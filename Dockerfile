@@ -18,4 +18,8 @@ ENV LD_LIBRARY_PATH=/isaac-sim/exts/omni.isaac.ros2_bridge/humble/lib:${LD_LIBRA
 
 # Run two terminal sessions, one for isaac-sim gui, second for interactive session
 COPY build_scripts/start.sh /start.sh
-ENTRYPOINT ["/bin/bash", "/start.sh"]
+RUN chmod +x /start.sh
+
+# ENTRYPOINT ["/bin/bash", "/start.sh"]
+ENTRYPOINT ["/bin/bash"]
+
