@@ -1,6 +1,6 @@
 # Running
 
-## Run isaac sim:
+## Run Isaac-Sim.
 On host:
 `make run-isaac`
 
@@ -45,3 +45,15 @@ The output is likely to be the following:
 Tickets:
 `https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010`
 
+## Creating a scene
+
+Use Blender with BlenderKit to import some asset, or create your own. Export scene as USD, then open it with Isaac-Sim.
+
+Make sure Blender is built with USD support, on Gentoo it has to be downloaded as binary from official site.
+
+
+### Physics
+
+Set rigid body for every object?
+Uncheck "kinematic flag" for objects like walls or heavy objects that drone can't move
+Set ground plane
