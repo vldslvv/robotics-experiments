@@ -24,7 +24,7 @@ Ubuntu 24 which Jazzy is based on, doesn't have this package available:
 
 https://github.com/PickNikRobotics/topic_based_ros2_control
 
-This package is required to run nvidia ros2 examples.
+This package is required to run nvidia ros2 examplehttps://github.com/PickNikRobotics/topic_based_ros2_controls.
 
 ## Sometimes permissions are messed after creating something inside a container:
 
@@ -78,7 +78,7 @@ Connect to deployed container, and set python interpreter path to:
 
 `.kit/python/bin/python3`
 
-## Isaac Sim ↔ ROS 2 Integration (Docker, ROS 2 Jazzy)
+## Isaac Sim ↔ ROS 2 Integration (Docker, ROS 2)
 
 Source: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#enabling-the-ros-2-bridge
 
@@ -128,7 +128,7 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.</license>
 ### 3. Env vars
 
 ```bash
-ROS_DISTRO=jazzy # Only set for Isaac Sim container
+ROS_DISTRO=jazzy or humble # Only set for Isaac Sim container
 LD_LIBRARY_PATH+=<isaac_path>/exts/isaacsim.ros2.bridge/jazzy/lib # Only for Isaac Sim container
 FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/fastdds.xml # A path to file created on previous step
 RMW_IMPLEMENTATION=rmw_fastrtps_cpp

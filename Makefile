@@ -25,7 +25,8 @@ SRC_DIR          = $(CURDIR)/src
 SCANS_DIR        = $(CURDIR)/scans
 
 # ROS 2 image / container
-ROS_DISTRO          = jazzy
+# ROS_DISTRO          = jazzy
+ROS_DISTRO          = humble
 
 ROS_BASE_IMAGE      = ros
 ROS_BASE_TAG        = $(ROS_DISTRO)
@@ -90,7 +91,7 @@ build-all: build-isaac build-ros
 ########################################
 
 # Run Isaac container interactively with /bin/bash
-run-isaac: xhost build-isaac
+run-isaac: xhost
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
 		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
@@ -114,9 +115,9 @@ run-isaac: xhost build-isaac
 			-e QT_X11_NO_MITSHM=1 \
 			-e ROS_DOMAIN_ID=$(ROS_DOMAIN_ID) \
 			-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
-			-e ROS_DISTRO=jazzy \
+			-e ROS_DISTRO=$(ROS_DISTRO) \
 			-e isaac_sim_package_path=/isaac-sim \
-			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib:$$LD_LIBRARY_PATH \
+			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
 			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
 			--device=/dev/dri \
 			-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
@@ -136,7 +137,7 @@ run-isaac: xhost build-isaac
 	fi
 
 # Run ROS 2 container interactively with bash (ROS env pre-sourced)
-run-ros: build-ros
+run-ros:
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
 		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
 		docker start -ai $(ROS_CONTAINER_NAME); \
@@ -158,7 +159,7 @@ run-ros: build-ros
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v "$(HOME)/ros2_ws":/ros2_ws \
 			"$(ROS_IMAGE)" \
-			/bin/bash -c "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && bash"; \
+			/bin/bash -c "source /opt/ros/$(ROS_DISTRO)/setup.bash && cd /ros2_ws && bash"; \
 	fi
 
 ########################################
