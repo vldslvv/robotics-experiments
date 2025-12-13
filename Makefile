@@ -89,6 +89,7 @@ run-isaac: xhost build-isaac
 			--gpus all \
 			--entrypoint "" \
 			-e ACCEPT_EULA=Y \
+			-e OMNI_KIT_DISABLE_TELEMETRY=1 \
 			-e DISPLAY=$(DISPLAY) \
 			-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
 			-e QT_X11_NO_MITSHM=1 \
@@ -96,7 +97,7 @@ run-isaac: xhost build-isaac
 			-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
 			-e ROS_DISTRO=jazzy \
 			-e isaac_sim_package_path=/isaac-sim \
-			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib \
+			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib:$$LD_LIBRARY_PATH \
 			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
 			--device=/dev/dri \
 			-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
