@@ -3,8 +3,11 @@
 ########################################
 
 # Isaac custom image
+ISAAC_BASE_IMAGE	= nvcr.io/nvidia/isaac-sim
+ISAAC_BASE_TAG		= 5.1.0
+
 ISAAC_IMAGE_NAME      = vv-isaac-sim-custom
-ISAAC_IMAGE_TAG       = 5.1.0
+ISAAC_IMAGE_TAG       = $(ISAAC_BASE_TAG)
 ISAAC_IMAGE           = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_CONTAINER_NAME  = vv-isaac-sim-custom
 
@@ -23,15 +26,19 @@ SCANS_DIR        = $(CURDIR)/scans
 
 # ROS 2 image / container
 ROS_DISTRO          = jazzy
-ROS_IMAGE_NAME      = ros
+
+ROS_BASE_IMAGE      = ros
+ROS_BASE_TAG        = $(ROS_DISTRO)
+
+ROS_IMAGE_NAME      = vv-ros-$(ROS_DISTRO)-custom
 ROS_IMAGE_TAG       = $(ROS_DISTRO)
 ROS_IMAGE           = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
-ROS_CONTAINER_NAME  = vv-ros-$(ROS_DISTRO)
+ROS_CONTAINER_NAME  = vv-ros-$(ROS_DISTRO)-custom
 
 # ROS 2 middleware config
-ROS_DOMAIN_ID											= 42
-RMW_IMPLEMENTATION								= rmw_fastrtps_cpp
-FASTRTPS_DEFAULT_PROFILES_FILE		= /etc/ros/fastdds.xml
+ROS_DOMAIN_ID										= 42
+RMW_IMPLEMENTATION							= rmw_fastrtps_cpp
+FASTRTPS_DEFAULT_PROFILES_FILE	= /etc/ros/fastdds.xml
 
 ########################################
 # Phony targets
@@ -57,11 +64,21 @@ xhost:
 
 build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
-	docker build -t $(ISAAC_IMAGE) -f Dockerfile .
+	docker build \
+		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
+		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
+		-t $(ISAAC_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
 
 build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
-	docker pull $(ROS_IMAGE)
+	docker build \
+		--build-arg DOCKER_REPO=$(ROS_BASE_IMAGE) \
+		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
+		-t $(ROS_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
 
 build-all: build-isaac build-ros
 	@echo "All images built/pulled."
@@ -127,6 +144,7 @@ run-ros: build-ros
 			--name "$(ROS_CONTAINER_NAME)" \
 			--network=host \
 			--gpus all \
+			--entrypoint "" \
 			-e DISPLAY="$(DISPLAY)" \
 			-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
 			-e QT_X11_NO_MITSHM=1 \
@@ -138,7 +156,7 @@ run-ros: build-ros
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v "$(HOME)/ros2_ws":/ros2_ws \
 			"$(ROS_IMAGE)" \
-			bash -c "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && bash"; \
+			/bin/bash -c "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && bash"; \
 	fi
 
 ########################################
