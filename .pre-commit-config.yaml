@@ -34,4 +34,3 @@ repos:
         additional_dependencies:
           - types-requests
         args: ["--ignore-missing-imports"]
-

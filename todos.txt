@@ -1,0 +1,5 @@
+Tabs to spaces pre-commit hook: https://github.com/Lucas-C/pre-commit-hooks
+Cleanup isaac sim docker file and build scripts
+Organize dir with files that are mounted to images
+Install ranger tmux and others to ros container
+

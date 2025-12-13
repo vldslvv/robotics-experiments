@@ -26,11 +26,12 @@ ROS_DISTRO          = jazzy
 ROS_IMAGE_NAME      = ros
 ROS_IMAGE_TAG       = $(ROS_DISTRO)
 ROS_IMAGE           = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
-ROS_CONTAINER_NAME  = vv-$(ROS_IMAGE_NAME)-$(ROS_DISTRO)
+ROS_CONTAINER_NAME  = vv-ros-$(ROS_DISTRO)
 
 # ROS 2 middleware config
-ROS_DOMAIN_ID       = 42
-RMW_IMPLEMENTATION  = rmw_fastrtps_cpp
+ROS_DOMAIN_ID											= 42
+RMW_IMPLEMENTATION								= rmw_fastrtps_cpp
+FASTRTPS_DEFAULT_PROFILES_FILE		= /etc/ros/fastdds.xml
 
 ########################################
 # Phony targets
@@ -93,6 +94,10 @@ run-isaac: xhost build-isaac
 			-e QT_X11_NO_MITSHM=1 \
 			-e ROS_DOMAIN_ID=$(ROS_DOMAIN_ID) \
 			-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
+			-e ROS_DISTRO=jazzy \
+			-e isaac_sim_package_path=/isaac-sim \
+			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
 			--device=/dev/dri \
 			-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
@@ -106,6 +111,7 @@ run-isaac: xhost build-isaac
 			-v $(ISAAC_DOCS):/isaac-sim/Documents \
 			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/robotics-experiments \
 			-v $(SCANS_DIR):/isaac-sim/scans \
+			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			$(ISAAC_IMAGE) /bin/bash -c "tmux new-session \; split-window -h \; attach"; \
 	fi
 
@@ -125,8 +131,10 @@ run-ros: build-ros
 			-e QT_X11_NO_MITSHM=1 \
 			-e ROS_DOMAIN_ID="$(ROS_DOMAIN_ID)" \
 			-e RMW_IMPLEMENTATION="$(RMW_IMPLEMENTATION)" \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
 			-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v "$(HOME)/ros2_ws":/ros2_ws \
 			"$(ROS_IMAGE)" \
 			bash -c "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && bash"; \

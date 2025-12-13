@@ -1,3 +1,5 @@
+# TODO: env vars set here might not be needed as Makefile is used
+# to launch it. Clean them up and make sure Makefile still works.
 FROM nvcr.io/nvidia/isaac-sim:5.1.0
 
 # Run as root (you need this due to NVML/Vulkan permissions)
