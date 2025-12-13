@@ -67,6 +67,7 @@ build-isaac:
 	docker build \
 		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
+		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
@@ -76,6 +77,7 @@ build-ros:
 	docker build \
 		--build-arg DOCKER_REPO=$(ROS_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
+		--target ros \
 		-t $(ROS_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)

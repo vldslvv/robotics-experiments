@@ -18,6 +18,14 @@ Both containers "should" be integrated to message each other
 Copy $PWD/.ros/fastdds.xml to host's $HOME/.ros directory
 make
 
+## ROS Humble vs Jazzy
+
+Ubuntu 24 which Jazzy is based on, doesn't have this package available:
+
+https://github.com/PickNikRobotics/topic_based_ros2_control
+
+This package is required to run nvidia ros2 examples.
+
 ## Sometimes permissions are messed after creating something inside a container:
 
 `sudo chown -R "$(whoami):" isaac-sim`
@@ -116,7 +124,6 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.</license>
     </participant>
 </profiles>
 ```
-
 
 ### 3. Env vars
 
