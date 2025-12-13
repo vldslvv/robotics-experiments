@@ -57,3 +57,11 @@ Make sure Blender is built with USD support, on Gentoo it has to be downloaded a
 Set rigid body for every object?
 Uncheck "kinematic flag" for objects like walls or heavy objects that drone can't move
 Set ground plane
+
+
+## Remote Container Developing with VS Code
+
+Connect to deployed container, and set python interpreter path to:
+
+`.kit/python/bin/python3`
+

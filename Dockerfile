@@ -22,4 +22,3 @@ RUN chmod +x /start.sh
 
 # ENTRYPOINT ["/bin/bash", "/start.sh"]
 ENTRYPOINT ["/bin/bash"]
-

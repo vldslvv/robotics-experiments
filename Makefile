@@ -22,10 +22,11 @@ SRC_DIR          = $(CURDIR)/src
 SCANS_DIR        = $(CURDIR)/scans
 
 # ROS 2 image / container
-ROS_IMAGE_NAME      = osrf/ros
-ROS_IMAGE_TAG       = humble-desktop
+ROS_DISTRO          = jazzy
+ROS_IMAGE_NAME      = ros
+ROS_IMAGE_TAG       = $(ROS_DISTRO)
 ROS_IMAGE           = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
-ROS_CONTAINER_NAME  = vv-ros2
+ROS_CONTAINER_NAME  = vv-$(ROS_IMAGE_NAME)-$(ROS_DISTRO)
 
 # ROS 2 middleware config
 ROS_DOMAIN_ID       = 42
@@ -128,7 +129,7 @@ run-ros: build-ros
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 			-v "$(HOME)/ros2_ws":/ros2_ws \
 			"$(ROS_IMAGE)" \
-			bash -c "source /opt/ros/humble/setup.bash && cd /ros2_ws && bash"; \
+			bash -c "source /opt/ros/jazzy/setup.bash && cd /ros2_ws && bash"; \
 	fi
 
 ########################################
@@ -159,9 +160,8 @@ clean-isaac-image:
 clean-ros-image:
 	@docker rmi $(ROS_IMAGE) 2>/dev/null || true
 
-clean-image: clean-isaac-image clean-ros-image
+clean-images: clean-isaac-image clean-ros-image
 	@echo "Removed Isaac and ROS images (if they existed)."
 
 clean-all: stop-all clean-container clean-image
 	@echo "All containers and images removed."
-
