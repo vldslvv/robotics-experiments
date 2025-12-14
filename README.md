@@ -20,11 +20,11 @@ make
 
 ## ROS Humble vs Jazzy
 
-Ubuntu 24 which Jazzy is based on, doesn't have this package available:
+Ubuntu 24, which Jazzy is based on, doesn't have this package available:
 
 https://github.com/PickNikRobotics/topic_based_ros2_control
 
-This package is required to run nvidia ros2 examplehttps://github.com/PickNikRobotics/topic_based_ros2_controls.
+This package is required to run nvidia ros2 examples.
 
 ## Sometimes permissions are messed after creating something inside a container:
 

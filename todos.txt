@@ -1,5 +1,22 @@
 Tabs to spaces pre-commit hook: https://github.com/Lucas-C/pre-commit-hooks
 Cleanup isaac sim docker file and build scripts
 Organize dir with files that are mounted to images
-Install ranger tmux and others to ros container
+
+Remove entrypoint overrides from Makefile
+Activate ros layers inside dockerfile to avoid spreading the logic
+
+Figure out this section:
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#isaac-ros-workspace
+
+1. Either try somehow installing on jazzy, but this doesn't work straight away
+
+2. Or install python3.11 and build workspace using it on humble
+
+2.1. Here, either try docker in docker for possibly easier -- run /ros2_ws/IsaacSim-ros_workspaces/dockerfiles/ubuntu_22_humble_python_311_minimal.dockerfile
+2.2. Or take parts of this docker file and run inside docker without docker in docker
+
+Figure out this:
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#enabling-rclpy-custom-ros-2-packages-and-workspaces-with-python-3-11
+
+Try pre-installing python 3.11 at ros docker
 

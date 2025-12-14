@@ -25,8 +25,8 @@ SRC_DIR          = $(CURDIR)/src
 SCANS_DIR        = $(CURDIR)/scans
 
 # ROS 2 image / container
-# ROS_DISTRO          = jazzy
-ROS_DISTRO          = humble
+ROS_DISTRO          = jazzy
+# ROS_DISTRO          = humble
 
 ROS_BASE_IMAGE      = ros
 ROS_BASE_TAG        = $(ROS_DISTRO)
@@ -157,7 +157,7 @@ run-ros:
 			-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
-			-v "$(HOME)/ros2_ws":/ros2_ws \
+			-v $(CURDIR)/ros2_ws:/ros2_ws \
 			"$(ROS_IMAGE)" \
 			/bin/bash -c "source /opt/ros/$(ROS_DISTRO)/setup.bash && cd /ros2_ws && bash"; \
 	fi
