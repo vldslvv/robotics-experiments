@@ -3,8 +3,8 @@
 ########################################
 
 # Isaac custom image
-ISAAC_BASE_IMAGE	= nvcr.io/nvidia/isaac-sim
-ISAAC_BASE_TAG		= 5.1.0
+ISAAC_BASE_IMAGE = nvcr.io/nvidia/isaac-sim
+ISAAC_BASE_TAG   = 5.1.0
 
 ISAAC_IMAGE_NAME      = vv-isaac-sim-custom
 ISAAC_IMAGE_TAG       = $(ISAAC_BASE_TAG)
@@ -37,9 +37,9 @@ ROS_IMAGE           = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
 ROS_CONTAINER_NAME  = vv-ros-$(ROS_DISTRO)-custom
 
 # ROS 2 middleware config
-ROS_DOMAIN_ID										= 42
-RMW_IMPLEMENTATION							= rmw_fastrtps_cpp
-FASTRTPS_DEFAULT_PROFILES_FILE	= /etc/ros/fastdds.xml
+ROS_DOMAIN_ID                  = 42
+RMW_IMPLEMENTATION             = rmw_fastrtps_cpp
+FASTRTPS_DEFAULT_PROFILES_FILE = /etc/ros/fastdds.xml
 
 ########################################
 # Phony targets
@@ -131,6 +131,7 @@ run-isaac: xhost
 			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/robotics-experiments \
 			-v $(SCANS_DIR):/isaac-sim/scans \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
+			-v $(CURDIR)/ros2_ws:/isaac-sim/ros2_ws \
 			$(ISAAC_IMAGE); \
 	fi
 
