@@ -90,7 +90,6 @@ build-all: build-isaac build-ros
 # Interactive runs (persistent containers)
 ########################################
 
-# Run Isaac container interactively with /bin/bash
 run-isaac: xhost
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
@@ -107,7 +106,6 @@ run-isaac: xhost
 			--network=host \
 			--user 0:0 \
 			--gpus all \
-			--entrypoint "" \
 			-e ACCEPT_EULA=Y \
 			-e OMNI_KIT_DISABLE_TELEMETRY=1 \
 			-e DISPLAY=$(DISPLAY) \
@@ -133,10 +131,9 @@ run-isaac: xhost
 			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/robotics-experiments \
 			-v $(SCANS_DIR):/isaac-sim/scans \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
-			$(ISAAC_IMAGE) /bin/bash -c "tmux new-session \; split-window -h \; attach"; \
+			$(ISAAC_IMAGE); \
 	fi
 
-# Run ROS 2 container interactively with bash (ROS env pre-sourced)
 run-ros:
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
 		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
@@ -147,7 +144,6 @@ run-ros:
 			--name "$(ROS_CONTAINER_NAME)" \
 			--network=host \
 			--gpus all \
-			--entrypoint "" \
 			-e DISPLAY="$(DISPLAY)" \
 			-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
 			-e QT_X11_NO_MITSHM=1 \
@@ -158,8 +154,7 @@ run-ros:
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v $(CURDIR)/ros2_ws:/ros2_ws \
-			"$(ROS_IMAGE)" \
-			/bin/bash -c "source /opt/ros/$(ROS_DISTRO)/setup.bash && cd /ros2_ws && bash"; \
+			"$(ROS_IMAGE)"; \
 	fi
 
 ########################################

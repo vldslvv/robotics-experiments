@@ -6,9 +6,6 @@ FROM ${DOCKER_REPO}:${DOCKER_TAG} AS base
 
 ENV ORIGINAL_USER=${USER}
 
-# # Verify ORIGINAL_USER is set; fail build if empty
-# RUN if [ -z "$ORIGINAL_USER" ]; then echo "ERROR: USER is not set in the base image; cannot restore original user." >&2; exit 1; fi
-
 # Run as root (you need this due to NVML/Vulkan permissions)
 USER 0
 
@@ -21,6 +18,7 @@ RUN apt-get update && \
     ranger \
     htop \
     vim \
+    ca-certificates \
     git
 
 # Restore the original user
@@ -28,40 +26,22 @@ USER ${ORIGINAL_USER}
 
 FROM base AS isaac-sim
 
-RUN rm -rf /var/lib/apt/lists/*
+# Optional, unless we care about image size
+# RUN rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT []
+ENTRYPOINT ["tmux"]
+CMD ["new-session", ";", "split-window", "-h", ";", "attach"]
 
-FROM base AS ros-base
-ARG ROS_DISTRO="humble"
+FROM base AS ros
+ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
 SHELL ["/bin/bash", "-lc"]
-
-# TODO: install python 3.11, this is for humble, maybe use pyenv instead
-# Install Python 3.11 in ROS layer without altering system default python3
-# Uses deadsnakes PPA which supports Ubuntu 22.04 and 24.04
-# RUN apt-get update && \
-#     apt-get install --no-install-recommends -y software-properties-common && \
-#     add-apt-repository -y ppa:deadsnakes/ppa && \
-#     apt-get update && \
-#     apt-get install --no-install-recommends -y \
-#         python3.11 \
-#         python3.11-venv \
-#         python3.11-dev \
-#         python3-pip && \
-#     python3.11 -m pip install --upgrade pip
 
 RUN apt-get install --no-install-recommends -y \
     ros-${ROS_DISTRO}-vision-msgs \
     ros-${ROS_DISTRO}-ackermann-msgs \
     python3-rosdep build-essential \
     python3-colcon-common-extensions
-
-# WARNING: On jazzy, ros-${ROS_DISTRO}-topic-based-ros2-control cannot be installed from registry
-# Building from sources fails with deprecation warning. Best to use humble for now, but
-# keep the ability to switch to jazzy easily
-# RUN apt-get install --no-install-recommends -y \
-#     ros-${ROS_DISTRO}-topic-based-ros2-control && \
 
 WORKDIR /topic_based_ros2_control_ws
 # We have to install topic_based_ros2_control from source, for jazzy it's mandatory as there's no
@@ -91,25 +71,11 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
      rosdep install -i --from-path src --rosdistro jazzy -y && \
      colcon build
 
-# This step has to be separate from previous
-# Quote from # https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#setting-up-workspaces
-# cd humble_ws
-# git submodule update --init --recursive # If using docker, perform this step outside the container and relaunch the container
-# rosdep install -i --from-path src --rosdistro humble -y
-# RUN cd IsaacSim-ros_workspaces/${ROS_DISTRO}_ws && \
-#     source /opt/ros/${ROS_DISTRO}/setup.bash && \
-#     rosdep install -i --from-path src --rosdistro ${ROS_DISTRO} -y && \
-#     colcon build
-
-# TODO:consider exporting this automatically
-# cd ${ROS_DISTRO}_ws
-# source IsaacSim-ros_workspaces/${ROS_DISTRO}_ws/install/local_setup.bash
-
 # Commands above require apt indices populated
+# Optional, unless we care about image size
 # RUN rm -rf /var/lib/apt/lists/*
 
-FROM ros-base AS ros
+# TODO: consider using ./ros_entrypoint.sh
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/${ROS_DISTRO}/setup.bash && source /topic_based_ros2_control_ws/install/setup.bash && cd /ros2_ws && exec \"$@\"", "--"]
+CMD ["tmux", "new-session", "-A", "-s", "ros"]
 
-RUN echo "we're here"
-
-ENTRYPOINT []
