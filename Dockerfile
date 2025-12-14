@@ -76,6 +76,12 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
 # RUN rm -rf /var/lib/apt/lists/*
 
 # TODO: consider using ./ros_entrypoint.sh
-ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/${ROS_DISTRO}/setup.bash && source /topic_based_ros2_control_ws/install/setup.bash && cd /ros2_ws && exec \"$@\"", "--"]
+# Source all three workspaces we have in order
+ENTRYPOINT ["/bin/bash", "-c", "\
+  source /opt/ros/${ROS_DISTRO}/setup.bash && \
+  source /topic_based_ros2_control_ws/install/setup.bash && \
+  source /isaacsim_ros_workspaces/${ROS_DISTRO}_ws/install/setup.bash && \
+  cd /ros2_ws && \
+  exec \"$@\" \
+", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
-
