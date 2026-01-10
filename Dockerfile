@@ -109,10 +109,6 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
   rosdep install -i --from-path src --rosdistro jazzy -y && \
   colcon build
 
-# Commands above require apt indices populated
-# Optional, unless we care about image size
-# RUN rm -rf /var/lib/apt/lists/*
-
 FROM ros-base AS ros
 
 RUN apt-get install ros-${ROS_DISTRO}-teleop-twist-keyboard

@@ -104,7 +104,7 @@ build-all: build-isaac build-ros
 # Interactive runs (persistent containers)
 ########################################
 
-run-isaac: xhost
+sync-nvim-caches:
 	mkdir -p \
 		$(BUILD_ROOT)/.config \
 		$(BUILD_ROOT)/.local/share \
@@ -115,6 +115,9 @@ run-isaac: xhost
 	rsync -a --exclude='**/.git/**' "${HOME}/.local/share/nvim" "$(BUILD_ROOT)/.local/share/"
 	rsync -a --exclude='**/.git/**' "${HOME}/.local/state/nvim" "$(BUILD_ROOT)/.local/state/"
 	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
+	echo "Neovim caches synchronized to build root."
+
+run-isaac: sync-nvim-caches
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
 		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
@@ -164,7 +167,7 @@ run-isaac: xhost
 			$(ISAAC_IMAGE); \
 	fi
 
-run-ros:
+run-ros: sync-nvim-caches
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
 		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
 		docker start -ai $(ROS_CONTAINER_NAME); \
@@ -184,20 +187,15 @@ run-ros:
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v $(CURDIR)/ros2_ws:/ros2_ws \
+			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
+			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
+			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
+			-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
+			-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
 			"$(ROS_IMAGE)"; \
 	fi
 
-run-nvim:
-	mkdir -p \
-		$(BUILD_ROOT)/.config \
-		$(BUILD_ROOT)/.local/share \
-		$(BUILD_ROOT)/.local/state \
-		$(BUILD_ROOT)/.cache
-	rsync -a --exclude='**/.git/**' "${HOME}/code/lazyvim-starter" "$(BUILD_ROOT)/.config/"
-	rsync -a --exclude='**/.git/**' "${HOME}/.config/github-copilot" "$(BUILD_ROOT)/.config/"
-	rsync -a --exclude='**/.git/**' "${HOME}/.local/share/nvim" "$(BUILD_ROOT)/.local/share/"
-	rsync -a --exclude='**/.git/**' "${HOME}/.local/state/nvim" "$(BUILD_ROOT)/.local/state/"
-	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
+run-nvim: sync-nvim-caches
 	@docker run -it --rm \
 		--name vv-neovim-custom \
 		--network=host \
