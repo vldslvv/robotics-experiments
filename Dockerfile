@@ -4,10 +4,9 @@ ARG DOCKER_REPO
 ARG DOCKER_TAG
 FROM ${DOCKER_REPO}:${DOCKER_TAG} AS base
 
-ENV ORIGINAL_USER=${USER}
-
 # Run as root (you need this due to NVML/Vulkan permissions)
 USER 0
+ENV HOME=/root
 
 # Versions are not pinned because this logic can run on both Ubuntu 22 and 24
 # TODO: consider separate sets of versions for each version
@@ -19,20 +18,59 @@ RUN apt-get update && \
   htop \
   vim \
   ca-certificates \
-  git
+  git \
+  file
 
-# Restore the original user
-USER ${ORIGINAL_USER}
+# If neovim is not needed, this step can be skipped
+FROM base AS nvim
+SHELL ["/bin/bash", "-lc"]
 
-FROM base AS isaac-sim
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+  ninja-build \
+  gettext \
+  cmake \
+  unzip \
+  curl \
+  git \
+  build-essential \
+  ca-certificates && \
+  update-ca-certificates
 
-# Optional, unless we care about image size
-# RUN rm -rf /var/lib/apt/lists/*
+# TODO: consider using same neovim version as host
+# Clone and build Neovim
+WORKDIR /opt
+RUN git clone https://github.com/neovim/neovim.git && \
+  cd neovim && \
+  git fetch --tags && \
+  LATEST_TAG=$(git describe --tags "$(git rev-list --tags --max-count=1)") && \
+  echo "Checking out Neovim tag: ${LATEST_TAG}" && \
+  git checkout "${LATEST_TAG}" && \
+  make CMAKE_BUILD_TYPE=RelWithDebInfo && \
+  make install
+
+# Optionally slim the layer by removing build tree
+RUN rm -rf /opt/neovim
+
+# Install nvm and Node.js v25 before cloning Neovim
+# Reference: https://github.com/nvm-sh/nvm
+# Note: We use bash SHELL; ensure nvm is sourced in the same RUN where needed
+RUN export NVM_DIR="${HOME}/.nvm" && \
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
+  source "$NVM_DIR/nvm.sh" && \
+  nvm install 25 && \
+  nvm alias default 25
+
+RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc && \
+  echo 'set -g default-terminal "tmux-256color"' >> ${HOME}/.tmux.conf && \
+  echo 'set -ga terminal-overrides ",*:Tc"' >> ${HOME}/.tmux.conf
+
+FROM nvim AS isaac-sim
 
 ENTRYPOINT ["tmux"]
 CMD ["new-session", ";", "split-window", "-h", ";", "attach"]
 
-FROM base AS ros-base
+FROM nvim AS ros-base
 ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
 SHELL ["/bin/bash", "-lc"]
@@ -90,66 +128,6 @@ ENTRYPOINT ["/bin/bash", "-c", "\
   ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
 
-FROM base AS nvim
-# Build Neovim from the latest tag
-# Use bash for more complex RUN logic
-SHELL ["/bin/bash", "-lc"]
-
-# Elevate privileges to install build dependencies
-USER 0
-
-RUN apt-get update && \
-  DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-  ninja-build \
-  gettext \
-  cmake \
-  unzip \
-  curl \
-  git \
-  build-essential \
-  ca-certificates && \
-  update-ca-certificates
-
-# TODO: consider using same neovim version as host
-# Clone and build Neovim
-WORKDIR /opt
-RUN git clone https://github.com/neovim/neovim.git && \
-  cd neovim && \
-  git fetch --tags && \
-  LATEST_TAG=$(git describe --tags "$(git rev-list --tags --max-count=1)") && \
-  echo "Checking out Neovim tag: ${LATEST_TAG}" && \
-  git checkout "${LATEST_TAG}" && \
-  make CMAKE_BUILD_TYPE=RelWithDebInfo && \
-  make install && \
-  echo "alias vim='nvim'" >> $HOME/.bashrc
-
-# Optionally slim the layer by removing build tree
-RUN rm -rf /opt/neovim
-
-# Restore original user
-ARG UID=1000 GID=1000
-RUN mkdir -p /home/ubuntu/.config /home/ubuntu/.local/{share,state} /home/ubuntu/.cache && chown -R $UID:$GID /home/ubuntu
-USER ubuntu
-
-# Install nvm and Node.js v25 before cloning Neovim
-# Reference: https://github.com/nvm-sh/nvm
-# Note: We use bash SHELL; ensure nvm is sourced in the same RUN where needed
-RUN export NVM_DIR="$HOME/.nvm" && \
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-  export NVM_DIR="$HOME/.nvm" && \
-  source "$NVM_DIR/nvm.sh" && \
-  nvm install 25 && \
-  nvm alias default 25 && \
-  node -v && npm -v
-
-# RUN chown -R ubuntu:ubuntu /home/ubuntu
-
-# TODO: mount directly from host, along with .local/share/nvim, .local/state/nvim and .cache/nvim
-# Clone config repo to $HOME/.config/nvim
-# RUN git clone -b patch/custom https://github.com/vldslvv/lazyvim-starter $HOME/.config/nvim
-
-# ARG BUILD_ROOT_DIR=mybuild/docker
-# COPY ${BUILD_ROOT_DIR}/.config/nvim/ /home/ubuntu/.config/nvim
 
 ENTRYPOINT ["/bin/bash", "-c"]
 

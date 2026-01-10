@@ -67,6 +67,7 @@ xhost:
 build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
+		--progress=plain \
 		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
 		--target isaac-sim \
@@ -77,6 +78,7 @@ build-isaac:
 build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
 	docker buildx build \
+		--progress=plain \
 		--build-arg DOCKER_REPO=$(ROS_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
 		--target ros \
@@ -87,6 +89,7 @@ build-ros:
 build-nvim:
 	@echo "Building custom Neovim image: vv-neovim-custom:latest"
 	docker buildx build \
+		--progress=plain \
 		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
 		--target nvim \
@@ -102,6 +105,16 @@ build-all: build-isaac build-ros
 ########################################
 
 run-isaac: xhost
+	mkdir -p \
+		$(BUILD_ROOT)/.config \
+		$(BUILD_ROOT)/.local/share \
+		$(BUILD_ROOT)/.local/state \
+		$(BUILD_ROOT)/.cache
+	rsync -a --exclude='**/.git/**' "${HOME}/code/lazyvim-starter" "$(BUILD_ROOT)/.config/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.config/github-copilot" "$(BUILD_ROOT)/.config/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.local/share/nvim" "$(BUILD_ROOT)/.local/share/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.local/state/nvim" "$(BUILD_ROOT)/.local/state/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
 		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
@@ -143,6 +156,11 @@ run-isaac: xhost
 			-v $(SCANS_DIR):/isaac-sim/scans \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v $(CURDIR)/ros2_ws:/isaac-sim/ros2_ws \
+			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
+			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
+			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
+			-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
+			-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
 			$(ISAAC_IMAGE); \
 	fi
 
@@ -183,19 +201,19 @@ run-nvim:
 	@docker run -it --rm \
 		--name vv-neovim-custom \
 		--network=host \
-		--user $(shell id -u):$(shell id -g) \
+		--user 0:0 \
 		--entrypoint /bin/bash \
 		-e DISPLAY=$(DISPLAY) \
 		-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
 		-e QT_X11_NO_MITSHM=1 \
 		-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
 		-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-		-v $(CURDIR)/src:/home/user/src \
-		-v $(BUILD_ROOT)/.config/lazyvim-starter:/home/ubuntu/.config/nvim \
-		-v $(BUILD_ROOT)/.config/github-copilot:/home/ubuntu/.config/github-copilot \
-		-v $(BUILD_ROOT)/.local/share/nvim:/home/ubuntu/.local/share/nvim \
-		-v $(BUILD_ROOT)/.local/state/nvim:/home/ubuntu/.local/state/nvim \
-		-v $(BUILD_ROOT)/.cache/nvim:/home/ubuntu/.cache/nvim \
+		-v $(CURDIR)/src:/root/src \
+		-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
+		-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
+		-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
+		-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
+		-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
 		vv-neovim-custom:latest
 
 ########################################
