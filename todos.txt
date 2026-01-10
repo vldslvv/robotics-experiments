@@ -19,3 +19,6 @@ Figure out this:
 https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#enabling-rclpy-custom-ros-2-packages-and-workspaces-with-python-3-11
 
 Try pre-installing python 3.11 at ros docker
+
+Consider installing neovim with my config instead of connecting to a docker
+

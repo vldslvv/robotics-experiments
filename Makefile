@@ -23,6 +23,7 @@ ISAAC_DATA       = $(ISAAC_HOME)/data
 ISAAC_DOCS       = $(ISAAC_HOME)/documents
 SRC_DIR          = $(CURDIR)/src
 SCANS_DIR        = $(CURDIR)/scans
+BUILD_ROOT       = $(CURDIR)/mybuild/docker
 
 # ROS 2 image / container
 ROS_DISTRO          = jazzy
@@ -65,7 +66,7 @@ xhost:
 
 build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
-	docker build \
+	docker buildx build \
 		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
 		--target isaac-sim \
@@ -75,11 +76,21 @@ build-isaac:
 
 build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
-	docker build \
+	docker buildx build \
 		--build-arg DOCKER_REPO=$(ROS_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
 		--target ros \
 		-t $(ROS_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
+
+build-nvim:
+	@echo "Building custom Neovim image: vv-neovim-custom:latest"
+	docker buildx build \
+		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
+		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
+		--target nvim \
+		-t vv-neovim-custom:latest \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -157,6 +168,35 @@ run-ros:
 			-v $(CURDIR)/ros2_ws:/ros2_ws \
 			"$(ROS_IMAGE)"; \
 	fi
+
+run-nvim:
+	mkdir -p \
+		$(BUILD_ROOT)/.config \
+		$(BUILD_ROOT)/.local/share \
+		$(BUILD_ROOT)/.local/state \
+		$(BUILD_ROOT)/.cache
+	rsync -a --exclude='**/.git/**' "${HOME}/code/lazyvim-starter" "$(BUILD_ROOT)/.config/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.config/github-copilot" "$(BUILD_ROOT)/.config/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.local/share/nvim" "$(BUILD_ROOT)/.local/share/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.local/state/nvim" "$(BUILD_ROOT)/.local/state/"
+	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
+	@docker run -it --rm \
+		--name vv-neovim-custom \
+		--network=host \
+		--user $(shell id -u):$(shell id -g) \
+		--entrypoint /bin/bash \
+		-e DISPLAY=$(DISPLAY) \
+		-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
+		-e QT_X11_NO_MITSHM=1 \
+		-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
+		-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+		-v $(CURDIR)/src:/home/user/src \
+		-v $(BUILD_ROOT)/.config/lazyvim-starter:/home/ubuntu/.config/nvim \
+		-v $(BUILD_ROOT)/.config/github-copilot:/home/ubuntu/.config/github-copilot \
+		-v $(BUILD_ROOT)/.local/share/nvim:/home/ubuntu/.local/share/nvim \
+		-v $(BUILD_ROOT)/.local/state/nvim:/home/ubuntu/.local/state/nvim \
+		-v $(BUILD_ROOT)/.cache/nvim:/home/ubuntu/.cache/nvim \
+		vv-neovim-custom:latest
 
 ########################################
 # Stop / clean
