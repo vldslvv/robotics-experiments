@@ -1,0 +1,18 @@
+Z is default axis for vertical direction
+For physics scene, make sure to uncheck GPU dynamics and use MBP Broadspace -- more efficient unless hundreds of rigid bodies and robots are simulated
+Ground plane is infinite, although it's rendered as 25x25 meters square
+When placing lights, can transform them above as 0,0,z as example, to place above the ground plane
+Can reduce intensity of default global light to work easier with manual light
+Shapes under Xform inherit its properties, which act as multipliers to own Shape's properties
+
+Joints:
+    Position Control: For position controlled joints, set a high stiffness and relatively low or zero damping.
+    Velocity Control: For velocity controller joints, set a high damping and zero stiffness.
+For joints on a wheel, it makes more sense to be velocity controlled, so set both wheels’ Damping to 1e4 and Target Velocity to 200 rad/s
+
+Make sure to add camera noise and other augmentations to simulation
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_camera_noise.html
+
+Hot reloading seems not possible without workarounds:
+https://github.com/isaac-sim/IsaacLab/issues/3201
+
