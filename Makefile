@@ -23,7 +23,7 @@ ISAAC_DATA       = $(ISAAC_HOME)/data
 ISAAC_DOCS       = $(ISAAC_HOME)/documents
 SRC_DIR          = $(CURDIR)/src
 SCANS_DIR        = $(CURDIR)/scans
-BUILD_ROOT       = $(CURDIR)/mybuild/docker
+BUILD_ROOT       = $(CURDIR)/.build/docker
 
 # ROS 2 image / container
 ROS_DISTRO          = jazzy
@@ -83,17 +83,6 @@ build-ros:
 		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
 		--target ros \
 		-t $(ROS_IMAGE) \
-		-f Dockerfile \
-		$(CURDIR)
-
-build-nvim:
-	@echo "Building custom Neovim image: vv-neovim-custom:latest"
-	docker buildx build \
-		--progress=plain \
-		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
-		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
-		--target nvim \
-		-t vv-neovim-custom:latest \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -195,24 +184,6 @@ run-ros: sync-nvim-caches
 			-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
 			"$(ROS_IMAGE)"; \
 	fi
-
-run-nvim: sync-nvim-caches
-	@docker run -it --rm \
-		--name vv-neovim-custom \
-		--network=host \
-		--user 0:0 \
-		--entrypoint /bin/bash \
-		-e DISPLAY=$(DISPLAY) \
-		-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
-		-e QT_X11_NO_MITSHM=1 \
-		-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
-		-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-		-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
-		-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
-		-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
-		-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
-		-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
-		vv-neovim-custom:latest
 
 ########################################
 # Stop / clean
