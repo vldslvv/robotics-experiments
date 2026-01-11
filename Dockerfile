@@ -19,7 +19,11 @@ RUN apt-get update && \
   vim \
   ca-certificates \
   git \
-  file
+  ripgrep \
+  file \
+  less \
+  tree
+
 
 # If neovim is not needed, this step can be skipped
 FROM base AS nvim
@@ -61,16 +65,41 @@ RUN export NVM_DIR="${HOME}/.nvm" && \
   nvm install 25 && \
   nvm alias default 25
 
+# For escape delay, see if there are any issues
+# https://superuser.com/questions/942677/consequences-of-escape-time-0-tmux-setting
 RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc && \
   echo 'set -g default-terminal "tmux-256color"' >> ${HOME}/.tmux.conf && \
-  echo 'set -ga terminal-overrides ",*:Tc"' >> ${HOME}/.tmux.conf
+  echo 'set -ga terminal-overrides ",*:Tc"' >> ${HOME}/.tmux.conf && \
+  echo 'set -sg escape-time 0' >> ${HOME}/.tmux.conf
+
 
 FROM nvim AS isaac-sim
 
-ENTRYPOINT ["tmux"]
+# Fix for wrong characters being displayed in Neovim, and possible other issues
+RUN apt-get update && apt-get install -y --no-install-recommends locales \
+ && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+ && locale-gen \
+ && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+WORKDIR /isaac-sim
+
+# The problem being solved:
+# https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
+# Uses custom environment script to be able to use LSP properly
+RUN echo "alias pyvim='source scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
+
+# This script will populate symlinks for editor's LSP to work
+COPY scripts/make_symlinks.sh make_symlinks.sh
+RUN chmod +x make_symlinks.sh
+
+  ENTRYPOINT ["/bin/bash", "-lc", "scripts/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
 CMD ["new-session", ";", "split-window", "-h", ";", "attach"]
 
 FROM nvim AS ros-base
+
 ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
 SHELL ["/bin/bash", "-lc"]
@@ -78,6 +107,7 @@ SHELL ["/bin/bash", "-lc"]
 RUN apt-get install --no-install-recommends -y \
   ros-${ROS_DISTRO}-vision-msgs \
   ros-${ROS_DISTRO}-ackermann-msgs \
+  ros-${ROS_DISTRO}-teleop-twist-keyboard \
   python3-rosdep build-essential \
   python3-colcon-common-extensions
 
@@ -109,9 +139,8 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
   rosdep install -i --from-path src --rosdistro jazzy -y && \
   colcon build
 
-FROM ros-base AS ros
 
-RUN apt-get install ros-${ROS_DISTRO}-teleop-twist-keyboard
+FROM ros-base AS ros
 
 # TODO: consider using ./ros_entrypoint.sh
 # Source all three workspaces we have in order
@@ -123,7 +152,4 @@ ENTRYPOINT ["/bin/bash", "-c", "\
   exec \"$@\" \
   ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
-
-
-ENTRYPOINT ["/bin/bash", "-c"]
 

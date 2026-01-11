@@ -156,6 +156,7 @@ run-isaac: sync-nvim-caches
 			-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
 			-v $(ISAAC_DOCS):/isaac-sim/Documents \
 			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/robotics-experiments \
+			-v $(CURDIR)/scripts:/isaac-sim/scripts \
 			-v $(SCANS_DIR):/isaac-sim/scans \
 			-v $(CURDIR)/.ros:/isaac-sim/.ros \
 			-v $(CURDIR)/ros2_ws:/isaac-sim/ros2_ws \
@@ -206,7 +207,6 @@ run-nvim: sync-nvim-caches
 		-e QT_X11_NO_MITSHM=1 \
 		-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
 		-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-		-v $(CURDIR)/src:/root/src \
 		-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 		-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
 		-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
