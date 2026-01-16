@@ -152,4 +152,3 @@ ENTRYPOINT ["/bin/bash", "-c", "\
   exec \"$@\" \
   ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
-

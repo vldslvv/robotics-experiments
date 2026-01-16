@@ -43,20 +43,10 @@ RMW_IMPLEMENTATION             = rmw_fastrtps_cpp
 FASTRTPS_DEFAULT_PROFILES_FILE = /etc/ros/fastdds.xml
 
 ########################################
-# Phony targets
-########################################
-
-.PHONY: xhost \
-        build-isaac build-ros build-all \
-        run-isaac run-ros \
-        stop-isaac stop-ros stop-all \
-        clean-isaac-container clean-ros-container clean-container \
-        clean-isaac-image clean-ros-image clean-image clean-all
-
-########################################
 # X11 helper
 ########################################
 
+.PHONY: xhost
 xhost:
 	@xhost +local:root >/dev/null 2>&1 || true
 
@@ -64,6 +54,7 @@ xhost:
 # Build images
 ########################################
 
+.PHONY: build-isaac
 build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
@@ -75,6 +66,7 @@ build-isaac:
 		-f Dockerfile \
 		$(CURDIR)
 
+.PHONY: build-ros
 build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
 	docker buildx build \
@@ -86,6 +78,7 @@ build-ros:
 		-f Dockerfile \
 		$(CURDIR)
 
+.PHONY: build-all
 build-all: build-isaac build-ros
 	@echo "All images built/pulled."
 
@@ -93,6 +86,7 @@ build-all: build-isaac build-ros
 # Interactive runs (persistent containers)
 ########################################
 
+.PHONY: sync-nvim-caches
 sync-nvim-caches:
 	mkdir -p \
 		$(BUILD_ROOT)/.config \
@@ -106,6 +100,7 @@ sync-nvim-caches:
 	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
 	echo "Neovim caches synchronized to build root."
 
+.PHONY: run-isaac
 run-isaac: xhost sync-nvim-caches
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
@@ -157,6 +152,7 @@ run-isaac: xhost sync-nvim-caches
 			$(ISAAC_IMAGE); \
 	fi
 
+.PHONY: run-ros
 run-ros: xhost sync-nvim-caches
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
 		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
@@ -189,32 +185,42 @@ run-ros: xhost sync-nvim-caches
 # Stop / clean
 ########################################
 
+.PHONY: stop-isaac
 stop-isaac:
 	@docker stop $(ISAAC_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: stop-ros
 stop-ros:
 	@docker stop $(ROS_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: stop-all
 stop-all: stop-isaac stop-ros
 	@echo "Stopped Isaac and ROS containers (if running)."
 
+.PHONY: clean-isaac-container
 clean-isaac-container:
 	@docker rm -f $(ISAAC_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: clean-ros-container
 clean-ros-container:
 	@docker rm -f $(ROS_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: clean-container
 clean-container: clean-isaac-container clean-ros-container
 	@echo "Removed Isaac and ROS containers (if they existed)."
 
+.PHONY: clean-isaac-image
 clean-isaac-image:
 	@docker rmi $(ISAAC_IMAGE) 2>/dev/null || true
 
+.PHONY: clean-ros-image
 clean-ros-image:
 	@docker rmi $(ROS_IMAGE) 2>/dev/null || true
 
+.PHONY: clean-images
 clean-images: clean-isaac-image clean-ros-image
 	@echo "Removed Isaac and ROS images (if they existed)."
 
-clean-all: stop-all clean-container clean-image
+.PHONY: clean-all
+clean-all: stop-all clean-container clean-images
 	@echo "All containers and images removed."

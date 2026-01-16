@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robotics-experiments"
+version = "0.0.0"
+description = "Robotics experiments integrating Isaac Sim and ROS 2."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Unknown" }]
+
+dependencies = [
+  "isaacsim==5.1.0.0",
+  "isaacsim-core==5.1.0.0",
+  "numpy==1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "debugpy",
+  "pre-commit==4.5.0",
+  "black==24.8.0",
+  "isort==5.13.2",
+  "ruff==0.6.9",
+  "mypy==1.11.2",
+  "types-requests",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["robotics-experiments*"]
+exclude = ["ros2_ws*", "scans*", "docs*", "build_scripts*", "scripts*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+# Keep default rule set minimal; repos often extend it over time.
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
