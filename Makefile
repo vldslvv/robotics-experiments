@@ -106,7 +106,7 @@ sync-nvim-caches:
 	rsync -a --exclude='**/.git/**' "${HOME}/.cache/nvim" "$(BUILD_ROOT)/.cache/"
 	echo "Neovim caches synchronized to build root."
 
-run-isaac: sync-nvim-caches
+run-isaac: xhost sync-nvim-caches
 	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
 		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
@@ -157,7 +157,7 @@ run-isaac: sync-nvim-caches
 			$(ISAAC_IMAGE); \
 	fi
 
-run-ros: sync-nvim-caches
+run-ros: xhost sync-nvim-caches
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
 		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
 		docker start -ai $(ROS_CONTAINER_NAME); \

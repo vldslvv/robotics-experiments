@@ -22,3 +22,13 @@ Try pre-installing python 3.11 at ros docker
 
 Consider installing neovim with my config instead of connecting to a docker
 
+3. Symlinks for exts/omni:
+
+Example: Make editor recognize symbols from `/isaac-sim/exts/isaacsim.core.api/isaacsim/core/api`
+to be importable as `import isaacsim.core.api`:
+
+1. Make sure PYTHONPATH contains symlink folder, in our case `/isaac-sim/symlinks/exts`. Make sure it comes after main paths as a fallback.
+2. Create a skeleton folder structure, /isaac-sim/symlinks/exts/isaacsim/core, make sure every level, starting from isaacsim, contains __init__.py
+3. Create a symlink as following:
+  ln -s /isaac-sim/exts/isaacsim.core.api/isaacsim/core/api /isaac-sim/symlinks/exts/isaacsim/core/api
+

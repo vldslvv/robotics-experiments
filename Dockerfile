@@ -89,7 +89,7 @@ WORKDIR /isaac-sim
 # The problem being solved:
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
-RUN echo "alias pyvim='source scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
+RUN echo "alias pyvim='source /isaac-sim/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
 
 # This script will populate symlinks for editor's LSP to work
 COPY scripts/make_symlinks.sh make_symlinks.sh
