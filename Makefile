@@ -169,6 +169,9 @@ run-ros: xhost sync-nvim-caches
 			--name "$(ROS_CONTAINER_NAME)" \
 			--network=host \
 			--gpus all \
+			--device=/dev/dri \
+			-e NVIDIA_DRIVER_CAPABILITIES=all \
+			-e NVIDIA_VISIBLE_DEVICES=all \
 			-e DISPLAY="$(DISPLAY)" \
 			-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
 			-e QT_X11_NO_MITSHM=1 \
