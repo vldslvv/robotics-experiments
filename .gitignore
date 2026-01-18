@@ -217,3 +217,7 @@ isaac/assets/
 # Ignore ROS2 workspace, but keep README.MD
 ros2_ws/
 !ros2_ws/README.md
+
+# Ignore zsh caches that are mounted to containers
+isaac/isaac-sim/cache/
+ros/cache/

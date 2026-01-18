@@ -24,6 +24,7 @@ ISAAC_COMPUTEC         = $(ISAAC_HOME)/isaac-sim/cache/computecache
 ISAAC_LOGS             = $(ISAAC_HOME)/isaac-sim/logs
 ISAAC_DATA             = $(ISAAC_HOME)/isaac-sim/data
 ISAAC_DOCS             = $(ISAAC_HOME)/isaac-sim/documents
+ISAAC_ZSH_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/zsh
 
 # These paths has to be relative to be inside docker build context
 ISAAC_ASSETS_DIR       = isaac/assets
@@ -41,6 +42,9 @@ ROS_CONTAINER_NAME = vv-ros-$(ROS_DISTRO)-custom
 # These paths has to be relative to be inside docker build context
 ROS_WS_DIR         = ros/ros2_ws
 ROS_DOT_DIR        = ros/.ros
+
+# This dir is mounted at runtime
+ROS_ZSH_CACHE      = $(ROS_HOME)/cache/zsh
 
 # ROS 2 middleware config
 ROS_DOMAIN_ID                  = 42
@@ -113,11 +117,10 @@ sync-nvim-caches:
 
 .PHONY: run-isaac
 run-isaac: xhost sync-nvim-caches
-	echo "$(ISAAC_PIP_CACHE)"
 	@mkdir -p \
 		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
 		"$(ISAAC_GLCACHE)" "$(ISAAC_COMPUTEC)" "$(ISAAC_LOGS)" \
-		"$(ISAAC_DATA)" "$(ISAAC_DOCS)"
+		"$(ISAAC_DATA)" "$(ISAAC_DOCS)" "$(ISAAC_ZSH_CACHE)"
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ISAAC_CONTAINER_NAME)$$'; then \
 		echo "Starting existing Isaac container $(ISAAC_CONTAINER_NAME)..."; \
 		docker start -ai $(ISAAC_CONTAINER_NAME); \
@@ -155,6 +158,7 @@ run-isaac: xhost sync-nvim-caches
 			-v $(CURDIR)/$(ISAAC_ASSETS_DIR):/isaac-sim/proj/assets \
 			-v $(CURDIR)/$(ROS_WS_DIR):/isaac-sim/proj/ros2_ws \
 			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
+			-v $(ISAAC_ZSH_CACHE):/cache/zsh \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
 			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
@@ -188,6 +192,7 @@ run-ros: xhost sync-nvim-caches
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
 			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
 			-v $(CURDIR)/$(ROS_WS_DIR):/ros2_ws \
+			-v $(ROS_ZSH_CACHE):/cache/zsh \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
 			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \

@@ -4,12 +4,12 @@ ARG DOCKER_REPO
 ARG DOCKER_TAG
 FROM ${DOCKER_REPO}:${DOCKER_TAG} AS base
 
-# Run as root (you need this due to NVML/Vulkan permissions)
+# Run as root (need this due to NVML/Vulkan permissions)
 USER 0
 ENV HOME=/root
 
 # Versions are not pinned because this logic can run on both Ubuntu 22 and 24
-# TODO: consider separate sets of versions for each version
+# TODO: consider separate sets of versions for each version (ROS2 jazzy or humble)
 # TODO: upgrade packages
 RUN apt-get update && \
   apt-get install --no-install-recommends -y \
@@ -26,8 +26,88 @@ RUN apt-get update && \
   fd-find
 
 
+FROM base AS zsh
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    zsh git curl ca-certificates \
+    zsh-syntax-highlighting
+
+# Cache location
+ENV ZSH_CACHE_DIR=/cache/zsh
+
+# Create cache dir
+RUN mkdir -p /cache/zsh
+
+# Installs into $HOME/.oh-my-zsh and creates $HOME/.zshrc (we'll overwrite)
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+
+# Enable autosuggestions
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
+    ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+
+# Enable VI mode
+RUN git clone https://github.com/jeffreytse/zsh-vi-mode \
+    ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-vi-mode
+
+# --- write a deterministic .zshrc ---
+# Enables completion, autosuggestions, syntax highlighting, and uses persistent cache paths.
+RUN cat > /root/.zshrc <<'EOF'
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+
+# Where zsh writes caches (compdump, etc.)
+export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-$HOME/.cache/zsh}"
+mkdir -p "$ZSH_CACHE_DIR"
+
+# Keep history in the mounted cache dir
+export HISTFILE="$ZSH_CACHE_DIR/zsh_history"
+export HISTSIZE=50000
+export SAVEHIST=50000
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_FIND_NO_DUPS
+setopt SHARE_HISTORY
+
+plugins=(
+  git
+  zsh-autosuggestions
+  zsh-vi-mode
+)
+
+# Ensure completion cache dir is secure
+export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-/cache/zsh}"
+mkdir -p "$ZSH_CACHE_DIR"
+
+# Only attempt chown if we can (may fail on some bind mounts)
+if command -v chown >/dev/null 2>&1; then
+  chown -R "$(id -u)":"$(id -g)" "$ZSH_CACHE_DIR" 2>/dev/null || true
+fi
+
+chmod -R go-w "$ZSH_CACHE_DIR" 2>/dev/null || true
+
+source "$ZSH/oh-my-zsh.sh"
+
+# --- completions ---
+autoload -Uz compinit
+# -d forces compdump location (persisted)
+compinit -d "$ZSH_CACHE_DIR/zcompdump"
+
+# --- extras installed via apt ---
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Make completion faster / reduce disk churn
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$ZSH_CACHE_DIR"
+
+# Useful defaults
+setopt AUTO_CD
+setopt INTERACTIVE_COMMENTS
+EOF
+
+ENV SHELL=/usr/bin/zsh
+RUN chmod 755 /usr/local/share/zsh
+
 # If neovim is not needed, this step can be skipped
-FROM base AS nvim
+FROM zsh AS nvim
 SHELL ["/bin/bash", "-lc"]
 
 RUN apt-get update && \
@@ -42,8 +122,6 @@ RUN apt-get update && \
   ca-certificates && \
   update-ca-certificates
 
-# TODO: consider using same neovim version as host
-# Clone and build Neovim
 WORKDIR /opt
 ARG NVIM_TAG=stable
 RUN git clone --depth 1 --branch ${NVIM_TAG} https://github.com/neovim/neovim.git && \
@@ -89,14 +167,16 @@ WORKDIR /isaac-sim
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
 RUN echo "alias pyvim='source /isaac-sim/proj/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
+RUN echo "alias pyvim='source /isaac-sim/proj/scripts/set_python_env.sh && nvim'" >> ${HOME}/.zshrc
 
 # This script will populate symlinks for editor's LSP to work
 ARG SCRIPTS_DIR
 COPY ${SCRIPTS_DIR}/make_symlinks.sh make_symlinks.sh
 RUN chmod +x make_symlinks.sh
 
-ENTRYPOINT ["/bin/bash", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
-CMD ["new-session", ";", "split-window", "-h", ";", "attach"]
+# If zsh setup is skipped, just use /bin/bash here
+ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
+CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
 
 FROM nvim AS ros-base
 
@@ -144,11 +224,20 @@ FROM ros-base AS ros
 
 # TODO: consider using ./ros_entrypoint.sh
 # Source all three workspaces we have in order
-ENTRYPOINT ["/bin/bash", "-c", "\
-  source /opt/ros/${ROS_DISTRO}/setup.bash && \
-  source /topic_based_ros2_control_ws/install/setup.bash && \
-  source /isaacsim_ros_workspaces/${ROS_DISTRO}_ws/install/setup.bash && \
+# ENTRYPOINT ["/bin/bash", "-c", "\
+#   source /opt/ros/${ROS_DISTRO}/setup.bash && \
+#   source /topic_based_ros2_control_ws/install/setup.bash && \
+#   source /isaacsim_ros_workspaces/${ROS_DISTRO}_ws/install/setup.bash && \
+#   cd /ros2_ws && \
+#   exec \"$@\" \
+#   ", "--"]
+# CMD ["tmux", "new-session", "-A", "-s", "ros"]
+ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
+  source /opt/ros/${ROS_DISTRO}/setup.zsh && \
+  source /topic_based_ros2_control_ws/install/setup.zsh && \
+  source /isaacsim_ros_workspaces/${ROS_DISTRO}_ws/install/setup.zsh && \
   cd /ros2_ws && \
   exec \"$@\" \
-  ", "--"]
+", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
+
