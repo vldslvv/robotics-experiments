@@ -45,17 +45,15 @@ RUN apt-get update && \
 # TODO: consider using same neovim version as host
 # Clone and build Neovim
 WORKDIR /opt
-RUN git clone https://github.com/neovim/neovim.git && \
-  cd neovim && \
-  git fetch --tags && \
-  LATEST_TAG=$(git describe --tags "$(git rev-list --tags --max-count=1)") && \
-  echo "Checking out Neovim tag: ${LATEST_TAG}" && \
-  git checkout "${LATEST_TAG}" && \
-  make CMAKE_BUILD_TYPE=RelWithDebInfo && \
-  make install
-
-# Optionally slim the layer by removing build tree
-RUN rm -rf /opt/neovim
+ARG NVIM_TAG=stable
+RUN git clone --depth 1 --branch ${NVIM_TAG} https://github.com/neovim/neovim.git && \
+    cd neovim && \
+    echo "Building Neovim tag: ${NVIM_TAG}" && \
+    make CMAKE_BUILD_TYPE=RelWithDebInfo && \
+    make install && \
+    cd ..&& \
+    rm -rf neovim && \
+    rm -rf /opt/neovim
 
 # Install nvm and Node.js v25 before cloning Neovim
 # Reference: https://github.com/nvm-sh/nvm

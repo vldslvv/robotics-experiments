@@ -47,6 +47,9 @@ ROS_DOMAIN_ID                  = 42
 RMW_IMPLEMENTATION             = rmw_fastrtps_cpp
 FASTRTPS_DEFAULT_PROFILES_FILE = /etc/ros/fastdds.xml
 
+# Make neovim version same a host's
+NVIM_VERSION := $(shell nvim --version | awk 'NR==1 {print $$2}')
+
 ########################################
 # X11 helper
 ########################################
@@ -64,9 +67,10 @@ build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
 		--progress=plain \
-		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
-		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
-		--build-arg SCRIPTS_DIR=$(ISAAC_SCRIPTS_DIR) \
+		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
+		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
+		--build-arg SCRIPTS_DIR="$(ISAAC_SCRIPTS_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
 		-f Dockerfile \
@@ -77,8 +81,9 @@ build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
 	docker buildx build \
 		--progress=plain \
-		--build-arg DOCKER_REPO=$(ROS_BASE_IMAGE) \
-		--build-arg DOCKER_TAG=$(ROS_BASE_TAG) \
+		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
+		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--target ros \
 		-t $(ROS_IMAGE) \
 		-f Dockerfile \
@@ -175,6 +180,7 @@ run-ros: xhost sync-nvim-caches
 			-e DISPLAY="$(DISPLAY)" \
 			-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
 			-e QT_X11_NO_MITSHM=1 \
+			-e QT_QPA_PLATFORM=xcb \
 			-e ROS_DOMAIN_ID="$(ROS_DOMAIN_ID)" \
 			-e RMW_IMPLEMENTATION="$(RMW_IMPLEMENTATION)" \
 			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
