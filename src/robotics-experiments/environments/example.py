@@ -19,9 +19,32 @@ from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
 
 from isaacsim.core.api import World
-from isaacsim.core.api.objects import DynamicCuboid, VisualCuboid
+from isaacsim.core.api.objects import VisualCuboid
 
 my_world = World(stage_units_in_meters=1.0)
+
+# Utility to load USD/USDC/USDZ scenes into the current stage via reference
+# This uses Isaac Sim's stage utilities to add a reference at a given prim path.
+# Note: Referencing is preferred over sublayering for modular scene composition.
+try:
+    from omni.isaac.core.utils.stage import add_reference_to_stage
+
+    def load_usd_scene(usd_path: str, prim_path: str = "/World/ExternalScene") -> None:
+        """Load a USD/USDC/USDZ file into the current stage by adding a reference.
+
+        Args:
+            usd_path: Absolute path or Omniverse URL to the USD/USDC/USDZ asset.
+            prim_path: Prim path under which the reference will be placed.
+        """
+        # Add the referenced scene at the desired prim path
+        add_reference_to_stage(usd_path, prim_path)
+
+    # Example usage (commented):
+    load_usd_scene("/path/to/your_scene.usdc", prim_path="/World/MyUSDCScene")
+except Exception as e:
+    # If stage utilities are unavailable, we avoid breaking the example and just log.
+    # You can remove this try/except if your environment always has omni.isaac available.
+    print(f"Warning: Could not import add_reference_to_stage: {e}")
 
 cube_1 = my_world.scene.add(
     VisualCuboid(
@@ -65,4 +88,4 @@ for i in range(5):
         # print(cube_2.get_angular_velocity())
         # print(cube_2.get_world_pose())
 
-simulation_app.close()
+# simulation_app.close()

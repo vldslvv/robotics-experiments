@@ -94,3 +94,5 @@ venv/
 
 # Isaac Sim
 isaac-sim/
+!isaac/
+!isaac/scripts/

@@ -2,40 +2,45 @@
 # Images / containers
 ########################################
 
+BUILD_ROOT             = $(CURDIR)/.build/docker
+SRC_DIR                = $(CURDIR)/src
+
 # Isaac custom image
 ISAAC_BASE_IMAGE = nvcr.io/nvidia/isaac-sim
 ISAAC_BASE_TAG   = 5.1.0
 
-ISAAC_IMAGE_NAME      = vv-isaac-sim-custom
-ISAAC_IMAGE_TAG       = $(ISAAC_BASE_TAG)
-ISAAC_IMAGE           = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
-ISAAC_CONTAINER_NAME  = vv-isaac-sim-custom
+ISAAC_IMAGE_NAME     = vv-isaac-sim-custom
+ISAAC_IMAGE_TAG      = $(ISAAC_BASE_TAG)
+ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
+ISAAC_CONTAINER_NAME = vv-isaac-sim-custom
 
 # Host paths for persistence
-ISAAC_HOME       = $(CURDIR)/isaac-sim
-ISAAC_KIT_CACHE  = $(ISAAC_HOME)/cache/kit
-ISAAC_OV_CACHE   = $(ISAAC_HOME)/cache/ov
-ISAAC_PIP_CACHE  = $(ISAAC_HOME)/cache/pip
-ISAAC_GLCACHE    = $(ISAAC_HOME)/cache/glcache
-ISAAC_COMPUTEC   = $(ISAAC_HOME)/cache/computecache
-ISAAC_LOGS       = $(ISAAC_HOME)/logs
-ISAAC_DATA       = $(ISAAC_HOME)/data
-ISAAC_DOCS       = $(ISAAC_HOME)/documents
-SRC_DIR          = $(CURDIR)/src
-SCANS_DIR        = $(CURDIR)/scans
-BUILD_ROOT       = $(CURDIR)/.build/docker
+ISAAC_HOME             = $(CURDIR)/isaac
+ISAAC_KIT_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/kit
+ISAAC_OV_CACHE         = $(ISAAC_HOME)/isaac-sim/cache/ov
+ISAAC_PIP_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/pip
+ISAAC_GLCACHE          = $(ISAAC_HOME)/isaac-sim/cache/glcache
+ISAAC_COMPUTEC         = $(ISAAC_HOME)/isaac-sim/cache/computecache
+ISAAC_LOGS             = $(ISAAC_HOME)/isaac-sim/logs
+ISAAC_DATA             = $(ISAAC_HOME)/isaac-sim/data
+ISAAC_DOCS             = $(ISAAC_HOME)/isaac-sim/documents
 
-# ROS 2 image / container
-ROS_DISTRO          = jazzy
-# ROS_DISTRO          = humble
+# These paths has to be relative to be inside docker build context
+ISAAC_ASSETS_DIR       = isaac/assets
+ISAAC_SCRIPTS_DIR      = isaac/scripts
 
-ROS_BASE_IMAGE      = ros
-ROS_BASE_TAG        = $(ROS_DISTRO)
+# ROS 2 image / container (humble is the other option)
+ROS_DISTRO         = jazzy
+ROS_BASE_IMAGE     = ros
+ROS_BASE_TAG       = $(ROS_DISTRO)
+ROS_IMAGE_NAME     = vv-ros-$(ROS_DISTRO)-custom
+ROS_IMAGE_TAG      = $(ROS_DISTRO)
+ROS_IMAGE          = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
+ROS_CONTAINER_NAME = vv-ros-$(ROS_DISTRO)-custom
 
-ROS_IMAGE_NAME      = vv-ros-$(ROS_DISTRO)-custom
-ROS_IMAGE_TAG       = $(ROS_DISTRO)
-ROS_IMAGE           = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
-ROS_CONTAINER_NAME  = vv-ros-$(ROS_DISTRO)-custom
+# These paths has to be relative to be inside docker build context
+ROS_WS_DIR         = ros/ros2_ws
+ROS_DOT_DIR        = ros/.ros
 
 # ROS 2 middleware config
 ROS_DOMAIN_ID                  = 42
@@ -61,6 +66,7 @@ build-isaac:
 		--progress=plain \
 		--build-arg DOCKER_REPO=$(ISAAC_BASE_IMAGE) \
 		--build-arg DOCKER_TAG=$(ISAAC_BASE_TAG) \
+		--build-arg SCRIPTS_DIR=$(ISAAC_SCRIPTS_DIR) \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
 		-f Dockerfile \
@@ -139,11 +145,11 @@ run-isaac: xhost sync-nvim-caches
 			-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
 			-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
 			-v $(ISAAC_DOCS):/isaac-sim/Documents \
-			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/robotics-experiments \
-			-v $(CURDIR)/scripts:/isaac-sim/scripts \
-			-v $(SCANS_DIR):/isaac-sim/scans \
-			-v $(CURDIR)/.ros:/isaac-sim/.ros \
-			-v $(CURDIR)/ros2_ws:/isaac-sim/ros2_ws \
+			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/proj/robotics-experiments \
+			-v $(CURDIR)/$(ISAAC_SCRIPTS_DIR):/isaac-sim/proj/scripts \
+			-v $(CURDIR)/$(ISAAC_ASSETS_DIR):/isaac-sim/proj/assets \
+			-v $(CURDIR)/$(ROS_WS_DIR):/isaac-sim/proj/ros2_ws \
+			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
 			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
@@ -171,8 +177,8 @@ run-ros: xhost sync-nvim-caches
 			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
 			-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-			-v $(CURDIR)/.ros:/isaac-sim/.ros \
-			-v $(CURDIR)/ros2_ws:/ros2_ws \
+			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
+			-v $(CURDIR)/$(ROS_WS_DIR):/ros2_ws \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
 			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \

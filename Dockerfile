@@ -22,7 +22,8 @@ RUN apt-get update && \
   ripgrep \
   file \
   less \
-  tree
+  tree \
+  fd-find
 
 
 # If neovim is not needed, this step can be skipped
@@ -89,13 +90,14 @@ WORKDIR /isaac-sim
 # The problem being solved:
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
-RUN echo "alias pyvim='source /isaac-sim/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
+RUN echo "alias pyvim='source /isaac-sim/proj/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
 
 # This script will populate symlinks for editor's LSP to work
-COPY scripts/make_symlinks.sh make_symlinks.sh
+ARG SCRIPTS_DIR
+COPY ${SCRIPTS_DIR}/make_symlinks.sh make_symlinks.sh
 RUN chmod +x make_symlinks.sh
 
-  ENTRYPOINT ["/bin/bash", "-lc", "scripts/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
+ENTRYPOINT ["/bin/bash", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
 CMD ["new-session", ";", "split-window", "-h", ";", "attach"]
 
 FROM nvim AS ros-base
