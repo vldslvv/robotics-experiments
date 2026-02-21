@@ -23,7 +23,9 @@ RUN apt-get update && \
   file \
   less \
   tree \
-  fd-find
+  fd-find \
+  python3-pip \
+  python3-virtualenv
 
 
 FROM base AS zsh

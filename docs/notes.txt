@@ -16,3 +16,13 @@ https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_ca
 Hot reloading seems not possible without workarounds:
 https://github.com/isaac-sim/IsaacLab/issues/3201
 
+Publishing TF trees:
+Make sure there's a graph with ROS2 Publish Transform Tree set up
+Check `ros2 topic echo /tf` and verify there is a message
+Run `ros2 run tf2_tools view_frames` to generate a pdf
+Open pdf
+
+To visualize in rviz2, set Fixed Frame to "world" or "map"
+
+For action graphs, investigate "pipelineStage" and why is it set for "pipelneStageOnDemand"
+Read Simulation Time: set Reset on Stop

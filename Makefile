@@ -201,6 +201,11 @@ run-ros: xhost sync-nvim-caches
 			"$(ROS_IMAGE)"; \
 	fi
 
+.PHONY: run-all
+run-all:
+	kitty --title ROS2 --hold make run-ros &
+	kitty --title IsaacSim --hold make run-isaac &
+
 ########################################
 # Stop / clean
 ########################################

@@ -34,3 +34,4 @@ to be importable as `import isaacsim.core.api`:
 
 4. Align paths in Makefile: when mounting, paths have to be absolute, but when passing paths to dockerfile as build-args, paths have to be relative to build context path.
 
+5. Install pip3 and torch to ROS2 docker?
