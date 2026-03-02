@@ -153,3 +153,13 @@ Topics and events can be checked by executing on ROS2 container:
 ros2 topic list
 ros2 topic echo /clock
 ```
+
+### 6. Light switch
+
+To add a light switch, add XForm, place Body and Button Cube Meshes. Add Articulation Root to XForm, add rigid body and colliders to both meshes. Colliders set to Bounding Cube for simplicity. Add prismatic joint and place it between meshes. To fix Body in place, add fixed joint and place it between World or Root and Body.
+
+### 7. Custom Extension
+
+Use `runapp_custom.sh` script to launch Isaac Sim so that extensions are picked from a custom directory.
+
+In Isaac Sim, check that `lightswitch` extension es enabled.

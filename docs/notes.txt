@@ -26,3 +26,18 @@ To visualize in rviz2, set Fixed Frame to "world" or "map"
 
 For action graphs, investigate "pipelineStage" and why is it set for "pipelneStageOnDemand"
 Read Simulation Time: set Reset on Stop
+
+Consider QoS:
+    On each frame:
+            Camera Info is published
+    Every 5 frames:
+            RGB image is published
+    Every 60 frames:
+            Depth image is published
+Example here:
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ros2_tutorials/tutorial_ros2_python.html#ros-2-camera
+
+In occupancy map, lidar scan height needs to be correlated with occupancy map Z bounds -- probably relevant for ground robots.
+Using nav2:
+Create occupancy map in Isaac Sim and import both yaml and png of a map
+Run navigation through ros2, in rviz2 at the top select Nav2 Goal and point a vector at the map

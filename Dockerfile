@@ -190,6 +190,8 @@ RUN apt-get install --no-install-recommends -y \
   ros-${ROS_DISTRO}-vision-msgs \
   ros-${ROS_DISTRO}-ackermann-msgs \
   ros-${ROS_DISTRO}-teleop-twist-keyboard \
+  ros-${ROS_DISTRO}-navigation2 \
+  ros-${ROS_DISTRO}-nav2-bringup \
   python3-rosdep build-essential \
   python3-colcon-common-extensions
 
@@ -242,4 +244,3 @@ ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
   exec \"$@\" \
 ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
-
