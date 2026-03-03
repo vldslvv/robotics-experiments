@@ -2,6 +2,7 @@ import os
 import random
 from dataclasses import dataclass, field
 
+import carb
 import omni.ext
 import omni.kit.app
 import omni.timeline
@@ -102,9 +103,9 @@ def _sample_positions(
                 break
 
         if not placed:
-            print(f"[LightSwitch] WARNING: Could not place switch {len(positions)} "
-                  f"with min separation {min_distance} m after {max_retries} retries; "
-                  "accepting overlapping position.")
+            carb.log_warn(f"[LightSwitch] Could not place switch {len(positions)} "
+                          f"with min separation {min_distance} m after {max_retries} retries; "
+                          "accepting overlapping position.")
             positions.append(fallback)
 
     return positions
@@ -116,7 +117,7 @@ def _spawn_switches(stage, usd_path: str, positions: list[Gf.Vec3d]) -> list[str
     Returns the list of spawned prim paths, or an empty list on failure.
     """
     if not os.path.isfile(usd_path):
-        print(f"[LightSwitch] ERROR: USD asset not found: '{usd_path}'")
+        carb.log_error(f"[LightSwitch] USD asset not found: '{usd_path}'")
         return []
 
     prim_paths = []
@@ -132,7 +133,7 @@ def _spawn_switches(stage, usd_path: str, positions: list[Gf.Vec3d]) -> list[str
 
         prim_paths.append(prim_path)
 
-    print(f"[LightSwitch] Spawned {len(prim_paths)} switches.")
+    carb.log_info(f"[LightSwitch] Spawned {len(prim_paths)} switches.")
     return prim_paths
 
 
@@ -140,7 +141,7 @@ def _validate_scene(stage, switch_state: list) -> bool:
     for sw in switch_state:
         prim = stage.GetPrimAtPath(sw.prim_path)
         if not prim.IsValid():
-            print(f"[LightSwitch] ERROR: Prim not found at '{sw.prim_path}'.")
+            carb.log_error(f"[LightSwitch] Prim not found at '{sw.prim_path}'.")
             return False
     return True
 
@@ -159,12 +160,12 @@ def _init_articulations(switch_state: list) -> bool:
             art.initialize()
             sw.articulation = art
 
-        print(f"[LightSwitch] Initialized {len(switch_state)} articulations.")
-        print(f"[LightSwitch] DOFs: {switch_state[0].articulation.dof_names}")
+        carb.log_info(f"[LightSwitch] Initialized {len(switch_state)} articulations.")
+        carb.log_info(f"[LightSwitch] DOFs: {switch_state[0].articulation.dof_names}")
         return True
 
     except Exception as e:
-        print(f"[LightSwitch] Articulation init failed: ({e})")
+        carb.log_error(f"[LightSwitch] Articulation init failed: ({e})")
         for sw in switch_state:
             sw.articulation = None  # discard any half-constructed objects
         return False
@@ -175,7 +176,7 @@ def _init_articulations(switch_state: list) -> bool:
 class LightSwitchExtension(omni.ext.IExt):
 
     def on_startup(self, ext_id: str):
-        print("[LightSwitch] Extension starting...")
+        carb.log_info("[LightSwitch] Extension starting...")
 
         # Per-switch state — populated in _on_simulation_start and _init_articulations
         self._switch_state: list[SwitchState] = []
@@ -201,10 +202,10 @@ class LightSwitchExtension(omni.ext.IExt):
             name="light_switch_update"
         )
 
-        print("[LightSwitch] Running. Press ▶ Play to begin.")
+        carb.log_info("[LightSwitch] Running. Press ▶ Play to begin.")
 
     def on_shutdown(self):
-        print("[LightSwitch] Shutting down...")
+        carb.log_info("[LightSwitch] Shutting down...")
 
         if self._state.update_sub:
             self._state.update_sub.unsubscribe()
@@ -221,7 +222,7 @@ class LightSwitchExtension(omni.ext.IExt):
         if rclpy.ok():
             rclpy.shutdown()
 
-        print("[LightSwitch] Shutdown complete.")
+        carb.log_info("[LightSwitch] Shutdown complete.")
 
     # ── Timeline lifecycle ─────────────────────────────────────────────────────
 
@@ -237,7 +238,7 @@ class LightSwitchExtension(omni.ext.IExt):
     def _on_simulation_start(self):
         stage = omni.usd.get_context().get_stage()
         if stage is None:
-            print("[LightSwitch] ERROR: No stage loaded.")
+            carb.log_error("[LightSwitch] No stage loaded.")
             return
 
         # Remove any previously spawned prims before spawning new ones
@@ -251,7 +252,7 @@ class LightSwitchExtension(omni.ext.IExt):
         self._switch_state = [SwitchState(prim_path=p) for p in switch_prim_paths]
 
         if not _validate_scene(stage, self._switch_state):
-            print("[LightSwitch] ERROR: Scene validation failed; aborting simulation start.")
+            carb.log_error("[LightSwitch] Scene validation failed; aborting simulation start.")
             return
 
         # Create single combined publisher
@@ -260,11 +261,11 @@ class LightSwitchExtension(omni.ext.IExt):
             Float32MultiArray, "/light_switches/state", qos
         )
 
-        print("[LightSwitch] Simulation started.")
+        carb.log_info("[LightSwitch] Simulation started.")
         self._state.sim_playing = True
 
     def _on_simulation_stop(self):
-        print("[LightSwitch] Simulation stopped — resetting state.")
+        carb.log_info("[LightSwitch] Simulation stopped — resetting state.")
         self._state.sim_playing    = False
         self._state.is_initialized = False
 
