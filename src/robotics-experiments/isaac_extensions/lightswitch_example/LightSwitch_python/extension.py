@@ -9,7 +9,7 @@ import rclpy
 from pxr import Gf, Sdf, UsdGeom
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Float32MultiArray
 
 from isaacsim.core.prims import SingleArticulation
 
@@ -18,39 +18,18 @@ from isaacsim.core.prims import SingleArticulation
 
 SWITCH_USD_PATH  = "/isaac-sim/proj/assets/LightSwitchWarehouse/LightSwitch.usd"  # prefab asset path
 NUM_SWITCHES     = 5
-SPAWN_AREA       = 3.0     # switches spawn within +/- this range on X and Y (meters)
+SPAWN_BOUNDS     = [                    # spawn regions along warehouse wall
+    Gf.Range3d(
+        Gf.Vec3d(-3.0, 17.99, 0.5),    # min (X, Y, Z)
+        Gf.Vec3d( 8.0, 17.99, 2.7),    # max (X, Y, Z)
+    ),
+]
 PRESS_THRESHOLD  = 0.01   # Y-axis joint travel to count as pressed (meters)
+MIN_SWITCH_DIST  = 0.5    # minimum Euclidean distance between any two switches (meters)
 
-# Each switch publishes on:
-#   /light_switch_{i}/status  (std_msgs/Bool)   — latched ON/OFF state
-#   /light_switch_{i}/button  (std_msgs/Float32) — raw joint position (for RL observations)
-PUBLISH_RATE_STEPS = 60    # heartbeat publish interval in simulation steps
-
-
-# ── Per-switch ROS2 publisher pair ─────────────────────────────────────────────
-
-class SwitchPublisher:
-    """Owns the two ROS2 publishers for a single switch instance."""
-
-    def __init__(self, node: Node, index: int):
-        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        self._status_pub = node.create_publisher(
-            Bool, f"/light_switch_{index}/status", qos
-        )
-        self._button_pub = node.create_publisher(
-            Float32, f"/light_switch_{index}/button", 10
-        )
-        self._index = index
-
-    def publish_status(self, state: bool):
-        msg = Bool()
-        msg.data = state
-        self._status_pub.publish(msg)
-
-    def publish_button(self, position: float):
-        msg = Float32()
-        msg.data = position
-        self._button_pub.publish(msg)
+# Publishes an event on state change:
+#   /light_switches/state  (std_msgs/Float32MultiArray)
+#   Layout: [index, state]  — state is 0.0 (OFF) or 1.0 (ON).
 
 
 # ── ROS2 node ──────────────────────────────────────────────────────────────────
@@ -71,12 +50,11 @@ class LightSwitchExtension(omni.ext.IExt):
         # Per-switch state — populated in _spawn_switches and _init_articulations
         self._switch_prim_paths  = []
         self._articulations      = []
-        self._publishers         = []
         self._switch_states      = []
         self._last_button_states = []
 
         # Shared state
-        self._step_counter    = 0
+        self._state_pub       = None
         self._is_initialized  = False
         self._sim_playing     = False
         self._update_sub      = None
@@ -125,46 +103,79 @@ class LightSwitchExtension(omni.ext.IExt):
 
     # ── Spawning ───────────────────────────────────────────────────────────────
 
-    def _spawn_switches(self):
+    def _sample_positions(
+        self,
+        count: int,
+        bounds: list[Gf.Range3d],
+        min_distance: float = MIN_SWITCH_DIST,
+        max_retries: int = 100,
+    ) -> list[Gf.Vec3d]:
+        """Return `count` random positions, each sampled from a randomly chosen bound.
+
+        Uses rejection sampling to ensure no two positions are closer than
+        min_distance in 3D space. Falls back to the best candidate after
+        100 retries to avoid hanging when the region is densely packed.
         """
-        Instantiate NUM_SWITCHES copies of the LightSwitch prefab USD at random
-        XY positions. Clears any previously spawned instances first so this is
-        safe to call on every episode reset.
+        positions = []
+
+        def _dist(a: Gf.Vec3d, b: Gf.Vec3d) -> float:
+            return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
+
+        for _ in range(count):
+            fallback = None
+            placed = False
+            for _ in range(max_retries):
+                b = random.choice(bounds)
+                mn, mx = b.min, b.max
+                c = Gf.Vec3d(
+                    random.uniform(mn[0], mx[0]),
+                    random.uniform(mn[1], mx[1]),
+                    random.uniform(mn[2], mx[2]),
+                )
+                if fallback is None:
+                    fallback = c
+                if all(_dist(c, p) >= min_distance for p in positions):
+                    positions.append(c)
+                    placed = True
+                    break
+
+            if not placed:
+                print(f"[LightSwitch] WARNING: Could not place switch {len(positions)} "
+                      f"with min separation {min_distance} m after {max_retries} retries; "
+                      "accepting overlapping position.")
+                positions.append(fallback)
+
+        return positions
+
+    def _spawn_switches(
+        self,
+        stage,
+        usd_path: str,
+        positions: list[Gf.Vec3d],
+    ) -> list[str]:
         """
-        if not os.path.isfile(SWITCH_USD_PATH):
-            print(f"[LightSwitch] ERROR: SWITCH_USD_PATH not found: '{SWITCH_USD_PATH}'")
-            return
+        Instantiate one LightSwitch prim per entry in `positions`.
+        Returns the list of spawned prim paths, or an empty list on failure.
+        """
+        if not os.path.isfile(usd_path):
+            print(f"[LightSwitch] ERROR: USD asset not found: '{usd_path}'")
+            return []
 
-        stage = omni.usd.get_context().get_stage()
-        if stage is None:
-            print("[LightSwitch] ERROR: No stage loaded.")
-            return
-
-        # Remove previously spawned prims
-        for path in self._switch_prim_paths:
-            prim = stage.GetPrimAtPath(path)
-            if prim.IsValid():
-                stage.RemovePrim(Sdf.Path(path))
-
-        self._switch_prim_paths = []
-
-        for i in range(NUM_SWITCHES):
+        prim_paths = []
+        for i, pos in enumerate(positions):
             prim_path = f"/Root/LightSwitch_{i}"
 
             prim = stage.DefinePrim(prim_path, "Xform")
-            prim.GetReferences().AddReference(SWITCH_USD_PATH)
+            prim.GetReferences().AddReference(usd_path)
 
             xform = UsdGeom.Xformable(prim)
             xform.ClearXformOpOrder()
-            xform.AddTranslateOp().Set(Gf.Vec3d(
-                random.uniform(-SPAWN_AREA, SPAWN_AREA),
-                random.uniform(-SPAWN_AREA, SPAWN_AREA),
-                0.0
-            ))
+            xform.AddTranslateOp().Set(pos)
 
-            self._switch_prim_paths.append(prim_path)
+            prim_paths.append(prim_path)
 
-        print(f"[LightSwitch] Spawned {NUM_SWITCHES} switches.")
+        print(f"[LightSwitch] Spawned {len(prim_paths)} switches.")
+        return prim_paths
 
     def _validate_scene(self) -> bool:
         stage = omni.usd.get_context().get_stage()
@@ -192,19 +203,33 @@ class LightSwitchExtension(omni.ext.IExt):
             self._on_simulation_stop()
 
     def _on_simulation_start(self):
-        self._spawn_switches()
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            print("[LightSwitch] ERROR: No stage loaded.")
+            return
+
+        # Remove any previously spawned prims before spawning new ones
+        for path in self._switch_prim_paths:
+            prim = stage.GetPrimAtPath(path)
+            if prim.IsValid():
+                stage.RemovePrim(Sdf.Path(path))
+
+        positions = self._sample_positions(NUM_SWITCHES, SPAWN_BOUNDS)
+        self._switch_prim_paths = self._spawn_switches(stage, SWITCH_USD_PATH, positions)
 
         if not self._validate_scene():
             return
 
-        # Create per-switch ROS2 publishers
-        self._publishers = [
-            SwitchPublisher(self._ros_node, i) for i in range(NUM_SWITCHES)
-        ]
+        # Create single combined publisher
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._state_pub = self._ros_node.create_publisher(
+            Float32MultiArray, "/light_switches/state", qos
+        )
 
         # Reset per-switch state
-        self._switch_states      = [False] * NUM_SWITCHES
-        self._last_button_states = [False] * NUM_SWITCHES
+        n = len(self._switch_prim_paths)
+        self._switch_states      = [False] * n
+        self._last_button_states = [False] * n
 
         print("[LightSwitch] Simulation started.")
         self._sim_playing = True
@@ -216,7 +241,14 @@ class LightSwitchExtension(omni.ext.IExt):
         self._articulations      = []    # physics view torn down; drop all references
         self._switch_states      = []
         self._last_button_states = []
-        self._step_counter       = 0
+
+        stage = omni.usd.get_context().get_stage()
+        if stage is not None:
+            for path in self._switch_prim_paths:
+                prim = stage.GetPrimAtPath(path)
+                if prim.IsValid():
+                    stage.RemovePrim(Sdf.Path(path))
+        self._switch_prim_paths = []
 
     # ── Articulation init ──────────────────────────────────────────────────────
 
@@ -264,21 +296,13 @@ class LightSwitchExtension(omni.ext.IExt):
             joint_positions = art.get_joint_positions()
             button_pos      = joint_positions[0]  # adjust index if DOF order differs
 
-            # Publish raw joint position for RL observations
-            self._publishers[i].publish_button(float(button_pos))
-
             # Toggle latch on leading edge of press
             # Uses >= for +Y travel. Swap to <= and negate PRESS_THRESHOLD if -Y.
             button_pressed = button_pos >= PRESS_THRESHOLD
             if button_pressed and not self._last_button_states[i]:
                 self._switch_states[i] = not self._switch_states[i]
-                self._publishers[i].publish_status(self._switch_states[i])
+                msg = Float32MultiArray()
+                msg.data = [float(i), float(self._switch_states[i])]
+                self._state_pub.publish(msg)
 
             self._last_button_states[i] = button_pressed
-
-        # ── Periodic heartbeat publish ─────────────────────────────────────────
-        self._step_counter += 1
-        if self._step_counter >= PUBLISH_RATE_STEPS:
-            for i, pub in enumerate(self._publishers):
-                pub.publish_status(self._switch_states[i])
-            self._step_counter = 0
