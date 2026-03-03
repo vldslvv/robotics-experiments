@@ -10,6 +10,10 @@
 # [ ! -e "$SYMLINKS/isaacsim/core/__init__.py" ] && touch "$SYMLINKS/isaacsim/core/__init__.py"
 # Now, create a symlink for api, if doens't exist already
 
+# TODO: create symlinks for /isaac-sim/kit/kernel/py/omni/ext/
+# and /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy/
+# Consider also /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy/rclpy/
+
 set -euo pipefail
 
 # -------- CONFIG --------
