@@ -8,7 +8,7 @@ import omni.kit.app
 import omni.timeline
 import omni.usd
 import rclpy
-from pxr import Gf, Sdf, UsdGeom
+from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdShade
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Float32MultiArray
@@ -19,6 +19,7 @@ from isaacsim.core.prims import SingleArticulation
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 SWITCH_USD_PATH  = "/isaac-sim/proj/assets/LightSwitchWarehouse/LightSwitch.usd"  # prefab asset path
+LAMP_USD_PATH  = "/isaac-sim/proj/assets/LightSwitchWarehouse/Lamp.usd"  # prefab asset path
 NUM_SWITCHES     = 5
 SPAWN_BOUNDS     = [                    # spawn regions along warehouse wall
     Gf.Range3d(
@@ -48,6 +49,7 @@ class LightSwitchNode(Node):
 @dataclass
 class SwitchState:
     prim_path:         str
+    lamp_prim_path:    str = ""
     articulation:      SingleArticulation | None = field(default=None, repr=False)
     state:             bool = False
     last_button_state: bool = False
@@ -134,6 +136,42 @@ def _spawn_switches(stage, usd_path: str, positions: list[Gf.Vec3d]) -> list[str
         prim_paths.append(prim_path)
 
     carb.log_info(f"[LightSwitch] Spawned {len(prim_paths)} switches.")
+    return prim_paths
+
+
+def _spawn_lamps(stage, usd_path: str, positions: list[Gf.Vec3d]) -> list[str]:
+    """Spawn a lamp 1m above each switch position. Returns list of prim paths."""
+    if not os.path.isfile(usd_path):
+        carb.log_error(f"[LightSwitch] Lamp USD asset not found: '{usd_path}'")
+        return []
+
+    prim_paths = []
+    for i, pos in enumerate(positions):
+        lamp_pos = Gf.Vec3d(pos[0], pos[1], random.uniform(3.4, 5.0))
+        prim_path = f"/Root/Lamp_{i}"
+
+        prim = stage.DefinePrim(prim_path, "Xform")
+        prim.GetReferences().AddReference(usd_path)
+
+        xform = UsdGeom.Xformable(prim)
+        xform.ClearXformOpOrder()
+        xform.AddTranslateOp().Set(lamp_pos)
+
+        # Initialize lamp to OFF
+        light_prim = stage.GetPrimAtPath(f"{prim_path}/Lamp/SphereLight")
+        if light_prim.IsValid():
+            UsdLux.SphereLight(light_prim).GetIntensityAttr().Set(0.0)
+
+        shader_prim = stage.GetPrimAtPath(f"{prim_path}/Lamp/Mesh/Looks/OmniPBR/Shader")
+        if shader_prim.IsValid():
+            shader = UsdShade.Shader(shader_prim)
+            shader.CreateInput("emissive_color", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(1.0, 0.9, 0.7))
+            shader.CreateInput("emissive_intensity", Sdf.ValueTypeNames.Float).Set(0.0)
+            shader.CreateInput("enable_emission", Sdf.ValueTypeNames.Bool).Set(False)
+
+        prim_paths.append(prim_path)
+
+    carb.log_info(f"[LightSwitch] Spawned {len(prim_paths)} lamps.")
     return prim_paths
 
 
@@ -243,13 +281,19 @@ class LightSwitchExtension(omni.ext.IExt):
 
         # Remove any previously spawned prims before spawning new ones
         for sw in self._switch_state:
-            prim = stage.GetPrimAtPath(sw.prim_path)
-            if prim.IsValid():
-                stage.RemovePrim(Sdf.Path(sw.prim_path))
+            for path in (sw.prim_path, sw.lamp_prim_path):
+                if path:
+                    prim = stage.GetPrimAtPath(path)
+                    if prim.IsValid():
+                        stage.RemovePrim(Sdf.Path(path))
 
         switch_positions = _sample_positions(NUM_SWITCHES, SPAWN_BOUNDS)
         switch_prim_paths = _spawn_switches(stage, SWITCH_USD_PATH, switch_positions)
-        self._switch_state = [SwitchState(prim_path=p) for p in switch_prim_paths]
+        lamp_prim_paths = _spawn_lamps(stage, LAMP_USD_PATH, switch_positions)
+        self._switch_state = [
+            SwitchState(prim_path=sp, lamp_prim_path=lp)
+            for sp, lp in zip(switch_prim_paths, lamp_prim_paths)
+        ]
 
         if not _validate_scene(stage, self._switch_state):
             carb.log_error("[LightSwitch] Scene validation failed; aborting simulation start.")
@@ -272,9 +316,11 @@ class LightSwitchExtension(omni.ext.IExt):
         stage = omni.usd.get_context().get_stage()
         if stage is not None:
             for sw in self._switch_state:
-                prim = stage.GetPrimAtPath(sw.prim_path)
-                if prim.IsValid():
-                    stage.RemovePrim(Sdf.Path(sw.prim_path))
+                for path in (sw.prim_path, sw.lamp_prim_path):
+                    if path:
+                        prim = stage.GetPrimAtPath(path)
+                        if prim.IsValid():
+                            stage.RemovePrim(Sdf.Path(path))
         self._switch_state = []    # physics view torn down; drop all references
 
     # ── Per-frame update ───────────────────────────────────────────────────────
@@ -304,5 +350,18 @@ class LightSwitchExtension(omni.ext.IExt):
                 msg = Float32MultiArray()
                 msg.data = [float(i), float(sw.state)]
                 self._state.state_pub.publish(msg)
+
+                # Toggle lamp light and emissive material
+                stage = omni.usd.get_context().get_stage()
+                light_prim = stage.GetPrimAtPath(f"{sw.lamp_prim_path}/Lamp/SphereLight")
+                if light_prim.IsValid():
+                    intensity = 5000.0 if sw.state else 0.0
+                    UsdLux.SphereLight(light_prim).GetIntensityAttr().Set(intensity)
+
+                shader_prim = stage.GetPrimAtPath(f"{sw.lamp_prim_path}/Lamp/Mesh/Looks/OmniPBR/Shader")
+                if shader_prim.IsValid():
+                    shader = UsdShade.Shader(shader_prim)
+                    shader.CreateInput("emissive_intensity", Sdf.ValueTypeNames.Float).Set(5000.0 if sw.state else 0.0)
+                    shader.CreateInput("enable_emission", Sdf.ValueTypeNames.Bool).Set(sw.state)
 
             sw.last_button_state = button_pressed
