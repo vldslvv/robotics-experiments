@@ -108,8 +108,14 @@ EOF
 ENV SHELL=/usr/bin/zsh
 RUN chmod 755 /usr/local/share/zsh
 
+# Can be skipped
+FROM zsh as claude
+
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+
 # If neovim is not needed, this step can be skipped
-FROM zsh AS nvim
+FROM claude AS nvim
 SHELL ["/bin/bash", "-lc"]
 
 RUN apt-get update && \
