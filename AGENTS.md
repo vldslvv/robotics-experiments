@@ -43,5 +43,4 @@ Don't do anything, ask for instructions
 ## Recent agent operations
 - Added a top-level `pyproject.toml` to centralize Python build metadata and tooling configuration (Black/isort/Ruff/mypy/pytest).
 - Fixed Docker build context issue for Isaac image: updated `Makefile` to pass `SCRIPTS_DIR=isaac/scripts` (relative to build context) so `COPY ${SCRIPTS_DIR}/make_symlinks.sh` succeeds during `make build-isaac`.
-
 - Synced dependency pins with `requirements.txt` / `requirements_dev.txt` and `.pre-commit-config.yaml`.

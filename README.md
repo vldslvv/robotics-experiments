@@ -163,3 +163,13 @@ To add a light switch, add XForm, place Body and Button Cube Meshes. Add Articul
 Use `runapp_custom.sh` script to launch Isaac Sim so that extensions are picked from a custom directory.
 
 In Isaac Sim, check that `lightswitch` extension is enabled.
+
+### 8. Creating Custom Extension
+
+Create an extension template using Isaac Sim -> Utilities -> Generate Extension Template.
+This generates lots of redundant boilerplate.
+
+Other option is to use cleaned up `extension_template` is this repository.
+
+After that, modify `runapp_custom.sh` to autoload the extension
+

@@ -5,7 +5,8 @@
 EXT_FOLDER="/isaac-sim/proj/robotics-experiments/isaac_extensions"
 SCENE_PATH="/isaac-sim/proj/assets/LightSwitchWarehouse/Warehouse.usd"
 OPEN_STAGE_SCRIPT="open_stage.py"
-EXTENSION="lightswitch_example"
+LIGHTSWITCH_EXTENSION="lightswitch_example"
+DRONE_SPAWNER_EXTENSION="drone_spawner"
 
 # For log level changes, use:
 # LOG_LEVEL="info"
@@ -16,7 +17,8 @@ EXTENSION="lightswitch_example"
 /isaac-sim/privacy.sh && \
 /isaac-sim/isaac-sim.sh \
   --ext-folder "$EXT_FOLDER" \
-  --enable "$EXTENSION" \
+  --enable "$LIGHTSWITCH_EXTENSION" \
+  --enable "$DRONE_SPAWNER_EXTENSION" \
   --/persistent/isaac/asset_root/default="$OMNI_SERVER" \
   --merge-config="/isaac-sim/config/open_endpoint.toml" \
   --allow-root \

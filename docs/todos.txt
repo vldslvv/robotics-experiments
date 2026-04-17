@@ -40,3 +40,7 @@ Done, check
 6. Install Nav2
 https://docs.nav2.org/getting_started/index.html#installation
 Done, check
+
+7. Create unified yaml config that aggregates scene, randomization settings across extensions
+
+8. Create wireframe "purpose = guide" for light switch spawn area
