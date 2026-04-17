@@ -4,6 +4,19 @@
 #   /isaac-sim/python.sh proj/robotics-experiments/isaac_scripts/build_copter_usd_without_pxr.py [config_name]
 #
 # Available configs: quadcopter_500mm (default), hexacopter_s550
+#
+# --- Boundary with Isaac Lab (drone_cfg.py) ---
+# This file authors the USD once. Anything topological / geometric lives here:
+#   - Prim tree, meshes, collision shapes
+#   - Joint topology (body pairs, axis, limits, relative frames)
+#   - Custom attributes (e.g. drone:spinDir on props)
+#   - Articulation root marker (ArticulationRootAPI on the wrapper prim)
+# The Isaac Lab ArticulationCfg (drone_cfg.py) overrides at spawn time:
+#   - Mass / inertia / CoM (so EventTerm can randomize per-env for sim-to-real)
+#   - Actuator stiffness / damping / effort limits
+#   - Initial pose and joint positions
+#   - Rigid body solver flags (CCD, max velocities, gravity toggle)
+# Rule: stable names in USD → Isaac Lab matches joints/bodies by regex.
 
 from __future__ import annotations
 
@@ -186,6 +199,11 @@ def build_drone_usd(cfg: DroneConfig) -> str:
     # --- Wrapper (default prim, plain Xform) so drone body and pusher pad
     #     live as sibling rigid bodies under a single reference root. ---
     wrapper = UsdGeom.Xform.Define(stage, wrapper_path)
+    # Mark the wrapper as the articulation root so Isaac Lab's Articulation
+    # wrapper sees `/body` and `/pusher/pad` as one articulation joined by the
+    # prismatic pusher joint. Without this, Isaac Lab treats them as two
+    # independent RigidObjects and the joint is invisible to actuator cfgs.
+    UsdPhysics.ArticulationRootAPI.Apply(wrapper.GetPrim())
 
     # --- Drone body rigid body ---
     root = UsdGeom.Xform.Define(stage, root_path)
@@ -347,7 +365,9 @@ def build_drone_usd(cfg: DroneConfig) -> str:
         pad_geom.CreateHeightAttr(PUSHER_PAD_HEIGHT)
         UsdPhysics.CollisionAPI.Apply(pad_geom.GetPrim())
 
-        joint = UsdPhysics.PrismaticJoint.Define(stage, f"{pusher_grp}/joint")
+        # Joint prim sits at a flat, stable path under the articulation root so
+        # Isaac Lab's `joint_names_expr=["pusher_joint"]` resolves unambiguously.
+        joint = UsdPhysics.PrismaticJoint.Define(stage, f"{wrapper_path}/pusher_joint")
         joint.CreateBody0Rel().SetTargets([root_path])
         joint.CreateBody1Rel().SetTargets([pusher_pad_path])
         joint.CreateAxisAttr("X")
