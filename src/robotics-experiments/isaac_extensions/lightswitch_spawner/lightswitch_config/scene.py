@@ -12,6 +12,16 @@ from .state import SwitchState
 def spawn_switches(
     stage: Usd.Stage, config: LightSwitchConfig = LIGHTSWITCH_CONFIG
 ) -> List[SwitchState]:
+    """Spawn switches and their paired lamps at randomly sampled positions.
+
+    Args:
+        stage: USD stage to mutate.
+        config: Spawner configuration; defaults to :data:`LIGHTSWITCH_CONFIG`.
+
+    Returns:
+        One :class:`SwitchState` per successfully spawned switch, pairing the
+        switch prim path with its lamp prim path.
+    """
     positions = _sample_positions(
         config.num_switches,
         config.spawn_bounds,
@@ -27,6 +37,15 @@ def spawn_switches(
 
 
 def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
+    """Remove all switch and lamp prims tracked by ``switch_state``.
+
+    Safe to call when ``stage`` is ``None`` or prims have already been
+    removed; missing prims are skipped silently.
+
+    Args:
+        stage: USD stage to mutate, or ``None`` for a no-op.
+        switch_state: Per-switch state entries whose prims should be removed.
+    """
     if stage is None:
         return
     for sw in switch_state:
@@ -39,6 +58,15 @@ def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
 
 
 def validate_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> bool:
+    """Verify that every tracked switch prim resolves on the stage.
+
+    Args:
+        stage: USD stage to inspect.
+        switch_state: Per-switch state entries to validate.
+
+    Returns:
+        ``True`` if all switch prims are valid, ``False`` if any is missing.
+    """
     for sw in switch_state:
         prim = stage.GetPrimAtPath(sw.prim_path)
         if not prim.IsValid():
@@ -53,6 +81,22 @@ def _sample_positions(
     min_distance: float,
     max_retries: int,
 ) -> List[Gf.Vec3d]:
+    """Sample ``count`` positions inside ``bounds`` with a minimum separation.
+
+    For each position, a random bound is picked and a point uniformly sampled
+    inside it. If ``max_retries`` attempts fail to satisfy the minimum
+    separation, the first sampled fallback is accepted and a warning is
+    logged rather than aborting the spawn.
+
+    Args:
+        count: Number of positions to sample.
+        bounds: Candidate axis-aligned regions to sample from.
+        min_distance: Minimum pairwise distance between accepted positions.
+        max_retries: Retry budget per position before accepting overlap.
+
+    Returns:
+        List of sampled positions with length ``count``.
+    """
     positions: List[Gf.Vec3d] = []
 
     def _dist(a: Gf.Vec3d, b: Gf.Vec3d) -> float:
@@ -88,6 +132,17 @@ def _sample_positions(
 
 
 def _spawn_switches(stage: Usd.Stage, usd_path: str, positions: List[Gf.Vec3d]) -> List[str]:
+    """Create ``Xform`` prims that reference the switch USD at each position.
+
+    Args:
+        stage: USD stage to mutate.
+        usd_path: Absolute path to the switch USD asset.
+        positions: World-space positions for each spawned switch.
+
+    Returns:
+        Absolute prim paths of the created switches, or an empty list when
+        the USD asset is missing.
+    """
     if not os.path.isfile(usd_path):
         carb.log_error(f"[LightSwitch] USD asset not found: '{usd_path}'")
         return []
@@ -109,6 +164,21 @@ def _spawn_switches(stage: Usd.Stage, usd_path: str, positions: List[Gf.Vec3d]) 
 
 
 def _spawn_lamps(stage: Usd.Stage, usd_path: str, positions: List[Gf.Vec3d]) -> List[str]:
+    """Create lamp prims above each switch with lights and emission set to off.
+
+    The lamp Z is randomized between 3.4 and 5.0 m above the ground so lamps
+    sit plausibly on a ceiling; the ``SphereLight`` intensity and the
+    ``OmniPBR`` shader emission are both pre-initialized to the off state.
+
+    Args:
+        stage: USD stage to mutate.
+        usd_path: Absolute path to the lamp USD asset.
+        positions: Switch positions used for lamp X/Y placement.
+
+    Returns:
+        Absolute prim paths of the created lamps, or an empty list when the
+        USD asset is missing.
+    """
     if not os.path.isfile(usd_path):
         carb.log_error(f"[LightSwitch] Lamp USD asset not found: '{usd_path}'")
         return []

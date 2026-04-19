@@ -9,6 +9,16 @@ from .config import DRONE_CONFIG, DroneConfig
 
 
 def spawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
+    """Spawn (or re-pose) the drone prim at a random pose within the spawn volume.
+
+    Adds the drone's USD asset as a reference under the stage default prim on
+    first call, ensures a guide cube exists to visualize the spawn volume, then
+    assigns a uniformly sampled translation and yaw.
+
+    Args:
+        stage: Target USD stage. Must be non-None and writable.
+        config: Drone spawner configuration; defaults to :data:`DRONE_CONFIG`.
+    """
     parent = _resolve_parent(stage)
     _ensure_guide_cube(stage, parent, config)
 
@@ -22,6 +32,15 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
 
 
 def despawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
+    """Remove the drone prim from the stage if present.
+
+    Safe to call when the stage is ``None`` or the prim does not exist; the
+    guide cube is intentionally left in place.
+
+    Args:
+        stage: USD stage to mutate, or ``None`` for a no-op.
+        config: Drone spawner configuration; defaults to :data:`DRONE_CONFIG`.
+    """
     if stage is None:
         return
     default_prim = stage.GetDefaultPrim()
@@ -33,6 +52,17 @@ def despawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
 
 
 def _resolve_parent(stage: Usd.Stage) -> str:
+    """Return the stage parent path used for spawner children.
+
+    Uses the stage default prim when set, otherwise falls back to ``/World``
+    and emits a warning.
+
+    Args:
+        stage: USD stage to inspect.
+
+    Returns:
+        Absolute prim path string of the resolved parent.
+    """
     default_prim = stage.GetDefaultPrim()
     if default_prim:
         parent = default_prim.GetPath().pathString
@@ -44,6 +74,17 @@ def _resolve_parent(stage: Usd.Stage) -> str:
 
 
 def _ensure_guide_cube(stage: Usd.Stage, parent: str, config: DroneConfig) -> None:
+    """Create a guide-purpose cube that visualizes the spawn volume.
+
+    Idempotent: returns immediately if the cube prim already exists. The cube
+    is marked with USD ``guide`` purpose so it does not render in ``default``
+    or ``render`` passes.
+
+    Args:
+        stage: USD stage to mutate.
+        parent: Absolute prim path under which to place the cube.
+        config: Provides the cube name, center, and half-extents.
+    """
     path = f"{parent}/{config.spawn_volume_prim_name}"
     if stage.GetPrimAtPath(path).IsValid():
         return
@@ -58,6 +99,15 @@ def _ensure_guide_cube(stage: Usd.Stage, parent: str, config: DroneConfig) -> No
 
 
 def _random_pose(config: DroneConfig):
+    """Sample a uniform random pose inside the configured spawn volume.
+
+    Args:
+        config: Provides the spawn volume center and half-extents.
+
+    Returns:
+        Tuple ``((x, y, z), yaw)`` where the position is in world units and
+        ``yaw`` is an angle in radians on ``[-pi, pi]``.
+    """
     cx, cy, cz = config.spawn_volume_center
     hx, hy, hz = config.spawn_volume_half_extents
     x = cx + random.uniform(-hx, hx)
@@ -68,6 +118,17 @@ def _random_pose(config: DroneConfig):
 
 
 def _apply_pose(stage: Usd.Stage, prim_path: str, pos, yaw: float) -> None:
+    """Overwrite a prim's xform ops with a translate and Z-rotation.
+
+    Clears any existing xform op order before writing, so repeated calls do
+    not stack transforms.
+
+    Args:
+        stage: USD stage that owns the prim.
+        prim_path: Absolute path to the prim to transform.
+        pos: ``(x, y, z)`` world translation.
+        yaw: Rotation about the Z axis, in radians.
+    """
     prim = stage.GetPrimAtPath(prim_path)
     xform = UsdGeom.Xformable(prim)
     xform.ClearXformOpOrder()

@@ -5,6 +5,16 @@ from .config import SIM_SETTINGS, SimSettings
 
 
 def apply_settings(stage: Usd.Stage, settings: SimSettings = SIM_SETTINGS) -> None:
+    """Apply gravity, PhysX, and render-rate settings to a stage.
+
+    Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
+    attributes, and configures the Kit main-loop render rate via carb
+    settings.
+
+    Args:
+        stage: USD stage to configure.
+        settings: Simulation settings to apply; defaults to :data:`SIM_SETTINGS`.
+    """
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
     _apply_physx(scene, settings.physics_hz, settings.solver_type)
@@ -18,6 +28,17 @@ def apply_settings(stage: Usd.Stage, settings: SimSettings = SIM_SETTINGS) -> No
 
 
 def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
+    """Return the first ``UsdPhysics.Scene`` on the stage, creating one if none exists.
+
+    A newly created scene is placed under the stage default prim, falling
+    back to ``/World`` when no default prim is set.
+
+    Args:
+        stage: USD stage to inspect or mutate.
+
+    Returns:
+        The existing or newly defined physics scene.
+    """
     for prim in stage.Traverse():
         if prim.IsA(UsdPhysics.Scene):
             return UsdPhysics.Scene(prim)
@@ -27,6 +48,16 @@ def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
 
 
 def _apply_gravity(scene: UsdPhysics.Scene, gravity: tuple) -> None:
+    """Write gravity direction and magnitude attributes on a physics scene.
+
+    Zero-magnitude gravity vectors are skipped because the direction is
+    undefined and writing zeros would disable gravity in a way USD does not
+    round-trip cleanly.
+
+    Args:
+        scene: Target ``UsdPhysics.Scene``.
+        gravity: ``(gx, gy, gz)`` world gravity vector in m/s^2.
+    """
     gx, gy, gz = gravity
     magnitude = (gx * gx + gy * gy + gz * gz) ** 0.5
     if magnitude <= 0.0:
@@ -38,12 +69,25 @@ def _apply_gravity(scene: UsdPhysics.Scene, gravity: tuple) -> None:
 
 
 def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -> None:
+    """Configure PhysX time stepping and solver type on a physics scene.
+
+    Args:
+        scene: Target ``UsdPhysics.Scene``; the ``PhysxSceneAPI`` schema is
+            applied to its prim if not already present.
+        physics_hz: PhysX steps per second; truncated to int by PhysX schema.
+        solver_type: PhysX solver identifier (e.g. ``"TGS"`` or ``"PGS"``).
+    """
     physx_api = PhysxSchema.PhysxSceneAPI.Apply(scene.GetPrim())
     physx_api.CreateTimeStepsPerSecondAttr().Set(int(physics_hz))
     physx_api.CreateSolverTypeAttr().Set(solver_type)
 
 
 def _apply_render_rate(rendering_hz: float) -> None:
+    """Enable and set the Kit main run-loop rate limit.
+
+    Args:
+        rendering_hz: Target render frequency in Hz; truncated to int.
+    """
     carb_settings = carb.settings.get_settings()
     carb_settings.set("/app/runLoops/main/rateLimitEnabled", True)
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
