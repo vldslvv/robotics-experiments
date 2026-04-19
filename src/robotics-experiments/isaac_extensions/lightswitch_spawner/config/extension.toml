@@ -18,3 +18,6 @@ writeTarget.kit = true
 
 [[python.module]]
 name = "LightSwitch_python"
+
+[[python.module]]
+name = "lightswitch_config"

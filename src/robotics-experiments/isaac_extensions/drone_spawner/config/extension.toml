@@ -19,3 +19,6 @@ writeTarget.kit = true
 
 [[python.module]]
 name = "DroneSpawner_python"
+
+[[python.module]]
+name = "drone_config"
