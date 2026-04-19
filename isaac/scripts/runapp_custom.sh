@@ -6,7 +6,7 @@ EXT_FOLDER="/isaac-sim/proj/robotics-experiments/isaac_extensions"
 SCENE_PATH="/isaac-sim/proj/assets/LightSwitchWarehouse/Warehouse.usd"
 OPEN_STAGE_SCRIPT="open_stage.py"
 SIM_SETTINGS_EXT="sim_settings"
-LIGHTSWITCH_EXT="lightswitch_example"
+LIGHTSWITCH_EXT="lightswitch_spawner"
 DRONE_SPAWNER_EXT="drone_spawner"
 
 # For log level changes, use:
