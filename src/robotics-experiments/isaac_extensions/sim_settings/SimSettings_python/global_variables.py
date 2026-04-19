@@ -1,5 +1,3 @@
-from sim_config.config import SIM_SETTINGS
-
 EXTENSION_TITLE = "SimSettings"
 EXTENSION_DESCRIPTION = "Applies simulation settings to the active stage"
 
