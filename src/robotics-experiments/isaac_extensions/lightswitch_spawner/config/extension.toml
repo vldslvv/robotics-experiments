@@ -13,6 +13,7 @@ icon = "data/icon.png"
 writeTarget.kit = true
 
 [dependencies]
+"experiment_config" = {}
 "isaacsim.core.prims" = {}
 "isaacsim.ros2.bridge" = {}
 

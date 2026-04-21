@@ -5,9 +5,19 @@
 EXT_FOLDER="/isaac-sim/proj/robotics-experiments/isaac_extensions"
 SCENE_PATH="/isaac-sim/proj/assets/LightSwitchWarehouse/Warehouse.usd"
 OPEN_STAGE_SCRIPT="open_stage.py"
+EXPERIMENT_CONFIG_EXT="experiment_config"
 SIM_SETTINGS_EXT="sim_settings"
 LIGHTSWITCH_EXT="lightswitch_spawner"
 DRONE_SPAWNER_EXT="drone_spawner"
+
+# Hydra-config overrides are picked up by the experiment_config extension.
+# Set EXPERIMENT_CONFIG_DIR to point at an alternative conf/ tree;
+# EXPERIMENT_CONFIG_NAME selects which top-level yaml to compose;
+# EXPERIMENT_CONFIG_OVERRIDES is a space-separated list of Hydra dot-list
+# overrides (e.g. "switches.num_switches=10 sim.physics_hz=200").
+export EXPERIMENT_CONFIG_DIR="${EXPERIMENT_CONFIG_DIR-}"
+export EXPERIMENT_CONFIG_NAME="${EXPERIMENT_CONFIG_NAME-}"
+export EXPERIMENT_CONFIG_OVERRIDES="${EXPERIMENT_CONFIG_OVERRIDES-}"
 
 # For log level changes, use:
 # LOG_LEVEL="info"
@@ -18,6 +28,7 @@ DRONE_SPAWNER_EXT="drone_spawner"
 /isaac-sim/privacy.sh && \
 /isaac-sim/isaac-sim.sh \
   --ext-folder "$EXT_FOLDER" \
+  --enable "$EXPERIMENT_CONFIG_EXT" \
   --enable "$SIM_SETTINGS_EXT" \
   --enable "$LIGHTSWITCH_EXT" \
   --enable "$DRONE_SPAWNER_EXT" \

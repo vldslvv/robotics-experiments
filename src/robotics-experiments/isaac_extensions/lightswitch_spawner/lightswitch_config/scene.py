@@ -5,26 +5,29 @@ from typing import List
 import carb
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
-from .config import LIGHTSWITCH_CONFIG, LightSwitchConfig
+from .config import BoundingBox, LightSwitchConfig, get_config
 from .state import SwitchState
 
 
 def spawn_switches(
-    stage: Usd.Stage, config: LightSwitchConfig = LIGHTSWITCH_CONFIG
+    stage: Usd.Stage, config: LightSwitchConfig | None = None
 ) -> List[SwitchState]:
     """Spawn switches and their paired lamps at randomly sampled positions.
 
     Args:
         stage: USD stage to mutate.
-        config: Spawner configuration; defaults to :data:`LIGHTSWITCH_CONFIG`.
+        config: Spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
 
     Returns:
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
+    if config is None:
+        config = get_config()
     positions = _sample_positions(
         config.num_switches,
-        config.spawn_bounds,
+        [_to_range(b) for b in config.spawn_bounds],
         config.min_spawn_dist,
         config.max_spawn_retries,
     )
@@ -73,6 +76,18 @@ def validate_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> bool
             carb.log_error(f"[LightSwitch] Prim not found at '{sw.prim_path}'.")
             return False
     return True
+
+
+def _to_range(box: BoundingBox) -> Gf.Range3d:
+    """Convert a serializable :class:`BoundingBox` to a ``pxr.Gf.Range3d``.
+
+    Args:
+        box: Corner-tuple bounding box authored in YAML.
+
+    Returns:
+        Equivalent ``Gf.Range3d`` usable by the sampling helpers.
+    """
+    return Gf.Range3d(Gf.Vec3d(*box.min), Gf.Vec3d(*box.max))
 
 
 def _sample_positions(

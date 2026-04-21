@@ -1,25 +1,15 @@
-from dataclasses import dataclass
-from typing import Tuple
+from experiment_config import DroneConfig
+from experiment_config import get_config as _get_experiment_config
 
 
-@dataclass(frozen=True)
-class DroneConfig:
-    """Immutable configuration for the drone spawner.
+def get_config() -> DroneConfig:
+    """Return the drone section of the shared experiment config.
 
-    Attributes:
-        usd_path: Absolute path to the drone USD asset referenced on spawn.
-        prim_name: Child name used under the stage default prim for the drone.
-        spawn_volume_prim_name: Child name used for the guide cube that
-            visualizes the spawn volume.
-        spawn_volume_center: World-space center of the spawn volume.
-        spawn_volume_half_extents: Per-axis half-extents of the spawn volume.
+    Returns:
+        The :class:`DroneConfig` resolved from
+        :func:`experiment_config.get_config`.
     """
-
-    usd_path: str = "/isaac-sim/proj/assets/LightSwitchWarehouse/hexacopter_s550.usda"
-    prim_name: str = "DroneSpawned"
-    spawn_volume_prim_name: str = "DroneSpawnVolume"
-    spawn_volume_center: Tuple[float, float, float] = (0.0, 0.0, 1.0)
-    spawn_volume_half_extents: Tuple[float, float, float] = (2.0, 2.0, 1.0)
+    return _get_experiment_config().drone
 
 
-DRONE_CONFIG = DroneConfig()
+__all__ = ["DroneConfig", "get_config"]

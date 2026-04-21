@@ -1,21 +1,15 @@
-from dataclasses import dataclass
-from typing import Tuple
+from experiment_config import SimSettings
+from experiment_config import get_config as _get_experiment_config
 
 
-@dataclass(frozen=True)
-class SimSettings:
-    """Immutable simulation settings applied by the sim_settings extension.
+def get_config() -> SimSettings:
+    """Return the simulation-settings section of the shared experiment config.
 
-    Attributes:
-        physics_hz: PhysX steps per second.
-        rendering_hz: Kit main-loop target render frequency in Hz.
-        solver_type: PhysX solver identifier (``"TGS"`` or ``"PGS"``).
-        gravity: World gravity vector in m/s^2 as ``(gx, gy, gz)``.
+    Returns:
+        The :class:`SimSettings` resolved from
+        :func:`experiment_config.get_config`.
     """
+    return _get_experiment_config().sim
 
-    physics_hz: float = 500.0
-    rendering_hz: float = 60.0
-    solver_type: str = "TGS"
-    gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81)
 
-SIM_SETTINGS = SimSettings()
+__all__ = ["SimSettings", "get_config"]

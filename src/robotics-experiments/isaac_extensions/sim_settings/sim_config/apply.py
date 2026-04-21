@@ -1,10 +1,10 @@
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
-from .config import SIM_SETTINGS, SimSettings
+from .config import SimSettings, get_config
 
 
-def apply_settings(stage: Usd.Stage, settings: SimSettings = SIM_SETTINGS) -> None:
+def apply_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
     """Apply gravity, PhysX, and render-rate settings to a stage.
 
     Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
@@ -13,8 +13,11 @@ def apply_settings(stage: Usd.Stage, settings: SimSettings = SIM_SETTINGS) -> No
 
     Args:
         stage: USD stage to configure.
-        settings: Simulation settings to apply; defaults to :data:`SIM_SETTINGS`.
+        settings: Simulation settings to apply; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
     """
+    if settings is None:
+        settings = get_config()
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
     _apply_physx(scene, settings.physics_hz, settings.solver_type)

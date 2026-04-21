@@ -4,7 +4,7 @@ import carb
 from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
-from .config import LIGHTSWITCH_CONFIG, LightSwitchConfig
+from .config import LightSwitchConfig, get_config
 from .state import SwitchState
 
 
@@ -44,7 +44,7 @@ def step_switches(
     stage: Usd.Stage,
     switch_state: List[SwitchState],
     on_toggle: Callable[[int, bool], None] | None = None,
-    config: LightSwitchConfig = LIGHTSWITCH_CONFIG,
+    config: LightSwitchConfig | None = None,
 ) -> None:
     """Detect rising-edge button presses and toggle the paired lamps.
 
@@ -59,8 +59,11 @@ def step_switches(
             ``last_button_state`` are updated in place.
         on_toggle: Optional callback receiving ``(index, new_state)`` on every
             successful toggle.
-        config: Spawner configuration; defaults to :data:`LIGHTSWITCH_CONFIG`.
+        config: Spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
     """
+    if config is None:
+        config = get_config()
     for i, sw in enumerate(switch_state):
         joint_positions = sw.articulation.get_joint_positions()
         button_pos = joint_positions[0]

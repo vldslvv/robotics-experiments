@@ -5,10 +5,10 @@ import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom
 
-from .config import DRONE_CONFIG, DroneConfig
+from .config import DroneConfig, get_config
 
 
-def spawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
+def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     """Spawn (or re-pose) the drone prim at a random pose within the spawn volume.
 
     Adds the drone's USD asset as a reference under the stage default prim on
@@ -17,8 +17,11 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
 
     Args:
         stage: Target USD stage. Must be non-None and writable.
-        config: Drone spawner configuration; defaults to :data:`DRONE_CONFIG`.
+        config: Drone spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
     """
+    if config is None:
+        config = get_config()
     parent = _resolve_parent(stage)
     _ensure_guide_cube(stage, parent, config)
 
@@ -31,7 +34,7 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
     carb.log_info(f"[DroneSpawner] Spawned at pos={pos} yaw={math.degrees(yaw):.1f}deg")
 
 
-def despawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
+def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     """Remove the drone prim from the stage if present.
 
     Safe to call when the stage is ``None`` or the prim does not exist; the
@@ -39,10 +42,13 @@ def despawn_drone(stage: Usd.Stage, config: DroneConfig = DRONE_CONFIG) -> None:
 
     Args:
         stage: USD stage to mutate, or ``None`` for a no-op.
-        config: Drone spawner configuration; defaults to :data:`DRONE_CONFIG`.
+        config: Drone spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
     """
     if stage is None:
         return
+    if config is None:
+        config = get_config()
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     drone_path = f"{parent}/{config.prim_name}"

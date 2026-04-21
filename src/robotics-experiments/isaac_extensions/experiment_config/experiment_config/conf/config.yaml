@@ -1,0 +1,6 @@
+defaults:
+  - base_env
+  - sim: default
+  - drone: default
+  - switches: default
+  - _self_

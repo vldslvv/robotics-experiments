@@ -17,6 +17,12 @@ Do not introduce new tooling unless explicitly requested.
 - docs/               -> Design and usage docs.
 - src/                -> Code of the project.
 
+## Isaac Sim extension design
+
+- keep internal logic and Isaac Sim event wiring separate
+- extension config is passed through experiment_config extension that uses hydra
+- each extension connects to experiment_config using config.py, no other coupling
+
 ## Common commands
 
 ### ROS 2
@@ -40,7 +46,3 @@ Avoid calling ROS2, it's meant to be used in dockerized environment
 ## When uncertain
 Don't do anything, ask for instructions
 
-## Recent agent operations
-- Added a top-level `pyproject.toml` to centralize Python build metadata and tooling configuration (Black/isort/Ruff/mypy/pytest).
-- Fixed Docker build context issue for Isaac image: updated `Makefile` to pass `SCRIPTS_DIR=isaac/scripts` (relative to build context) so `COPY ${SCRIPTS_DIR}/make_symlinks.sh` succeeds during `make build-isaac`.
-- Synced dependency pins with `requirements.txt` / `requirements_dev.txt` and `.pre-commit-config.yaml`.
