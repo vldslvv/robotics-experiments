@@ -1,0 +1,3 @@
+EXTENSION_TITLE = "Px4SitlBridge"
+
+EXTENSION_DESCRIPTION = "Bridges Isaac Sim with PX4 SITL"

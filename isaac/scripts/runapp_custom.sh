@@ -9,6 +9,7 @@ EXPERIMENT_CONFIG_EXT="experiment_config"
 SIM_SETTINGS_EXT="sim_settings"
 LIGHTSWITCH_EXT="lightswitch_spawner"
 DRONE_SPAWNER_EXT="drone_spawner"
+PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
 
 # Hydra-config overrides are picked up by the experiment_config extension.
 # Set EXPERIMENT_CONFIG_DIR to point at an alternative conf/ tree;
@@ -32,6 +33,7 @@ export EXPERIMENT_CONFIG_OVERRIDES="${EXPERIMENT_CONFIG_OVERRIDES-}"
   --enable "$SIM_SETTINGS_EXT" \
   --enable "$LIGHTSWITCH_EXT" \
   --enable "$DRONE_SPAWNER_EXT" \
+  --enable "$PX4_SITL_BRIDGE_EXT" \
   --/persistent/isaac/asset_root/default="$OMNI_SERVER" \
   --merge-config="/isaac-sim/config/open_endpoint.toml" \
   --allow-root \
