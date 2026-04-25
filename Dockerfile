@@ -1,7 +1,10 @@
 # This dockerfile installs common linux utilities on top of ubuntu-based base image.
 
-ARG DOCKER_REPO
-ARG DOCKER_TAG
+# Defaults keep the `FROM ${DOCKER_REPO}:${DOCKER_TAG}` reference valid when this
+# file is parsed for unrelated targets (e.g. `--target px4`); real builds of the
+# isaac/ros chains override these via --build-arg.
+ARG DOCKER_REPO=ubuntu
+ARG DOCKER_TAG=22.04
 FROM ${DOCKER_REPO}:${DOCKER_TAG} AS base
 
 # Run as root (need this due to NVML/Vulkan permissions)
@@ -109,7 +112,7 @@ ENV SHELL=/usr/bin/zsh
 RUN chmod 755 /usr/local/share/zsh
 
 # Can be skipped
-FROM zsh as claude
+FROM zsh AS claude
 
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
@@ -250,3 +253,39 @@ ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
   exec \"$@\" \
 ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
+
+
+# PX4 SITL stands in for the flight controller on a real drone; kept in its own
+# container (not in isaac-sim or ros) to mirror the hardware split.
+FROM ubuntu:22.04 AS px4
+
+ARG PX4_TAG=v1.14.3
+ENV PX4_DIR=/opt/PX4-Autopilot
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+      git make cmake ninja-build build-essential ca-certificates \
+      python3-pip python3-jinja2 python3-toml python3-numpy \
+      python3-future python3-jsonschema python3-packaging \
+      python3-setuptools python3-wheel python3-yaml \
+      lsb-release sudo gosu \
+      tmux ranger less vim \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir \
+      kconfiglib empy==3.3.4 pyros-genmsg
+
+RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
+    cd ${PX4_DIR} && git checkout ${PX4_TAG} && \
+    git submodule update --init --recursive
+
+# Headless SITL build; Pegasus provides dynamics over MAVLink, so no built-in sim backend.
+# Build the firmware only — omit the sim target (e.g. `none`) since it would launch
+# the nsh shell during `docker build` even with DONT_RUN=1 on PX4 v1.14.x.
+RUN cd ${PX4_DIR} && make px4_sitl_default
+
+WORKDIR ${PX4_DIR}
+# Drop into an attached tmux so PX4 SITL can be launched manually:
+#   make px4_sitl_default none_iris
+# (none = no built-in simulator backend; Pegasus feeds dynamics over MAVLink.)
+CMD ["tmux", "new-session", "-A", "-s", "px4"]

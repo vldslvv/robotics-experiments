@@ -39,6 +39,20 @@ ROS_IMAGE_TAG      = $(ROS_DISTRO)
 ROS_IMAGE          = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
 ROS_CONTAINER_NAME = vv-ros-$(ROS_DISTRO)-custom
 
+# PX4 SITL image / container (stands in for the flight controller)
+PX4_TAG            = v1.14.3
+PX4_IMAGE_NAME     = vv-px4-sitl
+PX4_IMAGE_TAG      = $(PX4_TAG)
+PX4_IMAGE          = $(PX4_IMAGE_NAME):$(PX4_IMAGE_TAG)
+PX4_CONTAINER_NAME = vv-px4-sitl
+
+# Host-side persistence for PX4 SITL (ULog flight logs + simulated EEPROM params).
+PX4_HOME           = $(CURDIR)/px4
+PX4_LOGS           = $(PX4_HOME)/logs
+PX4_EEPROM         = $(PX4_HOME)/eeprom
+# Paths inside the container (under PX4 SITL rootfs).
+PX4_ROOTFS         = /opt/PX4-Autopilot/build/px4_sitl_default/rootfs
+
 # These paths has to be relative to be inside docker build context
 ROS_WS_DIR         = ros/ros2_ws
 ROS_DOT_DIR        = ros/.ros
@@ -93,8 +107,19 @@ build-ros:
 		-f Dockerfile \
 		$(CURDIR)
 
+.PHONY: build-px4
+build-px4:
+	@echo "Building PX4 SITL image: $(PX4_IMAGE)"
+	docker buildx build \
+		--progress=plain \
+		--build-arg PX4_TAG="$(PX4_TAG)" \
+		--target px4 \
+		-t $(PX4_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
+
 .PHONY: build-all
-build-all: build-isaac build-ros
+build-all: build-isaac build-ros build-px4
 	@echo "All images built/pulled."
 
 ########################################
@@ -201,10 +226,27 @@ run-ros: xhost sync-nvim-caches
 			"$(ROS_IMAGE)"; \
 	fi
 
+.PHONY: run-px4
+run-px4:
+	@mkdir -p "$(PX4_LOGS)" "$(PX4_EEPROM)"
+	@if docker ps -a --format '{{.Names}}' | grep -q '^$(PX4_CONTAINER_NAME)$$'; then \
+		echo "Starting existing PX4 container $(PX4_CONTAINER_NAME)..."; \
+		docker start -ai $(PX4_CONTAINER_NAME); \
+	else \
+		echo "Creating and starting PX4 container $(PX4_CONTAINER_NAME)..."; \
+		docker run -it \
+			--name "$(PX4_CONTAINER_NAME)" \
+			--network=host \
+			-v $(PX4_LOGS):$(PX4_ROOTFS)/log \
+			-v $(PX4_EEPROM):$(PX4_ROOTFS)/eeprom \
+			"$(PX4_IMAGE)"; \
+	fi
+
 .PHONY: run-all
 run-all:
 	kitty --title ROS2 --hold make run-ros &
 	kitty --title IsaacSim --hold make run-isaac &
+	kitty --title PX4 --hold make run-px4 &
 
 ########################################
 # Stop / clean
@@ -218,9 +260,13 @@ stop-isaac:
 stop-ros:
 	@docker stop $(ROS_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: stop-px4
+stop-px4:
+	@docker stop $(PX4_CONTAINER_NAME) 2>/dev/null || true
+
 .PHONY: stop-all
-stop-all: stop-isaac stop-ros
-	@echo "Stopped Isaac and ROS containers (if running)."
+stop-all: stop-isaac stop-ros stop-px4
+	@echo "Stopped Isaac, ROS, and PX4 containers (if running)."
 
 .PHONY: clean-isaac-container
 clean-isaac-container:
@@ -230,9 +276,13 @@ clean-isaac-container:
 clean-ros-container:
 	@docker rm -f $(ROS_CONTAINER_NAME) 2>/dev/null || true
 
+.PHONY: clean-px4-container
+clean-px4-container:
+	@docker rm -f $(PX4_CONTAINER_NAME) 2>/dev/null || true
+
 .PHONY: clean-container
-clean-container: clean-isaac-container clean-ros-container
-	@echo "Removed Isaac and ROS containers (if they existed)."
+clean-container: clean-isaac-container clean-ros-container clean-px4-container
+	@echo "Removed Isaac, ROS, and PX4 containers (if they existed)."
 
 .PHONY: clean-isaac-image
 clean-isaac-image:
@@ -242,9 +292,13 @@ clean-isaac-image:
 clean-ros-image:
 	@docker rmi $(ROS_IMAGE) 2>/dev/null || true
 
+.PHONY: clean-px4-image
+clean-px4-image:
+	@docker rmi $(PX4_IMAGE) 2>/dev/null || true
+
 .PHONY: clean-images
-clean-images: clean-isaac-image clean-ros-image
-	@echo "Removed Isaac and ROS images (if they existed)."
+clean-images: clean-isaac-image clean-ros-image clean-px4-image
+	@echo "Removed Isaac, ROS, and PX4 images (if they existed)."
 
 .PHONY: clean-all
 clean-all: stop-all clean-container clean-images
