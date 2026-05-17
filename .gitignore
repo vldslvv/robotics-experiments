@@ -221,3 +221,6 @@ ros2_ws/
 # Ignore zsh caches that are mounted to containers
 isaac/isaac-sim/cache/
 ros/cache/
+
+# Flight logs
+px4/logs/

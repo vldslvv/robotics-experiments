@@ -14,6 +14,7 @@ writeTarget.kit = true
 
 [dependencies]
 "experiment_config" = {}
+"px4_sitl_brigde" = {}
 "isaacsim.core.api" = {}
 "isaacsim.gui.components" = {}
 "omni.kit.uiapp" = {}

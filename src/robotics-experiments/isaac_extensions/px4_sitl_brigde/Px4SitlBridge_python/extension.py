@@ -1,10 +1,18 @@
+"""Omniverse extension shell.
+
+Per the contract, this extension does not own the scene, the drone, or the
+physics callback. The host (``drone_spawner``) constructs the ``Px4Bridge``
+and ticks it. This shell exists only so Kit imports the package and the
+public API in ``__init__.py`` is available to consumers.
+"""
+
 import omni.ext
-from isaacsim.core.utils.stage import add_reference_to_stage
 
 
 class Extension(omni.ext.IExt):
+    """No-op extension entrypoint."""
+
     def on_startup(self, ext_id: str):
-        from pegasus.simulator.logic.backends.px4_mavlink_backend import PX4MavlinkBackend, PX4MavlinkBackendConfig
         pass
 
     def on_shutdown(self):

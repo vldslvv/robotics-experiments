@@ -1,20 +1,28 @@
-# Quadcopter Light Switch Interaction — Revised Architecture & Task Plan
+# Multirotor Light Switch Interaction — Revised Architecture & Task Plan (v4)
 
 ## Overview
 
-A simulated quadcopter in Isaac Sim that can navigate to light switches on a warehouse wall, apply pressure to toggle them, and detect whether the associated lamp turned on or off. The system combines classical robotics for navigation and perception with RL for the fine-grained contact-based switch pressing task.
+A simulated multirotor in Isaac Sim that can navigate to light switches on a warehouse wall, apply pressure to toggle them, and detect whether the associated lamp turned on or off. The system combines classical robotics for navigation and perception with RL for the fine-grained contact-based switch pressing task.
 
-> **Revision notes**: This plan incorporates fixes for contact sensing, pusher compliance, handoff robustness, state machine error handling, reward conflicts, domain randomization coverage, action smoothing, light detection timing, retreat strategy, training resource sizing, **sensor architecture with LiDAR/optical flow for indoor localization**, and **phase-evolving sensor strategy**. Changed sections are marked with ⚑.
+The platform is a **staged build on the Holybro X500 V2 frame**: Stage 1 is a conventional quadcopter (X4) for Phases 1–5 of the roadmap; Stage 2 upgrades to X8 coaxial octocopter by adding four motors to the undersides of the existing arms, providing motor redundancy and additional thrust margin for heavier sensor payloads. The X8 upgrade is triggered by empirical data from Stage 1, not built speculatively.
+
+> **Revision notes (v4)**: This revision updates the platform from a generic 500mm-class hexacopter to the staged X500 V2 quad→X8 build based on detailed analysis of thrust-to-weight, prop geometry, vibration characteristics, and frontal clearance for the pusher mechanism. Also incorporates fixes from v3 for contact sensing, pusher compliance, handoff robustness, state machine error handling, reward conflicts, domain randomization coverage, action smoothing, light detection timing, retreat strategy, training resource sizing, sensor architecture with LiDAR/optical flow for indoor localization, and phase-evolving sensor strategy. Changed sections in v4 are marked with ✦; sections changed in v3 retain the ⚑ marker.
 
 ---
 
 ## 1. Drone Platform
 
-### 1.1 Quadcopter USD Asset
-- 4-rotor quadcopter with a forward-facing **compliant pusher** appendage (see §1.3).
-- Collision geometry on the pusher for physics contact with the switch button.
-- Sensors: see §1.4 for full sensor suite.
-- Mass and inertia tuned so the drone can hover stably and absorb the reaction force of pressing a switch without tumbling.
+### ✦ 1.1 Platform — Holybro X500 V2 Staged Build
+
+The platform evolves across two hardware stages, sharing the same frame, flight controller, companion compute, sensors, and pusher mechanism. Only the propulsion layout changes.
+
+**Stage 1 — Quadcopter (X4).** Four arms at ±45° from the forward axis, one motor per arm. Frame: Holybro X500 V2 (500mm wheelbase, 2mm carbon fiber twill plates, 16mm CF tube arms, bolt-on arm attachment). Motors: 4× T-Motor MN3110 KV700. Propellers: 12×4.5" polymer. Target AUW: ~1,830g. Thrust-to-weight ratio: 3.28:1.
+
+**Stage 2 — X8 Coaxial Octocopter.** Same four arms, but with a second motor mounted on the underside of each arm spinning opposite direction, creating four upper/lower motor pairs. Added: 4× T-Motor MN3110 KV700 (identical to upper), 4× 12×4.5" polymer propellers (matched to upper props — mixed-size alternatives analyzed and rejected due to build complexity outweighing the 3–4% thrust gain), 4× lower motor brackets. Target AUW: ~2,320g (mid config) / ~2,631g (max config with 3D LiDAR). Thrust-to-weight ratio: 4.66:1 (mid) / 4.11:1 (max).
+
+**Upgrade trigger.** Stage 2 is initiated when Stage 1 demonstrates specific need: motor saturation during contact (any motor >95% throttle), sensor vibration degrading SLAM/policy quality beyond software filtering, payload growth pushing quad T:W below 2.5:1, or operational risk assessment requiring motor-failure redundancy. Redundancy without demonstrated need is over-engineering; the quad is sufficient for most research needs.
+
+**Why this platform over alternatives.** A 500mm hexacopter (S550/F550 class) was evaluated and rejected: the 60° arm spacing limits props to 9–10 inches, capping per-motor thrust and forcing higher RPM with correspondingly higher vibration. The X500 V2's 90° arm spacing allows 12–13" props and lower motor RPMs at hover, producing more thrust per motor with less vibration and better sensor data quality. A larger hexacopter (Tarot 680 with 13" props) is a viable alternative to the X8 upgrade but requires full rebuild rather than incremental upgrade; the staged X4→X8 path on one frame is the lower-risk option.
 
 ### 1.2 Low-Level Flight Controller (Classical)
 - **PID or PX4-style rate/attitude controller** running at physics step rate.
@@ -22,17 +30,42 @@ A simulated quadcopter in Isaac Sim that can navigate to light switches on a war
 - Outputs: per-rotor RPM.
 - This is deterministic controls math — no RL needed.
 - Can use Isaac Sim's articulation or direct force API on each rotor joint.
+- **Airframe mixing**: PX4 `Quad X` for Stage 1, `Octocopter Coaxial X` for Stage 2. Stage 2 transition requires PID retuning; budget 1–2 days.
 
-### ⚑ 1.3 Pusher Appendage Design
+### ✦ 1.3 Pusher Appendage Design
+
 A rigid pusher striking a rigid wall creates brutal force spikes in simulation, causing instability and sim-to-real transfer problems. The pusher must include compliance.
 
-**Design**: A small flat pad mounted on a spring-damper prismatic joint along the drone's forward axis.
+**Mechanical design**: A small flat pad mounted on a spring-damper prismatic joint along the drone's forward axis.
 - **Spring stiffness**: tuned so that the pad compresses ~5mm under the force needed to depress the switch button. This absorbs impact transients.
 - **Damper coefficient**: set to ~0.7× critical damping to prevent oscillation.
 - **Travel limit**: 10–15mm to prevent full collapse.
 - **Collision geometry**: a flat cylinder or box, ~30mm diameter, centered on the drone's forward axis.
+- **Total mass**: ~40–50g for the full assembly (pad + spring + bushing + carbon fiber boom + mount hardware).
 
 The joint displacement of this compliant mount also provides a **contact force proxy** observable by the RL policy (see §4.2), removing the need for a simulated force-torque sensor.
+
+#### Frontal clearance analysis
+
+The pusher mounting location must account for propeller geometry. On any multirotor with forward-mounted props, the front prop discs can overlap the forward centerline, creating a no-go zone for centerline-mounted pushers at the prop plane.
+
+On the X500 V2 with 12" props (152mm radius) and 354mm motor spacing, the two front motors sit at ±125mm lateral offset from centerline. Inner edges of the front prop discs reach to 125mm − 152mm = **−27mm**, meaning the prop discs overlap the forward centerline by 27mm. A pusher extending straight forward at the prop plane would be chopped.
+
+**Solution: mid-plane forward mount (Stage 1 and Stage 2).**
+
+The pusher mounts on the front edge of the center plate, extending forward as a carbon-fiber boom with the compliant pad at the tip. The boom passes at center-plate height, which is:
+- **Stage 1 (quad)**: below the single prop plane — pusher sits beneath the props, no interference.
+- **Stage 2 (X8)**: between the upper and lower prop planes — pusher threads through the ~80mm gap.
+
+On the X8, the 80mm vertical gap between prop planes provides ~35mm clearance above and below a 10mm-thick pad. A 100mm-forward boom with the drone pitched 10° nose-down deflects the tip only 17mm, well within the 35mm budget. Normal operation with modest pitch variation stays in the safe envelope.
+
+**Failure-mode consideration (X8 only)**: A violent pitch transient (>25° nose-down from a motor fault or disturbance) could deflect the pusher tip into the lower prop disc. The RL policy's axis-specific tilt termination (50° pitch max, see §4.5) provides the primary limit. For additional safety, the boom can be designed with a sacrificial shear point near the mount so a prop strike breaks off the pusher cleanly rather than damaging the motor.
+
+**Alternative: under-frame mount (fallback for both stages).**
+
+If mid-plane mounting proves problematic during build, mount the pusher beneath the center plate extending forward, passing under both prop planes. This trades a small nose-down approach angle (~5–10°) for larger vertical safety margin. The RL policy learns the approach angle naturally since forward flight requires forward pitch anyway.
+
+**Why centerline-forward mounting works (contrary to offset alternatives)**: Earlier iterations of this plan considered offset pusher mounts (mounting between adjacent arms rather than on centerline). Analysis shows this doesn't solve the geometry problem — yawing the drone to aim an offset pusher places the drone in the same prop-overlap geometry relative to the target. The real constraint is vertical (prop disc height vs. pusher height), not horizontal (body orientation). Centerline mounting with correct vertical placement is the clean solution.
 
 ### ⚑ 1.4 Sensor Suite
 
@@ -518,15 +551,28 @@ Implementation follows a strict simple-to-complex ordering. Each step produces a
 
 ---
 
-## 7. Key Design Decisions to Make
+## 7. Key Design Decisions
 
-1. **Drone asset**: build from scratch or adapt an existing Isaac Sim quadcopter (e.g. Crazyflie, generic quadrotor)?
+### ✦ Resolved decisions (v4)
+
+1. **Frame**: Holybro X500 V2 (500mm wheelbase, CF arms, bolt-on attachment supporting both quad and X8 coaxial configurations).
+2. **Motors**: T-Motor MN3110 KV700 across both stages. Buy 8 units upfront to ensure identical bearings and balance; 4 used in Stage 1, 4 reserved for Stage 2.
+3. **Propellers**: T-Motor T1245 (12×4.5" polymer) for all positions — both upper and lower in Stage 2. Matched prop sizes chosen over mixed (12"/11") for operational simplicity; 3–4% thrust loss is negligible against 4.6:1+ T:W margin.
+4. **ESCs**: HGLRC BS30A BLHeli_S (30A continuous, DShot600). Buy 8 units upfront.
+5. **Flight controller**: Holybro Pixhawk 6C with Holybro PM07 power module (native 8-channel ESC passthrough, no PDB upgrade needed for Stage 2).
+6. **Pusher mount**: Centerline-forward, mid-plane (between upper and lower prop planes on X8; below single prop plane on quad). Carbon fiber boom, 100mm forward extension, compliant spring-damper pad.
+7. **Action space**: Velocity deltas (Δv) output from policy, not absolute velocity. Naturally limits jerk and encourages smooth trajectories.
+8. **Compliance strategy**: Start in quad configuration through Phase 5. Upgrade to X8 only if empirical data demands it (motor saturation, vibration issues, payload growth, redundancy requirements).
+
+### Open decisions
+
+1. **Drone USD asset**: build from scratch or adapt an existing Isaac Sim quadcopter (e.g., Crazyflie, generic quadrotor)?
 2. **RL framework**: Isaac Lab built-in, rl_games, skrl, or stable-baselines3?
-3. **Action space**: velocity deltas (recommended) vs. absolute velocity vs. thrust/torque?
-4. **Compliant pusher parameters**: spring stiffness and damping ratio need empirical tuning in simulation — plan for a parameter sweep early in Phase 1.
-5. **Multi-switch strategy**: sequential (one at a time) or learned ordering?
-6. **LiDAR SLAM algorithm**: Google Cartographer (mature, well-documented) vs. Hector SLAM (no odometry needed) vs. KISS-ICP (modern, lightweight)?
-7. **2D vs 3D LiDAR timing**: start with 2D for Phases 1–6, upgrade to 3D only in Phase 7? Or invest in 3D from the start for a single sensor to maintain?
+3. **Compliant pusher parameters**: spring stiffness and damping ratio need empirical tuning in simulation — plan for a parameter sweep early in Phase 1.
+4. **Multi-switch strategy**: sequential (one at a time) or learned ordering?
+5. **LiDAR SLAM algorithm**: Google Cartographer (mature, well-documented) vs. Hector SLAM (no odometry needed) vs. KISS-ICP (modern, lightweight)?
+6. **2D vs 3D LiDAR timing**: start with 2D for Phases 1–6, upgrade to 3D only in Phase 7? Or invest in 3D from the start for a single sensor to maintain?
+7. **Stage 2 trigger threshold**: which specific metrics from Stage 1 flight data will justify the X8 upgrade? Define these before Phase 5 to avoid post-hoc rationalization.
 
 ---
 
@@ -537,17 +583,98 @@ Implementation follows a strict simple-to-complex ordering. Each step produces a
 | **Contact instability** — drone oscillates or bounces when pressing | High | Compliant pusher (§1.3), reward shaping for smooth approach (§4.4), action smoothing (§4.3.1) |
 | **Sim-to-real gap** — contact dynamics differ significantly | High | Broad domain randomization (§4.6) covering friction, mass, stiffness, actuator delay, sensor noise |
 | **Indoor localization failure** — SLAM diverges in featureless areas | High | Multi-sensor fusion (§1.4); LiDAR SLAM + optical flow + IMU provide redundant pose sources; SLAM divergence triggers ABORT |
+| ✦ **Motor failure during contact (quad Stage 1)** — any motor loss = uncontrolled crash | High | Monitor throttle margin during testing; if any motor exceeds 85% during normal contact, upgrade to Stage 2 X8 for redundancy |
+| ✦ **Prop strike on pusher (X8 Stage 2)** — aggressive pitch transient puts pusher into lower prop disc | Medium | Axis-specific pitch limit (50° max, §4.5); sacrificial shear point on pusher boom; domain randomization includes pitch excursions |
 | **Reward hacking** — drone finds unintended ways to trigger the switch | Medium | Phase-aware rewards eliminate approach/press conflict; constrain approach direction via observation frame; penalize excessive velocity at contact |
 | **Training time** — contact-rich RL slow to converge | Medium | Curriculum learning (§4.7), start with 16–32 envs and scale, shaped rewards with clear phases |
 | **Handoff instability** — RL policy receives the drone in a bad state | Medium | Explicit handoff gate with position/velocity/confidence criteria (§5.1), retry logic |
-| **Sensor weight budget** — LiDAR + camera + companion computer too heavy | Medium | Careful mass budget in Phase 1; 2D LiDAR (~180g) + optical flow (~5g) + camera (~70g) ≈ 255g — manageable on 500mm quad with 2:1 thrust ratio |
+| ✦ **Sensor vibration degrading SLAM/policy (Stage 2 X8)** — 8 motors in close proximity produce complex vibration signature | Medium | T-Motor MN3110 with EZO bearings chosen specifically for low vibration; silicone damper isolators on flight controller and LiDAR mounts; PX4 notch filters tuned post-build |
+| ✦ **Stage 2 PID re-tune cost** — quad PIDs don't transfer to X8 | Medium | Budget 1–2 days for PID retuning in Stage 2; RL policy may need 500–1,000 additional training iterations for X8 dynamics |
 | **Light detection timing** — policy releases button before light confirms | Low | Light state latch with N-step confirmation window (§3.5) |
 | **GPU memory** — contact-rich parallel envs exceed VRAM | Medium | Start conservatively at 16–32 envs; benchmark before scaling (§4.7) |
+| ✦ **Thrust margin on max config with 3D LiDAR (Stage 2)** — adding Livox Mid-360 pushes AUW to ~2,631g | Low | Stage 2 X8 with MN3110 motors provides 4.11:1 T:W at max config — comfortable margin; stage 2 triggered before adding 3D LiDAR |
+
+---
+
+## ✦ 9. Hardware Summary (v4)
+
+This section summarizes hardware-platform decisions. Full bill of materials is maintained in the companion document `HOLYBRO_X8_STAGED_BOM.md`.
+
+### 9.1 Stage 1 (quadcopter) performance
+
+| Metric | Value |
+|--------|-------|
+| Frame | Holybro X500 V2, 500mm wheelbase |
+| Motors | 4× T-Motor MN3110 KV700 |
+| Propellers | 4× T-Motor T1245 (12×4.5" polymer) |
+| Battery | 4S 5000mAh LiPo (Tattu R-Line 75C) |
+| AUW (mid config) | ~1,830g |
+| Max thrust | ~6,000g |
+| **Thrust-to-weight** | **3.28:1** |
+| Hover throttle | ~30% |
+| Flight time | ~12–14 min |
+| Motor redundancy | **None** (single failure = crash) |
+
+### 9.2 Stage 2 (X8 coaxial) performance
+
+| Metric | Mid config | Max config |
+|--------|-----------|-----------|
+| Upper motors | 4× T-Motor MN3110 KV700 | same |
+| Lower motors | 4× T-Motor MN3110 KV700 | same |
+| Upper props | 4× T1245 (12×4.5") | same |
+| Lower props | 4× T1245 (12×4.5") — matched to upper | same |
+| AUW | ~2,320g | ~2,631g |
+| Max thrust (after coaxial loss) | ~10,800g | ~10,800g |
+| **Thrust-to-weight** | **4.66:1** | **4.11:1** |
+| Hover throttle | ~19% | ~22% |
+| Flight time | ~10–12 min | ~8–10 min |
+| Motor redundancy | **2-motor loss survivable** | same |
+
+### 9.3 Stage 2 upgrade trigger criteria
+
+Stage 2 should be initiated when Stage 1 flight data demonstrates at least one of the following:
+
+1. **Motor saturation during normal contact maneuvers** — any motor exceeds 85% throttle during successful press sequences. Above this threshold there is insufficient margin for disturbance rejection.
+2. **Sensor data quality limited by vibration** — IMU FFT shows unfilterable peaks above PX4's notch filter bandwidth, LiDAR scan noise exceeds acceptable thresholds for SLAM, or camera-based switch detection confidence drops below 0.8 due to motion blur.
+3. **Crash risk unacceptable for operational environment** — deployment context (proximity to humans, over critical equipment, in production areas) requires motor-failure survivability that quad cannot provide.
+4. **Payload growth** — adding Phase 7 sensors (Livox Mid-360 3D LiDAR, Orin NX upgrade) pushes AUW above 2,200g. Quad T:W drops below 2.7:1 at this weight; X8 maintains 4.2:1.
+
+Do not upgrade Stage 2 without at least one of these criteria demonstrated by data. Redundancy without demonstrated need is over-engineering.
+
+### 9.4 Stage 2 software transition
+
+Transitioning from Stage 1 (quad) to Stage 2 (X8 coaxial) requires software changes that cannot be skipped:
+
+1. **PX4 airframe selection**: change from `Generic Quadrotor X` to `Generic Octocopter Coaxial`. Motor number mapping must be verified before first power-up.
+2. **PID retune**: moment of inertia changes significantly; attitude controller gains need retuning. Budget 1–2 days of empirical tuning.
+3. **RL policy fine-tuning**: policy trained on quad dynamics will not transfer zero-shot to X8. Plan for 500–1,000 additional training iterations in Isaac Sim with the X8 motor configuration before operational deployment.
+4. **State machine update**: add motor health monitoring to detect individual motor failures and transition to degraded-mode operation. The X8's fault tolerance is only realized if the software actively uses it.
+
+### 9.5 Alternative: larger hexacopter (Tarot 680)
+
+If the X8 upgrade path proves unsuitable (e.g., vibration from 8 motors impacts sensor quality more than predicted), the alternative is a full rebuild on the Tarot 680 Pro hexacopter frame. This path:
+
+- Keeps 6 of the 8 MN3110 motors already purchased (2 become spares)
+- Uses larger props (13×4.4") for better thrust per motor and lower blade-pass frequency
+- Provides single-motor-loss survivability (less than X8's 2-motor tolerance)
+- Requires full frame rebuild, not incremental upgrade
+- Larger indoor footprint (680mm vs 500mm)
+
+This path is **not the default**, but is kept available as a contingency. The 8 MN3110 motors specified in the Stage 1 purchase support this pivot without motor rebuy.
 
 ---
 
 ## Appendix: Changelog
 
+### v4 changes (✦)
+1. **§1.1** — Platform: changed from generic quadcopter to Holybro X500 V2 staged build (quad → X8 coaxial). Explicit trigger criteria for Stage 2 upgrade. Rejected S550 hex due to 9" prop size limit.
+2. **§1.2** — Added airframe mixing note (`Quad X` → `Octocopter Coaxial X` for Stage 2).
+3. **§1.3** — Pusher design: added frontal clearance analysis. Solved prop-overlap problem via mid-plane forward mount (below quad prop plane, between X8 upper/lower prop planes). Documented rejection of offset pusher alternative (doesn't solve the vertical geometry problem).
+4. **§7** — Resolved most open design decisions based on hardware analysis; remaining open items focused on software/training choices.
+5. **§8** — Added risks specific to hardware: motor failure on quad, prop strike on X8, vibration from 8-motor layout, PID re-tune cost for Stage 2.
+6. **§9 (NEW v4)** — Hardware summary section with Stage 1 and Stage 2 performance specs, upgrade trigger criteria, software transition requirements, and Tarot 680 hex contingency path.
+
+### v3 changes (⚑)
 1. **§1.3** — Pusher appendage design: specified compliant spring-damper mount with tuning guidelines.
 2. **§1.4 (NEW v3)** — Sensor suite: added 2D LiDAR, optical flow sensor, sensor fusion architecture, phase-evolving sensor strategy.
 3. **§3.1 (NEW v3)** — Indoor localization: LiDAR SLAM + IMU + optical flow fusion replaces GPS/VIO hand-wave.
