@@ -1,175 +1,135 @@
-# Running
+# Robotics Experiments
 
-## Run Isaac-Sim.
-On host:
-`make run-isaac`
+This repository integrates Isaac Sim, ROS 2, PX4 SITL, and the shared Python
+core package used by experiments.
 
-Inside docker:
-`./runapp.sh` -- launches sim GUI
+## Repository Layout
 
-## Run ROS2
-On host:
-`make run-ros`
+- `src/robotics_experiments`: core Python package for reusable experiment logic.
+- `isaac/isaac-sim`: Isaac Sim cache, config, logs, data, and documents
+  populated by the container.
+- `isaac/docker`: Isaac Sim Docker build and init inputs.
+- `isaac/runtime/extensions`: Isaac Kit extension workflow.
+- `isaac/runtime/standalone`: direct Isaac Sim scripts and launch helpers.
+- `isaac/runtime/lab`: Isaac Lab configs, tasks, and future environment code.
+- `ros/ros2_ws`: ROS 2 colcon workspace, persisted from the ROS 2 container.
+- `ros/config`: ROS 2 middleware config mounted into Isaac Sim and ROS 2.
+- `ros/docker` and `ros/scripts`: ROS 2 Docker and host-side helper area.
+- `px4/docker` and `px4/scripts`: PX4 Docker and host-side helper area.
+- `px4/logs` and `px4/eeprom`: PX4 SITL runtime persistence.
+- `docs`: design and usage docs.
 
-Both containers "should" be integrated to message each other
+## Running
+
+Build all Docker images:
+
+```bash
+make build-all
+```
+
+Run Isaac Sim:
+
+```bash
+make run-isaac
+```
+
+Inside the Isaac Sim container, `./runapp.sh` launches the GUI. For custom
+extension development, use `isaac/runtime/standalone/runapp_custom.sh` so the
+extensions under `isaac/runtime/extensions` are picked up.
+
+Run ROS 2:
+
+```bash
+make run-ros
+```
+
+Run PX4 SITL:
+
+```bash
+make run-px4
+```
+
+Clean containers and images:
+
+```bash
+make clean-all
+```
+
+The runtime targets are interactive and persistent. If a container already
+exists, the Makefile starts it again instead of creating a new one.
+
+## Isaac Sim Workflows
+
+- Use `isaac/runtime/extensions` for Isaac Kit extensions.
+- Use `isaac/runtime/standalone` for scripts run directly by Isaac Sim through
+  `/isaac-sim/python.sh`, `runapp.sh`, or `runapp_custom.sh`.
+- Use `isaac/runtime/lab` for Isaac Lab-specific configs, task definitions, and
+  future migration work.
+
+Keep internal experiment logic in `src/robotics_experiments` where possible.
+Isaac Sim extension code should handle Kit event wiring and delegate reusable
+logic to the core package.
 
 ## ROS Bridge
 
-Copy $PWD/.ros/fastdds.xml to host's $HOME/.ros directory
-make
+Fast DDS config lives at `ros/config/fastdds.xml`. The Makefile mounts this
+file into both Isaac Sim and ROS 2 containers at `/etc/ros/fastdds.xml` and sets
+`FASTRTPS_DEFAULT_PROFILES_FILE` for both containers.
 
-## ROS Humble vs Jazzy
-
-Ubuntu 24, which Jazzy is based on, doesn't have this package available:
-
-https://github.com/PickNikRobotics/topic_based_ros2_control
-
-This package is required to run nvidia ros2 examples.
-
-## Sometimes permissions are messed after creating something inside a container:
-
-`sudo chown -R "$(whoami):" isaac-sim`
-
-# Development
-
-There's no good way to get autocomplete, neither locally nor while connected to running container.
-
-The workflow is the following:
-1. Create script using isaacsim
-2. Mount its folder to a isaacsim container
-3. Run script using `./python.sh ...` inside a container
-4. For reference, use web documentation
-
-VS Code can be used to connect to container, make sure to set interpreter path to the one used by `./python.sh` script.
-
-To find out the interpreter, use:
+The Makefile also keeps the ROS 2 bridge defaults aligned:
 
 ```bash
-./python.sh -c "import sys; print(sys.executable); print(sys.path)"
-```
-
-The output is likely to be the following:
-
-```bash
-/isaac-sim /isaac-sim/kit/python/bin/python3
-['', '/isaac-sim', '/isaac-sim/kit/python/lib/python3.11', '/isaac-sim/kit/python/lib/python3.11/site-packages', '/isaac-sim/python_packages', '/isaac-sim/exts/isaacsim.simulation_app', '/isaac-sim/extsDeprecated/omni.isaac.kit', '/isaac-sim/kit/kernel/py', '/isaac-sim/kit/plugins/bindings-python', '/isaac-sim/exts/isaacsim.robot_motion.lula/pip_prebundle', '/isaac-sim/exts/isaacsim.asset.exporter.urdf/pip_prebundle', '/isaac-sim/extscache/omni.kit.pip_archive-0.0.0+69cbf6ad.lx64.cp311/pip_prebundle', '/isaac-sim/exts/omni.isaac.core_archive/pip_prebundle', '/isaac-sim/exts/omni.isaac.ml_archive/pip_prebundle', '/isaac-sim/exts/omni.pip.compute/pip_prebundle', '/isaac-sim/exts/omni.pip.cloud/pip_prebundle', '/isaac-sim/kit/python/lib/python311.zip', '/isaac-sim/kit/python/lib/python3.11/lib-dynload']
-```
-
-Tickets:
-`https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010`
-
-## Creating a scene
-
-Use Blender with BlenderKit to import some asset, or create your own. Export scene as USD, then open it with Isaac-Sim.
-
-Make sure Blender is built with USD support, on Gentoo it has to be downloaded as binary from official site.
-
-
-### Physics
-
-Set rigid body for every object?
-Uncheck "kinematic flag" for objects like walls or heavy objects that drone can't move
-Set ground plane
-
-
-## Remote Container Developing with VS Code
-
-Connect to deployed container, and set python interpreter path to:
-
-`.kit/python/bin/python3`
-
-## Isaac Sim ↔ ROS 2 Integration (Docker, ROS 2)
-
-Source: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#enabling-the-ros-2-bridge
-
-This section summarizes the **required steps** to integrate Isaac Sim with ROS 2 when both run in **separate Docker containers**.
-
-### 1. Networking
-
-Both containers must be started with:
-```bash
---net=host
-```
-
-### 2. Fast DDS Middleware File
-
-Put a file at known location for both Isaac Sim and ROS2 containers:
-
-```xml
-<?xml version="1.0" encoding="UTF-8" ?>
-
-<license>Copyright (c) 2022-2024, NVIDIA CORPORATION.  All rights reserved.
-NVIDIA CORPORATION and its licensors retain all intellectual property
-and proprietary rights in and to this software, related documentation
-and any modifications thereto.  Any use, reproduction, disclosure or
-distribution of this software and related documentation without an express
-license agreement from NVIDIA CORPORATION is strictly prohibited.</license>
-
-
-<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles" >
-    <transport_descriptors>
-        <transport_descriptor>
-            <transport_id>UdpTransport</transport_id>
-            <type>UDPv4</type>
-        </transport_descriptor>
-    </transport_descriptors>
-
-    <participant profile_name="udp_transport_profile" is_default_profile="true">
-        <rtps>
-            <userTransports>
-                <transport_id>UdpTransport</transport_id>
-            </userTransports>
-            <useBuiltinTransports>false</useBuiltinTransports>
-        </rtps>
-    </participant>
-</profiles>
-```
-
-### 3. Env vars
-
-```bash
-ROS_DISTRO=jazzy or humble # Only set for Isaac Sim container
-LD_LIBRARY_PATH+=<isaac_path>/exts/isaacsim.ros2.bridge/jazzy/lib # Only for Isaac Sim container
-FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/fastdds.xml # A path to file created on previous step
+ROS_DOMAIN_ID=42
 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-ROS_DOMAIN_ID=<same as ROS 2 container>
+FASTRTPS_DEFAULT_PROFILES_FILE=/etc/ros/fastdds.xml
 ```
 
-### 4. ROS2 Bridge
-
-ROS2 bridge has to be enabled for Isaac Sim. Usually by default, but worth
-checking if things are not working as expected.
-
-### 5. Add Test Graph
-
-Isaac Sim publishes no ROS data by default. To publish, create an example Graph
-in the scene by using `Tools -> Robotics -> ROS 2 OmniGraph -> Clock`
-
-After pressing Play, Isaac Sim should start publishing events.
-
-Topics and events can be checked by executing on ROS2 container:
+Isaac Sim publishes no ROS data by default. To test the bridge, create a Clock
+graph in Isaac Sim with `Tools -> Robotics -> ROS 2 OmniGraph -> Clock`, press
+Play, then check from the ROS 2 container:
 
 ```bash
 ros2 topic list
 ros2 topic echo /clock
 ```
 
-### 6. Light switch
+## Development Notes
 
-To add a light switch, add XForm, place Body and Button Cube Meshes. Add Articulation Root to XForm, add rigid body and colliders to both meshes. Colliders set to Bounding Cube for simplicity. Add prismatic joint and place it between meshes. To fix Body in place, add fixed joint and place it between World or Root and Body.
+VS Code can connect to a running container. For Isaac Sim, set the interpreter
+to the Python used by `/isaac-sim/python.sh`.
 
-### 7. Custom Extension
+To inspect the interpreter from inside the Isaac Sim container:
 
-Use `runapp_custom.sh` script to launch Isaac Sim so that extensions are picked from a custom directory.
+```bash
+./python.sh -c "import sys; print(sys.executable); print(sys.path)"
+```
 
-In Isaac Sim, check that `lightswitch` extension is enabled.
+Autocomplete for Isaac Sim APIs is limited. Use the container interpreter and
+NVIDIA documentation as the main reference.
 
-### 8. Creating Custom Extension
+If container-created files have host permission issues, fix ownership from the
+host. For example:
 
-Create an extension template using Isaac Sim -> Utilities -> Generate Extension Template.
-This generates lots of redundant boilerplate.
+```bash
+sudo chown -R "$(whoami):" isaac ros px4
+```
 
-Other option is to use cleaned up `extension_template` is this repository.
+## ROS Humble vs Jazzy
 
-After that, modify `runapp_custom.sh` to autoload the extension
+This repository defaults to ROS 2 Jazzy. Ubuntu 24.04, which Jazzy is based on,
+does not provide every package used by older NVIDIA ROS 2 examples. In
+particular, `topic_based_ros2_control` is built from source in the Docker image.
 
+## Scene Notes
+
+Use Blender with BlenderKit to import assets or create your own scene. Export
+the scene as USD, then open it with Isaac Sim.
+
+For simple physical scenes:
+
+- Set rigid bodies for simulated objects.
+- Leave static objects such as walls or heavy fixed objects non-kinematic.
+- Add colliders and a ground plane.
+
+Do not commit USD assets or other generated binary assets unless explicitly
+requested.

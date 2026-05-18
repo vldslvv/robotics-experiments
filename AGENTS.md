@@ -1,35 +1,64 @@
-# AGENTS.md — Robotics stack (Isaac Sim + ROS 2)
+# AGENTS.md - Robotics stack (Isaac Sim + ROS 2 + PX4)
 
 ## Project goal
 This repository integrates:
 - Isaac Sim (simulation)
 - ROS 2 (control, perception)
+- PX4 SITL (flight controller simulation)
 - Docker-based development
 
 Prefer minimal, scoped changes.
 Do not introduce new tooling unless explicitly requested.
 
 ## Repository layout
-- isaac/isaac-sim/    -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
-- isaac/docker/       -> Isaac Sim Docker build/init inputs.
-- isaac/runtime/      -> Isaac Sim runtime scripts, extensions, and environments.
-- ros2/ros2_ws/       -> ROS 2 workspace (colcon). Used to persist changes made inside ROS 2 container
-- docs/               -> Design and usage docs.
-- src/                -> Code of the project.
+- `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
+- `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
+- `isaac/docker/` -> Isaac Sim Docker build/init inputs.
+- `isaac/runtime/extensions/` -> Isaac Kit extension workflow.
+- `isaac/runtime/standalone/` -> Direct Isaac Sim scripts and launch helpers.
+- `isaac/runtime/lab/` -> Isaac Lab configs, task definitions, and future environment code.
+- `ros/ros2_ws/` -> ROS 2 workspace (colcon). Persists changes made inside ROS 2 container.
+- `ros/config/` -> ROS middleware config mounted into Isaac Sim and ROS 2 containers.
+- `ros/docker/` -> ROS 2 Docker build/init area.
+- `ros/scripts/` -> ROS 2 host-side helper scripts.
+- `px4/docker/` -> PX4 Docker build/init area.
+- `px4/scripts/` -> PX4 host-side helper scripts.
+- `px4/logs/` -> PX4 SITL log persistence.
+- `px4/eeprom/` -> PX4 SITL simulated EEPROM persistence.
+- `docs/` -> Design and usage docs.
+
+## Placement rules
+- Keep core project code under `src/robotics_experiments`.
+- Put Isaac Kit extension code under `isaac/runtime/extensions`.
+- Put direct Isaac Sim scripts under `isaac/runtime/standalone`.
+- Put Isaac Lab-specific configs, tasks, and environments under `isaac/runtime/lab`.
+- Put ROS 2 packages and colcon workspace changes under `ros/ros2_ws`.
+- Put ROS 2 middleware config under `ros/config`.
+- Put PX4 Docker/scripts/runtime support under `px4`.
 
 ## Isaac Sim extension design
 
-- keep internal logic and Isaac Sim event wiring separate
-- extension config is passed through experiment_config extension that uses hydra
-- each extension connects to experiment_config using config.py, no other coupling
+- Keep internal logic and Isaac Sim event wiring separate.
+- Extension config is passed through the `experiment_config` extension that uses hydra.
+- Each extension connects to `experiment_config` using `config.py`, no other coupling.
 
 ## Common commands
 
+### Docker
+- `make build-all` builds Isaac Sim, ROS 2, and PX4 images.
+- `make clean-all` stops/removes containers and removes built images.
+- `make run-isaac` starts the Isaac Sim container.
+- `make run-ros` starts the ROS 2 container.
+- `make run-px4` starts the PX4 SITL container.
+
 ### ROS 2
-Avoid calling ROS2, it's meant to be used in dockerized environment
+Avoid calling ROS 2 directly on the host. It is meant to be used in the Dockerized environment.
 
 ### Isaac Sim
-Avoid calling ROS2, it's meant to be used in dockerized environment
+Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dockerized environment.
+
+### PX4
+Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized environment.
 
 ## Hard rules
 - Do NOT commit USD assets or binary files.
@@ -39,9 +68,9 @@ Avoid calling ROS2, it's meant to be used in dockerized environment
 - Avoid using Unicode symbols.
 
 ## Docker assumptions
-- Containers often run with --network=host
-- GPU support is required (NVIDIA runtime)
-- Headless must work by default
+- Containers often run with `--network=host`.
+- GPU support is required (NVIDIA runtime).
+- Headless must work by default.
 
 ## When uncertain
-Don't do anything, ask for instructions
+Don't do anything, ask for instructions.

@@ -211,16 +211,11 @@ isaac/isaac-sim/
 # Ignore large assets and scenes
 isaac/assets/
 
+# Ignore runtime logs/state from external stacks
+px4/logs/
+px4/eeprom/
+ros/cache/
+ros/ros2_ws/
+
 # Ignore transient .build files
 .build/
-
-# Ignore ROS2 workspace, but keep README.MD
-ros2_ws/
-!ros2_ws/README.md
-
-# Ignore zsh caches that are mounted to containers
-isaac/isaac-sim/cache/
-ros/cache/
-
-# Flight logs
-px4/logs/

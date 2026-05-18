@@ -55,10 +55,10 @@ PX4_ROOTFS         = /opt/PX4-Autopilot/build/px4_sitl_default/rootfs
 
 # These paths has to be relative to be inside docker build context
 ROS_WS_DIR         = ros/ros2_ws
-ROS_DOT_DIR        = ros/.ros
+ROS_CONFIG_DIR     = ros/config
 
 # This dir is mounted at runtime
-ROS_ZSH_CACHE      = $(ROS_HOME)/cache/zsh
+ROS_ZSH_CACHE      = $(CURDIR)/ros/cache/zsh
 
 # ROS 2 middleware config
 ROS_DOMAIN_ID                  = 42
@@ -166,7 +166,7 @@ run-isaac: xhost sync-nvim-caches
 			-e ROS_DISTRO=$(ROS_DISTRO) \
 			-e isaac_sim_package_path=/isaac-sim \
 			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
-			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE) \
 			--device=/dev/dri \
 			-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
@@ -179,7 +179,7 @@ run-isaac: xhost sync-nvim-caches
 			-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
 			-v $(ISAAC_DOCS):/isaac-sim/Documents \
 			-v $(CURDIR):/isaac-sim/proj \
-			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
+			-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro \
 			-v $(ISAAC_ZSH_CACHE):/cache/zsh \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
 			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
@@ -209,10 +209,10 @@ run-ros: xhost sync-nvim-caches
 			-e QT_QPA_PLATFORM=xcb \
 			-e ROS_DOMAIN_ID="$(ROS_DOMAIN_ID)" \
 			-e RMW_IMPLEMENTATION="$(RMW_IMPLEMENTATION)" \
-			-e FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/.ros/fastdds.xml \
+			-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE) \
 			-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
 			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-			-v $(CURDIR)/$(ROS_DOT_DIR):/isaac-sim/.ros \
+			-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro \
 			-v $(CURDIR)/$(ROS_WS_DIR):/ros2_ws \
 			-v $(ROS_ZSH_CACHE):/cache/zsh \
 			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
