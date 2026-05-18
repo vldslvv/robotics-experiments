@@ -1,2 +1,0 @@
-debugpy
-pre-commit==4.5.0
