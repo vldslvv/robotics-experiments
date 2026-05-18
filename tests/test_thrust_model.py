@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from robotics_experiments.domain.thrust_model import LinearThrustModel
+from robotics_experiments.px4_bridge.thrust_model import LinearThrustModel
 
 
 def test_linear_thrust_model_clips_and_scales_commands():

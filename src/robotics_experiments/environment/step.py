@@ -6,7 +6,7 @@ from pxr import Sdf, Usd, UsdLux, UsdShade
 
 from robotics_experiments.config import LightSwitchConfig
 from robotics_experiments.config import get_config as _get_experiment_config
-from robotics_experiments.domain.switches import SwitchState, apply_button_sample
+from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
 
 def init_articulations(switch_state: List[SwitchState]) -> bool:

@@ -1,3 +1,3 @@
-from robotics_experiments.domain.switches import SwitchState
+from robotics_experiments.environment import SwitchState
 
 __all__ = ["SwitchState"]

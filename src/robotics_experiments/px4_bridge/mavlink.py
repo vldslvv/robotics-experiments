@@ -18,9 +18,9 @@ from typing import Optional
 
 import numpy as np
 
-from robotics_experiments.domain import frames
-from robotics_experiments.domain.vehicle_state import VehicleState
-from robotics_experiments.ports.flight_stack import AbstractFlightStackBridge
+from . import frames
+from .flight_stack import AbstractFlightStackBridge
+from .vehicle_state import VehicleState
 
 
 class Px4MavlinkPort(AbstractFlightStackBridge):

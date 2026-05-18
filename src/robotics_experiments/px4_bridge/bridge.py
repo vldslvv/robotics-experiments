@@ -20,9 +20,9 @@ from typing import Optional
 
 import numpy as np
 
-from robotics_experiments.domain.thrust_model import RotorThrustModel
-from robotics_experiments.ports.flight_stack import AbstractFlightStackBridge
-from robotics_experiments.ports.simulator import ArticulationIO
+from robotics_experiments.px4_bridge.flight_stack import AbstractFlightStackBridge
+from robotics_experiments.px4_bridge.simulator import ArticulationIO
+from robotics_experiments.px4_bridge.thrust_model import RotorThrustModel
 
 
 class Px4Bridge:
@@ -61,7 +61,7 @@ class Px4Bridge:
         self._port = port
         self._thrust_model = thrust_model
         if articulation_io is None:
-            from robotics_experiments.adapters.isaac.articulation_io import (
+            from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
             )
 

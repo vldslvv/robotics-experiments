@@ -4,7 +4,7 @@ from typing import Protocol
 
 import numpy as np
 
-from robotics_experiments.domain.vehicle_state import VehicleState
+from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 
 class ArticulationIO(Protocol):

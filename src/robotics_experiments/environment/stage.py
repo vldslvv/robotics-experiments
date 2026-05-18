@@ -7,7 +7,7 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
 from robotics_experiments.config import BoundingBox, LightSwitchConfig
 from robotics_experiments.config import get_config as _get_experiment_config
-from robotics_experiments.domain.switches import SwitchState
+from robotics_experiments.environment.switches import SwitchState
 
 
 def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) -> List[SwitchState]:

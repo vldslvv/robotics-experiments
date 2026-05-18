@@ -2,7 +2,7 @@ import omni.ext
 import omni.usd
 from omni.usd import StageEventType
 
-from robotics_experiments.app.sim_settings import apply_settings
+from robotics_experiments.simulation import apply_settings
 
 
 class Extension(omni.ext.IExt):

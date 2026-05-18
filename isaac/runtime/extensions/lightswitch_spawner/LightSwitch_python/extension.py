@@ -10,17 +10,13 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Float32MultiArray
 
-from robotics_experiments.adapters.isaac.light_switch_step import init_articulations
-from robotics_experiments.adapters.isaac.stage_switches import (
-    validate_switches,
-)
-from robotics_experiments.app.light_switch_task import (
+from robotics_experiments.environment import (
+    SwitchState,
     despawn_switches,
+    init_articulations,
     spawn_switches,
     step_switches,
-)
-from robotics_experiments.domain.switches import (
-    SwitchState,
+    validate_switches,
 )
 
 

@@ -52,9 +52,11 @@ class BridgeHost:
 
         # Late imports so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
-        from robotics_experiments.adapters.px4 import Px4MavlinkPort
-        from robotics_experiments.app.px4_bridge import Px4Bridge
-        from robotics_experiments.domain.thrust_model import LinearThrustModel
+        from robotics_experiments.px4_bridge import (
+            LinearThrustModel,
+            Px4Bridge,
+            Px4MavlinkPort,
+        )
 
         rotor_paths = self._resolve_rotor_paths(self._cfg.rotor_link_paths)
         if len(rotor_paths) != self._cfg.num_rotors:

@@ -1,1 +1,1 @@
-from robotics_experiments.adapters.isaac.stage_switches import *  # noqa: F401,F403
+from robotics_experiments.environment.stage import *  # noqa: F401,F403
