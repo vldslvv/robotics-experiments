@@ -13,4 +13,3 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$SCRIPT_DIR/.:$SCRIPT_DIR/exts/isaacsim.
 export PATH="/isaac-sim/kit/python/bin:$PATH"
 alias python3="/isaac-sim/kit/python/bin/python3"
 alias python="/isaac-sim/kit/python/bin/python3"
-

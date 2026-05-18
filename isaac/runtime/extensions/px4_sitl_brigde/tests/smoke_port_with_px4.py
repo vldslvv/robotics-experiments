@@ -53,8 +53,10 @@ def main() -> int:
         lockstep_timeout_s=args.lockstep_timeout_s,
     )
     port.start()
-    print(f"port started; waiting for PX4 to dial in on {args.connection_type}"
-          f":{args.connection_ip}:{args.connection_baseport}")
+    print(
+        f"port started; waiting for PX4 to dial in on {args.connection_type}"
+        f":{args.connection_ip}:{args.connection_baseport}"
+    )
 
     period_s = 1.0 / args.rate_hz
     sim_time_us = 0

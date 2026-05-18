@@ -30,7 +30,6 @@ from Px4SitlBridge_python import frames  # noqa: E402
 from Px4SitlBridge_python.thrust_model import LinearThrustModel  # noqa: E402
 from Px4SitlBridge_python.vehicle_state import VehicleState  # noqa: E402
 
-
 _failed = 0
 
 
@@ -62,9 +61,7 @@ def main() -> int:
         f"got {mag}",
     )
 
-    gps = frames.synth_gps_from_enu(
-        np.array([10.0, 20.0, 1.0]), np.zeros(3)
-    )
+    gps = frames.synth_gps_from_enu(np.array([10.0, 20.0, 1.0]), np.zeros(3))
     _check(
         "gps lat shift sign (north→larger lat)",
         gps["latitude"] > frames.DEFAULT_HOME_LAT_DEG,

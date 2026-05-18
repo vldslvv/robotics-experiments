@@ -4,8 +4,8 @@ import omni.usd
 from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 
-from robotics_experiments.drone import despawn_drone, spawn_drone
 from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.drone import despawn_drone, spawn_drone
 
 from .bridge_host import BridgeHost
 

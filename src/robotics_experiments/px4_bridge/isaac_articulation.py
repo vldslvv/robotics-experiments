@@ -11,7 +11,7 @@ articulation handles cannot be opened before the physics scene exists.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
@@ -33,7 +33,7 @@ class IsaacArticulationIO:
         self._articulation_path = str(articulation_path)
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
 
-        self._articulation = None
+        self._articulation: Any | None = None
         self._rotor_links: Optional[list] = None
         self._last_velocity_enu: Optional[np.ndarray] = None
         self._last_sim_time_us: Optional[int] = None
@@ -94,6 +94,8 @@ class IsaacArticulationIO:
         """
         if self._articulation is None:
             self.initialize()
+        if self._articulation is None:
+            raise RuntimeError("Isaac articulation handle is not initialized")
 
         pos, quat_wxyz = self._articulation.get_world_pose()
         position_enu = np.asarray(pos, dtype=np.float64)

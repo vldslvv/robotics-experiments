@@ -51,6 +51,18 @@ indent-style = "space"
 select = ["E", "F", "I", "B"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+"isaac/runtime/extensions/extension_template/ExtensionMinimalTemplate_python/__init__.py" = ["F403"]
+"isaac/runtime/extensions/px4_sitl_brigde/pegasus/simulator/logic/**/*.py" = [
+  "B006",
+  "B008",
+  "B024",
+  "E501",
+  "E712",
+  "E722",
+  "F401",
+]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true

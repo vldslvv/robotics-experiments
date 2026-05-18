@@ -10,7 +10,7 @@ This extension may also be enabled through the Extension Manager by providing it
 This template extension creates a Load, Reset, and Run button in a simple UI.
 The Load and Reset buttons interact with the isaacsim.core.api World() in order
 to simplify user interaction with the simulator and provide certain gurantees to the user
-at the times their callback functions are called.  
+at the times their callback functions are called.
 
 The Run button runs an analogue of a script, which allows the user to run long-lasting
 code that takes more than one frame to complete such as moving a robot to a target.
@@ -21,7 +21,7 @@ This approach is limited to code that is able to throw a yield() on every frame.
 The template is well documented and is meant to be self-explanatory to the user should they
 start reading the provided python files.  A short overview is also provided here:
 
-global_variables.py: 
+global_variables.py:
     A script that stores in global variables that the user specified when creating this extension such as the Title and Description.
 
 extension.py:

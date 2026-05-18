@@ -1,7 +1,8 @@
 # build_drone_usd.py — config-driven drone USD generator for Isaac Sim
 #
 # Run inside isaac-sim docker:
-#   /isaac-sim/python.sh /isaac-sim/proj/isaac/runtime/standalone/build_copter_usd_no_pxr.py [config_name]
+#   /isaac-sim/python.sh \
+#     /isaac-sim/proj/isaac/runtime/standalone/build_copter_usd_no_pxr.py [config_name]
 #
 # Available configs: quadcopter_500mm (default), hexacopter_s550
 #
@@ -26,10 +27,11 @@ from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from isaacsim import SimulationApp
+
 simulation_app = SimulationApp({"headless": True, "hide_ui": True})
 
-import omni.usd
-from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf
+import omni.usd  # noqa: E402
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
 ASSETS_DIR = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse"
 
@@ -92,11 +94,11 @@ class CapsulePart:
 @dataclass
 class Motor:
     name: str
-    position: tuple[float, float, float]   # motor origin, relative to body root
-    motor: CylinderPart                    # the brushless can
-    esc: BoxPart                           # ESC riding next to this motor
-    propeller: CylinderPart                # disc above the motor
-    spin_dir: str                          # "CCW" | "CW"
+    position: tuple[float, float, float]  # motor origin, relative to body root
+    motor: CylinderPart  # the brushless can
+    esc: BoxPart  # ESC riding next to this motor
+    propeller: CylinderPart  # disc above the motor
+    spin_dir: str  # "CCW" | "CW"
 
 
 @dataclass
@@ -136,6 +138,7 @@ class DroneConfig:
 
 # --- Config instances -------------------------------------------------------
 
+
 def _quadcopter_500mm() -> DroneConfig:
     body_half = 0.06
     plate_thickness = 0.006
@@ -146,12 +149,14 @@ def _quadcopter_500mm() -> DroneConfig:
     motor_xy = 0.25
     motor_z = 0.02
 
+    # fmt: off
     motor_specs = [
         ("M1 FR CCW",  ( motor_xy,  motor_xy, motor_z), "CCW"),
         ("M2 FL CW",   (-motor_xy,  motor_xy, motor_z), "CW"),
         ("M3 RL CCW",  (-motor_xy, -motor_xy, motor_z), "CCW"),
         ("M4 RR CW",   ( motor_xy, -motor_xy, motor_z), "CW"),
     ]
+    # fmt: on
 
     motors = [
         Motor(
@@ -272,7 +277,7 @@ def _hexacopter_s550() -> DroneConfig:
     motor_radius = 0.018
     motor_height = 0.035
     rotor_radius = 0.127  # 10" prop
-    arm_len = 0.275       # 550 mm diagonal -> 275 mm arm
+    arm_len = 0.275  # 550 mm diagonal -> 275 mm arm
     motor_z = 0.02
 
     spin_dirs = ["CCW", "CW", "CCW", "CW", "CCW", "CW"]
@@ -281,9 +286,7 @@ def _hexacopter_s550() -> DroneConfig:
         a = math.radians(a_deg)
         x = arm_len * math.cos(a)
         y = arm_len * math.sin(a)
-        motor_specs.append(
-            (f"M{i+1} {a_deg}deg {spin_dirs[i]}", (x, y, motor_z), spin_dirs[i])
-        )
+        motor_specs.append((f"M{i+1} {a_deg}deg {spin_dirs[i]}", (x, y, motor_z), spin_dirs[i]))
 
     motors = [
         Motor(
@@ -435,9 +438,7 @@ def _author_box(stage: Usd.Stage, prim_path: str, part: BoxPart) -> UsdGeom.Xfor
     return xform
 
 
-def _author_cylinder(
-    stage: Usd.Stage, prim_path: str, part: CylinderPart
-) -> UsdGeom.Cylinder:
+def _author_cylinder(stage: Usd.Stage, prim_path: str, part: CylinderPart) -> UsdGeom.Cylinder:
     cyl = UsdGeom.Cylinder.Define(stage, prim_path)
     cyl.CreateRadiusAttr(part.radius)
     cyl.CreateHeightAttr(part.height)
@@ -446,9 +447,7 @@ def _author_cylinder(
     return cyl
 
 
-def _author_capsule(
-    stage: Usd.Stage, prim_path: str, part: CapsulePart
-) -> UsdGeom.Capsule:
+def _author_capsule(stage: Usd.Stage, prim_path: str, part: CapsulePart) -> UsdGeom.Capsule:
     cap = UsdGeom.Capsule.Define(stage, prim_path)
     cap.CreateRadiusAttr(part.radius)
     cap.CreateHeightAttr(part.height)
@@ -457,9 +456,7 @@ def _author_capsule(
     return cap
 
 
-def _author_motor(
-    stage: Usd.Stage, parent_path: str, idx: int, motor: Motor
-) -> None:
+def _author_motor(stage: Usd.Stage, parent_path: str, idx: int, motor: Motor) -> None:
     grp_path = f"{parent_path}/motor_{idx+1}"
     UsdGeom.Xform.Define(stage, grp_path)
 
@@ -502,9 +499,7 @@ def _author_motor(
     prop.CreateRadiusAttr(prop_part.radius)
     prop.CreateHeightAttr(prop_part.height)
     _apply_pose(prop, prop_world_pos, prop_part.rotation_deg)
-    prop.GetPrim().CreateAttribute(
-        "drone:spinDir", Sdf.ValueTypeNames.String
-    ).Set(motor.spin_dir)
+    prop.GetPrim().CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(motor.spin_dir)
     _set_mass(prop.GetPrim(), prop_part.mass)
 
 
@@ -554,11 +549,9 @@ def build_drone_usd(cfg: DroneConfig) -> str:
     avionics_path = f"{root_path}/avionics"
     UsdGeom.Xform.Define(stage, avionics_path)
     pixhawk_pos = _shift_z(cfg.pixhawk.position, cfg.center_plate.size[2] / 2)
-    _author_box(stage, f"{avionics_path}/pixhawk",
-                _replace_pos(cfg.pixhawk, pixhawk_pos))
+    _author_box(stage, f"{avionics_path}/pixhawk", _replace_pos(cfg.pixhawk, pixhawk_pos))
     jetson_pos = _shift_z(cfg.jetson.position, cfg.center_plate.size[2] / 2)
-    _author_box(stage, f"{avionics_path}/jetson",
-                _replace_pos(cfg.jetson, jetson_pos))
+    _author_box(stage, f"{avionics_path}/jetson", _replace_pos(cfg.jetson, jetson_pos))
 
     # Sensors.
     sensors_path = f"{root_path}/sensors"
@@ -567,8 +560,7 @@ def build_drone_usd(cfg: DroneConfig) -> str:
     _author_box(stage, f"{sensors_path}/realsense_d435i", cfg.realsense)
     _author_box(stage, f"{sensors_path}/pmw3901_optical_flow", cfg.optical_flow)
     lidar_pos = _shift_z(cfg.lidar.position, cfg.center_plate.size[2] / 2)
-    _author_cylinder(stage, f"{sensors_path}/rplidar_a2",
-                     _replace_pos(cfg.lidar, lidar_pos))
+    _author_cylinder(stage, f"{sensors_path}/rplidar_a2", _replace_pos(cfg.lidar, lidar_pos))
 
     # Power.
     power_path = f"{root_path}/power"

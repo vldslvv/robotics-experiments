@@ -253,6 +253,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         from pymavlink import mavutil
 
         backend = self._backend
+        if backend._connection is None:
+            self._is_connected = False
+            return False
         needs_to_wait = backend._received_first_actuator and backend._enable_lockstep
         backend._received_actuator = False
 

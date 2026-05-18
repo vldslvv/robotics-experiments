@@ -18,8 +18,8 @@ from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({"headless": False})
 
-from isaacsim.core.api import World
-from isaacsim.core.api.objects import VisualCuboid
+from isaacsim.core.api import World  # noqa: E402
+from isaacsim.core.api.objects import VisualCuboid  # noqa: E402
 
 my_world = World(stage_units_in_meters=1.0)
 
@@ -81,9 +81,9 @@ cube_1 = my_world.scene.add(
 
 my_world.scene.add_default_ground_plane()
 
-for i in range(5):
+for _reset_index in range(5):
     my_world.reset()
-    for i in range(500):
+    for _i in range(500):
         my_world.step(render=True)
         # print(cube_2.get_angular_velocity())
         # print(cube_2.get_world_pose())

@@ -31,7 +31,9 @@ def init_articulations(switch_state: List[SwitchState]) -> bool:
             sw.articulation = art
 
         carb.log_info(f"[LightSwitch] Initialized {len(switch_state)} articulations.")
-        carb.log_info(f"[LightSwitch] DOFs: {switch_state[0].articulation.dof_names}")
+        articulation = switch_state[0].articulation
+        if articulation is not None:
+            carb.log_info(f"[LightSwitch] DOFs: {articulation.dof_names}")
         return True
 
     except Exception as e:
@@ -66,6 +68,9 @@ def step_switches(
     if config is None:
         config = _get_experiment_config().switches
     for i, sw in enumerate(switch_state):
+        if sw.articulation is None:
+            carb.log_error(f"[LightSwitch] No articulation set for switch with index {1}")
+            continue
         joint_positions = sw.articulation.get_joint_positions()
         button_pos = joint_positions[0]
 

@@ -1,7 +1,7 @@
 import os
 import shlex
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
@@ -64,7 +64,7 @@ def get_config() -> EnvConfig:
     with initialize_config_dir(config_dir=conf_dir, version_base=None):
         cfg = compose(config_name=config_name, overrides=overrides)
 
-    _CACHED = OmegaConf.to_object(cfg)  # type: ignore[assignment]
+    _CACHED = cast(EnvConfig, OmegaConf.to_object(cfg))
     return _CACHED
 
 

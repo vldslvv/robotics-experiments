@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 import carb
 import omni.ext
@@ -42,7 +43,7 @@ class ExtensionState:
         ros_node: The owned ROS 2 node, or ``None`` after shutdown.
     """
 
-    state_pub: object | None = None
+    state_pub: Any | None = None
     is_initialized: bool = False
     sim_playing: bool = False
     update_sub: object | None = None
@@ -150,6 +151,9 @@ class LightSwitchExtension(omni.ext.IExt):
             return
 
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        if self._state.ros_node is None:
+            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            return
         self._state.state_pub = self._state.ros_node.create_publisher(
             Float32MultiArray, "/light_switches/state", qos
         )
@@ -177,6 +181,10 @@ class LightSwitchExtension(omni.ext.IExt):
         Args:
             event: Per-frame update event from ``omni.kit.app``.
         """
+        if self._state.ros_node is None:
+            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            return
+
         rclpy.spin_once(self._state.ros_node, timeout_sec=0)
 
         if not self._state.sim_playing:
@@ -199,4 +207,7 @@ class LightSwitchExtension(omni.ext.IExt):
         """
         msg = Float32MultiArray()
         msg.data = [float(index), float(state)]
+        if self._state.state_pub is None:
+            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            return
         self._state.state_pub.publish(msg)

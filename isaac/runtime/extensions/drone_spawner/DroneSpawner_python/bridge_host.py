@@ -13,7 +13,7 @@ full bridge) by flipping the flag.
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, List
 
 import carb
 import omni.physx
@@ -32,7 +32,7 @@ class BridgeHost:
     def __init__(self, *, articulation_path: str, config: Px4BridgeConfig):
         self._cfg = config
         self._articulation_path = articulation_path
-        self._bridge = None
+        self._bridge: Any | None = None
         self._physx_sub = None
         self._sim_time_us: int = 0
 
