@@ -66,6 +66,9 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
 - Do NOT hardcode absolute paths.
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.
+- For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
+  (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
+  does not collapse manual column spacing.
 
 ## Docker assumptions
 - Containers often run with `--network=host`.
