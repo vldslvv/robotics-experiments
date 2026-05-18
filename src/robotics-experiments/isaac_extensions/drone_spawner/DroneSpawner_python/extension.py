@@ -1,10 +1,11 @@
 import omni.ext
 import omni.timeline
 import omni.usd
-from drone_config import despawn_drone, get_config, spawn_drone
-from experiment_config import get_config as _get_experiment_config
 from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
+
+from robotics_experiments.app.drone_spawning import despawn_drone, spawn_drone
+from robotics_experiments.config import get_config as _get_experiment_config
 
 from .bridge_host import BridgeHost
 
@@ -33,12 +34,14 @@ class Extension(omni.ext.IExt):
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         self._usd_context = omni.usd.get_context()
-        self._stage_event_sub = self._usd_context.get_stage_event_stream().create_subscription_to_pop(
-            self._on_stage_event
+        stage_events = self._usd_context.get_stage_event_stream()
+        self._stage_event_sub = stage_events.create_subscription_to_pop(
+            self._on_stage_event,
         )
         self._timeline = omni.timeline.get_timeline_interface()
-        self._timeline_event_sub = self._timeline.get_timeline_event_stream().create_subscription_to_pop(
-            self._on_timeline_event
+        timeline_events = self._timeline.get_timeline_event_stream()
+        self._timeline_event_sub = timeline_events.create_subscription_to_pop(
+            self._on_timeline_event,
         )
         self._bridge_host: BridgeHost | None = None
         stage = self._usd_context.get_stage()
@@ -97,14 +100,12 @@ class Extension(omni.ext.IExt):
         env = _get_experiment_config()
         if not env.px4.enabled:
             return
-        drone_cfg = get_config()
+        drone_cfg = env.drone
         default_prim = stage.GetDefaultPrim()
         parent = default_prim.GetPath().pathString if default_prim else "/World"
         articulation_path = f"{parent}/{drone_cfg.prim_name}"
 
         if self._bridge_host is not None:
             self._bridge_host.stop()
-        self._bridge_host = BridgeHost(
-            articulation_path=articulation_path, config=env.px4
-        )
+        self._bridge_host = BridgeHost(articulation_path=articulation_path, config=env.px4)
         self._bridge_host.start()

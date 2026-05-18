@@ -1,7 +1,8 @@
 import omni.ext
 import omni.usd
 from omni.usd import StageEventType
-from sim_config import apply_settings
+
+from robotics_experiments.app.sim_settings import apply_settings
 
 
 class Extension(omni.ext.IExt):
@@ -18,8 +19,9 @@ class Extension(omni.ext.IExt):
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         self._usd_context = omni.usd.get_context()
-        self._stage_event_sub = self._usd_context.get_stage_event_stream().create_subscription_to_pop(
-            self._on_stage_event
+        stage_events = self._usd_context.get_stage_event_stream()
+        self._stage_event_sub = stage_events.create_subscription_to_pop(
+            self._on_stage_event,
         )
         stage = self._usd_context.get_stage()
         if stage is not None:

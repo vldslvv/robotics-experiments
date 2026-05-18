@@ -13,12 +13,10 @@ icon = "data/icon.png"
 writeTarget.kit = true
 
 [dependencies]
+"robotics_experiments_core" = {}
 "experiment_config" = {}
 "isaacsim.core.prims" = {}
 "isaacsim.ros2.bridge" = {}
 
 [[python.module]]
 name = "LightSwitch_python"
-
-[[python.module]]
-name = "lightswitch_config"

@@ -178,6 +178,7 @@ run-isaac: xhost sync-nvim-caches
 			-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
 			-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
 			-v $(ISAAC_DOCS):/isaac-sim/Documents \
+			-v $(SRC_DIR):/isaac-sim/proj/src \
 			-v $(SRC_DIR)/robotics-experiments:/isaac-sim/proj/robotics-experiments \
 			-v $(CURDIR)/$(ISAAC_SCRIPTS_DIR):/isaac-sim/proj/scripts \
 			-v $(CURDIR)/$(ISAAC_ASSETS_DIR):/isaac-sim/proj/assets \

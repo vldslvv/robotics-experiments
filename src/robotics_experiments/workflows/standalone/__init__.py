@@ -1,0 +1,1 @@
+"""Standalone automated workflows."""

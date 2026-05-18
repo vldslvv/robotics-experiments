@@ -2,10 +2,11 @@
 
 # This script runs inside isaac sim docker, therefore
 # scene path depends on the mounts used
-EXT_FOLDER="/isaac-sim/proj/robotics-experiments/isaac_extensions"
+EXT_FOLDER="/isaac-sim/proj/src/robotics-experiments/isaac_extensions"
 SCENE_PATH="/isaac-sim/proj/assets/LightSwitchWarehouse/Warehouse.usd"
 OPEN_STAGE_SCRIPT="open_stage.py"
 EXPERIMENT_CONFIG_EXT="experiment_config"
+ROBOTICS_EXPERIMENTS_CORE_EXT="robotics_experiments_core"
 SIM_SETTINGS_EXT="sim_settings"
 LIGHTSWITCH_EXT="lightswitch_spawner"
 DRONE_SPAWNER_EXT="drone_spawner"
@@ -29,6 +30,7 @@ export EXPERIMENT_CONFIG_OVERRIDES="${EXPERIMENT_CONFIG_OVERRIDES-}"
 /isaac-sim/privacy.sh && \
 /isaac-sim/isaac-sim.sh \
   --ext-folder "$EXT_FOLDER" \
+  --enable "$ROBOTICS_EXPERIMENTS_CORE_EXT" \
   --enable "$EXPERIMENT_CONFIG_EXT" \
   --enable "$SIM_SETTINGS_EXT" \
   --enable "$LIGHTSWITCH_EXT" \

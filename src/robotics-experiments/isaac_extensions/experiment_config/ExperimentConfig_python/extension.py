@@ -1,7 +1,7 @@
 import carb
 import omni.ext
 
-from experiment_config import get_config
+from robotics_experiments.config import get_config
 
 
 class Extension(omni.ext.IExt):

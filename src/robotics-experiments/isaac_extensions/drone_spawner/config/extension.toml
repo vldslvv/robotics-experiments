@@ -13,6 +13,7 @@ icon = "data/icon.png"
 writeTarget.kit = true
 
 [dependencies]
+"robotics_experiments_core" = {}
 "experiment_config" = {}
 "px4_sitl_brigde" = {}
 "isaacsim.core.api" = {}
@@ -21,6 +22,3 @@ writeTarget.kit = true
 
 [[python.module]]
 name = "DroneSpawner_python"
-
-[[python.module]]
-name = "drone_config"

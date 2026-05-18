@@ -23,8 +23,6 @@ dependencies = [
 dev = [
   "debugpy",
   "pre-commit==4.5.0",
-  "black==24.8.0",
-  "isort==5.13.2",
   "ruff==0.6.9",
   "mypy==1.11.2",
   "types-requests",
@@ -35,19 +33,19 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["robotics-experiments*"]
+include = ["robotics_experiments*"]
 exclude = ["ros2_ws*", "scans*", "docs*", "build_scripts*", "scripts*"]
 
-[tool.black]
-line-length = 88
-target-version = ["py311"]
-
-[tool.isort]
-profile = "black"
+[tool.setuptools.package-data]
+robotics_experiments = ["config/conf/*.yaml", "config/conf/*/*.yaml"]
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 # Keep default rule set minimal; repos often extend it over time.
 [tool.ruff.lint]
@@ -64,4 +62,13 @@ no_implicit_optional = true
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
+[tool.uv]
+override-dependencies = [
+  "pywin32==306; sys_platform == 'win32'",
+]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"

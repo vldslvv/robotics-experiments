@@ -17,7 +17,8 @@ from typing import List
 
 import carb
 import omni.physx
-from experiment_config import Px4BridgeConfig
+
+from robotics_experiments.config import Px4BridgeConfig
 
 
 class BridgeHost:
@@ -51,11 +52,9 @@ class BridgeHost:
 
         # Late imports so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
-        from Px4SitlBridge_python import (
-            LinearThrustModel,
-            Px4Bridge,
-            Px4MavlinkPort,
-        )
+        from robotics_experiments.adapters.px4 import Px4MavlinkPort
+        from robotics_experiments.app.px4_bridge import Px4Bridge
+        from robotics_experiments.domain.thrust_model import LinearThrustModel
 
         rotor_paths = self._resolve_rotor_paths(self._cfg.rotor_link_paths)
         if len(rotor_paths) != self._cfg.num_rotors:

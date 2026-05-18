@@ -1,0 +1,15 @@
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "RoboticsExperimentsCore"
+description = "Shared robotics_experiments Python package for project extensions"
+authors = ["Vladislav Vyatkin"]
+repository = ""
+keywords = []
+writeTarget.kit = true
+
+[dependencies]
+
+[[python.module]]
+name = "robotics_experiments"
+path = "/isaac-sim/proj/src"

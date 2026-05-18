@@ -21,7 +21,11 @@ Typical wiring (done by the drone-spawning host, not by this extension):
 >>> bridge.stop()               # at Stop
 """
 
-from .extension import *  # noqa: F401,F403  -- registers omni.ext entrypoint
+try:
+    from .extension import *  # noqa: F401,F403  -- registers omni.ext entrypoint
+except ModuleNotFoundError as exc:
+    if exc.name != "omni":
+        raise
 from .ports import AbstractFlightStackBridge, Px4MavlinkPort
 from .px4_bridge import Px4Bridge
 from .thrust_model import LinearThrustModel, RotorThrustModel

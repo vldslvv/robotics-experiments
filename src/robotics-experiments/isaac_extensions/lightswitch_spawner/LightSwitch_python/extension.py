@@ -6,17 +6,22 @@ import omni.kit.app
 import omni.timeline
 import omni.usd
 import rclpy
-from lightswitch_config import (
-    SwitchState,
-    despawn_switches,
-    init_articulations,
-    spawn_switches,
-    step_switches,
-    validate_switches,
-)
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Float32MultiArray
+
+from robotics_experiments.adapters.isaac.light_switch_step import init_articulations
+from robotics_experiments.adapters.isaac.stage_switches import (
+    validate_switches,
+)
+from robotics_experiments.app.light_switch_task import (
+    despawn_switches,
+    spawn_switches,
+    step_switches,
+)
+from robotics_experiments.domain.switches import (
+    SwitchState,
+)
 
 
 class LightSwitchNode(Node):
@@ -34,7 +39,7 @@ class ExtensionState:
 
     Attributes:
         state_pub: ROS publisher for switch toggle events, created on simulation start.
-        is_initialized: Whether articulations have been initialized for the current play.
+        is_initialized: Whether articulations are initialized for the current play.
         sim_playing: Whether the Kit timeline is currently playing.
         update_sub: Subscription to the Kit per-frame update stream.
         timeline_sub: Subscription to the Kit timeline event stream.
@@ -58,7 +63,7 @@ class LightSwitchExtension(omni.ext.IExt):
     """
 
     def on_startup(self, ext_id: str):
-        """Initialize ROS, create the node, and subscribe to timeline and update streams.
+        """Initialize ROS, create the node, and subscribe to runtime streams.
 
         Args:
             ext_id: Extension identifier assigned by the Kit runtime.
@@ -73,13 +78,17 @@ class LightSwitchExtension(omni.ext.IExt):
         self._state.ros_node = LightSwitchNode()
 
         timeline = omni.timeline.get_timeline_interface()
-        self._state.timeline_sub = timeline.get_timeline_event_stream().create_subscription_to_pop(
-            self._on_timeline_event, name="light_switch_timeline"
+        timeline_events = timeline.get_timeline_event_stream()
+        self._state.timeline_sub = timeline_events.create_subscription_to_pop(
+            self._on_timeline_event,
+            name="light_switch_timeline",
         )
 
         app = omni.kit.app.get_app()
-        self._state.update_sub = app.get_update_event_stream().create_subscription_to_pop(
-            self._on_update, name="light_switch_update"
+        update_events = app.get_update_event_stream()
+        self._state.update_sub = update_events.create_subscription_to_pop(
+            self._on_update,
+            name="light_switch_update",
         )
 
         carb.log_info("[LightSwitch] Running. Press Play to begin.")

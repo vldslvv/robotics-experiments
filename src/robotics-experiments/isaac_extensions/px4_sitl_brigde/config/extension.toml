@@ -13,6 +13,7 @@ icon = "data/icon.png"
 writeTarget.kit = true
 
 [dependencies]
+"robotics_experiments_core" = {}
 "isaacsim.core.api" = {}
 "isaacsim.gui.components" = {}
 "omni.kit.uiapp" = {}
@@ -23,4 +24,3 @@ name = "Px4SitlBridge_python"
 [python.pipapi]
 requirements = ["numpy", "scipy", "pymavlink", "pyyaml", "toml"]
 use_online_index = true
-

@@ -1,0 +1,32 @@
+defaults:
+  - base_px4
+
+# Off by default; flip to true once PX4 SITL is reachable.
+enabled: false
+
+# Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
+articulation_path: ""
+
+# In PX4 motor-index order: FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X.
+# Paths are joined under the articulation root if relative.
+rotor_link_paths: []
+
+num_rotors: 4
+max_rotor_force_n: 8.0
+
+connection_type: tcpin
+connection_ip: localhost
+connection_baseport: 4560
+vehicle_id: 0
+
+# Leave autolaunch off when PX4 runs in Docker.
+px4_autolaunch: false
+px4_dir: ""
+px4_vehicle_model: gazebo-classic_iris
+
+lockstep_timeout_s: 0.1
+gps_send_rate_hz: 5.0
+
+home_lat_deg: 47.3977
+home_lon_deg: 8.5456
+home_alt_m: 488.0
