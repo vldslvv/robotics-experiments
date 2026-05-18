@@ -17,13 +17,16 @@ Catalog max-thrust corrections:
 """
 
 import sys
-sys.path.insert(0, "/home/claude")
-from thrust_to_weight import compute_tw, TWInputs
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from thrust_to_weight import TWInputs, compute_tw
 
 MID_BASE = 1616
 MAX_BASE = 1927
 QUAD_BASE = MID_BASE - 88
 
+# fmt: off
 # (mass_g, max_continuous_A, price_USD_each, catalog_max_thrust_g)
 MOTORS = {
     "MN3110 KV700":   (99,  21, 70,  1200),
@@ -34,10 +37,12 @@ MOTORS = {
     "MN4006 KV380":   (66,  22, 75,  1600),
     "MN4006 EVO 380": (68,  24, 88,  1700),
 }
+# fmt: on
 
 # Per-motor static thrust (g) at 4S/14.8V, using T-Motor / Ligpower data and
 # physics-based interpolation where direct test data is absent.
 # MN3508 numbers revised UPWARD given its 1.8kg catalog max (was clipped too low before).
+# fmt: off
 THRUST_DATA = {
     "MN3110 KV700": [
         ("12x4 CF",    1150, 16.0, 6),
@@ -68,27 +73,44 @@ THRUST_DATA = {
         ("13x4.4 CF",  1565, 17.5, 7),
     ],
 }
+# fmt: on
 
+# fmt: off
 PROP_PRICE = {
     "11x3.7 CF":  16,  # per pair
     "12x4 CF":    16,
     "13x4.4 CF":  20,
 }
+# fmt: on
 
 
 def evaluate(motor, prop, m_motor, m_prop, T, I, max_I, price, prop_price):
-    mid = compute_tw(TWInputs(
-        m_base=MID_BASE, N=8, m_motor=m_motor, m_prop=m_prop,
-        T_motor=T, is_coaxial=True, k_coax=0.80,
-    ))
-    mx = compute_tw(TWInputs(
-        m_base=MAX_BASE, N=8, m_motor=m_motor, m_prop=m_prop,
-        T_motor=T, is_coaxial=True, k_coax=0.80,
-    ))
+    mid = compute_tw(
+        TWInputs(
+            m_base=MID_BASE,
+            N=8,
+            m_motor=m_motor,
+            m_prop=m_prop,
+            T_motor=T,
+            is_coaxial=True,
+            k_coax=0.80,
+        )
+    )
+    mx = compute_tw(
+        TWInputs(
+            m_base=MAX_BASE,
+            N=8,
+            m_motor=m_motor,
+            m_prop=m_prop,
+            T_motor=T,
+            is_coaxial=True,
+            k_coax=0.80,
+        )
+    )
     current_ok = I <= max_I * 0.85
     motors_cost = price * 8
-    props_cost  = prop_price * 4   # 4 pairs serve 8 motor positions
-    total_cost  = motors_cost + props_cost
+    props_cost = prop_price * 4  # 4 pairs serve 8 motor positions
+    total_cost = motors_cost + props_cost
     cost_per_kg_thrust = total_cost / (mid.thrust_total_g / 1000)
     return mid, mx, current_ok, motors_cost, props_cost, total_cost, cost_per_kg_thrust
 
@@ -96,27 +118,41 @@ def evaluate(motor, prop, m_motor, m_prop, T, I, max_I, price, prop_price):
 rows = []
 for motor, combos in THRUST_DATA.items():
     m_motor, max_I, price, _ = MOTORS[motor]
-    for prop, T, I, m_prop in combos:
+    for prop, T, current_a, m_prop in combos:
         prop_price = PROP_PRICE[prop]
         mid, mx, ok, mcost, pcost, tcost, cpkt = evaluate(
-            motor, prop, m_motor, m_prop, T, I, max_I, price, prop_price)
-        rows.append({
-            "motor": motor, "prop": prop, "T_motor": T, "I": I, "max_I": max_I,
-            "current_ok": ok,
-            "mid_tw": mid.tw_ratio, "max_tw": mx.tw_ratio,
-            "mid_auw": mid.auw_g, "max_auw": mx.auw_g,
-            "mid_hover": mid.hover_throttle, "max_hover": mx.max_hover if hasattr(mx, "max_hover") else mx.hover_throttle,
-            "thrust_total": mid.thrust_total_g,
-            "motors_cost": mcost, "props_cost": pcost, "total_cost": tcost,
-            "cost_per_kg_thrust": cpkt,
-        })
+            motor, prop, m_motor, m_prop, T, current_a, max_I, price, prop_price
+        )
+        rows.append(
+            {
+                "motor": motor,
+                "prop": prop,
+                "T_motor": T,
+                "I": current_a,
+                "max_I": max_I,
+                "current_ok": ok,
+                "mid_tw": mid.tw_ratio,
+                "max_tw": mx.tw_ratio,
+                "mid_auw": mid.auw_g,
+                "max_auw": mx.auw_g,
+                "mid_hover": mid.hover_throttle,
+                "max_hover": mx.max_hover if hasattr(mx, "max_hover") else mx.hover_throttle,
+                "thrust_total": mid.thrust_total_g,
+                "motors_cost": mcost,
+                "props_cost": pcost,
+                "total_cost": tcost,
+                "cost_per_kg_thrust": cpkt,
+            }
+        )
 
 print("=" * 120)
 print("X8 COAXIAL — REVISED with corrected pricing and MN3508/MN4004 added")
 print("=" * 120)
 rows.sort(key=lambda r: -r["max_tw"])
-print(f"{'Motor':<18} {'Prop':<13} {'T1':>5} {'I':>5} {'MidT:W':>7} {'MaxT:W':>7} "
-      f"{'MotorsTot':>10} {'PropsTot':>9} {'TotalProp':>10} {'$/kg-thrust':>12}  Status")
+print(
+    f"{'Motor':<18} {'Prop':<13} {'T1':>5} {'I':>5} {'MidT:W':>7} {'MaxT:W':>7} "
+    f"{'MotorsTot':>10} {'PropsTot':>9} {'TotalProp':>10} {'$/kg-thrust':>12}  Status"
+)
 print("-" * 120)
 for r in rows:
     if not r["current_ok"]:
@@ -129,9 +165,11 @@ for r in rows:
         status = "ADEQUATE"
     else:
         status = "MARGINAL"
-    print(f"{r['motor']:<18} {r['prop']:<13} {r['T_motor']:>5} {r['I']:>4.1f}A "
-          f"{r['mid_tw']:>5.2f}:1 {r['max_tw']:>5.2f}:1 ${r['motors_cost']:>8} ${r['props_cost']:>7} "
-          f"${r['total_cost']:>8} ${r['cost_per_kg_thrust']:>9.0f}/kg  {status}")
+    print(
+        f"{r['motor']:<18} {r['prop']:<13} {r['T_motor']:>5} {r['I']:>4.1f}A "
+        f"{r['mid_tw']:>5.2f}:1 {r['max_tw']:>5.2f}:1 ${r['motors_cost']:>8} ${r['props_cost']:>7} "
+        f"${r['total_cost']:>8} ${r['cost_per_kg_thrust']:>9.0f}/kg  {status}"
+    )
 
 print()
 print("=" * 120)
@@ -140,9 +178,19 @@ print("=" * 120)
 safe = [r for r in rows if r["current_ok"]]
 safe.sort(key=lambda r: r["cost_per_kg_thrust"])
 for r in safe:
-    rating = "EXCELLENT" if r["max_tw"] >= 4.0 else "STRONG" if r["max_tw"] >= 3.0 else "ADEQUATE" if r["max_tw"] >= 2.5 else "MARGINAL"
-    print(f"  {r['motor']:<18} + {r['prop']:<13}  ${r['cost_per_kg_thrust']:>5.0f}/kg-thrust   "
-          f"max-T:W {r['max_tw']:.2f}:1  total ${r['total_cost']}  [{rating}]")
+    rating = (
+        "EXCELLENT"
+        if r["max_tw"] >= 4.0
+        else "STRONG"
+        if r["max_tw"] >= 3.0
+        else "ADEQUATE"
+        if r["max_tw"] >= 2.5
+        else "MARGINAL"
+    )
+    print(
+        f"  {r['motor']:<18} + {r['prop']:<13}  ${r['cost_per_kg_thrust']:>5.0f}/kg-thrust   "
+        f"max-T:W {r['max_tw']:.2f}:1  total ${r['total_cost']}  [{rating}]"
+    )
 
 print()
 print("=" * 120)
@@ -151,8 +199,11 @@ print("=" * 120)
 safe.sort(key=lambda r: -r["max_tw"])
 for r in safe[:8]:
     margin = r["max_tw"] - 2.5
-    print(f"  {r['motor']:<18} + {r['prop']:<13}  max-T:W {r['max_tw']:.2f}:1  "
-          f"(margin +{margin:.2f})  total ${r['total_cost']}  ${r['cost_per_kg_thrust']:.0f}/kg-thrust")
+    print(
+        f"  {r['motor']:<18} + {r['prop']:<13}  max-T:W {r['max_tw']:.2f}:1  "
+        f"(margin +{margin:.2f})  total ${r['total_cost']}  "
+        f"${r['cost_per_kg_thrust']:.0f}/kg-thrust"
+    )
 
 # Cost delta vs the BOM baseline
 print()
@@ -160,7 +211,10 @@ print("=" * 120)
 print("COST DELTA vs BOM BASELINE (MN3110 KV700 + 12x4)")
 print("=" * 120)
 baseline = next(r for r in rows if r["motor"] == "MN3110 KV700" and r["prop"] == "12x4 CF")
-print(f"Baseline: {baseline['motor']} + {baseline['prop']} -> ${baseline['total_cost']}, max-T:W {baseline['max_tw']:.2f}")
+print(
+    f"Baseline: {baseline['motor']} + {baseline['prop']} -> "
+    f"${baseline['total_cost']}, max-T:W {baseline['max_tw']:.2f}"
+)
 print()
 for r in safe:
     delta = r["total_cost"] - baseline["total_cost"]
@@ -168,5 +222,7 @@ for r in safe:
     if r["motor"] == baseline["motor"] and r["prop"] == baseline["prop"]:
         continue
     sign = "+" if delta > 0 else ""
-    print(f"  {r['motor']:<18} + {r['prop']:<13}  cost delta: {sign}${delta:>4}  "
-          f"T:W gain: +{tw_gain:.2f}  -> ${abs(delta)/max(tw_gain,0.01):.0f} per +0.1 T:W")
+    print(
+        f"  {r['motor']:<18} + {r['prop']:<13}  cost delta: {sign}${delta:>4}  "
+        f"T:W gain: +{tw_gain:.2f}  -> ${abs(delta)/max(tw_gain,0.01):.0f} per +0.1 T:W"
+    )
