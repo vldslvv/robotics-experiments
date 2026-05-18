@@ -34,7 +34,7 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["robotics_experiments*"]
-exclude = ["ros2_ws*", "scans*", "docs*", "build_scripts*", "scripts*"]
+exclude = ["ros2_ws*", "scans*", "docs*", "scripts*"]
 
 [tool.setuptools.package-data]
 robotics_experiments = ["config/conf/*.yaml", "config/conf/*/*.yaml"]
