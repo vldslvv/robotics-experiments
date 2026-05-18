@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+usd = [
+  "usd-core>=25.11,<27",
+]
+
 dev = [
   "debugpy",
   "pre-commit==4.5.0",
@@ -35,9 +39,6 @@ package-dir = { "" = "src" }
 where = ["src"]
 include = ["robotics_experiments*"]
 exclude = ["ros2_ws*", "scans*", "docs*", "scripts*"]
-
-[tool.setuptools.package-data]
-robotics_experiments = ["config/conf/*.yaml", "config/conf/*/*.yaml"]
 
 [tool.ruff]
 line-length = 100

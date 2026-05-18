@@ -3,7 +3,7 @@ defaults:
 
 switch_usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/LightSwitch.usd
 lamp_usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/Lamp.usd
-num_switches: 5
+num_switches: 10
 press_threshold: 0.01
 min_spawn_dist: 0.5
 max_spawn_retries: 100

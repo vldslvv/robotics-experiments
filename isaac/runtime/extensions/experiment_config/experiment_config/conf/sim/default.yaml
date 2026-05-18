@@ -1,7 +1,0 @@
-defaults:
-  - base_sim
-
-physics_hz: 500.0
-rendering_hz: 60.0
-solver_type: TGS
-gravity: [0.0, 0.0, -9.81]

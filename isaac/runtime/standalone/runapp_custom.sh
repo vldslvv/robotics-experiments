@@ -13,7 +13,8 @@ DRONE_SPAWNER_EXT="drone_spawner"
 PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
 
 # Hydra-config overrides are picked up by the experiment_config extension.
-# Set EXPERIMENT_CONFIG_DIR to point at an alternative conf/ tree;
+# The default tree is /isaac-sim/proj/configs/experiment.
+# Set EXPERIMENT_CONFIG_DIR to point at an alternative config tree;
 # EXPERIMENT_CONFIG_NAME selects which top-level yaml to compose;
 # EXPERIMENT_CONFIG_OVERRIDES is a space-separated list of Hydra dot-list
 # overrides (e.g. "switches.num_switches=10 sim.physics_hz=200").

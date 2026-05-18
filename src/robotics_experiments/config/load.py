@@ -11,7 +11,7 @@ from .schemas import EnvConfig, register_schemas
 
 _CACHED: Optional[EnvConfig] = None
 
-_DEFAULT_CONF_DIR = Path(__file__).parent / "conf"
+_DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs" / "experiment"
 _DEFAULT_CONFIG_NAME = "config"
 
 
@@ -41,10 +41,10 @@ def get_config() -> EnvConfig:
     """Return the process-wide composed :class:`EnvConfig`, loading once.
 
     The first call composes Hydra against the YAML tree resolved from
-    ``EXPERIMENT_CONFIG_DIR`` (default: the ``conf/`` directory shipped with
-    this extension) and caches the resulting dataclass. Subsequent calls
-    return the cached instance - safe to call from any extension's
-    ``on_startup`` and from per-step hot paths.
+    ``EXPERIMENT_CONFIG_DIR`` (default: the repository's
+    ``configs/experiment`` directory) and caches the resulting dataclass.
+    Subsequent calls return the cached instance - safe to call from any
+    extension's ``on_startup`` and from per-step hot paths.
 
     Returns:
         The composed ``EnvConfig`` instance.
