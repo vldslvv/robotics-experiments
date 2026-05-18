@@ -28,7 +28,7 @@ ISAAC_ZSH_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/zsh
 
 # These paths has to be relative to be inside docker build context
 ISAAC_ASSETS_DIR       = isaac/assets
-ISAAC_SCRIPTS_DIR      = isaac/scripts
+ISAAC_DOCKER_DIR       = isaac/docker
 
 # ROS 2 image / container (humble is the other option)
 ROS_DISTRO         = jazzy
@@ -88,7 +88,7 @@ build-isaac:
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
 		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
-		--build-arg SCRIPTS_DIR="$(ISAAC_SCRIPTS_DIR)" \
+		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
 		-f Dockerfile \

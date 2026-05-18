@@ -11,8 +11,8 @@ Do not introduce new tooling unless explicitly requested.
 
 ## Repository layout
 - isaac/isaac-sim/    -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
-- isaac/scripts/      -> Custom scripts to run inside Isaac Sim container.
-- isaac/environments/ -> Isaac Sim environments and assets.
+- isaac/docker/       -> Isaac Sim Docker build/init inputs.
+- isaac/runtime/      -> Isaac Sim runtime scripts, extensions, and environments.
 - ros2/ros2_ws/       -> ROS 2 workspace (colcon). Used to persist changes made inside ROS 2 container
 - docs/               -> Design and usage docs.
 - src/                -> Code of the project.
@@ -45,4 +45,3 @@ Avoid calling ROS2, it's meant to be used in dockerized environment
 
 ## When uncertain
 Don't do anything, ask for instructions
-

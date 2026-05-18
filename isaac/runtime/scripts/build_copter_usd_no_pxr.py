@@ -1,7 +1,7 @@
 # build_drone_usd.py — config-driven drone USD generator for Isaac Sim
 #
 # Run inside isaac-sim docker:
-#   /isaac-sim/python.sh proj/robotics-experiments/isaac_scripts/build_copter_usd_no_pxr.py [config_name]
+#   /isaac-sim/python.sh /isaac-sim/proj/isaac/runtime/scripts/build_copter_usd_no_pxr.py [config_name]
 #
 # Available configs: quadcopter_500mm (default), hexacopter_s550
 #

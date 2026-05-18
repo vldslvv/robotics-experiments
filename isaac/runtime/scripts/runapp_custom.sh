@@ -2,7 +2,7 @@
 
 # This script runs inside isaac sim docker, therefore
 # scene path depends on the mounts used
-EXT_FOLDER="/isaac-sim/proj/src/robotics-experiments/isaac_extensions"
+EXT_FOLDER="/isaac-sim/proj/isaac/runtime/extensions"
 SCENE_PATH="/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 OPEN_STAGE_SCRIPT="open_stage.py"
 EXPERIMENT_CONFIG_EXT="experiment_config"
