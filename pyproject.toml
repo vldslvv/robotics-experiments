@@ -7,7 +7,7 @@ name = "robotics-experiments"
 version = "0.0.0"
 description = "Robotics experiments integrating Isaac Sim and ROS 2."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Unknown" }]
 
@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "debugpy",
+  "pytest",
   "pre-commit==4.5.0",
   "ruff==0.6.9",
   "mypy==1.11.2",
@@ -67,6 +68,11 @@ override-dependencies = [
   "pywin32==306; sys_platform == 'win32'",
 ]
 
+[tool.uv.sources]
+isaacsim = { index = "nvidia" }
+isaacsim-core = { index = "nvidia" }
+
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com/"
+explicit = true
