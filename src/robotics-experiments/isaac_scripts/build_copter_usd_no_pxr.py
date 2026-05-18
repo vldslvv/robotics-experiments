@@ -31,7 +31,7 @@ simulation_app = SimulationApp({"headless": True, "hide_ui": True})
 import omni.usd
 from pxr import Usd, UsdGeom, UsdPhysics, Gf, Sdf
 
-ASSETS_DIR = "/isaac-sim/proj/assets/LightSwitchWarehouse"
+ASSETS_DIR = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse"
 
 # Pusher actuator tuning (drive parameters, not part geometry).
 PUSHER_TRAVEL = 0.015

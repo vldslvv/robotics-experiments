@@ -34,7 +34,7 @@ class DroneConfig:
         spawn_volume_half_extents: Per-axis half-extents of the spawn volume.
     """
 
-    usd_path: str = "/isaac-sim/proj/assets/LightSwitchWarehouse/hexacopter_s550.usda"
+    usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda"
     prim_name: str = "DroneSpawned"
     spawn_volume_prim_name: str = "DroneSpawnVolume"
     spawn_volume_center: Tuple[float, float, float] = (0.0, 0.0, 1.0)
@@ -81,8 +81,8 @@ class LightSwitchConfig:
         spawn_bounds: Candidate axis-aligned regions used to sample positions.
     """
 
-    switch_usd_path: str = "/isaac-sim/proj/assets/LightSwitchWarehouse/LightSwitch.usd"
-    lamp_usd_path: str = "/isaac-sim/proj/assets/LightSwitchWarehouse/Lamp.usd"
+    switch_usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/LightSwitch.usd"
+    lamp_usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/Lamp.usd"
     num_switches: int = 5
     press_threshold: float = 0.01
     min_spawn_dist: float = 0.5

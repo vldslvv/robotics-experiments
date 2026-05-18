@@ -57,7 +57,7 @@ from isaaclab.sim import (
 
 # Mirrored from build_copter_usd_without_pxr.py rather than imported because
 # importing that module triggers SimulationApp startup at Python import time.
-ASSETS_DIR = "/isaac-sim/proj/assets/LightSwitchWarehouse"
+ASSETS_DIR = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse"
 
 # Mirrored from the same file's pusher constants. Keep in sync if you retune
 # the USD defaults; cfg values here override the USD at spawn time, so this is

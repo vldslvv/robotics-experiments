@@ -111,14 +111,9 @@ EOF
 ENV SHELL=/usr/bin/zsh
 RUN chmod 755 /usr/local/share/zsh
 
-# Can be skipped
-FROM zsh AS claude
-
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
 # If neovim is not needed, this step can be skipped
-FROM claude AS nvim
+FROM zsh AS nvim
 SHELL ["/bin/bash", "-lc"]
 
 RUN apt-get update && \
@@ -161,7 +156,18 @@ RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc && \
   echo 'set -sg escape-time 0' >> ${HOME}/.tmux.conf
 
 
-FROM nvim AS isaac-sim
+FROM nvim AS ai-tools
+SHELL ["/bin/bash", "-lc"]
+
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+
+RUN export NVM_DIR="${HOME}/.nvm" && \
+    source "$NVM_DIR/nvm.sh" && \
+    npm install -g @openai/codex
+
+
+FROM ai-tools AS isaac-sim
 
 # Fix for wrong characters being displayed in Neovim, and possible other issues
 RUN apt-get update && apt-get install -y --no-install-recommends locales \
@@ -177,8 +183,8 @@ WORKDIR /isaac-sim
 # The problem being solved:
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
-RUN echo "alias pyvim='source /isaac-sim/proj/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
-RUN echo "alias pyvim='source /isaac-sim/proj/scripts/set_python_env.sh && nvim'" >> ${HOME}/.zshrc
+RUN echo "alias pyvim='source /isaac-sim/proj/isaac/scripts/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
+RUN echo "alias pyvim='source /isaac-sim/proj/isaac/scripts/set_python_env.sh && nvim'" >> ${HOME}/.zshrc
 
 # This script will populate symlinks for editor's LSP to work
 ARG SCRIPTS_DIR
@@ -189,7 +195,7 @@ RUN chmod +x make_symlinks.sh
 ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
 CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
 
-FROM nvim AS ros-base
+FROM ai-tools AS ros-base
 
 ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
