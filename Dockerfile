@@ -153,6 +153,8 @@ RUN export NVM_DIR="${HOME}/.nvm" && \
 RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc && \
   echo 'set -g default-terminal "tmux-256color"' >> ${HOME}/.tmux.conf && \
   echo 'set -ga terminal-overrides ",*:Tc"' >> ${HOME}/.tmux.conf && \
+  echo 'set -g mouse on' >> ${HOME}/.tmux.conf && \
+  echo 'set -g history-limit 50000' >> ${HOME}/.tmux.conf && \
   echo 'set -sg escape-time 0' >> ${HOME}/.tmux.conf
 
 
@@ -277,6 +279,13 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
       lsb-release sudo gosu \
       tmux ranger less vim \
  && rm -rf /var/lib/apt/lists/*
+
+RUN printf '%s\n' \
+      'set -g default-terminal "tmux-256color"' \
+      'set -g mouse on' \
+      'set -g history-limit 50000' \
+      'set -sg escape-time 0' \
+      > /root/.tmux.conf
 
 RUN pip3 install --no-cache-dir \
       kconfiglib empy==3.3.4 pyros-genmsg
