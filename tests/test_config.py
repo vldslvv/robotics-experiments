@@ -1,8 +1,18 @@
+import shutil
+from pathlib import Path
+
 import pytest
 
 
-def _write_yaml(path, lines):
-    path.write_text("\n".join([*lines, ""]), encoding="utf-8")
+_CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs" / "experiment"
+
+
+def _group_defaults(group_name):
+    from omegaconf import OmegaConf
+
+    group_config = OmegaConf.load(_CONFIG_DIR / group_name / "default.yaml")
+    group_config.pop("defaults", None)
+    return group_config
 
 
 def test_default_config_loads_from_root_experiment_config():
@@ -13,10 +23,19 @@ def test_default_config_loads_from_root_experiment_config():
     reset_config()
 
     config = get_config()
+    expected_sim = _group_defaults("sim")
+    expected_drone = _group_defaults("drone")
+    expected_switches = _group_defaults("switches")
+    expected_px4 = _group_defaults("px4")
 
     assert isinstance(config, EnvConfig)
-    assert config.sim.physics_hz > 0
-    assert config.drone.prim_name
+    assert config.sim.physics_hz == expected_sim.physics_hz
+    assert config.sim.rendering_hz == expected_sim.rendering_hz
+    assert config.sim.solver_type == expected_sim.solver_type
+    assert config.sim.gravity == expected_sim.gravity
+    assert config.drone.prim_name == expected_drone.prim_name
+    assert config.switches.num_switches == expected_switches.num_switches
+    assert config.px4.connection_baseport == expected_px4.connection_baseport
     reset_config()
 
 
@@ -26,41 +45,13 @@ def test_experiment_config_dir_override_loads(tmp_path, monkeypatch):
     from robotics_experiments.config import EnvConfig, get_config, reset_config
 
     conf_dir = tmp_path / "experiment"
-    conf_dir.mkdir()
-    (conf_dir / "sim").mkdir()
-    (conf_dir / "drone").mkdir()
-    (conf_dir / "switches").mkdir()
-    (conf_dir / "px4").mkdir()
-    _write_yaml(
-        conf_dir / "config.yaml",
-        [
-            "defaults:",
-            "  - base_env",
-            "  - sim: default",
-            "  - drone: default",
-            "  - switches: default",
-            "  - px4: default",
-            "  - _self_",
-        ],
-    )
-    _write_yaml(
-        conf_dir / "sim" / "default.yaml",
-        ["defaults:", "  - base_sim", "  - _self_", "", "physics_hz: 123.0"],
-    )
-    _write_yaml(
-        conf_dir / "drone" / "default.yaml",
-        ["defaults:", "  - base_drone", "  - _self_", "", "prim_name: OverrideDrone"],
-    )
-    _write_yaml(
-        conf_dir / "switches" / "default.yaml",
-        ["defaults:", "  - base_switches", "  - _self_"],
-    )
-    _write_yaml(
-        conf_dir / "px4" / "default.yaml",
-        ["defaults:", "  - base_px4", "  - _self_"],
-    )
+    shutil.copytree(_CONFIG_DIR, conf_dir)
 
     monkeypatch.setenv("EXPERIMENT_CONFIG_DIR", str(conf_dir))
+    monkeypatch.setenv(
+        "EXPERIMENT_CONFIG_OVERRIDES",
+        "sim.physics_hz=123.0 drone.prim_name=OverrideDrone switches.num_switches=3",
+    )
     reset_config()
 
     config = get_config()
@@ -68,4 +59,5 @@ def test_experiment_config_dir_override_loads(tmp_path, monkeypatch):
     assert isinstance(config, EnvConfig)
     assert config.sim.physics_hz == 123.0
     assert config.drone.prim_name == "OverrideDrone"
+    assert config.switches.num_switches == 3
     reset_config()

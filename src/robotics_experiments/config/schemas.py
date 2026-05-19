@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple
 
 from hydra.core.config_store import ConfigStore
@@ -15,10 +15,10 @@ class SimSettings:
         gravity: World gravity vector in m/s^2 as ``(gx, gy, gz)``.
     """
 
-    physics_hz: float = 500.0
-    rendering_hz: float = 60.0
-    solver_type: str = "TGS"
-    gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81)
+    physics_hz: float
+    rendering_hz: float
+    solver_type: str
+    gravity: Tuple[float, float, float]
 
 
 @dataclass
@@ -34,11 +34,11 @@ class DroneConfig:
         spawn_volume_half_extents: Per-axis half-extents of the spawn volume.
     """
 
-    usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda"
-    prim_name: str = "DroneSpawned"
-    spawn_volume_prim_name: str = "DroneSpawnVolume"
-    spawn_volume_center: Tuple[float, float, float] = (0.0, 0.0, 1.0)
-    spawn_volume_half_extents: Tuple[float, float, float] = (2.0, 2.0, 1.0)
+    usd_path: str
+    prim_name: str
+    spawn_volume_prim_name: str
+    spawn_volume_center: Tuple[float, float, float]
+    spawn_volume_half_extents: Tuple[float, float, float]
 
 
 @dataclass
@@ -53,17 +53,8 @@ class BoundingBox:
         max: Upper corner ``(x, y, z)`` in world units.
     """
 
-    min: Tuple[float, float, float] = (0.0, 0.0, 0.0)
-    max: Tuple[float, float, float] = (1.0, 1.0, 1.0)
-
-
-def _default_bounds() -> List[BoundingBox]:
-    """Return the default list of spawn volumes for switches.
-
-    Returns:
-        A single axis-aligned region along the warehouse wall at y=17.99 m.
-    """
-    return [BoundingBox(min=(-3.0, 17.99, 0.5), max=(8.0, 17.99, 2.7))]
+    min: Tuple[float, float, float]
+    max: Tuple[float, float, float]
 
 
 @dataclass
@@ -81,14 +72,14 @@ class LightSwitchConfig:
         spawn_bounds: Candidate axis-aligned regions used to sample positions.
     """
 
-    switch_usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/LightSwitch.usd"
-    lamp_usd_path: str = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse/Lamp.usd"
-    num_switches: int = 5
-    press_threshold: float = 0.01
-    min_spawn_dist: float = 0.5
-    max_spawn_retries: int = 100
-    lamp_on_intensity: float = 5000.0
-    spawn_bounds: List[BoundingBox] = field(default_factory=_default_bounds)
+    switch_usd_path: str
+    lamp_usd_path: str
+    num_switches: int
+    press_threshold: float
+    min_spawn_dist: float
+    max_spawn_retries: int
+    lamp_on_intensity: float
+    spawn_bounds: List[BoundingBox]
 
 
 @dataclass
@@ -129,23 +120,23 @@ class Px4BridgeConfig:
             built-in default (Zurich).
     """
 
-    enabled: bool = False
-    articulation_path: str = ""
-    rotor_link_paths: List[str] = field(default_factory=list)
-    num_rotors: int = 4
-    max_rotor_force_n: float = 8.0
-    connection_type: str = "tcpin"
-    connection_ip: str = "localhost"
-    connection_baseport: int = 4560
-    vehicle_id: int = 0
-    px4_autolaunch: bool = False
-    px4_dir: str = ""
-    px4_vehicle_model: str = "gazebo-classic_iris"
-    lockstep_timeout_s: float = 0.1
-    gps_send_rate_hz: float = 5.0
-    home_lat_deg: float = 47.3977
-    home_lon_deg: float = 8.5456
-    home_alt_m: float = 488.0
+    enabled: bool
+    articulation_path: str
+    rotor_link_paths: List[str]
+    num_rotors: int
+    max_rotor_force_n: float
+    connection_type: str
+    connection_ip: str
+    connection_baseport: int
+    vehicle_id: int
+    px4_autolaunch: bool
+    px4_dir: str
+    px4_vehicle_model: str
+    lockstep_timeout_s: float
+    gps_send_rate_hz: float
+    home_lat_deg: float
+    home_lon_deg: float
+    home_alt_m: float
 
 
 @dataclass
@@ -159,10 +150,10 @@ class EnvConfig:
         px4: PX4 SITL bridge configuration.
     """
 
-    sim: SimSettings = field(default_factory=SimSettings)
-    drone: DroneConfig = field(default_factory=DroneConfig)
-    switches: LightSwitchConfig = field(default_factory=LightSwitchConfig)
-    px4: Px4BridgeConfig = field(default_factory=Px4BridgeConfig)
+    sim: SimSettings
+    drone: DroneConfig
+    switches: LightSwitchConfig
+    px4: Px4BridgeConfig
 
 
 def register_schemas() -> None:

@@ -74,6 +74,14 @@ no_implicit_optional = true
 addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["src"]
+norecursedirs = [
+  ".build",
+  ".cache",
+  ".venv",
+  "isaac",
+  "ros",
+  "px4",
+]
 
 [tool.uv]
 override-dependencies = [
