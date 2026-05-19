@@ -3,6 +3,16 @@ from typing import List, Tuple
 
 from hydra.core.config_store import ConfigStore
 
+__all__ = [
+    "SimSettings",
+    "DroneConfig",
+    "BoundingBox",
+    "LightSwitchConfig",
+    "Px4BridgeConfig",
+    "EnvConfig",
+    "register_schemas",
+]
+
 
 @dataclass
 class SimSettings:

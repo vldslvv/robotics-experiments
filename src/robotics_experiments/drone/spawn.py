@@ -8,54 +8,7 @@ from pxr import Gf, Usd, UsdGeom
 from robotics_experiments.config import DroneConfig
 from robotics_experiments.config import get_config as _get_experiment_config
 
-
-def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
-    """Spawn (or re-pose) the drone prim at a random pose within the spawn volume.
-
-    Adds the drone's USD asset as a reference under the stage default prim on
-    first call, ensures a guide cube exists to visualize the spawn volume, then
-    assigns a uniformly sampled translation and yaw.
-
-    Args:
-        stage: Target USD stage. Must be non-None and writable.
-        config: Drone spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-    """
-    if config is None:
-        config = _get_experiment_config().drone
-    parent = _resolve_parent(stage)
-    _ensure_guide_cube(stage, parent, config)
-
-    drone_path = f"{parent}/{config.prim_name}"
-    if not stage.GetPrimAtPath(drone_path).IsValid():
-        add_reference_to_stage(config.usd_path, drone_path)
-
-    pos, yaw = _random_pose(config)
-    _apply_pose(stage, drone_path, pos, yaw)
-    carb.log_info(f"[DroneSpawner] Spawned at pos={pos} yaw={math.degrees(yaw):.1f}deg")
-
-
-def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
-    """Remove the drone prim from the stage if present.
-
-    Safe to call when the stage is ``None`` or the prim does not exist; the
-    guide cube is intentionally left in place.
-
-    Args:
-        stage: USD stage to mutate, or ``None`` for a no-op.
-        config: Drone spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-    """
-    if stage is None:
-        return
-    if config is None:
-        config = _get_experiment_config().drone
-    default_prim = stage.GetDefaultPrim()
-    parent = default_prim.GetPath().pathString if default_prim else "/World"
-    drone_path = f"{parent}/{config.prim_name}"
-    if stage.GetPrimAtPath(drone_path).IsValid():
-        stage.RemovePrim(drone_path)
-        carb.log_info(f"[DroneSpawner] Despawned {drone_path}")
+__all__ = ["spawn_drone", "despawn_drone"]
 
 
 def _resolve_parent(stage: Usd.Stage) -> str:
@@ -141,3 +94,52 @@ def _apply_pose(stage: Usd.Stage, prim_path: str, pos, yaw: float) -> None:
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*pos))
     xform.AddRotateZOp().Set(math.degrees(yaw))
+
+
+def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
+    """Spawn (or re-pose) the drone prim at a random pose within the spawn volume.
+
+    Adds the drone's USD asset as a reference under the stage default prim on
+    first call, ensures a guide cube exists to visualize the spawn volume, then
+    assigns a uniformly sampled translation and yaw.
+
+    Args:
+        stage: Target USD stage. Must be non-None and writable.
+        config: Drone spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
+    """
+    if config is None:
+        config = _get_experiment_config().drone
+    parent = _resolve_parent(stage)
+    _ensure_guide_cube(stage, parent, config)
+
+    drone_path = f"{parent}/{config.prim_name}"
+    if not stage.GetPrimAtPath(drone_path).IsValid():
+        add_reference_to_stage(config.usd_path, drone_path)
+
+    pos, yaw = _random_pose(config)
+    _apply_pose(stage, drone_path, pos, yaw)
+    carb.log_info(f"[DroneSpawner] Spawned at pos={pos} yaw={math.degrees(yaw):.1f}deg")
+
+
+def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
+    """Remove the drone prim from the stage if present.
+
+    Safe to call when the stage is ``None`` or the prim does not exist; the
+    guide cube is intentionally left in place.
+
+    Args:
+        stage: USD stage to mutate, or ``None`` for a no-op.
+        config: Drone spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
+    """
+    if stage is None:
+        return
+    if config is None:
+        config = _get_experiment_config().drone
+    default_prim = stage.GetDefaultPrim()
+    parent = default_prim.GetPath().pathString if default_prim else "/World"
+    drone_path = f"{parent}/{config.prim_name}"
+    if stage.GetPrimAtPath(drone_path).IsValid():
+        stage.RemovePrim(drone_path)
+        carb.log_info(f"[DroneSpawner] Despawned {drone_path}")

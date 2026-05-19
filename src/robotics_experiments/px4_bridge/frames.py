@@ -38,20 +38,24 @@ DEFAULT_HOME_LAT_DEG: float = 47.3977
 DEFAULT_HOME_LON_DEG: float = 8.5456
 DEFAULT_HOME_ALT_M: float = 488.0
 
+__all__ = [
+    "GRAVITY_M_S2",
+    "DEFAULT_MAG_NED_GAUSS",
+    "DEFAULT_HOME_LAT_DEG",
+    "DEFAULT_HOME_LON_DEG",
+    "DEFAULT_HOME_ALT_M",
+    "quat_wxyz_to_xyzw",
+    "quat_xyzw_to_wxyz",
+    "rotate_vector_wxyz",
+    "world_enu_to_body_flu",
+    "specific_force_body_flu",
+    "magnetometer_body_flu",
+    "synth_gps_from_enu",
+    "synth_barometer",
+]
+
 
 # ---- Quaternion helpers -----------------------------------------------------
-
-
-def quat_wxyz_to_xyzw(q_wxyz: np.ndarray) -> np.ndarray:
-    """Reorder a quaternion from ``[w, x, y, z]`` to ``[x, y, z, w]``."""
-    q = np.asarray(q_wxyz, dtype=np.float64)
-    return np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
-
-
-def quat_xyzw_to_wxyz(q_xyzw: np.ndarray) -> np.ndarray:
-    """Reorder a quaternion from ``[x, y, z, w]`` to ``[w, x, y, z]``."""
-    q = np.asarray(q_xyzw, dtype=np.float64)
-    return np.array([q[3], q[0], q[1], q[2]], dtype=np.float64)
 
 
 def _normalize_quat_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
@@ -79,6 +83,18 @@ def _quat_multiply_wxyz(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> np.ndarray:
         ],
         dtype=np.float64,
     )
+
+
+def quat_wxyz_to_xyzw(q_wxyz: np.ndarray) -> np.ndarray:
+    """Reorder a quaternion from ``[w, x, y, z]`` to ``[x, y, z, w]``."""
+    q = np.asarray(q_wxyz, dtype=np.float64)
+    return np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
+
+
+def quat_xyzw_to_wxyz(q_xyzw: np.ndarray) -> np.ndarray:
+    """Reorder a quaternion from ``[x, y, z, w]`` to ``[w, x, y, z]``."""
+    q = np.asarray(q_xyzw, dtype=np.float64)
+    return np.array([q[3], q[0], q[1], q[2]], dtype=np.float64)
 
 
 def rotate_vector_wxyz(q_wxyz: np.ndarray, vec: np.ndarray) -> np.ndarray:

@@ -9,72 +9,7 @@ from robotics_experiments.config import BoundingBox, LightSwitchConfig
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.environment.switches import SwitchState
 
-
-def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) -> List[SwitchState]:
-    """Spawn switches and their paired lamps at randomly sampled positions.
-
-    Args:
-        stage: USD stage to mutate.
-        config: Spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-
-    Returns:
-        One :class:`SwitchState` per successfully spawned switch, pairing the
-        switch prim path with its lamp prim path.
-    """
-    if config is None:
-        config = _get_experiment_config().switches
-    positions = _sample_positions(
-        config.num_switches,
-        [_to_range(b) for b in config.spawn_bounds],
-        config.min_spawn_dist,
-        config.max_spawn_retries,
-    )
-    switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
-    lamp_paths = _spawn_lamps(stage, config.lamp_usd_path, positions)
-    return [
-        SwitchState(prim_path=sp, lamp_prim_path=lp)
-        for sp, lp in zip(switch_paths, lamp_paths, strict=False)
-    ]
-
-
-def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
-    """Remove all switch and lamp prims tracked by ``switch_state``.
-
-    Safe to call when ``stage`` is ``None`` or prims have already been
-    removed; missing prims are skipped silently.
-
-    Args:
-        stage: USD stage to mutate, or ``None`` for a no-op.
-        switch_state: Per-switch state entries whose prims should be removed.
-    """
-    if stage is None:
-        return
-    for sw in switch_state:
-        for path in (sw.prim_path, sw.lamp_prim_path):
-            if not path:
-                continue
-            prim = stage.GetPrimAtPath(path)
-            if prim.IsValid():
-                stage.RemovePrim(Sdf.Path(path))
-
-
-def validate_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> bool:
-    """Verify that every tracked switch prim resolves on the stage.
-
-    Args:
-        stage: USD stage to inspect.
-        switch_state: Per-switch state entries to validate.
-
-    Returns:
-        ``True`` if all switch prims are valid, ``False`` if any is missing.
-    """
-    for sw in switch_state:
-        prim = stage.GetPrimAtPath(sw.prim_path)
-        if not prim.IsValid():
-            carb.log_error(f"[LightSwitch] Prim not found at '{sw.prim_path}'.")
-            return False
-    return True
+__all__ = ["spawn_switches", "despawn_switches", "validate_switches"]
 
 
 def _to_range(box: BoundingBox) -> Gf.Range3d:
@@ -234,3 +169,70 @@ def _spawn_lamps(
 
     carb.log_info(f"[LightSwitch] Spawned {len(prim_paths)} lamps.")
     return prim_paths
+
+
+def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) -> List[SwitchState]:
+    """Spawn switches and their paired lamps at randomly sampled positions.
+
+    Args:
+        stage: USD stage to mutate.
+        config: Spawner configuration; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
+
+    Returns:
+        One :class:`SwitchState` per successfully spawned switch, pairing the
+        switch prim path with its lamp prim path.
+    """
+    if config is None:
+        config = _get_experiment_config().switches
+    positions = _sample_positions(
+        config.num_switches,
+        [_to_range(b) for b in config.spawn_bounds],
+        config.min_spawn_dist,
+        config.max_spawn_retries,
+    )
+    switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
+    lamp_paths = _spawn_lamps(stage, config.lamp_usd_path, positions)
+    return [
+        SwitchState(prim_path=sp, lamp_prim_path=lp)
+        for sp, lp in zip(switch_paths, lamp_paths, strict=False)
+    ]
+
+
+def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
+    """Remove all switch and lamp prims tracked by ``switch_state``.
+
+    Safe to call when ``stage`` is ``None`` or prims have already been
+    removed; missing prims are skipped silently.
+
+    Args:
+        stage: USD stage to mutate, or ``None`` for a no-op.
+        switch_state: Per-switch state entries whose prims should be removed.
+    """
+    if stage is None:
+        return
+    for sw in switch_state:
+        for path in (sw.prim_path, sw.lamp_prim_path):
+            if not path:
+                continue
+            prim = stage.GetPrimAtPath(path)
+            if prim.IsValid():
+                stage.RemovePrim(Sdf.Path(path))
+
+
+def validate_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> bool:
+    """Verify that every tracked switch prim resolves on the stage.
+
+    Args:
+        stage: USD stage to inspect.
+        switch_state: Per-switch state entries to validate.
+
+    Returns:
+        ``True`` if all switch prims are valid, ``False`` if any is missing.
+    """
+    for sw in switch_state:
+        prim = stage.GetPrimAtPath(sw.prim_path)
+        if not prim.IsValid():
+            carb.log_error(f"[LightSwitch] Prim not found at '{sw.prim_path}'.")
+            return False
+    return True

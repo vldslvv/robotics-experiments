@@ -9,6 +9,8 @@ from omegaconf import OmegaConf
 
 from .schemas import EnvConfig, register_schemas
 
+__all__ = ["get_config", "reset_config"]
+
 _CACHED: Optional[EnvConfig] = None
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs" / "experiment"

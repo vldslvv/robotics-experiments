@@ -22,6 +22,13 @@ from . import frames
 from .flight_stack import AbstractFlightStackBridge
 from .vehicle_state import VehicleState
 
+__all__ = ["Px4MavlinkPort"]
+
+
+def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
+    vec = np.asarray(vec_flu, dtype=np.float64)
+    return np.array([vec[0], -vec[1], -vec[2]], dtype=np.float64)
+
 
 class Px4MavlinkPort(AbstractFlightStackBridge):
     """PX4 SITL adapter over Pegasus' ``PX4MavlinkBackend``.
@@ -284,8 +291,3 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 # Hard timeout - let upstream return zeros; do not hang.
                 self._is_connected = False
                 return False
-
-
-def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
-    vec = np.asarray(vec_flu, dtype=np.float64)
-    return np.array([vec[0], -vec[1], -vec[2]], dtype=np.float64)

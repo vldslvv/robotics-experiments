@@ -8,6 +8,38 @@ from robotics_experiments.config import LightSwitchConfig
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
+__all__ = ["init_articulations", "step_switches"]
+
+
+def _set_lamp(
+    stage: Usd.Stage,
+    lamp_prim_path: str,
+    on: bool,
+    intensity: float,
+) -> None:
+    """Drive both the ``SphereLight`` intensity and the shader emission of a lamp.
+
+    The lamp is rendered via an emissive shader as well as a light source;
+    keeping the two in sync is what makes the lamp visibly switch on and off.
+
+    Args:
+        stage: USD stage that owns the lamp.
+        lamp_prim_path: Absolute path to the lamp root prim.
+        on: ``True`` to enable the lamp, ``False`` to turn it off.
+        intensity: Light intensity used when ``on``; ignored when off.
+    """
+    light_prim = stage.GetPrimAtPath(f"{lamp_prim_path}/Lamp/SphereLight")
+    if light_prim.IsValid():
+        UsdLux.SphereLight(light_prim).GetIntensityAttr().Set(intensity if on else 0.0)
+
+    shader_prim = stage.GetPrimAtPath(f"{lamp_prim_path}/Lamp/Mesh/Looks/OmniPBR/Shader")
+    if shader_prim.IsValid():
+        shader = UsdShade.Shader(shader_prim)
+        shader.CreateInput("emissive_intensity", Sdf.ValueTypeNames.Float).Set(
+            intensity if on else 0.0
+        )
+        shader.CreateInput("enable_emission", Sdf.ValueTypeNames.Bool).Set(on)
+
 
 def init_articulations(switch_state: List[SwitchState]) -> bool:
     """Initialize PhysX articulations for each tracked switch.
@@ -82,33 +114,3 @@ def step_switches(
             _set_lamp(stage, sw.lamp_prim_path, sw.state, config.lamp_on_intensity)
             if on_toggle is not None:
                 on_toggle(i, sw.state)
-
-
-def _set_lamp(
-    stage: Usd.Stage,
-    lamp_prim_path: str,
-    on: bool,
-    intensity: float,
-) -> None:
-    """Drive both the ``SphereLight`` intensity and the shader emission of a lamp.
-
-    The lamp is rendered via an emissive shader as well as a light source;
-    keeping the two in sync is what makes the lamp visibly switch on and off.
-
-    Args:
-        stage: USD stage that owns the lamp.
-        lamp_prim_path: Absolute path to the lamp root prim.
-        on: ``True`` to enable the lamp, ``False`` to turn it off.
-        intensity: Light intensity used when ``on``; ignored when off.
-    """
-    light_prim = stage.GetPrimAtPath(f"{lamp_prim_path}/Lamp/SphereLight")
-    if light_prim.IsValid():
-        UsdLux.SphereLight(light_prim).GetIntensityAttr().Set(intensity if on else 0.0)
-
-    shader_prim = stage.GetPrimAtPath(f"{lamp_prim_path}/Lamp/Mesh/Looks/OmniPBR/Shader")
-    if shader_prim.IsValid():
-        shader = UsdShade.Shader(shader_prim)
-        shader.CreateInput("emissive_intensity", Sdf.ValueTypeNames.Float).Set(
-            intensity if on else 0.0
-        )
-        shader.CreateInput("enable_emission", Sdf.ValueTypeNames.Bool).Set(on)

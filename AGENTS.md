@@ -36,6 +36,15 @@ Do not introduce new tooling unless explicitly requested.
 - Put ROS 2 middleware config under `ros/config`.
 - Put PX4 Docker/scripts/runtime support under `px4`.
 
+## Python API organization
+- Public top-level functions, classes, and intentional constants in Python modules must be
+  listed in module-level `__all__`.
+- Keep private top-level helper functions before public top-level APIs when possible, so
+  declarations read from implementation helpers into public entrypoints.
+- Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
+  loading during lightweight package imports.
+- Do not rename, remove, or broaden public exports as part of cleanup unless explicitly requested.
+
 ## Isaac Sim extension design
 
 - Keep internal logic and Isaac Sim event wiring separate.

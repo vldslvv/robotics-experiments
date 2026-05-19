@@ -4,31 +4,7 @@ from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 from robotics_experiments.config import SimSettings
 from robotics_experiments.config import get_config as _get_experiment_config
 
-
-def apply_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
-    """Apply gravity, PhysX, and render-rate settings to a stage.
-
-    Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
-    attributes, and configures the Kit main-loop render rate via carb
-    settings.
-
-    Args:
-        stage: USD stage to configure.
-        settings: Simulation settings to apply; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-    """
-    if settings is None:
-        settings = _get_experiment_config().sim
-    scene = _get_or_create_physics_scene(stage)
-    _apply_gravity(scene, settings.gravity)
-    _apply_physx(scene, settings.physics_hz, settings.solver_type)
-    _apply_render_rate(settings.rendering_hz)
-
-    carb.log_info(
-        f"[SimSettings] physics={settings.physics_hz}Hz "
-        f"rendering={settings.rendering_hz}Hz solver={settings.solver_type} "
-        f"gravity={settings.gravity}"
-    )
+__all__ = ["apply_settings"]
 
 
 def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
@@ -93,3 +69,29 @@ def _apply_render_rate(rendering_hz: float) -> None:
     carb_settings = carb.settings.get_settings()
     carb_settings.set("/app/runLoops/main/rateLimitEnabled", True)
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
+
+
+def apply_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
+    """Apply gravity, PhysX, and render-rate settings to a stage.
+
+    Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
+    attributes, and configures the Kit main-loop render rate via carb
+    settings.
+
+    Args:
+        stage: USD stage to configure.
+        settings: Simulation settings to apply; when ``None``, resolved via
+            :func:`.config.get_config` at call time.
+    """
+    if settings is None:
+        settings = _get_experiment_config().sim
+    scene = _get_or_create_physics_scene(stage)
+    _apply_gravity(scene, settings.gravity)
+    _apply_physx(scene, settings.physics_hz, settings.solver_type)
+    _apply_render_rate(settings.rendering_hz)
+
+    carb.log_info(
+        f"[SimSettings] physics={settings.physics_hz}Hz "
+        f"rendering={settings.rendering_hz}Hz solver={settings.solver_type} "
+        f"gravity={settings.gravity}"
+    )

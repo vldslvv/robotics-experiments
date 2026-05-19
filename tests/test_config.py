@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs" / "experiment"
 
 

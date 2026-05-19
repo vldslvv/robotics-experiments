@@ -1,6 +1,6 @@
 """Drone spawning and randomization logic."""
 
-__all__ = ["despawn_drone", "spawn_drone"]
+__all__ = ["spawn_drone", "despawn_drone"]
 
 
 def __getattr__(name: str):
