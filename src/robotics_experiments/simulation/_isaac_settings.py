@@ -38,18 +38,20 @@ def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
 def _apply_gravity(scene: UsdPhysics.Scene, gravity: tuple) -> None:
     """Write gravity direction and magnitude attributes on a physics scene.
 
-    Zero-magnitude gravity vectors are skipped because the direction is
-    undefined and writing zeros would disable gravity in a way USD does not
-    round-trip cleanly.
+    Zero-magnitude gravity vectors are invalid simulation settings because
+    the gravity direction is undefined.
 
     Args:
         scene: Target ``UsdPhysics.Scene``.
         gravity: ``(gx, gy, gz)`` world gravity vector in m/s^2.
+
+    Raises:
+        ValueError: If the gravity vector has zero magnitude.
     """
     gx, gy, gz = gravity
     magnitude = (gx * gx + gy * gy + gz * gz) ** 0.5
     if magnitude <= 0.0:
-        return
+        raise ValueError(f"Gravity vector must have positive magnitude, got {gravity}")
     scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(gx / magnitude, gy / magnitude, gz / magnitude))
     scene.CreateGravityMagnitudeAttr().Set(magnitude)
 
@@ -62,7 +64,12 @@ def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -
             applied to its prim if not already present.
         physics_hz: PhysX steps per second; truncated to int by PhysX schema.
         solver_type: PhysX solver identifier (e.g. ``"TGS"`` or ``"PGS"``).
+
+    Raises:
+        ValueError: If ``physics_hz`` is not positive.
     """
+    if physics_hz <= 0:
+        raise ValueError(f"physics_hz must be positive, got {physics_hz}")
     physx_api = PhysxSchema.PhysxSceneAPI.Apply(scene.GetPrim())
     physx_api.CreateTimeStepsPerSecondAttr().Set(int(physics_hz))
     physx_api.CreateSolverTypeAttr().Set(solver_type)
@@ -73,7 +80,12 @@ def _apply_render_rate(rendering_hz: float) -> None:
 
     Args:
         rendering_hz: Target render frequency in Hz; truncated to int.
+
+    Raises:
+        ValueError: If ``rendering_hz`` is not positive.
     """
+    if rendering_hz <= 0:
+        raise ValueError(f"rendering_hz must be positive, got {rendering_hz}")
     carb_settings = carb.settings.get_settings()
     carb_settings.set("/app/runLoops/main/rateLimitEnabled", True)
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))

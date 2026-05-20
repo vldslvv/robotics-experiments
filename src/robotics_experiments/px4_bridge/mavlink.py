@@ -13,6 +13,7 @@ contract requirements (timeout, sim-time passthrough) are satisfied.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 
@@ -23,6 +24,8 @@ from .flight_stack import AbstractFlightStackBridge
 from .vehicle_state import VehicleState
 
 __all__ = ["Px4MavlinkPort"]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
@@ -118,8 +121,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
     def stop(self) -> None:
         try:
             self._backend.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOGGER.warning("PX4 MAVLink backend stop failed: %s", exc)
         self._is_connected = False
 
     # ---- Properties --------------------------------------------------------
@@ -154,7 +157,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         if now - self._last_heartbeat_send_s > 1.0:
             try:
                 self._backend.send_heartbeat()
-            except Exception:
+            except Exception as exc:
+                _LOGGER.warning("PX4 heartbeat send failed; marking disconnected: %s", exc)
                 self._is_connected = False
                 return np.zeros(self._num_rotors, dtype=np.float64)
             self._last_heartbeat_send_s = now
@@ -170,7 +174,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             if self._should_send_gps(sim_time_us):
                 self._backend.send_gps_msgs(sim_time_us)
                 self._last_gps_send_us = sim_time_us
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning("PX4 sensor/GPS send failed; marking disconnected: %s", exc)
             self._is_connected = False
             return np.zeros(self._num_rotors, dtype=np.float64)
 
@@ -261,6 +266,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
         backend = self._backend
         if backend._connection is None:
+            _LOGGER.warning("PX4 actuator polling skipped because MAVLink connection is closed")
             self._is_connected = False
             return False
         needs_to_wait = backend._received_first_actuator and backend._enable_lockstep
@@ -275,7 +281,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     blocking=needs_to_wait,
                     timeout=remaining,
                 )
-            except Exception:
+            except Exception as exc:
+                _LOGGER.warning("PX4 actuator polling failed; marking disconnected: %s", exc)
                 self._is_connected = False
                 return False
 
@@ -289,5 +296,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
             if time.time() >= deadline:
                 # Hard timeout - let upstream return zeros; do not hang.
+                _LOGGER.warning("PX4 actuator polling timed out after %.3f seconds", timeout_s)
                 self._is_connected = False
                 return False

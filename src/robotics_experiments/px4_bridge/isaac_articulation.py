@@ -11,6 +11,7 @@ articulation handles cannot be opened before the physics scene exists.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, List, Optional, Sequence
 
 import numpy as np
@@ -18,6 +19,8 @@ import numpy as np
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["IsaacArticulationIO"]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class IsaacArticulationIO:
@@ -66,18 +69,22 @@ class IsaacArticulationIO:
         if hasattr(self._articulation, "initialize"):
             try:
                 self._articulation.initialize()
-            except Exception:
+            except Exception as exc:
                 # Some Isaac versions auto-initialize; tolerate failure here
                 # and let the first read fail loudly if the handle is stale.
-                pass
+                _LOGGER.warning(
+                    "Isaac articulation initialization failed for %s: %s",
+                    self._articulation_path,
+                    exc,
+                )
 
         self._rotor_links = [RigidPrim(prim_paths_expr=path) for path in self._rotor_link_paths]
-        for link in self._rotor_links:
+        for path, link in zip(self._rotor_link_paths, self._rotor_links, strict=False):
             if hasattr(link, "initialize"):
                 try:
                     link.initialize()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _LOGGER.warning("Isaac rotor link initialization failed for %s: %s", path, exc)
 
     def shutdown(self) -> None:
         """Drop handles. Safe to call repeatedly."""
@@ -140,14 +147,16 @@ class IsaacArticulationIO:
                 f"apply_forces expected shape ({self.num_rotors},), got {forces_n.shape}"
             )
 
-        for link, magnitude in zip(self._rotor_links, forces_n, strict=False):
+        for path, link, magnitude in zip(
+            self._rotor_link_paths, self._rotor_links, forces_n, strict=False
+        ):
             try:
                 link.apply_forces_and_torques_at_pos(
                     forces=np.array([[0.0, 0.0, float(magnitude)]], dtype=np.float64),
                     is_global=False,
                 )
-            except Exception:
+            except Exception as exc:
                 # Best-effort: the precise API varies across Isaac Sim
                 # versions. The user can wire in the correct call once
                 # they confirm which method their version exposes.
-                pass
+                _LOGGER.warning("Failed to apply rotor force to %s: %s", path, exc)

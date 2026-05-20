@@ -75,6 +75,10 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
 - Do NOT hardcode absolute paths.
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.
+- Invalid configuration or unexpected runtime state must not fail silently.
+  Raise an error for wrong configuration; log a warning for recoverable runtime fallbacks.
+- Every behavior change must be reflected in this file when it changes project conventions,
+  error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.
