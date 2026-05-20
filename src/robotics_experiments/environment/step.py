@@ -4,8 +4,7 @@ import carb
 from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
-from robotics_experiments.config import LightSwitchConfig
-from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.config.types import LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
 __all__ = ["init_articulations", "step_switches"]
@@ -98,6 +97,8 @@ def step_switches(
             :func:`.config.get_config` at call time.
     """
     if config is None:
+        from robotics_experiments.config import get_config as _get_experiment_config
+
         config = _get_experiment_config().switches
     for i, sw in enumerate(switch_state):
         if sw.articulation is None:

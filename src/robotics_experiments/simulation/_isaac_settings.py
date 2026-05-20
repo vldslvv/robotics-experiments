@@ -9,8 +9,7 @@ the package without loading simulator-only modules.
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
-from robotics_experiments.config import SimSettings
-from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.config.types import SimSettings
 
 __all__ = ["apply_isaac_settings"]
 
@@ -104,6 +103,8 @@ def apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) 
             :func:`.config.get_config` at call time.
     """
     if settings is None:
+        from robotics_experiments.config import get_config as _get_experiment_config
+
         settings = _get_experiment_config().sim
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)

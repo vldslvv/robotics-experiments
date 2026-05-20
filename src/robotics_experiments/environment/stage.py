@@ -5,8 +5,7 @@ from typing import List
 import carb
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
-from robotics_experiments.config import BoundingBox, LightSwitchConfig
-from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.config.types import BoundingBox, LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState
 
 __all__ = ["spawn_switches", "despawn_switches", "validate_switches"]
@@ -184,6 +183,8 @@ def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) ->
         switch prim path with its lamp prim path.
     """
     if config is None:
+        from robotics_experiments.config import get_config as _get_experiment_config
+
         config = _get_experiment_config().switches
     positions = _sample_positions(
         config.num_switches,

@@ -10,6 +10,10 @@ the layer that owns the behavior being changed.
   validation, and reusable APIs. Public APIs should accept explicit config
   objects when practical and keep Isaac-only imports lazy or inside private
   backend modules.
+- Core public entrypoints should also avoid loading heavy runtime config
+  machinery during lightweight imports. Type-only config references should
+  come from lightweight schema/type paths; Hydra composition belongs behind
+  explicit config-loading calls.
 - Isaac Kit extensions under `isaac/runtime/extensions/` own runtime wiring:
   event subscriptions, active-stage lookup, lifecycle state, and calls into the
   core package. Extension-local config modules should adapt the shared
@@ -25,6 +29,10 @@ the layer that owns the behavior being changed.
   `apply_settings(stage, settings=None)` entrypoint is safe to import from
   normal Python tooling and lazily loads the Isaac backend only when settings
   are applied.
+- Default setting resolution should remain separate from import-time module
+  setup: importing the entrypoint should not require Hydra, and only applying
+  settings without an explicit config should resolve the shared experiment
+  config.
 - The private Isaac backend owns USD/carb/PhysX mutation: finding or creating
   the physics scene, validating gravity and positive rates, applying PhysX
   attributes, setting the Kit render-rate limit, and logging the applied values.
