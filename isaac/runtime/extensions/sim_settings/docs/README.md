@@ -1,5 +1,15 @@
 # Usage
 
-To enable this extension, run Isaac Sim with the flags --ext-folder {path_to_ext_folder} --enable sim_settings
+To enable this extension, run Isaac Sim with:
 
-The extension applies simulation settings (physics Hz, render Hz, solver, gravity) from sim_config.config.SIM_SETTINGS to the active stage on every stage-open event. Stage loading is the host's responsibility: use Isaac Sim's --exec open_stage.py ... or Isaac Lab's InteractiveSceneCfg to choose the USD scene.
+```bash
+--ext-folder {path_to_ext_folder} --enable sim_settings
+```
+
+The extension applies simulation settings (physics Hz, render Hz, solver, gravity)
+from the Hydra-backed experiment config. The extension-local `sim_config`
+adapter resolves `robotics_experiments.config.get_config().sim`, then delegates
+the stage mutation to `robotics_experiments.simulation.apply_settings`.
+
+Stage loading is the host workflow's responsibility. Use Isaac Sim `--exec`,
+standalone scripts, or Isaac Lab scene configuration to choose the USD scene.
