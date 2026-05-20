@@ -13,6 +13,11 @@ ISAAC_IMAGE_NAME     = vv-isaac-sim-custom
 ISAAC_IMAGE_TAG      = $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_CONTAINER_NAME = vv-isaac-sim-custom
+ISAAC_PROJECT_DIR    = /isaac-sim/proj
+ISAAC_PYTHON         = /isaac-sim/python.sh
+ISAAC_SIM_TEST       = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_sim_settings.py
+ISAAC_SIM_TEST_LOG   = /isaac-sim/.nvidia-omniverse/logs/test_simulation_settings.log
+SCENE                ?= @isaac/assets/LightSwitchWarehouse/Warehouse.usd
 
 # Host paths for persistence
 ISAAC_HOME             = $(CURDIR)/isaac
@@ -29,6 +34,56 @@ ISAAC_ZSH_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/zsh
 # These paths has to be relative to be inside docker build context
 ISAAC_ASSETS_DIR       = isaac/assets
 ISAAC_DOCKER_DIR       = isaac/docker
+
+ISAAC_RUNTIME_DIRS = \
+	"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
+	"$(ISAAC_GLCACHE)" "$(ISAAC_COMPUTEC)" "$(ISAAC_LOGS)" \
+	"$(ISAAC_DATA)" "$(ISAAC_DOCS)"
+
+ISAAC_DOCKER_RUNTIME = \
+	--network=host \
+	--user 0:0 \
+	--gpus all \
+	--device=/dev/dri
+
+ISAAC_DOCKER_ENV = \
+	-e ACCEPT_EULA=Y \
+	-e OMNI_KIT_DISABLE_TELEMETRY=1 \
+	-e PYTHONPATH=$(ISAAC_PROJECT_DIR)/src \
+	-e EXPERIMENT_CONFIG_DIR=$(ISAAC_PROJECT_DIR)/configs/experiment \
+	-e isaac_sim_package_path=/isaac-sim
+
+ISAAC_DOCKER_VOLUMES = \
+	-v $(ISAAC_KIT_CACHE):/isaac-sim/kit/cache \
+	-v $(ISAAC_OV_CACHE):/isaac-sim/.cache/ov \
+	-v $(ISAAC_PIP_CACHE):/isaac-sim/.cache/pip \
+	-v $(ISAAC_GLCACHE):/isaac-sim/.cache/nvidia/GLCache \
+	-v $(ISAAC_COMPUTEC):/isaac-sim/.nv/ComputeCache \
+	-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
+	-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
+	-v $(ISAAC_DOCS):/isaac-sim/Documents \
+	-v $(CURDIR):$(ISAAC_PROJECT_DIR) \
+	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
+
+ISAAC_INTERACTIVE_ENV = \
+	-e DISPLAY=$(DISPLAY) \
+	-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
+	-e QT_X11_NO_MITSHM=1 \
+	-e ROS_DOMAIN_ID=$(ROS_DOMAIN_ID) \
+	-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
+	-e ROS_DISTRO=$(ROS_DISTRO) \
+	-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
+	-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE)
+
+ISAAC_INTERACTIVE_VOLUMES = \
+	-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
+	-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+	-v $(ISAAC_ZSH_CACHE):/cache/zsh \
+	-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
+	-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
+	-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
+	-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
+	-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim
 
 # ROS 2 image / container (humble is the other option)
 ROS_DISTRO         = jazzy
@@ -142,10 +197,7 @@ sync-nvim-caches:
 
 .PHONY: run-isaac
 run-isaac: xhost sync-nvim-caches
-	@mkdir -p \
-		"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
-		"$(ISAAC_GLCACHE)" "$(ISAAC_COMPUTEC)" "$(ISAAC_LOGS)" \
-		"$(ISAAC_DATA)" "$(ISAAC_DOCS)" "$(ISAAC_ZSH_CACHE)"
+	@mkdir -p $(ISAAC_RUNTIME_DIRS) "$(ISAAC_ZSH_CACHE)"
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ISAAC_CONTAINER_NAME)$$'; then \
 		echo "Starting existing Isaac container $(ISAAC_CONTAINER_NAME)..."; \
 		docker start -ai $(ISAAC_CONTAINER_NAME); \
@@ -153,41 +205,34 @@ run-isaac: xhost sync-nvim-caches
 		echo "Creating and starting Isaac container $(ISAAC_CONTAINER_NAME)..."; \
 		docker run -it \
 			--name $(ISAAC_CONTAINER_NAME) \
-			--network=host \
-			--user 0:0 \
-			--gpus all \
-			-e ACCEPT_EULA=Y \
-			-e OMNI_KIT_DISABLE_TELEMETRY=1 \
-			-e DISPLAY=$(DISPLAY) \
-			-e XDG_RUNTIME_DIR=$(XDG_RUNTIME_DIR) \
-			-e QT_X11_NO_MITSHM=1 \
-			-e ROS_DOMAIN_ID=$(ROS_DOMAIN_ID) \
-			-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
-			-e ROS_DISTRO=$(ROS_DISTRO) \
-			-e isaac_sim_package_path=/isaac-sim \
-			-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
-			-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE) \
-			--device=/dev/dri \
-			-v $(XDG_RUNTIME_DIR):$(XDG_RUNTIME_DIR) \
-			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-			-v $(ISAAC_KIT_CACHE):/isaac-sim/kit/cache \
-			-v $(ISAAC_OV_CACHE):/isaac-sim/.cache/ov \
-			-v $(ISAAC_PIP_CACHE):/isaac-sim/.cache/pip \
-			-v $(ISAAC_GLCACHE):/isaac-sim/.cache/nvidia/GLCache \
-			-v $(ISAAC_COMPUTEC):/isaac-sim/.nv/ComputeCache \
-			-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
-			-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
-			-v $(ISAAC_DOCS):/isaac-sim/Documents \
-			-v $(CURDIR):/isaac-sim/proj \
-			-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro \
-			-v $(ISAAC_ZSH_CACHE):/cache/zsh \
-			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
-			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
-			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
-			-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
-			-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
+			$(ISAAC_DOCKER_RUNTIME) \
+			$(ISAAC_DOCKER_ENV) \
+			$(ISAAC_INTERACTIVE_ENV) \
+			$(ISAAC_DOCKER_VOLUMES) \
+			$(ISAAC_INTERACTIVE_VOLUMES) \
 			$(ISAAC_IMAGE); \
 	fi
+
+.PHONY: test-isaac-simulation
+test-isaac-simulation:
+	@mkdir -p $(ISAAC_RUNTIME_DIRS)
+	@docker run --rm \
+		$(ISAAC_DOCKER_RUNTIME) \
+		$(ISAAC_DOCKER_ENV) \
+		$(ISAAC_DOCKER_VOLUMES) \
+		--entrypoint /bin/bash \
+		$(ISAAC_IMAGE) \
+		-lc 'set -o pipefail && \
+			cd /isaac-sim && \
+			rm -f "$(ISAAC_SIM_TEST_LOG)" && \
+			{ PIP_ROOT_USER_ACTION=ignore $(ISAAC_PYTHON) -m pip install \
+				--quiet --disable-pip-version-check hydra-core omegaconf \
+				>>"$(ISAAC_SIM_TEST_LOG)" 2>&1 || \
+				{ grep -E "ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed" \
+					"$(ISAAC_SIM_TEST_LOG)"; exit 1; }; } && \
+			$(ISAAC_PYTHON) $(ISAAC_SIM_TEST) --scene "$(SCENE)" \
+				2>&1 | tee -a "$(ISAAC_SIM_TEST_LOG)" | grep --line-buffered -E \
+					"^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File \"|^[A-Za-z_]+(Error|Exception):"'
 
 .PHONY: run-ros
 run-ros: xhost sync-nvim-caches

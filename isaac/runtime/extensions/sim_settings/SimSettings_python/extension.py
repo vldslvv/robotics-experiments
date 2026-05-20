@@ -1,3 +1,11 @@
+"""Kit extension workflow for applying shared simulation settings.
+
+The extension does not own Isaac startup or scene loading. It subscribes to
+Kit stage events and delegates the actual USD/carb mutations to
+``robotics_experiments.simulation.apply_settings(stage)``, which is the shared
+implementation used by standalone tests and extension workflows.
+"""
+
 import omni.ext
 import omni.usd
 from omni.usd import StageEventType
@@ -9,7 +17,9 @@ class Extension(omni.ext.IExt):
     """Isaac Sim extension that applies fixed physics and render settings.
 
     Settings are re-applied whenever a stage finishes opening so that opening
-    a new scene does not silently revert the configured rates or gravity.
+    a new scene does not silently revert the configured rates or gravity. Kit
+    owns the app and stage lifecycle; this extension only bridges those stage
+    events to the shared ``apply_settings`` API.
     """
 
     def on_startup(self, ext_id: str):

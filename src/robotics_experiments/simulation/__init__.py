@@ -1,4 +1,9 @@
-"""Simulation settings application logic."""
+"""Simulation package public API.
+
+This package exposes lightweight entrypoints that are safe to import from
+normal Python tooling, tests, and non-Isaac processes. Isaac-specific modules
+are imported only when their functionality is called.
+"""
 
 from .settings import apply_settings
 

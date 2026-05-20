@@ -1,1 +1,3 @@
-from robotics_experiments.simulation.isaac_settings import *  # noqa: F401,F403
+from robotics_experiments.simulation import apply_settings
+
+__all__ = ["apply_settings"]

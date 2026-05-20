@@ -1,10 +1,18 @@
+"""Isaac Sim backend for applying simulation settings.
+
+This module is intentionally allowed to import Isaac runtime dependencies such
+as ``carb`` and ``pxr``. Keep caller-facing imports pointed at
+``robotics_experiments.simulation.apply_settings`` so non-Isaac code can import
+the package without loading simulator-only modules.
+"""
+
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
 from robotics_experiments.config import SimSettings
 from robotics_experiments.config import get_config as _get_experiment_config
 
-__all__ = ["apply_settings"]
+__all__ = ["apply_isaac_settings"]
 
 
 def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
@@ -71,7 +79,7 @@ def _apply_render_rate(rendering_hz: float) -> None:
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
 
 
-def apply_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
+def apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
     """Apply gravity, PhysX, and render-rate settings to a stage.
 
     Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX

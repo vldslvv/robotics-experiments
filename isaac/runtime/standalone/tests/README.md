@@ -1,0 +1,10 @@
+# Standalone Isaac Tests
+
+Standalone Isaac tests run through `/isaac-sim/python.sh` inside the Isaac
+container. They should exercise real USD stages and Hydra-loaded project
+configuration, with mocks kept to the minimum needed for dependencies that
+cannot run in standalone Isaac.
+
+Use `_runtime.py` for shared setup and teardown. Each extension should get its
+own test module when it has real standalone coverage to add, for example
+`test_sim_settings.py`.
