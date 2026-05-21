@@ -4,6 +4,8 @@
 
 BUILD_ROOT             = $(CURDIR)/.build/docker
 SRC_DIR                = $(CURDIR)/src
+VENV_DIR               = $(CURDIR)/.venv
+VENV_ACTIVATE          = $(VENV_DIR)/bin/activate
 
 # Isaac custom image
 ISAAC_BASE_IMAGE = nvcr.io/nvidia/isaac-sim
@@ -130,6 +132,21 @@ NVIM_VERSION := $(shell nvim --version | awk 'NR==1 {print $$2}')
 .PHONY: xhost
 xhost:
 	@xhost +local:root >/dev/null 2>&1 || true
+
+########################################
+# Host tests
+########################################
+
+.PHONY: require-venv
+require-venv:
+	@test -f "$(VENV_ACTIVATE)" || { \
+		echo "Missing virtual environment at $(VENV_DIR). Create it before running tests."; \
+		exit 1; \
+	}
+
+.PHONY: test
+test: require-venv
+	@. "$(VENV_ACTIVATE)" && python -m pytest
 
 ########################################
 # Build images
