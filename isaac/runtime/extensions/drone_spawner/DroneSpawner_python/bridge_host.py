@@ -20,6 +20,10 @@ import omni.physx
 
 from robotics_experiments.config import Px4BridgeConfig
 
+from .global_variables import EXTENSION_TITLE
+
+_LOG_PREFIX = f"{EXTENSION_TITLE}.BridgeHost"
+
 
 class BridgeHost:
     """Lifecycle owner for a single ``Px4Bridge`` instance.
@@ -61,7 +65,7 @@ class BridgeHost:
         rotor_paths = self._resolve_rotor_paths(self._cfg.rotor_link_paths)
         if len(rotor_paths) != self._cfg.num_rotors:
             carb.log_error(
-                f"[Px4BridgeHost] rotor_link_paths has {len(rotor_paths)} entries; "
+                f"[{_LOG_PREFIX}] rotor_link_paths has {len(rotor_paths)} entries; "
                 f"expected num_rotors={self._cfg.num_rotors}. Bridge not started."
             )
             return
@@ -96,14 +100,14 @@ class BridgeHost:
         try:
             self._bridge.start()
         except Exception as exc:
-            carb.log_error(f"[Px4BridgeHost] bridge.start() failed: {exc}")
+            carb.log_error(f"[{_LOG_PREFIX}] bridge.start() failed: {exc}")
             self._bridge = None
             return
 
         self._sim_time_us = 0
         physx = omni.physx.get_physx_interface()
         self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
-        carb.log_info("[Px4BridgeHost] PX4 bridge started")
+        carb.log_info(f"[{_LOG_PREFIX}] PX4 bridge started")
 
     def stop(self) -> None:
         """Unsubscribe and tear down the bridge."""
@@ -112,7 +116,7 @@ class BridgeHost:
             try:
                 self._bridge.stop()
             except Exception as exc:
-                carb.log_warn(f"[Px4BridgeHost] bridge.stop() raised: {exc}")
+                carb.log_warn(f"[{_LOG_PREFIX}] bridge.stop() raised: {exc}")
             self._bridge = None
 
     def _on_physics_step(self, dt: float) -> None:
@@ -124,7 +128,7 @@ class BridgeHost:
         except Exception as exc:
             # One bad tick must not crash the simulator. Log and continue;
             # persistent failure will be visible via is_connected.
-            carb.log_warn(f"[Px4BridgeHost] on_physics_step error: {exc}")
+            carb.log_warn(f"[{_LOG_PREFIX}] on_physics_step error: {exc}")
 
     def _resolve_rotor_paths(self, configured: List[str]) -> List[str]:
         """Prefix relative rotor link paths with the articulation root."""

@@ -3,6 +3,8 @@ import omni.ext
 
 from robotics_experiments.config import get_config
 
+from .global_variables import EXTENSION_TITLE
+
 
 class Extension(omni.ext.IExt):
     """Dependency-anchor extension that eagerly composes the experiment config.
@@ -20,7 +22,7 @@ class Extension(omni.ext.IExt):
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         cfg = get_config()
-        carb.log_info(f"[ExperimentConfig] Composed config: {cfg}")
+        carb.log_info(f"[{EXTENSION_TITLE}] Composed config: {cfg}")
 
     def on_shutdown(self):
         """No-op; the cached config lives for the Kit process lifetime."""

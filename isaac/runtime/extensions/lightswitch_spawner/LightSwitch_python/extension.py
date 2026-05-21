@@ -20,6 +20,8 @@ from robotics_experiments.environment import (
     validate_switches,
 )
 
+from .global_variables import EXTENSION_TITLE
+
 
 class LightSwitchNode(Node):
     """ROS 2 node that owns publishers for light-switch toggle events."""
@@ -65,7 +67,7 @@ class LightSwitchExtension(omni.ext.IExt):
         Args:
             ext_id: Extension identifier assigned by the Kit runtime.
         """
-        carb.log_info("[LightSwitch] Extension starting...")
+        carb.log_info(f"[{EXTENSION_TITLE}] Extension starting...")
 
         self._switch_state: list[SwitchState] = []
         self._state = ExtensionState()
@@ -88,14 +90,14 @@ class LightSwitchExtension(omni.ext.IExt):
             name="light_switch_update",
         )
 
-        carb.log_info("[LightSwitch] Running. Press Play to begin.")
+        carb.log_info(f"[{EXTENSION_TITLE}] Running. Press Play to begin.")
 
     def on_shutdown(self):
         """Unsubscribe from Kit streams, destroy the ROS node, and shut down rclpy.
 
         Called by the Kit runtime when the extension is disabled.
         """
-        carb.log_info("[LightSwitch] Shutting down...")
+        carb.log_info(f"[{EXTENSION_TITLE}] Shutting down...")
 
         if self._state.update_sub:
             self._state.update_sub.unsubscribe()
@@ -112,7 +114,7 @@ class LightSwitchExtension(omni.ext.IExt):
         if rclpy.ok():
             rclpy.shutdown()
 
-        carb.log_info("[LightSwitch] Shutdown complete.")
+        carb.log_info(f"[{EXTENSION_TITLE}] Shutdown complete.")
 
     def _on_timeline_event(self, event):
         """Dispatch timeline transitions to simulation start/stop handlers.
@@ -140,30 +142,32 @@ class LightSwitchExtension(omni.ext.IExt):
         """
         stage = omni.usd.get_context().get_stage()
         if stage is None:
-            carb.log_error("[LightSwitch] No stage loaded.")
+            carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
             return
 
         despawn_switches(stage, self._switch_state)
         self._switch_state = spawn_switches(stage)
 
         if not validate_switches(stage, self._switch_state):
-            carb.log_error("[LightSwitch] Scene validation failed; aborting simulation start.")
+            carb.log_error(
+                f"[{EXTENSION_TITLE}] Scene validation failed; aborting simulation start."
+            )
             return
 
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         if self._state.ros_node is None:
-            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
         self._state.state_pub = self._state.ros_node.create_publisher(
             Float32MultiArray, "/light_switches/state", qos
         )
 
-        carb.log_info("[LightSwitch] Simulation started.")
+        carb.log_info(f"[{EXTENSION_TITLE}] Simulation started.")
         self._state.sim_playing = True
 
     def _on_simulation_stop(self):
         """Reset runtime flags and despawn all switches and lamps from the stage."""
-        carb.log_info("[LightSwitch] Simulation stopped - resetting state.")
+        carb.log_info(f"[{EXTENSION_TITLE}] Simulation stopped - resetting state.")
         self._state.sim_playing = False
         self._state.is_initialized = False
 
@@ -182,7 +186,7 @@ class LightSwitchExtension(omni.ext.IExt):
             event: Per-frame update event from ``omni.kit.app``.
         """
         if self._state.ros_node is None:
-            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
 
         rclpy.spin_once(self._state.ros_node, timeout_sec=0)
@@ -208,6 +212,6 @@ class LightSwitchExtension(omni.ext.IExt):
         msg = Float32MultiArray()
         msg.data = [float(index), float(state)]
         if self._state.state_pub is None:
-            carb.log_error("[LightSwitch] ROS node is not initialized.")
+            carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
         self._state.state_pub.publish(msg)

@@ -1,3 +1,13 @@
-# Usage
+# Light Switch Spawner
 
-To enable this extension, run Isaac Sim with the flags --ext-folder {path_to_ext_folder} --enable {ext_directory_name}
+Spawns configured light switches and publishes switch state changes through
+ROS 2 while the Isaac timeline is playing.
+
+Enable it from Isaac Sim with:
+
+```bash
+--ext-folder {path_to_ext_folder} --enable lightswitch_spawner
+```
+
+The extension reads scene configuration through `experiment_config`, owns the
+ROS 2 node lifecycle, and despawns runtime prims when simulation stops.
