@@ -51,6 +51,24 @@ Do not introduce new tooling unless explicitly requested.
 ## Isaac Sim extension design
 
 - Keep internal logic and Isaac Sim event wiring separate.
+- Treat `on_startup`, `on_shutdown`, and Isaac/Kit event callbacks as wiring.
+  They should subscribe, unsubscribe, decode events, update direct runtime
+  handles such as the current stage, and delegate meaningful behavior.
+- Keep event callbacks small. They should route to domain actions such as
+  `setup_drone`, `teardown_drone`, or equivalent names.
+- Domain action methods should own complete lifecycle behavior for the feature,
+  including related prims, bridge hosts, ROS nodes, callbacks, publishers, and
+  subscriptions that must start and stop together.
+- Prefer larger meaningful helpers over chains of tiny one-use helpers. If a
+  helper is used once and only forwards to another helper, merge it into the
+  caller.
+- Avoid overgeneralized instance members for wiring objects. Use local variables
+  for Isaac/Kit context objects unless their lifetime must be retained, and store
+  direct feature state such as `self.stage` instead of broad handles such as
+  `self._usd_context`.
+- Use `drone_spawner` as the extension pattern: wire Isaac/Kit events separately
+  from meaningful actions, and let setup/teardown actions own related prim and
+  bridge lifecycle together.
 - `robotics_experiments_core` exposes the shared `src/robotics_experiments`
   package to Isaac Sim extensions. Extension code that needs the core package
   should depend on `robotics_experiments_core` instead of manipulating
