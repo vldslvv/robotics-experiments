@@ -1,0 +1,16 @@
+[package]
+version = "0.1.0"
+category = "Template"
+title = "MinimalExtension"
+description = "Minimal Isaac Kit extension template"
+authors = ["Vladislav Vyatkin"]
+repository = ""
+keywords = ["template"]
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+writeTarget.kit = true
+
+[dependencies]
+
+[[python.module]]
+name = "MinimalExtension_python"

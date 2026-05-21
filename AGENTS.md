@@ -15,6 +15,7 @@ Do not introduce new tooling unless explicitly requested.
 - `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
 - `isaac/docker/` -> Isaac Sim Docker build/init inputs.
 - `isaac/runtime/extensions/` -> Isaac Kit extension workflow.
+- `isaac/runtime/templates/` -> Copyable Isaac runtime templates, not loaded directly.
 - `isaac/runtime/standalone/` -> Direct Isaac Sim scripts and launch helpers.
 - `isaac/runtime/lab/` -> Isaac Lab configs, task definitions, and future environment code.
 - `ros/ros2_ws/` -> ROS 2 workspace (colcon). Persists changes made inside ROS 2 container.
@@ -30,6 +31,8 @@ Do not introduce new tooling unless explicitly requested.
 ## Placement rules
 - Keep core project code under `src/robotics_experiments`.
 - Put Isaac Kit extension code under `isaac/runtime/extensions`.
+- Put reusable Isaac runtime templates under `isaac/runtime/templates`, outside
+  the extension discovery folder.
 - Put direct Isaac Sim scripts under `isaac/runtime/standalone`.
 - Put Isaac Lab-specific configs, tasks, and environments under `isaac/runtime/lab`.
 - Put ROS 2 packages and colcon workspace changes under `ros/ros2_ws`.
