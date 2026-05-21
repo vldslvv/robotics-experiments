@@ -1,9 +1,24 @@
 import importlib
 import sys
+import tomllib
 import types
 from enum import IntEnum
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+
+
+def test_extension_manifest_exposes_only_lightswitch_python_module():
+    manifest_path = (
+        Path(__file__).resolve().parents[1]
+        / "isaac/runtime/extensions/lightswitch_spawner/config/extension.toml"
+    )
+
+    manifest = tomllib.loads(manifest_path.read_text())
+    module_names = {module["name"] for module in manifest["python"]["module"]}
+
+    assert module_names == {"LightSwitch_python"}
 
 
 class _TimelineEventType(IntEnum):
@@ -81,9 +96,11 @@ class _Node:
 
 
 class _QoSProfile:
-    def __init__(self, *, depth, durability):
+    def __init__(self, *, depth, durability, history, reliability):
         self.depth = depth
         self.durability = durability
+        self.history = history
+        self.reliability = reliability
 
 
 class _Float32MultiArray:
@@ -91,7 +108,28 @@ class _Float32MultiArray:
         self.data = []
 
 
-def _install_fake_modules(monkeypatch, usd_context, app):
+def _qos_config(
+    *,
+    depth=1,
+    durability="transient_local",
+    reliability="reliable",
+    history="keep_last",
+):
+    return SimpleNamespace(
+        depth=depth,
+        durability=durability,
+        reliability=reliability,
+        history=history,
+    )
+
+
+def _publisher_config(topic="/light_switches/state", qos=None):
+    if qos is None:
+        qos = _qos_config()
+    return SimpleNamespace(topic=topic, qos=qos)
+
+
+def _install_fake_modules(monkeypatch, usd_context, app, publisher_config):
     omni = types.ModuleType("omni")
     omni.__path__ = []
     omni_ext = types.ModuleType("omni.ext")
@@ -142,8 +180,19 @@ def _install_fake_modules(monkeypatch, usd_context, app):
     rclpy_node = types.ModuleType("rclpy.node")
     rclpy_node.Node = _Node
     rclpy_qos = types.ModuleType("rclpy.qos")
-    rclpy_qos.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL="transient_local")
+    rclpy_qos.DurabilityPolicy = SimpleNamespace(
+        TRANSIENT_LOCAL="transient_local",
+        VOLATILE="volatile",
+    )
+    rclpy_qos.HistoryPolicy = SimpleNamespace(
+        KEEP_LAST="keep_last",
+        KEEP_ALL="keep_all",
+    )
     rclpy_qos.QoSProfile = _QoSProfile
+    rclpy_qos.ReliabilityPolicy = SimpleNamespace(
+        RELIABLE="reliable",
+        BEST_EFFORT="best_effort",
+    )
 
     std_msgs = types.ModuleType("std_msgs")
     std_msgs_msg = types.ModuleType("std_msgs.msg")
@@ -156,6 +205,11 @@ def _install_fake_modules(monkeypatch, usd_context, app):
     fake_environment.spawn_switches = lambda stage: []
     fake_environment.step_switches = lambda stage, switch_state, on_toggle=None: None
     fake_environment.validate_switches = lambda stage, switch_state: True
+
+    fake_config = types.ModuleType("robotics_experiments.config")
+    fake_config.get_config = lambda: SimpleNamespace(
+        switches=SimpleNamespace(state_publisher=publisher_config)
+    )
 
     modules = {
         "carb": carb,
@@ -170,13 +224,14 @@ def _install_fake_modules(monkeypatch, usd_context, app):
         "rclpy.qos": rclpy_qos,
         "std_msgs": std_msgs,
         "std_msgs.msg": std_msgs_msg,
+        "robotics_experiments.config": fake_config,
         "robotics_experiments.environment": fake_environment,
     }
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
 
 
-def _import_extension(monkeypatch, stage=None):
+def _import_extension(monkeypatch, stage=None, publisher_config=None):
     for name in list(sys.modules):
         if name == "LightSwitch_python" or name.startswith("LightSwitch_python."):
             sys.modules.pop(name, None)
@@ -185,7 +240,9 @@ def _import_extension(monkeypatch, stage=None):
         stage = object()
     usd_context = _UsdContext(stage)
     app = _App()
-    _install_fake_modules(monkeypatch, usd_context, app)
+    if publisher_config is None:
+        publisher_config = _publisher_config()
+    _install_fake_modules(monkeypatch, usd_context, app, publisher_config)
     extension_root = (
         Path(__file__).resolve().parents[1]
         / "isaac/runtime/extensions/lightswitch_spawner"
@@ -211,7 +268,20 @@ def test_startup_subscribes_without_spawning(monkeypatch):
 
 def test_play_spawns_validates_and_creates_publisher(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    publisher_config = _publisher_config(
+        topic="/custom_switch_state",
+        qos=_qos_config(
+            depth=7,
+            durability="volatile",
+            reliability="best_effort",
+            history="keep_all",
+        ),
+    )
+    module, _usd_context, _app = _import_extension(
+        monkeypatch,
+        stage=stage,
+        publisher_config=publisher_config,
+    )
     switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
     calls = []
 
@@ -242,7 +312,28 @@ def test_play_spawns_validates_and_creates_publisher(monkeypatch):
     assert extension._switch_state == switches
     assert extension._sim_playing
     assert extension._state_pub is not None
-    assert extension._ros_node.publishers[0][1] == "/light_switches/state"
+    _msg_type, topic, qos, _publisher = extension._ros_node.publishers[0]
+    assert topic == "/custom_switch_state"
+    assert qos.depth == 7
+    assert qos.durability == "volatile"
+    assert qos.reliability == "best_effort"
+    assert qos.history == "keep_all"
+
+
+def test_play_uses_default_hydra_publisher_settings(monkeypatch):
+    stage = object()
+    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+
+    _msg_type, topic, qos, _publisher = extension._ros_node.publishers[0]
+    assert topic == "/light_switches/state"
+    assert qos.depth == 1
+    assert qos.durability == "transient_local"
+    assert qos.reliability == "reliable"
+    assert qos.history == "keep_last"
 
 
 def test_validation_failure_tears_down_partial_runtime_state(monkeypatch):
@@ -350,3 +441,24 @@ def test_publish_toggle_sends_float_array(monkeypatch):
 
     assert len(publisher.messages) == 1
     assert publisher.messages[0].data == [2.0, 1.0]
+
+
+@pytest.mark.parametrize(
+    ("qos", "message"),
+    [
+        (_qos_config(depth=0), "QoS depth must be positive"),
+        (_qos_config(durability="forever"), "Invalid QoS durability"),
+        (_qos_config(reliability="sometimes"), "Invalid QoS reliability"),
+        (_qos_config(history="keep_some"), "Invalid QoS history"),
+    ],
+)
+def test_invalid_qos_config_raises(monkeypatch, qos, message):
+    module, _usd_context, _app = _import_extension(
+        monkeypatch,
+        publisher_config=_publisher_config(qos=qos),
+    )
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+
+    with pytest.raises(ValueError, match=message):
+        extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))

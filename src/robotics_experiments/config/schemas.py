@@ -5,7 +5,9 @@ from .types import (
     DroneConfig,
     EnvConfig,
     LightSwitchConfig,
+    LightSwitchStatePublisherConfig,
     Px4BridgeConfig,
+    RosQosConfig,
     SimSettings,
 )
 
@@ -13,6 +15,8 @@ __all__ = [
     "SimSettings",
     "DroneConfig",
     "BoundingBox",
+    "RosQosConfig",
+    "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
     "Px4BridgeConfig",
     "EnvConfig",

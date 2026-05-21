@@ -17,7 +17,8 @@ the layer that owns the behavior being changed.
 - Isaac Kit extensions under `isaac/runtime/extensions/` own runtime wiring:
   event subscriptions, active-stage lookup, lifecycle state, and calls into the
   core package. Extension-local config modules should adapt the shared
-  `experiment_config`/Hydra config to the feature-specific config object.
+  `robotics_experiments.config` Hydra config to the feature-specific config
+  object.
 - Standalone workflows under `isaac/runtime/standalone/` own executable
   integration coverage. They may start `SimulationApp`, load real scenes,
   reset/recompose Hydra config for tests, and assert externally visible

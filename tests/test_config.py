@@ -34,6 +34,20 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.sim.gravity == expected_sim.gravity
     assert config.drone.prim_name == expected_drone.prim_name
     assert config.switches.num_switches == expected_switches.num_switches
+    assert config.switches.state_publisher.topic == expected_switches.state_publisher.topic
+    assert config.switches.state_publisher.qos.depth == expected_switches.state_publisher.qos.depth
+    assert (
+        config.switches.state_publisher.qos.durability
+        == expected_switches.state_publisher.qos.durability
+    )
+    assert (
+        config.switches.state_publisher.qos.reliability
+        == expected_switches.state_publisher.qos.reliability
+    )
+    assert (
+        config.switches.state_publisher.qos.history
+        == expected_switches.state_publisher.qos.history
+    )
     assert config.px4.connection_baseport == expected_px4.connection_baseport
     reset_config()
 

@@ -9,5 +9,5 @@ Enable it from Isaac Sim with:
 --ext-folder {path_to_ext_folder} --enable lightswitch_spawner
 ```
 
-The extension reads scene configuration through `experiment_config`, owns the
-ROS 2 node lifecycle, and despawns runtime prims when simulation stops.
+The extension reads scene configuration through `robotics_experiments.config`,
+owns the ROS 2 node lifecycle, and despawns runtime prims when simulation stops.

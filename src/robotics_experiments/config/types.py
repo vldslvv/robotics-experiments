@@ -5,6 +5,8 @@ __all__ = [
     "SimSettings",
     "DroneConfig",
     "BoundingBox",
+    "RosQosConfig",
+    "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
     "Px4BridgeConfig",
     "EnvConfig",
@@ -65,6 +67,36 @@ class BoundingBox:
 
 
 @dataclass
+class RosQosConfig:
+    """ROS 2 QoS settings for a publisher or subscription.
+
+    Attributes:
+        depth: Queue depth for ``KEEP_LAST`` history.
+        durability: Durability policy name, such as ``"transient_local"``.
+        reliability: Reliability policy name, such as ``"reliable"``.
+        history: History policy name, such as ``"keep_last"``.
+    """
+
+    depth: int
+    durability: str
+    reliability: str
+    history: str
+
+
+@dataclass
+class LightSwitchStatePublisherConfig:
+    """ROS publisher configuration for light-switch state events.
+
+    Attributes:
+        topic: ROS topic used for switch toggle events.
+        qos: ROS 2 QoS settings for the publisher.
+    """
+
+    topic: str
+    qos: RosQosConfig
+
+
+@dataclass
 class LightSwitchConfig:
     """Configuration for the light-switch spawner extension.
 
@@ -77,6 +109,7 @@ class LightSwitchConfig:
         max_spawn_retries: Retry budget per position before accepting overlap.
         lamp_on_intensity: ``SphereLight`` intensity applied when the lamp is on.
         spawn_bounds: Candidate axis-aligned regions used to sample positions.
+        state_publisher: ROS publisher settings for switch toggle events.
     """
 
     switch_usd_path: str
@@ -87,6 +120,7 @@ class LightSwitchConfig:
     max_spawn_retries: int
     lamp_on_intensity: float
     spawn_bounds: List[BoundingBox]
+    state_publisher: LightSwitchStatePublisherConfig
 
 
 @dataclass

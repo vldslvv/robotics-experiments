@@ -73,8 +73,10 @@ Do not introduce new tooling unless explicitly requested.
   package to Isaac Sim extensions. Extension code that needs the core package
   should depend on `robotics_experiments_core` instead of manipulating
   `sys.path`.
-- Extension config is passed through the `experiment_config` extension that uses hydra.
-- Each extension connects to `experiment_config` using `config.py`, no other coupling.
+- Extension config comes from `robotics_experiments.config`, which composes the
+  Hydra config lazily and caches it for the process.
+- Feature extensions should depend on `robotics_experiments_core` and use a
+  small local `config.py` adapter when they need feature-specific config access.
 
 ## Common commands
 

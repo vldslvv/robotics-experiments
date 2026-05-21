@@ -11,3 +11,10 @@ lamp_on_intensity: 5000.0
 spawn_bounds:
   - min: [-3.0, 17.99, 0.5]
     max: [8.0, 17.99, 2.7]
+state_publisher:
+  topic: /light_switches/state
+  qos:
+    depth: 1
+    durability: transient_local
+    reliability: reliable
+    history: keep_last
