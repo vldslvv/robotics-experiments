@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Any
 
 import carb
@@ -7,6 +6,8 @@ import omni.kit.app
 import omni.timeline
 import omni.usd
 import rclpy
+from omni.timeline import TimelineEventType
+from omni.usd import StageEventType
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Float32MultiArray
@@ -22,6 +23,8 @@ from robotics_experiments.environment import (
 
 from .global_variables import EXTENSION_TITLE
 
+__all__ = ["LightSwitchExtension", "LightSwitchNode"]
+
 
 class LightSwitchNode(Node):
     """ROS 2 node that owns publishers for light-switch toggle events."""
@@ -30,27 +33,6 @@ class LightSwitchNode(Node):
         """Initialize the ROS node with the fixed name ``light_switch_node``."""
         super().__init__("light_switch_node")
         self.get_logger().info("LightSwitchNode ready.")
-
-
-@dataclass
-class ExtensionState:
-    """Mutable runtime state for :class:`LightSwitchExtension`.
-
-    Attributes:
-        state_pub: ROS publisher for switch toggle events, created on simulation start.
-        is_initialized: Whether articulations are initialized for the current play.
-        sim_playing: Whether the Kit timeline is currently playing.
-        update_sub: Subscription to the Kit per-frame update stream.
-        timeline_sub: Subscription to the Kit timeline event stream.
-        ros_node: The owned ROS 2 node, or ``None`` after shutdown.
-    """
-
-    state_pub: Any | None = None
-    is_initialized: bool = False
-    sim_playing: bool = False
-    update_sub: object | None = None
-    timeline_sub: object | None = None
-    ros_node: LightSwitchNode | None = None
 
 
 class LightSwitchExtension(omni.ext.IExt):
@@ -69,23 +51,33 @@ class LightSwitchExtension(omni.ext.IExt):
         """
         carb.log_info(f"[{EXTENSION_TITLE}] Extension starting...")
 
+        usd_context = omni.usd.get_context()
+        self.stage = usd_context.get_stage()
         self._switch_state: list[SwitchState] = []
-        self._state = ExtensionState()
+        self._state_pub: Any | None = None
+        self._is_initialized = False
+        self._sim_playing = False
 
         if not rclpy.ok():
             rclpy.init()
-        self._state.ros_node = LightSwitchNode()
+        self._ros_node: LightSwitchNode | None = LightSwitchNode()
+
+        stage_events = usd_context.get_stage_event_stream()
+        self._stage_event_sub = stage_events.create_subscription_to_pop(
+            self._on_stage_event,
+            name="light_switch_stage",
+        )
 
         timeline = omni.timeline.get_timeline_interface()
         timeline_events = timeline.get_timeline_event_stream()
-        self._state.timeline_sub = timeline_events.create_subscription_to_pop(
+        self._timeline_event_sub = timeline_events.create_subscription_to_pop(
             self._on_timeline_event,
             name="light_switch_timeline",
         )
 
         app = omni.kit.app.get_app()
         update_events = app.get_update_event_stream()
-        self._state.update_sub = update_events.create_subscription_to_pop(
+        self._update_event_sub = update_events.create_subscription_to_pop(
             self._on_update,
             name="light_switch_update",
         )
@@ -99,22 +91,39 @@ class LightSwitchExtension(omni.ext.IExt):
         """
         carb.log_info(f"[{EXTENSION_TITLE}] Shutting down...")
 
-        if self._state.update_sub:
-            self._state.update_sub.unsubscribe()
-            self._state.update_sub = None
+        if self._update_event_sub:
+            self._update_event_sub.unsubscribe()
+            self._update_event_sub = None
 
-        if self._state.timeline_sub:
-            self._state.timeline_sub.unsubscribe()
-            self._state.timeline_sub = None
+        if self._timeline_event_sub:
+            self._timeline_event_sub.unsubscribe()
+            self._timeline_event_sub = None
 
-        if self._state.ros_node:
-            self._state.ros_node.destroy_node()
-            self._state.ros_node = None
+        if self._stage_event_sub:
+            self._stage_event_sub.unsubscribe()
+            self._stage_event_sub = None
+
+        self._teardown_switches()
+
+        if self._ros_node:
+            self._ros_node.destroy_node()
+            self._ros_node = None
 
         if rclpy.ok():
             rclpy.shutdown()
 
         carb.log_info(f"[{EXTENSION_TITLE}] Shutdown complete.")
+
+    def _on_stage_event(self, event):
+        """Clear runtime switch state when a new stage finishes opening.
+
+        Args:
+            event: Stage event emitted by ``omni.usd``; only
+                ``StageEventType.OPENED`` is handled.
+        """
+        if event.type == int(StageEventType.OPENED):
+            self.stage = omni.usd.get_context().get_stage()
+            self._teardown_switches()
 
     def _on_timeline_event(self, event):
         """Dispatch timeline transitions to simulation start/stop handlers.
@@ -125,54 +134,55 @@ class LightSwitchExtension(omni.ext.IExt):
         Args:
             event: Timeline event emitted by ``omni.timeline``.
         """
-        if event.type == int(omni.timeline.TimelineEventType.PLAY):
-            self._on_simulation_start()
+        if event.type == int(TimelineEventType.PLAY):
+            self._setup_switches()
         elif event.type in (
-            int(omni.timeline.TimelineEventType.STOP),
-            int(omni.timeline.TimelineEventType.PAUSE),
+            int(TimelineEventType.STOP),
+            int(TimelineEventType.PAUSE),
         ):
-            self._on_simulation_stop()
+            self._teardown_switches()
 
-    def _on_simulation_start(self):
+    def _setup_switches(self):
         """Despawn any stale prims, spawn fresh switches, and create the ROS publisher.
 
         Validates the resulting scene before arming the main loop. On
         validation failure the simulation-playing flag is left unset so the
         update loop stays idle.
         """
-        stage = omni.usd.get_context().get_stage()
-        if stage is None:
+        if self.stage is None:
             carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
             return
 
-        despawn_switches(stage, self._switch_state)
-        self._switch_state = spawn_switches(stage)
+        self._teardown_switches()
+        self._switch_state = spawn_switches(self.stage)
 
-        if not validate_switches(stage, self._switch_state):
+        if not validate_switches(self.stage, self._switch_state):
             carb.log_error(
                 f"[{EXTENSION_TITLE}] Scene validation failed; aborting simulation start."
             )
+            self._teardown_switches()
             return
 
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        if self._state.ros_node is None:
+        if self._ros_node is None:
             carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
+            self._teardown_switches()
             return
-        self._state.state_pub = self._state.ros_node.create_publisher(
+        self._state_pub = self._ros_node.create_publisher(
             Float32MultiArray, "/light_switches/state", qos
         )
 
         carb.log_info(f"[{EXTENSION_TITLE}] Simulation started.")
-        self._state.sim_playing = True
+        self._sim_playing = True
 
-    def _on_simulation_stop(self):
+    def _teardown_switches(self):
         """Reset runtime flags and despawn all switches and lamps from the stage."""
         carb.log_info(f"[{EXTENSION_TITLE}] Simulation stopped - resetting state.")
-        self._state.sim_playing = False
-        self._state.is_initialized = False
+        self._sim_playing = False
+        self._is_initialized = False
+        self._state_pub = None
 
-        stage = omni.usd.get_context().get_stage()
-        despawn_switches(stage, self._switch_state)
+        despawn_switches(self.stage, self._switch_state)
         self._switch_state = []
 
     def _on_update(self, event):
@@ -185,22 +195,28 @@ class LightSwitchExtension(omni.ext.IExt):
         Args:
             event: Per-frame update event from ``omni.kit.app``.
         """
-        if self._state.ros_node is None:
+        if self._ros_node is None:
             carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
 
-        rclpy.spin_once(self._state.ros_node, timeout_sec=0)
+        rclpy.spin_once(self._ros_node, timeout_sec=0)
 
-        if not self._state.sim_playing:
+        if not self._sim_playing:
             return
 
-        if not self._state.is_initialized:
+        self._step_switches()
+
+    def _step_switches(self):
+        """Initialize articulations or run per-frame switch interaction logic."""
+        if not self._is_initialized:
             if init_articulations(self._switch_state):
-                self._state.is_initialized = True
+                self._is_initialized = True
             return
 
-        stage = omni.usd.get_context().get_stage()
-        step_switches(stage, self._switch_state, on_toggle=self._publish_toggle)
+        if self.stage is None:
+            carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
+            return
+        step_switches(self.stage, self._switch_state, on_toggle=self._publish_toggle)
 
     def _publish_toggle(self, index: int, state: bool) -> None:
         """Publish a ``(switch_index, state)`` toggle event on the ROS topic.
@@ -211,7 +227,7 @@ class LightSwitchExtension(omni.ext.IExt):
         """
         msg = Float32MultiArray()
         msg.data = [float(index), float(state)]
-        if self._state.state_pub is None:
+        if self._state_pub is None:
             carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
-        self._state.state_pub.publish(msg)
+        self._state_pub.publish(msg)
