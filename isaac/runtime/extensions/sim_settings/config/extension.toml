@@ -21,6 +21,3 @@ writeTarget.kit = true
 
 [[python.module]]
 name = "SimSettings_python"
-
-[[python.module]]
-name = "sim_config"

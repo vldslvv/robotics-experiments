@@ -55,7 +55,7 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
         raise AssertionError("Expected lazy get_config access to require hydra")
 
 
-def test_sim_settings_manifest_exposes_config_adapter():
+def test_sim_settings_manifest_exposes_extension_module():
     manifest_path = (
         Path(__file__).resolve().parents[1]
         / "isaac/runtime/extensions/sim_settings/config/extension.toml"
@@ -63,4 +63,4 @@ def test_sim_settings_manifest_exposes_config_adapter():
     manifest = tomllib.loads(manifest_path.read_text())
     module_names = {module["name"] for module in manifest["python"]["module"]}
 
-    assert {"SimSettings_python", "sim_config"} <= module_names
+    assert module_names == {"SimSettings_python"}

@@ -7,9 +7,8 @@ To enable this extension, run Isaac Sim with:
 ```
 
 The extension applies simulation settings (physics Hz, render Hz, solver, gravity)
-from the Hydra-backed experiment config. The extension-local `sim_config`
-adapter resolves `robotics_experiments.config.get_config().sim`, then delegates
-the stage mutation to `robotics_experiments.simulation.apply_settings`.
+from the Hydra-backed experiment config, then delegates the stage mutation to
+`robotics_experiments.simulation.apply_settings`.
 
 Stage loading is the host workflow's responsibility. Use Isaac Sim `--exec`,
 standalone scripts, or Isaac Lab scene configuration to choose the USD scene.

@@ -1,18 +1,16 @@
 """Kit extension workflow for applying shared simulation settings.
 
 The extension does not own Isaac startup or scene loading. It subscribes to
-Kit stage events and delegates the actual USD/carb mutations to
-``robotics_experiments.simulation.apply_settings(stage, settings)``, which is
-the shared implementation used by standalone tests and extension workflows.
+Kit stage events, reads the shared experiment config, and delegates the actual
+USD/carb mutations to ``robotics_experiments.simulation.apply_settings``.
 """
 
 import omni.ext
 import omni.usd
 from omni.usd import StageEventType
 
+from robotics_experiments.config import get_config as get_experiment_config
 from robotics_experiments.simulation import apply_settings
-
-from sim_config import get_config
 
 __all__ = ["Extension"]
 
@@ -22,9 +20,8 @@ class Extension(omni.ext.IExt):
 
     Settings are re-applied whenever a stage finishes opening so that opening
     a new scene does not silently revert the configured rates or gravity. Kit
-    owns the app and stage lifecycle; this extension only bridges those stage
-    events and its Hydra-backed config adapter to the shared ``apply_settings``
-    API.
+    owns the app and stage lifecycle; this extension only bridges those events
+    to the shared config and ``apply_settings`` APIs.
     """
 
     def on_startup(self, ext_id: str):
@@ -40,7 +37,7 @@ class Extension(omni.ext.IExt):
         )
         stage = self._usd_context.get_stage()
         if stage is not None:
-            apply_settings(stage, get_config())
+            apply_settings(stage, get_experiment_config().sim)
 
     def on_shutdown(self):
         """Release the stage event subscription."""
@@ -56,4 +53,4 @@ class Extension(omni.ext.IExt):
         if event.type == int(StageEventType.OPENED):
             stage = self._usd_context.get_stage()
             if stage is not None:
-                apply_settings(stage, get_config())
+                apply_settings(stage, get_experiment_config().sim)
