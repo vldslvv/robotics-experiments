@@ -6,6 +6,8 @@ description = "Shared robotics_experiments Python package for project extensions
 authors = ["Vladislav Vyatkin"]
 repository = ""
 keywords = []
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
 writeTarget.kit = true
 
 [dependencies]

@@ -48,6 +48,10 @@ Do not introduce new tooling unless explicitly requested.
 ## Isaac Sim extension design
 
 - Keep internal logic and Isaac Sim event wiring separate.
+- `robotics_experiments_core` exposes the shared `src/robotics_experiments`
+  package to Isaac Sim extensions. Extension code that needs the core package
+  should depend on `robotics_experiments_core` instead of manipulating
+  `sys.path`.
 - Extension config is passed through the `experiment_config` extension that uses hydra.
 - Each extension connects to `experiment_config` using `config.py`, no other coupling.
 

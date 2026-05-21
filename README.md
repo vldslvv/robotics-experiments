@@ -61,6 +61,9 @@ exists, the Makefile starts it again instead of creating a new one.
 ## Isaac Sim Workflows
 
 - Use `isaac/runtime/extensions` for Isaac Kit extensions.
+- Use `isaac/runtime/extensions/robotics_experiments_core` as the shared
+  dependency that exposes `src/robotics_experiments` to other Isaac Sim
+  extensions.
 - Use `isaac/runtime/standalone` for scripts run directly by Isaac Sim through
   `/isaac-sim/python.sh`, `runapp.sh`, or `runapp_custom.sh`.
 - Use `isaac/runtime/lab` for Isaac Lab-specific configs, task definitions, and
