@@ -102,7 +102,7 @@ def step_switches(
         config = _get_experiment_config().switches
     for i, sw in enumerate(switch_state):
         if sw.articulation is None:
-            carb.log_error(f"[LightSwitch] No articulation set for switch with index {1}")
+            carb.log_error(f"[LightSwitch] No articulation set for switch with index {i}")
             continue
         joint_positions = sw.articulation.get_joint_positions()
         button_pos = joint_positions[0]

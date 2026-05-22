@@ -64,8 +64,8 @@ Do not introduce new tooling unless explicitly requested.
   caller.
 - Avoid overgeneralized instance members for wiring objects. Use local variables
   for Isaac/Kit context objects unless their lifetime must be retained, and store
-  direct feature state such as `self.stage` instead of broad handles such as
-  `self._usd_context`.
+  direct feature state in private attributes such as `self._stage` instead of
+  broad handles such as `self._usd_context`.
 - Use `drone_spawner` as the extension pattern: wire Isaac/Kit events separately
   from meaningful actions, and let setup/teardown actions own related prim and
   bridge lifecycle together.
