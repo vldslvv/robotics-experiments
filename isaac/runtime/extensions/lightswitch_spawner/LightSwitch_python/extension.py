@@ -228,10 +228,8 @@ class LightSwitchExtension(omni.ext.IExt):
 
         rclpy.spin_once(self._ros_node, timeout_sec=0)
 
-        if not self._simulation_running:
-            return
-
-        self._step_switches()
+        if self._simulation_running:
+            self._step_switches()
 
     def _step_switches(self):
         """Initialize articulations or run per-frame switch interaction logic."""

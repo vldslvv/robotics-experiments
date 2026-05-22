@@ -49,6 +49,16 @@ def test_default_config_loads_from_root_experiment_config():
         == expected_switches.state_publisher.qos.history
     )
     assert config.px4.connection_baseport == expected_px4.connection_baseport
+    assert config.drone.usd_path.endswith("/quadcopter_500mm.usda")
+    assert config.px4.num_rotors == 4
+    assert config.px4.rotor_link_paths == [
+        "propulsion/motor_1/prop",
+        "propulsion/motor_3/prop",
+        "propulsion/motor_2/prop",
+        "propulsion/motor_4/prop",
+    ]
+    assert config.px4.connection_type == "tcpin"
+    assert config.px4.px4_autolaunch is False
     reset_config()
 
 
