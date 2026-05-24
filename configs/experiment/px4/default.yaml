@@ -1,8 +1,8 @@
 defaults:
   - base_px4
 
-# Off by default; flip to true once PX4 SITL is reachable.
-enabled: false
+# Enabled by default for the custom Isaac bridge workflow.
+enabled: true
 
 # Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
 articulation_path: ""
@@ -10,10 +10,10 @@ articulation_path: ""
 # In PX4 motor-index order: FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X.
 # Paths are joined under the articulation root if relative.
 rotor_link_paths:
-  - propulsion/motor_1/prop
-  - propulsion/motor_3/prop
-  - propulsion/motor_2/prop
-  - propulsion/motor_4/prop
+  - body/propulsion/motor_1/prop
+  - body/propulsion/motor_3/prop
+  - body/propulsion/motor_2/prop
+  - body/propulsion/motor_4/prop
 
 num_rotors: 4
 max_rotor_force_n: 8.0
@@ -28,7 +28,10 @@ px4_autolaunch: false
 px4_dir: ""
 px4_vehicle_model: gazebo-classic_iris
 
-lockstep_timeout_s: 0.1
+lockstep_timeout_s: 1.0
+first_heartbeat_timeout_s: 5.0
+heartbeat_rate_hz: 1.0
+gps_enabled: true
 gps_send_rate_hz: 5.0
 
 home_lat_deg: 47.3977

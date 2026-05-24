@@ -155,6 +155,13 @@ class Px4BridgeConfig:
             each tick. On timeout the port returns zeros and Isaac keeps
             ticking - required so a stalled flight stack does not freeze
             the simulator.
+        first_heartbeat_timeout_s: Hard deadline on receiving PX4's first
+            heartbeat after the port starts. On timeout, the bridge marks
+            the port disconnected instead of waiting indefinitely.
+        heartbeat_rate_hz: Wall-clock rate for bridge-originated MAVLink
+            heartbeat messages.
+        gps_enabled: When true, synthesize and send ``HIL_GPS`` from the
+            local ENU pose. Keep true for the default PX4 SITL estimator path.
         gps_send_rate_hz: Rate at which synthesized ``HIL_GPS`` is sent.
         home_lat_deg, home_lon_deg, home_alt_m: Home position used when
             synthesizing GPS from the local ENU pose. Defaults match PX4's
@@ -174,6 +181,9 @@ class Px4BridgeConfig:
     px4_dir: str
     px4_vehicle_model: str
     lockstep_timeout_s: float
+    first_heartbeat_timeout_s: float
+    heartbeat_rate_hz: float
+    gps_enabled: bool
     gps_send_rate_hz: float
     home_lat_deg: float
     home_lon_deg: float

@@ -39,6 +39,7 @@ class BridgeHost:
         self._bridge: Any | None = None
         self._physx_sub = None
         self._sim_time_us: int = 0
+        self._physics_tick_count: int = 0
 
     @property
     def is_running(self) -> bool:
@@ -80,6 +81,9 @@ class BridgeHost:
             px4_dir=self._cfg.px4_dir,
             px4_vehicle_model=self._cfg.px4_vehicle_model,
             lockstep_timeout_s=self._cfg.lockstep_timeout_s,
+            first_heartbeat_timeout_s=self._cfg.first_heartbeat_timeout_s,
+            heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
+            gps_enabled=self._cfg.gps_enabled,
             gps_send_rate_hz=self._cfg.gps_send_rate_hz,
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
@@ -90,6 +94,17 @@ class BridgeHost:
             max_force_n=self._cfg.max_rotor_force_n,
         )
         articulation_path = self._cfg.articulation_path or self._articulation_path
+        endpoint = (
+            f"{self._cfg.connection_type}:{self._cfg.connection_ip}:"
+            f"{self._cfg.connection_baseport + self._cfg.vehicle_id}"
+        )
+        carb.log_info(
+            f"[{_LOG_PREFIX}] starting PX4 bridge endpoint={endpoint} "
+            f"articulation={articulation_path} rotor_paths={rotor_paths} "
+            f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
+            f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
+            f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz}"
+        )
         self._bridge = Px4Bridge(
             articulation_path=articulation_path,
             rotor_link_paths=rotor_paths,
@@ -105,6 +120,7 @@ class BridgeHost:
             return
 
         self._sim_time_us = 0
+        self._physics_tick_count = 0
         physx = omni.physx.get_physx_interface()
         self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
         carb.log_info(f"[{_LOG_PREFIX}] PX4 bridge started")
@@ -123,12 +139,22 @@ class BridgeHost:
         if self._bridge is None:
             return
         self._sim_time_us += int(round(dt * 1_000_000))
+        self._physics_tick_count += 1
+        if self._physics_tick_count == 1 or self._physics_tick_count % 250 == 0:
+            carb.log_info(
+                f"[{_LOG_PREFIX}] physics tick={self._physics_tick_count} "
+                f"dt={dt:.6f} sim_time_us={self._sim_time_us} "
+                f"connected={self._bridge.is_connected}"
+            )
         try:
             self._bridge.on_physics_step(dt, self._sim_time_us)
         except Exception as exc:
             # One bad tick must not crash the simulator. Log and continue;
             # persistent failure will be visible via is_connected.
-            carb.log_warn(f"[{_LOG_PREFIX}] on_physics_step error: {exc}")
+            carb.log_warn(
+                f"[{_LOG_PREFIX}] on_physics_step error at tick={self._physics_tick_count} "
+                f"sim_time_us={self._sim_time_us}: {exc}"
+            )
 
     def _resolve_rotor_paths(self, configured: List[str]) -> List[str]:
         """Prefix relative rotor link paths with the articulation root."""

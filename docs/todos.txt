@@ -1,26 +1,5 @@
-Tabs to spaces pre-commit hook: https://github.com/Lucas-C/pre-commit-hooks
-Cleanup isaac sim docker file and build scripts
-Organize dir with files that are mounted to images
-
-Remove entrypoint overrides from Makefile
-Activate ros layers inside dockerfile to avoid spreading the logic
-
-Figure out this section:
-https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#isaac-ros-workspace
-
-1. Either try somehow installing on jazzy, but this doesn't work straight away
-
-2. Or install python3.11 and build workspace using it on humble
-
-2.1. Here, either try docker in docker for possibly easier -- run /ros2_ws/IsaacSim-ros_workspaces/dockerfiles/ubuntu_22_humble_python_311_minimal.dockerfile
-2.2. Or take parts of this docker file and run inside docker without docker in docker
-
 Figure out this:
 https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_ros.html#enabling-rclpy-custom-ros-2-packages-and-workspaces-with-python-3-11
-
-Try pre-installing python 3.11 at ros docker
-
-Consider installing neovim with my config instead of connecting to a docker
 
 3. Symlinks for exts/omni:
 
@@ -32,15 +11,8 @@ to be importable as `import isaacsim.core.api`:
 3. Create a symlink as following:
   ln -s /isaac-sim/exts/isaacsim.core.api/isaacsim/core/api /isaac-sim/symlinks/exts/isaacsim/core/api
 
-4. Align paths in Makefile: when mounting, paths have to be absolute, but when passing paths to dockerfile as build-args, paths have to be relative to build context path.
-
-5. Install pip3 and torch to ROS2 docker?
-Done, check
-
-6. Install Nav2
-https://docs.nav2.org/getting_started/index.html#installation
-Done, check
-
-7. Create unified yaml config that aggregates scene, randomization settings across extensions
-
 8. Create wireframe "purpose = guide" for light switch spawn area
+
+9. Bridge:
+ - take frequency from hydra for both PX4 and Isaac Sim, make sure they are equal
+ - create a test that ensures communication between Isaac Sim and PX4 SITL

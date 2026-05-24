@@ -26,6 +26,7 @@ class SceneTestContext:
 
     stage: object
     scene_path: Path
+    simulation_app: object
     report: Callable[[str], None]
 
 
@@ -102,7 +103,14 @@ def run_scene_test(
         if stage is None:
             raise RuntimeError(f"Stage did not load: {scene_path}")
 
-        test_body(SceneTestContext(stage=stage, scene_path=scene_path, report=report))
+        test_body(
+            SceneTestContext(
+                stage=stage,
+                scene_path=scene_path,
+                simulation_app=simulation_app,
+                report=report,
+            )
+        )
         report(f"{test_name}: PASS")
     except SystemExit as exc:
         error = RuntimeError(f"{test_name}: Isaac test exited before completion: {exc}")

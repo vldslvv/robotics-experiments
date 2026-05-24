@@ -77,24 +77,43 @@ Do not introduce new tooling unless explicitly requested.
   Hydra config lazily and caches it for the process.
 - Feature extensions should depend on `robotics_experiments_core` and use a
   small local `config.py` adapter when they need feature-specific config access.
+- PX4 bridge behavior is configured through the Hydra `px4` group. The default
+  experiment enables the bridge for the custom Isaac runtime; use Hydra
+  overrides such as `px4.enabled=false` for Isaac sessions that should not
+  connect to PX4 SITL.
+- PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
+  If Isaac emits duplicate or non-increasing physics timestamps, the bridge
+  must not forward another HIL sensor tick or wait for a new actuator packet.
 
 ## Common commands
 
 ### Docker
-- `make build-all` builds Isaac Sim, ROS 2, and PX4 images.
-- `make clean-all` stops/removes containers and removes built images.
+- `make build` builds Isaac Sim, ROS 2, and PX4 images.
+- `make destroy` stops/removes containers and removes built images.
 - `make run-isaac` starts the Isaac Sim container.
 - `make run-ros` starts the ROS 2 container.
 - `make run-px4` starts the PX4 SITL container.
+- `make stop` stops persistent containers without removing them.
+- Legacy targets such as `build-all`, `run-all`, and `clean-all` are
+  compatibility aliases.
 
 ### ROS 2
 Avoid calling ROS 2 directly on the host. It is meant to be used in the Dockerized environment.
 
 ### Isaac Sim
 Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dockerized environment.
+- `make test` runs host Python tests.
+- `make test-integration` runs container-backed integration tests.
+- `make test-integration-px4` starts a temporary PX4 SITL container, runs the
+  standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
 
 ### PX4
 Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized environment.
+- `make run-px4` opens a `px4` tmux session with side-by-side panes. One pane
+  starts `make px4_sitl_default none_iris`; the other remains an interactive
+  shell.
+- Inside the PX4 container, `px4-iris` runs `make px4_sitl_default none_iris`
+  from the PX4 source directory on demand.
 
 ## Hard rules
 - Do NOT commit USD assets or binary files.

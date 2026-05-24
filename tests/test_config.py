@@ -52,13 +52,17 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.drone.usd_path.endswith("/quadcopter_500mm.usda")
     assert config.px4.num_rotors == 4
     assert config.px4.rotor_link_paths == [
-        "propulsion/motor_1/prop",
-        "propulsion/motor_3/prop",
-        "propulsion/motor_2/prop",
-        "propulsion/motor_4/prop",
+        "body/propulsion/motor_1/prop",
+        "body/propulsion/motor_3/prop",
+        "body/propulsion/motor_2/prop",
+        "body/propulsion/motor_4/prop",
     ]
     assert config.px4.connection_type == "tcpin"
     assert config.px4.px4_autolaunch is False
+    assert config.px4.enabled is True
+    assert config.px4.first_heartbeat_timeout_s == 5.0
+    assert config.px4.heartbeat_rate_hz == 1.0
+    assert config.px4.gps_enabled is True
     reset_config()
 
 

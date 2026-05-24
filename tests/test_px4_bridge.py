@@ -1,3 +1,4 @@
+import itertools
 import sys
 import types
 
@@ -102,7 +103,11 @@ class _FakeConnection:
     def __init__(self, messages=()):
         self.messages = list(messages)
         self.recv_calls = []
-        self.mav = types.SimpleNamespace(heartbeat_send=lambda *args: None)
+        self.hil_sensor_sends = []
+        self.mav = types.SimpleNamespace(
+            heartbeat_send=lambda *args: None,
+            hil_sensor_send=lambda *args: self.hil_sensor_sends.append(args),
+        )
 
     def recv_match(self, *, blocking=False, timeout=None):
         self.recv_calls.append((blocking, timeout))
@@ -116,16 +121,39 @@ class _FakePegasusBackend:
         self.config = config
         self._connection = _FakeConnection()
         self._received_first_hearbeat = True
+        self.first_heartbeat_available = True
         self._received_first_actuator = False
         self._enable_lockstep = True
         self._received_actuator = False
         self._input_reference = [0.0] * config.config["num_rotors"]
+        self._sensor_data = types.SimpleNamespace(
+            new_imu_data=False,
+            received_first_imu=False,
+            xacc=0.0,
+            yacc=0.0,
+            zacc=0.0,
+            xgyro=0.0,
+            ygyro=0.0,
+            zgyro=0.0,
+            new_mag_data=False,
+            xmag=0.0,
+            ymag=0.0,
+            zmag=0.0,
+            new_bar_data=False,
+            abs_pressure=0.0,
+            diff_pressure=0.0,
+            pressure_alt=0.0,
+            temperature=0.0,
+            new_press_data=False,
+        )
         self.sensor_times = []
         self.gps_times = []
         self.imu_updates = []
         self.mag_updates = []
         self.bar_updates = []
         self.gps_updates = []
+        self.heartbeat_sends = 0
+        self.first_heartbeat_waits = 0
         self.started = False
         self.stopped = False
 
@@ -137,19 +165,37 @@ class _FakePegasusBackend:
         self._connection = None
 
     def send_heartbeat(self):
-        pass
+        self.heartbeat_sends += 1
 
     def wait_for_first_hearbeat(self):
-        self._received_first_hearbeat = True
+        self.first_heartbeat_waits += 1
+        if self.first_heartbeat_available:
+            self._received_first_hearbeat = True
 
     def update_imu_data(self, data):
         self.imu_updates.append(data)
+        self._sensor_data.xacc = data["linear_acceleration"][0]
+        self._sensor_data.yacc = data["linear_acceleration"][1]
+        self._sensor_data.zacc = data["linear_acceleration"][2]
+        self._sensor_data.xgyro = data["angular_velocity"][0]
+        self._sensor_data.ygyro = data["angular_velocity"][1]
+        self._sensor_data.zgyro = data["angular_velocity"][2]
+        self._sensor_data.new_imu_data = True
+        self._sensor_data.received_first_imu = True
 
     def update_mag_data(self, data):
         self.mag_updates.append(data)
+        self._sensor_data.xmag = data["magnetic_field"][0]
+        self._sensor_data.ymag = data["magnetic_field"][1]
+        self._sensor_data.zmag = data["magnetic_field"][2]
+        self._sensor_data.new_mag_data = True
 
     def update_bar_data(self, data):
         self.bar_updates.append(data)
+        self._sensor_data.temperature = data["temperature"]
+        self._sensor_data.abs_pressure = data["absolute_pressure"]
+        self._sensor_data.pressure_alt = data["pressure_altitude"]
+        self._sensor_data.new_bar_data = True
 
     def update_gps_data(self, data):
         self.gps_updates.append(data)
@@ -207,24 +253,143 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     port.step(VehicleState.hover_at(sim_time_us=300_000))
 
     assert backend.started is True
-    assert backend.sensor_times == [100_000, 150_000, 300_000]
+    assert [args[0] for args in backend._connection.hil_sensor_sends] == [
+        100_000,
+        150_000,
+        300_000,
+    ]
     assert backend.gps_times == [100_000, 300_000]
     assert len(backend.imu_updates) == 3
     assert len(backend.mag_updates) == 3
     assert len(backend.bar_updates) == 3
     assert len(backend.gps_updates) == 3
+    first_hil_sensor = backend._connection.hil_sensor_sends[0]
+    assert first_hil_sensor[13] == 25.0
+    assert first_hil_sensor[14] == 8191
 
 
-def test_mavlink_port_timeout_marks_disconnected(monkeypatch):
+def test_mavlink_port_can_disable_gps(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=0.0)
+    port = Px4MavlinkPort(num_rotors=4, gps_enabled=False)
     backend = port._backend
     backend._connection = _FakeConnection()
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
+    assert backend.gps_times == []
+    assert backend.gps_updates == []
+
+
+def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4)
+    backend = port._backend
+    actuator_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.1, 0.2, 0.3, 0.4],
+        mode=0,
+        flags=0,
+    )
+    backend._connection = _FakeConnection([actuator_msg])
     backend._received_first_actuator = True
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
+    assert len(backend._connection.recv_calls) == 1
+    assert np.allclose(commands, [0.1, 0.2, 0.3, 0.4])
+    assert port.is_connected is True
+    assert port._last_disconnect_reason is None
+    assert port._sensor_send_count == 1
+    assert port._actuator_receive_count == 1
+
+
+def test_mavlink_port_uses_configured_heartbeat_rate(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    import robotics_experiments.px4_bridge.mavlink as mavlink_module
+
+    times = itertools.chain(
+        [100.0, 100.0, 100.4, 100.4, 100.6, 100.6],
+        itertools.repeat(100.6),
+    )
+    monkeypatch.setattr(mavlink_module.time, "time", lambda: next(times))
+
+    port = Px4MavlinkPort(num_rotors=4, heartbeat_rate_hz=2.0)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    port.step(VehicleState.hover_at(sim_time_us=200_000))
+    port.step(VehicleState.hover_at(sim_time_us=300_000))
+
+    assert backend.heartbeat_sends == 2
+
+
+def test_mavlink_port_first_heartbeat_timeout_marks_disconnected(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, first_heartbeat_timeout_s=0.0)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._received_first_hearbeat = False
+    backend.first_heartbeat_available = False
 
     port.start()
     commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
 
     assert np.allclose(commands, np.zeros(4))
+    assert backend.first_heartbeat_waits == 1
     assert port.is_connected is False
-    assert backend._connection.recv_calls
+    assert backend.stopped is True
+    assert port._last_disconnect_reason == "first heartbeat timeout"
+
+
+def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    actuator_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.1, 0.2, 0.3, 0.4],
+        mode=0,
+        flags=0,
+    )
+    connection = _FakeConnection([actuator_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+
+    port.start()
+    commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    assert np.allclose(commands, [0.1, 0.2, 0.3, 0.4])
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert backend._connection is connection
+    assert port._actuator_receive_count == 1
+    assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=0.0)
+    backend = port._backend
+    connection = _FakeConnection()
+    backend._connection = connection
+    backend._received_first_actuator = True
+
+    port.start()
+    commands = port.step(VehicleState.hover_at(sim_time_us=300_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is False
+    assert backend.stopped is True
+    assert backend._connection is None
+    assert len(connection.recv_calls) == 1
+    assert port._last_disconnect_reason == "actuator polling timed out after 0.000 seconds"

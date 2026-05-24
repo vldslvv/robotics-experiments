@@ -18,8 +18,8 @@ PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
 # EXPERIMENT_CONFIG_NAME selects which top-level yaml to compose;
 # EXPERIMENT_CONFIG_OVERRIDES is a space-separated list of Hydra dot-list
 # overrides (e.g. "switches.num_switches=10 sim.physics_hz=200").
-export EXPERIMENT_CONFIG_DIR="${EXPERIMENT_CONFIG_DIR-}"
-export EXPERIMENT_CONFIG_NAME="${EXPERIMENT_CONFIG_NAME-}"
+export EXPERIMENT_CONFIG_DIR="${EXPERIMENT_CONFIG_DIR:-/isaac-sim/proj/configs/experiment}"
+export EXPERIMENT_CONFIG_NAME="${EXPERIMENT_CONFIG_NAME:-config}"
 export EXPERIMENT_CONFIG_OVERRIDES="${EXPERIMENT_CONFIG_OVERRIDES-}"
 
 # For log level changes, use:

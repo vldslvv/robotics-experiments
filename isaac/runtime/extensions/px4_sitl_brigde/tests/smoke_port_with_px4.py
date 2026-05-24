@@ -62,21 +62,32 @@ def main() -> int:
     sim_time_us = 0
     deadline = time.time() + args.duration_s
     last_print = 0.0
+    disconnected = False
     try:
         while time.time() < deadline:
             tick_start = time.time()
 
             state = VehicleState.hover_at(sim_time_us=sim_time_us)
             commands = port.step(state)
+            if not port.is_connected:
+                disconnected = True
 
             now = time.time()
             if now - last_print > 1.0:
                 print(
                     f"t={sim_time_us/1e6:7.3f}s  "
                     f"connected={port.is_connected}  armed={port.is_armed}  "
+                    f"heartbeat={getattr(port, '_first_heartbeat_received_s', None) is not None}  "
+                    f"sensors={getattr(port, '_sensor_send_count', 0)}  "
+                    f"actuators={getattr(port, '_actuator_receive_count', 0)}  "
+                    f"last_sensor_us={getattr(port, '_last_sensor_send_us', None)}  "
+                    f"last_actuator_us={getattr(port, '_last_actuator_receive_us', None)}  "
+                    f"disconnect={getattr(port, '_last_disconnect_reason', None)!r}  "
                     f"cmd={np.round(commands, 3).tolist()}"
                 )
                 last_print = now
+            if disconnected:
+                break
 
             sim_time_us += int(period_s * 1_000_000)
             elapsed = time.time() - tick_start
@@ -87,6 +98,12 @@ def main() -> int:
     finally:
         port.stop()
         print("port stopped")
+    if disconnected:
+        print(
+            "port disconnected before duration elapsed: "
+            f"{getattr(port, '_last_disconnect_reason', None)!r}"
+        )
+        return 1
     return 0
 
 

@@ -24,7 +24,7 @@ core package used by experiments.
 Build all Docker images:
 
 ```bash
-make build-all
+make build
 ```
 
 Run Isaac Sim:
@@ -49,14 +49,33 @@ Run PX4 SITL:
 make run-px4
 ```
 
-Clean containers and images:
+The PX4 container opens a `px4` tmux session with two side-by-side panes. One
+pane starts `make px4_sitl_default none_iris`; the other stays available as a
+shell. Inside the container, use `px4-iris` to run the same SITL command on
+demand.
+
+Run host Python tests:
 
 ```bash
-make clean-all
+make test
+```
+
+Run container-backed integration tests:
+
+```bash
+make test-integration
+```
+
+Destroy containers and images:
+
+```bash
+make destroy
 ```
 
 The runtime targets are interactive and persistent. If a container already
 exists, the Makefile starts it again instead of creating a new one.
+Legacy targets such as `build-all`, `run-all`, and `clean-all` remain as
+compatibility aliases.
 
 ## Isaac Sim Workflows
 

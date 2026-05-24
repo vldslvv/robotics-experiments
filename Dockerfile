@@ -182,6 +182,12 @@ ENV LC_ALL=en_US.UTF-8
 
 WORKDIR /isaac-sim
 
+RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \
+    --no-cache-dir \
+    --disable-pip-version-check \
+    "hydra-core>=1.3" \
+    "omegaconf>=2.3"
+
 # The problem being solved:
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
@@ -287,6 +293,13 @@ RUN printf '%s\n' \
       'set -sg escape-time 0' \
       > /root/.tmux.conf
 
+RUN printf '%s\n' \
+      "alias px4-iris='cd ${PX4_DIR} && make px4_sitl_default none_iris'" \
+      >> /root/.bashrc
+
+COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
+RUN chmod +x /usr/local/bin/start_px4_tmux
+
 RUN pip3 install --no-cache-dir \
       kconfiglib empy==3.3.4 pyros-genmsg
 
@@ -300,7 +313,5 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
 RUN cd ${PX4_DIR} && make px4_sitl_default
 
 WORKDIR ${PX4_DIR}
-# Drop into an attached tmux so PX4 SITL can be launched manually:
-#   make px4_sitl_default none_iris
-# (none = no built-in simulator backend; Pegasus feeds dynamics over MAVLink.)
-CMD ["tmux", "new-session", "-A", "-s", "px4"]
+# Drop into an attached tmux with PX4 SITL running in one pane and a shell in another.
+CMD ["/usr/local/bin/start_px4_tmux"]

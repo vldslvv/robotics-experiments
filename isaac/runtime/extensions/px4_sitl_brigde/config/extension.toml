@@ -19,6 +19,9 @@ writeTarget.kit = true
 [[python.module]]
 name = "Px4SitlBridge_python"
 
+[[python.module]]
+name = "pegasus"
+
 [python.pipapi]
 requirements = ["numpy", "scipy", "pymavlink", "pyyaml", "toml"]
 use_online_index = true
