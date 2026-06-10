@@ -63,6 +63,12 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.first_heartbeat_timeout_s == 5.0
     assert config.px4.heartbeat_rate_hz == 1.0
     assert config.px4.gps_enabled is True
+    assert config.px4.gps_send_rate_hz == 250.0
+    assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]
+    assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
+    assert config.px4.rotor_constant == [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
+    assert config.px4.rot_dir == [-1.0, -1.0, 1.0, 1.0]
+    assert config.px4.linear_drag == [0.50, 0.30, 0.0]
     reset_config()
 
 

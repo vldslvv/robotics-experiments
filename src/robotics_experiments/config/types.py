@@ -141,8 +141,15 @@ class Px4BridgeConfig:
             separate rotor bodies. The host prefixes them with the articulation
             path if they start with a ``/``, otherwise treats them as relative.
         num_rotors: Number of rotors driven by the bridge.
-        max_rotor_force_n: Force in Newtons produced at command 1.0 by the
-            default linear thrust model.
+        max_rotor_force_n: Legacy staging value for the linear thrust model.
+            The default PX4 path uses Pegasus' quadratic rotor model instead.
+        input_offset, input_scaling, zero_position_armed: Pegasus MAVLink
+            actuator scaling from PX4 controls to rotor angular velocity
+            references.
+        rotor_constant, rolling_moment_coefficient, rot_dir,
+            min_rotor_velocity, max_rotor_velocity: Pegasus quadratic thrust
+            curve parameters.
+        linear_drag: Pegasus body-frame linear drag coefficients.
         connection_type: "tcpin" (bridge listens) or "tcpout".
         connection_ip: Address used by ``connection_type``.
         connection_baseport: TCP port for the simulator MAVLink API.
@@ -175,6 +182,15 @@ class Px4BridgeConfig:
     rotor_link_paths: List[str]
     num_rotors: int
     max_rotor_force_n: float
+    input_offset: List[float]
+    input_scaling: List[float]
+    zero_position_armed: List[float]
+    rotor_constant: List[float]
+    rolling_moment_coefficient: List[float]
+    rot_dir: List[float]
+    min_rotor_velocity: List[float]
+    max_rotor_velocity: List[float]
+    linear_drag: List[float]
     connection_type: str
     connection_ip: str
     connection_baseport: int

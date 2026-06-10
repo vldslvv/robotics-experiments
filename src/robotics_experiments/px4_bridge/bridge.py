@@ -11,7 +11,7 @@ and tested independently:
 - ``articulation_io``: reads ``VehicleState``, applies per-rotor forces.
 - ``port``: pumps state out, pulls actuator commands back (MAVLink in prod,
   fake in tests).
-- ``thrust_model``: maps normalized commands [0..1] to forces in Newtons.
+- ``thrust_model``: maps rotor references to Pegasus-compatible dynamics.
 """
 
 from __future__ import annotations
@@ -20,9 +20,10 @@ from typing import Optional
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.flight_stack import AbstractFlightStackBridge
-from robotics_experiments.px4_bridge.simulator import ArticulationIO
-from robotics_experiments.px4_bridge.thrust_model import RotorThrustModel
+from . import frames
+from .flight_stack import AbstractFlightStackBridge
+from .simulator import ArticulationIO
+from .thrust_model import RotorThrustModel
 
 __all__ = ["Px4Bridge"]
 
@@ -44,7 +45,7 @@ class Px4Bridge:
         Args:
             articulation_path: USD path to the drone root articulation.
             rotor_link_paths: USD paths to rotor thrust markers in PX4 motor-index order.
-            thrust_model: Maps normalized commands -> per-rotor forces (N).
+            thrust_model: Maps rotor commands to per-rotor forces and body effects.
             port: Adapter to the flight stack.
             articulation_io: Optional override for Isaac state I/O - used by
                 tests to inject a fake. Defaults to a real
@@ -99,8 +100,19 @@ class Px4Bridge:
             return
 
         commands = self._port.step(state)
-        forces = self._thrust_model.commands_to_forces(commands)
-        self._io.apply_forces(forces)
+        body_velocity_flu = frames.world_enu_to_body_flu(
+            state.orientation_flu_enu_wxyz,
+            state.linear_velocity_enu,
+        )
+        dynamics = self._thrust_model.commands_to_dynamics(
+            commands,
+            linear_body_velocity_flu=body_velocity_flu,
+        )
+        self._io.apply_forces(dynamics.forces_n)
+        if hasattr(self._io, "apply_body_torque"):
+            self._io.apply_body_torque(dynamics.body_torque_n_m)
+        if hasattr(self._io, "apply_body_force"):
+            self._io.apply_body_force(dynamics.body_drag_n)
 
     # ---- Status ------------------------------------------------------------
 

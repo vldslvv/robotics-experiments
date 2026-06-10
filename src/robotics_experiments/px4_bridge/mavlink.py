@@ -2,19 +2,17 @@
 
 The port is the seam between the bridge and whatever flight stack is on the
 other side. Components above the port (``Px4Bridge``) speak only
-``VehicleState`` in / ``np.ndarray`` of normalized commands out, so they can
-be paired with a fake port for staged testing without PX4 running.
+``VehicleState`` in / rotor references out, so they can be paired with a fake
+port for staged testing without PX4 running.
 
 The concrete ``Px4MavlinkPort`` wraps Pegasus' ``PX4MavlinkBackend`` for the
-heavy lifting (socket, MAVLink packing, PX4 launch) but takes over the
-sensor-frame conversions, lockstep poll, and timestamp handling so the
-contract requirements (timeout, sim-time passthrough) are satisfied.
+heavy lifting (socket, MAVLink packing, PX4 launch, actuator scaling) while
+preserving custom timeout and sim-time handling.
 """
 
 from __future__ import annotations
 
 import logging
-import math
 import time
 from typing import Optional
 
@@ -33,14 +31,210 @@ _HIL_SENSOR_GYRO_UPDATED = 0b0000000111000
 _HIL_SENSOR_MAG_UPDATED = 0b0000111000000
 _HIL_SENSOR_BARO_UPDATED = 0b1101000000000
 _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
-_HIL_SENSOR_ALL_UPDATED = 0x1FFF
-_MAG_DITHER_GAUSS = 0.0025
-_BARO_DITHER_HPA = 0.012
+_DEFAULT_SENSOR_RATE_HZ = 250.0
 
 
 def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
     vec = np.asarray(vec_flu, dtype=np.float64)
     return np.array([vec[0], -vec[1], -vec[2]], dtype=np.float64)
+
+
+def _pegasus_magnetometer_body_frd(
+    *,
+    position_enu: np.ndarray,
+    orientation_flu_enu_wxyz: np.ndarray,
+    home_lat_deg: float,
+    home_lon_deg: float,
+) -> np.ndarray | None:
+    """Return Pegasus' WMM-based magnetometer reading when Pegasus is importable."""
+    try:
+        from scipy.spatial.transform import Rotation
+
+        from pegasus.simulator.logic.rotations import rot_ENU_to_NED, rot_FLU_to_FRD
+        from pegasus.simulator.logic.sensors.geo_mag_utils import (
+            get_mag_declination,
+            get_mag_inclination,
+            get_mag_strength,
+            reprojection,
+        )
+    except Exception:
+        return None
+
+    latitude, longitude = reprojection(
+        np.asarray(position_enu, dtype=np.float64),
+        np.radians(home_lat_deg),
+        np.radians(home_lon_deg),
+    )
+    declination_rad = np.radians(get_mag_declination(np.degrees(latitude), np.degrees(longitude)))
+    inclination_rad = np.radians(get_mag_inclination(np.degrees(latitude), np.degrees(longitude)))
+    strength_ga = 0.01 * get_mag_strength(np.degrees(latitude), np.degrees(longitude))
+
+    horizontal = strength_ga * np.cos(inclination_rad)
+    magnetic_field_inertial = np.array(
+        [
+            horizontal * np.cos(declination_rad),
+            horizontal * np.sin(declination_rad),
+            np.tan(inclination_rad) * horizontal,
+        ],
+        dtype=np.float64,
+    )
+
+    q = np.asarray(orientation_flu_enu_wxyz, dtype=np.float64)
+    attitude_flu_enu = Rotation.from_quat([q[1], q[2], q[3], q[0]])
+    rot_body_to_world = rot_ENU_to_NED * attitude_flu_enu * rot_FLU_to_FRD.inv()
+    return np.asarray(rot_body_to_world.inv().apply(magnetic_field_inertial), dtype=np.float64)
+
+
+class _PegasusRateGate:
+    def __init__(self, update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ):
+        self._period_s = 1.0 / float(update_rate_hz)
+        self._first_update = True
+        self._total_time_s = 0.0
+
+    def should_update(self, dt_s: float) -> tuple[bool, float]:
+        self._total_time_s += max(0.0, float(dt_s))
+        if self._first_update or self._total_time_s >= self._period_s:
+            elapsed = self._total_time_s if self._total_time_s > 0.0 else self._period_s
+            self._first_update = False
+            self._total_time_s = 0.0
+            return True, elapsed
+        return False, self._total_time_s
+
+
+class _PegasusBarometer:
+    """Pegasus barometer model without the random noise term."""
+
+    _TEMPERATURE_MSL_K = 288.15
+    _PRESSURE_MSL_PA = 101325.0
+    _LAPSE_RATE_K_M = 0.0065
+    _AIR_DENSITY_MSL = 1.225
+    _ABSOLUTE_ZERO_C = -273.15
+    _GRAVITY_M_S2 = 9.80665
+
+    def __init__(self, *, origin_alt_m: float):
+        self._origin_alt_m = float(origin_alt_m)
+        self._z_start: float | None = None
+
+    def update(self, altitude_enu_m: float) -> dict:
+        if self._z_start is None:
+            self._z_start = float(altitude_enu_m)
+
+        alt_rel = float(altitude_enu_m) - self._z_start
+        alt_amsl = self._origin_alt_m + alt_rel
+        temperature_local = self._TEMPERATURE_MSL_K - self._LAPSE_RATE_K_M * alt_amsl
+        pressure_ratio = (self._TEMPERATURE_MSL_K / temperature_local) ** 5.2561
+        absolute_pressure_hpa = (self._PRESSURE_MSL_PA / pressure_ratio) * 0.01
+        density_ratio = (self._TEMPERATURE_MSL_K / temperature_local) ** 4.256
+        air_density = self._AIR_DENSITY_MSL / density_ratio
+        pressure_altitude = alt_amsl - 0.0 / (self._GRAVITY_M_S2 * air_density)
+        temperature_celsius = temperature_local + self._ABSOLUTE_ZERO_C
+
+        return {
+            "absolute_pressure": absolute_pressure_hpa,
+            "pressure_altitude": pressure_altitude,
+            "temperature": temperature_celsius,
+        }
+
+
+class _PegasusSensorSuite:
+    """Stateful Pegasus-style sensor update pipeline."""
+
+    def __init__(
+        self,
+        *,
+        home_lat_deg: float,
+        home_lon_deg: float,
+        home_alt_m: float,
+        gps_enabled: bool,
+        update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
+    ):
+        self._home_lat_deg = float(home_lat_deg)
+        self._home_lon_deg = float(home_lon_deg)
+        self._home_alt_m = float(home_alt_m)
+        self._gps_enabled = bool(gps_enabled)
+        self._last_sim_time_us: int | None = None
+        self._imu_gate = _PegasusRateGate(update_rate_hz)
+        self._mag_gate = _PegasusRateGate(update_rate_hz)
+        self._baro_gate = _PegasusRateGate(update_rate_hz)
+        self._gps_gate = _PegasusRateGate(update_rate_hz)
+        self._barometer = _PegasusBarometer(origin_alt_m=self._home_alt_m)
+
+    def update(self, state: VehicleState) -> dict[str, dict | None]:
+        sim_time_us = int(state.sim_time_us)
+        if self._last_sim_time_us is None:
+            dt_s = 1.0 / _DEFAULT_SENSOR_RATE_HZ
+        else:
+            dt_s = max(0.0, (sim_time_us - self._last_sim_time_us) * 1e-6)
+        self._last_sim_time_us = sim_time_us
+
+        imu = self._update_imu(state, dt_s)
+        mag = self._update_mag(state, dt_s)
+        baro = self._update_baro(state, dt_s)
+        gps = self._update_gps(state, dt_s) if self._gps_enabled else None
+        return {"imu": imu, "mag": mag, "baro": baro, "gps": gps}
+
+    def _update_imu(self, state: VehicleState, dt_s: float) -> dict | None:
+        should_update, _ = self._imu_gate.should_update(dt_s)
+        if not should_update:
+            return None
+        sf_flu = frames.specific_force_body_flu(
+            state.linear_acceleration_enu,
+            state.orientation_flu_enu_wxyz,
+            gravity=9.80665,
+        )
+        sf_frd = _flu_to_frd(sf_flu)
+        gyro_frd = _flu_to_frd(np.asarray(state.angular_velocity_flu, dtype=np.float64))
+        return {
+            "linear_acceleration": [
+                float(sf_frd[0]),
+                float(sf_frd[1]),
+                float(sf_frd[2]),
+            ],
+            "angular_velocity": [
+                float(gyro_frd[0]),
+                float(gyro_frd[1]),
+                float(gyro_frd[2]),
+            ],
+        }
+
+    def _update_mag(self, state: VehicleState, dt_s: float) -> dict | None:
+        should_update, _ = self._mag_gate.should_update(dt_s)
+        if not should_update:
+            return None
+        mag_frd = _pegasus_magnetometer_body_frd(
+            position_enu=state.position_enu,
+            orientation_flu_enu_wxyz=state.orientation_flu_enu_wxyz,
+            home_lat_deg=self._home_lat_deg,
+            home_lon_deg=self._home_lon_deg,
+        )
+        if mag_frd is None:
+            mag_flu = frames.magnetometer_body_flu(state.orientation_flu_enu_wxyz)
+            mag_frd = _flu_to_frd(mag_flu)
+        return {
+            "magnetic_field": [
+                float(mag_frd[0]),
+                float(mag_frd[1]),
+                float(mag_frd[2]),
+            ],
+        }
+
+    def _update_baro(self, state: VehicleState, dt_s: float) -> dict | None:
+        should_update, _ = self._baro_gate.should_update(dt_s)
+        if not should_update:
+            return None
+        return self._barometer.update(float(state.position_enu[2]))
+
+    def _update_gps(self, state: VehicleState, dt_s: float) -> dict | None:
+        should_update, _ = self._gps_gate.should_update(dt_s)
+        if not should_update:
+            return None
+        return frames.synth_gps_from_enu(
+            position_enu=state.position_enu,
+            velocity_enu=state.linear_velocity_enu,
+            home_lat_deg=self._home_lat_deg,
+            home_lon_deg=self._home_lon_deg,
+            home_alt_m=self._home_alt_m,
+        )
 
 
 # TODO get rid of px4_autolaunch and similar settings
@@ -55,9 +249,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
     - ``HIL_SENSOR.time_usec`` is taken from the caller's ``sim_time_us``,
       not a wallclock-derived counter. This is what makes lockstep
       sim-speed-agnostic.
-    - Sensor synthesis (specific force from gravity + attitude, magnetometer
-      from a fixed NED reference, GPS from local ENU offset, barometer from
-      ISA) is performed inside the port. Callers only supply ``VehicleState``.
+    - Sensor synthesis follows Pegasus' sensor-rate and payload conventions.
+      Callers only supply ``VehicleState``.
 
     The Pegasus backend is bypassed for ``update`` / ``poll_mavlink_messages``;
     its ``_connection``, ``send_*`` helpers, ``handle_control``, and rotor
@@ -75,11 +268,14 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         px4_autolaunch: bool = False,
         px4_dir: str = "",
         px4_vehicle_model: str = "gazebo-classic_iris",
+        input_offset: list[float] | None = None,
+        input_scaling: list[float] | None = None,
+        zero_position_armed: list[float] | None = None,
         lockstep_timeout_s: float = 0.1,
         first_heartbeat_timeout_s: float = 5.0,
         heartbeat_rate_hz: float = 1.0,
         gps_enabled: bool = True,
-        gps_send_rate_hz: float = 5.0,
+        gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
         home_lat_deg: float = frames.DEFAULT_HOME_LAT_DEG,
         home_lon_deg: float = frames.DEFAULT_HOME_LON_DEG,
         home_alt_m: float = frames.DEFAULT_HOME_ALT_M,
@@ -96,6 +292,17 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._home_lat_deg = float(home_lat_deg)
         self._home_lon_deg = float(home_lon_deg)
         self._home_alt_m = float(home_alt_m)
+        self._sensor_suite = _PegasusSensorSuite(
+            home_lat_deg=self._home_lat_deg,
+            home_lon_deg=self._home_lon_deg,
+            home_alt_m=self._home_alt_m,
+            gps_enabled=self._gps_enabled,
+        )
+        input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
+        input_scaling = [1000.0] * self._num_rotors if input_scaling is None else input_scaling
+        zero_position_armed = (
+            [100.0] * self._num_rotors if zero_position_armed is None else zero_position_armed
+        )
 
         # Lazy-construct the Pegasus backend so importing this module does
         # not require pegasus/scipy until something actually runs.
@@ -116,11 +323,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     "px4_dir": px4_dir,
                     "px4_vehicle_model": px4_vehicle_model,
                     "enable_lockstep": True,
-                    # Force the linear-scaling stage in the backend into a
-                    # passthrough: thrust_model handles command->force.
-                    "input_offset": [0.0] * self._num_rotors,
-                    "input_scaling": [1.0] * self._num_rotors,
-                    "zero_position_armed": [0.0] * self._num_rotors,
+                    "input_offset": input_offset,
+                    "input_scaling": input_scaling,
+                    "zero_position_armed": zero_position_armed,
                 }
             )
         )
@@ -142,6 +347,12 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
     def start(self) -> None:
         self._backend.start()
+        self._sensor_suite = _PegasusSensorSuite(
+            home_lat_deg=self._home_lat_deg,
+            home_lon_deg=self._home_lon_deg,
+            home_alt_m=self._home_alt_m,
+            gps_enabled=self._gps_enabled,
+        )
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
         self._last_heartbeat_send_s = 0.0
@@ -259,57 +470,20 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
     def _fill_sensor_data(self, state: VehicleState) -> None:
         """Populate ``self._backend._sensor_data`` from a VehicleState.
 
-        IMU values are in body-FRD (PX4 convention); we go ENU/FLU -> FRD via
-        the Pegasus rotation helpers.
+        Sensor values are generated through a Pegasus-style stateful sensor
+        suite. Only sensors that refreshed on this tick update the Pegasus
+        backend, which preserves the backend's ``fields_updated`` mask
+        semantics.
         """
-        # Specific force in body FLU, then to FRD for PX4.
-        sf_flu = frames.specific_force_body_flu(
-            state.linear_acceleration_enu, state.orientation_flu_enu_wxyz
-        )
-        sf_frd = _flu_to_frd(sf_flu)
-
-        # Gyro is in body. Convert FLU -> FRD.
-        gyro_frd = _flu_to_frd(np.asarray(state.angular_velocity_flu, dtype=np.float64))
-
-        # Magnetometer in body FLU then to FRD.
-        mag_flu = frames.magnetometer_body_flu(state.orientation_flu_enu_wxyz)
-        mag_frd = _flu_to_frd(mag_flu)
-
-        self._backend.update_imu_data(
-            {
-                "linear_acceleration": [
-                    float(sf_frd[0]),
-                    float(sf_frd[1]),
-                    float(sf_frd[2]),
-                ],
-                "angular_velocity": [
-                    float(gyro_frd[0]),
-                    float(gyro_frd[1]),
-                    float(gyro_frd[2]),
-                ],
-            }
-        )
-        self._backend.update_mag_data(
-            {
-                "magnetic_field": [
-                    float(mag_frd[0]),
-                    float(mag_frd[1]),
-                    float(mag_frd[2]),
-                ]
-            }
-        )
-        self._backend.update_bar_data(frames.synth_barometer(float(state.position_enu[2])))
-
-        if self._gps_enabled:
-            # GPS - synthesized from local ENU around home.
-            gps = frames.synth_gps_from_enu(
-                position_enu=state.position_enu,
-                velocity_enu=state.linear_velocity_enu,
-                home_lat_deg=self._home_lat_deg,
-                home_lon_deg=self._home_lon_deg,
-                home_alt_m=self._home_alt_m,
-            )
-            self._backend.update_gps_data(gps)
+        updates = self._sensor_suite.update(state)
+        if updates["imu"] is not None:
+            self._backend.update_imu_data(updates["imu"])
+        if updates["mag"] is not None:
+            self._backend.update_mag_data(updates["mag"])
+        if updates["baro"] is not None:
+            self._backend.update_bar_data(updates["baro"])
+        if updates["gps"] is not None:
+            self._backend.update_gps_data(updates["gps"])
 
     def _should_send_heartbeat(self, now_s: float) -> bool:
         if self._heartbeat_period_s is None:
@@ -347,43 +521,19 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         return (sim_time_us - self._last_gps_send_us) >= self._gps_period_s * 1_000_000
 
     def _send_sensor_msgs(self, sim_time_us: int) -> None:
-        """Send HIL_SENSOR with a project-owned field mask and baro payload."""
-        sensor = self._backend._sensor_data
-        fields_updated = 0
-
-        if sensor.new_imu_data:
-            fields_updated |= _HIL_SENSOR_ACCEL_UPDATED | _HIL_SENSOR_GYRO_UPDATED
-            sensor.new_imu_data = False
-        if sensor.new_mag_data:
-            fields_updated |= _HIL_SENSOR_MAG_UPDATED
-            sensor.new_mag_data = False
-        if sensor.new_bar_data:
-            fields_updated |= _HIL_SENSOR_BARO_UPDATED
-            sensor.new_bar_data = False
-        if sensor.new_press_data:
-            fields_updated |= _HIL_SENSOR_DIFF_PRESS_UPDATED
-            sensor.new_press_data = False
-
-        # PX4's SITL simulator path expects all HIL_SENSOR fields to be marked
-        # valid. We synthesize zero differential pressure when no airspeed
-        # model exists, which is still a valid value for this multirotor path.
-        fields_updated = _HIL_SENSOR_ALL_UPDATED
-
-        # PX4's simulator driver republishes IMU samples continuously, but the
-        # mag/baro path can leave vehicle_magnetometer/vehicle_air_data stale
-        # when a perfectly static HIL_SENSOR stream quantizes to identical raw
-        # samples. Add deterministic sub-sensor-noise variation so the sensor
-        # voter sees fresh samples without creating meaningful vehicle motion.
-        t_s = sim_time_us * 1e-6
-        mag_x = sensor.xmag + _MAG_DITHER_GAUSS * math.sin(2.0 * math.pi * 0.73 * t_s)
-        mag_y = sensor.ymag + _MAG_DITHER_GAUSS * math.sin(2.0 * math.pi * 0.91 * t_s + 1.7)
-        mag_z = sensor.zmag + _MAG_DITHER_GAUSS * math.sin(2.0 * math.pi * 0.61 * t_s + 0.4)
-        abs_pressure = sensor.abs_pressure + _BARO_DITHER_HPA * math.sin(
-            2.0 * math.pi * 0.37 * t_s + 0.2
-        )
-
+        """Send HIL_SENSOR through Pegasus' backend implementation."""
         if self._sensor_payload_debug_count < 5 or self._sensor_payload_debug_count % 250 == 0:
-            _LOGGER.warning(
+            sensor = self._backend._sensor_data
+            fields_updated = 0
+            if sensor.new_imu_data:
+                fields_updated |= _HIL_SENSOR_ACCEL_UPDATED | _HIL_SENSOR_GYRO_UPDATED
+            if sensor.new_mag_data:
+                fields_updated |= _HIL_SENSOR_MAG_UPDATED
+            if sensor.new_bar_data:
+                fields_updated |= _HIL_SENSOR_BARO_UPDATED
+            if sensor.new_press_data:
+                fields_updated |= _HIL_SENSOR_DIFF_PRESS_UPDATED
+            _LOGGER.debug(
                 "PX4 HIL_SENSOR payload: n=%d time_us=%d mask=%d acc=[%.5f, %.5f, %.5f] "
                 "gyro=[%.5f, %.5f, %.5f] mag=[%.5f, %.5f, %.5f] "
                 "abs_pressure=%.5f diff_pressure=%.5f pressure_alt=%.5f temp=%.2f",
@@ -396,33 +546,16 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 sensor.xgyro,
                 sensor.ygyro,
                 sensor.zgyro,
-                mag_x,
-                mag_y,
-                mag_z,
-                abs_pressure,
+                sensor.xmag,
+                sensor.ymag,
+                sensor.zmag,
+                sensor.abs_pressure,
                 sensor.diff_pressure,
                 sensor.pressure_alt,
                 sensor.temperature,
             )
         self._sensor_payload_debug_count += 1
-
-        self._backend._connection.mav.hil_sensor_send(
-            int(sim_time_us),
-            sensor.xacc,
-            sensor.yacc,
-            sensor.zacc,
-            sensor.xgyro,
-            sensor.ygyro,
-            sensor.zgyro,
-            mag_x,
-            mag_y,
-            mag_z,
-            abs_pressure,
-            sensor.diff_pressure,
-            sensor.pressure_alt,
-            sensor.temperature,
-            fields_updated,
-        )
+        self._backend.send_sensor_msgs(int(sim_time_us))
 
     def _mark_disconnected(self, reason: str, *, close_backend: bool = False) -> None:
         """Record a fatal MAVLink state transition and optionally close the socket."""

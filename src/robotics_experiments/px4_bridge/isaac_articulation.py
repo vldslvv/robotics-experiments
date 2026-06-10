@@ -209,3 +209,61 @@ class IsaacArticulationIO:
                 )
             except Exception as exc:
                 _LOGGER.warning("Failed to apply rotor force to %s: %s", self._body_path, exc)
+
+    def apply_body_force(self, force_n: np.ndarray) -> None:
+        """Apply a body-frame force at the drone body origin."""
+        self._apply_body_effect(force_n=force_n, torque_n_m=None)
+
+    def apply_body_torque(self, torque_n_m: np.ndarray) -> None:
+        """Apply a body-frame torque at the drone body origin."""
+        self._apply_body_effect(force_n=None, torque_n_m=torque_n_m)
+
+    def _apply_body_effect(
+        self,
+        *,
+        force_n: np.ndarray | None,
+        torque_n_m: np.ndarray | None,
+    ) -> None:
+        if self._body is None:
+            return
+        force = (
+            np.zeros((1, 3), dtype=np.float64)
+            if force_n is None
+            else np.asarray([force_n], dtype=np.float64)
+        )
+        torque = (
+            np.zeros((1, 3), dtype=np.float64)
+            if torque_n_m is None
+            else np.asarray([torque_n_m], dtype=np.float64)
+        )
+        if force.shape != (1, 3):
+            raise ValueError(f"force_n expects shape (3,), got {force.shape[1:]}")
+        if torque.shape != (1, 3):
+            raise ValueError(f"torque_n_m expects shape (3,), got {torque.shape[1:]}")
+        if not np.any(force) and not np.any(torque):
+            return
+        try:
+            self._body.apply_forces_and_torques_at_pos(
+                forces=force,
+                torques=torque,
+                positions=np.zeros((1, 3), dtype=np.float64),
+                is_global=False,
+            )
+        except TypeError:
+            # Isaac versions differ in accepted kwargs. Fall back to the older
+            # force-only call when possible; torque support is validated in the
+            # Isaac smoke test for the deployed version.
+            if np.any(force):
+                self._body.apply_forces_and_torques_at_pos(
+                    forces=force,
+                    positions=np.zeros((1, 3), dtype=np.float64),
+                    is_global=False,
+                )
+            elif np.any(torque):
+                _LOGGER.warning(
+                    "Isaac body torque API is unavailable for %s; skipping torque %s",
+                    self._body_path,
+                    torque,
+                )
+        except Exception as exc:
+            _LOGGER.warning("Failed to apply body effect to %s: %s", self._body_path, exc)

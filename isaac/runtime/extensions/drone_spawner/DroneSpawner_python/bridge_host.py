@@ -58,7 +58,7 @@ class BridgeHost:
         # Late imports so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
         from robotics_experiments.px4_bridge import (
-            LinearThrustModel,
+            PegasusQuadraticThrustModel,
             Px4Bridge,
             Px4MavlinkPort,
         )
@@ -80,6 +80,9 @@ class BridgeHost:
             px4_autolaunch=self._cfg.px4_autolaunch,
             px4_dir=self._cfg.px4_dir,
             px4_vehicle_model=self._cfg.px4_vehicle_model,
+            input_offset=self._cfg.input_offset,
+            input_scaling=self._cfg.input_scaling,
+            zero_position_armed=self._cfg.zero_position_armed,
             lockstep_timeout_s=self._cfg.lockstep_timeout_s,
             first_heartbeat_timeout_s=self._cfg.first_heartbeat_timeout_s,
             heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
@@ -89,9 +92,14 @@ class BridgeHost:
             home_lon_deg=self._cfg.home_lon_deg,
             home_alt_m=self._cfg.home_alt_m,
         )
-        thrust_model = LinearThrustModel(
+        thrust_model = PegasusQuadraticThrustModel(
             num_rotors=self._cfg.num_rotors,
-            max_force_n=self._cfg.max_rotor_force_n,
+            rotor_constant=self._cfg.rotor_constant,
+            rolling_moment_coefficient=self._cfg.rolling_moment_coefficient,
+            rot_dir=self._cfg.rot_dir,
+            min_rotor_velocity=self._cfg.min_rotor_velocity,
+            max_rotor_velocity=self._cfg.max_rotor_velocity,
+            linear_drag=self._cfg.linear_drag,
         )
         articulation_path = self._cfg.articulation_path or self._articulation_path
         endpoint = (

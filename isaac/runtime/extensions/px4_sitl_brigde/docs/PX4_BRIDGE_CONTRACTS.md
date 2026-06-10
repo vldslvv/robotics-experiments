@@ -36,7 +36,7 @@ In-process Python method calls. No serialization, no network. The bridge is a Py
 | Direction | Frequency | Payload |
 |-----------|-----------|---------|
 | Isaac → Bridge | every physics tick | ground-truth state of drone articulation |
-| Bridge → Isaac | every physics tick | per-rotor forces in Newtons |
+| Bridge → Isaac | every physics tick | per-rotor forces in Newtons, body reaction torque, body drag |
 
 The bridge is reactive: it has no opinion about when ticks happen. When called, it returns commands derived from the most recent rotor outputs PX4 produced.
 
@@ -63,14 +63,14 @@ These conventions MUST be documented in a single `frames.py` module and never cr
 
 A flat numpy array of length `num_rotors`. Each entry is the **force in Newtons** to apply to the drone rigid body at the corresponding rotor thrust marker position, along the body-local thrust axis (typically +Z, matching USD authoring convention).
 
-The bridge does NOT return torques. Yaw torque emerges from differential rotor speeds via PX4's mixer; the bridge applies thrust forces only. Per-rotor reaction torque (from the spinning prop) is folded into the thrust model or simulated as a small constant body torque per rotor — handled by the thrust model, not by the bridge.
+For PX4/Pegasus operation the thrust model also returns the Pegasus body-Z rotor reaction torque and body-frame linear drag. The Isaac adapter applies these at the body origin so yaw authority and damping match Pegasus Simulator.
 
 ### Separation of concerns: bridge vs thrust model
 
 | Concern | Owned by |
 |---------|----------|
 | MAVLink protocol, lockstep, network | Bridge |
-| Normalized command (0..1) → Newtons | Thrust model |
+| PX4/Pegasus rotor reference → Newtons | Thrust model |
 | Per-motor scaling (domain randomization) | Thrust model |
 | Response lag / actuator delay | Thrust model |
 | Voltage sag effects | Thrust model |
@@ -234,7 +234,7 @@ Frequency: 250–400 Hz, set by PX4's mixer.
 | `mode` | Actuator mode (PX4 safety) |
 | `flags` | Armed state, lockstep flags |
 
-The bridge consumes `controls[0:num_rotors]`, applies offset/scaling (config: `input_offset`, `input_scaling`, `zero_position_armed`), and forwards to the thrust model.
+The bridge consumes `controls[0:num_rotors]`, applies Pegasus offset/scaling (config: `input_offset`, `input_scaling`, `zero_position_armed`), and forwards rotor angular velocity references to the Pegasus-compatible quadratic thrust model.
 
 #### `HEARTBEAT`
 
@@ -369,13 +369,13 @@ Isaac articulation
    │         │ ◄────────────────────────────────────────── │           │
    └─────────┘            HIL_ACTUATOR_CONTROLS             └───────────┘
         │
-        │ normalized commands [0..1] per rotor
+        │ Pegasus rotor angular velocity references
         ▼
    Thrust model
         │
-        │ forces in Newtons per rotor
+        │ per-rotor forces, body reaction torque, body drag
         ▼
-Isaac articulation (apply force on body at rotor markers)
+Isaac articulation (apply rotor forces and body effects)
 ```
 
 ### Owned by the bridge

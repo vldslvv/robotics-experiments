@@ -8,6 +8,8 @@ import pytest
 from robotics_experiments.px4_bridge import LinearThrustModel, Px4Bridge, Px4MavlinkPort
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
+_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE = 129
+
 
 class _FakeArticulationIO:
     def __init__(self, state: VehicleState):
@@ -145,6 +147,7 @@ class _FakePegasusBackend:
             pressure_alt=0.0,
             temperature=0.0,
             new_press_data=False,
+            new_gps_data=False,
         )
         self.sensor_times = []
         self.gps_times = []
@@ -199,18 +202,62 @@ class _FakePegasusBackend:
 
     def update_gps_data(self, data):
         self.gps_updates.append(data)
+        self._sensor_data.new_gps_data = True
 
     def send_sensor_msgs(self, sim_time_us):
         self.sensor_times.append(sim_time_us)
+        fields_updated = 0
+        if self._sensor_data.new_imu_data:
+            fields_updated |= 7 | 56
+            self._sensor_data.new_imu_data = False
+        if self._sensor_data.new_mag_data:
+            fields_updated |= 448
+            self._sensor_data.new_mag_data = False
+        if self._sensor_data.new_bar_data:
+            fields_updated |= 6656
+            self._sensor_data.new_bar_data = False
+        if self._sensor_data.new_press_data:
+            fields_updated |= 1024
+            self._sensor_data.new_press_data = False
+        self._connection.mav.hil_sensor_send(
+            sim_time_us,
+            self._sensor_data.xacc,
+            self._sensor_data.yacc,
+            self._sensor_data.zacc,
+            self._sensor_data.xgyro,
+            self._sensor_data.ygyro,
+            self._sensor_data.zgyro,
+            self._sensor_data.xmag,
+            self._sensor_data.ymag,
+            self._sensor_data.zmag,
+            self._sensor_data.abs_pressure,
+            self._sensor_data.diff_pressure,
+            self._sensor_data.pressure_alt,
+            self._sensor_data.temperature,
+            fields_updated,
+        )
 
     def send_gps_msgs(self, sim_time_us):
+        if not self._sensor_data.new_gps_data:
+            return
+        self._sensor_data.new_gps_data = False
         self.gps_times.append(sim_time_us)
 
     def input_reference(self):
         return self._input_reference
 
     def handle_control(self, time_usec, controls, mode, flags):
-        self._input_reference = list(controls[: self.config.config["num_rotors"]])
+        num_rotors = self.config.config["num_rotors"]
+        if mode == _MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE:
+            offsets = self.config.config["input_offset"]
+            scaling = self.config.config["input_scaling"]
+            zero_armed = self.config.config["zero_position_armed"]
+            self._input_reference = [
+                (controls[i] + offsets[i]) * scaling[i] + zero_armed[i]
+                for i in range(num_rotors)
+            ]
+        else:
+            self._input_reference = [0.0] * num_rotors
 
 
 class _FakePegasusConfig:
@@ -264,8 +311,9 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     assert len(backend.bar_updates) == 3
     assert len(backend.gps_updates) == 3
     first_hil_sensor = backend._connection.hil_sensor_sends[0]
-    assert first_hil_sensor[13] == 25.0
-    assert first_hil_sensor[14] == 8191
+    assert first_hil_sensor[12] == pytest.approx(488.0)
+    assert first_hil_sensor[13] == pytest.approx(11.827, abs=0.01)
+    assert first_hil_sensor[14] == 7167
 
 
 def test_mavlink_port_can_disable_gps(monkeypatch):
@@ -290,7 +338,7 @@ def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
         id=93,
         time_usec=100_000,
         controls=[0.1, 0.2, 0.3, 0.4],
-        mode=0,
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
         flags=0,
     )
     backend._connection = _FakeConnection([actuator_msg])
@@ -302,7 +350,7 @@ def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
 
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
     assert len(backend._connection.recv_calls) == 1
-    assert np.allclose(commands, [0.1, 0.2, 0.3, 0.4])
+    assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
     assert port.is_connected is True
     assert port._last_disconnect_reason is None
     assert port._sensor_send_count == 1
@@ -357,7 +405,7 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
         id=93,
         time_usec=100_000,
         controls=[0.1, 0.2, 0.3, 0.4],
-        mode=0,
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
         flags=0,
     )
     connection = _FakeConnection([actuator_msg])
@@ -367,7 +415,7 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
     port.start()
     commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
 
-    assert np.allclose(commands, [0.1, 0.2, 0.3, 0.4])
+    assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
     assert port.is_connected is True
     assert backend.stopped is False
     assert backend._connection is connection
