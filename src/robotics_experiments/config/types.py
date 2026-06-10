@@ -134,10 +134,12 @@ class Px4BridgeConfig:
         articulation_path: USD path of the drone root articulation. When
             empty (default), the host derives it from the drone-spawner
             config (``<default_prim>/<drone.prim_name>``).
-        rotor_link_paths: USD paths of rotor links **in PX4 motor-index
-            order** (FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X). The
-            host prefixes them with the articulation path if they start
-            with a ``/``, otherwise treats them as relative.
+        rotor_link_paths: USD paths of rotor thrust marker prims **in PX4
+            motor-index order** (FR-CW, RL-CW, FL-CCW, RR-CCW for Generic
+            Quad X). The Isaac adapter applies thrust to the drone rigid body
+            at these marker positions; the marker prims are not simulated as
+            separate rotor bodies. The host prefixes them with the articulation
+            path if they start with a ``/``, otherwise treats them as relative.
         num_rotors: Number of rotors driven by the bridge.
         max_rotor_force_n: Force in Newtons produced at command 1.0 by the
             default linear thrust model.

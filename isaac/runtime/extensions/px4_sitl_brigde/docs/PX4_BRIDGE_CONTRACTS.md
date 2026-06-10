@@ -61,7 +61,7 @@ These conventions MUST be documented in a single `frames.py` module and never cr
 
 ### Returned commands (Bridge → Isaac each tick)
 
-A flat numpy array of length `num_rotors`. Each entry is the **force in Newtons** to apply to the corresponding rotor link in that link's local thrust axis (typically +Z, matching USD authoring convention).
+A flat numpy array of length `num_rotors`. Each entry is the **force in Newtons** to apply to the drone rigid body at the corresponding rotor thrust marker position, along the body-local thrust axis (typically +Z, matching USD authoring convention).
 
 The bridge does NOT return torques. Yaw torque emerges from differential rotor speeds via PX4's mixer; the bridge applies thrust forces only. Per-rotor reaction torque (from the spinning prop) is folded into the thrust model or simulated as a small constant body torque per rotor — handled by the thrust model, not by the bridge.
 
@@ -79,7 +79,7 @@ This separation is required because the thrust model is what gets randomized dur
 
 ### Motor index ordering
 
-The single most error-prone detail. The bridge accepts a list of rotor link USD paths in **PX4 motor-index order**, not in scene-graph order or alphabetical order.
+The single most error-prone detail. The bridge accepts a list of rotor thrust marker USD paths in **PX4 motor-index order**, not in scene-graph order or alphabetical order. These marker prims locate where thrust is applied on the drone body; they are not simulated as separate rotor bodies.
 
 For PX4's `Generic Quadrotor X` airframe:
 
@@ -110,7 +110,7 @@ A wrong list means the drone arms, spins up, and immediately flips. Validate via
 [Each subsequent tick]    bridge.on_physics_step(dt, sim_time_us):
                             - read articulation state
                             - call port.step()
-                            - apply forces to rotor links
+                            - apply forces to drone body at rotor markers
         │
         ▼
 [Stop / scene teardown]   bridge.stop():
@@ -141,7 +141,7 @@ class Px4Bridge:
         self,
         *,
         articulation_path: str,         # USD path to drone root
-        rotor_link_paths: list[str],    # USD paths in PX4 motor-index order
+        rotor_link_paths: list[str],    # rotor marker USD paths in PX4 motor-index order
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
     ): ...
@@ -290,7 +290,7 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 | Lockstep deadlock | One side started before the other, or one side died mid-flight | Hard timeout in bridge; force-close socket; require explicit restart |
 | PX4 refuses to arm | EKF preflight checks failing — typically GPS, magnetometer, or accelerometer health | Check `STATUSTEXT` messages; tune sensor noise or disable failing checks via PX4 params |
 | Drone arms then immediately disarms | Inconsistent sensor data — common: forgetting gravity in accel, or zero magnetic field | Verify each sensor field individually with PX4 `listener sensor_combined` |
-| Drone arms, takes off, drifts/spins | Motor index ordering wrong | Re-check `rotor_link_paths` against airframe |
+| Drone arms, takes off, drifts/spins | Motor index ordering wrong | Re-check `rotor_link_paths` against airframe marker positions |
 
 ### What the bridge does NOT expose to surrounding code
 
@@ -375,7 +375,7 @@ Isaac articulation
         │
         │ forces in Newtons per rotor
         ▼
-Isaac articulation (apply_force on rotor links)
+Isaac articulation (apply force on body at rotor markers)
 ```
 
 ### Owned by the bridge

@@ -81,6 +81,10 @@ Do not introduce new tooling unless explicitly requested.
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
   connect to PX4 SITL.
+- PX4 `rotor_link_paths` identify rotor thrust marker prims in motor-index
+  order. The Isaac adapter applies thrust to the drone rigid body at those
+  marker positions; marker prims must not be treated as separate free rotor
+  rigid bodies unless joints are explicitly authored for that topology.
 - PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
   If Isaac emits duplicate or non-increasing physics timestamps, the bridge
   must not forward another HIL sensor tick or wait for a new actuator packet.

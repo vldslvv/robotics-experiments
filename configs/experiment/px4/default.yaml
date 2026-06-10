@@ -7,8 +7,10 @@ enabled: true
 # Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
 articulation_path: ""
 
-# In PX4 motor-index order: FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X.
-# Paths are joined under the articulation root if relative.
+# Rotor thrust marker paths in PX4 motor-index order:
+# FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X. Paths are joined under
+# the articulation root if relative. The markers are visual USD prims; thrust
+# is applied to the drone rigid body at these body-local positions.
 rotor_link_paths:
   - body/propulsion/motor_1/prop
   - body/propulsion/motor_3/prop

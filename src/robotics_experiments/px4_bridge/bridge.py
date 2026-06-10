@@ -43,7 +43,7 @@ class Px4Bridge:
 
         Args:
             articulation_path: USD path to the drone root articulation.
-            rotor_link_paths: USD paths to rotor links in PX4 motor-index order.
+            rotor_link_paths: USD paths to rotor thrust markers in PX4 motor-index order.
             thrust_model: Maps normalized commands -> per-rotor forces (N).
             port: Adapter to the flight stack.
             articulation_io: Optional override for Isaac state I/O - used by

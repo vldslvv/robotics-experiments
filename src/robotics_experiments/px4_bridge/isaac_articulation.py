@@ -28,7 +28,7 @@ class IsaacArticulationIO:
 
     Args:
         articulation_path: USD prim path to the drone root articulation.
-        rotor_link_paths: USD prim paths of rotor links **in PX4 motor-index
+        rotor_link_paths: USD prim paths of rotor thrust markers **in PX4 motor-index
             order** - front-right CW, rear-left CW, front-left CCW,
             rear-right CCW for ``Generic Quadrotor X``. Wrong order makes the
             drone flip on takeoff; validate against airframe geometry.
@@ -39,7 +39,9 @@ class IsaacArticulationIO:
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
 
         self._articulation: Any | None = None
-        self._rotor_links: Optional[list] = None
+        self._body: Any | None = None
+        self._body_path: str | None = None
+        self._rotor_positions_body: Optional[np.ndarray] = None
         self._last_velocity_enu: Optional[np.ndarray] = None
         self._last_sim_time_us: Optional[int] = None
 
@@ -54,7 +56,7 @@ class IsaacArticulationIO:
     # ---- Lifecycle ---------------------------------------------------------
 
     def initialize(self) -> None:
-        """Acquire the articulation and rotor link handles.
+        """Acquire the articulation body and rotor thrust marker poses.
 
         Safe to call multiple times - first successful call wins.
         """
@@ -63,6 +65,7 @@ class IsaacArticulationIO:
 
         # Imports are deferred so this module can be imported in non-Isaac
         # contexts (e.g. unit tests for the surrounding logic).
+        import omni.usd
         from isaacsim.core.prims import RigidPrim, SingleArticulation
 
         self._articulation = SingleArticulation(prim_path=self._articulation_path)
@@ -78,18 +81,66 @@ class IsaacArticulationIO:
                     exc,
                 )
 
-        self._rotor_links = [RigidPrim(prim_paths_expr=path) for path in self._rotor_link_paths]
-        for path, link in zip(self._rotor_link_paths, self._rotor_links, strict=False):
-            if hasattr(link, "initialize"):
-                try:
-                    link.initialize()
-                except Exception as exc:
-                    _LOGGER.warning("Isaac rotor link initialization failed for %s: %s", path, exc)
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            raise RuntimeError("Cannot initialize Isaac articulation I/O without an open USD stage")
+
+        body_path = self._resolve_body_path(stage)
+        self._body_path = body_path
+        self._body = RigidPrim(prim_paths_expr=body_path)
+        if hasattr(self._body, "initialize"):
+            try:
+                self._body.initialize()
+            except Exception as exc:
+                _LOGGER.warning("Isaac body initialization failed for %s: %s", body_path, exc)
+
+        self._rotor_positions_body = self._resolve_rotor_positions_body(stage, body_path)
+
+    def _resolve_body_path(self, stage) -> str:
+        from pxr import UsdPhysics
+
+        articulation_prim = stage.GetPrimAtPath(self._articulation_path)
+        if not articulation_prim.IsValid():
+            raise RuntimeError(f"Articulation prim does not exist: {self._articulation_path}")
+        if articulation_prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            return self._articulation_path
+
+        body_path = f"{self._articulation_path.rstrip('/')}/body"
+        body_prim = stage.GetPrimAtPath(body_path)
+        if body_prim.IsValid() and body_prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            return body_path
+
+        raise RuntimeError(
+            "Drone articulation must be a rigid body or contain a rigid body child at "
+            f"{body_path}"
+        )
+
+    def _resolve_rotor_positions_body(self, stage, body_path: str) -> np.ndarray:
+        from pxr import Usd, UsdGeom
+
+        body_prim = stage.GetPrimAtPath(body_path)
+        body_xform = UsdGeom.Xformable(body_prim)
+        body_to_world = body_xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        world_to_body = body_to_world.GetInverse()
+
+        positions = []
+        for path in self._rotor_link_paths:
+            rotor_prim = stage.GetPrimAtPath(path)
+            if not rotor_prim.IsValid():
+                raise RuntimeError(f"Rotor thrust marker prim does not exist: {path}")
+            rotor_xform = UsdGeom.Xformable(rotor_prim)
+            rotor_to_world = rotor_xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            position_body = world_to_body.Transform(rotor_to_world.ExtractTranslation())
+            positions.append([position_body[0], position_body[1], position_body[2]])
+
+        return np.asarray(positions, dtype=np.float64)
 
     def shutdown(self) -> None:
         """Drop handles. Safe to call repeatedly."""
         self._articulation = None
-        self._rotor_links = None
+        self._body = None
+        self._body_path = None
+        self._rotor_positions_body = None
         self._last_velocity_enu = None
         self._last_sim_time_us = None
 
@@ -135,28 +186,26 @@ class IsaacArticulationIO:
         )
 
     def apply_forces(self, forces_n: np.ndarray) -> None:
-        """Apply per-rotor forces along each link's local +Z axis.
+        """Apply per-rotor forces to the drone body at each marker's local +Z axis.
 
         Args:
             forces_n: Shape ``(num_rotors,)`` array of forces in Newtons.
         """
-        if self._rotor_links is None:
+        if self._body is None or self._rotor_positions_body is None:
             return
         if forces_n.shape != (self.num_rotors,):
             raise ValueError(
                 f"apply_forces expected shape ({self.num_rotors},), got {forces_n.shape}"
             )
 
-        for path, link, magnitude in zip(
-            self._rotor_link_paths, self._rotor_links, forces_n, strict=False
+        for position_body, magnitude in zip(
+            self._rotor_positions_body, forces_n, strict=False
         ):
             try:
-                link.apply_forces_and_torques_at_pos(
+                self._body.apply_forces_and_torques_at_pos(
                     forces=np.array([[0.0, 0.0, float(magnitude)]], dtype=np.float64),
+                    positions=np.asarray([position_body], dtype=np.float64),
                     is_global=False,
                 )
             except Exception as exc:
-                # Best-effort: the precise API varies across Isaac Sim
-                # versions. The user can wire in the correct call once
-                # they confirm which method their version exposes.
-                _LOGGER.warning("Failed to apply rotor force to %s: %s", path, exc)
+                _LOGGER.warning("Failed to apply rotor force to %s: %s", self._body_path, exc)
