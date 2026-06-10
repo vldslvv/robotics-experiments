@@ -1,6 +1,8 @@
 import itertools
+import importlib
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,6 +11,9 @@ from robotics_experiments.px4_bridge import LinearThrustModel, Px4Bridge, Px4Mav
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE = 129
+_PX4_BRIDGE_EXTENSION_ROOT = (
+    Path(__file__).resolve().parents[1] / "isaac/runtime/extensions/px4_sitl_brigde"
+)
 
 
 class _FakeArticulationIO:
@@ -266,18 +271,12 @@ class _FakePegasusConfig:
 
 
 def _install_fake_pegasus(monkeypatch):
+    monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
     module_name = "pegasus.simulator.logic.backends.px4_mavlink_backend"
     fake_module = types.ModuleType(module_name)
     fake_module.PX4MavlinkBackend = _FakePegasusBackend
     fake_module.PX4MavlinkBackendConfig = _FakePegasusConfig
 
-    for package in [
-        "pegasus",
-        "pegasus.simulator",
-        "pegasus.simulator.logic",
-        "pegasus.simulator.logic.backends",
-    ]:
-        monkeypatch.setitem(sys.modules, package, types.ModuleType(package))
     monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     pymavlink = types.ModuleType("pymavlink")
@@ -286,6 +285,21 @@ def _install_fake_pegasus(monkeypatch):
     pymavlink.mavutil = mavutil
     monkeypatch.setitem(sys.modules, "pymavlink", pymavlink)
     monkeypatch.setitem(sys.modules, "pymavlink.mavutil", mavutil)
+
+
+def test_vendored_pegasus_sensor_utils_are_importable(monkeypatch):
+    monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
+
+    geo_mag_utils = importlib.import_module("pegasus.simulator.logic.sensors.geo_mag_utils")
+
+    lat, lon = geo_mag_utils.reprojection(
+        np.array([0.0, 0.0, 0.0]),
+        np.radians(47.397742),
+        np.radians(8.545594),
+    )
+    assert np.degrees(lat) == pytest.approx(47.397742)
+    assert np.degrees(lon) == pytest.approx(8.545594)
+    assert geo_mag_utils.get_mag_strength(47.397742, 8.545594) > 0.0
 
 
 def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):

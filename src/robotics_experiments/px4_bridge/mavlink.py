@@ -45,20 +45,17 @@ def _pegasus_magnetometer_body_frd(
     orientation_flu_enu_wxyz: np.ndarray,
     home_lat_deg: float,
     home_lon_deg: float,
-) -> np.ndarray | None:
-    """Return Pegasus' WMM-based magnetometer reading when Pegasus is importable."""
-    try:
-        from scipy.spatial.transform import Rotation
+) -> np.ndarray:
+    """Return Pegasus' WMM-based magnetometer reading."""
+    from scipy.spatial.transform import Rotation
 
-        from pegasus.simulator.logic.rotations import rot_ENU_to_NED, rot_FLU_to_FRD
-        from pegasus.simulator.logic.sensors.geo_mag_utils import (
-            get_mag_declination,
-            get_mag_inclination,
-            get_mag_strength,
-            reprojection,
-        )
-    except Exception:
-        return None
+    from pegasus.simulator.logic.rotations import rot_ENU_to_NED, rot_FLU_to_FRD
+    from pegasus.simulator.logic.sensors.geo_mag_utils import (
+        get_mag_declination,
+        get_mag_inclination,
+        get_mag_strength,
+        reprojection,
+    )
 
     latitude, longitude = reprojection(
         np.asarray(position_enu, dtype=np.float64),
@@ -207,9 +204,6 @@ class _PegasusSensorSuite:
             home_lat_deg=self._home_lat_deg,
             home_lon_deg=self._home_lon_deg,
         )
-        if mag_frd is None:
-            mag_flu = frames.magnetometer_body_flu(state.orientation_flu_enu_wxyz)
-            mag_frd = _flu_to_frd(mag_flu)
         return {
             "magnetic_field": [
                 float(mag_frd[0]),
