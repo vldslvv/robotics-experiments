@@ -1514,6 +1514,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyulog"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1e/0e/45b1c8509a8ca943a8c74bc1879d4fc9bc4f23adc41e3d21f735dc9c27e4/pyulog-1.2.2.tar.gz", hash = "sha256:f6ffded4954c44f430a1125c28e81916966f8a3050d3d4db7fa07878c2d2de26", size = 77583, upload-time = "2025-07-10T07:59:47.579Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/7b/7e07895342827f5bbfe60bca810337c2e3cf24777a5bd6d095f3746850f2/pyulog-1.2.2-py3-none-any.whl", hash = "sha256:43cb20d493158226a6d309c45e23ffab47eebc69cfaafa15277463804c5338e1", size = 48952, upload-time = "2025-07-10T07:59:46.121Z" },
+]
+
+[[package]]
 name = "pywin32"
 version = "306"
 source = { registry = "https://pypi.org/simple" }
@@ -1609,6 +1621,7 @@ dependencies = [
     { name = "isaacsim-core" },
     { name = "numpy" },
     { name = "omegaconf" },
+    { name = "pyulog" },
     { name = "usd-core" },
 ]
 
@@ -1633,6 +1646,7 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.5.0" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pyulog", specifier = ">=1.2.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.6.9" },
     { name = "types-requests", marker = "extra == 'dev'" },
     { name = "usd-core", specifier = ">=25.11,<27" },

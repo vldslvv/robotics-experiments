@@ -85,6 +85,10 @@ Do not introduce new tooling unless explicitly requested.
   order. The Isaac adapter applies thrust to the drone rigid body at those
   marker positions; marker prims must not be treated as separate free rotor
   rigid bodies unless joints are explicitly authored for that topology.
+- For `none_iris` / Generic Quad X, PX4 motor-index order is
+  front-right CW, rear-left CW, front-left CCW, rear-right CCW. PX4 geometry is
+  FRD, while Isaac marker positions are FLU, so PX4 right maps to Isaac
+  negative Y when resolving USD marker positions.
 - PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
   If Isaac emits duplicate or non-increasing physics timestamps, the bridge
   must not forward another HIL sensor tick or wait for a new actuator packet.
@@ -117,6 +121,59 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
   starts `px4-iris`; the other remains an interactive shell.
 - Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
   `make px4_sitl_default none_iris` from the PX4 source directory on demand.
+
+### PX4 bridge debugging
+- PX4 ULog files and custom bridge logs are persisted under
+  `px4/logs/<yyyy-mm-dd>/`.
+- PX4 creates the ULog when the SITL logger starts, before arm/takeoff. The
+  bridge creates its log when the Isaac bridge opens the PX4 MAVLink endpoint.
+  A normal paired run has matching names such as:
+  - `px4/logs/2026-06-10/23_20_44.ulg`
+  - `px4/logs/2026-06-10/23_20_44_bridge.log`
+- Pair logs by the date directory and `HH_MM_SS` stem first. If there are
+  nearby bridge logs with adjacent seconds, use file modification time and the
+  bridge first line (`PX4 MAVLink port constructed`) to confirm the pair.
+- Do not rely on `docker logs` alone for flight analysis. The PX4 terminal
+  scrollback can contain repeated starts and ANSI redraw output. Use it only to
+  identify high-level warnings, then inspect the persisted ULog and bridge log.
+- For a fresh run, `px4-iris` clears PX4 non-volatile SITL state but keeps
+  `px4/logs` persistent. If a warning might be stale, first confirm the latest
+  `.ulg` and `_bridge.log` modification times.
+- The bridge log records MAVLink connection, first heartbeat, first HIL sensor,
+  periodic sensor freshness, actuator controls, rotor mapping, per-rotor forces,
+  body torque/drag, pose, velocity, and stop counters. Use it to verify:
+  - `HIL_SENSOR.time_usec` is strictly increasing.
+  - `fresh={imu:True mag:True baro:True ...}` is present before send.
+  - `input_reference` and `commands` match expected PX4 actuator behavior.
+  - `rotor_link_paths` resolve to the expected body-frame positions and spin
+    directions for PX4 motor-index order.
+- Use the ULog to decide whether PX4 commanded the bad motion or the bridge
+  applied the command incorrectly. The minimum topics for flight divergence are:
+  `vehicle_command`, `vehicle_command_ack`, `vehicle_status`,
+  `vehicle_local_position`, `vehicle_local_position_setpoint`,
+  `trajectory_setpoint`, `vehicle_attitude`, `vehicle_attitude_setpoint`,
+  `vehicle_rates_setpoint`, `vehicle_thrust_setpoint`,
+  `vehicle_torque_setpoint`, `actuator_motors`, `actuator_outputs`,
+  `estimator_status`, `estimator_aid_src_mag_heading`,
+  `vehicle_magnetometer`, `vehicle_air_data`, `battery_status`,
+  `failsafe_flags`, `vehicle_land_detected`, and `takeoff_status`.
+- Interpret the logs in this order:
+  1. Confirm the ULog and bridge log are from the same run.
+  2. Check PX4 accepted `commander arm` / `commander takeoff` in
+     `vehicle_command_ack`.
+  3. Check `trajectory_setpoint` and `vehicle_local_position_setpoint` to see
+     whether PX4 requested lateral motion.
+  4. Compare `vehicle_attitude_setpoint` / `vehicle_rates_setpoint` against
+     actual `vehicle_attitude`.
+  5. Compare `actuator_motors` with bridge `input_reference`, `commands`, and
+     `forces_n`.
+  6. If PX4 commands a correction and the vehicle moves farther in the wrong
+     direction, suspect rotor order, thrust axis, body frame, or sign mismatch.
+  7. Treat compass/failsafe warnings that appear after the attitude diverges as
+     likely consequences unless estimator topics show rejection before motion.
+- If local ULog tools are unavailable, a temporary parser can be run with:
+  `env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python`.
+  Prefer extracting a focused topic summary over exporting every topic.
 
 ## Hard rules
 - Do NOT commit USD assets or binary files.

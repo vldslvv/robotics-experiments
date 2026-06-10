@@ -8,14 +8,17 @@ enabled: true
 articulation_path: ""
 
 # Rotor thrust marker paths in PX4 motor-index order:
-# FR-CW, RL-CW, FL-CCW, RR-CCW for Generic Quad X. Paths are joined under
-# the articulation root if relative. The markers are visual USD prims; thrust
-# is applied to the drone rigid body at these body-local positions.
+# FR-CW, RL-CW, FL-CCW, RR-CCW for PX4 none_iris / Generic Quad X.
+# PX4 rotor coordinates are FRD (Y right); Isaac marker positions are FLU
+# (Y left), so the USD motor names below look mirrored relative to PX4's
+# CA_ROTOR*_PY signs. Paths are joined under the articulation root if relative.
+# The markers are visual USD prims; thrust is applied to the drone rigid body
+# at these body-local positions.
 rotor_link_paths:
+  - body/propulsion/motor_4/prop
+  - body/propulsion/motor_2/prop
   - body/propulsion/motor_1/prop
   - body/propulsion/motor_3/prop
-  - body/propulsion/motor_2/prop
-  - body/propulsion/motor_4/prop
 
 num_rotors: 4
 

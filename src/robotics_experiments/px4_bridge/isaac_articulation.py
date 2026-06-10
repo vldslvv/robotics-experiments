@@ -30,8 +30,10 @@ class IsaacArticulationIO:
         articulation_path: USD prim path to the drone root articulation.
         rotor_link_paths: USD prim paths of rotor thrust markers **in PX4 motor-index
             order** - front-right CW, rear-left CW, front-left CCW,
-            rear-right CCW for ``Generic Quadrotor X``. Wrong order makes the
-            drone flip on takeoff; validate against airframe geometry.
+            rear-right CCW for ``Generic Quadrotor X``. PX4 rotor geometry is
+            expressed in FRD, while Isaac body marker positions are FLU, so
+            PX4 right maps to Isaac negative Y. Wrong order makes the drone
+            flip on takeoff; validate against airframe geometry.
     """
 
     def __init__(self, *, articulation_path: str, rotor_link_paths: Sequence[str]):
