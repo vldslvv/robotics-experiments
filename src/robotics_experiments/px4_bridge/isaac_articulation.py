@@ -124,14 +124,33 @@ class IsaacArticulationIO:
         world_to_body = body_to_world.GetInverse()
 
         positions = []
-        for path in self._rotor_link_paths:
+        rotor_debug = []
+        for index, path in enumerate(self._rotor_link_paths):
             rotor_prim = stage.GetPrimAtPath(path)
             if not rotor_prim.IsValid():
                 raise RuntimeError(f"Rotor thrust marker prim does not exist: {path}")
             rotor_xform = UsdGeom.Xformable(rotor_prim)
             rotor_to_world = rotor_xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             position_body = world_to_body.Transform(rotor_to_world.ExtractTranslation())
-            positions.append([position_body[0], position_body[1], position_body[2]])
+            position = [position_body[0], position_body[1], position_body[2]]
+            positions.append(position)
+            spin_attr = rotor_prim.GetAttribute("drone:spinDir")
+            spin_dir = spin_attr.Get() if spin_attr and spin_attr.HasValue() else None
+            rotor_debug.append(
+                {
+                    "index": index,
+                    "path": path,
+                    "position_body": [float(v) for v in position],
+                    "spin_dir": spin_dir,
+                }
+            )
+
+        _LOGGER.info(
+            "PX4 rotor mapping resolved: articulation=%s body=%s rotors=%s",
+            self._articulation_path,
+            body_path,
+            rotor_debug,
+        )
 
         return np.asarray(positions, dtype=np.float64)
 

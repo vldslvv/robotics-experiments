@@ -1,7 +1,9 @@
 import itertools
 import importlib
+import logging
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -302,6 +304,49 @@ def test_vendored_pegasus_sensor_utils_are_importable(monkeypatch):
     assert geo_mag_utils.get_mag_strength(47.397742, 8.545594) > 0.0
 
 
+def test_vendored_pegasus_backend_sends_barometer_temperature(monkeypatch):
+    monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
+    sys.modules.pop("pegasus.simulator.logic.backends.px4_mavlink_backend", None)
+
+    carb = types.ModuleType("carb")
+    carb.log_info = lambda message: None
+    carb.log_warn = lambda message: None
+    monkeypatch.setitem(sys.modules, "carb", carb)
+
+    pymavlink = types.ModuleType("pymavlink")
+    mavutil = types.ModuleType("pymavlink.mavutil")
+    mavutil.mavlink = types.SimpleNamespace(
+        MAVLINK_MSG_ID_HIL_ACTUATOR_CONTROLS=93,
+        MAV_TYPE_GENERIC=0,
+        MAV_AUTOPILOT_INVALID=8,
+        MAV_MODE_FLAG_SAFETY_ARMED=128,
+    )
+    mavutil.mavlink_connection = lambda *args, **kwargs: None
+    pymavlink.mavutil = mavutil
+    monkeypatch.setitem(sys.modules, "pymavlink", pymavlink)
+    monkeypatch.setitem(sys.modules, "pymavlink.mavutil", mavutil)
+
+    module = importlib.import_module("pegasus.simulator.logic.backends.px4_mavlink_backend")
+    backend = module.PX4MavlinkBackend(
+        module.PX4MavlinkBackendConfig({"num_rotors": 4, "px4_autolaunch": False})
+    )
+    backend._connection = _FakeConnection()
+    backend.update_bar_data(
+        {
+            "absolute_pressure": 954.609,
+            "pressure_altitude": 488.0,
+            "temperature": 11.827,
+        }
+    )
+
+    backend.send_sensor_msgs(123_000)
+
+    hil_sensor = backend._connection.hil_sensor_sends[0]
+    assert hil_sensor[13] == pytest.approx(11.827)
+    assert hil_sensor[13] != backend._sensor_data.altitude
+    assert hil_sensor[14] == 6656
+
+
 def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0)
@@ -328,6 +373,62 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     assert first_hil_sensor[12] == pytest.approx(488.0)
     assert first_hil_sensor[13] == pytest.approx(11.827, abs=0.01)
     assert first_hil_sensor[14] == 7167
+
+
+def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):
+    _install_fake_pegasus(monkeypatch)
+    log_path = tmp_path / "px4_bridge.log"
+    port = Px4MavlinkPort(
+        num_rotors=4,
+        debug_log_path=str(log_path),
+        debug_log_level="DEBUG",
+        sensor_debug_log_interval=1,
+    )
+    port._backend._connection = _FakeConnection()
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    port.stop()
+
+    log_text = log_path.read_text()
+    assert "PX4 HIL_SENSOR pre-send" in log_text
+    assert "mask=7167" in log_text
+    assert "fresh={imu:True mag:True baro:True" in log_text
+    assert "PX4 HIL_SENSOR post-send" in log_text
+
+
+def test_bridge_log_path_uses_px4_style_timestamp_and_fresh_handler(tmp_path):
+    import robotics_experiments.px4_bridge.mavlink as mavlink_module
+
+    logger = logging.getLogger("robotics_experiments.px4_bridge")
+    first_path = tmp_path / "old_bridge.log"
+    second_template = str(tmp_path / "{date}" / "{time}_bridge.log")
+
+    try:
+        resolved_first = mavlink_module._configure_file_logging(
+            str(first_path),
+            "DEBUG",
+            now=datetime(2026, 6, 10, 21, 9, 59),
+        )
+        logger.debug("old run marker")
+
+        resolved_second = mavlink_module._configure_file_logging(
+            second_template,
+            "DEBUG",
+            now=datetime(2026, 6, 10, 21, 10, 5),
+        )
+        logger.debug("new run marker")
+
+        assert resolved_first == first_path.resolve()
+        assert resolved_second == (tmp_path / "2026-06-10" / "21_10_05_bridge.log").resolve()
+        assert "old run marker" in first_path.read_text()
+        assert "new run marker" not in first_path.read_text()
+        assert "new run marker" in resolved_second.read_text()
+    finally:
+        for handler in list(logger.handlers):
+            if getattr(handler, mavlink_module._FILE_LOG_HANDLER_ATTR, None) is not None:
+                logger.removeHandler(handler)
+                handler.close()
 
 
 def test_mavlink_port_can_disable_gps(monkeypatch):
@@ -379,7 +480,7 @@ def test_mavlink_port_uses_configured_heartbeat_rate(monkeypatch):
         [100.0, 100.0, 100.4, 100.4, 100.6, 100.6],
         itertools.repeat(100.6),
     )
-    monkeypatch.setattr(mavlink_module.time, "time", lambda: next(times))
+    monkeypatch.setattr(mavlink_module, "time", types.SimpleNamespace(time=lambda: next(times)))
 
     port = Px4MavlinkPort(num_rotors=4, heartbeat_rate_hz=2.0)
     backend = port._backend

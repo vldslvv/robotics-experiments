@@ -711,7 +711,7 @@ class PX4MavlinkBackend(Backend):
                 self._sensor_data.abs_pressure,
                 self._sensor_data.diff_pressure,
                 self._sensor_data.pressure_alt,
-                self._sensor_data.altitude,
+                self._sensor_data.temperature,
                 fields_updated,
             )
         except:

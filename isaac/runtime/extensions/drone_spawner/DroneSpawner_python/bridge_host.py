@@ -91,6 +91,9 @@ class BridgeHost:
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
             home_alt_m=self._cfg.home_alt_m,
+            debug_log_path=self._cfg.debug_log_path,
+            debug_log_level=self._cfg.debug_log_level,
+            sensor_debug_log_interval=self._cfg.sensor_debug_log_interval,
         )
         thrust_model = PegasusQuadraticThrustModel(
             num_rotors=self._cfg.num_rotors,
@@ -111,7 +114,8 @@ class BridgeHost:
             f"articulation={articulation_path} rotor_paths={rotor_paths} "
             f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
             f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
-            f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz}"
+            f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
+            f"debug_log_path={self._cfg.debug_log_path}"
         )
         self._bridge = Px4Bridge(
             articulation_path=articulation_path,

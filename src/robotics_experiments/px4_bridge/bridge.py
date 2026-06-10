@@ -16,6 +16,7 @@ and tested independently:
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import numpy as np
@@ -26,6 +27,8 @@ from .simulator import ArticulationIO
 from .thrust_model import RotorThrustModel
 
 __all__ = ["Px4Bridge"]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Px4Bridge:
@@ -63,6 +66,8 @@ class Px4Bridge:
 
         self._port = port
         self._thrust_model = thrust_model
+        self._tick_count = 0
+        self._dynamics_debug_interval = 50
         if articulation_io is None:
             from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
@@ -78,6 +83,7 @@ class Px4Bridge:
 
     def start(self) -> None:
         """Open the flight-stack connection. Articulation handles are deferred."""
+        self._tick_count = 0
         self._port.start()
 
     def stop(self) -> None:
@@ -108,6 +114,25 @@ class Px4Bridge:
             commands,
             linear_body_velocity_flu=body_velocity_flu,
         )
+        self._tick_count += 1
+        if self._tick_count <= 10 or self._tick_count % self._dynamics_debug_interval == 0:
+            _LOGGER.debug(
+                "PX4 bridge dynamics: tick=%d sim_time_us=%d connected=%s armed=%s "
+                "commands=%s forces_n=%s body_torque_n_m=%s body_drag_n=%s "
+                "position_enu=%s quat_wxyz=%s velocity_enu=%s body_velocity_flu=%s",
+                self._tick_count,
+                int(sim_time_us),
+                self.is_connected,
+                self.is_armed,
+                np.asarray(commands, dtype=np.float64).tolist(),
+                np.asarray(dynamics.forces_n, dtype=np.float64).tolist(),
+                np.asarray(dynamics.body_torque_n_m, dtype=np.float64).tolist(),
+                np.asarray(dynamics.body_drag_n, dtype=np.float64).tolist(),
+                np.asarray(state.position_enu, dtype=np.float64).tolist(),
+                np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64).tolist(),
+                np.asarray(state.linear_velocity_enu, dtype=np.float64).tolist(),
+                np.asarray(body_velocity_flu, dtype=np.float64).tolist(),
+            )
         self._io.apply_forces(dynamics.forces_n)
         if hasattr(self._io, "apply_body_torque"):
             self._io.apply_body_torque(dynamics.body_torque_n_m)

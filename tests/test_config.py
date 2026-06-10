@@ -69,6 +69,11 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.rotor_constant == [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
     assert config.px4.rot_dir == [-1.0, -1.0, 1.0, 1.0]
     assert config.px4.linear_drag == [0.50, 0.30, 0.0]
+    assert config.px4.debug_log_path == (
+        "/isaac-sim/proj/px4/logs/{date}/{time}_bridge.log"
+    )
+    assert config.px4.debug_log_level == "DEBUG"
+    assert config.px4.sensor_debug_log_interval == 50
     reset_config()
 
 

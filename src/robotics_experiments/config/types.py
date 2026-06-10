@@ -175,6 +175,14 @@ class Px4BridgeConfig:
         home_lat_deg, home_lon_deg, home_alt_m: Home position used when
             synthesizing GPS from the local ENU pose. Defaults match PX4's
             built-in default (Zurich).
+        debug_log_path: Path template for persistent bridge diagnostics. Empty
+            disables file logging. Supports ``{date}`` (``YYYY-MM-DD``),
+            ``{time}`` (``HH_MM_SS``), and ``{timestamp}``
+            (``YYYY-MM-DD/HH_MM_SS``) so bridge logs can be paired with PX4
+            ULog files without appending across runs.
+        debug_log_level: Python logging level name used by the bridge file log.
+        sensor_debug_log_interval: Emit one detailed HIL_SENSOR payload log
+            every N sensor sends after the initial startup samples.
     """
 
     enabled: bool
@@ -206,6 +214,9 @@ class Px4BridgeConfig:
     home_lat_deg: float
     home_lon_deg: float
     home_alt_m: float
+    debug_log_path: str
+    debug_log_level: str
+    sensor_debug_log_interval: int
 
 
 @dataclass

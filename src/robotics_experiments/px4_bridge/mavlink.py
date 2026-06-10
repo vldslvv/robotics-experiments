@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -32,11 +34,58 @@ _HIL_SENSOR_MAG_UPDATED = 0b0000111000000
 _HIL_SENSOR_BARO_UPDATED = 0b1101000000000
 _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
 _DEFAULT_SENSOR_RATE_HZ = 250.0
+_DEFAULT_DEBUG_LOG_PATH = "/tmp/robotics_experiments_px4_bridge.log"
+_FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
 
 
 def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
     vec = np.asarray(vec_flu, dtype=np.float64)
     return np.array([vec[0], -vec[1], -vec[2]], dtype=np.float64)
+
+
+def _resolve_log_path_template(log_path: str, now: datetime) -> Path:
+    return Path(
+        log_path.format(
+            date=now.strftime("%Y-%m-%d"),
+            time=now.strftime("%H_%M_%S"),
+            timestamp=now.strftime("%Y-%m-%d/%H_%M_%S"),
+        )
+    ).expanduser()
+
+
+def _configure_file_logging(
+    log_path: str | None,
+    level_name: str,
+    now: datetime | None = None,
+) -> Path | None:
+    if not log_path:
+        return None
+
+    now = now or datetime.now()
+    path = _resolve_log_path_template(log_path, now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    level = getattr(logging, str(level_name).upper(), logging.DEBUG)
+    package_logger = logging.getLogger("robotics_experiments.px4_bridge")
+    package_logger.setLevel(min(package_logger.level or level, level))
+
+    resolved = path.resolve()
+    for handler in list(package_logger.handlers):
+        if getattr(handler, _FILE_LOG_HANDLER_ATTR, None) is not None:
+            package_logger.removeHandler(handler)
+            handler.close()
+
+    handler = logging.FileHandler(resolved, mode="w", encoding="utf-8")
+    setattr(handler, _FILE_LOG_HANDLER_ATTR, str(resolved))
+    handler.setLevel(level)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s.%(msecs)03d %(levelname)s %(name)s:%(lineno)d %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    package_logger.addHandler(handler)
+    return resolved
 
 
 def _pegasus_magnetometer_body_frd(
@@ -273,8 +322,13 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         home_lat_deg: float = frames.DEFAULT_HOME_LAT_DEG,
         home_lon_deg: float = frames.DEFAULT_HOME_LON_DEG,
         home_alt_m: float = frames.DEFAULT_HOME_ALT_M,
+        debug_log_path: str | None = _DEFAULT_DEBUG_LOG_PATH,
+        debug_log_level: str = "DEBUG",
+        sensor_debug_log_interval: int = 50,
     ):
         """Initialize the port. No socket is opened until :meth:`start`."""
+        self._debug_log_path = _configure_file_logging(debug_log_path, debug_log_level)
+        self._sensor_debug_log_interval = max(1, int(sensor_debug_log_interval))
         self._num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep_timeout_s)
         self._first_heartbeat_timeout_s = float(first_heartbeat_timeout_s)
@@ -336,6 +390,22 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._actuator_receive_count: int = 0
         self._last_actuator_receive_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
+        _LOGGER.info(
+            "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
+            "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
+            "gps_enabled=%s gps_rate_hz=%s debug_log=%s sensor_debug_interval=%d",
+            connection_type,
+            connection_ip,
+            connection_baseport,
+            vehicle_id,
+            self._num_rotors,
+            self._lockstep_timeout_s,
+            self._first_heartbeat_timeout_s,
+            self._gps_enabled,
+            gps_send_rate_hz,
+            self._debug_log_path,
+            self._sensor_debug_log_interval,
+        )
 
     # ---- Lifecycle ---------------------------------------------------------
 
@@ -359,7 +429,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._last_actuator_receive_us = None
         self._sensor_payload_debug_count = 0
         self._is_connected = True
-        _LOGGER.info("PX4 MAVLink port started")
+        _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self._debug_log_path)
 
     def stop(self) -> None:
         try:
@@ -448,6 +518,11 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             if self._should_send_gps(sim_time_us):
                 self._backend.send_gps_msgs(sim_time_us)
                 self._last_gps_send_us = sim_time_us
+                _LOGGER.debug(
+                    "PX4 HIL_GPS sent: time_us=%d sensor_send_count=%d",
+                    sim_time_us,
+                    self._sensor_send_count,
+                )
         except Exception as exc:
             self._mark_disconnected(f"sensor/GPS send failed: {exc}", close_backend=True)
             return np.zeros(self._num_rotors, dtype=np.float64)
@@ -516,24 +591,36 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
     def _send_sensor_msgs(self, sim_time_us: int) -> None:
         """Send HIL_SENSOR through Pegasus' backend implementation."""
-        if self._sensor_payload_debug_count < 5 or self._sensor_payload_debug_count % 250 == 0:
-            sensor = self._backend._sensor_data
-            fields_updated = 0
-            if sensor.new_imu_data:
-                fields_updated |= _HIL_SENSOR_ACCEL_UPDATED | _HIL_SENSOR_GYRO_UPDATED
-            if sensor.new_mag_data:
-                fields_updated |= _HIL_SENSOR_MAG_UPDATED
-            if sensor.new_bar_data:
-                fields_updated |= _HIL_SENSOR_BARO_UPDATED
-            if sensor.new_press_data:
-                fields_updated |= _HIL_SENSOR_DIFF_PRESS_UPDATED
+        sensor = self._backend._sensor_data
+        fields_updated = 0
+        if sensor.new_imu_data:
+            fields_updated |= _HIL_SENSOR_ACCEL_UPDATED | _HIL_SENSOR_GYRO_UPDATED
+        if sensor.new_mag_data:
+            fields_updated |= _HIL_SENSOR_MAG_UPDATED
+        if sensor.new_bar_data:
+            fields_updated |= _HIL_SENSOR_BARO_UPDATED
+        if sensor.new_press_data:
+            fields_updated |= _HIL_SENSOR_DIFF_PRESS_UPDATED
+
+        should_log_payload = (
+            self._sensor_payload_debug_count < 10
+            or self._sensor_payload_debug_count % self._sensor_debug_log_interval == 0
+        )
+        if should_log_payload:
             _LOGGER.debug(
-                "PX4 HIL_SENSOR payload: n=%d time_us=%d mask=%d acc=[%.5f, %.5f, %.5f] "
+                "PX4 HIL_SENSOR pre-send: n=%d time_us=%d mask=%d "
+                "fresh={imu:%s mag:%s baro:%s diff_press:%s gps:%s} "
+                "acc=[%.5f, %.5f, %.5f] "
                 "gyro=[%.5f, %.5f, %.5f] mag=[%.5f, %.5f, %.5f] "
                 "abs_pressure=%.5f diff_pressure=%.5f pressure_alt=%.5f temp=%.2f",
                 self._sensor_payload_debug_count + 1,
                 sim_time_us,
                 fields_updated,
+                sensor.new_imu_data,
+                sensor.new_mag_data,
+                sensor.new_bar_data,
+                sensor.new_press_data,
+                sensor.new_gps_data,
                 sensor.xacc,
                 sensor.yacc,
                 sensor.zacc,
@@ -550,6 +637,19 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             )
         self._sensor_payload_debug_count += 1
         self._backend.send_sensor_msgs(int(sim_time_us))
+        if should_log_payload:
+            _LOGGER.debug(
+                "PX4 HIL_SENSOR post-send: n=%d time_us=%d mask=%d "
+                "fresh_after={imu:%s mag:%s baro:%s diff_press:%s gps:%s}",
+                self._sensor_payload_debug_count,
+                sim_time_us,
+                fields_updated,
+                sensor.new_imu_data,
+                sensor.new_mag_data,
+                sensor.new_bar_data,
+                sensor.new_press_data,
+                sensor.new_gps_data,
+            )
 
     def _mark_disconnected(self, reason: str, *, close_backend: bool = False) -> None:
         """Record a fatal MAVLink state transition and optionally close the socket."""
@@ -622,6 +722,16 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     _LOGGER.info(
                         "PX4 first HIL_ACTUATOR_CONTROLS received at time_usec=%d",
                         self._last_actuator_receive_us,
+                    )
+                if self._actuator_receive_count <= 10 or self._actuator_receive_count % 50 == 0:
+                    _LOGGER.debug(
+                        "PX4 HIL_ACTUATOR_CONTROLS received: n=%d time_us=%d "
+                        "mode=%s flags=%s input_reference=%s",
+                        self._actuator_receive_count,
+                        self._last_actuator_receive_us,
+                        msg.mode,
+                        msg.flags,
+                        np.asarray(backend.input_reference(), dtype=np.float64).tolist(),
                     )
 
             if not needs_to_wait or backend._received_actuator:
