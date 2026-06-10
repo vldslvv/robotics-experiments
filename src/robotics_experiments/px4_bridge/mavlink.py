@@ -88,49 +88,6 @@ def _configure_file_logging(
     return resolved
 
 
-def _pegasus_magnetometer_body_frd(
-    *,
-    position_enu: np.ndarray,
-    orientation_flu_enu_wxyz: np.ndarray,
-    home_lat_deg: float,
-    home_lon_deg: float,
-) -> np.ndarray:
-    """Return Pegasus' WMM-based magnetometer reading."""
-    from scipy.spatial.transform import Rotation
-
-    from pegasus.simulator.logic.rotations import rot_ENU_to_NED, rot_FLU_to_FRD
-    from pegasus.simulator.logic.sensors.geo_mag_utils import (
-        get_mag_declination,
-        get_mag_inclination,
-        get_mag_strength,
-        reprojection,
-    )
-
-    latitude, longitude = reprojection(
-        np.asarray(position_enu, dtype=np.float64),
-        np.radians(home_lat_deg),
-        np.radians(home_lon_deg),
-    )
-    declination_rad = np.radians(get_mag_declination(np.degrees(latitude), np.degrees(longitude)))
-    inclination_rad = np.radians(get_mag_inclination(np.degrees(latitude), np.degrees(longitude)))
-    strength_ga = 0.01 * get_mag_strength(np.degrees(latitude), np.degrees(longitude))
-
-    horizontal = strength_ga * np.cos(inclination_rad)
-    magnetic_field_inertial = np.array(
-        [
-            horizontal * np.cos(declination_rad),
-            horizontal * np.sin(declination_rad),
-            np.tan(inclination_rad) * horizontal,
-        ],
-        dtype=np.float64,
-    )
-
-    q = np.asarray(orientation_flu_enu_wxyz, dtype=np.float64)
-    attitude_flu_enu = Rotation.from_quat([q[1], q[2], q[3], q[0]])
-    rot_body_to_world = rot_ENU_to_NED * attitude_flu_enu * rot_FLU_to_FRD.inv()
-    return np.asarray(rot_body_to_world.inv().apply(magnetic_field_inertial), dtype=np.float64)
-
-
 class _PegasusRateGate:
     def __init__(self, update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ):
         self._period_s = 1.0 / float(update_rate_hz)
@@ -145,41 +102,6 @@ class _PegasusRateGate:
             self._total_time_s = 0.0
             return True, elapsed
         return False, self._total_time_s
-
-
-class _PegasusBarometer:
-    """Pegasus barometer model without the random noise term."""
-
-    _TEMPERATURE_MSL_K = 288.15
-    _PRESSURE_MSL_PA = 101325.0
-    _LAPSE_RATE_K_M = 0.0065
-    _AIR_DENSITY_MSL = 1.225
-    _ABSOLUTE_ZERO_C = -273.15
-    _GRAVITY_M_S2 = 9.80665
-
-    def __init__(self, *, origin_alt_m: float):
-        self._origin_alt_m = float(origin_alt_m)
-        self._z_start: float | None = None
-
-    def update(self, altitude_enu_m: float) -> dict:
-        if self._z_start is None:
-            self._z_start = float(altitude_enu_m)
-
-        alt_rel = float(altitude_enu_m) - self._z_start
-        alt_amsl = self._origin_alt_m + alt_rel
-        temperature_local = self._TEMPERATURE_MSL_K - self._LAPSE_RATE_K_M * alt_amsl
-        pressure_ratio = (self._TEMPERATURE_MSL_K / temperature_local) ** 5.2561
-        absolute_pressure_hpa = (self._PRESSURE_MSL_PA / pressure_ratio) * 0.01
-        density_ratio = (self._TEMPERATURE_MSL_K / temperature_local) ** 4.256
-        air_density = self._AIR_DENSITY_MSL / density_ratio
-        pressure_altitude = alt_amsl - 0.0 / (self._GRAVITY_M_S2 * air_density)
-        temperature_celsius = temperature_local + self._ABSOLUTE_ZERO_C
-
-        return {
-            "absolute_pressure": absolute_pressure_hpa,
-            "pressure_altitude": pressure_altitude,
-            "temperature": temperature_celsius,
-        }
 
 
 class _PegasusSensorSuite:
@@ -200,10 +122,25 @@ class _PegasusSensorSuite:
         self._gps_enabled = bool(gps_enabled)
         self._last_sim_time_us: int | None = None
         self._imu_gate = _PegasusRateGate(update_rate_hz)
-        self._mag_gate = _PegasusRateGate(update_rate_hz)
-        self._baro_gate = _PegasusRateGate(update_rate_hz)
         self._gps_gate = _PegasusRateGate(update_rate_hz)
-        self._barometer = _PegasusBarometer(origin_alt_m=self._home_alt_m)
+
+        from pegasus.simulator.logic.sensors.barometer import Barometer
+        from pegasus.simulator.logic.sensors.magnetometer import Magnetometer
+
+        self._barometer = Barometer({"update_rate": update_rate_hz})
+        self._magnetometer = Magnetometer({"update_rate": update_rate_hz})
+        self._barometer.initialize(
+            None,
+            self._home_lat_deg,
+            self._home_lon_deg,
+            self._home_alt_m,
+        )
+        self._magnetometer.initialize(
+            None,
+            self._home_lat_deg,
+            self._home_lon_deg,
+            self._home_alt_m,
+        )
 
     def update(self, state: VehicleState) -> dict[str, dict | None]:
         sim_time_us = int(state.sim_time_us)
@@ -218,6 +155,25 @@ class _PegasusSensorSuite:
         baro = self._update_baro(state, dt_s)
         gps = self._update_gps(state, dt_s) if self._gps_enabled else None
         return {"imu": imu, "mag": mag, "baro": baro, "gps": gps}
+
+    def _to_pegasus_state(self, state: VehicleState):
+        from pegasus.simulator.logic.state import State
+
+        pegasus_state = State()
+        q = np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64)
+        pegasus_state.position = np.asarray(state.position_enu, dtype=np.float64)
+        pegasus_state.attitude = np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
+        pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
+        pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
+        pegasus_state.linear_acceleration = np.asarray(
+            state.linear_acceleration_enu,
+            dtype=np.float64,
+        )
+        pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(
+            state.orientation_flu_enu_wxyz,
+            state.linear_velocity_enu,
+        )
+        return pegasus_state
 
     def _update_imu(self, state: VehicleState, dt_s: float) -> dict | None:
         should_update, _ = self._imu_gate.should_update(dt_s)
@@ -244,28 +200,10 @@ class _PegasusSensorSuite:
         }
 
     def _update_mag(self, state: VehicleState, dt_s: float) -> dict | None:
-        should_update, _ = self._mag_gate.should_update(dt_s)
-        if not should_update:
-            return None
-        mag_frd = _pegasus_magnetometer_body_frd(
-            position_enu=state.position_enu,
-            orientation_flu_enu_wxyz=state.orientation_flu_enu_wxyz,
-            home_lat_deg=self._home_lat_deg,
-            home_lon_deg=self._home_lon_deg,
-        )
-        return {
-            "magnetic_field": [
-                float(mag_frd[0]),
-                float(mag_frd[1]),
-                float(mag_frd[2]),
-            ],
-        }
+        return self._magnetometer.update(self._to_pegasus_state(state), dt_s)
 
     def _update_baro(self, state: VehicleState, dt_s: float) -> dict | None:
-        should_update, _ = self._baro_gate.should_update(dt_s)
-        if not should_update:
-            return None
-        return self._barometer.update(float(state.position_enu[2]))
+        return self._barometer.update(self._to_pegasus_state(state), dt_s)
 
     def _update_gps(self, state: VehicleState, dt_s: float) -> dict | None:
         should_update, _ = self._gps_gate.should_update(dt_s)

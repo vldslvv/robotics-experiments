@@ -9,7 +9,7 @@ if tmux has-session -t "${session}" 2>/dev/null; then
 fi
 
 tmux new-session -d -s "${session}" -c "${px4_dir}" \
-  "/bin/bash -lc 'cd \"${PX4_DIR:-/opt/PX4-Autopilot}\" && exec make px4_sitl_default none_iris'"
+  "/bin/bash -lc 'exec /usr/local/bin/run_px4_iris_fresh'"
 tmux split-window -h -t "${session}:0" -c "${px4_dir}" "/bin/bash"
 tmux select-pane -t "${session}:0.0"
 exec tmux attach-session -t "${session}"

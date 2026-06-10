@@ -49,6 +49,12 @@ px4_vehicle_model: gazebo-classic_iris
 lockstep_timeout_s: 1.0
 first_heartbeat_timeout_s: 5.0
 heartbeat_rate_hz: 1.0
+
+# Delay opening the PX4 simulator MAVLink endpoint until Isaac physics has
+# stepped the spawned drone long enough to settle on the ground. This prevents
+# PX4 from initializing its estimator from the spawn drop transient.
+startup_settle_time_s: 1.0
+
 gps_enabled: true
 gps_send_rate_hz: 250.0
 

@@ -294,11 +294,12 @@ RUN printf '%s\n' \
       > /root/.tmux.conf
 
 RUN printf '%s\n' \
-      "alias px4-iris='cd ${PX4_DIR} && make px4_sitl_default none_iris'" \
+      "alias px4-iris='/usr/local/bin/run_px4_iris_fresh'" \
       >> /root/.bashrc
 
+COPY px4/docker/run_px4_iris_fresh.sh /usr/local/bin/run_px4_iris_fresh
 COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
-RUN chmod +x /usr/local/bin/start_px4_tmux
+RUN chmod +x /usr/local/bin/run_px4_iris_fresh /usr/local/bin/start_px4_tmux
 
 RUN pip3 install --no-cache-dir \
       kconfiglib empy==3.3.4 pyros-genmsg

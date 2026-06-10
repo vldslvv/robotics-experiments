@@ -41,6 +41,15 @@ class DroneConfig:
             visualizes the spawn volume.
         spawn_volume_center: World-space center of the spawn volume.
         spawn_volume_half_extents: Per-axis half-extents of the spawn volume.
+        spawn_stationary: When true, spawn at sampled X/Y and yaw but compute
+            Z from the referenced drone bounds so the vehicle starts resting
+            near the ground instead of falling through PX4 startup.
+        stationary_ground_z: World Z coordinate of the ground plane used for
+            stationary placement.
+        stationary_ground_clearance_m: Clearance added above the computed
+            lower bound to avoid initial interpenetration.
+        stationary_spawn_z_fallback: Root Z used if composed bounds cannot be
+            computed for the referenced drone.
     """
 
     usd_path: str
@@ -48,6 +57,10 @@ class DroneConfig:
     spawn_volume_prim_name: str
     spawn_volume_center: Tuple[float, float, float]
     spawn_volume_half_extents: Tuple[float, float, float]
+    spawn_stationary: bool
+    stationary_ground_z: float
+    stationary_ground_clearance_m: float
+    stationary_spawn_z_fallback: float
 
 
 @dataclass
@@ -169,6 +182,10 @@ class Px4BridgeConfig:
             the port disconnected instead of waiting indefinitely.
         heartbeat_rate_hz: Wall-clock rate for bridge-originated MAVLink
             heartbeat messages.
+        startup_settle_time_s: Sim-time delay before opening the PX4
+            simulator MAVLink endpoint. The drone is allowed to settle in
+            Isaac physics first so PX4 does not initialize from spawn-drop
+            transients.
         gps_enabled: When true, synthesize and send ``HIL_GPS`` from the
             local ENU pose. Keep true for the default PX4 SITL estimator path.
         gps_send_rate_hz: Rate at which synthesized ``HIL_GPS`` is sent.
@@ -209,6 +226,7 @@ class Px4BridgeConfig:
     lockstep_timeout_s: float
     first_heartbeat_timeout_s: float
     heartbeat_rate_hz: float
+    startup_settle_time_s: float
     gps_enabled: bool
     gps_send_rate_hz: float
     home_lat_deg: float

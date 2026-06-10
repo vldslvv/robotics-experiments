@@ -76,7 +76,7 @@ test-integration-px4:
 			-v "$(PX4_LOGS):$(PX4_ROOTFS)/log" \
 			-v "$(PX4_EEPROM):$(PX4_ROOTFS)/eeprom" \
 			"$(PX4_IMAGE)" \
-			/bin/bash -lc "cd /opt/PX4-Autopilot && exec make px4_sitl_default none_iris" \
+			/bin/bash -lc "exec /usr/local/bin/run_px4_iris_fresh" \
 			>/dev/null; \
 		echo "Waiting for PX4 simulator TCP port 4560 readiness..."; \
 		ready=0; \

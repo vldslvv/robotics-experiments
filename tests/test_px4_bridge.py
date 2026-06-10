@@ -370,9 +370,30 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     assert len(backend.bar_updates) == 3
     assert len(backend.gps_updates) == 3
     first_hil_sensor = backend._connection.hil_sensor_sends[0]
-    assert first_hil_sensor[12] == pytest.approx(488.0)
+    assert first_hil_sensor[12] == pytest.approx(488.0, abs=1.0)
     assert first_hil_sensor[13] == pytest.approx(11.827, abs=0.01)
     assert first_hil_sensor[14] == 7167
+
+
+def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    port.step(VehicleState.hover_at(sim_time_us=104_000))
+
+    assert len(backend.mag_updates) == 2
+    assert len(backend.bar_updates) == 2
+    first_mag = np.asarray(backend.mag_updates[0]["magnetic_field"], dtype=np.float64)
+    second_mag = np.asarray(backend.mag_updates[1]["magnetic_field"], dtype=np.float64)
+    first_baro = backend.bar_updates[0]
+    second_baro = backend.bar_updates[1]
+
+    assert not np.array_equal(first_mag, second_mag)
+    assert first_baro["absolute_pressure"] != second_baro["absolute_pressure"]
 
 
 def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):

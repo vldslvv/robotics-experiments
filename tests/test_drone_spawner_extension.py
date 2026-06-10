@@ -94,7 +94,7 @@ def _install_fake_modules(monkeypatch, usd_context):
     )
 
     fake_drone = types.ModuleType("robotics_experiments.drone")
-    fake_drone.spawn_drone = lambda stage: None
+    fake_drone.spawn_drone = lambda stage, config=None: None
     fake_drone.despawn_drone = lambda stage: None
 
     fake_bridge_host = types.ModuleType("DroneSpawner_python.bridge_host")
@@ -131,7 +131,11 @@ def _import_extension(monkeypatch, stage=None):
 def test_startup_and_stage_open_do_not_spawn(monkeypatch):
     module, _usd_context = _import_extension(monkeypatch)
     calls = []
-    monkeypatch.setattr(module, "spawn_drone", lambda stage: calls.append(("spawn", stage)))
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None: calls.append(("spawn", stage, config)),
+    )
     monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append(("despawn", stage)))
 
     extension = module.Extension()
@@ -146,20 +150,29 @@ def test_play_spawns_once_after_clearing_stale_runtime_drone(monkeypatch):
     module, _usd_context = _import_extension(monkeypatch, stage=stage)
     calls = []
     monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append(("despawn", stage)))
-    monkeypatch.setattr(module, "spawn_drone", lambda stage: calls.append(("spawn", stage)))
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None: calls.append(("spawn", stage, config)),
+    )
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    assert calls == [("despawn", stage), ("spawn", stage)]
+    expected_drone_config = sys.modules["robotics_experiments.config"].get_config().drone
+    assert calls == [("despawn", stage), ("spawn", stage, expected_drone_config)]
 
 
 def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
     module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
     calls = []
     monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append("despawn"))
-    monkeypatch.setattr(module, "spawn_drone", lambda stage: calls.append("spawn"))
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None: calls.append(("spawn", config)),
+    )
     monkeypatch.setattr(
         module,
         "_get_experiment_config",
@@ -185,7 +198,13 @@ def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    assert calls == ["despawn", "spawn", ("bridge_init", "/World/Drone"), "bridge_start"]
+    expected_drone_config = sys.modules["robotics_experiments.config"].get_config().drone
+    assert calls == [
+        "despawn",
+        ("spawn", expected_drone_config),
+        ("bridge_init", "/World/Drone"),
+        "bridge_start",
+    ]
 
 
 def test_stop_pause_and_shutdown_stop_bridge_and_despawn(monkeypatch):

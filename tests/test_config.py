@@ -33,6 +33,10 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.sim.solver_type == expected_sim.solver_type
     assert config.sim.gravity == expected_sim.gravity
     assert config.drone.prim_name == expected_drone.prim_name
+    assert config.drone.spawn_stationary is True
+    assert config.drone.stationary_ground_z == 0.0
+    assert config.drone.stationary_ground_clearance_m == 0.01
+    assert config.drone.stationary_spawn_z_fallback == 0.07
     assert config.switches.num_switches == expected_switches.num_switches
     assert config.switches.state_publisher.topic == expected_switches.state_publisher.topic
     assert config.switches.state_publisher.qos.depth == expected_switches.state_publisher.qos.depth
@@ -62,6 +66,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.enabled is True
     assert config.px4.first_heartbeat_timeout_s == 5.0
     assert config.px4.heartbeat_rate_hz == 1.0
+    assert config.px4.startup_settle_time_s == 1.0
     assert config.px4.gps_enabled is True
     assert config.px4.gps_send_rate_hz == 250.0
     assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]

@@ -40,6 +40,7 @@ class BridgeHost:
         self._physx_sub = None
         self._sim_time_us: int = 0
         self._physics_tick_count: int = 0
+        self._start_attempted: bool = False
 
     @property
     def is_running(self) -> bool:
@@ -52,8 +53,31 @@ class BridgeHost:
         """
         if self._bridge is not None:
             return
+        if self._physx_sub is not None:
+            return
         if not self._cfg.enabled:
             return
+
+        self._sim_time_us = 0
+        self._physics_tick_count = 0
+        self._start_attempted = False
+        physx = omni.physx.get_physx_interface()
+        self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
+        settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
+        if settle_time_s > 0.0:
+            carb.log_info(
+                f"[{_LOG_PREFIX}] delaying PX4 bridge start for "
+                f"startup_settle_time_s={settle_time_s:.3f}"
+            )
+            return
+
+        self._start_bridge()
+
+    def _start_bridge(self) -> None:
+        """Construct the bridge after any configured startup settle delay."""
+        if self._bridge is not None or self._start_attempted:
+            return
+        self._start_attempted = True
 
         # Late imports so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
@@ -131,10 +155,6 @@ class BridgeHost:
             self._bridge = None
             return
 
-        self._sim_time_us = 0
-        self._physics_tick_count = 0
-        physx = omni.physx.get_physx_interface()
-        self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
         carb.log_info(f"[{_LOG_PREFIX}] PX4 bridge started")
 
     def stop(self) -> None:
@@ -148,24 +168,42 @@ class BridgeHost:
             self._bridge = None
 
     def _on_physics_step(self, dt: float) -> None:
-        if self._bridge is None:
-            return
         self._sim_time_us += int(round(dt * 1_000_000))
         self._physics_tick_count += 1
+        settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
+        settle_time_us = int(round(settle_time_s * 1_000_000))
+        if self._bridge is None:
+            if self._sim_time_us >= settle_time_us:
+                carb.log_info(
+                    f"[{_LOG_PREFIX}] startup settle complete at "
+                    f"tick={self._physics_tick_count} sim_time_us={self._sim_time_us}; "
+                    f"starting PX4 bridge"
+                )
+                self._start_bridge()
+                return
+            elif self._physics_tick_count == 1 or self._physics_tick_count % 250 == 0:
+                carb.log_info(
+                    f"[{_LOG_PREFIX}] waiting for startup settle "
+                    f"tick={self._physics_tick_count} dt={dt:.6f} "
+                    f"sim_time_us={self._sim_time_us} target_us={settle_time_us}"
+                )
+            return
+
+        bridge_sim_time_us = self._sim_time_us - settle_time_us
         if self._physics_tick_count == 1 or self._physics_tick_count % 250 == 0:
             carb.log_info(
                 f"[{_LOG_PREFIX}] physics tick={self._physics_tick_count} "
-                f"dt={dt:.6f} sim_time_us={self._sim_time_us} "
+                f"dt={dt:.6f} sim_time_us={bridge_sim_time_us} "
                 f"connected={self._bridge.is_connected}"
             )
         try:
-            self._bridge.on_physics_step(dt, self._sim_time_us)
+            self._bridge.on_physics_step(dt, bridge_sim_time_us)
         except Exception as exc:
             # One bad tick must not crash the simulator. Log and continue;
             # persistent failure will be visible via is_connected.
             carb.log_warn(
                 f"[{_LOG_PREFIX}] on_physics_step error at tick={self._physics_tick_count} "
-                f"sim_time_us={self._sim_time_us}: {exc}"
+                f"sim_time_us={bridge_sim_time_us}: {exc}"
             )
 
     def _resolve_rotor_paths(self, configured: List[str]) -> List[str]:

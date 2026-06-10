@@ -25,7 +25,7 @@ Do not introduce new tooling unless explicitly requested.
 - `px4/docker/` -> PX4 Docker build/init area.
 - `px4/scripts/` -> PX4 host-side helper scripts.
 - `px4/logs/` -> PX4 SITL log persistence.
-- `px4/eeprom/` -> PX4 SITL simulated EEPROM persistence.
+- `px4/eeprom/` -> PX4 SITL simulated EEPROM mount; cleared by the default PX4 launch wrapper.
 - `docs/` -> Design and usage docs.
 
 ## Placement rules
@@ -114,10 +114,9 @@ Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dock
 ### PX4
 Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized environment.
 - `make run-px4` opens a `px4` tmux session with side-by-side panes. One pane
-  starts `make px4_sitl_default none_iris`; the other remains an interactive
-  shell.
-- Inside the PX4 container, `px4-iris` runs `make px4_sitl_default none_iris`
-  from the PX4 source directory on demand.
+  starts `px4-iris`; the other remains an interactive shell.
+- Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
+  `make px4_sitl_default none_iris` from the PX4 source directory on demand.
 
 ## Hard rules
 - Do NOT commit USD assets or binary files.

@@ -16,7 +16,9 @@ core package used by experiments.
 - `ros/config`: ROS 2 middleware config mounted into Isaac Sim and ROS 2.
 - `ros/docker` and `ros/scripts`: ROS 2 Docker and host-side helper area.
 - `px4/docker` and `px4/scripts`: PX4 Docker and host-side helper area.
-- `px4/logs` and `px4/eeprom`: PX4 SITL runtime persistence.
+- `px4/logs`: PX4 SITL log persistence.
+- `px4/eeprom`: PX4 SITL simulated EEPROM mount, cleared by the default
+  `px4-iris` launch path so each run starts from fresh PX4 state.
 - `docs`: design and usage docs.
 
 ## Running
@@ -50,9 +52,10 @@ make run-px4
 ```
 
 The PX4 container opens a `px4` tmux session with two side-by-side panes. One
-pane starts `make px4_sitl_default none_iris`; the other stays available as a
-shell. Inside the container, use `px4-iris` to run the same SITL command on
-demand.
+pane starts `px4-iris`; the other stays available as a shell. Inside the
+container, `px4-iris` clears simulated PX4 state and then runs
+`make px4_sitl_default none_iris`. Set `PX4_FRESH_STATE=0` only when you
+intentionally want to reuse PX4 SITL parameters/dataman/eeprom state.
 
 Run host Python tests:
 

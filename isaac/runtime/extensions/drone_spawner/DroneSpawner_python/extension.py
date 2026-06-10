@@ -85,9 +85,9 @@ class Extension(omni.ext.IExt):
         if self.stage is None:
             return
         self._teardown_drone()
-        spawn_drone(self.stage)
 
         env = _get_experiment_config()
+        spawn_drone(self.stage, env.drone)
         if not env.px4.enabled:
             return
         drone_cfg = env.drone
