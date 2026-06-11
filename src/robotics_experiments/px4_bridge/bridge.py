@@ -42,6 +42,7 @@ class Px4Bridge:
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
         articulation_io: Optional[ArticulationIO] = None,
+        max_tilt_angle_deg: Optional[float] = None,
     ):
         """Build the bridge. No sockets or articulation handles are touched here.
 
@@ -53,6 +54,10 @@ class Px4Bridge:
             articulation_io: Optional override for Isaac state I/O - used by
                 tests to inject a fake. Defaults to a real
                 :class:`IsaacArticulationIO`.
+            max_tilt_angle_deg: Maximum allowed tilt angle in degrees. When the
+                drone's body-Z axis deviates from world-Z by more than this
+                angle, the bridge zeros all rotor forces. ``None`` disables
+                the check.
         """
         if thrust_model.num_rotors != port.num_rotors:
             raise ValueError(
@@ -68,6 +73,8 @@ class Px4Bridge:
         self._thrust_model = thrust_model
         self._tick_count = 0
         self._dynamics_debug_interval = 50
+        self._max_tilt_angle_deg = max_tilt_angle_deg
+        self._tilt_cutoff_count = 0
         if articulation_io is None:
             from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
@@ -104,6 +111,24 @@ class Px4Bridge:
         ):
             # NaN guard: skip this tick, keep the last good force unchanged.
             return
+
+        if (
+            self._max_tilt_angle_deg is not None
+            and self._max_tilt_angle_deg > 0.0
+        ):
+            tilt = frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)
+            if tilt > self._max_tilt_angle_deg:
+                self._tilt_cutoff_count += 1
+                if self._tilt_cutoff_count <= 10 or self._tilt_cutoff_count % 250 == 0:
+                    _LOGGER.warning(
+                        "PX4 bridge tilt cutoff: count=%d tilt=%.1f deg "
+                        "limit=%.1f deg; zeroing rotor forces",
+                        self._tilt_cutoff_count,
+                        tilt,
+                        self._max_tilt_angle_deg,
+                    )
+                self._io.apply_forces(np.zeros(self._thrust_model.num_rotors, dtype=np.float64))
+                return
 
         commands = self._port.step(state)
         body_velocity_flu = frames.world_enu_to_body_flu(

@@ -352,6 +352,7 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0)
     backend = port._backend
     backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
 
     port.start()
     port.step(VehicleState.hover_at(sim_time_us=100_000))
@@ -380,6 +381,7 @@ def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
     port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0)
     backend = port._backend
     backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
 
     port.start()
     port.step(VehicleState.hover_at(sim_time_us=100_000))
@@ -406,6 +408,7 @@ def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):
         sensor_debug_log_interval=1,
     )
     port._backend._connection = _FakeConnection()
+    port._backend._enable_lockstep = False
 
     port.start()
     port.step(VehicleState.hover_at(sim_time_us=100_000))
@@ -457,6 +460,7 @@ def test_mavlink_port_can_disable_gps(monkeypatch):
     port = Px4MavlinkPort(num_rotors=4, gps_enabled=False)
     backend = port._backend
     backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
 
     port.start()
     port.step(VehicleState.hover_at(sim_time_us=100_000))
@@ -485,7 +489,7 @@ def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
     commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
 
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
-    assert len(backend._connection.recv_calls) == 1
+    assert len(backend._connection.recv_calls) == 2
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
     assert port.is_connected is True
     assert port._last_disconnect_reason is None
@@ -506,6 +510,7 @@ def test_mavlink_port_uses_configured_heartbeat_rate(monkeypatch):
     port = Px4MavlinkPort(num_rotors=4, heartbeat_rate_hz=2.0)
     backend = port._backend
     backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
 
     port.start()
     port.step(VehicleState.hover_at(sim_time_us=100_000))
@@ -560,6 +565,173 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
     assert port._last_disconnect_reason is None
 
 
+def test_mavlink_port_does_not_wait_before_first_lockstep_actuator(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=0.0)
+    backend = port._backend
+    connection = _FakeConnection()
+    backend._connection = connection
+    backend._received_first_actuator = False
+
+    port.start()
+    commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert port._actuator_receive_count == 0
+    assert port._last_actuator_receive_us is None
+    assert connection.recv_calls == [(False, 0.0)]
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_drains_actuator_backlog_to_newest(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    old_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.1, 0.1, 0.1, 0.1],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    newest_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=112_000,
+        controls=[0.2, 0.3, 0.4, 0.5],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    connection = _FakeConnection([old_msg, newest_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+
+    port.start()
+    commands = port.step(VehicleState.hover_at(sim_time_us=112_000))
+
+    assert np.allclose(commands, [300.0, 400.0, 500.0, 600.0])
+    assert port._actuator_receive_count == 2
+    assert port._last_actuator_receive_us == 112_000
+    assert len(connection.recv_calls) == 3
+    assert connection.recv_calls[0][0] is True
+    assert connection.recv_calls[1:] == [(False, 0.0), (False, 0.0)]
+    assert port.is_connected is True
+
+
+def test_mavlink_port_disconnects_when_drained_actuator_is_stale(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    stale_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.5, 0.5, 0.5, 0.5],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    connection = _FakeConnection([stale_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._actuator_lag_baseline_us = 0
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._actuator_lag_baseline_us = 0
+    port._last_sensor_period_us = 4_000
+    commands = port.step(VehicleState.hover_at(sim_time_us=140_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is False
+    assert backend.stopped is True
+    assert backend._connection is None
+    assert port._last_disconnect_reason.startswith("actuator timestamp stale:")
+    assert "lag_us=40000" in port._last_disconnect_reason
+    assert "limit_us=20000" in port._last_disconnect_reason
+
+
+def test_mavlink_port_accepts_bounded_bootstrap_actuator_lag(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    bootstrap_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=52_000,
+        controls=[0.0, 0.0, 0.0, 0.0],
+        mode=1,
+        flags=1,
+    )
+    connection = _FakeConnection([bootstrap_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._last_sensor_period_us = 4_000
+    commands = port.step(VehicleState.hover_at(sim_time_us=148_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert port._last_actuator_receive_us == 52_000
+    assert port._actuator_lag_baseline_us == 96_000
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_accepts_slow_first_bootstrap_actuator(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    bootstrap_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=68_000,
+        controls=[0.0, 0.0, 0.0, 0.0],
+        mode=1,
+        flags=1,
+    )
+    connection = _FakeConnection([bootstrap_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._last_sensor_period_us = 4_000
+    commands = port.step(VehicleState.hover_at(sim_time_us=972_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert port._last_actuator_receive_us == 68_000
+    assert port._actuator_lag_baseline_us == 904_000
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_accepts_actuator_within_freshness_limit(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    fresh_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=124_000,
+        controls=[0.0, 0.25, 0.5, 1.0],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    connection = _FakeConnection([fresh_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._last_sensor_period_us = 4_000
+    commands = port.step(VehicleState.hover_at(sim_time_us=140_000))
+
+    assert np.allclose(commands, [100.0, 350.0, 600.0, 1100.0])
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert port._last_disconnect_reason is None
+
+
 def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=0.0)
@@ -577,3 +749,115 @@ def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
     assert backend._connection is None
     assert len(connection.recv_calls) == 1
     assert port._last_disconnect_reason == "actuator polling timed out after 0.000 seconds"
+
+
+def _quat_pitch_deg(angle_deg: float) -> np.ndarray:
+    """Return a [w, x, y, z] quaternion for a pitch rotation of angle_deg."""
+    import math
+
+    half = math.radians(angle_deg) / 2.0
+    return np.array([math.cos(half), 0.0, math.sin(half), 0.0], dtype=np.float64)
+
+
+def _quat_yaw_deg(angle_deg: float) -> np.ndarray:
+    """Return a [w, x, y, z] quaternion for a yaw rotation of angle_deg."""
+    import math
+
+    half = math.radians(angle_deg) / 2.0
+    return np.array([math.cos(half), 0.0, 0.0, math.sin(half)], dtype=np.float64)
+
+
+def test_tilt_angle_deg_level():
+    from robotics_experiments.px4_bridge.frames import tilt_angle_deg
+
+    q = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    assert tilt_angle_deg(q) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_tilt_angle_deg_45_pitch():
+    from robotics_experiments.px4_bridge.frames import tilt_angle_deg
+
+    q = _quat_pitch_deg(45.0)
+    assert tilt_angle_deg(q) == pytest.approx(45.0, abs=1e-10)
+
+
+def test_tilt_angle_deg_inverted():
+    from robotics_experiments.px4_bridge.frames import tilt_angle_deg
+
+    q = _quat_pitch_deg(180.0)
+    assert tilt_angle_deg(q) == pytest.approx(180.0, abs=1e-10)
+
+
+def test_tilt_angle_deg_pure_yaw_is_zero():
+    from robotics_experiments.px4_bridge.frames import tilt_angle_deg
+
+    q = _quat_yaw_deg(90.0)
+    assert tilt_angle_deg(q) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_bridge_tilt_cutoff_zeros_forces():
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=60.0,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    assert len(io.applied_forces) == 1
+    assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
+    assert bridge._tilt_cutoff_count == 1
+
+
+def test_bridge_tilt_cutoff_passes_through_within_limit():
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_pitch_deg(30.0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=60.0,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    assert len(io.applied_forces) == 1
+    assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
+    assert bridge._tilt_cutoff_count == 0
+
+
+def test_bridge_tilt_cutoff_disabled_when_none():
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_pitch_deg(170.0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=None,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    assert len(io.applied_forces) == 1
+    assert bridge._tilt_cutoff_count == 0

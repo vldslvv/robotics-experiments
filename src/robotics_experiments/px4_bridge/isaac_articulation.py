@@ -186,8 +186,16 @@ class IsaacArticulationIO:
         orientation_wxyz = np.asarray(quat_wxyz, dtype=np.float64)
 
         linear_velocity_enu = np.asarray(self._articulation.get_linear_velocity(), dtype=np.float64)
-        angular_velocity_flu = np.asarray(
-            self._articulation.get_angular_velocity(), dtype=np.float64
+        # Isaac reports angular velocity in the world frame. PX4 HIL gyro data
+        # is body-frame FRD, so keep VehicleState's contract as body-FLU here
+        # and let the MAVLink port do the final FLU->FRD sign conversion.
+        angular_velocity_enu = np.asarray(
+            self._articulation.get_angular_velocity(),
+            dtype=np.float64,
+        )
+        angular_velocity_flu = frames.world_enu_to_body_flu(
+            orientation_wxyz,
+            angular_velocity_enu,
         )
 
         # Finite-difference accel from last tick (world ENU frame).

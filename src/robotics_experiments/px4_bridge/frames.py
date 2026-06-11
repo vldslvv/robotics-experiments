@@ -48,6 +48,7 @@ __all__ = [
     "quat_xyzw_to_wxyz",
     "rotate_vector_wxyz",
     "world_enu_to_body_flu",
+    "tilt_angle_deg",
     "specific_force_body_flu",
     "magnetometer_body_flu",
     "synth_gps_from_enu",
@@ -116,6 +117,20 @@ def world_enu_to_body_flu(
         _quat_conjugate_wxyz(_normalize_quat_wxyz(q_flu_enu_wxyz)),
         np.asarray(vec_enu, dtype=np.float64),
     )
+
+
+def tilt_angle_deg(q_flu_enu_wxyz: np.ndarray) -> float:
+    """Angle between body-Z (up) and world-Z in degrees.
+
+    Returns 0 when the body is level and 180 when fully inverted. Pure yaw
+    rotations do not change the tilt angle.
+    """
+    body_z_world = rotate_vector_wxyz(
+        q_flu_enu_wxyz,
+        np.array([0.0, 0.0, 1.0], dtype=np.float64),
+    )
+    cos_angle = float(np.clip(body_z_world[2], -1.0, 1.0))
+    return math.degrees(math.acos(cos_angle))
 
 
 def specific_force_body_flu(

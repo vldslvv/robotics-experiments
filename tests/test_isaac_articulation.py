@@ -18,6 +18,41 @@ class _FakeRigidBody:
         self.calls.append(kwargs)
 
 
+class _FakeArticulation:
+    def __init__(self, *, position, orientation_wxyz, linear_velocity, angular_velocity):
+        self._position = np.asarray(position, dtype=np.float64)
+        self._orientation_wxyz = np.asarray(orientation_wxyz, dtype=np.float64)
+        self._linear_velocity = np.asarray(linear_velocity, dtype=np.float64)
+        self._angular_velocity = np.asarray(angular_velocity, dtype=np.float64)
+
+    def get_world_pose(self):
+        return self._position, self._orientation_wxyz
+
+    def get_linear_velocity(self):
+        return self._linear_velocity
+
+    def get_angular_velocity(self):
+        return self._angular_velocity
+
+
+def test_read_state_rotates_world_angular_velocity_into_body_frame():
+    q_yaw_90_wxyz = np.array(
+        [math.cos(math.pi / 4.0), 0.0, 0.0, math.sin(math.pi / 4.0)],
+        dtype=np.float64,
+    )
+    io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=[])
+    io._articulation = _FakeArticulation(
+        position=[0.0, 0.0, 1.0],
+        orientation_wxyz=q_yaw_90_wxyz,
+        linear_velocity=[0.0, 0.0, 0.0],
+        angular_velocity=[1.0, 0.0, 0.0],
+    )
+
+    state = io.read_state(sim_time_us=1_000)
+
+    np.testing.assert_allclose(state.angular_velocity_flu, [0.0, -1.0, 0.0], atol=1e-12)
+
+
 def test_rotor_forces_to_world_rotates_positions_and_keeps_vertical_force_under_yaw():
     q_yaw_90_wxyz = np.array(
         [math.cos(math.pi / 4.0), 0.0, 0.0, math.sin(math.pi / 4.0)],

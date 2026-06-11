@@ -73,3 +73,9 @@ home_alt_m: 488.0
 debug_log_path: /isaac-sim/proj/px4/logs/{date}/{time}_bridge.log
 debug_log_level: DEBUG
 sensor_debug_log_interval: 50
+
+# Bridge-side tilt safety cutoff. When the drone's body-Z axis deviates from
+# world-Z by more than this angle (degrees), the bridge zeros all rotor forces
+# to prevent inverted thrust after a crash. Set to 0 or a negative value to
+# disable.
+max_tilt_angle_deg: 60.0

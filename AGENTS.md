@@ -81,6 +81,9 @@ Do not introduce new tooling unless explicitly requested.
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
   connect to PX4 SITL.
+- Isaac articulation angular velocity is treated as world-frame data and must
+  be rotated into body-FLU before MAVLink converts it to PX4 body-FRD gyro
+  fields.
 - PX4 `rotor_link_paths` identify rotor thrust marker prims in motor-index
   order. The Isaac adapter applies thrust to the drone rigid body at those
   marker positions; marker prims must not be treated as separate free rotor
@@ -92,6 +95,14 @@ Do not introduce new tooling unless explicitly requested.
 - PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
   If Isaac emits duplicate or non-increasing physics timestamps, the bridge
   must not forward another HIL sensor tick or wait for a new actuator packet.
+- PX4 actuator lockstep must use fresh actuator packets. Once PX4 has produced
+  its first `HIL_ACTUATOR_CONTROLS` packet, the bridge drains queued actuator
+  messages after each sensor tick and applies the newest packet. PX4 startup can
+  produce an initial actuator timestamp lag while HIL output begins; the bridge
+  may use the first actuator packet's lag as a bootstrap baseline. If later
+  actuator timestamps become materially stale relative to that baseline and the
+  current simulation time, the bridge must disconnect and return zero rotor
+  commands instead of applying old motor outputs.
 
 ## Common commands
 
@@ -123,6 +134,8 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
   `make px4_sitl_default none_iris` from the PX4 source directory on demand.
 
 ### PX4 bridge debugging
+- Use `flight_analysis/README.md` for the detailed repeatable log-analysis
+  workflow and helper scripts.
 - PX4 ULog files and custom bridge logs are persisted under
   `px4/logs/<yyyy-mm-dd>/`.
 - PX4 creates the ULog when the SITL logger starts, before arm/takeoff. The
@@ -143,6 +156,8 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
   periodic sensor freshness, actuator controls, rotor mapping, per-rotor forces,
   body torque/drag, pose, velocity, and stop counters. Use it to verify:
   - `HIL_SENSOR.time_usec` is strictly increasing.
+  - `HIL_ACTUATOR_CONTROLS` timestamps stay close to sensor simulation time;
+    stale actuator lag means the bridge is applying old control outputs.
   - `fresh={imu:True mag:True baro:True ...}` is present before send.
   - `input_reference` and `commands` match expected PX4 actuator behavior.
   - `rotor_link_paths` resolve to the expected body-frame positions and spin

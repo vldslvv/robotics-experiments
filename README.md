@@ -80,6 +80,37 @@ exists, the Makefile starts it again instead of creating a new one.
 Legacy targets such as `build-all`, `run-all`, and `clean-all` remain as
 compatibility aliases.
 
+## PX4 Bridge Notes
+
+The custom Isaac PX4 bridge is intentionally strict about simulation time and
+frame conventions. The main failure modes fixed during flight debugging were:
+
+- `HIL_SENSOR.time_usec` must be strictly increasing and derived from Isaac
+  simulation time, not wall clock time.
+- PX4 actuator lockstep should not block before PX4 has produced its first
+  `HIL_ACTUATOR_CONTROLS` packet. After the first packet, the bridge drains
+  queued actuator messages and applies the newest command only.
+- The first actuator packet can arrive with startup timestamp lag while PX4 HIL
+  output comes online. The bridge accepts that first lag as a bootstrap
+  baseline, then disconnects and zeros commands if later actuator packets become
+  materially staler than that baseline.
+- Isaac articulation angular velocity is world-frame data. It must be rotated
+  into body-FLU before the MAVLink adapter converts it to PX4 body-FRD gyro
+  fields. Sending world-frame angular velocity as body gyro can look stable
+  while level, then destabilize takeoff as soon as the vehicle rotates.
+- Rotor thrust markers are configured in PX4 motor-index order for
+  `none_iris` / Generic Quad X: front-right CW, rear-left CW, front-left CCW,
+  rear-right CCW. PX4 uses FRD geometry while Isaac marker positions are FLU,
+  so the USD motor names look mirrored relative to PX4's Y-right convention.
+- The bridge-side tilt cutoff zeros rotor forces after excessive tilt so an
+  already-crashed or inverted vehicle does not keep applying thrust.
+
+For flight debugging, start with the paired files under `px4/logs/<date>/`, for
+example `HH_MM_SS.ulg` and `HH_MM_SS_bridge.log`. Use the bridge log to check
+sensor timestamps, actuator lag, rotor mapping, applied forces, and tilt cutoff.
+Use the ULog to confirm command acknowledgements, trajectory setpoints,
+attitude setpoints, actuator outputs, estimator status, and failsafe flags.
+
 ## Isaac Sim Workflows
 
 - Use `isaac/runtime/extensions` for Isaac Kit extensions.

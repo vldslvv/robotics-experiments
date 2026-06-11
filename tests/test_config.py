@@ -35,7 +35,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.drone.prim_name == expected_drone.prim_name
     assert config.drone.spawn_stationary is True
     assert config.drone.stationary_ground_z == 0.0
-    assert config.drone.stationary_ground_clearance_m == 0.01
+    assert config.drone.stationary_ground_clearance_m == 0.05
     assert config.drone.stationary_spawn_z_fallback == 0.07
     assert config.switches.num_switches == expected_switches.num_switches
     assert config.switches.state_publisher.topic == expected_switches.state_publisher.topic
@@ -79,6 +79,7 @@ def test_default_config_loads_from_root_experiment_config():
     )
     assert config.px4.debug_log_level == "DEBUG"
     assert config.px4.sensor_debug_log_interval == 50
+    assert config.px4.max_tilt_angle_deg == 60.0
     reset_config()
 
 

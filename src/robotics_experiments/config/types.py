@@ -202,6 +202,10 @@ class Px4BridgeConfig:
         debug_log_level: Python logging level name used by the bridge file log.
         sensor_debug_log_interval: Emit one detailed HIL_SENSOR payload log
             every N sensor sends after the initial startup samples.
+        max_tilt_angle_deg: Maximum allowed tilt angle in degrees between the
+            drone's body-Z axis and world-Z. When exceeded, the bridge zeros
+            all rotor forces to prevent inverted thrust after a crash. Set to
+            zero or a negative value to disable.
     """
 
     enabled: bool
@@ -237,6 +241,7 @@ class Px4BridgeConfig:
     debug_log_path: str
     debug_log_level: str
     sensor_debug_log_interval: int
+    max_tilt_angle_deg: float
 
 
 @dataclass

@@ -319,6 +319,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._is_connected: bool = False
         self._last_gps_send_us: Optional[int] = None
         self._last_sensor_send_us: Optional[int] = None
+        self._last_sensor_period_us: Optional[int] = None
         self._last_heartbeat_send_s: float = 0.0
         self._first_heartbeat_wait_start_s: Optional[float] = None
         self._first_heartbeat_received_s: Optional[float] = None
@@ -327,6 +328,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._sensor_send_count: int = 0
         self._actuator_receive_count: int = 0
         self._last_actuator_receive_us: Optional[int] = None
+        self._actuator_lag_baseline_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
         _LOGGER.info(
             "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
@@ -357,6 +359,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         )
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
+        self._last_sensor_period_us = None
         self._last_heartbeat_send_s = 0.0
         self._first_heartbeat_wait_start_s = None
         self._first_heartbeat_received_s = None
@@ -365,6 +368,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._sensor_send_count = 0
         self._actuator_receive_count = 0
         self._last_actuator_receive_us = None
+        self._actuator_lag_baseline_us = None
         self._sensor_payload_debug_count = 0
         self._is_connected = True
         _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self._debug_log_path)
@@ -438,19 +442,28 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
         # 4. Send sensor + GPS messages with the caller's sim time.
         try:
+            previous_sensor_send_us = self._last_sensor_send_us
             self._send_sensor_msgs(sim_time_us)
             self._last_sensor_send_us = sim_time_us
+            if previous_sensor_send_us is not None:
+                self._last_sensor_period_us = sim_time_us - previous_sensor_send_us
             self._sensor_send_count += 1
             if self._sensor_send_count == 1:
                 _LOGGER.info("PX4 first HIL_SENSOR sent at sim_time_us=%d", sim_time_us)
             elif self._sensor_send_count % 250 == 0:
+                actuator_lag_us = (
+                    None
+                    if self._last_actuator_receive_us is None
+                    else sim_time_us - self._last_actuator_receive_us
+                )
                 _LOGGER.debug(
                     "PX4 sensor stream: sensors=%d actuators=%d sim_time_us=%d "
-                    "last_actuator_us=%s connected=%s",
+                    "last_actuator_us=%s actuator_lag_us=%s connected=%s",
                     self._sensor_send_count,
                     self._actuator_receive_count,
                     sim_time_us,
                     self._last_actuator_receive_us,
+                    actuator_lag_us,
                     self.is_connected,
                 )
             if self._should_send_gps(sim_time_us):
@@ -466,7 +479,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             return np.zeros(self._num_rotors, dtype=np.float64)
 
         # 5. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout.
-        if not self._poll_for_actuator(self._lockstep_timeout_s):
+        if not self._poll_for_actuator(self._lockstep_timeout_s, sim_time_us):
             return np.zeros(self._num_rotors, dtype=np.float64)
 
         # 6. Return the up-to-date rotor reference.
@@ -614,12 +627,86 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             except Exception as exc:
                 _LOGGER.warning("PX4 MAVLink backend close after disconnect failed: %s", exc)
 
-    def _poll_for_actuator(self, timeout_s: float) -> bool:
+    def _actuator_stale_limit_us(self) -> int:
+        observed_period_us = max(0, int(self._last_sensor_period_us or 0))
+        return max(5 * observed_period_us, 20_000)
+
+    def _handle_actuator_msg(self, msg) -> None:
+        backend = self._backend
+        backend._received_first_actuator = True
+        backend._received_actuator = True
+        backend.handle_control(msg.time_usec, msg.controls, msg.mode, msg.flags)
+        self._actuator_receive_count += 1
+        self._last_actuator_receive_us = int(msg.time_usec)
+        if self._actuator_receive_count == 1:
+            _LOGGER.info(
+                "PX4 first HIL_ACTUATOR_CONTROLS received at time_usec=%d",
+                self._last_actuator_receive_us,
+            )
+        if self._actuator_receive_count <= 10 or self._actuator_receive_count % 50 == 0:
+            _LOGGER.debug(
+                "PX4 HIL_ACTUATOR_CONTROLS received: n=%d time_us=%d "
+                "mode=%s flags=%s input_reference=%s",
+                self._actuator_receive_count,
+                self._last_actuator_receive_us,
+                msg.mode,
+                msg.flags,
+                np.asarray(backend.input_reference(), dtype=np.float64).tolist(),
+            )
+
+    def _actuator_is_fresh(self, sim_time_us: int) -> bool:
+        if self._last_actuator_receive_us is None:
+            return True
+        actuator_lag_us = max(0, sim_time_us - self._last_actuator_receive_us)
+        stale_limit_us = self._actuator_stale_limit_us()
+
+        if self._actuator_lag_baseline_us is None:
+            # PX4 can emit its first HIL_ACTUATOR_CONTROLS packet with an old
+            # simulation timestamp while HIL output starts. Accept that first
+            # lag as a startup baseline, then fail closed if later packets fall
+            # materially farther behind instead of applying stale motor output.
+            self._actuator_lag_baseline_us = actuator_lag_us
+            if actuator_lag_us > stale_limit_us:
+                _LOGGER.info(
+                    "PX4 actuator bootstrap lag accepted: "
+                    "sim_time_us=%d last_actuator_us=%d lag_us=%d steady_limit_us=%d",
+                    sim_time_us,
+                    self._last_actuator_receive_us,
+                    actuator_lag_us,
+                    stale_limit_us,
+                )
+            return True
+
+        if actuator_lag_us <= stale_limit_us:
+            self._actuator_lag_baseline_us = min(
+                self._actuator_lag_baseline_us,
+                actuator_lag_us,
+            )
+            return True
+
+        allowed_lag_us = self._actuator_lag_baseline_us + stale_limit_us
+        if actuator_lag_us <= allowed_lag_us:
+            if actuator_lag_us < self._actuator_lag_baseline_us:
+                self._actuator_lag_baseline_us = actuator_lag_us
+            return True
+
+        self._mark_disconnected(
+            "actuator timestamp stale: "
+            f"sim_time_us={sim_time_us} "
+            f"last_actuator_us={self._last_actuator_receive_us} "
+            f"lag_us={actuator_lag_us} limit_us={allowed_lag_us}",
+            close_backend=True,
+        )
+        return False
+
+    def _poll_for_actuator(self, timeout_s: float, sim_time_us: int) -> bool:
         """Block (with timeout) for a HIL_ACTUATOR_CONTROLS message.
 
         With Isaac physics configured to the PX4 actuator cadence, lockstep is
-        strict: after the first actuator packet, each new sensor tick must be
-        paired with a new actuator response before the next tick continues.
+        strict after PX4 has produced its first actuator packet: each new sensor
+        tick must then be paired with a fresh actuator response before the next
+        tick continues. Any queued actuator backlog is drained so the bridge
+        uses PX4's newest command.
 
         Returns:
             ``True`` if an actuator message was processed, or no blocking wait
@@ -634,6 +721,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         needs_to_wait = backend._received_first_actuator and backend._enable_lockstep
         backend._received_actuator = False
 
+        # Do not block before PX4 has ever produced an actuator packet. During
+        # startup the controller may need several sensor ticks before it begins
+        # HIL output; strict lockstep starts only after that first response.
         deadline = time.time() + timeout_s
 
         while True:
@@ -651,29 +741,10 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 return True
 
             if msg is not None and msg.id == mavutil.mavlink.MAVLINK_MSG_ID_HIL_ACTUATOR_CONTROLS:
-                backend._received_first_actuator = True
-                backend._received_actuator = True
-                backend.handle_control(msg.time_usec, msg.controls, msg.mode, msg.flags)
-                self._actuator_receive_count += 1
-                self._last_actuator_receive_us = int(msg.time_usec)
-                if self._actuator_receive_count == 1:
-                    _LOGGER.info(
-                        "PX4 first HIL_ACTUATOR_CONTROLS received at time_usec=%d",
-                        self._last_actuator_receive_us,
-                    )
-                if self._actuator_receive_count <= 10 or self._actuator_receive_count % 50 == 0:
-                    _LOGGER.debug(
-                        "PX4 HIL_ACTUATOR_CONTROLS received: n=%d time_us=%d "
-                        "mode=%s flags=%s input_reference=%s",
-                        self._actuator_receive_count,
-                        self._last_actuator_receive_us,
-                        msg.mode,
-                        msg.flags,
-                        np.asarray(backend.input_reference(), dtype=np.float64).tolist(),
-                    )
+                self._handle_actuator_msg(msg)
 
-            if not needs_to_wait or backend._received_actuator:
-                return True
+            if backend._received_actuator:
+                break
 
             if time.time() >= deadline:
                 self._last_poll_timeout_s = time.time()
@@ -682,3 +753,16 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     close_backend=True,
                 )
                 return False
+
+        while True:
+            try:
+                msg = backend._connection.recv_match(blocking=False, timeout=0.0)
+            except Exception as exc:
+                self._mark_disconnected(f"actuator polling failed: {exc}", close_backend=True)
+                return False
+            if msg is None:
+                break
+            if msg.id == mavutil.mavlink.MAVLINK_MSG_ID_HIL_ACTUATOR_CONTROLS:
+                self._handle_actuator_msg(msg)
+
+        return self._actuator_is_fresh(sim_time_us)

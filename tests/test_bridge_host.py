@@ -84,10 +84,18 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             calls.append(("thrust", kwargs))
 
     class Px4Bridge:
-        def __init__(self, *, articulation_path, rotor_link_paths, thrust_model, port):
+        def __init__(
+            self,
+            *,
+            articulation_path,
+            rotor_link_paths,
+            thrust_model,
+            port,
+            max_tilt_angle_deg=None,
+        ):
             self.is_connected = True
             self.step_times = []
-            calls.append(("bridge", articulation_path, rotor_link_paths))
+            calls.append(("bridge", articulation_path, rotor_link_paths, max_tilt_angle_deg))
 
         def start(self):
             calls.append("bridge_start")
@@ -148,6 +156,7 @@ def _config(**overrides):
         "debug_log_path": "",
         "debug_log_level": "DEBUG",
         "sensor_debug_log_interval": 50,
+        "max_tilt_angle_deg": 60.0,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
