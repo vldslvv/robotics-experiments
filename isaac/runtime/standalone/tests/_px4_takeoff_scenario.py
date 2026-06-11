@@ -25,9 +25,16 @@ _GROUND_SETTLE_S = 1.5
 _HEARTBEAT_TIMEOUT_S = 12.0
 _PREARM_SETTLE_S = 10.0
 _COMMAND_ACK_TIMEOUT_S = 10.0
-_OBSERVATION_S = 12.0
-_TAKEOFF_ALTITUDE_M = 2.0
-_MIN_CLIMB_M = 0.5
+_TAKEOFF_ALTITUDE_M = 2.5
+# TODO: Figure out why PX4 currently settles below the requested 2.5m
+# takeoff target in this SITL/Isaac loop. Until then, this scenario verifies
+# that takeoff reaches the observed airborne envelope and then holds hover.
+_MIN_TAKEOFF_CLIMB_M = 1.5
+_TAKEOFF_TIMEOUT_S = 30.0
+_HOVER_SETTLE_S = 2.0
+_HOVER_OBSERVATION_S = 5.0
+_HOVER_MAX_ALTITUDE_RANGE_M = 0.35
+_HOVER_MAX_ABS_VERTICAL_SPEED_M_S = 0.35
 _MAX_TILT_DEG = 35.0
 _MAX_LATERAL_DRIFT_M = 2.0
 _MAX_VERTICAL_SPEED_M_S = 8.0
@@ -515,13 +522,22 @@ def _observe_stability(
     test_name: str,
     start_position: np.ndarray,
 ) -> None:
-    context.report(f"{test_name}: observing takeoff stability for {_OBSERVATION_S:.1f}s")
+    context.report(
+        f"{test_name}: observing takeoff for up to {_TAKEOFF_TIMEOUT_S:.1f}s "
+        f"until climb >= {_MIN_TAKEOFF_CLIMB_M:.2f}m"
+    )
     start_us = int(getattr(host, "_sim_time_us", 0))
-    target_us = start_us + int(round(_OBSERVATION_S * 1_000_000))
+    takeoff_deadline_us = start_us + int(round(_TAKEOFF_TIMEOUT_S * 1_000_000))
+    hover_settle_end_us: int | None = None
+    hover_end_us: int | None = None
     highest_altitude_m = float(start_position[2])
     sample_count = 0
+    hover_sample_count = 0
+    max_hover_abs_vertical_speed_m_s = 0.0
+    min_hover_climb_m = math.inf
+    max_hover_climb_m = -math.inf
 
-    while int(getattr(host, "_sim_time_us", 0)) < target_us:
+    while True:
         try:
             _advance_one(context, host)
         except AssertionError as exc:
@@ -542,6 +558,7 @@ def _observe_stability(
         sample_count += 1
         highest_altitude_m = max(highest_altitude_m, float(sample.position_enu[2]))
 
+        climb_m = float(sample.position_enu[2]) - float(start_position[2])
         lateral_drift_m = float(np.linalg.norm(sample.position_enu[:2] - start_position[:2]))
         vertical_velocity_m_s = float(sample.linear_velocity_enu[2])
         angular_speed_rad_s = float(np.linalg.norm(sample.angular_velocity_flu))
@@ -569,6 +586,24 @@ def _observe_stability(
                 f"Drone angular velocity diverged: |omega|={angular_speed_rad_s:.2f}rad/s"
             )
 
+        if hover_settle_end_us is None and climb_m >= _MIN_TAKEOFF_CLIMB_M:
+            hover_settle_end_us = sim_time_us + int(round(_HOVER_SETTLE_S * 1_000_000))
+            hover_end_us = hover_settle_end_us + int(round(_HOVER_OBSERVATION_S * 1_000_000))
+            context.report(
+                f"{test_name}: reached takeoff altitude envelope: "
+                f"climb={climb_m:.2f}m required={_MIN_TAKEOFF_CLIMB_M:.2f}m; "
+                f"settling hover for {_HOVER_SETTLE_S:.1f}s"
+            )
+
+        if hover_settle_end_us is not None and sim_time_us >= hover_settle_end_us:
+            hover_sample_count += 1
+            max_hover_abs_vertical_speed_m_s = max(
+                max_hover_abs_vertical_speed_m_s,
+                abs(vertical_velocity_m_s),
+            )
+            min_hover_climb_m = min(min_hover_climb_m, climb_m)
+            max_hover_climb_m = max(max_hover_climb_m, climb_m)
+
         if sample_count == 1 or sample_count % 250 == 0:
             context.report(
                 f"{test_name}: sample t={sim_time_us * 1e-6:.2f}s "
@@ -578,15 +613,42 @@ def _observe_stability(
                 f"drift={lateral_drift_m:.2f}m"
             )
 
+        if hover_end_us is not None and sim_time_us >= hover_end_us:
+            break
+        if hover_settle_end_us is None and sim_time_us >= takeoff_deadline_us:
+            break
+
     climb_m = highest_altitude_m - float(start_position[2])
-    if climb_m < _MIN_CLIMB_M:
+    if climb_m < _MIN_TAKEOFF_CLIMB_M:
         _raise_instability(
             f"Drone altitude did not increase enough: climb={climb_m:.2f}m "
-            f"required={_MIN_CLIMB_M:.2f}m"
+            f"required={_MIN_TAKEOFF_CLIMB_M:.2f}m"
         )
+
+    if hover_sample_count <= 0:
+        _raise_instability("Drone reached takeoff altitude but no hover samples were collected")
+
+    hover_altitude_range_m = max_hover_climb_m - min_hover_climb_m
+    if hover_altitude_range_m > _HOVER_MAX_ALTITUDE_RANGE_M:
+        _raise_instability(
+            "Drone did not hold hover height: "
+            f"climb_range={hover_altitude_range_m:.2f}m "
+            f"limit={_HOVER_MAX_ALTITUDE_RANGE_M:.2f}m "
+            f"min_climb={min_hover_climb_m:.2f}m max_climb={max_hover_climb_m:.2f}m"
+        )
+    if max_hover_abs_vertical_speed_m_s > _HOVER_MAX_ABS_VERTICAL_SPEED_M_S:
+        _raise_instability(
+            "Drone vertical speed did not settle during hover: "
+            f"max_abs_vz={max_hover_abs_vertical_speed_m_s:.2f}m/s "
+            f"limit={_HOVER_MAX_ABS_VERTICAL_SPEED_M_S:.2f}m/s"
+        )
+
     context.report(
-        f"{test_name}: observed stable climb: max_climb={climb_m:.2f}m "
-        f"samples={sample_count}"
+        f"{test_name}: observed stable takeoff and hover: "
+        f"max_climb={climb_m:.2f}m "
+        f"hover_climb_range={min_hover_climb_m:.2f}-{max_hover_climb_m:.2f}m "
+        f"max_hover_abs_vz={max_hover_abs_vertical_speed_m_s:.2f}m/s "
+        f"samples={sample_count} hover_samples={hover_sample_count}"
     )
 
 

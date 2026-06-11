@@ -15,3 +15,8 @@ owned by the repository workflow. For example, use
 `make test-integration-px4-takeoff` for the arm/takeoff stability scenario.
 Use `make test-integration-px4-takeoff-instability` for the opt-in negative
 scenario that intentionally swaps rotor paths and expects instability detection.
+The positive takeoff scenario commands a 2.5 m global takeoff over MAVLink
+without changing PX4 takeoff-height parameters. It currently passes after the
+vehicle reaches the observed airborne envelope, waits 2 seconds for hover
+settle, then holds 5 seconds of hover with no more than 0.35 m of height range
+and no more than 0.35 m/s vertical speed in magnitude.
