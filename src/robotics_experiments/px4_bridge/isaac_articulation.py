@@ -16,6 +16,7 @@ from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
+from . import frames
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["IsaacArticulationIO"]
@@ -46,6 +47,7 @@ class IsaacArticulationIO:
         self._rotor_positions_body: Optional[np.ndarray] = None
         self._last_velocity_enu: Optional[np.ndarray] = None
         self._last_sim_time_us: Optional[int] = None
+        self._force_apply_count: int = 0
 
     @property
     def num_rotors(self) -> int:
@@ -164,6 +166,7 @@ class IsaacArticulationIO:
         self._rotor_positions_body = None
         self._last_velocity_enu = None
         self._last_sim_time_us = None
+        self._force_apply_count = 0
 
     # ---- Per-tick I/O ------------------------------------------------------
 
@@ -206,27 +209,109 @@ class IsaacArticulationIO:
             sim_time_us=int(sim_time_us),
         )
 
+    def _body_world_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the current body pose as ``(position, quaternion_wxyz)``."""
+        pose_source = self._body if hasattr(self._body, "get_world_pose") else self._articulation
+        if pose_source is None:
+            raise RuntimeError("Isaac body/articulation handle is not initialized")
+        pos, quat_wxyz = pose_source.get_world_pose()
+        return np.asarray(pos, dtype=np.float64), np.asarray(quat_wxyz, dtype=np.float64)
+
+    @staticmethod
+    def _rotor_forces_to_world(
+        *,
+        body_position_world: np.ndarray,
+        body_orientation_wxyz: np.ndarray,
+        rotor_positions_body: np.ndarray,
+        forces_n: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Convert Pegasus body-frame rotor effects into Isaac world-space inputs."""
+        position_world = np.asarray(body_position_world, dtype=np.float64)
+        orientation_wxyz = np.asarray(body_orientation_wxyz, dtype=np.float64)
+        positions_body = np.asarray(rotor_positions_body, dtype=np.float64)
+        forces = np.asarray(forces_n, dtype=np.float64)
+        if positions_body.ndim != 2 or positions_body.shape[1] != 3:
+            raise ValueError(f"rotor_positions_body expects shape (N, 3), got {positions_body.shape}")
+        if forces.shape != (positions_body.shape[0],):
+            raise ValueError(
+                f"forces_n expected shape ({positions_body.shape[0]},), got {forces.shape}"
+            )
+
+        rotor_positions_world = np.asarray(
+            [
+                position_world + frames.rotate_vector_wxyz(orientation_wxyz, position_body)
+                for position_body in positions_body
+            ],
+            dtype=np.float64,
+        )
+        rotor_forces_world = np.asarray(
+            [
+                frames.rotate_vector_wxyz(
+                    orientation_wxyz,
+                    np.array([0.0, 0.0, float(force_n)], dtype=np.float64),
+                )
+                for force_n in forces
+            ],
+            dtype=np.float64,
+        )
+        return rotor_forces_world, rotor_positions_world
+
     def apply_forces(self, forces_n: np.ndarray) -> None:
-        """Apply per-rotor forces to the drone body at each marker's local +Z axis.
+        """Apply per-rotor thrust at each marker's current world-space position.
+
+        Pegasus applies rotor thrust in the rotor/body local +Z direction. This
+        bridge uses marker prims rather than Pegasus rotor rigid bodies, so it
+        converts body-local marker offsets and force vectors into world-space
+        arguments before calling Isaac's force-at-position API.
 
         Args:
             forces_n: Shape ``(num_rotors,)`` array of forces in Newtons.
         """
         if self._body is None or self._rotor_positions_body is None:
             return
-        if forces_n.shape != (self.num_rotors,):
+        forces = np.asarray(forces_n, dtype=np.float64)
+        if forces.shape != (self.num_rotors,):
             raise ValueError(
-                f"apply_forces expected shape ({self.num_rotors},), got {forces_n.shape}"
+                f"apply_forces expected shape ({self.num_rotors},), got {forces.shape}"
             )
 
-        for position_body, magnitude in zip(
-            self._rotor_positions_body, forces_n, strict=False
+        body_position_world, body_orientation_wxyz = self._body_world_pose()
+        rotor_forces_world, rotor_positions_world = self._rotor_forces_to_world(
+            body_position_world=body_position_world,
+            body_orientation_wxyz=body_orientation_wxyz,
+            rotor_positions_body=self._rotor_positions_body,
+            forces_n=forces,
+        )
+        self._force_apply_count += 1
+        if self._force_apply_count <= 3 or self._force_apply_count % 250 == 0:
+            net_force_world = np.sum(rotor_forces_world, axis=0)
+            net_torque_world = np.sum(
+                np.cross(rotor_positions_world - body_position_world, rotor_forces_world),
+                axis=0,
+            )
+            _LOGGER.debug(
+                "PX4 rotor force application: n=%d body_position_world=%s "
+                "body_quat_wxyz=%s forces_n=%s first_force_world=%s "
+                "first_position_world=%s net_force_world=%s net_torque_world=%s "
+                "is_global=True",
+                self._force_apply_count,
+                body_position_world.tolist(),
+                body_orientation_wxyz.tolist(),
+                forces.tolist(),
+                rotor_forces_world[0].tolist() if len(rotor_forces_world) else [],
+                rotor_positions_world[0].tolist() if len(rotor_positions_world) else [],
+                net_force_world.tolist(),
+                net_torque_world.tolist(),
+            )
+
+        for force_world, position_world in zip(
+            rotor_forces_world, rotor_positions_world, strict=False
         ):
             try:
                 self._body.apply_forces_and_torques_at_pos(
-                    forces=np.array([[0.0, 0.0, float(magnitude)]], dtype=np.float64),
-                    positions=np.asarray([position_body], dtype=np.float64),
-                    is_global=False,
+                    forces=np.asarray([force_world], dtype=np.float64),
+                    positions=np.asarray([position_world], dtype=np.float64),
+                    is_global=True,
                 )
             except Exception as exc:
                 _LOGGER.warning("Failed to apply rotor force to %s: %s", self._body_path, exc)
