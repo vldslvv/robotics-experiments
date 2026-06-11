@@ -8,3 +8,10 @@ cannot run in standalone Isaac.
 Use `_runtime.py` for shared setup and teardown. Each extension should get its
 own test module when it has real standalone coverage to add, for example
 `test_sim_settings.py`.
+
+PX4-backed scenario tests should be run from their host Make targets so Docker
+lifecycle, mounted EEPROM state, and persisted `px4/logs` diagnostics stay
+owned by the repository workflow. For example, use
+`make test-integration-px4-takeoff` for the arm/takeoff stability scenario.
+Use `make test-integration-px4-takeoff-instability` for the opt-in negative
+scenario that intentionally swaps rotor paths and expects instability detection.

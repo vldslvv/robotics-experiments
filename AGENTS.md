@@ -125,6 +125,13 @@ Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dock
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-px4` starts a temporary PX4 SITL container, runs the
   standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
+- `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
+  runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves PX4
+  ULogs and bridge logs under `px4/logs`, and removes the temporary PX4
+  container.
+- `make test-integration-px4-takeoff-instability` runs the same scenario with
+  a test-local PX4 rotor mapping fault and passes only when the stability
+  envelope detects the resulting instability.
 
 ### PX4
 Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized environment.
