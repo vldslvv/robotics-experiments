@@ -1621,6 +1621,7 @@ dependencies = [
     { name = "isaacsim-core" },
     { name = "numpy" },
     { name = "omegaconf" },
+    { name = "pytest" },
     { name = "pyulog" },
     { name = "usd-core" },
 ]
@@ -1645,6 +1646,7 @@ requires-dist = [
     { name = "numpy", specifier = "==1.26.0" },
     { name = "omegaconf", specifier = ">=2.3" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.5.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyulog", specifier = ">=1.2.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.6.9" },

@@ -16,8 +16,9 @@ from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
-from . import frames
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+
+from . import frames
 
 __all__ = ["IsaacArticulationIO"]
 
@@ -171,7 +172,7 @@ class IsaacArticulationIO:
     # ---- Per-tick I/O ------------------------------------------------------
 
     def read_state(self, sim_time_us: int) -> VehicleState:
-        """Sample articulation state into a :class:`VehicleState` (ENU/FLU).
+        """Sample body state into a :class:`VehicleState` (ENU/FLU).
 
         Linear acceleration is finite-differenced from the previous tick's
         linear velocity. The first tick produces zero acceleration.
@@ -180,19 +181,20 @@ class IsaacArticulationIO:
             self.initialize()
         if self._articulation is None:
             raise RuntimeError("Isaac articulation handle is not initialized")
+        if self._body is None:
+            raise RuntimeError("Isaac body handle is not initialized")
 
-        pos, quat_wxyz = self._articulation.get_world_pose()
-        position_enu = np.asarray(pos, dtype=np.float64)
-        orientation_wxyz = np.asarray(quat_wxyz, dtype=np.float64)
+        # SingleArticulation is useful for lifecycle/root access, but PX4 state
+        # must describe the rigid body that receives rotor thrust, drag, and
+        # body torque. If the USD root and /body differ, sampling the root would
+        # send PX4 state for a different frame than the one physics actuates.
+        position_enu, orientation_wxyz = self._sample_body_world_pose()
 
-        linear_velocity_enu = np.asarray(self._articulation.get_linear_velocity(), dtype=np.float64)
+        linear_velocity_enu = self._sample_body_linear_velocity()
         # Isaac reports angular velocity in the world frame. PX4 HIL gyro data
         # is body-frame FRD, so keep VehicleState's contract as body-FLU here
         # and let the MAVLink port do the final FLU->FRD sign conversion.
-        angular_velocity_enu = np.asarray(
-            self._articulation.get_angular_velocity(),
-            dtype=np.float64,
-        )
+        angular_velocity_enu = self._sample_body_angular_velocity()
         angular_velocity_flu = frames.world_enu_to_body_flu(
             orientation_wxyz,
             angular_velocity_enu,
@@ -217,13 +219,58 @@ class IsaacArticulationIO:
             sim_time_us=int(sim_time_us),
         )
 
+    def _require_body_method(self, singular_name: str, plural_name: str):
+        if self._body is None:
+            raise RuntimeError("Isaac body handle is not initialized")
+        singular = getattr(self._body, singular_name, None)
+        if callable(singular):
+            return singular, False
+        plural = getattr(self._body, plural_name, None)
+        if callable(plural):
+            return plural, True
+        body_path = self._body_path or "<unresolved body>"
+        raise RuntimeError(
+            f"Isaac body {body_path} is missing required API " f"{singular_name}()/{plural_name}()"
+        )
+
+    @staticmethod
+    def _first_body_row(value) -> np.ndarray:
+        array = np.asarray(value, dtype=np.float64)
+        if array.ndim == 2 and array.shape[0] >= 1:
+            return array[0]
+        return array
+
+    def _sample_body_world_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        method, is_batched = self._require_body_method("get_world_pose", "get_world_poses")
+        pos, quat_wxyz = method()
+        if is_batched:
+            pos = self._first_body_row(pos)
+            quat_wxyz = self._first_body_row(quat_wxyz)
+        return np.asarray(pos, dtype=np.float64), np.asarray(quat_wxyz, dtype=np.float64)
+
+    def _sample_body_linear_velocity(self) -> np.ndarray:
+        method, is_batched = self._require_body_method(
+            "get_linear_velocity",
+            "get_linear_velocities",
+        )
+        velocity = method()
+        if is_batched:
+            velocity = self._first_body_row(velocity)
+        return np.asarray(velocity, dtype=np.float64)
+
+    def _sample_body_angular_velocity(self) -> np.ndarray:
+        method, is_batched = self._require_body_method(
+            "get_angular_velocity",
+            "get_angular_velocities",
+        )
+        velocity = method()
+        if is_batched:
+            velocity = self._first_body_row(velocity)
+        return np.asarray(velocity, dtype=np.float64)
+
     def _body_world_pose(self) -> tuple[np.ndarray, np.ndarray]:
         """Return the current body pose as ``(position, quaternion_wxyz)``."""
-        pose_source = self._body if hasattr(self._body, "get_world_pose") else self._articulation
-        if pose_source is None:
-            raise RuntimeError("Isaac body/articulation handle is not initialized")
-        pos, quat_wxyz = pose_source.get_world_pose()
-        return np.asarray(pos, dtype=np.float64), np.asarray(quat_wxyz, dtype=np.float64)
+        return self._sample_body_world_pose()
 
     @staticmethod
     def _rotor_forces_to_world(
@@ -239,7 +286,9 @@ class IsaacArticulationIO:
         positions_body = np.asarray(rotor_positions_body, dtype=np.float64)
         forces = np.asarray(forces_n, dtype=np.float64)
         if positions_body.ndim != 2 or positions_body.shape[1] != 3:
-            raise ValueError(f"rotor_positions_body expects shape (N, 3), got {positions_body.shape}")
+            raise ValueError(
+                f"rotor_positions_body expects shape (N, 3), got {positions_body.shape}"
+            )
         if forces.shape != (positions_body.shape[0],):
             raise ValueError(
                 f"forces_n expected shape ({positions_body.shape[0]},), got {forces.shape}"
