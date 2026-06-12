@@ -31,6 +31,9 @@ ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):
 ISAAC_TEST_FAILURE_FILTER = ^\[isaac-standalone-test\] ERROR:
 TERMINAL_CONTROL_FILTER = sed -u -E "s|\x1B\[[0-9;?]*[ -/]*[@-~]||g; s|\x1B[=>c]||g"
+PX4_PROMPT_FILTER = sed -u -E "s|\r|\n|g" | sed -u -E "s|^pxh>[[:space:]]*||; /^$$/d"
+INTEGRATION_VERBOSE ?= 0
+INTEGRATION_LOG_TAIL_LINES ?= 120
 SCENE                ?= @isaac/assets/LightSwitchWarehouse/Warehouse.usd
 
 # Host paths for persistence
@@ -50,9 +53,9 @@ ISAAC_ASSETS_DIR       = isaac/assets
 ISAAC_DOCKER_DIR       = isaac/docker
 
 ISAAC_RUNTIME_DIRS = \
-	"$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
-	"$(ISAAC_GLCACHE)" "$(ISAAC_COMPUTEC)" "$(ISAAC_LOGS)" \
-	"$(ISAAC_DATA)" "$(ISAAC_DOCS)"
+    "$(ISAAC_KIT_CACHE)" "$(ISAAC_OV_CACHE)" "$(ISAAC_PIP_CACHE)" \
+    "$(ISAAC_GLCACHE)" "$(ISAAC_COMPUTEC)" "$(ISAAC_LOGS)" \
+    "$(ISAAC_DATA)" "$(ISAAC_DOCS)"
 
 # ROS 2 image / container (humble is the other option)
 ROS_DISTRO         ?= jazzy

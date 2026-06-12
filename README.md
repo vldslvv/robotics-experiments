@@ -56,6 +56,10 @@ pane starts `px4-iris`; the other stays available as a shell. Inside the
 container, `px4-iris` clears simulated PX4 state and then runs
 `make px4_sitl_default none_iris`. Set `PX4_FRESH_STATE=0` only when you
 intentionally want to reuse PX4 SITL parameters/dataman/eeprom state.
+Automated integration tests use a non-interactive PX4 launcher that suppresses
+prompt-only `pxh>` lines while preserving PX4 logs under `px4/logs`. Set
+`INTEGRATION_VERBOSE=1` when running a test target to print the full captured
+PX4 container log.
 
 Run host Python tests:
 

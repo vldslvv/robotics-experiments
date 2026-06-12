@@ -297,10 +297,6 @@ RUN printf '%s\n' \
       "alias px4-iris='/usr/local/bin/run_px4_iris_fresh'" \
       >> /root/.bashrc
 
-COPY px4/docker/run_px4_iris_fresh.sh /usr/local/bin/run_px4_iris_fresh
-COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
-RUN chmod +x /usr/local/bin/run_px4_iris_fresh /usr/local/bin/start_px4_tmux
-
 RUN pip3 install --no-cache-dir \
       kconfiglib empy==3.3.4 pyros-genmsg
 
@@ -312,6 +308,14 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
 # Build the firmware only — omit the sim target (e.g. `none`) since it would launch
 # the nsh shell during `docker build` even with DONT_RUN=1 on PX4 v1.14.x.
 RUN cd ${PX4_DIR} && make px4_sitl_default
+
+COPY px4/docker/run_px4_iris_fresh.sh /usr/local/bin/run_px4_iris_fresh
+COPY px4/docker/run_px4_iris_ci.sh /usr/local/bin/run_px4_iris_ci
+COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
+RUN chmod +x \
+      /usr/local/bin/run_px4_iris_fresh \
+      /usr/local/bin/run_px4_iris_ci \
+      /usr/local/bin/start_px4_tmux
 
 WORKDIR ${PX4_DIR}
 # Drop into an attached tmux with PX4 SITL running in one pane and a shell in another.
