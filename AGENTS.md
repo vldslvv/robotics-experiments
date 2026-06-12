@@ -123,6 +123,8 @@ Avoid calling ROS 2 directly on the host. It is meant to be used in the Dockeriz
 Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dockerized environment.
 - `make test` runs host Python tests.
 - `make test-integration` runs container-backed integration tests.
+- `make test-integration-all` runs every integration test target and prints an
+  aggregate passed/failed summary after all targets finish.
 - `make test-integration-px4` starts a temporary PX4 SITL container, runs the
   standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,

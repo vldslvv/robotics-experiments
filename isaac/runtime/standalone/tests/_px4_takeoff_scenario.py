@@ -289,9 +289,7 @@ def _assert_command_ack(
             result = int(msg.result)
             if result not in accepted:
                 if result == mavutil.mavlink.MAV_RESULT_TEMPORARILY_REJECTED:
-                    context.report(
-                        f"{test_name}: PX4 temporarily rejected {label}; retrying"
-                    )
+                    context.report(f"{test_name}: PX4 temporarily rejected {label}; retrying")
                     return "temporarily_rejected"
                 raise AssertionError(f"PX4 rejected {label}: COMMAND_ACK result={result}")
             context.report(f"{test_name}: PX4 accepted {label} command")
@@ -467,9 +465,7 @@ def _wait_for_takeoff_target(
     climb_m: float,
     timeout_s: float,
 ) -> _TakeoffTarget:
-    context.report(
-        f"{test_name}: waiting up to {timeout_s:.1f}s for PX4 takeoff telemetry"
-    )
+    context.report(f"{test_name}: waiting up to {timeout_s:.1f}s for PX4 takeoff telemetry")
     deadline = time.monotonic() + timeout_s
     latest_position: tuple[float, float, float] | None = None
     while time.monotonic() < deadline:
@@ -538,12 +534,7 @@ def _observe_stability(
     max_hover_climb_m = -math.inf
 
     while True:
-        try:
-            _advance_one(context, host)
-        except AssertionError as exc:
-            if "PX4 bridge disconnected" in str(exc):
-                _raise_instability(str(exc))
-            raise
+        _advance_one(context, host)
         _send_gcs_heartbeat(mav)
 
         for msg in _drain_mavlink(mav):
@@ -656,9 +647,17 @@ def _assert_bridge_log_clean(path: Path | None) -> None:
     if path is None or not path.exists():
         raise AssertionError("PX4 bridge debug log was not created")
     text = path.read_text(encoding="utf-8", errors="replace")
+    disconnect_markers = [
+        "PX4 MAVLink port disconnected",
+    ]
+    found_disconnects = [marker for marker in disconnect_markers if marker in text]
+    if found_disconnects:
+        raise AssertionError(
+            f"PX4 bridge log contains disconnect markers: {found_disconnects}; log={path}"
+        )
+
     bad_markers = [
         "actuator timestamp stale",
-        "PX4 MAVLink port disconnected",
         "PX4 bridge tilt cutoff",
     ]
     found = [marker for marker in bad_markers if marker in text]
@@ -673,6 +672,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     sys.path.insert(0, str(_px4_bridge_extension_root()))
 
     from DroneSpawner_python.bridge_host import BridgeHost
+
     from robotics_experiments.config import get_config
     from robotics_experiments.drone import despawn_drone, spawn_drone
     from robotics_experiments.px4_bridge import IsaacArticulationIO
@@ -709,9 +709,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         host.start()
         timeline.play()
 
-        context.report(
-            f"{options.test_name}: settling drone on ground for {_GROUND_SETTLE_S:.1f}s"
-        )
+        context.report(f"{options.test_name}: settling drone on ground for {_GROUND_SETTLE_S:.1f}s")
         _advance_sim_time(context, host, seconds=_GROUND_SETTLE_S, wall_timeout_s=20.0)
         _wait_for_bridge_heartbeat(
             context,
@@ -764,6 +762,8 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
             climb_m=_TAKEOFF_ALTITUDE_M,
             target=takeoff_target,
         )
+        if options.post_takeoff_hook is not None:
+            options.post_takeoff_hook(context, host)
         _observe_stability(
             context,
             host,
@@ -801,6 +801,7 @@ class Px4TakeoffScenarioOptions:
     test_name: str
     px4_container_log_name: str
     px4_config_transform: Callable[[Any], Any] | None = None
+    post_takeoff_hook: Callable[[SceneTestContext, Any], None] | None = None
 
 
 def run_px4_takeoff_scenario(
@@ -811,6 +812,4 @@ def run_px4_takeoff_scenario(
     try:
         _run_scenario(context, options)
     except AssertionError as exc:
-        raise type(exc)(
-            f"{exc}\n{_latest_log_hint(options.px4_container_log_name)}"
-        ) from exc
+        raise type(exc)(f"{exc}\n{_latest_log_hint(options.px4_container_log_name)}") from exc

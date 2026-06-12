@@ -126,6 +126,18 @@ def _bridge_is_connected(host) -> bool:
     return bool(bridge is not None and bridge.is_connected)
 
 
+def _wait_for_bridge_start(context: SceneTestContext, host, timeout_s: float) -> None:
+    deadline = time.monotonic() + timeout_s
+    context.report(f"{TEST_NAME}: waiting up to {timeout_s:.1f}s for bridge host start")
+    while time.monotonic() < deadline:
+        host._on_physics_step(PHYSICS_DT_S)
+        if host.is_running:
+            context.report(f"{TEST_NAME}: bridge host started")
+            return
+
+    raise AssertionError("PX4 bridge host did not start")
+
+
 def _install_synthetic_articulation_io(host) -> _SyntheticArticulationIO:
     bridge = getattr(host, "_bridge", None)
     if bridge is None:
@@ -142,6 +154,7 @@ def _run_test(context: SceneTestContext) -> None:
     sys.path.insert(0, str(_px4_bridge_extension_root()))
 
     from DroneSpawner_python.bridge_host import BridgeHost
+
     from robotics_experiments.config import get_config
     from robotics_experiments.drone import despawn_drone, spawn_drone
 
@@ -165,18 +178,22 @@ def _run_test(context: SceneTestContext) -> None:
 
     context.report(f"{TEST_NAME}: constructing bridge host")
     host = BridgeHost(articulation_path=articulation_path, config=env.px4)
-    deadline = time.monotonic() + float(env.px4.first_heartbeat_timeout_s) + 1.0
+    startup_settle_time_s = max(0.0, float(env.px4.startup_settle_time_s))
 
     context.report(f"{TEST_NAME}: spawning configured drone")
     spawn_drone(context.stage, env.drone)
     try:
         context.report(f"{TEST_NAME}: starting bridge host")
         host.start()
-        if not host.is_running:
-            raise AssertionError("PX4 bridge host did not start")
+        _wait_for_bridge_start(
+            context,
+            host,
+            timeout_s=startup_settle_time_s + 1.0,
+        )
 
         context.report(f"{TEST_NAME}: installing synthetic simulator-side articulation I/O")
         io = _install_synthetic_articulation_io(host)
+        deadline = time.monotonic() + float(env.px4.first_heartbeat_timeout_s) + 1.0
         context.report(
             f"{TEST_NAME}: waiting up to {env.px4.first_heartbeat_timeout_s:.1f}s "
             "for live PX4 heartbeat"

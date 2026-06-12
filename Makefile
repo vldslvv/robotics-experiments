@@ -29,6 +29,7 @@ help:
 		'' \
 		'  make test                  Run host Python tests' \
 		'  make test-integration      Run container-backed integration tests' \
+		'  make test-integration-all  Run all integration tests with an aggregate summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \
 		'  make test-integration-px4  Run the Isaac/PX4 bridge integration test' \
 		'  make test-integration-px4-takeoff Run the Isaac/PX4 takeoff stability test' \

@@ -1,9 +1,9 @@
 """Standalone Isaac/PX4 negative takeoff stability scenario.
 
-This test intentionally swaps two PX4 rotor marker paths in the local bridge
-configuration, then runs the same arm/takeoff scenario as the positive
-stability test. It passes only if the scenario reaches command flow and detects
-the resulting instability through the stability envelope.
+This test runs the same arm/takeoff command flow as the positive stability
+test, then injects a one-rotor thrust fault after PX4 accepts takeoff. It
+passes only if the scenario reaches takeoff and detects the resulting flight
+instability through the stability envelope.
 
 Run through the host Make target so PX4 lifecycle and logs are owned outside
 Isaac:
@@ -12,8 +12,7 @@ Isaac:
 
 from __future__ import annotations
 
-from dataclasses import replace
-
+import numpy as np
 from _px4_takeoff_scenario import (
     ExpectedInstabilityDetected,
     Px4TakeoffScenarioOptions,
@@ -24,16 +23,59 @@ from _runtime import SceneTestContext, run_scene_test
 DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 TEST_NAME = "px4_takeoff_instability_detection"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_instability_px4.log"
+FAULTED_ROTOR_INDEX = 0
+FAULTED_ROTOR_COMMAND_SCALE = 0.25
 
 
-def _swap_front_right_and_front_left_rotor_paths(px4_config):
-    rotor_paths = list(px4_config.rotor_link_paths)
-    if len(rotor_paths) < 4:
-        raise AssertionError(
-            "PX4 rotor path swap negative test requires at least four rotor paths"
+class _RotorCommandScaleFault:
+    def __init__(self, base_model, *, rotor_index: int, command_scale: float):
+        self._base_model = base_model
+        self._rotor_index = int(rotor_index)
+        self._command_scale = float(command_scale)
+
+    @property
+    def num_rotors(self) -> int:
+        return self._base_model.num_rotors
+
+    def _faulted_controls(self, controls):
+        faulted = np.asarray(controls, dtype=np.float64).copy()
+        if faulted.shape != (self.num_rotors,):
+            raise ValueError(f"Rotor fault expects shape ({self.num_rotors},), got {faulted.shape}")
+        faulted[self._rotor_index] *= self._command_scale
+        return faulted
+
+    def commands_to_forces(self, controls):
+        return self._base_model.commands_to_forces(self._faulted_controls(controls))
+
+    def commands_to_dynamics(self, controls, *, linear_body_velocity_flu=None):
+        return self._base_model.commands_to_dynamics(
+            self._faulted_controls(controls),
+            linear_body_velocity_flu=linear_body_velocity_flu,
         )
-    rotor_paths[0], rotor_paths[2] = rotor_paths[2], rotor_paths[0]
-    return replace(px4_config, rotor_link_paths=rotor_paths)
+
+
+def _inject_one_rotor_fault(context: SceneTestContext, host) -> None:
+    bridge = getattr(host, "_bridge", None)
+    if bridge is None:
+        raise AssertionError("PX4 bridge was not constructed before fault injection")
+    thrust_model = getattr(bridge, "_thrust_model", None)
+    if thrust_model is None:
+        raise AssertionError("PX4 bridge has no thrust model to fault")
+    if FAULTED_ROTOR_INDEX >= thrust_model.num_rotors:
+        raise AssertionError(
+            f"Faulted rotor index {FAULTED_ROTOR_INDEX} is outside "
+            f"thrust model size {thrust_model.num_rotors}"
+        )
+
+    bridge._thrust_model = _RotorCommandScaleFault(
+        thrust_model,
+        rotor_index=FAULTED_ROTOR_INDEX,
+        command_scale=FAULTED_ROTOR_COMMAND_SCALE,
+    )
+    context.report(
+        f"{TEST_NAME}: injected rotor {FAULTED_ROTOR_INDEX} command scale fault "
+        f"after accepted takeoff command: scale={FAULTED_ROTOR_COMMAND_SCALE:.2f}"
+    )
 
 
 def _run_test(context: SceneTestContext) -> None:
@@ -43,15 +85,13 @@ def _run_test(context: SceneTestContext) -> None:
             Px4TakeoffScenarioOptions(
                 test_name=TEST_NAME,
                 px4_container_log_name=PX4_CONTAINER_LOG_NAME,
-                px4_config_transform=_swap_front_right_and_front_left_rotor_paths,
+                post_takeoff_hook=_inject_one_rotor_fault,
             ),
         )
     except ExpectedInstabilityDetected as exc:
         context.report(f"{TEST_NAME}: detected expected instability: {exc}")
         return
-    raise AssertionError(
-        "Rotor-path swap negative test did not trigger the takeoff stability envelope"
-    )
+    raise AssertionError("Post-takeoff rotor fault did not trigger the takeoff stability envelope")
 
 
 def main() -> None:

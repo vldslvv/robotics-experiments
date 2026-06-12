@@ -5,6 +5,40 @@
 .PHONY: test-integration
 test-integration: test-integration-isaac test-integration-px4
 
+INTEGRATION_TEST_TARGETS = \
+    test-integration-isaac \
+    test-integration-drone-articulation \
+    test-integration-px4 \
+    test-integration-px4-takeoff \
+    test-integration-px4-takeoff-instability
+
+.PHONY: test-integration-all
+test-integration-all:
+	@mkdir -p "$(BUILD_ROOT)"; \
+	results_file="$(BUILD_ROOT)/integration-test-results.$$$$"; \
+	: >"$$results_file"; \
+	trap 'rm -f "$$results_file"' EXIT; \
+	passed=0; \
+	failed=0; \
+	for target in $(INTEGRATION_TEST_TARGETS); do \
+		printf '\n==> %s\n' "$$target"; \
+		if $(MAKE) --no-print-directory "$$target"; then \
+			printf '%s PASS\n' "$$target" >>"$$results_file"; \
+			passed=$$((passed + 1)); \
+		else \
+			printf '%s FAIL\n' "$$target" >>"$$results_file"; \
+			failed=$$((failed + 1)); \
+		fi; \
+	done; \
+	printf '\nIntegration test summary\n'; \
+	printf '%-45s %s\n' 'Target' 'Result'; \
+	printf '%-45s %s\n' '------' '------'; \
+	while read -r target result; do \
+		printf '%-45s %s\n' "$$target" "$$result"; \
+	done <"$$results_file"; \
+	printf '\nPassed: %s  Failed: %s\n' "$$passed" "$$failed"; \
+	if [ "$$failed" -ne 0 ]; then exit 1; fi
+
 .PHONY: test-integration-isaac
 test-integration-isaac: ; @mkdir -p $(ISAAC_RUNTIME_DIRS) && \
     docker run --rm \
