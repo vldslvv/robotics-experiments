@@ -16,6 +16,10 @@ from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
+from robotics_experiments.px4_bridge.asset_diagnostics import (
+    RootBodyPoseDiagnosticParams,
+    validate_root_body_pose,
+)
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 from . import frames
@@ -38,9 +42,20 @@ class IsaacArticulationIO:
             flip on takeoff; validate against airframe geometry.
     """
 
-    def __init__(self, *, articulation_path: str, rotor_link_paths: Sequence[str]):
+    def __init__(
+        self,
+        *,
+        articulation_path: str,
+        rotor_link_paths: Sequence[str],
+        root_body_pose_diagnostics: RootBodyPoseDiagnosticParams | None = None,
+    ):
         self._articulation_path = str(articulation_path)
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
+        self._root_body_pose_diagnostics = (
+            root_body_pose_diagnostics
+            if root_body_pose_diagnostics is not None
+            else RootBodyPoseDiagnosticParams()
+        )
 
         self._articulation: Any | None = None
         self._body: Any | None = None
@@ -98,6 +113,14 @@ class IsaacArticulationIO:
                 self._body.initialize()
             except Exception as exc:
                 _LOGGER.warning("Isaac body initialization failed for %s: %s", body_path, exc)
+
+        validate_root_body_pose(
+            stage,
+            self._articulation_path,
+            body_path,
+            self._root_body_pose_diagnostics,
+            logger=_LOGGER,
+        )
 
         self._rotor_positions_body = self._resolve_rotor_positions_body(stage, body_path)
 

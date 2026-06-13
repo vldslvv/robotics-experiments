@@ -1,7 +1,11 @@
 import math
+import sys
+import types
 
 import numpy as np
 
+import robotics_experiments.px4_bridge.isaac_articulation as isaac_articulation_module
+from robotics_experiments.px4_bridge.asset_diagnostics import RootBodyPoseDiagnosticParams
 from robotics_experiments.px4_bridge.isaac_articulation import IsaacArticulationIO
 
 
@@ -274,3 +278,80 @@ def test_apply_forces_calls_isaac_with_world_space_forces_and_positions():
     assert call["is_global"] is True
     np.testing.assert_allclose(call["forces"], [[0.0, 0.0, 4.0]], atol=1e-12)
     np.testing.assert_allclose(call["positions"], [[8.0, 21.0, 30.25]], atol=1e-12)
+
+
+def test_initialize_runs_root_body_diagnostics_before_rotor_resolution(monkeypatch):
+    order = []
+    stage = object()
+
+    class SingleArticulation:
+        def __init__(self, *, prim_path):
+            self.prim_path = prim_path
+
+        def initialize(self):
+            order.append("articulation")
+
+    class RigidPrim:
+        def __init__(self, *, prim_paths_expr):
+            self.prim_paths_expr = prim_paths_expr
+
+        def initialize(self):
+            order.append("body")
+
+    omni = types.ModuleType("omni")
+    omni_usd = types.ModuleType("omni.usd")
+    omni_usd.get_context = lambda: types.SimpleNamespace(get_stage=lambda: stage)
+    omni.usd = omni_usd
+
+    isaacsim = types.ModuleType("isaacsim")
+    isaacsim_core = types.ModuleType("isaacsim.core")
+    isaacsim_core_prims = types.ModuleType("isaacsim.core.prims")
+    isaacsim_core_prims.RigidPrim = RigidPrim
+    isaacsim_core_prims.SingleArticulation = SingleArticulation
+
+    monkeypatch.setitem(sys.modules, "omni", omni)
+    monkeypatch.setitem(sys.modules, "omni.usd", omni_usd)
+    monkeypatch.setitem(sys.modules, "isaacsim", isaacsim)
+    monkeypatch.setitem(sys.modules, "isaacsim.core", isaacsim_core)
+    monkeypatch.setitem(sys.modules, "isaacsim.core.prims", isaacsim_core_prims)
+    monkeypatch.setattr(
+        IsaacArticulationIO,
+        "_resolve_body_path",
+        lambda self, _stage: "/Drone/body",
+    )
+
+    def validate(stage_arg, articulation_path, body_path, params, **kwargs):
+        order.append("validate")
+        assert stage_arg is stage
+        assert articulation_path == "/Drone"
+        assert body_path == "/Drone/body"
+        assert params == RootBodyPoseDiagnosticParams(
+            policy="fail",
+            translation_threshold_m=0.5,
+            orientation_threshold_rad=0.25,
+        )
+        assert "logger" in kwargs
+        return object()
+
+    def resolve_rotors(self, stage_arg, body_path):
+        order.append("rotors")
+        assert stage_arg is stage
+        assert body_path == "/Drone/body"
+        return np.zeros((0, 3), dtype=np.float64)
+
+    monkeypatch.setattr(isaac_articulation_module, "validate_root_body_pose", validate)
+    monkeypatch.setattr(IsaacArticulationIO, "_resolve_rotor_positions_body", resolve_rotors)
+
+    io = IsaacArticulationIO(
+        articulation_path="/Drone",
+        rotor_link_paths=[],
+        root_body_pose_diagnostics=RootBodyPoseDiagnosticParams(
+            policy="fail",
+            translation_threshold_m=0.5,
+            orientation_threshold_rad=0.25,
+        ),
+    )
+
+    io.initialize()
+
+    assert order == ["articulation", "body", "validate", "rotors"]
