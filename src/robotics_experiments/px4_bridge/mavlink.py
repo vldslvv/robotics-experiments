@@ -441,6 +441,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             return np.zeros(self._num_rotors, dtype=np.float64)
 
         # 4. Send sensor + GPS messages with the caller's sim time.
+        # This is an intentional Pegasus phase-order deviation: each port
+        # instance treats a tick as state(t) -> sensors(t) -> actuator(t),
+        # keeping lockstep causal per drone while retaining a hard timeout.
         try:
             previous_sensor_send_us = self._last_sensor_send_us
             self._send_sensor_msgs(sim_time_us)

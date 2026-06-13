@@ -113,13 +113,19 @@ class _FakeConnection:
         self.messages = list(messages)
         self.recv_calls = []
         self.hil_sensor_sends = []
+        self.events = []
         self.mav = types.SimpleNamespace(
             heartbeat_send=lambda *args: None,
-            hil_sensor_send=lambda *args: self.hil_sensor_sends.append(args),
+            hil_sensor_send=lambda *args: self._record_hil_sensor_send(args),
         )
+
+    def _record_hil_sensor_send(self, args):
+        self.hil_sensor_sends.append(args)
+        self.events.append(("hil_sensor_send", args[0]))
 
     def recv_match(self, *, blocking=False, timeout=None):
         self.recv_calls.append((blocking, timeout))
+        self.events.append(("recv_match", blocking, timeout))
         if self.messages:
             return self.messages.pop(0)
         return None
@@ -563,6 +569,33 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
     assert port._actuator_receive_count == 1
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
     assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_lockstep_sends_current_sensor_before_wait(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    actuator_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.1, 0.2, 0.3, 0.4],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    connection = _FakeConnection([actuator_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+
+    port.start()
+    commands = port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    assert connection.events[0] == ("hil_sensor_send", 100_000)
+    assert connection.events[1][0:2] == ("recv_match", True)
+    assert connection.events[1][2] <= 1.0
+    assert connection.events[1][2] > 0.0
+    assert port._last_actuator_receive_us == 100_000
+    assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
+    assert port.is_connected is True
 
 
 def test_mavlink_port_does_not_wait_before_first_lockstep_actuator(monkeypatch):
