@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -70,7 +71,7 @@ def _px4_bridge_extension_root() -> Path:
 
 
 def _logs_root() -> Path:
-    return Path("/isaac-sim/proj/px4/logs")
+    return Path(os.environ.get("PX4_TEST_LOGS_DIR", "/isaac-sim/proj/px4/logs"))
 
 
 def _latest_path(pattern: str) -> Path | None:

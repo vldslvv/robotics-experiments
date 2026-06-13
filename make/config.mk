@@ -34,6 +34,8 @@ TERMINAL_CONTROL_FILTER = sed -u -E "s|\x1B\[[0-9;?]*[ -/]*[@-~]||g; s|\x1B[=>c]
 PX4_PROMPT_FILTER = sed -u -E "s|\r|\n|g" | sed -u -E "s|^pxh>[[:space:]]*||; /^$$/d"
 INTEGRATION_VERBOSE ?= 0
 INTEGRATION_LOG_TAIL_LINES ?= 120
+INTEGRATION_ROOT ?= $(BUILD_ROOT)/integration
+INTEGRATION_TEST_JOBS ?= 2
 SCENE                ?= @isaac/assets/LightSwitchWarehouse/Warehouse.usd
 
 # Host paths for persistence

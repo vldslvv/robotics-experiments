@@ -123,14 +123,17 @@ Avoid calling ROS 2 directly on the host. It is meant to be used in the Dockeriz
 Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dockerized environment.
 - `make test` runs host Python tests.
 - `make test-integration` runs container-backed integration tests.
-- `make test-integration-all` runs every integration test target and prints an
-  aggregate passed/failed summary after all targets finish.
+- `make test-integration-all` runs every integration test target in parallel
+  using isolated transient containers and prints an aggregate passed/failed
+  summary after all targets finish. It defaults to two concurrent targets to
+  avoid Isaac/GPU resource starvation; set `INTEGRATION_TEST_JOBS=<n>` to tune
+  concurrency for the host.
 - `make test-integration-px4` starts a temporary PX4 SITL container, runs the
   standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
-  runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves PX4
-  ULogs and bridge logs under `px4/logs`, and removes the temporary PX4
-  container.
+  runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
+  isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and
+  removes the temporary PX4 container.
 - `make test-integration-px4-takeoff-instability` runs the same scenario with
   a test-local PX4 rotor mapping fault and passes only when the stability
   envelope detects the resulting instability.
@@ -146,7 +149,10 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
 - Use `flight_analysis/README.md` for the detailed repeatable log-analysis
   workflow and helper scripts.
 - PX4 ULog files and custom bridge logs are persisted under
-  `px4/logs/<yyyy-mm-dd>/`.
+  `px4/logs/<yyyy-mm-dd>/` for manual PX4 runs. Automated integration tests
+  keep PX4 logs, bridge logs, and Isaac logs under
+  `.build/docker/integration/<target>.<run-id>/` so parallel runs do not share
+  PX4 state or diagnostics.
 - PX4 creates the ULog when the SITL logger starts, before arm/takeoff. The
   bridge creates its log when the Isaac bridge opens the PX4 MAVLink endpoint.
   A normal paired run has matching names such as:

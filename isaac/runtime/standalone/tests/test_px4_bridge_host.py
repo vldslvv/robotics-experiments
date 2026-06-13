@@ -12,6 +12,7 @@ Run inside the Isaac Sim container:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -21,7 +22,7 @@ from _runtime import SceneTestContext, run_scene_test
 
 DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 TEST_NAME = "px4_bridge_host"
-PX4_CONTAINER_NAME = "vv-px4-sitl"
+PX4_CONTAINER_NAME = os.environ.get("PX4_TEST_CONTAINER_NAME", "vv-px4-sitl")
 PHYSICS_DT_S = 0.004
 HEARTBEAT_POLL_INTERVAL_S = 0.05
 

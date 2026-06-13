@@ -8,6 +8,11 @@ ISAAC_DOCKER_RUNTIME = \
 	--gpus all \
 	--device=/dev/dri
 
+ISAAC_INTEGRATION_DOCKER_RUNTIME = \
+	--user 0:0 \
+	--gpus all \
+	--device=/dev/dri
+
 ISAAC_DOCKER_ENV = \
 	-e ACCEPT_EULA=Y \
 	-e OMNI_KIT_DISABLE_TELEMETRY=1 \
@@ -24,6 +29,18 @@ ISAAC_DOCKER_VOLUMES = \
 	-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
 	-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
 	-v $(ISAAC_DOCS):/isaac-sim/Documents \
+	-v $(CURDIR):$(ISAAC_PROJECT_DIR) \
+	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
+
+ISAAC_INTEGRATION_DOCKER_VOLUMES = \
+	-v $${ISAAC_RUN_ROOT}/kit-cache:/isaac-sim/kit/cache \
+	-v $${ISAAC_RUN_ROOT}/ov-cache:/isaac-sim/.cache/ov \
+	-v $${ISAAC_RUN_ROOT}/pip-cache:/isaac-sim/.cache/pip \
+	-v $${ISAAC_RUN_ROOT}/gl-cache:/isaac-sim/.cache/nvidia/GLCache \
+	-v $${ISAAC_RUN_ROOT}/compute-cache:/isaac-sim/.nv/ComputeCache \
+	-v $${ISAAC_RUN_ROOT}/logs:/isaac-sim/.nvidia-omniverse/logs \
+	-v $${ISAAC_RUN_ROOT}/data:/isaac-sim/.local/share/ov/data \
+	-v $${ISAAC_RUN_ROOT}/documents:/isaac-sim/Documents \
 	-v $(CURDIR):$(ISAAC_PROJECT_DIR) \
 	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
 
