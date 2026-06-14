@@ -48,6 +48,7 @@ __all__ = [
     "quat_xyzw_to_wxyz",
     "rotate_vector_wxyz",
     "world_enu_to_body_flu",
+    "body_velocity_flu_from_state",
     "tilt_angle_deg",
     "specific_force_body_flu",
     "magnetometer_body_flu",
@@ -116,6 +117,18 @@ def world_enu_to_body_flu(
     return rotate_vector_wxyz(
         _quat_conjugate_wxyz(_normalize_quat_wxyz(q_flu_enu_wxyz)),
         np.asarray(vec_enu, dtype=np.float64),
+    )
+
+
+def body_velocity_flu_from_state(state) -> np.ndarray:
+    """Return true body-FLU linear velocity from a ``VehicleState``.
+
+    Do not route this through Pegasus ``State.get_linear_body_velocity_ned_frd``:
+    that reference method currently returns acceleration despite its name.
+    """
+    return world_enu_to_body_flu(
+        state.orientation_flu_enu_wxyz,
+        state.linear_velocity_enu,
     )
 
 

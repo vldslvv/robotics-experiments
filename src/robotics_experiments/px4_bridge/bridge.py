@@ -128,10 +128,7 @@ class Px4Bridge:
                 return
 
         commands = self._port.step(state)
-        body_velocity_flu = frames.world_enu_to_body_flu(
-            state.orientation_flu_enu_wxyz,
-            state.linear_velocity_enu,
-        )
+        body_velocity_flu = frames.body_velocity_flu_from_state(state)
         dynamics = self._thrust_model.commands_to_dynamics(
             commands,
             linear_body_velocity_flu=body_velocity_flu,

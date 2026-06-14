@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.px4_bridge import LinearThrustModel, Px4Bridge, Px4MavlinkPort
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE = 129
@@ -73,6 +74,30 @@ class _FakeFlightStack:
         return self.commands
 
 
+class _CapturingThrustModel:
+    def __init__(self, num_rotors=4):
+        self._num_rotors = num_rotors
+        self.captured_body_velocity_flu = None
+
+    @property
+    def num_rotors(self):
+        return self._num_rotors
+
+    def commands_to_forces(self, controls: np.ndarray) -> np.ndarray:
+        return np.zeros(self._num_rotors, dtype=np.float64)
+
+    def commands_to_dynamics(self, controls, *, linear_body_velocity_flu=None):
+        self.captured_body_velocity_flu = np.asarray(
+            linear_body_velocity_flu,
+            dtype=np.float64,
+        )
+        return RotorDynamics(
+            forces_n=np.zeros(self._num_rotors, dtype=np.float64),
+            body_torque_n_m=np.zeros(3, dtype=np.float64),
+            body_drag_n=np.zeros(3, dtype=np.float64),
+        )
+
+
 def test_px4_bridge_tick_reads_state_and_applies_forces():
     state = VehicleState.hover_at(sim_time_us=0)
     io = _FakeArticulationIO(state)
@@ -95,6 +120,34 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     assert io.shutdown_called is True
     assert port.states[0].sim_time_us == 4_000
     assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
+
+
+def test_px4_bridge_derives_drag_velocity_from_world_velocity_not_acceleration():
+    state = VehicleState.hover_at(sim_time_us=0)
+    yaw_90_wxyz = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)], dtype=np.float64)
+    state.orientation_flu_enu_wxyz = yaw_90_wxyz
+    state.linear_velocity_enu = np.array([0.0, 3.0, 0.0], dtype=np.float64)
+    state.linear_acceleration_enu = np.array([100.0, 200.0, 300.0], dtype=np.float64)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.0, 0.0, 0.0, 0.0])
+    thrust_model = _CapturingThrustModel(num_rotors=4)
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=thrust_model,
+        port=port,
+        articulation_io=io,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    np.testing.assert_allclose(
+        thrust_model.captured_body_velocity_flu,
+        [3.0, 0.0, 0.0],
+        atol=1e-12,
+    )
 
 
 def test_px4_bridge_validates_rotor_count_against_port():
