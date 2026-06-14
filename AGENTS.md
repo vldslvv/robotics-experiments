@@ -97,6 +97,28 @@ the current contents and the intended home for that kind of code.
   current simulation time, the bridge must disconnect and return zero rotor
   commands instead of applying old motor outputs.
 
+## Python environment
+- This project uses `uv` for all host-side Python work. Do not call `pip`,
+  `python -m venv`, or a system/global Python directly.
+- The project virtualenv lives at `.venv` and is pinned to the Python in
+  `.python-version` (3.11). Dependencies and the resolver index (including the
+  NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
+  are locked in `uv.lock`. Do not edit `uv.lock` by hand.
+- Initialize or repair the environment with `uv sync --extra dev`. The `dev`
+  extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
+  intentionally omits it; pass `--extra dev` when you need the tooling.
+- Always work inside the project venv. Either activate it with
+  `source .venv/bin/activate`, or prefix commands with `uv run` (for example
+  `uv run pytest`, `uv run ruff check`). Prefer `uv run` for one-off commands so
+  the correct interpreter is used without relying on shell state.
+- Add or change dependencies with `uv add` / `uv remove` (or by editing
+  `pyproject.toml` and running `uv lock`), never with ad hoc `pip install`. Keep
+  `uv.lock` committed and in sync; `uv lock --check` must pass.
+- Host-side Isaac Sim, ROS 2, and PX4 work that does not run inside their Docker
+  containers still goes through this venv. The throwaway `uv run --no-project`
+  invocations (such as the ULog parser below) are deliberate exceptions for
+  one-off tooling that must not touch the project environment.
+
 ## Common commands
 
 Run ROS 2, Isaac Sim, and PX4 through the Docker targets below, not directly on
@@ -113,7 +135,11 @@ the host. They are meant to be used in the Dockerized environment.
   compatibility aliases.
 
 ### Isaac Sim
-- `make test` runs host Python tests.
+- `make test` runs the host Python unit test suite (pytest, defined in
+  `make/tests.mk`). It requires the project venv at `.venv`; create it first with
+  `uv sync --extra dev` if missing. The target activates `.venv` and runs
+  `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
+  under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target in parallel
   using isolated transient containers and prints an aggregate passed/failed
