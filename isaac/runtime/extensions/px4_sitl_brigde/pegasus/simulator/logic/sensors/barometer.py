@@ -58,6 +58,9 @@ class Barometer(Sensor):
 
         # Set the drift for the sensor
         self._baro_drift_pa_per_sec: float = config.get("drift_pa_per_sec", 0.0)
+        # Pressure noise is Gaussian in Pa. The default preserves Pegasus' 1 Pa
+        # RMS behavior; bridge precision tests set this to 0 through Hydra.
+        self._baro_noise_std_pa: float = config.get("noise_std_pa", 1.0)
 
         # Auxiliar variables for generating the noise
         self._baro_rnd_use_last: bool = False
@@ -104,7 +107,9 @@ class Barometer(Sensor):
 
         # Generate a Gaussian noise sequence using polar form of Box-Muller transformation
         # Honestly, this is overkill and will get replaced by numpys random.randn.
-        if not self._baro_rnd_use_last:
+        if self._baro_noise_std_pa == 0.0:
+            y1 = 0.0
+        elif not self._baro_rnd_use_last:
 
             w: float = 1.0
 
@@ -122,7 +127,7 @@ class Barometer(Sensor):
             self._baro_rnd_use_last = False
 
         # Apply noise and drift
-        abs_pressure_noise: float = y1  # 1 Pa RMS noise
+        abs_pressure_noise: float = self._baro_noise_std_pa * y1
         self._baro_drift_pa = self._baro_drift_pa + (self._baro_drift_pa_per_sec * dt)  # Update the drift
         absolute_pressure_noisy: float = absolute_pressure + abs_pressure_noise + self._baro_drift_pa_per_sec
 

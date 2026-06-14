@@ -63,6 +63,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.startup_settle_time_s == 1.0
     assert config.px4.gps_enabled is True
     assert config.px4.gps_send_rate_hz == 250.0
+    assert config.px4.sensor_noise_enabled is True
     assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]
     assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
     assert config.px4.rotor_constant == [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]

@@ -44,6 +44,15 @@ startup_settle_time_s: 1.0
 
 gps_enabled: true
 gps_send_rate_hz: 250.0
+# Enables Pegasus stochastic sensor models:
+# - IMU: Gaussian white noise plus random-walk bias terms.
+# - GPS: noisy/bias-walk position and altitude; velocity remains ground-truth
+#   in the vendored Pegasus model.
+# - Barometer: Gaussian pressure noise plus optional drift.
+# - Magnetometer: Gaussian white noise plus random-walk bias.
+# Keep true for integration tests and normal simulator runs; precision unit
+# tests may override this to false.
+sensor_noise_enabled: true
 
 home_lat_deg: 47.3977
 home_lon_deg: 8.5456

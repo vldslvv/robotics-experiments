@@ -145,7 +145,9 @@ class GPS(Sensor):
             state.position, np.radians(self._origin_lat), np.radians(self._origin_lon)
         )
 
-        # Add noise to the velocity expressed in the world frame
+        # Add noise to the velocity expressed in the world frame.
+        # Pegasus currently samples GPS velocity noise above but does not apply
+        # it here, so HIL_GPS velocity remains exact ENU->NED ground truth.
         velocity: np.ndarray = state.linear_velocity  # + self._noise_gps_vel
 
         # Compute the xy speed

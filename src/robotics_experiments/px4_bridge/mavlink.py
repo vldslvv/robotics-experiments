@@ -13,6 +13,7 @@ preserving custom timeout and sim-time handling.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import datetime
 from pathlib import Path
@@ -36,11 +37,6 @@ _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
 _DEFAULT_SENSOR_RATE_HZ = 250.0
 _DEFAULT_DEBUG_LOG_PATH = "/tmp/robotics_experiments_px4_bridge.log"
 _FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
-
-
-def _flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
-    vec = np.asarray(vec_flu, dtype=np.float64)
-    return np.array([vec[0], -vec[1], -vec[2]], dtype=np.float64)
 
 
 def _resolve_log_path_template(log_path: str, now: datetime) -> Path:
@@ -88,22 +84,6 @@ def _configure_file_logging(
     return resolved
 
 
-class _PegasusRateGate:
-    def __init__(self, update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ):
-        self._period_s = 1.0 / float(update_rate_hz)
-        self._first_update = True
-        self._total_time_s = 0.0
-
-    def should_update(self, dt_s: float) -> tuple[bool, float]:
-        self._total_time_s += max(0.0, float(dt_s))
-        if self._first_update or self._total_time_s >= self._period_s:
-            elapsed = self._total_time_s if self._total_time_s > 0.0 else self._period_s
-            self._first_update = False
-            self._total_time_s = 0.0
-            return True, elapsed
-        return False, self._total_time_s
-
-
 class _PegasusSensorSuite:
     """Stateful Pegasus-style sensor update pipeline."""
 
@@ -114,33 +94,41 @@ class _PegasusSensorSuite:
         home_lon_deg: float,
         home_alt_m: float,
         gps_enabled: bool,
+        sensor_noise_enabled: bool,
         update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
     ):
         self._home_lat_deg = float(home_lat_deg)
         self._home_lon_deg = float(home_lon_deg)
         self._home_alt_m = float(home_alt_m)
         self._gps_enabled = bool(gps_enabled)
+        self._sensor_noise_enabled = bool(sensor_noise_enabled)
         self._last_sim_time_us: int | None = None
-        self._imu_gate = _PegasusRateGate(update_rate_hz)
-        self._gps_gate = _PegasusRateGate(update_rate_hz)
 
         from pegasus.simulator.logic.sensors.barometer import Barometer
+        from pegasus.simulator.logic.sensors.gps import GPS
+        from pegasus.simulator.logic.sensors.imu import IMU
         from pegasus.simulator.logic.sensors.magnetometer import Magnetometer
 
-        self._barometer = Barometer({"update_rate": update_rate_hz})
-        self._magnetometer = Magnetometer({"update_rate": update_rate_hz})
-        self._barometer.initialize(
-            None,
-            self._home_lat_deg,
-            self._home_lon_deg,
-            self._home_alt_m,
+        # Runtime intentionally uses Pegasus sensor classes for all PX4-bound
+        # sensor signals. With noise enabled their internal distributions are:
+        # IMU gyro/accel white noise plus bias random walks, GPS position and
+        # altitude noise plus bias walk, barometer pressure noise/drift, and
+        # magnetometer white noise plus bias walk.
+        self._imu = IMU(_pegasus_imu_config(update_rate_hz, self._sensor_noise_enabled))
+        self._gps = GPS(_pegasus_gps_config(update_rate_hz, self._sensor_noise_enabled))
+        self._barometer = Barometer(
+            _pegasus_barometer_config(update_rate_hz, self._sensor_noise_enabled)
         )
-        self._magnetometer.initialize(
-            None,
-            self._home_lat_deg,
-            self._home_lon_deg,
-            self._home_alt_m,
+        self._magnetometer = Magnetometer(
+            _pegasus_magnetometer_config(update_rate_hz, self._sensor_noise_enabled)
         )
+        for sensor in (self._imu, self._gps, self._barometer, self._magnetometer):
+            sensor.initialize(
+                None,
+                self._home_lat_deg,
+                self._home_lon_deg,
+                self._home_alt_m,
+            )
 
     def update(self, state: VehicleState) -> dict[str, dict | None]:
         sim_time_us = int(state.sim_time_us)
@@ -150,10 +138,11 @@ class _PegasusSensorSuite:
             dt_s = max(0.0, (sim_time_us - self._last_sim_time_us) * 1e-6)
         self._last_sim_time_us = sim_time_us
 
-        imu = self._update_imu(state, dt_s)
-        mag = self._update_mag(state, dt_s)
-        baro = self._update_baro(state, dt_s)
-        gps = self._update_gps(state, dt_s) if self._gps_enabled else None
+        pegasus_state = self._to_pegasus_state(state)
+        imu = self._update_imu(pegasus_state, dt_s)
+        mag = self._update_mag(pegasus_state, dt_s)
+        baro = self._update_baro(pegasus_state, dt_s)
+        gps = self._update_gps(pegasus_state, dt_s) if self._gps_enabled else None
         return {"imu": imu, "mag": mag, "baro": baro, "gps": gps}
 
     def _to_pegasus_state(self, state: VehicleState):
@@ -175,47 +164,94 @@ class _PegasusSensorSuite:
         )
         return pegasus_state
 
-    def _update_imu(self, state: VehicleState, dt_s: float) -> dict | None:
-        should_update, _ = self._imu_gate.should_update(dt_s)
-        if not should_update:
+    def _update_imu(self, state, dt_s: float) -> dict | None:
+        return self._imu.update(state, dt_s)
+
+    def _update_mag(self, state, dt_s: float) -> dict | None:
+        return self._magnetometer.update(state, dt_s)
+
+    def _update_baro(self, state, dt_s: float) -> dict | None:
+        return self._barometer.update(state, dt_s)
+
+    def _update_gps(self, state, dt_s: float) -> dict | None:
+        gps = self._gps.update(state, dt_s)
+        if gps is None:
             return None
-        sf_flu = frames.specific_force_body_flu(
-            state.linear_acceleration_enu,
-            state.orientation_flu_enu_wxyz,
-            gravity=9.80665,
-        )
-        sf_frd = _flu_to_frd(sf_flu)
-        gyro_frd = _flu_to_frd(np.asarray(state.angular_velocity_flu, dtype=np.float64))
-        return {
-            "linear_acceleration": [
-                float(sf_frd[0]),
-                float(sf_frd[1]),
-                float(sf_frd[2]),
-            ],
-            "angular_velocity": [
-                float(gyro_frd[0]),
-                float(gyro_frd[1]),
-                float(gyro_frd[2]),
-            ],
+        return _normalize_pegasus_gps_for_backend(gps)
+
+
+def _pegasus_imu_config(update_rate_hz: float, noise_enabled: bool) -> dict:
+    config = {"update_rate": update_rate_hz}
+    if not noise_enabled:
+        # Zero both white-noise densities and random-walk terms so precision
+        # tests still exercise Pegasus frame conversion without stochastic
+        # gyro/accelerometer perturbations.
+        config["gyroscope"] = {
+            "noise_density": 0.0,
+            "random_walk": 0.0,
+            "bias_correlation_time": 1.0e3,
+            "turn_on_bias_sigma": 0.0,
         }
+        config["accelerometer"] = {
+            "noise_density": 0.0,
+            "random_walk": 0.0,
+            "bias_correlation_time": 300.0,
+            "turn_on_bias_sigma": 0.0,
+        }
+    return config
 
-    def _update_mag(self, state: VehicleState, dt_s: float) -> dict | None:
-        return self._magnetometer.update(self._to_pegasus_state(state), dt_s)
 
-    def _update_baro(self, state: VehicleState, dt_s: float) -> dict | None:
-        return self._barometer.update(self._to_pegasus_state(state), dt_s)
-
-    def _update_gps(self, state: VehicleState, dt_s: float) -> dict | None:
-        should_update, _ = self._gps_gate.should_update(dt_s)
-        if not should_update:
-            return None
-        return frames.synth_gps_from_enu(
-            position_enu=state.position_enu,
-            velocity_enu=state.linear_velocity_enu,
-            home_lat_deg=self._home_lat_deg,
-            home_lon_deg=self._home_lon_deg,
-            home_alt_m=self._home_alt_m,
+def _pegasus_gps_config(update_rate_hz: float, noise_enabled: bool) -> dict:
+    config = {"update_rate": update_rate_hz}
+    if not noise_enabled:
+        # Pegasus GPS applies randomness to position/altitude through
+        # white-noise and bias-walk terms. Its velocity-noise samples are
+        # currently computed but not applied by the vendored model.
+        config.update(
+            {
+                "gps_xy_random_walk": 0.0,
+                "gps_z_random_walk": 0.0,
+                "gps_xy_noise_density": 0.0,
+                "gps_z_noise_density": 0.0,
+                "gps_vxy_noise_density": 0.0,
+                "gps_vz_noise_density": 0.0,
+            }
         )
+    return config
+
+
+def _pegasus_barometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
+    config = {"update_rate": update_rate_hz}
+    if not noise_enabled:
+        # Barometer randomness is pressure-domain Gaussian noise plus drift.
+        # The vendored sensor now exposes noise_std_pa so it can be made exact.
+        config["noise_std_pa"] = 0.0
+        config["drift_pa_per_sec"] = 0.0
+    return config
+
+
+def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
+    config = {"update_rate": update_rate_hz}
+    if not noise_enabled:
+        # Magnetometer randomness is Gaussian field noise plus random-walk
+        # bias. Zero both terms for exact frame/field tests.
+        config.update(
+            {
+                "noise_density": 0.0,
+                "random_walk": 0.0,
+                "bias_correlation_time": 6.0e2,
+            }
+        )
+    return config
+
+
+def _normalize_pegasus_gps_for_backend(gps: dict) -> dict:
+    normalized = dict(gps)
+    for key in ("latitude_gt", "longitude_gt"):
+        value = float(normalized[key])
+        if math.isfinite(value) and abs(value) <= 2.0 * math.pi:
+            normalized[key] = math.degrees(value)
+    return normalized
 
 
 # TODO get rid of px4_autolaunch and similar settings
@@ -257,6 +293,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         heartbeat_rate_hz: float = 1.0,
         gps_enabled: bool = True,
         gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
+        sensor_noise_enabled: bool = True,
         home_lat_deg: float = frames.DEFAULT_HOME_LAT_DEG,
         home_lon_deg: float = frames.DEFAULT_HOME_LON_DEG,
         home_alt_m: float = frames.DEFAULT_HOME_ALT_M,
@@ -273,6 +310,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._heartbeat_period_s = 1.0 / float(heartbeat_rate_hz) if heartbeat_rate_hz > 0 else None
         self._gps_enabled = bool(gps_enabled)
         self._gps_period_s = 1.0 / float(gps_send_rate_hz) if gps_send_rate_hz > 0 else None
+        self._sensor_noise_enabled = bool(sensor_noise_enabled)
         self._home_lat_deg = float(home_lat_deg)
         self._home_lon_deg = float(home_lon_deg)
         self._home_alt_m = float(home_alt_m)
@@ -281,6 +319,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             home_lon_deg=self._home_lon_deg,
             home_alt_m=self._home_alt_m,
             gps_enabled=self._gps_enabled,
+            sensor_noise_enabled=self._sensor_noise_enabled,
         )
         input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
         input_scaling = [1000.0] * self._num_rotors if input_scaling is None else input_scaling
@@ -331,7 +370,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         _LOGGER.info(
             "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
             "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
-            "gps_enabled=%s gps_rate_hz=%s debug_log=%s sensor_debug_interval=%d",
+            "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
+            "debug_log=%s sensor_debug_interval=%d",
             connection_type,
             connection_ip,
             connection_baseport,
@@ -341,6 +381,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._first_heartbeat_timeout_s,
             self._gps_enabled,
             gps_send_rate_hz,
+            self._sensor_noise_enabled,
             self._debug_log_path,
             self._sensor_debug_log_interval,
         )
@@ -354,6 +395,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             home_lon_deg=self._home_lon_deg,
             home_alt_m=self._home_alt_m,
             gps_enabled=self._gps_enabled,
+            sensor_noise_enabled=self._sensor_noise_enabled,
         )
         self._last_gps_send_us = None
         self._last_sensor_send_us = None

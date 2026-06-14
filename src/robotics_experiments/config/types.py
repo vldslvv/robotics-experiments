@@ -180,9 +180,12 @@ class Px4BridgeConfig:
             simulator MAVLink endpoint. The drone is allowed to settle in
             Isaac physics first so PX4 does not initialize from spawn-drop
             transients.
-        gps_enabled: When true, synthesize and send ``HIL_GPS`` from the
+        gps_enabled: When true, update and send Pegasus ``HIL_GPS`` from the
             local ENU pose. Keep true for the default PX4 SITL estimator path.
-        gps_send_rate_hz: Rate at which synthesized ``HIL_GPS`` is sent.
+        gps_send_rate_hz: Rate at which ``HIL_GPS`` is sent.
+        sensor_noise_enabled: When true, Pegasus sensor noise/bias models are
+            active. Integration and real simulator runs should keep this true;
+            precision tests may disable it through Hydra or direct port config.
         home_lat_deg, home_lon_deg, home_alt_m: Home position used when
             synthesizing GPS from the local ENU pose. Defaults match PX4's
             built-in default (Zurich).
@@ -224,6 +227,7 @@ class Px4BridgeConfig:
     startup_settle_time_s: float
     gps_enabled: bool
     gps_send_rate_hz: float
+    sensor_noise_enabled: bool
     home_lat_deg: float
     home_lon_deg: float
     home_alt_m: float

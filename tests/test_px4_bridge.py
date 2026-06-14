@@ -221,6 +221,7 @@ class _FakePegasusBackend:
         self.mag_updates = []
         self.bar_updates = []
         self.gps_updates = []
+        self.gps_sensor_data = []
         self.heartbeat_sends = 0
         self.first_heartbeat_waits = 0
         self.started = False
@@ -268,6 +269,17 @@ class _FakePegasusBackend:
 
     def update_gps_data(self, data):
         self.gps_updates.append(data)
+        self._sensor_data.fix_type = int(data["fix_type"])
+        self._sensor_data.latitude_deg = int(data["latitude"] * 10000000)
+        self._sensor_data.longitude_deg = int(data["longitude"] * 10000000)
+        self._sensor_data.altitude = int(data["altitude"] * 1000)
+        self._sensor_data.velocity_north = int(data["velocity_north"] * 100)
+        self._sensor_data.velocity_east = int(data["velocity_east"] * 100)
+        self._sensor_data.velocity_down = int(data["velocity_down"] * 100)
+        self._sensor_data.sim_lat = int(data["latitude_gt"] * 10000000)
+        self._sensor_data.sim_lon = int(data["longitude_gt"] * 10000000)
+        self._sensor_data.sim_alt = int(data["altitude_gt"] * 1000)
+        self.gps_sensor_data.append(types.SimpleNamespace(**vars(self._sensor_data)))
         self._sensor_data.new_gps_data = True
 
     def send_sensor_msgs(self, sim_time_us):
@@ -407,7 +419,7 @@ def test_vendored_pegasus_backend_sends_barometer_temperature(monkeypatch):
 
 def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0)
+    port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0, sensor_noise_enabled=False)
     backend = port._backend
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
@@ -432,6 +444,96 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     assert first_hil_sensor[12] == pytest.approx(488.0, abs=1.0)
     assert first_hil_sensor[13] == pytest.approx(11.827, abs=0.01)
     assert first_hil_sensor[14] == 7167
+
+
+def test_mavlink_port_pegasus_sensors_can_disable_noise_for_precision(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=250.0, sensor_noise_enabled=False)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    state = VehicleState.hover_at(position_enu=(3.0, 4.0, 1.0), sim_time_us=100_000)
+    state.linear_velocity_enu = np.array([5.0, 6.0, 7.0], dtype=np.float64)
+    state.angular_velocity_flu = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+    port.start()
+    port.step(state)
+
+    imu = backend.imu_updates[0]
+    np.testing.assert_allclose(imu["angular_velocity"], [1.0, -2.0, -3.0], atol=1e-12)
+    np.testing.assert_allclose(
+        imu["linear_acceleration"],
+        [1250.0, -1500.0, -1759.80665],
+        atol=1e-5,
+    )
+
+    gps = backend.gps_updates[0]
+    assert gps["velocity_east"] == pytest.approx(5.0)
+    assert gps["velocity_north"] == pytest.approx(6.0)
+    assert gps["velocity_down"] == pytest.approx(-7.0)
+    assert gps["latitude"] == pytest.approx(gps["latitude_gt"])
+    assert gps["longitude"] == pytest.approx(gps["longitude_gt"])
+    assert abs(gps["latitude_gt"]) > 10.0
+    assert abs(gps["longitude_gt"]) > 1.0
+
+
+def test_mavlink_port_pegasus_imu_rest_accel_is_frd_when_noise_disabled(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, sensor_noise_enabled=False)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+
+    imu = backend.imu_updates[0]
+    np.testing.assert_allclose(
+        imu["linear_acceleration"],
+        [0.0, 0.0, -9.80665],
+        atol=1e-8,
+    )
+
+
+def test_mavlink_port_barometer_altitude_sign_with_noise_disabled(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, sensor_noise_enabled=False)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    port.start()
+    port.step(VehicleState.hover_at(position_enu=(0.0, 0.0, 1.0), sim_time_us=100_000))
+    port.step(VehicleState.hover_at(position_enu=(0.0, 0.0, 2.0), sim_time_us=110_000))
+
+    assert backend.bar_updates[1]["pressure_altitude"] > backend.bar_updates[0]["pressure_altitude"]
+
+
+def test_pegasus_gps_ground_truth_radians_are_normalized_for_backend(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    import robotics_experiments.px4_bridge.mavlink as mavlink_module
+
+    gps = {
+        "latitude": 47.3977,
+        "longitude": 8.5456,
+        "latitude_gt": np.radians(47.3977),
+        "longitude_gt": np.radians(8.5456),
+    }
+
+    normalized = mavlink_module._normalize_pegasus_gps_for_backend(gps)
+
+    assert normalized["latitude"] == pytest.approx(47.3977)
+    assert normalized["longitude"] == pytest.approx(8.5456)
+    assert normalized["latitude_gt"] == pytest.approx(47.3977)
+    assert normalized["longitude_gt"] == pytest.approx(8.5456)
+
+
+def test_mavlink_port_defaults_to_pegasus_sensor_noise(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4)
+
+    assert port._sensor_noise_enabled is True
 
 
 def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):

@@ -202,6 +202,12 @@ Carries simulated IMU + barometer + magnetometer:
 
 Rate higher than physics step is wasteful; lower starves PX4's EKF.
 
+Runtime IMU, barometer, and magnetometer data are produced by the vendored
+Pegasus sensor models. The Hydra field `px4.sensor_noise_enabled` controls
+whether Pegasus noise/bias terms are active. The default is `true`, so
+integration tests and normal simulator runs exercise noisy sensors; precision
+unit tests may disable it.
+
 #### `HIL_GPS` (msg id 113)
 
 Frequency: typically 5–10 Hz.
@@ -215,6 +221,12 @@ Frequency: typically 5–10 Hz.
 | `cog`, `satellites_visible`, `fix_type` | nav fix metadata |
 
 For indoor-only operation: either send synthesized "fake but consistent" GPS centered on a fixed home (e.g., Zurich `47.3977, 8.5456` — the PX4 default), or omit GPS entirely with `COM_ARM_WO_GPS=1` configured on PX4. Synthesized GPS is the cleaner path because it keeps PX4's EKF satisfied without parameter changes.
+
+Runtime GPS data is produced by Pegasus `GPS`, using the configured home
+position. Pegasus returns noisy `latitude`/`longitude` in degrees but
+ground-truth `latitude_gt`/`longitude_gt` in radians; the bridge normalizes the
+ground-truth fields to degrees before handing the payload to the Pegasus
+MAVLink backend.
 
 #### `HIL_STATE_QUATERNION` (msg id 115) — optional
 

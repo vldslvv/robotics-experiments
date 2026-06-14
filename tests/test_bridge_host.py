@@ -159,6 +159,7 @@ def _config(**overrides):
         "startup_settle_time_s": 0.012,
         "gps_enabled": True,
         "gps_send_rate_hz": 250.0,
+        "sensor_noise_enabled": True,
         "home_lat_deg": 47.3977,
         "home_lon_deg": 8.5456,
         "home_alt_m": 488.0,
@@ -235,6 +236,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
     bridge_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "bridge")
 
     assert port_call[1]["num_rotors"] == 2
+    assert port_call[1]["sensor_noise_enabled"] is True
     assert thrust_call[1]["num_rotors"] == 2
     assert thrust_call[1]["rot_dir"] == [-1.0, 1.0]
     assert bridge_call[2] == [

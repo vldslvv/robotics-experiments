@@ -124,6 +124,7 @@ class BridgeHost:
             heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
             gps_enabled=self._cfg.gps_enabled,
             gps_send_rate_hz=self._cfg.gps_send_rate_hz,
+            sensor_noise_enabled=self._cfg.sensor_noise_enabled,
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
             home_alt_m=self._cfg.home_alt_m,
@@ -151,6 +152,7 @@ class BridgeHost:
             f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
             f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
+            f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "
             f"debug_log_path={self._cfg.debug_log_path}"
         )
         self._bridge = Px4Bridge(
