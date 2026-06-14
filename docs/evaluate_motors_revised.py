@@ -84,7 +84,7 @@ PROP_PRICE = {
 # fmt: on
 
 
-def evaluate(motor, prop, m_motor, m_prop, T, I, max_I, price, prop_price):
+def evaluate(motor, prop, m_motor, m_prop, T, I, max_I, price, prop_price):  # noqa: E741
     mid = compute_tw(
         TWInputs(
             m_base=MID_BASE,

@@ -43,6 +43,10 @@ exclude = ["ros2_ws*", "scans*", "docs*", "scripts*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Vendored Pegasus simulator code is excluded from linting and formatting.
+# force-exclude makes ruff honor this even when pre-commit passes files explicitly.
+force-exclude = true
+extend-exclude = ["isaac/runtime/extensions/px4_sitl_brigde/pegasus/"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -55,15 +59,8 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "isaac/runtime/extensions/extension_template/ExtensionMinimalTemplate_python/__init__.py" = ["F403"]
-"isaac/runtime/extensions/px4_sitl_brigde/pegasus/simulator/logic/**/*.py" = [
-  "B006",
-  "B008",
-  "B024",
-  "E501",
-  "E712",
-  "E722",
-  "F401",
-]
+# The vendored Pegasus tree is fully excluded via extend-exclude above, so no
+# per-file lint ignores are needed for it here.
 
 [tool.mypy]
 python_version = "3.11"

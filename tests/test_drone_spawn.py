@@ -169,7 +169,9 @@ def _install_fake_isaac_modules(monkeypatch, *, min_z=-0.06, empty_bound=False):
     usd_geom.Xformable = _Xformable
     usd_geom.Imageable = _Imageable
     usd_geom.BBoxCache = _BBoxCache
-    usd_geom.Tokens = SimpleNamespace(default_="default", render="render", proxy="proxy", guide="guide")
+    usd_geom.Tokens = SimpleNamespace(
+        default_="default", render="render", proxy="proxy", guide="guide"
+    )
     usd_physics = types.ModuleType("pxr.UsdPhysics")
     usd_physics.RigidBodyAPI = _RigidBodyAPI
 

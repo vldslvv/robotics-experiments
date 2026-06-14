@@ -173,9 +173,7 @@ def _install_fake_modules(monkeypatch, usd_context, app, publisher_config):
     rclpy.ok = ok
     rclpy.init = init
     rclpy.shutdown = shutdown
-    rclpy.spin_once = lambda node, timeout_sec=0: rclpy.spin_calls.append(
-        (node, timeout_sec)
-    )
+    rclpy.spin_once = lambda node, timeout_sec=0: rclpy.spin_calls.append((node, timeout_sec))
 
     rclpy_node = types.ModuleType("rclpy.node")
     rclpy_node.Node = _Node
@@ -244,8 +242,7 @@ def _import_extension(monkeypatch, stage=None, publisher_config=None):
         publisher_config = _publisher_config()
     _install_fake_modules(monkeypatch, usd_context, app, publisher_config)
     extension_root = (
-        Path(__file__).resolve().parents[1]
-        / "isaac/runtime/extensions/lightswitch_spawner"
+        Path(__file__).resolve().parents[1] / "isaac/runtime/extensions/lightswitch_spawner"
     )
     monkeypatch.syspath_prepend(str(extension_root))
     module = importlib.import_module("LightSwitch_python.extension")

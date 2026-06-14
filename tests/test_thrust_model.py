@@ -39,6 +39,6 @@ def test_pegasus_quadratic_model_returns_reaction_torque_and_drag():
         linear_body_velocity_flu=np.array([2.0, -3.0, 1.0]),
     )
 
-    expected_yaw_torque = 1e-6 * (-100.0**2 - 100.0**2 + 300.0**2 + 300.0**2)
+    expected_yaw_torque = 1e-6 * (-(100.0**2) - 100.0**2 + 300.0**2 + 300.0**2)
     np.testing.assert_allclose(dynamics.body_torque_n_m, [0.0, 0.0, expected_yaw_torque])
     np.testing.assert_allclose(dynamics.body_drag_n, [-1.0, 0.9, 0.0])

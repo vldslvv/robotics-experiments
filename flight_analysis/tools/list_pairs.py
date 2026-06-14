@@ -63,7 +63,9 @@ def _nearest(reference: _LogFile, candidates: list[_LogFile]) -> tuple[_LogFile 
     if not with_seconds:
         return None, None
     candidate = min(with_seconds, key=lambda item: abs(item.seconds - reference.seconds))
-    return candidate, abs(candidate.seconds - reference.seconds) if candidate.seconds is not None else None
+    return candidate, abs(
+        candidate.seconds - reference.seconds
+    ) if candidate.seconds is not None else None
 
 
 def _format_delta(seconds: int | None) -> str:
@@ -88,7 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     for directory in sorted(set(ulogs) | set(bridges)):
         for bridge in sorted(bridges.get(directory, []), key=lambda item: item.stem):
             ulog, delta = _nearest(bridge, ulogs.get(directory, []))
-            status = "paired" if ulog and (delta == 0 or (delta is not None and delta <= args.max_stem_delta_s)) else "check"
+            status = (
+                "paired"
+                if ulog and (delta == 0 or (delta is not None and delta <= args.max_stem_delta_s))
+                else "check"
+            )
             rows.append(
                 (
                     status,

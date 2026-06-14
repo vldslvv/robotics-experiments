@@ -217,9 +217,7 @@ def _drone_config(data: dict[str, Any]) -> DroneConfig:
         lidar=_cylinder(data["lidar"], "drone.lidar"),
         battery=_box(data["battery"], "drone.battery"),
         wiring=_box(data["wiring"], "drone.wiring"),
-        pusher_pad=None
-        if pusher_pad is None
-        else _cylinder(pusher_pad, "drone.pusher_pad"),
+        pusher_pad=None if pusher_pad is None else _cylinder(pusher_pad, "drone.pusher_pad"),
     )
 
 

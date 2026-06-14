@@ -81,14 +81,14 @@ class BridgeHost:
 
         # Late imports so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
+        import omni.usd
+
         from robotics_experiments.px4_bridge import (
             PegasusQuadraticThrustModel,
             Px4Bridge,
             Px4MavlinkPort,
             discover_px4_rotor_mapping,
         )
-
-        import omni.usd
 
         articulation_path = self._cfg.articulation_path or self._articulation_path
         stage = omni.usd.get_context().get_stage()

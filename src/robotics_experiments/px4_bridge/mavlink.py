@@ -270,9 +270,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep_timeout_s)
         self._first_heartbeat_timeout_s = float(first_heartbeat_timeout_s)
-        self._heartbeat_period_s = (
-            1.0 / float(heartbeat_rate_hz) if heartbeat_rate_hz > 0 else None
-        )
+        self._heartbeat_period_s = 1.0 / float(heartbeat_rate_hz) if heartbeat_rate_hz > 0 else None
         self._gps_enabled = bool(gps_enabled)
         self._gps_period_s = 1.0 / float(gps_send_rate_hz) if gps_send_rate_hz > 0 else None
         self._home_lat_deg = float(home_lat_deg)

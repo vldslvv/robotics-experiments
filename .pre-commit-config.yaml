@@ -30,9 +30,13 @@ repos:
     hooks:
       - id: forbid-crlf  # Forbid files containing CRLF end-lines to be committed
       - id: remove-crlf  # Replace CRLF end-lines by LF ones before committing
+      # Makefiles require literal tabs in recipe lines, so they must be exempt
+      # from the tab forbid/remove hooks or make targets break.
       - id: forbid-tabs  # Forbid files containing tabs to be committed
+        exclude: '(?x)((^|/)Makefile$|\.mk$)'
       - id: remove-tabs  # Replace tabs by whitespaces before committing
         args: [--whitespaces-count, '4']  # defaults to: 4
+        exclude: '(?x)((^|/)Makefile$|\.mk$)'
       - id: chmod  # Set file permissions
         args: ['644']
         files: \.md$

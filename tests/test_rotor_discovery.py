@@ -26,13 +26,9 @@ def _make_stage(markers):
         if marker.get("rotor_marker", True):
             prim.CreateAttribute("drone:rotorMarker", Sdf.ValueTypeNames.Bool).Set(True)
         if "index" in marker:
-            prim.CreateAttribute("drone:px4MotorIndex", Sdf.ValueTypeNames.Int).Set(
-                marker["index"]
-            )
+            prim.CreateAttribute("drone:px4MotorIndex", Sdf.ValueTypeNames.Int).Set(marker["index"])
         if "spin" in marker:
-            prim.CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(
-                marker["spin"]
-            )
+            prim.CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(marker["spin"])
     return stage
 
 

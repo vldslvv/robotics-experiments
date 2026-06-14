@@ -28,9 +28,9 @@ class SensorSource:
         | DIFF_PRESS (int): mavlink binary code for the pressure sensor (0b0010000000000=1024)
     """
 
-    ACCEL: int = 7    
-    GYRO: int = 56          
-    MAG: int = 448        
+    ACCEL: int = 7
+    GYRO: int = 56
+    MAG: int = 448
     BARO: int = 6656
     DIFF_PRESS: int = 1024
 
@@ -108,7 +108,7 @@ class SensorMsg:
 
 class ThrusterControl:
     """
-    An auxiliary data class that saves the thrusters command data received via mavlink and 
+    An auxiliary data class that saves the thrusters command data received via mavlink and
     scales them into individual angular velocities expressed in rad/s to apply to each rotor
     """
 
@@ -164,11 +164,11 @@ class ThrusterControl:
         if len(controls) < self.num_rotors:
             carb.log_warn("Did not receive enough inputs for all the rotors")
             return
-        
+
 
         # Update the desired reference for every rotor (and saturate according to the min and max values)
         for i in range(self.num_rotors):
-            
+
             # Compute the actual velocity reference to apply to each rotor
             self._input_reference[i] = (controls[i] + self.input_offset[i]) * self.input_scaling[i] + self.zero_position_armed[i]
 
@@ -191,12 +191,12 @@ class PX4MavlinkBackendConfig(BackendConfig):
 
         Args:
             config (dict): A Dictionary that contains all the parameters for configuring the Mavlink interface - it can be empty or only have some of the parameters used by this backend.
-        
+
         Examples:
             The dictionary default parameters are
 
-            >>> {"vehicle_id": 0,           
-            >>>  "connection_type": "tcpin",           
+            >>> {"vehicle_id": 0,
+            >>>  "connection_type": "tcpin",
             >>>  "connection_ip": "localhost",
             >>>  "connection_baseport": 4560,
             >>>  "px4_autolaunch": True,
@@ -213,7 +213,7 @@ class PX4MavlinkBackendConfig(BackendConfig):
 
         # Configurations for the mavlink communication protocol (note: the vehicle id is sumed to the connection_baseport)
         self.config = config
-        
+
         self.vehicle_id = self.config.get("vehicle_id", 0)
         self.connection_type = self.config.get("connection_type", "tcpin")
         self.connection_ip = self.config.get("connection_ip", "localhost")
@@ -309,8 +309,8 @@ class PX4MavlinkBackend(Backend):
         self._current_utime: int = 0
 
     def update_sensor(self, sensor_type: str, data):
-        """Method that is used as callback for the vehicle for every iteration that a sensor produces new data. 
-        Only the IMU, GPS, Barometer and  Magnetometer sensor data are stored to be sent through mavlink. Every other 
+        """Method that is used as callback for the vehicle for every iteration that a sensor produces new data.
+        Only the IMU, GPS, Barometer and  Magnetometer sensor data are stored to be sent through mavlink. Every other
         sensor data that gets passed to this function is discarded.
 
         Args:
@@ -491,7 +491,7 @@ class PX4MavlinkBackend(Backend):
             carb.log_info("Mavlink connection was not closed, because it was never opened")
 
     def start(self):
-        """Method that handles the begining of the simulation of vehicle. It will try to open the mavlink connection 
+        """Method that handles the begining of the simulation of vehicle. It will try to open the mavlink connection
         interface and also attemp to launch px4 in a background process if that option as specified in the config class
         """
 
@@ -569,7 +569,7 @@ class PX4MavlinkBackend(Backend):
 
         # Wait for the connection to be established
         if self._connection is None:
-            return 
+            return
 
         carb.log_warn("Waiting for first hearbeat")
         result = self._connection.wait_heartbeat(blocking=False)
@@ -657,8 +657,8 @@ class PX4MavlinkBackend(Backend):
         """
         Method that is used to publish an heartbear through mavlink protocol
 
-        Args: 
-            mav_type (int): The ID that indicates the type of vehicle. Defaults to MAV_TYPE_GENERIC=0 
+        Args:
+            mav_type (int): The ID that indicates the type of vehicle. Defaults to MAV_TYPE_GENERIC=0
         """
 
         # Note: to know more about these functions, go to pymavlink->dialects->v20->standard.py
@@ -845,4 +845,3 @@ class PX4MavlinkBackend(Backend):
             data (dict): A dictionary that contains the data produced by the sensor
         """
         pass
- 

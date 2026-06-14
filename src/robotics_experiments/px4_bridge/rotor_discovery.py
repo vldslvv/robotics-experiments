@@ -111,8 +111,7 @@ def _resolve_body_path(stage, articulation_path: str, usd_physics) -> str:
         return body_path
 
     raise RuntimeError(
-        "Drone articulation must be a rigid body or contain a rigid body child at "
-        f"{body_path}"
+        "Drone articulation must be a rigid body or contain a rigid body child at " f"{body_path}"
     )
 
 
@@ -128,9 +127,7 @@ def _validate_indices(indices: Sequence[tuple[int, str]]) -> None:
         if index < 0:
             raise RuntimeError(f"Rotor marker {path} has negative drone:px4MotorIndex={index}")
         if index in seen:
-            raise RuntimeError(
-                f"Duplicate drone:px4MotorIndex={index}: {seen[index]} and {path}"
-            )
+            raise RuntimeError(f"Duplicate drone:px4MotorIndex={index}: {seen[index]} and {path}")
         seen[index] = path
 
     expected = set(range(len(indices)))
@@ -146,7 +143,9 @@ def _validate_generic_quad_x_order(paths: Sequence[str], positions: np.ndarray) 
     # Isaac body frame is FLU. PX4 Generic Quad X order is FR, RL, FL, RR,
     # which maps to (+X,-Y), (-X,+Y), (+X,+Y), (-X,-Y) in FLU.
     expected_signs = ((1, -1), (-1, 1), (1, 1), (-1, -1))
-    for index, (path, position, signs) in enumerate(zip(paths, positions, expected_signs)):
+    for index, (path, position, signs) in enumerate(
+        zip(paths, positions, expected_signs, strict=False)
+    ):
         x, y = float(position[0]), float(position[1])
         expected_x, expected_y = signs
         if _sign(x) != expected_x or _sign(y) != expected_y:

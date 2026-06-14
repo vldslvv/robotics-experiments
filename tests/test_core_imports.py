@@ -48,7 +48,7 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     assert simulation.__all__ == ["apply_settings"]
 
     try:
-        config.get_config
+        _ = config.get_config
     except ModuleNotFoundError as exc:
         assert exc.name == "hydra" or exc.name.startswith("hydra.")
     else:

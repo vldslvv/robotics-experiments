@@ -21,7 +21,7 @@ class GPS(Sensor):
 
         Args:
             config (dict): A Dictionary that contains all the parameters for configuring the GPS - it can be empty or only have some of the parameters used by the GPS.
-        
+
         Examples:
             The dictionary default parameters are
 

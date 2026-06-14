@@ -523,4 +523,3 @@ def Xform "hexacopter" (
         float physics:upperLimit = 0.015
     }
 }
-

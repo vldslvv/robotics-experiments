@@ -180,7 +180,9 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
         else:
             body_vel = np.asarray(linear_body_velocity_flu, dtype=np.float64)
             if body_vel.shape != (3,):
-                raise ValueError(f"linear_body_velocity_flu expects shape (3,), got {body_vel.shape}")
+                raise ValueError(
+                    f"linear_body_velocity_flu expects shape (3,), got {body_vel.shape}"
+                )
             drag = -self._linear_drag * body_vel
 
         return RotorDynamics(

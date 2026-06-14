@@ -23,7 +23,7 @@ class Barometer(Sensor):
 
         Args:
             config (dict): A Dictionary that contains all the parameters for configuring the Barometer - it can be empty or only have some of the parameters used by the Barometer.
-            
+
         Examples:
             The dictionary default parameters are
 
@@ -63,7 +63,7 @@ class Barometer(Sensor):
         self._baro_rnd_use_last: bool = False
         self._baro_rnd_y2: float = 0.0
         self._baro_drift_pa: float = 0.0
-        
+
 
         # Save the current state measured by the Baramoter
         self._state = {"absolute_pressure": 0.0, "pressure_altitude": 0.0, "temperature": 0.0}
@@ -103,7 +103,7 @@ class Barometer(Sensor):
         absolute_pressure: float = self._PRESSURE_MSL / pressure_ratio
 
         # Generate a Gaussian noise sequence using polar form of Box-Muller transformation
-        # Honestly, this is overkill and will get replaced by numpys random.randn. 
+        # Honestly, this is overkill and will get replaced by numpys random.randn.
         if not self._baro_rnd_use_last:
 
             w: float = 1.0

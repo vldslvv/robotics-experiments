@@ -118,9 +118,7 @@ def _computed_stationary_z(stage: Usd.Stage, prim_path: str, config: DroneConfig
             raise ValueError("empty composed bound")
         min_z = float(bound.GetMin()[2])
         return (
-            float(config.stationary_ground_z)
-            + float(config.stationary_ground_clearance_m)
-            - min_z
+            float(config.stationary_ground_z) + float(config.stationary_ground_clearance_m) - min_z
         )
     except Exception as exc:
         fallback = float(config.stationary_spawn_z_fallback)
@@ -164,9 +162,7 @@ def _clear_rigid_body_velocities(stage: Usd.Stage, prim_path: str) -> None:
             body.set_angular_velocity(zeros)
         carb.log_info(f"[DroneSpawner] Cleared rigid body velocity for {body_path}")
     except Exception as exc:
-        carb.log_warn(
-            f"[DroneSpawner] Could not clear rigid body velocity for {body_path}: {exc}"
-        )
+        carb.log_warn(f"[DroneSpawner] Could not clear rigid body velocity for {body_path}: {exc}")
 
 
 def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
@@ -210,9 +206,7 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     _apply_pose(stage, drone_path, pos, yaw)
     if config.spawn_stationary:
         _clear_rigid_body_velocities(stage, drone_path)
-    carb.log_info(
-        f"[DroneSpawner] Spawned mode={mode} at pos={pos} yaw={math.degrees(yaw):.1f}deg"
-    )
+    carb.log_info(f"[DroneSpawner] Spawned mode={mode} at pos={pos} yaw={math.degrees(yaw):.1f}deg")
 
 
 def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:

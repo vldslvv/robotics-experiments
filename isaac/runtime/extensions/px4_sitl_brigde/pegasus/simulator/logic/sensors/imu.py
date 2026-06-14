@@ -82,7 +82,7 @@ class IMU(Sensor):
 
     @Sensor.update_at_rate
     def update(self, state: State, dt: float):
-        """Method that implements the logic of an IMU. In this method we start by generating the random walk of the 
+        """Method that implements the logic of an IMU. In this method we start by generating the random walk of the
         gyroscope. This value is then added to the real angular velocity of the vehicle (FLU relative to ENU inertial frame
         expressed in FLU body frame). The same logic is followed for the accelerometer and the accelerations. After this step,
         the angular velocity is rotated such that it expressed a FRD body frame, relative to a NED inertial frame, expressed

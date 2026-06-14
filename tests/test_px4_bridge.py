@@ -1,5 +1,5 @@
-import itertools
 import importlib
+import itertools
 import logging
 import sys
 import types
@@ -266,8 +266,7 @@ class _FakePegasusBackend:
             scaling = self.config.config["input_scaling"]
             zero_armed = self.config.config["zero_position_armed"]
             self._input_reference = [
-                (controls[i] + offsets[i]) * scaling[i] + zero_armed[i]
-                for i in range(num_rotors)
+                (controls[i] + offsets[i]) * scaling[i] + zero_armed[i] for i in range(num_rotors)
             ]
         else:
             self._input_reference = [0.0] * num_rotors

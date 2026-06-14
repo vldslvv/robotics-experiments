@@ -112,10 +112,7 @@ class Px4Bridge:
             # NaN guard: skip this tick, keep the last good force unchanged.
             return
 
-        if (
-            self._max_tilt_angle_deg is not None
-            and self._max_tilt_angle_deg > 0.0
-        ):
+        if self._max_tilt_angle_deg is not None and self._max_tilt_angle_deg > 0.0:
             tilt = frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)
             if tilt > self._max_tilt_angle_deg:
                 self._tilt_cutoff_count += 1

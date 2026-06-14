@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 
 class BackendConfig(ABC):
     """
-    This class represents the configuration for the communication and control backend. 
+    This class represents the configuration for the communication and control backend.
     Every backend has a configuration, which is used to customize its behavior.
     The configuration is used to instantiate the backend at the simulation start.
     """
@@ -21,7 +21,7 @@ class Backend(ABC):
     """
     This class defines the templates for the communication and control backend. Every vehicle can have at least one backend
     at the same time. Every timestep, the methods 'update_state' and 'update_sensor' are called to update the data produced
-    by the simulation, i.e. for every time step the backend will receive teh current state of the vehicle and its sensors. 
+    by the simulation, i.e. for every time step the backend will receive teh current state of the vehicle and its sensors.
     Additionally, the backend must provide a method named 'input_reference' which will be used by the vehicle simulation
     to know the desired angular velocities to apply to the rotors of the vehicle. The method 'update' is called on every
     physics step and can be use to implement some logic or send data to another interface (such as PX4 through mavlink or ROS2).
@@ -47,7 +47,7 @@ class Backend(ABC):
         return self._vehicle
 
     def initialize(self, vehicle):
-        """A method that can be invoked when the simulation is starting to give access to the control backend 
+        """A method that can be invoked when the simulation is starting to give access to the control backend
         to the entire vehicle object. Even though we provide update_sensor and update_state callbacks that are called
         at every physics step with the latest vehicle state and its sensor data, having access to the full vehicle
         object may prove usefull under some circumstances. This is nice to give users the possibility of overiding
@@ -58,7 +58,7 @@ class Backend(ABC):
         """
         self._vehicle = vehicle
 
-    
+
     @abstractmethod
     def update_sensor(self, sensor_type: str, data):
         """Method that when implemented, should handle the receival of sensor data
