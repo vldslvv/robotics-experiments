@@ -1,4 +1,4 @@
-"""Standalone Isaac Sim smoke test for configured PX4 bridge prim paths.
+"""Standalone Isaac Sim smoke test for discovered PX4 bridge prim paths.
 
 Run inside the Isaac Sim container:
     /isaac-sim/python.sh \
@@ -10,12 +10,13 @@ from __future__ import annotations
 from _runtime import SceneTestContext, run_scene_test
 
 DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
-TEST_NAME = "px4_configured_paths"
+TEST_NAME = "px4_discovered_paths"
 
 
 def _run_test(context: SceneTestContext) -> None:
     from robotics_experiments.config import get_config
     from robotics_experiments.drone import despawn_drone, spawn_drone
+    from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
 
     env = get_config()
     spawn_drone(context.stage, env.drone)
@@ -27,17 +28,20 @@ def _run_test(context: SceneTestContext) -> None:
     if not articulation_prim.IsValid():
         raise AssertionError(f"Configured articulation path is invalid: {articulation_path}")
 
-    missing = []
-    for path in env.px4.rotor_link_paths:
-        rotor_path = path if path.startswith("/") else f"{articulation_path}/{path}"
-        if not context.stage.GetPrimAtPath(rotor_path).IsValid():
-            missing.append(rotor_path)
+    rotor_mapping = discover_px4_rotor_mapping(context.stage, articulation_path)
+    missing = [
+        path
+        for path in rotor_mapping.rotor_link_paths
+        if not context.stage.GetPrimAtPath(path).IsValid()
+    ]
 
     despawn_drone(context.stage, env.drone)
     if missing:
         raise AssertionError(f"Configured PX4 rotor paths are invalid: {missing}")
 
-    context.report(f"{TEST_NAME}: verified configured articulation and rotor paths")
+    context.report(
+        f"{TEST_NAME}: verified articulation and {rotor_mapping.num_rotors} discovered rotors"
+    )
 
 
 def main() -> None:

@@ -162,14 +162,11 @@ class IsaacArticulationIO:
             position_body = world_to_body.Transform(rotor_to_world.ExtractTranslation())
             position = [position_body[0], position_body[1], position_body[2]]
             positions.append(position)
-            spin_attr = rotor_prim.GetAttribute("drone:spinDir")
-            spin_dir = spin_attr.Get() if spin_attr and spin_attr.HasValue() else None
             rotor_debug.append(
                 {
                     "index": index,
                     "path": path,
                     "position_body": [float(v) for v in position],
-                    "spin_dir": spin_dir,
                 }
             )
 

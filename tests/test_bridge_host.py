@@ -48,7 +48,7 @@ def _install_fake_isaac(monkeypatch):
     omni_usd = types.ModuleType("omni.usd")
     omni_usd.StageEventType = _StageEventType
     omni_usd.get_context = lambda: SimpleNamespace(
-        get_stage=lambda: None,
+        get_stage=lambda: object(),
         get_stage_event_stream=lambda: SimpleNamespace(
             create_subscription_to_pop=lambda callback: SimpleNamespace(unsubscribe=lambda: None)
         ),
@@ -107,9 +107,21 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             self.step_times.append(sim_time_us)
             calls.append(("step", dt, sim_time_us))
 
+    def discover_px4_rotor_mapping(stage, articulation_path):
+        calls.append(("discover", stage, articulation_path))
+        return SimpleNamespace(
+            rotor_link_paths=[
+                "/World/Drone/body/propulsion/motor_4/prop",
+                "/World/Drone/body/propulsion/motor_2/prop",
+            ],
+            rot_dir=[-1.0, 1.0],
+            num_rotors=2,
+        )
+
     fake_px4_bridge.Px4MavlinkPort = Px4MavlinkPort
     fake_px4_bridge.PegasusQuadraticThrustModel = PegasusQuadraticThrustModel
     fake_px4_bridge.Px4Bridge = Px4Bridge
+    fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
 
 
@@ -126,14 +138,11 @@ def _config(**overrides):
     values = {
         "enabled": True,
         "articulation_path": "",
-        "rotor_link_paths": ["motor_1", "motor_2"],
-        "num_rotors": 2,
         "input_offset": [0.0, 0.0],
         "input_scaling": [1000.0, 1000.0],
         "zero_position_armed": [100.0, 100.0],
         "rotor_constant": [1.0, 1.0],
         "rolling_moment_coefficient": [1.0, 1.0],
-        "rot_dir": [-1.0, 1.0],
         "min_rotor_velocity": [0.0, 0.0],
         "max_rotor_velocity": [1100.0, 1100.0],
         "linear_drag": [0.0, 0.0, 0.0],
@@ -206,3 +215,29 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
 
     assert "bridge_start" in calls
     assert ("step", 0.004, 4000) in calls
+
+
+def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
+    _install_fake_isaac(monkeypatch)
+    calls = []
+    _install_fake_px4_bridge(monkeypatch, calls)
+    module = _import_bridge_host(monkeypatch)
+
+    host = module.BridgeHost(
+        articulation_path="/World/Drone",
+        config=_config(startup_settle_time_s=0.0),
+    )
+
+    host.start()
+
+    port_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "port")
+    thrust_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "thrust")
+    bridge_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "bridge")
+
+    assert port_call[1]["num_rotors"] == 2
+    assert thrust_call[1]["num_rotors"] == 2
+    assert thrust_call[1]["rot_dir"] == [-1.0, 1.0]
+    assert bridge_call[2] == [
+        "/World/Drone/body/propulsion/motor_4/prop",
+        "/World/Drone/body/propulsion/motor_2/prop",
+    ]

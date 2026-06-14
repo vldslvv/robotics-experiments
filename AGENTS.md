@@ -11,6 +11,8 @@ Prefer minimal, scoped changes.
 Do not introduce new tooling unless explicitly requested.
 
 ## Repository layout
+Place new code in the directory matching its purpose; each entry below is both
+the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
 - `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
 - `isaac/docker/` -> Isaac Sim Docker build/init inputs.
@@ -27,17 +29,6 @@ Do not introduce new tooling unless explicitly requested.
 - `px4/logs/` -> PX4 SITL log persistence.
 - `px4/eeprom/` -> PX4 SITL simulated EEPROM mount; cleared by the default PX4 launch wrapper.
 - `docs/` -> Design and usage docs.
-
-## Placement rules
-- Keep core project code under `src/robotics_experiments`.
-- Put Isaac Kit extension code under `isaac/runtime/extensions`.
-- Put reusable Isaac runtime templates under `isaac/runtime/templates`, outside
-  the extension discovery folder.
-- Put direct Isaac Sim scripts under `isaac/runtime/standalone`.
-- Put Isaac Lab-specific configs, tasks, and environments under `isaac/runtime/lab`.
-- Put ROS 2 packages and colcon workspace changes under `ros/ros2_ws`.
-- Put ROS 2 middleware config under `ros/config`.
-- Put PX4 Docker/scripts/runtime support under `px4`.
 
 ## Python API organization
 - Public top-level functions, classes, and intentional constants in Python modules must be
@@ -84,10 +75,12 @@ Do not introduce new tooling unless explicitly requested.
 - Isaac articulation angular velocity is treated as world-frame data and must
   be rotated into body-FLU before MAVLink converts it to PX4 body-FRD gyro
   fields.
-- PX4 `rotor_link_paths` identify rotor thrust marker prims in motor-index
-  order. The Isaac adapter applies thrust to the drone rigid body at those
-  marker positions; marker prims must not be treated as separate free rotor
-  rigid bodies unless joints are explicitly authored for that topology.
+- USD rotor marker metadata identifies thrust marker prims in PX4 motor-index
+  order. The bridge discovers prims with `drone:rotorMarker = true`, orders
+  them by `drone:px4MotorIndex`, and derives spin from `drone:spinDir`. The
+  Isaac adapter applies thrust to the drone rigid body at those marker
+  positions; marker prims must not be treated as separate free rotor rigid
+  bodies unless joints are explicitly authored for that topology.
 - For `none_iris` / Generic Quad X, PX4 motor-index order is
   front-right CW, rear-left CW, front-left CCW, rear-right CCW. PX4 geometry is
   FRD, while Isaac marker positions are FLU, so PX4 right maps to Isaac
@@ -106,6 +99,9 @@ Do not introduce new tooling unless explicitly requested.
 
 ## Common commands
 
+Run ROS 2, Isaac Sim, and PX4 through the Docker targets below, not directly on
+the host. They are meant to be used in the Dockerized environment.
+
 ### Docker
 - `make build` builds Isaac Sim, ROS 2, and PX4 images.
 - `make destroy` stops/removes containers and removes built images.
@@ -116,11 +112,7 @@ Do not introduce new tooling unless explicitly requested.
 - Legacy targets such as `build-all`, `run-all`, and `clean-all` are
   compatibility aliases.
 
-### ROS 2
-Avoid calling ROS 2 directly on the host. It is meant to be used in the Dockerized environment.
-
 ### Isaac Sim
-Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dockerized environment.
 - `make test` runs host Python tests.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target in parallel
@@ -128,6 +120,10 @@ Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dock
   summary after all targets finish. It defaults to two concurrent targets to
   avoid Isaac/GPU resource starvation; set `INTEGRATION_TEST_JOBS=<n>` to tune
   concurrency for the host.
+- Integration test Make targets are defined in `make/integration-tests.mk`.
+  Their standalone Isaac test scripts live under
+  `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
+  scenario-specific notes.
 - `make test-integration-px4` starts a temporary PX4 SITL container, runs the
   standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
@@ -139,7 +135,6 @@ Avoid calling Isaac Sim directly on the host. It is meant to be used in the Dock
   envelope detects the resulting instability.
 
 ### PX4
-Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized environment.
 - `make run-px4` opens a `px4` tmux session with side-by-side panes. One pane
   starts `px4-iris`; the other remains an interactive shell.
 - Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
@@ -175,8 +170,8 @@ Avoid calling PX4 directly on the host. It is meant to be used in the Dockerized
     stale actuator lag means the bridge is applying old control outputs.
   - `fresh={imu:True mag:True baro:True ...}` is present before send.
   - `input_reference` and `commands` match expected PX4 actuator behavior.
-  - `rotor_link_paths` resolve to the expected body-frame positions and spin
-    directions for PX4 motor-index order.
+  - discovered rotor marker paths resolve to the expected body-frame positions
+    and spin directions for PX4 motor-index order.
 - Use the ULog to decide whether PX4 commanded the bad motion or the bridge
   applied the command incorrectly. The minimum topics for flight divergence are:
   `vehicle_command`, `vehicle_command_ack`, `vehicle_status`,

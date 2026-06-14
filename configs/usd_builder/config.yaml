@@ -1,0 +1,10 @@
+defaults:
+  - drone: quadcopter_500mm
+  - _self_
+
+output_dir: isaac/assets/LightSwitchWarehouse
+
+pusher_drive:
+  travel: 0.015
+  stiffness: 800.0
+  damping: 40.0

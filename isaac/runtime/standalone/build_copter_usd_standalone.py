@@ -1,7 +1,7 @@
-# build_copter_usd_standalone.py - config-driven drone USD generator
+# build_copter_usd_standalone.py - Hydra-config-driven drone USD generator
 #
 # Run with standalone OpenUSD Python bindings:
-#   python isaac/runtime/standalone/build_copter_usd_standalone.py [config_name]
+#   python isaac/runtime/standalone/build_copter_usd_standalone.py [config_name] [overrides...]
 #
 # Available configs: quadcopter_500mm (default), hexacopter_s550
 #
@@ -9,7 +9,7 @@
 # This file authors the USD once. Anything topological / geometric lives here:
 #   - Prim tree, meshes, collision shapes
 #   - Joint topology (body pairs, axis, limits, relative frames)
-#   - Custom attributes (e.g. drone:spinDir on props)
+#   - Custom attributes (e.g. PX4 rotor mapping metadata on props)
 #   - Articulation root marker (ArticulationRootAPI on the wrapper prim)
 # The Isaac Lab ArticulationCfg (drone_cfg.py) overrides at spawn time:
 #   - Mass / inertia / CoM (so EventTerm can randomize per-env for sim-to-real)
@@ -21,19 +21,18 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 from dataclasses import dataclass, replace
-from typing import TypeVar
+from pathlib import Path
+from typing import Any, TypeVar
 
+from hydra import compose, initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import OmegaConf
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
 ASSETS_DIR = "isaac/assets/LightSwitchWarehouse"
-
-# Pusher actuator tuning (drive parameters, not part geometry).
-PUSHER_TRAVEL = 0.015
-PUSHER_STIFFNESS = 800.0
-PUSHER_DAMPING = 40.0
+CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs" / "usd_builder"
 
 
 # --- Component dataclasses --------------------------------------------------
@@ -94,6 +93,7 @@ class Motor:
     esc: BoxPart  # ESC riding next to this motor
     propeller: CylinderPart  # disc above the motor
     spin_dir: str  # "CCW" | "CW"
+    px4_motor_index: int
 
 
 @dataclass
@@ -131,277 +131,123 @@ class DroneConfig:
     pusher_pad: CylinderPart | None = None
 
 
-# --- Config instances -------------------------------------------------------
+@dataclass
+class PusherDriveConfig:
+    travel: float
+    stiffness: float
+    damping: float
 
 
-def _quadcopter_500mm() -> DroneConfig:
-    body_half = 0.06
-    plate_thickness = 0.006
+@dataclass
+class BuilderConfig:
+    output_dir: str
+    pusher_drive: PusherDriveConfig
+    drone: DroneConfig
 
-    motor_radius = 0.015
-    motor_height = 0.03
-    rotor_radius = 0.1143  # 9" prop
-    motor_xy = 0.25
-    motor_z = 0.02
 
-    # fmt: off
-    motor_specs = [
-        ("M1 FR CCW",  ( motor_xy,  motor_xy, motor_z), "CCW"),
-        ("M2 FL CW",   (-motor_xy,  motor_xy, motor_z), "CW"),
-        ("M3 RL CCW",  (-motor_xy, -motor_xy, motor_z), "CCW"),
-        ("M4 RR CW",   ( motor_xy, -motor_xy, motor_z), "CW"),
-    ]
-    # fmt: on
+# --- Config loading ---------------------------------------------------------
 
-    motors = [
-        Motor(
-            name=name,
-            position=pos,
-            motor=CylinderPart(
-                name="X2212-class brushless motor",
-                radius=motor_radius,
-                height=motor_height,
-                position=(0.0, 0.0, 0.0),
-                mass=0.057,
-            ),
-            esc=BoxPart(
-                name="BLHeli_S 20A ESC",
-                # Sits inboard along the arm, 40% of the way back toward the
-                # plate, just above the plate's mid-plane.
-                size=(0.025, 0.015, 0.004),
-                position=(-0.4 * pos[0], -0.4 * pos[1], 0.005 - pos[2]),
-                mass=0.007,
-            ),
-            propeller=CylinderPart(
-                name="9045 propeller",
-                radius=rotor_radius,
-                height=0.002,
-                position=(0.0, 0.0, 0.02),  # 2 cm above the motor can
-                mass=0.008,
-            ),
-            spin_dir=spin,
-        )
-        for (name, pos, spin) in motor_specs
-    ]
 
-    arms = [
-        CapsulePart(
-            name=f"Arm {i+1}",
-            radius=0.008,
-            height=math.hypot(m.position[0], m.position[1]) * 1.8,
-            position=(m.position[0] / 2, m.position[1] / 2, 0.0),
-            rotation_deg=(0.0, 90.0, math.degrees(math.atan2(m.position[1], m.position[0]))),
-        )
-        for i, m in enumerate(motors)
-    ]
+def _as_tuple3(data: Any, label: str) -> tuple[float, float, float]:
+    values = tuple(float(v) for v in data)
+    if len(values) != 3:
+        raise ValueError(f"{label} must have exactly 3 values, got {values}")
+    return values
 
-    return DroneConfig(
-        name="quadcopter_500mm",
-        output_filename="quadcopter_500mm.usda",
-        prim_name="quadcopter",
-        total_mass=1.5,
-        diagonal_inertia=(0.0347, 0.0458, 0.0977),
-        center_of_mass=(0.0, 0.0, 0.01),
-        center_plate=BoxPart(
-            name="S500-class carbon center plate",
-            size=(body_half * 2, body_half * 2, plate_thickness),
-            position=(0.0, 0.0, 0.0),
-            mass=0.350,  # whole airframe mass rolled in here
-        ),
-        arms=arms,
-        motors=motors,
-        pixhawk=BoxPart(
-            name="Pixhawk 6C",
-            size=(0.050, 0.038, 0.016),
-            position=(0.0, 0.0, 0.016 / 2),  # flush on top of center plate
-            mass=0.035,
-        ),
-        jetson=BoxPart(
-            name="Jetson Orin Nano Super",
-            size=(0.100, 0.080, 0.030),
-            position=(-0.03, 0.0, 0.030 / 2),
-            mass=0.165,
-        ),
-        realsense=BoxPart(
-            name="Intel RealSense D435i",
-            size=(0.090, 0.025, 0.025),
-            position=(body_half + 0.01, 0.0, 0.01),
-            mass=0.072,
-            rotation_deg=(0.0, -15.0, 0.0),
-        ),
-        optical_flow=BoxPart(
-            name="PMW3901 optical flow",
-            size=(0.020, 0.020, 0.005),
-            position=(0.0, 0.0, -body_half),
-            mass=0.005,
-            rotation_deg=(180.0, 0.0, 0.0),
-        ),
-        lidar=CylinderPart(
-            name="Slamtec RPLiDAR A2",
-            radius=0.038,
-            height=0.041,
-            position=(0.0, 0.0, 0.041 / 2),  # sits on top of plate
-            mass=0.190,
-        ),
-        battery=BoxPart(
-            name="4S 5000 mAh LiPo",
-            size=(0.140, 0.045, 0.025),
-            position=(0.0, 0.0, -body_half * 0.5),
-            mass=0.300,
-        ),
-        wiring=BoxPart(
-            name="PDB + power module",
-            size=(0.050, 0.030, 0.010),
-            position=(0.0, 0.0, 0.0),
-            mass=0.100,
-        ),
-        pusher_pad=CylinderPart(
-            name="Spring-loaded pusher pad",
-            radius=0.015,
-            height=0.008,
-            position=(body_half + 0.05, 0.0, 0.01),
-            mass=0.040,
-        ),
+
+def _box(data: dict[str, Any], label: str) -> BoxPart:
+    return BoxPart(
+        name=str(data["name"]),
+        size=_as_tuple3(data["size"], f"{label}.size"),
+        position=_as_tuple3(data["position"], f"{label}.position"),
+        mass=float(data["mass"]),
+        rotation_deg=_as_tuple3(data.get("rotation_deg", (0.0, 0.0, 0.0)), f"{label}.rotation_deg"),
     )
 
 
-def _hexacopter_s550() -> DroneConfig:
-    body_half = 0.08
-    plate_thickness = 0.008
-
-    motor_radius = 0.018
-    motor_height = 0.035
-    rotor_radius = 0.127  # 10" prop
-    arm_len = 0.275  # 550 mm diagonal -> 275 mm arm
-    motor_z = 0.02
-
-    spin_dirs = ["CCW", "CW", "CCW", "CW", "CCW", "CW"]
-    motor_specs = []
-    for i, a_deg in enumerate(range(0, 360, 60)):
-        a = math.radians(a_deg)
-        x = arm_len * math.cos(a)
-        y = arm_len * math.sin(a)
-        motor_specs.append((f"M{i+1} {a_deg}deg {spin_dirs[i]}", (x, y, motor_z), spin_dirs[i]))
-
-    motors = [
-        Motor(
-            name=name,
-            position=pos,
-            motor=CylinderPart(
-                name="X2212-class brushless motor",
-                radius=motor_radius,
-                height=motor_height,
-                position=(0.0, 0.0, 0.0),
-                mass=0.057,  # 342 g / 6
-            ),
-            esc=BoxPart(
-                name="BLHeli_S 20A ESC",
-                # Sits inboard along the arm, 40% of the way back toward the
-                # plate, just above the plate's mid-plane.
-                size=(0.025, 0.015, 0.004),
-                position=(-0.4 * pos[0], -0.4 * pos[1], 0.005 - pos[2]),
-                mass=0.007,  # 42 g / 6
-            ),
-            propeller=CylinderPart(
-                name="1045 propeller",
-                radius=rotor_radius,
-                height=0.002,
-                position=(0.0, 0.0, 0.02),  # 2 cm above the motor can
-                mass=0.008,  # 48 g / 6
-            ),
-            spin_dir=spin,
-        )
-        for (name, pos, spin) in motor_specs
-    ]
-
-    arms = [
-        CapsulePart(
-            name=f"Arm {i+1}",
-            radius=0.01,
-            height=math.hypot(m.position[0], m.position[1]) * 1.8,
-            position=(m.position[0] / 2, m.position[1] / 2, 0.0),
-            rotation_deg=(0.0, 90.0, math.degrees(math.atan2(m.position[1], m.position[0]))),
-        )
-        for i, m in enumerate(motors)
-    ]
-
-    return DroneConfig(
-        name="hexacopter_s550",
-        output_filename="hexacopter_s550.usda",
-        prim_name="hexacopter",
-        total_mass=1.929,
-        diagonal_inertia=(0.075, 0.075, 0.14),
-        center_of_mass=(0.0, 0.0, 0.01),
-        center_plate=BoxPart(
-            name="S550 airframe center plate",
-            size=(body_half * 2, body_half * 2, plate_thickness),
-            position=(0.0, 0.0, 0.0),
-            mass=0.480,
-        ),
-        arms=arms,
-        motors=motors,
-        pixhawk=BoxPart(
-            name="Pixhawk 6C",
-            size=(0.050, 0.038, 0.016),
-            position=(0.0, 0.0, 0.016 / 2),
-            mass=0.035,
-        ),
-        jetson=BoxPart(
-            name="Jetson Orin Nano Super",
-            size=(0.100, 0.080, 0.030),
-            position=(-0.03, 0.0, 0.030 / 2),
-            mass=0.165,
-        ),
-        realsense=BoxPart(
-            name="Intel RealSense D435i",
-            size=(0.090, 0.025, 0.025),
-            position=(body_half + 0.01, 0.0, 0.01),
-            mass=0.072,
-            rotation_deg=(0.0, -15.0, 0.0),
-        ),
-        optical_flow=BoxPart(
-            name="PMW3901 optical flow",
-            size=(0.020, 0.020, 0.005),
-            position=(0.0, 0.0, -body_half),
-            mass=0.005,
-            rotation_deg=(180.0, 0.0, 0.0),
-        ),
-        lidar=CylinderPart(
-            name="Slamtec RPLiDAR A2",
-            radius=0.038,
-            height=0.041,
-            position=(0.0, 0.0, 0.041 / 2),
-            mass=0.190,
-        ),
-        battery=BoxPart(
-            name="4S 5000 mAh LiPo",
-            size=(0.140, 0.045, 0.025),
-            position=(0.0, 0.0, -body_half * 0.5),
-            mass=0.390,
-        ),
-        wiring=BoxPart(
-            name="PDB + power module",
-            size=(0.050, 0.030, 0.010),
-            position=(0.0, 0.0, 0.0),
-            mass=0.120,
-        ),
-        pusher_pad=CylinderPart(
-            name="Spring-loaded pusher pad",
-            radius=0.015,
-            height=0.008,
-            position=(body_half + 0.05, 0.0, 0.01),
-            mass=0.040,
-        ),
+def _cylinder(data: dict[str, Any], label: str) -> CylinderPart:
+    return CylinderPart(
+        name=str(data["name"]),
+        radius=float(data["radius"]),
+        height=float(data["height"]),
+        position=_as_tuple3(data["position"], f"{label}.position"),
+        mass=float(data["mass"]),
+        rotation_deg=_as_tuple3(data.get("rotation_deg", (0.0, 0.0, 0.0)), f"{label}.rotation_deg"),
     )
 
 
-QUADCOPTER_500MM = _quadcopter_500mm()
-HEXACOPTER_S550 = _hexacopter_s550()
+def _capsule(data: dict[str, Any], label: str) -> CapsulePart:
+    return CapsulePart(
+        name=str(data["name"]),
+        radius=float(data["radius"]),
+        height=float(data["height"]),
+        position=_as_tuple3(data["position"], f"{label}.position"),
+        rotation_deg=_as_tuple3(data["rotation_deg"], f"{label}.rotation_deg"),
+    )
 
-CONFIGS: dict[str, DroneConfig] = {
-    "quadcopter_500mm": QUADCOPTER_500MM,
-    "hexacopter_s550": HEXACOPTER_S550,
-}
+
+def _motor(data: dict[str, Any], label: str) -> Motor:
+    return Motor(
+        name=str(data["name"]),
+        position=_as_tuple3(data["position"], f"{label}.position"),
+        motor=_cylinder(data["motor"], f"{label}.motor"),
+        esc=_box(data["esc"], f"{label}.esc"),
+        propeller=_cylinder(data["propeller"], f"{label}.propeller"),
+        spin_dir=str(data["spin_dir"]),
+        px4_motor_index=int(data["px4_motor_index"]),
+    )
+
+
+def _drone_config(data: dict[str, Any]) -> DroneConfig:
+    pusher_pad = data.get("pusher_pad")
+    return DroneConfig(
+        name=str(data["name"]),
+        output_filename=str(data["output_filename"]),
+        prim_name=str(data["prim_name"]),
+        total_mass=float(data["total_mass"]),
+        diagonal_inertia=_as_tuple3(data["diagonal_inertia"], "drone.diagonal_inertia"),
+        center_of_mass=_as_tuple3(data["center_of_mass"], "drone.center_of_mass"),
+        center_plate=_box(data["center_plate"], "drone.center_plate"),
+        arms=[_capsule(arm, f"drone.arms[{i}]") for i, arm in enumerate(data["arms"])],
+        motors=[_motor(motor, f"drone.motors[{i}]") for i, motor in enumerate(data["motors"])],
+        pixhawk=_box(data["pixhawk"], "drone.pixhawk"),
+        jetson=_box(data["jetson"], "drone.jetson"),
+        realsense=_box(data["realsense"], "drone.realsense"),
+        optical_flow=_box(data["optical_flow"], "drone.optical_flow"),
+        lidar=_cylinder(data["lidar"], "drone.lidar"),
+        battery=_box(data["battery"], "drone.battery"),
+        wiring=_box(data["wiring"], "drone.wiring"),
+        pusher_pad=None
+        if pusher_pad is None
+        else _cylinder(pusher_pad, "drone.pusher_pad"),
+    )
+
+
+def _builder_config(data: dict[str, Any]) -> BuilderConfig:
+    pusher_drive = data["pusher_drive"]
+    return BuilderConfig(
+        output_dir=str(data["output_dir"]),
+        pusher_drive=PusherDriveConfig(
+            travel=float(pusher_drive["travel"]),
+            stiffness=float(pusher_drive["stiffness"]),
+            damping=float(pusher_drive["damping"]),
+        ),
+        drone=_drone_config(data["drone"]),
+    )
+
+
+def load_builder_config(
+    *,
+    config_dir: str | os.PathLike[str] = CONFIG_DIR,
+    overrides: list[str] | None = None,
+) -> BuilderConfig:
+    """Compose the Hydra USD-builder config and convert it to dataclasses."""
+
+    if GlobalHydra.instance().is_initialized():
+        GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=str(Path(config_dir).resolve()), version_base=None):
+        cfg = compose(config_name="config", overrides=overrides or [])
+    return _builder_config(OmegaConf.to_container(cfg, resolve=True))
 
 
 # --- USD authoring helpers --------------------------------------------------
@@ -494,11 +340,20 @@ def _author_motor(stage: Usd.Stage, parent_path: str, idx: int, motor: Motor) ->
     prop.CreateRadiusAttr(prop_part.radius)
     prop.CreateHeightAttr(prop_part.height)
     _apply_pose(prop, prop_world_pos, prop_part.rotation_deg)
+    prop.GetPrim().CreateAttribute("drone:rotorMarker", Sdf.ValueTypeNames.Bool).Set(True)
+    prop.GetPrim().CreateAttribute("drone:px4MotorIndex", Sdf.ValueTypeNames.Int).Set(
+        motor.px4_motor_index
+    )
     prop.GetPrim().CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(motor.spin_dir)
     _set_mass(prop.GetPrim(), prop_part.mass)
 
 
-def build_drone_usd(cfg: DroneConfig, output_dir: str = ASSETS_DIR) -> str:
+def build_drone_usd(
+    cfg: DroneConfig,
+    *,
+    output_dir: str = ASSETS_DIR,
+    pusher_drive: PusherDriveConfig,
+) -> str:
     stage_path = os.path.join(output_dir, cfg.output_filename)
     wrapper_path = f"/{cfg.prim_name}"
     root_path = f"{wrapper_path}/body"
@@ -585,7 +440,7 @@ def build_drone_usd(cfg: DroneConfig, output_dir: str = ASSETS_DIR) -> str:
         joint.CreateBody1Rel().SetTargets([pad_path])
         joint.CreateAxisAttr("X")
         joint.CreateLowerLimitAttr(0.0)
-        joint.CreateUpperLimitAttr(PUSHER_TRAVEL)
+        joint.CreateUpperLimitAttr(pusher_drive.travel)
         joint.CreateLocalPos0Attr(Gf.Vec3f(*pad.position))
         joint.CreateLocalRot0Attr(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
         joint.CreateLocalPos1Attr(Gf.Vec3f(0.0, 0.0, 0.0))
@@ -593,8 +448,8 @@ def build_drone_usd(cfg: DroneConfig, output_dir: str = ASSETS_DIR) -> str:
 
         drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), "linear")
         drive.CreateTypeAttr("force")
-        drive.CreateStiffnessAttr(PUSHER_STIFFNESS)
-        drive.CreateDampingAttr(PUSHER_DAMPING)
+        drive.CreateStiffnessAttr(pusher_drive.stiffness)
+        drive.CreateDampingAttr(pusher_drive.damping)
 
     stage.SetDefaultPrim(wrapper.GetPrim())
     stage.Export(stage_path)
@@ -619,21 +474,43 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "config_name",
         nargs="?",
-        default="quadcopter_500mm",
-        choices=sorted(CONFIGS),
-        help="Drone configuration to generate.",
+        default=None,
+        help="Drone config group option to generate, e.g. quadcopter_500mm.",
     )
     parser.add_argument(
         "--output-dir",
-        default=ASSETS_DIR,
+        default=None,
         help="Directory where the generated .usda file will be written.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--config-dir",
+        default=str(CONFIG_DIR),
+        help="Hydra config directory for USD-builder configs.",
+    )
+    args, overrides = parser.parse_known_args()
+    args.overrides = overrides
+    return args
+
+
+def _hydra_overrides_from_args(args: argparse.Namespace) -> list[str]:
+    overrides = list(args.overrides)
+    if args.config_name:
+        overrides.insert(0, f"drone={args.config_name}")
+    if args.output_dir:
+        overrides.append(f"output_dir={args.output_dir}")
+    return overrides
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    config_name = args.config_name
 
-    path = build_drone_usd(CONFIGS[config_name], args.output_dir)
+    config = load_builder_config(
+        config_dir=args.config_dir,
+        overrides=_hydra_overrides_from_args(args),
+    )
+    path = build_drone_usd(
+        config.drone,
+        output_dir=config.output_dir,
+        pusher_drive=config.pusher_drive,
+    )
     print(f"Saved: {path}")

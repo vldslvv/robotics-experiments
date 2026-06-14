@@ -7,21 +7,6 @@ enabled: true
 # Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
 articulation_path: ""
 
-# Rotor thrust marker paths in PX4 motor-index order:
-# FR-CW, RL-CW, FL-CCW, RR-CCW for PX4 none_iris / Generic Quad X.
-# PX4 rotor coordinates are FRD (Y right); Isaac marker positions are FLU
-# (Y left), so the USD motor names below look mirrored relative to PX4's
-# CA_ROTOR*_PY signs. Paths are joined under the articulation root if relative.
-# The markers are visual USD prims; thrust is applied to the drone rigid body
-# at these body-local positions.
-rotor_link_paths:
-  - body/propulsion/motor_4/prop
-  - body/propulsion/motor_2/prop
-  - body/propulsion/motor_1/prop
-  - body/propulsion/motor_3/prop
-
-num_rotors: 4
-
 # Legacy linear model setting kept for staged tests. The live PX4 bridge uses
 # Pegasus' quadratic rotor model below.
 max_rotor_force_n: 8.0
@@ -34,7 +19,6 @@ zero_position_armed: [100.0, 100.0, 100.0, 100.0]
 # Pegasus default quadratic thrust curve and multirotor body dynamics.
 rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
 rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
-rot_dir: [-1.0, -1.0, 1.0, 1.0]
 min_rotor_velocity: [0.0, 0.0, 0.0, 0.0]
 max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0]
 linear_drag: [0.50, 0.30, 0.0]

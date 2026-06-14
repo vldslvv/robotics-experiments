@@ -13,7 +13,7 @@ full bridge) by flipping the flag.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 import carb
 import omni.physx
@@ -85,18 +85,30 @@ class BridgeHost:
             PegasusQuadraticThrustModel,
             Px4Bridge,
             Px4MavlinkPort,
+            discover_px4_rotor_mapping,
         )
 
-        rotor_paths = self._resolve_rotor_paths(self._cfg.rotor_link_paths)
-        if len(rotor_paths) != self._cfg.num_rotors:
+        import omni.usd
+
+        articulation_path = self._cfg.articulation_path or self._articulation_path
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
             carb.log_error(
-                f"[{_LOG_PREFIX}] rotor_link_paths has {len(rotor_paths)} entries; "
-                f"expected num_rotors={self._cfg.num_rotors}. Bridge not started."
+                f"[{_LOG_PREFIX}] cannot discover PX4 rotors without an open USD stage. "
+                "Bridge not started."
             )
             return
+        try:
+            rotor_mapping = discover_px4_rotor_mapping(stage, articulation_path)
+        except Exception as exc:
+            carb.log_error(f"[{_LOG_PREFIX}] PX4 rotor discovery failed: {exc}")
+            return
+
+        rotor_paths = rotor_mapping.rotor_link_paths
+        num_rotors = rotor_mapping.num_rotors
 
         port = Px4MavlinkPort(
-            num_rotors=self._cfg.num_rotors,
+            num_rotors=num_rotors,
             connection_type=self._cfg.connection_type,
             connection_ip=self._cfg.connection_ip,
             connection_baseport=self._cfg.connection_baseport,
@@ -120,15 +132,14 @@ class BridgeHost:
             sensor_debug_log_interval=self._cfg.sensor_debug_log_interval,
         )
         thrust_model = PegasusQuadraticThrustModel(
-            num_rotors=self._cfg.num_rotors,
+            num_rotors=num_rotors,
             rotor_constant=self._cfg.rotor_constant,
             rolling_moment_coefficient=self._cfg.rolling_moment_coefficient,
-            rot_dir=self._cfg.rot_dir,
+            rot_dir=rotor_mapping.rot_dir,
             min_rotor_velocity=self._cfg.min_rotor_velocity,
             max_rotor_velocity=self._cfg.max_rotor_velocity,
             linear_drag=self._cfg.linear_drag,
         )
-        articulation_path = self._cfg.articulation_path or self._articulation_path
         endpoint = (
             f"{self._cfg.connection_type}:{self._cfg.connection_ip}:"
             f"{self._cfg.connection_baseport + self._cfg.vehicle_id}"
@@ -136,6 +147,7 @@ class BridgeHost:
         carb.log_info(
             f"[{_LOG_PREFIX}] starting PX4 bridge endpoint={endpoint} "
             f"articulation={articulation_path} rotor_paths={rotor_paths} "
+            f"rot_dir={rotor_mapping.rot_dir} "
             f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
             f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
@@ -206,16 +218,3 @@ class BridgeHost:
                 f"[{_LOG_PREFIX}] on_physics_step error at tick={self._physics_tick_count} "
                 f"sim_time_us={bridge_sim_time_us}: {exc}"
             )
-
-    def _resolve_rotor_paths(self, configured: List[str]) -> List[str]:
-        """Prefix relative rotor link paths with the articulation root."""
-        root = self._cfg.articulation_path or self._articulation_path
-        out: List[str] = []
-        for p in configured:
-            if not p:
-                continue
-            if p.startswith("/"):
-                out.append(p)
-            else:
-                out.append(f"{root.rstrip('/')}/{p}")
-        return out

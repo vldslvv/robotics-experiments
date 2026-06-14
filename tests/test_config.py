@@ -54,13 +54,8 @@ def test_default_config_loads_from_root_experiment_config():
     )
     assert config.px4.connection_baseport == expected_px4.connection_baseport
     assert config.drone.usd_path.endswith("/quadcopter_500mm.usda")
-    assert config.px4.num_rotors == 4
-    assert config.px4.rotor_link_paths == [
-        "body/propulsion/motor_4/prop",
-        "body/propulsion/motor_2/prop",
-        "body/propulsion/motor_1/prop",
-        "body/propulsion/motor_3/prop",
-    ]
+    assert not hasattr(config.px4, "num_rotors")
+    assert not hasattr(config.px4, "rotor_link_paths")
     assert config.px4.connection_type == "tcpin"
     assert config.px4.px4_autolaunch is False
     assert config.px4.enabled is True
@@ -72,7 +67,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]
     assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
     assert config.px4.rotor_constant == [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
-    assert config.px4.rot_dir == [-1.0, -1.0, 1.0, 1.0]
+    assert not hasattr(config.px4, "rot_dir")
     assert config.px4.linear_drag == [0.50, 0.30, 0.0]
     assert config.px4.debug_log_path == (
         "/isaac-sim/proj/px4/logs/{date}/{time}_bridge.log"

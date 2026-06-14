@@ -147,23 +147,15 @@ class Px4BridgeConfig:
         articulation_path: USD path of the drone root articulation. When
             empty (default), the host derives it from the drone-spawner
             config (``<default_prim>/<drone.prim_name>``).
-        rotor_link_paths: USD paths of rotor thrust marker prims **in PX4
-            motor-index order** (FR-CW, RL-CW, FL-CCW, RR-CCW for Generic
-            Quad X). PX4 rotor coordinates are FRD while Isaac marker
-            positions are FLU, so PX4 right maps to Isaac negative Y. The
-            Isaac adapter applies thrust to the drone rigid body at these
-            marker positions; the marker prims are not simulated as separate
-            rotor bodies. The host prefixes them with the articulation path if
-            they start with a ``/``, otherwise treats them as relative.
-        num_rotors: Number of rotors driven by the bridge.
         max_rotor_force_n: Legacy staging value for the linear thrust model.
             The default PX4 path uses Pegasus' quadratic rotor model instead.
         input_offset, input_scaling, zero_position_armed: Pegasus MAVLink
             actuator scaling from PX4 controls to rotor angular velocity
             references.
-        rotor_constant, rolling_moment_coefficient, rot_dir,
-            min_rotor_velocity, max_rotor_velocity: Pegasus quadratic thrust
-            curve parameters.
+        rotor_constant, rolling_moment_coefficient, min_rotor_velocity,
+            max_rotor_velocity: Pegasus quadratic thrust curve parameters.
+            Rotor count and spin direction come from authored USD rotor
+            metadata on the spawned drone asset.
         linear_drag: Pegasus body-frame linear drag coefficients.
         connection_type: "tcpin" (bridge listens) or "tcpout".
         connection_ip: Address used by ``connection_type``.
@@ -210,15 +202,12 @@ class Px4BridgeConfig:
 
     enabled: bool
     articulation_path: str
-    rotor_link_paths: List[str]
-    num_rotors: int
     max_rotor_force_n: float
     input_offset: List[float]
     input_scaling: List[float]
     zero_position_armed: List[float]
     rotor_constant: List[float]
     rolling_moment_coefficient: List[float]
-    rot_dir: List[float]
     min_rotor_velocity: List[float]
     max_rotor_velocity: List[float]
     linear_drag: List[float]

@@ -1,0 +1,173 @@
+name: quadcopter_500mm
+output_filename: quadcopter_500mm.usda
+prim_name: quadcopter
+
+total_mass: 1.5
+diagonal_inertia: [0.0347, 0.0458, 0.0977]
+center_of_mass: [0.0, 0.0, 0.01]
+
+center_plate:
+  name: S500-class carbon center plate
+  size: [0.12, 0.12, 0.006]
+  position: [0.0, 0.0, 0.0]
+  mass: 0.350
+
+arms:
+  - name: Arm 1
+    radius: 0.008
+    height: 0.6363961030678928
+    position: [0.125, 0.125, 0.0]
+    rotation_deg: [0.0, 90.0, 45.0]
+  - name: Arm 2
+    radius: 0.008
+    height: 0.6363961030678928
+    position: [-0.125, 0.125, 0.0]
+    rotation_deg: [0.0, 90.0, 135.0]
+  - name: Arm 3
+    radius: 0.008
+    height: 0.6363961030678928
+    position: [-0.125, -0.125, 0.0]
+    rotation_deg: [0.0, 90.0, -135.0]
+  - name: Arm 4
+    radius: 0.008
+    height: 0.6363961030678928
+    position: [0.125, -0.125, 0.0]
+    rotation_deg: [0.0, 90.0, -45.0]
+
+motors:
+  - name: M1 FR CCW
+    position: [0.25, 0.25, 0.02]
+    spin_dir: CCW
+    px4_motor_index: 2
+    motor:
+      name: X2212-class brushless motor
+      radius: 0.015
+      height: 0.03
+      position: [0.0, 0.0, 0.0]
+      mass: 0.057
+    esc:
+      name: BLHeli_S 20A ESC
+      size: [0.025, 0.015, 0.004]
+      position: [-0.1, -0.1, -0.015]
+      mass: 0.007
+    propeller:
+      name: 9045 propeller
+      radius: 0.1143
+      height: 0.002
+      position: [0.0, 0.0, 0.02]
+      mass: 0.008
+  - name: M2 FL CW
+    position: [-0.25, 0.25, 0.02]
+    spin_dir: CW
+    px4_motor_index: 1
+    motor:
+      name: X2212-class brushless motor
+      radius: 0.015
+      height: 0.03
+      position: [0.0, 0.0, 0.0]
+      mass: 0.057
+    esc:
+      name: BLHeli_S 20A ESC
+      size: [0.025, 0.015, 0.004]
+      position: [0.1, -0.1, -0.015]
+      mass: 0.007
+    propeller:
+      name: 9045 propeller
+      radius: 0.1143
+      height: 0.002
+      position: [0.0, 0.0, 0.02]
+      mass: 0.008
+  - name: M3 RL CCW
+    position: [-0.25, -0.25, 0.02]
+    spin_dir: CCW
+    px4_motor_index: 3
+    motor:
+      name: X2212-class brushless motor
+      radius: 0.015
+      height: 0.03
+      position: [0.0, 0.0, 0.0]
+      mass: 0.057
+    esc:
+      name: BLHeli_S 20A ESC
+      size: [0.025, 0.015, 0.004]
+      position: [0.1, 0.1, -0.015]
+      mass: 0.007
+    propeller:
+      name: 9045 propeller
+      radius: 0.1143
+      height: 0.002
+      position: [0.0, 0.0, 0.02]
+      mass: 0.008
+  - name: M4 RR CW
+    position: [0.25, -0.25, 0.02]
+    spin_dir: CW
+    px4_motor_index: 0
+    motor:
+      name: X2212-class brushless motor
+      radius: 0.015
+      height: 0.03
+      position: [0.0, 0.0, 0.0]
+      mass: 0.057
+    esc:
+      name: BLHeli_S 20A ESC
+      size: [0.025, 0.015, 0.004]
+      position: [-0.1, 0.1, -0.015]
+      mass: 0.007
+    propeller:
+      name: 9045 propeller
+      radius: 0.1143
+      height: 0.002
+      position: [0.0, 0.0, 0.02]
+      mass: 0.008
+
+pixhawk:
+  name: Pixhawk 6C
+  size: [0.050, 0.038, 0.016]
+  position: [0.0, 0.0, 0.008]
+  mass: 0.035
+
+jetson:
+  name: Jetson Orin Nano Super
+  size: [0.100, 0.080, 0.030]
+  position: [-0.03, 0.0, 0.015]
+  mass: 0.165
+
+realsense:
+  name: Intel RealSense D435i
+  size: [0.090, 0.025, 0.025]
+  position: [0.07, 0.0, 0.01]
+  mass: 0.072
+  rotation_deg: [0.0, -15.0, 0.0]
+
+optical_flow:
+  name: PMW3901 optical flow
+  size: [0.020, 0.020, 0.005]
+  position: [0.0, 0.0, -0.06]
+  mass: 0.005
+  rotation_deg: [180.0, 0.0, 0.0]
+
+lidar:
+  name: Slamtec RPLiDAR A2
+  radius: 0.038
+  height: 0.041
+  position: [0.0, 0.0, 0.0205]
+  mass: 0.190
+
+battery:
+  name: 4S 5000 mAh LiPo
+  size: [0.140, 0.045, 0.025]
+  position: [0.0, 0.0, -0.03]
+  mass: 0.300
+
+wiring:
+  name: PDB + power module
+  size: [0.050, 0.030, 0.010]
+  position: [0.0, 0.0, 0.0]
+  mass: 0.100
+
+pusher_pad:
+  name: Spring-loaded pusher pad
+  radius: 0.015
+  height: 0.008
+  position: [0.11, 0.0, 0.01]
+  mass: 0.040

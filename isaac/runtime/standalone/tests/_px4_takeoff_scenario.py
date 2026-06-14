@@ -93,14 +93,13 @@ def _latest_log_hint(px4_container_log_name: str) -> str:
 
 
 def _resolve_drone_paths(stage, env, px4_config) -> tuple[str, list[str]]:
+    from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
+
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     articulation_path = px4_config.articulation_path or f"{parent}/{env.drone.prim_name}"
-    rotor_paths = [
-        path if path.startswith("/") else f"{articulation_path}/{path}"
-        for path in px4_config.rotor_link_paths
-    ]
-    return articulation_path, rotor_paths
+    rotor_mapping = discover_px4_rotor_mapping(stage, articulation_path)
+    return articulation_path, rotor_mapping.rotor_link_paths
 
 
 def _bridge_received_first_heartbeat(host) -> bool:
@@ -691,6 +690,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     context.report(f"{options.test_name}: applying configured simulation settings")
     apply_settings(context.stage)
 
+    context.report(f"{options.test_name}: spawning configured drone")
+    spawn_drone(context.stage, env.drone)
+
     articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env, px4_config)
     context.report(f"{options.test_name}: using drone articulation path {articulation_path}")
     context.report(f"{options.test_name}: using rotor paths {rotor_paths}")
@@ -703,8 +705,6 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     timeline = omni.timeline.get_timeline_interface()
     mav = None
 
-    context.report(f"{options.test_name}: spawning configured drone")
-    spawn_drone(context.stage, env.drone)
     try:
         context.report(f"{options.test_name}: starting PX4 bridge host")
         host.start()

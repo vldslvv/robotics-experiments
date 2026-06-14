@@ -33,14 +33,13 @@ def _assert_finite_array(value, *, shape: tuple[int, ...], label: str) -> None:
 
 
 def _resolve_drone_paths(stage, env) -> tuple[str, list[str]]:
+    from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
+
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     articulation_path = env.px4.articulation_path or f"{parent}/{env.drone.prim_name}"
-    rotor_paths = [
-        path if path.startswith("/") else f"{articulation_path}/{path}"
-        for path in env.px4.rotor_link_paths
-    ]
-    return articulation_path, rotor_paths
+    rotor_mapping = discover_px4_rotor_mapping(stage, articulation_path)
+    return articulation_path, rotor_mapping.rotor_link_paths
 
 
 def _assert_configured_prims_exist(stage, articulation_path: str, rotor_paths: list[str]) -> None:
@@ -100,10 +99,6 @@ def _run_test(context: SceneTestContext) -> None:
         articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env)
         context.report(f"{TEST_NAME}: using drone articulation path {articulation_path}")
         _assert_configured_prims_exist(context.stage, articulation_path, rotor_paths)
-        if len(rotor_paths) != env.px4.num_rotors:
-            raise AssertionError(
-                f"Configured {len(rotor_paths)} rotor paths; expected {env.px4.num_rotors}"
-            )
 
         _advance(context, SETTLE_UPDATES)
         timeline.play()
@@ -117,17 +112,17 @@ def _run_test(context: SceneTestContext) -> None:
         articulation_io.initialize()
         if not articulation_io.is_initialized:
             raise AssertionError("Isaac articulation I/O did not initialize")
-        if articulation_io.num_rotors != env.px4.num_rotors:
+        if articulation_io.num_rotors != len(rotor_paths):
             raise AssertionError(
                 f"Isaac articulation I/O has {articulation_io.num_rotors} rotors; "
-                f"expected {env.px4.num_rotors}"
+                f"expected {len(rotor_paths)}"
             )
 
         context.report(f"{TEST_NAME}: reading spawned drone state")
         state = articulation_io.read_state(sim_time_us=int(PHYSICS_DT_S * 1_000_000))
         _assert_vehicle_state(state, sim_time_us=int(PHYSICS_DT_S * 1_000_000))
 
-        forces_n = np.full(env.px4.num_rotors, 0.25, dtype=np.float64)
+        forces_n = np.full(len(rotor_paths), 0.25, dtype=np.float64)
         context.report(f"{TEST_NAME}: applying per-rotor forces through Isaac")
         articulation_io.apply_forces(forces_n)
         _advance(context, SETTLE_UPDATES)
