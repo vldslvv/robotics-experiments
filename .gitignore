@@ -208,8 +208,6 @@ __marimo__/
 
 # Ignore isaac-sim caches
 isaac/isaac-sim/
-# Ignore large assets and scenes
-isaac/assets/
 
 # Ignore runtime logs/state from external stacks
 px4/logs/
