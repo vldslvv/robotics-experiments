@@ -1,9 +1,9 @@
 """Standalone Isaac/PX4 negative takeoff stability scenario.
 
 This test runs the same arm/takeoff command flow as the positive stability
-test, then injects a one-rotor thrust fault after PX4 accepts takeoff. It
-passes only if the scenario reaches takeoff and detects the resulting flight
-instability through the stability envelope.
+test, then injects a hard one-rotor thrust fault plus a sustained body torque
+after PX4 accepts takeoff. It passes only if the scenario reaches takeoff and
+detects the resulting flight instability through the stability envelope.
 
 Run through the host Make target so PX4 lifecycle and logs are owned outside
 Isaac:
@@ -24,14 +24,27 @@ DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 TEST_NAME = "px4_takeoff_instability_detection"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_instability_px4.log"
 FAULTED_ROTOR_INDEX = 0
-FAULTED_ROTOR_COMMAND_SCALE = 0.25
+FAULTED_ROTOR_COMMAND_SCALE = 0.0
+FAULT_BODY_TORQUE_BIAS_N_M = np.array([4.0, 0.0, 0.0], dtype=np.float64)
 
 
-class _RotorCommandScaleFault:
-    def __init__(self, base_model, *, rotor_index: int, command_scale: float):
+class _RotorFailureFault:
+    def __init__(
+        self,
+        base_model,
+        *,
+        rotor_index: int,
+        command_scale: float,
+        body_torque_bias_n_m: np.ndarray,
+    ):
         self._base_model = base_model
         self._rotor_index = int(rotor_index)
         self._command_scale = float(command_scale)
+        self._body_torque_bias_n_m = np.asarray(body_torque_bias_n_m, dtype=np.float64)
+        if self._body_torque_bias_n_m.shape != (3,):
+            raise ValueError(
+                f"Body torque fault expects shape (3,), got {self._body_torque_bias_n_m.shape}"
+            )
 
     @property
     def num_rotors(self) -> int:
@@ -48,9 +61,17 @@ class _RotorCommandScaleFault:
         return self._base_model.commands_to_forces(self._faulted_controls(controls))
 
     def commands_to_dynamics(self, controls, *, linear_body_velocity_flu=None):
-        return self._base_model.commands_to_dynamics(
+        dynamics = self._base_model.commands_to_dynamics(
             self._faulted_controls(controls),
             linear_body_velocity_flu=linear_body_velocity_flu,
+        )
+        return type(dynamics)(
+            forces_n=dynamics.forces_n,
+            body_torque_n_m=(
+                np.asarray(dynamics.body_torque_n_m, dtype=np.float64)
+                + self._body_torque_bias_n_m
+            ),
+            body_drag_n=dynamics.body_drag_n,
         )
 
 
@@ -67,14 +88,16 @@ def _inject_one_rotor_fault(context: SceneTestContext, host) -> None:
             f"thrust model size {thrust_model.num_rotors}"
         )
 
-    bridge._thrust_model = _RotorCommandScaleFault(
+    bridge._thrust_model = _RotorFailureFault(
         thrust_model,
         rotor_index=FAULTED_ROTOR_INDEX,
         command_scale=FAULTED_ROTOR_COMMAND_SCALE,
+        body_torque_bias_n_m=FAULT_BODY_TORQUE_BIAS_N_M,
     )
     context.report(
         f"{TEST_NAME}: injected rotor {FAULTED_ROTOR_INDEX} command scale fault "
-        f"after accepted takeoff command: scale={FAULTED_ROTOR_COMMAND_SCALE:.2f}"
+        f"after accepted takeoff command: scale={FAULTED_ROTOR_COMMAND_SCALE:.2f} "
+        f"body_torque_bias_n_m={FAULT_BODY_TORQUE_BIAS_N_M.tolist()}"
     )
 
 

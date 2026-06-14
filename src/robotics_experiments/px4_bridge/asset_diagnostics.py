@@ -14,6 +14,35 @@ RootBodyMismatchPolicy = Literal["warn", "fail", "ignore"]
 _LOGGER = logging.getLogger(__name__)
 
 
+# NOTE: Known noisy diagnostic. With the spawned quadcopter asset and
+# `drone.spawn_stationary = true`, this validation emits a "PX4 root/body pose
+# mismatch" WARNING on every bridge start (seen in test-integration-px4-takeoff,
+# -instability, and -drone-articulation). The reported delta is a fixed,
+# asset-intrinsic, pure-Z TRANSLATION of ~0.1045 m (translation_delta_m ~= 0.1045,
+# orientation_delta_rad == 0): spawn lifts the articulation root so the asset's
+# lowest geometry clears the ground, while the rigid `body` sub-prim keeps its
+# authored local position.
+#
+# This particular offset is benign: the bridge reads state and applies thrust
+# entirely in the /body frame (see IsaacArticulationIO.read_state and
+# _resolve_rotor_positions_body), so the root translation never reaches PX4. An
+# ORIENTATION mismatch is the genuinely dangerous case (it would corrupt PX4
+# attitude/state). The current single `policy` + threshold conflates the two, so
+# we cannot silence the benign translation noise without also losing the
+# orientation safety check.
+#
+# Possible improvements (deferred - keep this analysis so it is not re-derived):
+#   1. Split severity: handle translation and orientation independently
+#      (e.g. orientation_policy default "warn", translation_policy default
+#      "ignore"), keeping the orientation check while silencing the static
+#      translation offset.
+#   2. Make policy + thresholds configurable through the Hydra `px4` group
+#      (add fields to Px4BridgeConfig + configs/experiment/px4/default.yaml and
+#      thread RootBodyPoseDiagnosticParams from bridge_host -> Px4Bridge ->
+#      IsaacArticulationIO, which already accepts it) so a scene can escalate or
+#      ignore as needed.
+#   3. Fix the asset so the articulation root coincides with the body (offset 0).
+#      Out of scope here: that regenerates/commits a USD asset.
 @dataclass(frozen=True)
 class RootBodyPoseDiagnosticParams:
     """Configuration for root/body pose validation."""
