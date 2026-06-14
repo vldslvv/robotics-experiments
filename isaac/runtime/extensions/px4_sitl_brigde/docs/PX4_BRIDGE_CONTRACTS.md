@@ -11,12 +11,16 @@ Both contracts execute synchronously per physics tick. Failure on either side st
 
 ## Scope and non-scope
 
-The bridge has exactly one responsibility: convert articulation state to PX4-compatible HIL messages and apply PX4's actuator commands as forces on motor links.
+The bridge has exactly one responsibility: orchestrate a physics tick by reading
+the resolved Isaac body state, sending PX4-compatible HIL messages, receiving
+PX4 actuator commands, converting them through the thrust model, and applying
+the resulting forces through Isaac I/O.
 
 The bridge does NOT:
 
 - Own the drone USD or any scene primitive.
 - Register physics step callbacks (the scene-owning extension calls into the bridge).
+- Discover or author rotor metadata; that is handled before bridge construction.
 - Publish ROS 2 topics.
 - Run navigation, RL policy, or state machine logic.
 - Synthesize camera, LiDAR, or RealSense data.
@@ -44,12 +48,12 @@ The bridge is reactive: it has no opinion about when ticks happen. When called, 
 
 | Field | Frame | Units | Source on Isaac side |
 |-------|-------|-------|---------------------|
-| Position | World | meters | `articulation.get_world_pose()[0]` |
-| Orientation | World→Body, quaternion `(w, x, y, z)` | dimensionless | `articulation.get_world_pose()[1]` |
-| Linear velocity | World | m/s | `articulation.get_linear_velocity()` |
-| Angular velocity | Body | rad/s | `articulation.get_angular_velocity()` (verify body vs world per Isaac Sim version) |
-| Linear acceleration | Body | m/s² | finite-difference of velocity, or direct API if available |
-| Sim time | — | microseconds | `SimulationContext.current_time × 1e6` |
+| Position | ENU world | meters | resolved body prim pose when available; articulation root only as a logged fallback |
+| Orientation | FLU body relative to ENU world, quaternion `(w, x, y, z)` | dimensionless | resolved body prim pose when available; articulation root only as a logged fallback |
+| Linear velocity | ENU world | m/s | resolved body prim velocity when available; articulation root only as a logged fallback |
+| Angular velocity | FLU body | rad/s | resolved body prim angular velocity when available; articulation root only as a logged fallback |
+| Linear acceleration | ENU world | m/s² | finite difference of linear velocity |
+| Sim time | — | microseconds | `BridgeHost` sim-time counter, reset to zero after any startup settle delay |
 
 ### Frame conventions
 
@@ -79,7 +83,11 @@ This separation is required because the thrust model is what gets randomized dur
 
 ### Motor index ordering
 
-The single most error-prone detail. The bridge accepts a list of rotor thrust marker USD paths in **PX4 motor-index order**, not in scene-graph order or alphabetical order. These marker prims locate where thrust is applied on the drone body; they are not simulated as separate rotor bodies.
+The single most error-prone detail. The default runtime discovers rotor thrust
+marker USD paths from the spawned asset and passes them to `Px4Bridge` in **PX4
+motor-index order**, not in scene-graph order or alphabetical order. These
+marker prims locate where thrust is applied on the drone body; they are not
+simulated as separate rotor bodies.
 
 For PX4's `Generic Quadrotor X` airframe:
 
@@ -90,36 +98,82 @@ For PX4's `Generic Quadrotor X` airframe:
 
 For PX4's `Octocopter Coaxial X` (Stage 2 X8): 8 motors with airframe-specific upper/lower CW/CCW pairing — different list, must be re-derived per airframe.
 
-A wrong list means the drone arms, spins up, and immediately flips. Validate via a unit test that asserts geometric layout matches index ordering.
+A wrong list means the drone arms, spins up, and immediately flips. Rotor
+discovery must validate that marker paths resolve, are unique, have plausible
+arm geometry, and match authored spin direction metadata where present.
+
+### Construction ownership
+
+The local implementation intentionally splits Pegasus' monolithic `Vehicle`
+lifecycle into small owners. Sync work must preserve these boundaries:
+
+| Layer | Owns | Must not own |
+|-------|------|--------------|
+| `DroneSpawner_python.extension` | Timeline and stage event handling; spawn on PLAY; teardown on STOP, PAUSE, shutdown, or stage-open | PX4 sockets, MAVLink, thrust math |
+| `robotics_experiments.drone.spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
+| `BridgeHost` | PX4 enable gate, physics-step subscription, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Drone USD authoring, MAVLink packet logic |
+| `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
+| `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
+| `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
+
+### Construction checklist
+
+Before a PX4 bridge tick is allowed to run:
+
+- `px4.enabled` is true. Disabled PX4 must not construct `BridgeHost` or import
+  the bridge internals.
+- The drone root exists under the stage default prim, unless
+  `px4.articulation_path` explicitly overrides it.
+- The resolved body prim exists and is the same rigid body used for state
+  sampling, body drag, and body reaction torque.
+- Rotor marker paths resolve, are unique, are in PX4 motor-index order, and have
+  nonzero XY arm length.
+- Authored rotor spin direction metadata, when present, matches the discovered
+  PX4/Pegasus `rot_dir`.
+- The physics step rate is compatible with PX4 lockstep and the configured
+  `lockstep_timeout_s`.
+- If `startup_settle_time_s > 0`, Isaac physics may run before the PX4
+  simulator MAVLink endpoint opens. The bridge-facing `sim_time_us` starts at
+  `0` on the first post-settle bridge tick.
+
+`startup_settle_time_s` is an intentional local extension. It lets the spawned
+drone settle in Isaac physics before PX4 initializes its estimator from HIL
+sensor data. Keep it unless PX4 estimator behavior shows that delayed startup is
+harmful.
 
 ### Lifecycle
 
 ```
-[Construction]            cheap; no sockets, no articulation handles
+[Extension startup]       register timeline/stage subscriptions only
         │
         ▼
-[Play pressed]            scene begins simulating
+[Play pressed]            spawn runtime drone USD; construct BridgeHost only
+                            when px4.enabled is true
         │
         ▼
-[First physics tick]      bridge.start() runs:
-                            - acquire SingleArticulation handle (deferred init)
-                            - open TCP connection to PX4
-                            - perform connection handshake
+[BridgeHost.start()]      subscribe to physics steps; optionally wait for
+                            startup_settle_time_s before constructing Px4Bridge
         │
         ▼
-[Each subsequent tick]    bridge.on_physics_step(dt, sim_time_us):
-                            - read articulation state
+[Bridge start]            discover rotor mapping, construct port/thrust model,
+                            acquire body and rotor handles, open TCP connection,
+                            perform PX4 handshake
+        │
+        ▼
+[Each bridge tick]        bridge.on_physics_step(dt, sim_time_us):
+                            - read resolved body state
                             - call port.step()
                             - apply forces to drone body at rotor markers
         │
         ▼
-[Stop / scene teardown]   bridge.stop():
-                            - close TCP connection cleanly
+[Stop / pause / teardown] BridgeHost.stop(), bridge.stop(), then despawn drone:
+                            - close TCP connection cleanly before USD removal
                             (critical — half-closed lockstep socket
                              will hang the next session)
 ```
 
-The bridge MUST be safe to start/stop multiple times within one Isaac session — common during development when pressing Play repeatedly.
+The bridge host and bridge MUST be safe to start/stop multiple times within one
+Isaac session — common during development when pressing Play repeatedly.
 
 ### Failure semantics
 
@@ -141,7 +195,7 @@ class Px4Bridge:
         self,
         *,
         articulation_path: str,         # USD path to drone root
-        rotor_link_paths: list[str],    # rotor marker USD paths in PX4 motor-index order
+        rotor_link_paths: list[str],    # discovered rotor marker paths in PX4 motor-index order
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
     ): ...
