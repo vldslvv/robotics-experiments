@@ -104,9 +104,18 @@ the current contents and the intended home for that kind of code.
   `.python-version` (3.11). Dependencies and the resolver index (including the
   NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
   are locked in `uv.lock`. Do not edit `uv.lock` by hand.
+- The project uses a repo-local uv-managed Python install under `.uv-python/`
+  so sandboxed tools do not need access to user-level Python installs under
+  `/home/vv/.local` or `/home/vv/.pyenv`. `.uv-python/` is local machine state
+  and must not be committed.
 - Initialize or repair the environment with `uv sync --extra dev`. The `dev`
   extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
   intentionally omits it; pass `--extra dev` when you need the tooling.
+- If `.venv` is missing, points outside the repository, or cannot be read from
+  the sandbox, recreate it with the repo-local interpreter:
+  `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then
+  `UV_PYTHON_INSTALL_DIR=.uv-python uv sync --extra dev --managed-python`.
+  After that, normal `uv run ...` and `uv sync ...` commands reuse `.venv`.
 - Always work inside the project venv. Either activate it with
   `source .venv/bin/activate`, or prefix commands with `uv run` (for example
   `uv run pytest`, `uv run ruff check`). Prefer `uv run` for one-off commands so
