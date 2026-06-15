@@ -155,6 +155,7 @@ def _config(**overrides):
         "px4_vehicle_model": "gazebo-classic_iris",
         "lockstep_timeout_s": 1.0,
         "first_heartbeat_timeout_s": 5.0,
+        "max_bootstrap_actuator_lag_s": 2.5,
         "heartbeat_rate_hz": 1.0,
         "startup_settle_time_s": 0.012,
         "gps_enabled": True,

@@ -35,6 +35,14 @@ px4_vehicle_model: gazebo-classic_iris
 
 lockstep_timeout_s: 1.0
 first_heartbeat_timeout_s: 5.0
+# Upper bound (seconds) on PX4's first HIL_ACTUATOR_CONTROLS lag. A host-loaded
+# PX4 SITL startup can emit its first actuator packet several seconds behind sim
+# time; accepting that as the baseline makes the bridge fly on multi-second-stale
+# commands and destabilizes takeoff. On exceed the bridge disconnects (fail
+# closed) with an "actuator bootstrap lag too large" reason so the bad startup is
+# caught early. Chosen just above observed healthy startups (<=2.45s) and below
+# observed failing ones (>=3.09s). Set to 0 or negative to disable.
+max_bootstrap_actuator_lag_s: 2.5
 heartbeat_rate_hz: 1.0
 
 # Delay opening the PX4 simulator MAVLink endpoint until Isaac physics has

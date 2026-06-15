@@ -290,6 +290,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         zero_position_armed: list[float] | None = None,
         lockstep_timeout_s: float = 0.1,
         first_heartbeat_timeout_s: float = 5.0,
+        max_bootstrap_actuator_lag_s: float = 5.0,
         heartbeat_rate_hz: float = 1.0,
         gps_enabled: bool = True,
         gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
@@ -307,6 +308,15 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep_timeout_s)
         self._first_heartbeat_timeout_s = float(first_heartbeat_timeout_s)
+        # Upper bound on the accepted first-actuator (bootstrap) lag. A value of
+        # zero or below disables the guard (matching the max_tilt_angle_deg
+        # convention). Stored as integer microseconds for comparison against
+        # sim-time deltas.
+        self._max_bootstrap_actuator_lag_us: Optional[int] = (
+            None
+            if max_bootstrap_actuator_lag_s <= 0
+            else int(max_bootstrap_actuator_lag_s * 1_000_000)
+        )
         self._heartbeat_period_s = 1.0 / float(heartbeat_rate_hz) if heartbeat_rate_hz > 0 else None
         self._gps_enabled = bool(gps_enabled)
         self._gps_period_s = 1.0 / float(gps_send_rate_hz) if gps_send_rate_hz > 0 else None
@@ -370,6 +380,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         _LOGGER.info(
             "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
             "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
+            "max_bootstrap_actuator_lag_us=%s "
             "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
             "debug_log=%s sensor_debug_interval=%d",
             connection_type,
@@ -379,6 +390,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._num_rotors,
             self._lockstep_timeout_s,
             self._first_heartbeat_timeout_s,
+            self._max_bootstrap_actuator_lag_us,
             self._gps_enabled,
             gps_send_rate_hz,
             self._sensor_noise_enabled,
@@ -708,6 +720,26 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             # simulation timestamp while HIL output starts. Accept that first
             # lag as a startup baseline, then fail closed if later packets fall
             # materially farther behind instead of applying stale motor output.
+            #
+            # Guard: a pathological PX4 SITL startup (host-load dependent) can
+            # produce a multi-second bootstrap lag. Accepting it as the baseline
+            # would let the bridge apply multi-second-stale motor commands for
+            # the rest of the run, which destabilizes takeoff. Bound the accepted
+            # bootstrap lag and fail closed (distinct reason) when it is too
+            # large, so the failure is caught early with a self-identifying log.
+            if (
+                self._max_bootstrap_actuator_lag_us is not None
+                and actuator_lag_us > self._max_bootstrap_actuator_lag_us
+            ):
+                self._mark_disconnected(
+                    "actuator bootstrap lag too large: "
+                    f"sim_time_us={sim_time_us} "
+                    f"last_actuator_us={self._last_actuator_receive_us} "
+                    f"lag_us={actuator_lag_us} "
+                    f"max_us={self._max_bootstrap_actuator_lag_us}",
+                    close_backend=True,
+                )
+                return False
             self._actuator_lag_baseline_us = actuator_lag_us
             if actuator_lag_us > stale_limit_us:
                 _LOGGER.info(

@@ -898,6 +898,71 @@ def test_mavlink_port_accepts_slow_first_bootstrap_actuator(monkeypatch):
     assert port._last_disconnect_reason is None
 
 
+def test_mavlink_port_disconnects_when_bootstrap_lag_exceeds_max(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep_timeout_s=1.0, max_bootstrap_actuator_lag_s=2.5
+    )
+    backend = port._backend
+    bootstrap_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=68_000,
+        controls=[0.0, 0.0, 0.0, 0.0],
+        mode=1,
+        flags=1,
+    )
+    connection = _FakeConnection([bootstrap_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._last_sensor_period_us = 4_000
+    # lag = 3_000_000 - 68_000 = 2_932_000 us > 2_500_000 us cap.
+    commands = port.step(VehicleState.hover_at(sim_time_us=3_000_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is False
+    assert backend.stopped is True
+    assert backend._connection is None
+    assert port._actuator_lag_baseline_us is None
+    assert port._last_disconnect_reason.startswith("actuator bootstrap lag too large")
+    assert "lag_us=2932000" in port._last_disconnect_reason
+    assert "max_us=2500000" in port._last_disconnect_reason
+
+
+def test_mavlink_port_bootstrap_guard_disabled_accepts_huge_lag(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep_timeout_s=1.0, max_bootstrap_actuator_lag_s=0.0
+    )
+    backend = port._backend
+    bootstrap_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=68_000,
+        controls=[0.0, 0.0, 0.0, 0.0],
+        mode=1,
+        flags=1,
+    )
+    connection = _FakeConnection([bootstrap_msg])
+    backend._connection = connection
+    backend._received_first_actuator = True
+    port._last_sensor_period_us = 4_000
+
+    port.start()
+    port._last_sensor_period_us = 4_000
+    # With the guard disabled, a multi-second bootstrap lag is accepted as the
+    # baseline (pre-guard behavior) instead of disconnecting.
+    commands = port.step(VehicleState.hover_at(sim_time_us=3_000_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is True
+    assert backend.stopped is False
+    assert port._last_actuator_receive_us == 68_000
+    assert port._actuator_lag_baseline_us == 2_932_000
+    assert port._last_disconnect_reason is None
+
+
 def test_mavlink_port_accepts_actuator_within_freshness_limit(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)

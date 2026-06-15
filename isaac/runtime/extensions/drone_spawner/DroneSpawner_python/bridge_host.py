@@ -121,6 +121,7 @@ class BridgeHost:
             zero_position_armed=self._cfg.zero_position_armed,
             lockstep_timeout_s=self._cfg.lockstep_timeout_s,
             first_heartbeat_timeout_s=self._cfg.first_heartbeat_timeout_s,
+            max_bootstrap_actuator_lag_s=self._cfg.max_bootstrap_actuator_lag_s,
             heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
             gps_enabled=self._cfg.gps_enabled,
             gps_send_rate_hz=self._cfg.gps_send_rate_hz,
@@ -151,6 +152,7 @@ class BridgeHost:
             f"rot_dir={rotor_mapping.rot_dir} "
             f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
             f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
+            f"max_bootstrap_actuator_lag_s={self._cfg.max_bootstrap_actuator_lag_s} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
             f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "
             f"debug_log_path={self._cfg.debug_log_path}"

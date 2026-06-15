@@ -174,6 +174,15 @@ class Px4BridgeConfig:
         first_heartbeat_timeout_s: Hard deadline on receiving PX4's first
             heartbeat after the port starts. On timeout, the bridge marks
             the port disconnected instead of waiting indefinitely.
+        max_bootstrap_actuator_lag_s: Upper bound on the lag of PX4's first
+            HIL_ACTUATOR_CONTROLS packet relative to current sim time. A
+            host-load-dependent PX4 SITL startup can emit its first actuator
+            packet several seconds behind; accepting that as the steady-state
+            baseline makes the bridge apply multi-second-stale motor commands
+            and destabilizes takeoff. When the first lag exceeds this bound the
+            bridge disconnects (fail closed) with a distinct "actuator bootstrap
+            lag too large" reason, catching the pathological startup early. Set
+            to zero or a negative value to disable the guard.
         heartbeat_rate_hz: Wall-clock rate for bridge-originated MAVLink
             heartbeat messages.
         startup_settle_time_s: Sim-time delay before opening the PX4
@@ -223,6 +232,7 @@ class Px4BridgeConfig:
     px4_vehicle_model: str
     lockstep_timeout_s: float
     first_heartbeat_timeout_s: float
+    max_bootstrap_actuator_lag_s: float
     heartbeat_rate_hz: float
     startup_settle_time_s: float
     gps_enabled: bool

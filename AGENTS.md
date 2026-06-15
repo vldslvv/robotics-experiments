@@ -96,6 +96,15 @@ the current contents and the intended home for that kind of code.
   actuator timestamps become materially stale relative to that baseline and the
   current simulation time, the bridge must disconnect and return zero rotor
   commands instead of applying old motor outputs.
+- The accepted bootstrap actuator lag is bounded by
+  `px4.max_bootstrap_actuator_lag_s`. A host-load-dependent PX4 SITL startup can
+  emit its first `HIL_ACTUATOR_CONTROLS` packet several seconds behind sim time;
+  accepting that as the baseline makes the bridge fly on multi-second-stale
+  commands and destabilizes takeoff. When the first actuator lag exceeds the
+  bound the bridge fails closed: it disconnects with the distinct "actuator
+  bootstrap lag too large" reason and returns zero rotor commands, so the bad
+  startup is caught early instead of surfacing as a later attitude divergence.
+  A value of zero or below disables the guard.
 - Bridge safety gating must gate only the applied rotor forces, never the
   per-tick sensor/actuator exchange. The tilt cutoff zeros forces (and skips
   body torque/drag) but still calls the MAVLink `step` every tick so
@@ -246,6 +255,13 @@ the host. They are meant to be used in the Dockerized environment.
 - Do NOT commit USD assets or binary files.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
+- Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
+  the Hydra `configs/` YAML as the single source of truth, not hardcoded in code.
+  Add a matching field (a bare annotation with no default) to the relevant
+  `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
+  through. A library constructor may keep a neutral fallback default, but it must
+  not duplicate the project value (for example `lockstep_timeout_s` is `0.1` in
+  the port constructor but `1.0` in `configs/experiment/px4/default.yaml`).
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.
 - Invalid configuration or unexpected runtime state must not fail silently.
