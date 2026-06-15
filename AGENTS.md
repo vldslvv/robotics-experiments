@@ -166,11 +166,13 @@ the host. They are meant to be used in the Dockerized environment.
   `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
   under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
 - `make test-integration` runs container-backed integration tests.
-- `make test-integration-all` runs every integration test target in parallel
-  using isolated transient containers and prints an aggregate passed/failed
-  summary after all targets finish. It defaults to two concurrent targets to
-  avoid Isaac/GPU resource starvation; set `INTEGRATION_TEST_JOBS=<n>` to tune
-  concurrency for the host.
+- `make test-integration-all` runs every integration test target using isolated
+  transient containers and prints an aggregate passed/failed summary after all
+  targets finish. It defaults to running targets serially
+  (`INTEGRATION_TEST_JOBS=1`) to avoid Isaac/GPU resource starvation and the
+  host-load-dependent PX4 SITL startup actuator backlog that destabilizes
+  takeoff; set `INTEGRATION_TEST_JOBS=<n>` to run `<n>` targets concurrently when
+  the host can sustain it.
 - Integration test Make targets are defined in `make/integration-tests.mk`.
   Their standalone Isaac test scripts live under
   `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
