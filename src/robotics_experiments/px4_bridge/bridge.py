@@ -56,8 +56,9 @@ class Px4Bridge:
                 :class:`IsaacArticulationIO`.
             max_tilt_angle_deg: Maximum allowed tilt angle in degrees. When the
                 drone's body-Z axis deviates from world-Z by more than this
-                angle, the bridge zeros all rotor forces. ``None`` disables
-                the check.
+                angle, the bridge zeros all rotor forces while continuing the
+                MAVLink sensor/actuator exchange every tick, so PX4 lockstep is
+                preserved. ``None`` disables the check.
         """
         if thrust_model.num_rotors != port.num_rotors:
             raise ValueError(
@@ -109,12 +110,39 @@ class Px4Bridge:
         if not np.all(np.isfinite(state.position_enu)) or not np.all(
             np.isfinite(state.orientation_flu_enu_wxyz)
         ):
-            # NaN guard: skip this tick, keep the last good force unchanged.
-            return
+            # A non-finite state is unrecoverable corruption: fail loudly rather
+            # than forwarding NaN/Inf into the MAVLink/EKF lockstep. Per the
+            # CLAUDE.md hard rule, unexpected runtime state must not fail
+            # silently.
+            #
+            # Deferred recoverable design: if non-finite states ever turn out to
+            # be a recurring, recoverable runtime condition, cache the
+            # last-finite VehicleState and, on a non-finite tick, send HIL_SENSOR
+            # from the cached state (with sim_time_us bumped to the current tick)
+            # while applying zero forces, instead of raising. The logged values
+            # below are the breadcrumbs needed to implement that.
+            _LOGGER.error(
+                "PX4 bridge non-finite vehicle state at sim_time_us=%d: "
+                "position_enu=%s orientation_flu_enu_wxyz=%s",
+                int(sim_time_us),
+                np.asarray(state.position_enu, dtype=np.float64).tolist(),
+                np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64).tolist(),
+            )
+            raise RuntimeError(
+                f"PX4 bridge read a non-finite vehicle state at "
+                f"sim_time_us={int(sim_time_us)}; refusing to forward NaN/Inf "
+                f"into the PX4 lockstep exchange"
+            )
 
+        # The tilt cutoff gates only the *applied* rotor forces. The
+        # sensor/actuator exchange must keep running every physics tick so that
+        # HIL_SENSOR.time_usec stays strictly increasing and PX4 lockstep is
+        # preserved even while the safety condition holds.
+        force_cutoff = False
         if self._max_tilt_angle_deg is not None and self._max_tilt_angle_deg > 0.0:
             tilt = frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)
             if tilt > self._max_tilt_angle_deg:
+                force_cutoff = True
                 self._tilt_cutoff_count += 1
                 if self._tilt_cutoff_count <= 10 or self._tilt_cutoff_count % 250 == 0:
                     _LOGGER.warning(
@@ -124,10 +152,14 @@ class Px4Bridge:
                         tilt,
                         self._max_tilt_angle_deg,
                     )
-                self._io.apply_forces(np.zeros(self._thrust_model.num_rotors, dtype=np.float64))
-                return
 
+        # Always exchange sensors/actuators with PX4 (lockstep), using the real
+        # state, before gating the applied forces.
         commands = self._port.step(state)
+        if force_cutoff:
+            self._io.apply_forces(np.zeros(self._thrust_model.num_rotors, dtype=np.float64))
+            return
+
         body_velocity_flu = frames.body_velocity_flu_from_state(state)
         dynamics = self._thrust_model.commands_to_dynamics(
             commands,

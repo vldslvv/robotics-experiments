@@ -96,6 +96,13 @@ the current contents and the intended home for that kind of code.
   actuator timestamps become materially stale relative to that baseline and the
   current simulation time, the bridge must disconnect and return zero rotor
   commands instead of applying old motor outputs.
+- Bridge safety gating must gate only the applied rotor forces, never the
+  per-tick sensor/actuator exchange. The tilt cutoff zeros forces (and skips
+  body torque/drag) but still calls the MAVLink `step` every tick so
+  `HIL_SENSOR.time_usec` keeps advancing and lockstep is preserved. A
+  non-finite vehicle state is treated as unrecoverable corruption: the bridge
+  logs the offending state and raises rather than forwarding NaN/Inf into the
+  lockstep exchange.
 
 ## Python environment
 - This project uses `uv` for all host-side Python work. Do not call `pip`,

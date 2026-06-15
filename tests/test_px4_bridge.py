@@ -50,6 +50,10 @@ class _FakeFlightStack:
         self.started = False
         self.stopped = False
         self.states = []
+        # Record sim_time_us at call time; the fake articulation reuses one
+        # VehicleState object, so reading state.sim_time_us later would only
+        # show the last value.
+        self.sim_times = []
 
     @property
     def num_rotors(self):
@@ -71,6 +75,7 @@ class _FakeFlightStack:
 
     def step(self, state: VehicleState):
         self.states.append(state)
+        self.sim_times.append(int(state.sim_time_us))
         return self.commands
 
 
@@ -1000,9 +1005,68 @@ def test_bridge_tilt_cutoff_zeros_forces():
     bridge.on_physics_step(0.004, 4_000)
     bridge.stop()
 
+    # Forces are zeroed, but the MAVLink exchange must still run so PX4
+    # lockstep keeps advancing (the sensor tick is not dropped).
+    assert len(port.states) == 1
     assert len(io.applied_forces) == 1
     assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
     assert bridge._tilt_cutoff_count == 1
+
+
+def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=60.0,
+    )
+
+    bridge.start()
+    sim_times = [4_000, 8_000, 12_000, 16_000, 20_000]
+    for t in sim_times:
+        bridge.on_physics_step(0.004, t)
+    bridge.stop()
+
+    # Every tick exchanged sensors with strictly increasing sim time, while all
+    # applied forces stayed zero throughout the sustained tilt excursion.
+    assert port.sim_times == sim_times
+    assert all(
+        b > a for a, b in zip(port.sim_times, port.sim_times[1:], strict=False)
+    )
+    assert len(io.applied_forces) == len(sim_times)
+    for forces in io.applied_forces:
+        assert np.allclose(forces, [0.0, 0.0, 0.0, 0.0])
+    assert bridge._tilt_cutoff_count == len(sim_times)
+
+
+def test_bridge_nonfinite_state_raises_without_exchange():
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.position_enu = np.array([0.0, np.nan, 0.0], dtype=np.float64)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=60.0,
+    )
+
+    bridge.start()
+    with pytest.raises(RuntimeError):
+        bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    # No NaN forwarded into the lockstep exchange, and no forces applied.
+    assert port.states == []
+    assert io.applied_forces == []
 
 
 def test_bridge_tilt_cutoff_passes_through_within_limit():
