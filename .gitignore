@@ -218,3 +218,5 @@ ros/ros2_ws/
 
 # Ignore transient .build files
 .build/
+
+PegasusSimulator/

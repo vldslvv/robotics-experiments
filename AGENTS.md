@@ -90,21 +90,33 @@ the current contents and the intended home for that kind of code.
   must not forward another HIL sensor tick or wait for a new actuator packet.
 - PX4 actuator lockstep must use fresh actuator packets. Once PX4 has produced
   its first `HIL_ACTUATOR_CONTROLS` packet, the bridge drains queued actuator
-  messages after each sensor tick and applies the newest packet. PX4 startup can
-  produce an initial actuator timestamp lag while HIL output begins; the bridge
-  may use the first actuator packet's lag as a bootstrap baseline. If later
-  actuator timestamps become materially stale relative to that baseline and the
-  current simulation time, the bridge must disconnect and return zero rotor
-  commands instead of applying old motor outputs.
-- The accepted bootstrap actuator lag is bounded by
-  `px4.max_bootstrap_actuator_lag_s`. A host-load-dependent PX4 SITL startup can
-  emit its first `HIL_ACTUATOR_CONTROLS` packet several seconds behind sim time;
-  accepting that as the baseline makes the bridge fly on multi-second-stale
-  commands and destabilizes takeoff. When the first actuator lag exceeds the
-  bound the bridge fails closed: it disconnects with the distinct "actuator
-  bootstrap lag too large" reason and returns zero rotor commands, so the bad
-  startup is caught early instead of surfacing as a later attitude divergence.
-  A value of zero or below disables the guard.
+  messages after each sensor tick and applies the newest packet.
+- The bridge must prevent a startup actuator backlog from forming, because a
+  backlog makes it fly on stale motor commands and destabilizes takeoff. PX4
+  needs a few priming `HIL_SENSOR` packets while it boots before it emits its
+  first actuator; if Isaac free-runs during that window it floods PX4 and builds
+  a backlog that PX4 then delivers FIFO with stale timestamps and that may never
+  drain (host-load dependent). The bridge therefore sends at most
+  `px4.bootstrap_prime_ticks` priming sensor packets non-blocking, then blocks
+  (up to `px4.first_actuator_timeout_s`, which is larger than
+  `lockstep_timeout_s` because PX4 boot takes seconds of wallclock) for the first
+  actuator instead of racing ahead. `bootstrap_prime_ticks` must exceed PX4's
+  boot sensor need (~15) or the first-actuator wait times out and the bridge
+  disconnects. This bounds the backlog to ~`bootstrap_prime_ticks` ticks, so the
+  steady-state actuator lag stays ~1 tick regardless of host load. This is a
+  deliberate improvement over upstream Pegasus, which also free-runs before the
+  first actuator (it merely avoids the backlog by running near real-time) and
+  blocks without a timeout and without draining.
+- `px4.max_sustained_actuator_lag_s` is a safety tripwire on steady-state
+  actuator lag (current sim time minus the newest applied actuator timestamp),
+  not a happy-path control. Strict blocking lockstep already holds the lag at ~1
+  tick, prime-then-block prevents the startup backlog, and a PX4 stall is caught
+  by `lockstep_timeout_s`. The ceiling exists to catch the one remaining failure
+  mode -- a regression that reintroduces a stale-but-still-flowing actuator
+  backlog (PX4 keeps answering, but with persistently old timestamps) -- which
+  would otherwise silently fly stale motor commands. On exceed the bridge
+  disconnects with the distinct "actuator lag exceeded sustained limit" reason
+  and returns zero rotor commands.
 - Bridge safety gating must gate only the applied rotor forces, never the
   per-tick sensor/actuator exchange. The tilt cutoff zeros forces (and skips
   body torque/drag) but still calls the MAVLink `step` every tick so
@@ -268,6 +280,15 @@ the host. They are meant to be used in the Dockerized environment.
 - Avoid using Unicode symbols.
 - Invalid configuration or unexpected runtime state must not fail silently.
   Raise an error for wrong configuration; log a warning for recoverable runtime fallbacks.
+- Avoid overly defensive guards. Do not wrap a value in `Optional`/`None`, add
+  `is not None` checks, or carry a `<= 0 disables` special case when a plain
+  concrete default works. A numerical runtime parameter must carry a concrete
+  default in its library constructor and a value in the Hydra YAML, and be used
+  directly (the `*Config` dataclass field still stays a bare annotation per the
+  configs rule above). Reserve `None`/optional handling and disable branches for
+  states that are genuinely distinct and required for correctness (for example
+  "no actuator received yet" before any timestamp exists), not as routine
+  safety padding.
 - Every behavior change must be reflected in this file when it changes project conventions,
   error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas

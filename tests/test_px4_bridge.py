@@ -811,9 +811,12 @@ def test_mavlink_port_drains_actuator_backlog_to_newest(monkeypatch):
     assert port.is_connected is True
 
 
-def test_mavlink_port_disconnects_when_drained_actuator_is_stale(monkeypatch):
+def test_mavlink_port_disconnects_when_actuator_lag_exceeds_sustained_limit(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    # 0.02s = 20_000us absolute ceiling on steady-state actuator lag.
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep_timeout_s=1.0, max_sustained_actuator_lag_s=0.02
+    )
     backend = port._backend
     stale_msg = types.SimpleNamespace(
         id=93,
@@ -825,141 +828,124 @@ def test_mavlink_port_disconnects_when_drained_actuator_is_stale(monkeypatch):
     connection = _FakeConnection([stale_msg])
     backend._connection = connection
     backend._received_first_actuator = True
-    port._actuator_lag_baseline_us = 0
-    port._last_sensor_period_us = 4_000
 
     port.start()
-    port._actuator_lag_baseline_us = 0
-    port._last_sensor_period_us = 4_000
+    # lag = 140_000 - 100_000 = 40_000us > 20_000us ceiling.
     commands = port.step(VehicleState.hover_at(sim_time_us=140_000))
 
     assert np.allclose(commands, np.zeros(4))
     assert port.is_connected is False
     assert backend.stopped is True
     assert backend._connection is None
-    assert port._last_disconnect_reason.startswith("actuator timestamp stale:")
+    assert port._last_disconnect_reason.startswith("actuator lag exceeded sustained limit")
     assert "lag_us=40000" in port._last_disconnect_reason
-    assert "limit_us=20000" in port._last_disconnect_reason
+    assert "max_us=20000" in port._last_disconnect_reason
 
 
-def test_mavlink_port_accepts_bounded_bootstrap_actuator_lag(monkeypatch):
+def test_mavlink_port_primes_then_blocks_for_first_actuator(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
-    backend = port._backend
-    bootstrap_msg = types.SimpleNamespace(
-        id=93,
-        time_usec=52_000,
-        controls=[0.0, 0.0, 0.0, 0.0],
-        mode=1,
-        flags=1,
-    )
-    connection = _FakeConnection([bootstrap_msg])
-    backend._connection = connection
-    backend._received_first_actuator = True
-    port._last_sensor_period_us = 4_000
-
-    port.start()
-    port._last_sensor_period_us = 4_000
-    commands = port.step(VehicleState.hover_at(sim_time_us=148_000))
-
-    assert np.allclose(commands, np.zeros(4))
-    assert port.is_connected is True
-    assert backend.stopped is False
-    assert port._last_actuator_receive_us == 52_000
-    assert port._actuator_lag_baseline_us == 96_000
-    assert port._last_disconnect_reason is None
-
-
-def test_mavlink_port_accepts_slow_first_bootstrap_actuator(monkeypatch):
-    _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
-    backend = port._backend
-    bootstrap_msg = types.SimpleNamespace(
-        id=93,
-        time_usec=68_000,
-        controls=[0.0, 0.0, 0.0, 0.0],
-        mode=1,
-        flags=1,
-    )
-    connection = _FakeConnection([bootstrap_msg])
-    backend._connection = connection
-    backend._received_first_actuator = True
-    port._last_sensor_period_us = 4_000
-
-    port.start()
-    port._last_sensor_period_us = 4_000
-    commands = port.step(VehicleState.hover_at(sim_time_us=972_000))
-
-    assert np.allclose(commands, np.zeros(4))
-    assert port.is_connected is True
-    assert backend.stopped is False
-    assert port._last_actuator_receive_us == 68_000
-    assert port._actuator_lag_baseline_us == 904_000
-    assert port._last_disconnect_reason is None
-
-
-def test_mavlink_port_disconnects_when_bootstrap_lag_exceeds_max(monkeypatch):
-    _install_fake_pegasus(monkeypatch)
+    # Allow 3 priming sends, then block; first_actuator_timeout_s=0.0 makes the
+    # post-prime blocking wait time out immediately when no actuator arrives.
     port = Px4MavlinkPort(
-        num_rotors=4, lockstep_timeout_s=1.0, max_bootstrap_actuator_lag_s=2.5
+        num_rotors=4,
+        lockstep_timeout_s=1.0,
+        bootstrap_prime_ticks=3,
+        first_actuator_timeout_s=0.0,
     )
     backend = port._backend
-    bootstrap_msg = types.SimpleNamespace(
-        id=93,
-        time_usec=68_000,
-        controls=[0.0, 0.0, 0.0, 0.0],
-        mode=1,
-        flags=1,
-    )
-    connection = _FakeConnection([bootstrap_msg])
+    connection = _FakeConnection()
     backend._connection = connection
-    backend._received_first_actuator = True
-    port._last_sensor_period_us = 4_000
+    backend._received_first_actuator = False
 
     port.start()
-    port._last_sensor_period_us = 4_000
-    # lag = 3_000_000 - 68_000 = 2_932_000 us > 2_500_000 us cap.
-    commands = port.step(VehicleState.hover_at(sim_time_us=3_000_000))
+
+    # The first 3 sends are priming: non-blocking, no backlog grows past them.
+    for tick in range(1, 4):
+        commands = port.step(VehicleState.hover_at(sim_time_us=tick * 4_000))
+        assert np.allclose(commands, np.zeros(4))
+        assert port.is_connected is True
+        assert connection.recv_calls[-1] == (False, 0.0)
+
+    assert port._actuator_receive_count == 0
+
+    # The 4th send exceeds the prime budget: the bridge now blocks for the first
+    # actuator instead of free-running, and times out (no actuator) -> disconnect.
+    commands = port.step(VehicleState.hover_at(sim_time_us=4 * 4_000))
 
     assert np.allclose(commands, np.zeros(4))
+    assert connection.recv_calls[-1][0] is True
     assert port.is_connected is False
     assert backend.stopped is True
-    assert backend._connection is None
-    assert port._actuator_lag_baseline_us is None
-    assert port._last_disconnect_reason.startswith("actuator bootstrap lag too large")
-    assert "lag_us=2932000" in port._last_disconnect_reason
-    assert "max_us=2500000" in port._last_disconnect_reason
+    assert port._last_disconnect_reason == "actuator polling timed out after 0.000 seconds"
 
 
-def test_mavlink_port_bootstrap_guard_disabled_accepts_huge_lag(monkeypatch):
+def test_mavlink_port_first_actuator_lag_is_bounded_by_prime_budget(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(
-        num_rotors=4, lockstep_timeout_s=1.0, max_bootstrap_actuator_lag_s=0.0
+        num_rotors=4,
+        lockstep_timeout_s=1.0,
+        bootstrap_prime_ticks=3,
+        first_actuator_timeout_s=1.0,
     )
     backend = port._backend
-    bootstrap_msg = types.SimpleNamespace(
-        id=93,
-        time_usec=68_000,
-        controls=[0.0, 0.0, 0.0, 0.0],
-        mode=1,
-        flags=1,
-    )
-    connection = _FakeConnection([bootstrap_msg])
+    connection = _FakeConnection()
     backend._connection = connection
-    backend._received_first_actuator = True
-    port._last_sensor_period_us = 4_000
+    backend._received_first_actuator = False
 
     port.start()
-    port._last_sensor_period_us = 4_000
-    # With the guard disabled, a multi-second bootstrap lag is accepted as the
-    # baseline (pre-guard behavior) instead of disconnecting.
-    commands = port.step(VehicleState.hover_at(sim_time_us=3_000_000))
 
-    assert np.allclose(commands, np.zeros(4))
+    # Prime 3 ticks with no actuator available (non-blocking).
+    for tick in range(1, 4):
+        port.step(VehicleState.hover_at(sim_time_us=tick * 4_000))
+    assert port._actuator_receive_count == 0
+
+    # On the first blocking tick, PX4's first actuator is delivered, stamped at
+    # the current sim time: the lag is ~0, not multi-second, because the bridge
+    # never raced ahead.
+    connection.messages.append(
+        types.SimpleNamespace(
+            id=93,
+            time_usec=4 * 4_000,
+            controls=[0.0, 0.0, 0.0, 0.0],
+            mode=1,
+            flags=1,
+        )
+    )
+    port.step(VehicleState.hover_at(sim_time_us=4 * 4_000))
+
+    assert port._actuator_receive_count == 1
+    assert port._last_actuator_receive_us == 16_000
     assert port.is_connected is True
-    assert backend.stopped is False
-    assert port._last_actuator_receive_us == 68_000
-    assert port._actuator_lag_baseline_us == 2_932_000
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_steady_state_lag_stays_one_tick(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    connection = _FakeConnection()
+    backend._connection = connection
+    backend._received_first_actuator = True
+
+    port.start()
+
+    # Each tick delivers exactly one actuator stamped one tick (4_000us) behind
+    # the current sim time; the lag must stay at one tick and the port connected.
+    for tick in range(2, 6):
+        sim_time_us = tick * 4_000
+        connection.messages.append(
+            types.SimpleNamespace(
+                id=93,
+                time_usec=sim_time_us - 4_000,
+                controls=[0.0, 0.0, 0.0, 0.0],
+                mode=1,
+                flags=1,
+            )
+        )
+        port.step(VehicleState.hover_at(sim_time_us=sim_time_us))
+        assert sim_time_us - port._last_actuator_receive_us == 4_000
+        assert port.is_connected is True
+
     assert port._last_disconnect_reason is None
 
 
@@ -977,10 +963,8 @@ def test_mavlink_port_accepts_actuator_within_freshness_limit(monkeypatch):
     connection = _FakeConnection([fresh_msg])
     backend._connection = connection
     backend._received_first_actuator = True
-    port._last_sensor_period_us = 4_000
 
     port.start()
-    port._last_sensor_period_us = 4_000
     commands = port.step(VehicleState.hover_at(sim_time_us=140_000))
 
     assert np.allclose(commands, [100.0, 350.0, 600.0, 1100.0])

@@ -35,14 +35,26 @@ px4_vehicle_model: gazebo-classic_iris
 
 lockstep_timeout_s: 1.0
 first_heartbeat_timeout_s: 5.0
-# Upper bound (seconds) on PX4's first HIL_ACTUATOR_CONTROLS lag. A host-loaded
-# PX4 SITL startup can emit its first actuator packet several seconds behind sim
-# time; accepting that as the baseline makes the bridge fly on multi-second-stale
-# commands and destabilizes takeoff. On exceed the bridge disconnects (fail
-# closed) with an "actuator bootstrap lag too large" reason so the bad startup is
-# caught early. Chosen just above observed healthy startups (<=2.45s) and below
-# observed failing ones (>=3.09s). Set to 0 or negative to disable.
-max_bootstrap_actuator_lag_s: 2.5
+# Prime-then-block bootstrap: send at most this many HIL_SENSOR packets
+# non-blocking while PX4 boots, then block for the first HIL_ACTUATOR_CONTROLS so
+# Isaac sim time cannot race ahead and build a startup backlog (the backlog is
+# what makes the bridge fly on stale commands and destabilizes takeoff). Must
+# exceed PX4's boot sensor need (~15); the backlog is then bounded to ~this many
+# ticks and steady-state actuator lag stays ~1 tick.
+bootstrap_prime_ticks: 20
+# Generous deadline (seconds) for PX4's first actuator once the bridge starts
+# blocking; PX4 boot is ~2s of wallclock, longer than lockstep_timeout_s (which
+# applies only after the first actuator).
+first_actuator_timeout_s: 5.0
+# Safety tripwire (seconds) on steady-state actuator lag -- a regression net, not
+# a happy-path control. Strict blocking lockstep already holds the lag at ~1 tick
+# (0.004s), prime-then-block prevents the startup backlog, and a PX4 stall is
+# caught by lockstep_timeout_s above. This only fires if a regression reintroduces
+# a stale-but-still-flowing backlog; on exceed the bridge disconnects with an
+# "actuator lag exceeded sustained limit" reason instead of silently flying stale
+# commands. Set above the brief post-bootstrap drain transient and below the
+# ~0.4s divergence zone.
+max_sustained_actuator_lag_s: 0.5
 heartbeat_rate_hz: 1.0
 
 # Delay opening the PX4 simulator MAVLink endpoint until Isaac physics has

@@ -290,7 +290,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         zero_position_armed: list[float] | None = None,
         lockstep_timeout_s: float = 0.1,
         first_heartbeat_timeout_s: float = 5.0,
-        max_bootstrap_actuator_lag_s: float = 5.0,
+        bootstrap_prime_ticks: int = 20,
+        first_actuator_timeout_s: float = 5.0,
+        max_sustained_actuator_lag_s: float = 0.5,
         heartbeat_rate_hz: float = 1.0,
         gps_enabled: bool = True,
         gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
@@ -308,15 +310,21 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep_timeout_s)
         self._first_heartbeat_timeout_s = float(first_heartbeat_timeout_s)
-        # Upper bound on the accepted first-actuator (bootstrap) lag. A value of
-        # zero or below disables the guard (matching the max_tilt_angle_deg
-        # convention). Stored as integer microseconds for comparison against
-        # sim-time deltas.
-        self._max_bootstrap_actuator_lag_us: Optional[int] = (
-            None
-            if max_bootstrap_actuator_lag_s <= 0
-            else int(max_bootstrap_actuator_lag_s * 1_000_000)
-        )
+        # Bound the pre-first-actuator free-run: allow this many priming
+        # HIL_SENSOR sends while PX4 boots, then block for the first actuator so
+        # Isaac sim time cannot race ahead and build a startup backlog. Must
+        # exceed PX4's boot sensor need (~15) or the first-actuator wait times
+        # out.
+        self._bootstrap_prime_ticks = max(0, int(bootstrap_prime_ticks))
+        # Generous blocking deadline for PX4's first actuator (boot is several
+        # seconds of wallclock); steady-state ticks use lockstep_timeout_s.
+        self._first_actuator_timeout_s = float(first_actuator_timeout_s)
+        # Safety tripwire on steady-state actuator lag, stored as integer
+        # microseconds. In strict lockstep the lag is structurally ~1 tick and a
+        # PX4 stall is caught by lockstep_timeout_s, so this only fires if a
+        # regression lets a stale-but-still-flowing backlog form (PX4 keeps
+        # answering, but with persistently old timestamps). See _actuator_is_fresh.
+        self._max_sustained_actuator_lag_us = int(max_sustained_actuator_lag_s * 1_000_000)
         self._heartbeat_period_s = 1.0 / float(heartbeat_rate_hz) if heartbeat_rate_hz > 0 else None
         self._gps_enabled = bool(gps_enabled)
         self._gps_period_s = 1.0 / float(gps_send_rate_hz) if gps_send_rate_hz > 0 else None
@@ -366,7 +374,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._is_connected: bool = False
         self._last_gps_send_us: Optional[int] = None
         self._last_sensor_send_us: Optional[int] = None
-        self._last_sensor_period_us: Optional[int] = None
         self._last_heartbeat_send_s: float = 0.0
         self._first_heartbeat_wait_start_s: Optional[float] = None
         self._first_heartbeat_received_s: Optional[float] = None
@@ -375,12 +382,12 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._sensor_send_count: int = 0
         self._actuator_receive_count: int = 0
         self._last_actuator_receive_us: Optional[int] = None
-        self._actuator_lag_baseline_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
         _LOGGER.info(
             "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
             "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
-            "max_bootstrap_actuator_lag_us=%s "
+            "bootstrap_prime_ticks=%d first_actuator_timeout_s=%.3f "
+            "max_sustained_actuator_lag_us=%s "
             "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
             "debug_log=%s sensor_debug_interval=%d",
             connection_type,
@@ -390,7 +397,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._num_rotors,
             self._lockstep_timeout_s,
             self._first_heartbeat_timeout_s,
-            self._max_bootstrap_actuator_lag_us,
+            self._bootstrap_prime_ticks,
+            self._first_actuator_timeout_s,
+            self._max_sustained_actuator_lag_us,
             self._gps_enabled,
             gps_send_rate_hz,
             self._sensor_noise_enabled,
@@ -411,7 +420,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         )
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
-        self._last_sensor_period_us = None
         self._last_heartbeat_send_s = 0.0
         self._first_heartbeat_wait_start_s = None
         self._first_heartbeat_received_s = None
@@ -420,7 +428,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._sensor_send_count = 0
         self._actuator_receive_count = 0
         self._last_actuator_receive_us = None
-        self._actuator_lag_baseline_us = None
         self._sensor_payload_debug_count = 0
         self._is_connected = True
         _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self._debug_log_path)
@@ -497,11 +504,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         # instance treats a tick as state(t) -> sensors(t) -> actuator(t),
         # keeping lockstep causal per drone while retaining a hard timeout.
         try:
-            previous_sensor_send_us = self._last_sensor_send_us
             self._send_sensor_msgs(sim_time_us)
             self._last_sensor_send_us = sim_time_us
-            if previous_sensor_send_us is not None:
-                self._last_sensor_period_us = sim_time_us - previous_sensor_send_us
             self._sensor_send_count += 1
             if self._sensor_send_count == 1:
                 _LOGGER.info("PX4 first HIL_SENSOR sent at sim_time_us=%d", sim_time_us)
@@ -533,8 +537,16 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._mark_disconnected(f"sensor/GPS send failed: {exc}", close_backend=True)
             return np.zeros(self._num_rotors, dtype=np.float64)
 
-        # 5. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout.
-        if not self._poll_for_actuator(self._lockstep_timeout_s, sim_time_us):
+        # 5. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout. The first
+        # actuator may take several seconds of wallclock while PX4 boots, so the
+        # pre-first-actuator wait uses a generous deadline; steady-state ticks
+        # use the tight lockstep timeout.
+        poll_timeout = (
+            self._first_actuator_timeout_s
+            if not self._backend._received_first_actuator
+            else self._lockstep_timeout_s
+        )
+        if not self._poll_for_actuator(poll_timeout, sim_time_us):
             return np.zeros(self._num_rotors, dtype=np.float64)
 
         # 6. Return the up-to-date rotor reference.
@@ -682,10 +694,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             except Exception as exc:
                 _LOGGER.warning("PX4 MAVLink backend close after disconnect failed: %s", exc)
 
-    def _actuator_stale_limit_us(self) -> int:
-        observed_period_us = max(0, int(self._last_sensor_period_us or 0))
-        return max(5 * observed_period_us, 20_000)
-
     def _handle_actuator_msg(self, msg) -> None:
         backend = self._backend
         backend._received_first_actuator = True
@@ -713,66 +721,25 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         if self._last_actuator_receive_us is None:
             return True
         actuator_lag_us = max(0, sim_time_us - self._last_actuator_receive_us)
-        stale_limit_us = self._actuator_stale_limit_us()
 
-        if self._actuator_lag_baseline_us is None:
-            # PX4 can emit its first HIL_ACTUATOR_CONTROLS packet with an old
-            # simulation timestamp while HIL output starts. Accept that first
-            # lag as a startup baseline, then fail closed if later packets fall
-            # materially farther behind instead of applying stale motor output.
-            #
-            # Guard: a pathological PX4 SITL startup (host-load dependent) can
-            # produce a multi-second bootstrap lag. Accepting it as the baseline
-            # would let the bridge apply multi-second-stale motor commands for
-            # the rest of the run, which destabilizes takeoff. Bound the accepted
-            # bootstrap lag and fail closed (distinct reason) when it is too
-            # large, so the failure is caught early with a self-identifying log.
-            if (
-                self._max_bootstrap_actuator_lag_us is not None
-                and actuator_lag_us > self._max_bootstrap_actuator_lag_us
-            ):
-                self._mark_disconnected(
-                    "actuator bootstrap lag too large: "
-                    f"sim_time_us={sim_time_us} "
-                    f"last_actuator_us={self._last_actuator_receive_us} "
-                    f"lag_us={actuator_lag_us} "
-                    f"max_us={self._max_bootstrap_actuator_lag_us}",
-                    close_backend=True,
-                )
-                return False
-            self._actuator_lag_baseline_us = actuator_lag_us
-            if actuator_lag_us > stale_limit_us:
-                _LOGGER.info(
-                    "PX4 actuator bootstrap lag accepted: "
-                    "sim_time_us=%d last_actuator_us=%d lag_us=%d steady_limit_us=%d",
-                    sim_time_us,
-                    self._last_actuator_receive_us,
-                    actuator_lag_us,
-                    stale_limit_us,
-                )
-            return True
-
-        if actuator_lag_us <= stale_limit_us:
-            self._actuator_lag_baseline_us = min(
-                self._actuator_lag_baseline_us,
-                actuator_lag_us,
+        # Safety tripwire (not a happy-path mechanism). Strict blocking lockstep
+        # keeps the lag at ~1 tick because the bridge waits for an actuator
+        # before advancing, prime-then-block prevents the startup backlog, and a
+        # PX4 stall is caught by the lockstep timeout. The remaining way the lag
+        # could grow is a regression that reintroduces a stale-but-still-flowing
+        # backlog; that would otherwise silently fly stale motor commands and
+        # surface as a confusing attitude divergence. Fail closed loudly instead.
+        if actuator_lag_us > self._max_sustained_actuator_lag_us:
+            self._mark_disconnected(
+                "actuator lag exceeded sustained limit: "
+                f"sim_time_us={sim_time_us} "
+                f"last_actuator_us={self._last_actuator_receive_us} "
+                f"lag_us={actuator_lag_us} "
+                f"max_us={self._max_sustained_actuator_lag_us}",
+                close_backend=True,
             )
-            return True
-
-        allowed_lag_us = self._actuator_lag_baseline_us + stale_limit_us
-        if actuator_lag_us <= allowed_lag_us:
-            if actuator_lag_us < self._actuator_lag_baseline_us:
-                self._actuator_lag_baseline_us = actuator_lag_us
-            return True
-
-        self._mark_disconnected(
-            "actuator timestamp stale: "
-            f"sim_time_us={sim_time_us} "
-            f"last_actuator_us={self._last_actuator_receive_us} "
-            f"lag_us={actuator_lag_us} limit_us={allowed_lag_us}",
-            close_backend=True,
-        )
-        return False
+            return False
+        return True
 
     def _poll_for_actuator(self, timeout_s: float, sim_time_us: int) -> bool:
         """Block (with timeout) for a HIL_ACTUATOR_CONTROLS message.
@@ -793,12 +760,20 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         if backend._connection is None:
             self._mark_disconnected("actuator polling skipped: connection is closed")
             return False
-        needs_to_wait = backend._received_first_actuator and backend._enable_lockstep
+        # Block once PX4 has produced its first actuator (strict lockstep), OR
+        # once the bootstrap priming budget is spent. PX4 needs a few priming
+        # HIL_SENSOR packets before it emits its first actuator, so the first
+        # `_bootstrap_prime_ticks` sends stay non-blocking; after that the bridge
+        # blocks for the first actuator instead of free-running, which bounds the
+        # startup backlog (and therefore the steady-state actuator lag).
+        # `_sensor_send_count` is incremented before this call, so on the tick
+        # after the budget is spent the count exceeds the budget and we block.
+        needs_to_wait = backend._enable_lockstep and (
+            backend._received_first_actuator
+            or self._sensor_send_count > self._bootstrap_prime_ticks
+        )
         backend._received_actuator = False
 
-        # Do not block before PX4 has ever produced an actuator packet. During
-        # startup the controller may need several sensor ticks before it begins
-        # HIL output; strict lockstep starts only after that first response.
         deadline = time.time() + timeout_s
 
         while True:
