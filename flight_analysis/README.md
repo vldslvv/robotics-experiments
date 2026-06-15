@@ -16,9 +16,63 @@ env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy py
   flight_analysis/tools/ulog_timeline.py px4/logs/2026-06-11/05_11_40.ulg
 ```
 
-`list_pairs.py` has no third-party dependencies. `ulog_timeline.py` needs
-`pyulog` and `numpy`; use the `uv --with` command above so those tools do not
-become permanent project dependencies.
+`list_pairs.py` has no third-party dependencies. `ulog_timeline.py` and
+`compare_logs.py` need `pyulog` and `numpy`; use the `uv --with` command above so
+those tools do not become permanent project dependencies. Both share the ULog
+loaders in `tools/_ulog_common.py`.
+
+## Sim-to-real comparison
+
+`compare_logs.py` overlays two PX4 ULogs and prints a per-metric divergence table
+for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
+yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real
+gap once real flights exist, and to track sim-vs-sim drift in the meantime.
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
+  flight_analysis/tools/compare_logs.py <log_a.ulg> <log_b.ulg> \
+  --align takeoff --hover-last 2.0 --labels sim,real --csv /tmp/cmp.csv
+```
+
+The comparison is **symmetric and origin-agnostic**: both inputs are just PX4
+ULogs, so any pairing works (sim-vs-real, sim-vs-sim, real-vs-real). Neither log
+is a privileged reference; swapping the two positional inputs only flips the sign
+of each `delta (B-A)`. Labels are display strings only, and the tool never
+branches on whether a log came from SITL or hardware -- it reads only standard PX4
+estimator/actuator topics present in every log.
+
+- `--align {takeoff,arm,none}` zeroes each log's clock on a shared flight event
+  (accepted `vehicle_command_ack` for takeoff cmd 22 / arm cmd 400), so two runs
+  with unrelated wall clocks line up. `none` uses raw log time.
+- `--window START,END` selects an anchor-relative window; otherwise `--hover-last`
+  takes the last N seconds of each log (default 2.0).
+- `--csv` writes both logs' position resampled onto a shared normalized grid for
+  later plotting (no plotting dependency added).
+
+Caveats when reading the table:
+
+- `vehicle_local_position` is **NED**: +z is down, so altitude is `-z`.
+- Tilt is the body-up vs world-up angle (frame-agnostic magnitude); yaw is the
+  Euler-Z of `vehicle_attitude`.
+- The sim currently aids PX4 with simulated **GPS** (`HIL_GPS`); an indoor real
+  drone's aiding source is undecided (mocap, optical flow, etc.). The tool reads
+  estimator *outputs* that exist regardless of aiding source, but position-noise
+  differences between a GPS-sim log and a mocap/flow-real log are an
+  **aiding-source artifact**, not necessarily a dynamics-model gap. Interpret
+  them as such until the real position source is chosen and matched in sim.
+
+### Required real-drone log topics
+
+For a clean overlay, the real drone must record the same ULog topic set the sim
+already logs. Lock this union (the `ulog_timeline.py` topic list plus the metric
+topics `compare_logs.py` reads) into the airframe's SDLOG profile:
+
+`vehicle_command`, `vehicle_command_ack`, `vehicle_status`, `takeoff_status`,
+`vehicle_land_detected`, `trajectory_setpoint`, `vehicle_local_position`,
+`vehicle_attitude`, `vehicle_attitude_setpoint`, `vehicle_rates_setpoint`,
+`vehicle_thrust_setpoint`, `vehicle_torque_setpoint`, `vehicle_angular_velocity`,
+`actuator_motors`, `actuator_outputs`, `failsafe_flags`,
+`estimator_status_flags`.
 
 ## Analysis Process
 

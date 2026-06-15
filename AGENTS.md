@@ -205,6 +205,23 @@ the host. They are meant to be used in the Dockerized environment.
 - Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
   `make px4_sitl_default none_iris` from the PX4 source directory on demand.
 
+### Flight log analysis
+- Make targets in `make/flight-analysis.mk` run the host ULog analysis tools
+  through a throwaway `uv run --no-project --with pyulog --with numpy`
+  environment, so pyulog/numpy never enter the project `.venv`.
+- `make compare-logs A=<log_a.ulg> B=<log_b.ulg>` compares two PX4 ULogs and
+  prints a per-metric divergence table (horizontal drift, vertical range, speed,
+  tilt, yaw, body rates, motor effort). The comparison is symmetric and
+  origin-agnostic: any pairing works (sim-vs-real, sim-vs-sim, real-vs-real),
+  neither log is a reference, and swapping `A`/`B` only flips the sign of each
+  delta. Optional overrides: `ALIGN=takeoff|arm|none` (clock anchor, default
+  takeoff), `HOVER_LAST=<seconds>` (window, default 2.0), `WINDOW=START,END`,
+  `LABELS=A,B`, `CSV=<out.csv>` (aligned resampled series for plotting).
+- `make ulog-timeline ULOG=<log.ulg> [SAMPLES=10,11,12]` prints a focused
+  single-log flight timeline.
+- See `flight_analysis/README.md` for the required real-drone SDLOG topic set,
+  the NED / aiding-source caveats, and the underlying tool invocations.
+
 ### PX4 bridge debugging
 - Use `flight_analysis/README.md` for the detailed repeatable log-analysis
   workflow and helper scripts.
