@@ -4,7 +4,8 @@ This test runs a full single-vehicle loop against a live PX4 SITL instance:
 spawn the configured drone, start the production PX4 bridge host, command arm
 and takeoff over PX4's GCS MAVLink endpoint, and assert that the vehicle climbs
 without excessive tilt, lateral drift, bridge disconnects, stale actuator
-lag, or PX4 failsafe state.
+lag, or PX4 failsafe state, then holds a stable hover within bounded height,
+vertical speed, horizontal position, and horizontal speed envelopes.
 
 Run through the host Make target so PX4 lifecycle and logs are owned outside
 Isaac:

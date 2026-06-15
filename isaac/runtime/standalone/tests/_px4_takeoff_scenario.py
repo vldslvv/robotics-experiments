@@ -36,6 +36,13 @@ _HOVER_SETTLE_S = 2.0
 _HOVER_OBSERVATION_S = 5.0
 _HOVER_MAX_ALTITUDE_RANGE_M = 0.35
 _HOVER_MAX_ABS_VERTICAL_SPEED_M_S = 0.35
+# Horizontal hover-quality gates. The continuous _MAX_LATERAL_DRIFT_M guard only
+# catches gross divergence (~88x the observed hover spread); these gate hover
+# position-hold quality directly. Sized from the four most recent passing runs
+# (worst case: bbox-diagonal range 4.3cm, horizontal speed 0.022m/s), leaving
+# ~7x / ~14x headroom so they stay flake-safe while catching a real regression.
+_HOVER_MAX_HORIZONTAL_RANGE_M = 0.30
+_HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S = 0.30
 _MAX_TILT_DEG = 35.0
 _MAX_LATERAL_DRIFT_M = 2.0
 _MAX_VERTICAL_SPEED_M_S = 8.0
@@ -532,6 +539,11 @@ def _observe_stability(
     max_hover_abs_vertical_speed_m_s = 0.0
     min_hover_climb_m = math.inf
     max_hover_climb_m = -math.inf
+    max_hover_abs_horizontal_speed_m_s = 0.0
+    min_hover_x_m = math.inf
+    max_hover_x_m = -math.inf
+    min_hover_y_m = math.inf
+    max_hover_y_m = -math.inf
 
     while True:
         _advance_one(context, host)
@@ -594,6 +606,15 @@ def _observe_stability(
             )
             min_hover_climb_m = min(min_hover_climb_m, climb_m)
             max_hover_climb_m = max(max_hover_climb_m, climb_m)
+            horizontal_speed_m_s = float(np.linalg.norm(sample.linear_velocity_enu[:2]))
+            max_hover_abs_horizontal_speed_m_s = max(
+                max_hover_abs_horizontal_speed_m_s,
+                horizontal_speed_m_s,
+            )
+            min_hover_x_m = min(min_hover_x_m, float(sample.position_enu[0]))
+            max_hover_x_m = max(max_hover_x_m, float(sample.position_enu[0]))
+            min_hover_y_m = min(min_hover_y_m, float(sample.position_enu[1]))
+            max_hover_y_m = max(max_hover_y_m, float(sample.position_enu[1]))
 
         if sample_count == 1 or sample_count % 250 == 0:
             context.report(
@@ -634,11 +655,29 @@ def _observe_stability(
             f"limit={_HOVER_MAX_ABS_VERTICAL_SPEED_M_S:.2f}m/s"
         )
 
+    hover_horizontal_range_m = math.hypot(
+        max_hover_x_m - min_hover_x_m, max_hover_y_m - min_hover_y_m
+    )
+    if hover_horizontal_range_m > _HOVER_MAX_HORIZONTAL_RANGE_M:
+        _raise_instability(
+            "Drone did not hold hover position: "
+            f"horizontal_range={hover_horizontal_range_m:.2f}m "
+            f"limit={_HOVER_MAX_HORIZONTAL_RANGE_M:.2f}m"
+        )
+    if max_hover_abs_horizontal_speed_m_s > _HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S:
+        _raise_instability(
+            "Drone horizontal speed did not settle during hover: "
+            f"max_horizontal_speed={max_hover_abs_horizontal_speed_m_s:.2f}m/s "
+            f"limit={_HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S:.2f}m/s"
+        )
+
     context.report(
         f"{test_name}: observed stable takeoff and hover: "
         f"max_climb={climb_m:.2f}m "
         f"hover_climb_range={min_hover_climb_m:.2f}-{max_hover_climb_m:.2f}m "
         f"max_hover_abs_vz={max_hover_abs_vertical_speed_m_s:.2f}m/s "
+        f"hover_horizontal_range={hover_horizontal_range_m:.2f}m "
+        f"max_hover_horizontal_speed={max_hover_abs_horizontal_speed_m_s:.2f}m/s "
         f"samples={sample_count} hover_samples={hover_sample_count}"
     )
 
