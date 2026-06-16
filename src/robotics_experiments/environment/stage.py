@@ -80,6 +80,32 @@ def _sample_positions(
     return positions
 
 
+def _reference_asset_at(
+    stage: Usd.Stage,
+    prim_path: str,
+    usd_path: str,
+    pos: Gf.Vec3d,
+) -> Usd.Prim:
+    """Define an ``Xform`` prim that references ``usd_path`` and translate it.
+
+    Args:
+        stage: USD stage to mutate.
+        prim_path: Absolute prim path to create.
+        usd_path: Absolute path to the USD asset to reference.
+        pos: World-space translation for the created prim.
+
+    Returns:
+        The created prim, so callers can author further attributes on it.
+    """
+    prim = stage.DefinePrim(prim_path, "Xform")
+    prim.GetReferences().AddReference(usd_path)
+
+    xform = UsdGeom.Xformable(prim)
+    xform.ClearXformOpOrder()
+    xform.AddTranslateOp().Set(pos)
+    return prim
+
+
 def _spawn_switches(
     stage: Usd.Stage,
     usd_path: str,
@@ -103,13 +129,7 @@ def _spawn_switches(
     prim_paths: List[str] = []
     for i, pos in enumerate(positions):
         prim_path = f"/Root/LightSwitch_{i}"
-        prim = stage.DefinePrim(prim_path, "Xform")
-        prim.GetReferences().AddReference(usd_path)
-
-        xform = UsdGeom.Xformable(prim)
-        xform.ClearXformOpOrder()
-        xform.AddTranslateOp().Set(pos)
-
+        _reference_asset_at(stage, prim_path, usd_path, pos)
         prim_paths.append(prim_path)
 
     carb.log_info(f"[LightSwitch] Spawned {len(prim_paths)} switches.")
@@ -145,12 +165,7 @@ def _spawn_lamps(
         lamp_pos = Gf.Vec3d(pos[0], pos[1], random.uniform(3.4, 5.0))
         prim_path = f"/Root/Lamp_{i}"
 
-        prim = stage.DefinePrim(prim_path, "Xform")
-        prim.GetReferences().AddReference(usd_path)
-
-        xform = UsdGeom.Xformable(prim)
-        xform.ClearXformOpOrder()
-        xform.AddTranslateOp().Set(lamp_pos)
+        _reference_asset_at(stage, prim_path, usd_path, lamp_pos)
 
         light_prim = stage.GetPrimAtPath(f"{prim_path}/Lamp/SphereLight")
         if light_prim.IsValid():
