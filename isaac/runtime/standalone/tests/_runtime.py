@@ -26,7 +26,7 @@ class SceneTestContext:
 
     stage: object
     scene_path: Path
-    simulation_app: object
+    simulation_app: SimulationApp
     report: Callable[[str], None]
 
 

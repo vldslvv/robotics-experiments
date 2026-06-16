@@ -16,6 +16,7 @@ from _runtime import SceneTestContext
 
 __all__ = [
     "ExpectedInstabilityDetected",
+    "Px4FailsafeDetected",
     "Px4TakeoffScenarioOptions",
     "run_px4_takeoff_scenario",
 ]
@@ -133,6 +134,10 @@ def _raise_instability(message: str) -> None:
     raise ExpectedInstabilityDetected(message)
 
 
+def _raise_failsafe(message: str) -> None:
+    raise Px4FailsafeDetected(message)
+
+
 def _require_bridge_connected(host) -> None:
     bridge = getattr(host, "_bridge", None)
     if bridge is None:
@@ -213,7 +218,7 @@ def _send_gcs_heartbeat(mav, *, force: bool = False) -> None:
 
 
 def _drain_mavlink(mav) -> list[Any]:
-    messages = []
+    messages: list[Any] = []
     while True:
         msg = mav.recv_match(blocking=False)
         if msg is None:
@@ -282,7 +287,7 @@ def _assert_command_ack(
         _advance_one(context, host)
         for msg in _drain_mavlink(mav):
             if _message_indicates_failsafe(msg):
-                raise AssertionError(
+                _raise_failsafe(
                     "PX4 entered failsafe state while waiting for "
                     f"{label} ACK: system_status={int(msg.system_status)}"
                 )
@@ -327,7 +332,7 @@ def _settle_px4_prearm(
         _advance_one(context, host)
         for msg in _drain_mavlink(mav):
             if _message_indicates_failsafe(msg):
-                raise AssertionError(
+                _raise_failsafe(
                     "PX4 entered failsafe state while settling before arm: "
                     f"system_status={int(msg.system_status)}"
                 )
@@ -480,7 +485,7 @@ def _wait_for_takeoff_target(
         _advance_one(context, host)
         for msg in _drain_mavlink(mav):
             if _message_indicates_failsafe(msg):
-                raise AssertionError(
+                _raise_failsafe(
                     "PX4 entered failsafe state while waiting for altitude telemetry: "
                     f"system_status={int(msg.system_status)}"
                 )
@@ -551,7 +556,7 @@ def _observe_stability(
 
         for msg in _drain_mavlink(mav):
             if _message_indicates_failsafe(msg):
-                _raise_instability(
+                _raise_failsafe(
                     "PX4 entered failsafe state during takeoff: "
                     f"system_status={int(msg.system_status)}"
                 )
@@ -832,6 +837,18 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
 
 class ExpectedInstabilityDetected(AssertionError):
     """Raised when the scenario reaches command flow and detects instability."""
+
+
+class Px4FailsafeDetected(AssertionError):
+    """Raised when PX4 SITL enters a failsafe state.
+
+    A failsafe heartbeat (system_status critical / emergency / flight
+    termination) is a PX4-internal estimator/EKF event, not a flight-envelope
+    breach, and is host-load-dependent and rerun-worthy. It is deliberately NOT
+    a subclass of :class:`ExpectedInstabilityDetected`, so it never counts as an
+    envelope-detected instability: the negative takeoff test must only pass when
+    the stability envelope catches the injected fault, never on a failsafe flake.
+    """
 
 
 @dataclass(frozen=True)

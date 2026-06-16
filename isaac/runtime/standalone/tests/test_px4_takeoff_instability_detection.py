@@ -68,8 +68,7 @@ class _RotorFailureFault:
         return type(dynamics)(
             forces_n=dynamics.forces_n,
             body_torque_n_m=(
-                np.asarray(dynamics.body_torque_n_m, dtype=np.float64)
-                + self._body_torque_bias_n_m
+                np.asarray(dynamics.body_torque_n_m, dtype=np.float64) + self._body_torque_bias_n_m
             ),
             body_drag_n=dynamics.body_drag_n,
         )
@@ -112,6 +111,10 @@ def _run_test(context: SceneTestContext) -> None:
             ),
         )
     except ExpectedInstabilityDetected as exc:
+        # Only a stability-envelope breach counts as detection. A
+        # Px4FailsafeDetected is intentionally NOT caught here: a PX4 failsafe is
+        # a rerun-worthy infrastructure flake, not proof the envelope caught the
+        # injected fault, so it must propagate as a failure instead of a pass.
         context.report(f"{TEST_NAME}: detected expected instability: {exc}")
         return
     raise AssertionError("Post-takeoff rotor fault did not trigger the takeoff stability envelope")
