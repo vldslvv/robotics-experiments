@@ -7,10 +7,6 @@ enabled: true
 # Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
 articulation_path: ""
 
-# Legacy linear model setting kept for staged tests. The live PX4 bridge uses
-# Pegasus' quadratic rotor model below.
-max_rotor_force_n: 8.0
-
 # Pegasus actuator scaling: PX4 controls -> rotor angular velocity references.
 input_offset: [0.0, 0.0, 0.0, 0.0]
 input_scaling: [1000.0, 1000.0, 1000.0, 1000.0]

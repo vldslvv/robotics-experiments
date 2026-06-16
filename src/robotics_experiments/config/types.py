@@ -147,8 +147,6 @@ class Px4BridgeConfig:
         articulation_path: USD path of the drone root articulation. When
             empty (default), the host derives it from the drone-spawner
             config (``<default_prim>/<drone.prim_name>``).
-        max_rotor_force_n: Legacy staging value for the linear thrust model.
-            The default PX4 path uses Pegasus' quadratic rotor model instead.
         input_offset, input_scaling, zero_position_armed: Pegasus MAVLink
             actuator scaling from PX4 controls to rotor angular velocity
             references.
@@ -228,7 +226,6 @@ class Px4BridgeConfig:
 
     enabled: bool
     articulation_path: str
-    max_rotor_force_n: float
     input_offset: List[float]
     input_scaling: List[float]
     zero_position_armed: List[float]
