@@ -25,9 +25,7 @@ import numpy as np
 EXT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXT_ROOT))
 
-from Px4SitlBridge_python import frames  # noqa: E402
-from Px4SitlBridge_python.thrust_model import LinearThrustModel  # noqa: E402
-from Px4SitlBridge_python.vehicle_state import VehicleState  # noqa: E402
+from Px4SitlBridge_python import LinearThrustModel, VehicleState, frames  # noqa: E402
 
 _failed = 0
 

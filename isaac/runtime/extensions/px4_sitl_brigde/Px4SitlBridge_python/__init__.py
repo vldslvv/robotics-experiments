@@ -24,12 +24,25 @@ Typical wiring (done by the drone-spawning host, not by this extension):
 try:
     from .extension import *  # noqa: F401,F403  -- registers omni.ext entrypoint
 except ModuleNotFoundError as exc:
-    if exc.name != "omni":
+    # ``extension.py`` pulls Kit-only deps (omni, carb) that are absent in
+    # pure-Python smoke/unit runs; tolerate those, re-raise anything else.
+    if exc.name not in ("omni", "carb"):
         raise
-from .ports import AbstractFlightStackBridge, Px4MavlinkPort
-from .px4_bridge import Px4Bridge
-from .thrust_model import LinearThrustModel, PegasusQuadraticThrustModel, RotorThrustModel
-from .vehicle_state import VehicleState
+
+# Re-export the core bridge API directly; this package is a thin shim that lets
+# Kit import the extension while consumers use ``robotics_experiments.px4_bridge``.
+# ``frames`` is re-exported as a module attribute for the smoke tests; it is not
+# part of the public ``__all__`` surface.
+from robotics_experiments.px4_bridge import (  # noqa: F401
+    AbstractFlightStackBridge,
+    LinearThrustModel,
+    PegasusQuadraticThrustModel,
+    Px4Bridge,
+    Px4MavlinkPort,
+    RotorThrustModel,
+    VehicleState,
+    frames,
+)
 
 __all__ = [
     "AbstractFlightStackBridge",
