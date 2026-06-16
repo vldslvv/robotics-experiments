@@ -85,8 +85,12 @@ class GPS(Sensor):
             "epv": self._epv,
             "cog": 0.0,
             "sattelites_visible": self._sattelites_visible,
-            "latitude_gt": np.radians(self._origin_lat),
-            "longitude_gt": np.radians(self._origin_lon),
+            # Ground-truth lat/lon are reported in degrees, consistent with the
+            # primary "latitude"/"longitude" fields. This diverges from upstream
+            # Pegasus (radians) on purpose; the backend consumes these via
+            # ``* 10000000`` expecting degrees. Do not "sync away" the units.
+            "latitude_gt": self._origin_lat,
+            "longitude_gt": self._origin_lon,
             "altitude_gt": self._origin_alt,
         }
 
@@ -182,8 +186,10 @@ class GPS(Sensor):
             "epv": self._epv,
             "cog": 0.0,  # cog,
             "sattelites_visible": self._sattelites_visible,
-            "latitude_gt": latitude_gt,
-            "longitude_gt": longitude_gt,
+            # Ground-truth lat/lon in degrees (see __init__): intentional
+            # divergence from upstream Pegasus, which returns radians here.
+            "latitude_gt": np.degrees(latitude_gt),
+            "longitude_gt": np.degrees(longitude_gt),
             "altitude_gt": state.position[2] + self._origin_alt,
         }
 

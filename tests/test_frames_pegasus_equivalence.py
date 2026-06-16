@@ -149,14 +149,55 @@ def test_reference_gps_matches_pegasus_frame_and_unit_conventions(pegasus_path):
     assert pegasus_gps["velocity_down"] == pytest.approx(reference_gps["velocity_down"])
     assert pegasus_gps["latitude"] == pytest.approx(reference_gps["latitude"], abs=1.0e-6)
     assert pegasus_gps["longitude"] == pytest.approx(reference_gps["longitude"], abs=1.0e-6)
-    assert np.degrees(pegasus_gps["latitude_gt"]) == pytest.approx(
+    assert pegasus_gps["latitude_gt"] == pytest.approx(
         reference_gps["latitude_gt"],
         abs=1.0e-6,
     )
-    assert np.degrees(pegasus_gps["longitude_gt"]) == pytest.approx(
+    assert pegasus_gps["longitude_gt"] == pytest.approx(
         reference_gps["longitude_gt"],
         abs=1.0e-6,
     )
+
+
+@pytest.mark.parametrize(
+    "home_lat_deg, home_lon_deg",
+    [
+        (frames.DEFAULT_HOME_LAT_DEG, frames.DEFAULT_HOME_LON_DEG),
+        # Near-equator home: |lat|,|lon| < 2*pi would be misclassified as radians
+        # by the old magnitude heuristic. Ground truth must stay in degrees.
+        (1.0, 2.0),
+    ],
+)
+def test_pegasus_gps_ground_truth_is_degrees_for_any_home(
+    pegasus_path,
+    home_lat_deg,
+    home_lon_deg,
+):
+    from pegasus.simulator.logic.sensors.gps import GPS
+
+    state = VehicleState.hover_at(position_enu=(12.0, -7.0, 2.0), sim_time_us=0)
+
+    gps = GPS(
+        {
+            "update_rate": 1.0,
+            "gps_xy_random_walk": 0.0,
+            "gps_z_random_walk": 0.0,
+            "gps_xy_noise_density": 0.0,
+            "gps_z_noise_density": 0.0,
+            "gps_vxy_noise_density": 0.0,
+            "gps_vz_noise_density": 0.0,
+        }
+    )
+    gps.initialize(None, home_lat_deg, home_lon_deg, frames.DEFAULT_HOME_ALT_M)
+
+    sensor = gps.update(_pegasus_state_from_vehicle(state), 1.0)
+
+    # Ground truth and primary coordinates share units (degrees) regardless of
+    # home magnitude: near home they are within a fraction of a degree.
+    assert sensor["latitude_gt"] == pytest.approx(sensor["latitude"], abs=1.0e-3)
+    assert sensor["longitude_gt"] == pytest.approx(sensor["longitude"], abs=1.0e-3)
+    assert sensor["latitude_gt"] == pytest.approx(home_lat_deg, abs=1.0e-3)
+    assert sensor["longitude_gt"] == pytest.approx(home_lon_deg, abs=1.0e-3)
 
 
 def test_reference_barometer_matches_pegasus_altitude_sign_and_pressure(pegasus_path):

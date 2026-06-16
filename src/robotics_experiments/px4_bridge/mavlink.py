@@ -13,7 +13,6 @@ preserving custom timeout and sim-time handling.
 from __future__ import annotations
 
 import logging
-import math
 import time
 from datetime import datetime
 from pathlib import Path
@@ -171,10 +170,7 @@ class _PegasusSensorSuite:
         return self._barometer.update(state, dt_s)
 
     def _update_gps(self, state, dt_s: float) -> dict | None:
-        gps = self._gps.update(state, dt_s)
-        if gps is None:
-            return None
-        return _normalize_pegasus_gps_for_backend(gps)
+        return self._gps.update(state, dt_s)
 
 
 def _pegasus_imu_config(update_rate_hz: float, noise_enabled: bool) -> dict:
@@ -240,15 +236,6 @@ def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> 
             }
         )
     return config
-
-
-def _normalize_pegasus_gps_for_backend(gps: dict) -> dict:
-    normalized = dict(gps)
-    for key in ("latitude_gt", "longitude_gt"):
-        value = float(normalized[key])
-        if math.isfinite(value) and abs(value) <= 2.0 * math.pi:
-            normalized[key] = math.degrees(value)
-    return normalized
 
 
 # TODO get rid of px4_autolaunch and similar settings

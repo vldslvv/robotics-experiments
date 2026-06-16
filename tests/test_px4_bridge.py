@@ -550,25 +550,6 @@ def test_mavlink_port_barometer_altitude_sign_with_noise_disabled(monkeypatch):
     assert backend.bar_updates[1]["pressure_altitude"] > backend.bar_updates[0]["pressure_altitude"]
 
 
-def test_pegasus_gps_ground_truth_radians_are_normalized_for_backend(monkeypatch):
-    _install_fake_pegasus(monkeypatch)
-    import robotics_experiments.px4_bridge.mavlink as mavlink_module
-
-    gps = {
-        "latitude": 47.3977,
-        "longitude": 8.5456,
-        "latitude_gt": np.radians(47.3977),
-        "longitude_gt": np.radians(8.5456),
-    }
-
-    normalized = mavlink_module._normalize_pegasus_gps_for_backend(gps)
-
-    assert normalized["latitude"] == pytest.approx(47.3977)
-    assert normalized["longitude"] == pytest.approx(8.5456)
-    assert normalized["latitude_gt"] == pytest.approx(47.3977)
-    assert normalized["longitude_gt"] == pytest.approx(8.5456)
-
-
 def test_mavlink_port_defaults_to_pegasus_sensor_noise(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4)
