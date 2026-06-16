@@ -711,6 +711,9 @@ class PX4MavlinkBackend(Backend):
                 self._sensor_data.abs_pressure,
                 self._sensor_data.diff_pressure,
                 self._sensor_data.pressure_alt,
+                # Intentional divergence from upstream Pegasus: the 14th
+                # HIL_SENSOR field carries temperature, not GPS altitude
+                # (upstream sends altitude here). Do not "sync" this back.
                 self._sensor_data.temperature,
                 fields_updated,
             )
