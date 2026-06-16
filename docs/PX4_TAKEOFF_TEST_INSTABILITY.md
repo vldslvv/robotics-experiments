@@ -43,7 +43,11 @@ flakiness.
   `isaac/runtime/standalone/tests/_px4_takeoff_scenario.py` route through it, so a
   failsafe never counts as an envelope-detected instability and the `-instability`
   test no longer passes on a failsafe flake. (Verified safe: all recent
-  `-instability` runs detect via the tilt envelope, not failsafe.)
+  `-instability` runs detect via the tilt envelope, not failsafe.) Within the
+  observation loop the per-tick stability-envelope gates are now evaluated
+  *before* the failsafe check, so a fault-induced divergence that would trip both
+  on the same tick is always attributed to the envelope; a failsafe is raised
+  only when PX4 fails safe while the drone is still inside the envelope.
 - **Deferred (route still open):** the per-run classification tool, bounded
   auto-retry of infra flakes, and the readiness-gate / concurrency hardening
   described under "Open implementation options" remain unimplemented.

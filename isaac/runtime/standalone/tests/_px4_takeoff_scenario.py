@@ -554,12 +554,10 @@ def _observe_stability(
         _advance_one(context, host)
         _send_gcs_heartbeat(mav)
 
+        failsafe_status: int | None = None
         for msg in _drain_mavlink(mav):
             if _message_indicates_failsafe(msg):
-                _raise_failsafe(
-                    "PX4 entered failsafe state during takeoff: "
-                    f"system_status={int(msg.system_status)}"
-                )
+                failsafe_status = int(msg.system_status)
 
         sim_time_us = int(getattr(host, "_sim_time_us", 0))
         sample = _sample_state(articulation_io, sim_time_us)
@@ -592,6 +590,17 @@ def _observe_stability(
         if angular_speed_rad_s > _MAX_ANGULAR_SPEED_RAD_S:
             _raise_instability(
                 f"Drone angular velocity diverged: |omega|={angular_speed_rad_s:.2f}rad/s"
+            )
+
+        # Failsafe is evaluated only after the per-tick stability-envelope gates
+        # above. If a fault-induced divergence is severe enough to trip both on
+        # the same tick, it is attributed to the envelope
+        # (ExpectedInstabilityDetected); a failsafe seen while the drone is still
+        # inside the envelope is a genuine PX4-internal event raised as the
+        # distinct Px4FailsafeDetected (flake/rerun, not an envelope detection).
+        if failsafe_status is not None:
+            _raise_failsafe(
+                "PX4 entered failsafe state during takeoff: " f"system_status={failsafe_status}"
             )
 
         if hover_settle_end_us is None and climb_m >= _MIN_TAKEOFF_CLIMB_M:
