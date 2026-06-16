@@ -771,6 +771,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
             test_name=options.test_name,
             timeout_s=_HEARTBEAT_TIMEOUT_S,
         )
+        if not bool(getattr(host, "is_running", False)):
+            raise AssertionError("PX4 bridge host stopped before command flow")
+        _require_bridge_connected(host)
 
         observer.initialize()
         start_sample = _sample_state(observer, int(getattr(host, "_sim_time_us", 0)))

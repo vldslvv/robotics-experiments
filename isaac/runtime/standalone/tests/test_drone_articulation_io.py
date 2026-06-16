@@ -3,8 +3,7 @@
 This test verifies the Isaac-side half of the PX4 bridge contract: a spawned
 configured drone can be opened through ``IsaacArticulationIO``, sampled into a
 finite ``VehicleState``, and addressed with per-rotor force commands. It does
-not connect to PX4 SITL; ``test_px4_bridge_host.py`` owns the live MAVLink
-coverage.
+not connect to PX4 SITL; the takeoff scenario owns live MAVLink coverage.
 
 Run inside the Isaac Sim container:
     /isaac-sim/python.sh \

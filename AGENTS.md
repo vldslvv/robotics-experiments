@@ -212,8 +212,6 @@ the host. They are meant to be used in the Dockerized environment.
   Their standalone Isaac test scripts live under
   `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
   scenario-specific notes.
-- `make test-integration-px4` starts a temporary PX4 SITL container, runs the
-  standalone Isaac PX4 bridge test, and removes the temporary PX4 container.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
   runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
   isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and

@@ -3,12 +3,11 @@
 ########################################
 
 .PHONY: test-integration
-test-integration: test-integration-isaac test-integration-px4
+test-integration: test-integration-isaac test-integration-px4-takeoff
 
 INTEGRATION_TEST_TARGETS = \
     test-integration-isaac \
     test-integration-drone-articulation \
-    test-integration-px4 \
     test-integration-px4-takeoff \
     test-integration-px4-takeoff-instability
 
@@ -117,10 +116,6 @@ PX4_INTEGRATION_COMMON_ENV = \
     PX4_TEST_READY_TIMEOUT_S='$(PX4_TEST_READY_TIMEOUT_S)' \
     SCENE='$(SCENE)'
 
-.PHONY: test-integration-px4
-test-integration-px4:
-	$(call RUN_PX4_INTEGRATION_TEST,test-integration-px4,$(ISAAC_PX4_BRIDGE_TEST),$(ISAAC_PX4_BRIDGE_TEST_LOG),test_px4_bridge_host.log,test_px4_bridge_host_px4.log)
-
 .PHONY: test-integration-px4-takeoff
 test-integration-px4-takeoff:
 	$(call RUN_PX4_INTEGRATION_TEST,test-integration-px4-takeoff,$(ISAAC_PX4_TAKEOFF_TEST),$(ISAAC_PX4_TAKEOFF_TEST_LOG),test_px4_takeoff_stability.log,test_px4_takeoff_stability_px4.log)
@@ -134,9 +129,6 @@ test-isaac-simulation: test-integration-isaac
 
 .PHONY: test-isaac-drone-articulation
 test-isaac-drone-articulation: test-integration-drone-articulation
-
-.PHONY: test-isaac-px4-bridge
-test-isaac-px4-bridge: test-integration-px4
 
 .PHONY: test-isaac-px4-takeoff
 test-isaac-px4-takeoff: test-integration-px4-takeoff

@@ -32,6 +32,5 @@ help:
 		'  make test-integration      Run container-backed integration tests' \
 		'  make test-integration-all  Run all integration tests in parallel with a summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \
-		'  make test-integration-px4  Run the Isaac/PX4 bridge integration test' \
 		'  make test-integration-px4-takeoff Run the Isaac/PX4 takeoff stability test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test'
