@@ -155,10 +155,6 @@ class _PegasusSensorSuite:
         pegasus_state.attitude = np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
         pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
         pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
-        pegasus_state.linear_acceleration = np.asarray(
-            state.linear_acceleration_enu,
-            dtype=np.float64,
-        )
         pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(
             state.orientation_flu_enu_wxyz,
             state.linear_velocity_enu,

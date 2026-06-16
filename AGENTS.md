@@ -38,6 +38,9 @@ the current contents and the intended home for that kind of code.
 - Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
   loading during lightweight package imports.
 - Do not rename, remove, or broaden public exports as part of cleanup unless explicitly requested.
+- `VehicleState` carries pose, velocity, angular velocity, and sim time only.
+  Do not add a kinematic acceleration field for the PX4 HIL path; the Pegasus
+  IMU derives acceleration from velocity deltas internally.
 
 ## Isaac Sim extension design
 
@@ -195,11 +198,11 @@ the host. They are meant to be used in the Dockerized environment.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all
-  targets finish. It defaults to running targets serially
-  (`INTEGRATION_TEST_JOBS=1`) to avoid Isaac/GPU resource starvation and the
+  targets finish. It defaults to running 3 targets concurrently
+  (`INTEGRATION_TEST_JOBS=3`); lower it (for example `INTEGRATION_TEST_JOBS=1`
+  to run serially) to avoid Isaac/GPU resource starvation and the
   host-load-dependent PX4 SITL startup actuator backlog that destabilizes
-  takeoff; set `INTEGRATION_TEST_JOBS=<n>` to run `<n>` targets concurrently when
-  the host can sustain it.
+  takeoff, or raise it when the host can sustain more.
 - Integration test Make targets are defined in `make/integration-tests.mk`.
   Their standalone Isaac test scripts live under
   `isaac/runtime/standalone/tests/`; use that directory's `README.md` for

@@ -7,7 +7,6 @@ Run with the Isaac Kit Python interpreter or any Python with ``numpy`` and
 
 Exercises:
   - ``VehicleState.hover_at`` constructs without error
-  - ``frames.specific_force_body_flu`` returns +g along body up at rest
   - ``frames.magnetometer_body_flu`` returns the expected FLU vector
   - ``frames.synth_gps_from_enu`` shifts lat/lon by the right sign
   - ``LinearThrustModel`` clips and scales as advertised
@@ -45,13 +44,6 @@ def main() -> int:
     s = VehicleState.hover_at()
     _check("hover state position", np.allclose(s.position_enu, [0, 0, 1]))
     _check("hover state quat wxyz", np.allclose(s.orientation_flu_enu_wxyz, [1, 0, 0, 0]))
-
-    sf = frames.specific_force_body_flu(np.zeros(3), np.array([1.0, 0, 0, 0]))
-    _check(
-        "specific force at rest level reads +g on body up",
-        np.allclose(sf, [0, 0, 9.81], atol=1e-6),
-        f"got {sf}",
-    )
 
     mag = frames.magnetometer_body_flu(np.array([1.0, 0, 0, 0]))
     # Default NED ref [0.215, 0, 0.43] → ENU [0, 0.215, -0.43] → body FLU same (level).

@@ -28,9 +28,6 @@ class VehicleState:
             body frame into the ENU world frame.
         linear_velocity_enu: World-frame linear velocity in m/s.
         angular_velocity_flu: Body-frame (FLU) angular velocity in rad/s.
-        linear_acceleration_enu: World-frame linear acceleration in m/s^2
-            (kinematic, gravity NOT included). The port adds gravity and
-            rotates into body frame to produce specific force.
         sim_time_us: Simulation time in microseconds. Used as the source of
             truth for ``HIL_SENSOR.time_usec`` - must be monotonic and derived
             from sim time, not wall clock, for lockstep to work.
@@ -40,7 +37,6 @@ class VehicleState:
     orientation_flu_enu_wxyz: np.ndarray
     linear_velocity_enu: np.ndarray
     angular_velocity_flu: np.ndarray
-    linear_acceleration_enu: np.ndarray
     sim_time_us: int
 
     @staticmethod
@@ -55,6 +51,5 @@ class VehicleState:
             orientation_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
             linear_velocity_enu=np.zeros(3, dtype=np.float64),
             angular_velocity_flu=np.zeros(3, dtype=np.float64),
-            linear_acceleration_enu=np.zeros(3, dtype=np.float64),
             sim_time_us=int(sim_time_us),
         )

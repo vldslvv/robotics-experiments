@@ -52,7 +52,6 @@ The bridge is reactive: it has no opinion about when ticks happen. When called, 
 | Orientation | FLU body relative to ENU world, quaternion `(w, x, y, z)` | dimensionless | resolved body prim pose when available; articulation root only as a logged fallback |
 | Linear velocity | ENU world | m/s | resolved body prim velocity when available; articulation root only as a logged fallback |
 | Angular velocity | FLU body | rad/s | resolved body prim angular velocity when available; articulation root only as a logged fallback |
-| Linear acceleration | ENU world | m/s² | finite difference of linear velocity |
 | Sim time | — | microseconds | `BridgeHost` sim-time counter, reset to zero after any startup settle delay |
 
 ### Frame conventions
@@ -390,7 +389,6 @@ Isaac → Bridge:
         orientation_wxyz    = [0.99, 0.0, 0.0, 0.14],
         velocity_enu        = [0.3, 0.0, 0.0],
         angular_velocity_flu = [0.0, 0.0, 0.0],
-        linear_acceleration_flu = [0.0, 0.0, 9.81],   # at hover, gravity in body +Z
         timestamp_us        = 4_000_000,
     )
 

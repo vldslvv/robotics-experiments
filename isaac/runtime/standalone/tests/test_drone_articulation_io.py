@@ -67,11 +67,6 @@ def _assert_vehicle_state(state, *, sim_time_us: int) -> None:
     )
     _assert_finite_array(state.linear_velocity_enu, shape=(3,), label="linear_velocity_enu")
     _assert_finite_array(state.angular_velocity_flu, shape=(3,), label="angular_velocity_flu")
-    _assert_finite_array(
-        state.linear_acceleration_enu,
-        shape=(3,),
-        label="linear_acceleration_enu",
-    )
     quat_norm = float(np.linalg.norm(np.asarray(state.orientation_flu_enu_wxyz)))
     if not math.isclose(quat_norm, 1.0, rel_tol=1e-3, abs_tol=1e-3):
         raise AssertionError(f"orientation quaternion is not normalized: norm={quat_norm}")

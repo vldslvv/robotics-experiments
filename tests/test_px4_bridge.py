@@ -127,12 +127,11 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
 
 
-def test_px4_bridge_derives_drag_velocity_from_world_velocity_not_acceleration():
+def test_px4_bridge_derives_drag_velocity_from_world_velocity():
     state = VehicleState.hover_at(sim_time_us=0)
     yaw_90_wxyz = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)], dtype=np.float64)
     state.orientation_flu_enu_wxyz = yaw_90_wxyz
     state.linear_velocity_enu = np.array([0.0, 3.0, 0.0], dtype=np.float64)
-    state.linear_acceleration_enu = np.array([100.0, 200.0, 300.0], dtype=np.float64)
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.0, 0.0, 0.0])
     thrust_model = _CapturingThrustModel(num_rotors=4)

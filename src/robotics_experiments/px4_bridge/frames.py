@@ -6,8 +6,6 @@ Single source of truth for:
   the MAVLink wire boundary, which Pegasus' ``state.py`` already handles).
 - ENU<->NED inertial frame conversion.
 - FLU<->FRD body frame conversion.
-- Reference-only specific-force synthesis (gravity-inclusive body acceleration
-  the accelerometer would report).
 - Reference-only GPS lat/lon synthesis from a local ENU offset around a fixed
   home.
 - Reference-only magnetometer body-frame synthesis from a supplied fixed NED
@@ -58,7 +56,6 @@ __all__ = [
     "world_enu_to_body_flu",
     "body_velocity_flu_from_state",
     "tilt_angle_deg",
-    "specific_force_body_flu",
     "magnetometer_body_flu",
     "synth_gps_from_enu",
     "synth_barometer",
@@ -152,23 +149,6 @@ def tilt_angle_deg(q_flu_enu_wxyz: np.ndarray) -> float:
     )
     cos_angle = float(np.clip(body_z_world[2], -1.0, 1.0))
     return math.degrees(math.acos(cos_angle))
-
-
-def specific_force_body_flu(
-    linear_acceleration_enu: np.ndarray,
-    q_flu_enu_wxyz: np.ndarray,
-    gravity: float = GRAVITY_M_S2,
-) -> np.ndarray:
-    """Compute reference body-FLU specific force for tests/diagnostics.
-
-    ``f_body = R_world->body @ (a_inertial - g_world_enu)`` where
-    ``g_world_enu = [0, 0, -gravity]`` (gravity points down in ENU). At rest
-    and level this returns ``[0, 0, +gravity]`` in FLU - i.e. the IMU reports
-    +9.81 along body up, matching real-world behavior.
-    """
-    a_inertial = np.asarray(linear_acceleration_enu, dtype=np.float64)
-    g_world_enu = np.array([0.0, 0.0, -gravity], dtype=np.float64)
-    return world_enu_to_body_flu(q_flu_enu_wxyz, a_inertial - g_world_enu)
 
 
 def magnetometer_body_flu(

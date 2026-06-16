@@ -23,10 +23,6 @@ def _pegasus_state_from_vehicle(state: VehicleState):
     )
     pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
     pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
-    pegasus_state.linear_acceleration = np.asarray(
-        state.linear_acceleration_enu,
-        dtype=np.float64,
-    )
     pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(
         state.orientation_flu_enu_wxyz,
         state.linear_velocity_enu,
@@ -76,61 +72,6 @@ def _wmm_field_ned_gauss(
 @pytest.fixture
 def pegasus_path(monkeypatch):
     monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
-
-
-def test_reference_specific_force_matches_pegasus_imu_without_noise(pegasus_path):
-    from pegasus.simulator.logic.sensors.geo_mag_utils import GRAVITY_VECTOR
-    from pegasus.simulator.logic.sensors.imu import IMU
-
-    dt_s = 1.0
-    orientation_wxyz = np.array([np.sqrt(0.5), np.sqrt(0.5), 0.0, 0.0], dtype=np.float64)
-    initial_velocity = np.array([1.0, -2.0, 0.5], dtype=np.float64)
-    acceleration_enu = np.array([0.25, -0.5, 1.25], dtype=np.float64)
-
-    first = VehicleState.hover_at(sim_time_us=0)
-    first.orientation_flu_enu_wxyz = orientation_wxyz
-    first.linear_velocity_enu = initial_velocity
-    first.linear_acceleration_enu = acceleration_enu
-
-    second = VehicleState.hover_at(sim_time_us=1_000_000)
-    second.orientation_flu_enu_wxyz = orientation_wxyz
-    second.linear_velocity_enu = initial_velocity + acceleration_enu * dt_s
-    second.linear_acceleration_enu = acceleration_enu
-
-    imu = IMU(
-        {
-            "update_rate": 1.0,
-            "gyroscope": {
-                "noise_density": 0.0,
-                "random_walk": 0.0,
-                "bias_correlation_time": 1.0e3,
-                "turn_on_bias_sigma": 0.0,
-            },
-            "accelerometer": {
-                "noise_density": 0.0,
-                "random_walk": 0.0,
-                "bias_correlation_time": 300.0,
-                "turn_on_bias_sigma": 0.0,
-            },
-        }
-    )
-    imu.initialize(
-        None,
-        frames.DEFAULT_HOME_LAT_DEG,
-        frames.DEFAULT_HOME_LON_DEG,
-        frames.DEFAULT_HOME_ALT_M,
-    )
-    imu.update(_pegasus_state_from_vehicle(first), dt_s)
-    pegasus_imu = imu.update(_pegasus_state_from_vehicle(second), dt_s)
-
-    reference_frd = _flu_to_frd(
-        frames.specific_force_body_flu(
-            acceleration_enu,
-            orientation_wxyz,
-            gravity=float(np.linalg.norm(GRAVITY_VECTOR)),
-        )
-    )
-    np.testing.assert_allclose(pegasus_imu["linear_acceleration"], reference_frd, atol=1e-12)
 
 
 def test_reference_magnetometer_matches_pegasus_with_same_wmm_field(pegasus_path):

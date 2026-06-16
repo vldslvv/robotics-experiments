@@ -61,8 +61,6 @@ class IsaacArticulationIO:
         self._body: Any | None = None
         self._body_path: str | None = None
         self._rotor_positions_body: Optional[np.ndarray] = None
-        self._last_velocity_enu: Optional[np.ndarray] = None
-        self._last_sim_time_us: Optional[int] = None
         self._force_apply_count: int = 0
 
     @property
@@ -185,8 +183,6 @@ class IsaacArticulationIO:
         self._body = None
         self._body_path = None
         self._rotor_positions_body = None
-        self._last_velocity_enu = None
-        self._last_sim_time_us = None
         self._force_apply_count = 0
 
     # ---- Per-tick I/O ------------------------------------------------------
@@ -194,8 +190,9 @@ class IsaacArticulationIO:
     def read_state(self, sim_time_us: int) -> VehicleState:
         """Sample body state into a :class:`VehicleState` (ENU/FLU).
 
-        Linear acceleration is finite-differenced from the previous tick's
-        linear velocity. The first tick produces zero acceleration.
+        The PX4 HIL IMU path recomputes acceleration inside the Pegasus IMU
+        from velocity deltas, so this state sample only carries pose and
+        velocity data.
         """
         if self._articulation is None:
             self.initialize()
@@ -220,22 +217,11 @@ class IsaacArticulationIO:
             angular_velocity_enu,
         )
 
-        # Finite-difference accel from last tick (world ENU frame).
-        if self._last_velocity_enu is not None and self._last_sim_time_us is not None:
-            dt_s = max(1e-6, (sim_time_us - self._last_sim_time_us) * 1e-6)
-            linear_acceleration_enu = (linear_velocity_enu - self._last_velocity_enu) / dt_s
-        else:
-            linear_acceleration_enu = np.zeros(3, dtype=np.float64)
-
-        self._last_velocity_enu = linear_velocity_enu.copy()
-        self._last_sim_time_us = sim_time_us
-
         return VehicleState(
             position_enu=position_enu,
             orientation_flu_enu_wxyz=orientation_wxyz,
             linear_velocity_enu=linear_velocity_enu,
             angular_velocity_flu=angular_velocity_flu,
-            linear_acceleration_enu=linear_acceleration_enu,
             sim_time_us=int(sim_time_us),
         )
 

@@ -124,7 +124,7 @@ def test_read_state_samples_body_pose_when_root_pose_differs():
     np.testing.assert_allclose(state.orientation_flu_enu_wxyz, q_body_wxyz, atol=1e-12)
 
 
-def test_read_state_uses_body_linear_velocity_for_velocity_and_acceleration():
+def test_read_state_uses_body_linear_velocity_when_root_differs():
     io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=[])
     io._articulation = _FakeArticulation(
         position=[0.0, 0.0, 0.0],
@@ -145,7 +145,6 @@ def test_read_state_uses_body_linear_velocity_for_velocity_and_acceleration():
 
     np.testing.assert_allclose(first.linear_velocity_enu, [1.0, 2.0, 3.0], atol=1e-12)
     np.testing.assert_allclose(second.linear_velocity_enu, [1.5, 3.0, 4.5], atol=1e-12)
-    np.testing.assert_allclose(second.linear_acceleration_enu, [1.0, 2.0, 3.0], atol=1e-12)
 
 
 def test_read_state_uses_body_angular_velocity_when_root_differs():
