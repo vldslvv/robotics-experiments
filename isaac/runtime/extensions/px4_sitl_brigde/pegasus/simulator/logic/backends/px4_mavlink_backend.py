@@ -13,7 +13,6 @@ from pymavlink import mavutil
 
 from pegasus.simulator.logic.state import State
 from pegasus.simulator.logic.backends.backend import Backend, BackendConfig
-# from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 from pegasus.simulator.logic.backends.tools.px4_launch_tool import PX4LaunchTool
 
 
@@ -200,7 +199,7 @@ class PX4MavlinkBackendConfig(BackendConfig):
             >>>  "connection_ip": "localhost",
             >>>  "connection_baseport": 4560,
             >>>  "px4_autolaunch": True,
-            >>>  "px4_dir": "PegasusInterface().px4_path",
+            >>>  "px4_dir": "",
             >>>  "px4_vehicle_model": "gazebo-classic_iris",
             >>>  "enable_lockstep": True,
             >>>  "num_rotors": 4,
