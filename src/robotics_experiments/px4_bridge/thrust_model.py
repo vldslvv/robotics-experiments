@@ -21,6 +21,14 @@ __all__ = [
     "RotorThrustModel",
 ]
 
+# Per-motor iris defaults, identical across all four rotors. These are
+# library-default fallbacks only; the Hydra px4 config is the runtime source
+# of truth.
+_IRIS_ROTOR_CONSTANT = 8.54858e-6
+_IRIS_ROLLING_MOMENT = 1e-6
+_IRIS_MIN_ROTOR_VELOCITY = 0.0
+_IRIS_MAX_ROTOR_VELOCITY = 1100.0
+
 
 @dataclass(frozen=True)
 class RotorDynamics:
@@ -119,11 +127,11 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
         self,
         *,
         num_rotors: int = 4,
-        rotor_constant: Sequence[float] = (8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6),
-        rolling_moment_coefficient: Sequence[float] = (1e-6, 1e-6, 1e-6, 1e-6),
+        rotor_constant: Sequence[float] = (_IRIS_ROTOR_CONSTANT,) * 4,
+        rolling_moment_coefficient: Sequence[float] = (_IRIS_ROLLING_MOMENT,) * 4,
         rot_dir: Sequence[float] = (-1.0, -1.0, 1.0, 1.0),
-        min_rotor_velocity: Sequence[float] = (0.0, 0.0, 0.0, 0.0),
-        max_rotor_velocity: Sequence[float] = (1100.0, 1100.0, 1100.0, 1100.0),
+        min_rotor_velocity: Sequence[float] = (_IRIS_MIN_ROTOR_VELOCITY,) * 4,
+        max_rotor_velocity: Sequence[float] = (_IRIS_MAX_ROTOR_VELOCITY,) * 4,
         linear_drag: Sequence[float] = (0.50, 0.30, 0.0),
     ):
         self._num_rotors = int(num_rotors)
