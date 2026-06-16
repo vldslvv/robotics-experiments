@@ -6,13 +6,21 @@ Single source of truth for:
   the MAVLink wire boundary, which Pegasus' ``state.py`` already handles).
 - ENU<->NED inertial frame conversion.
 - FLU<->FRD body frame conversion.
-- Specific-force synthesis (gravity-inclusive body acceleration the
-  accelerometer would report).
-- GPS lat/lon synthesis from a local ENU offset around a fixed home.
-- Magnetometer body-frame synthesis from a fixed NED reference field.
+- Reference-only specific-force synthesis (gravity-inclusive body acceleration
+  the accelerometer would report).
+- Reference-only GPS lat/lon synthesis from a local ENU offset around a fixed
+  home.
+- Reference-only magnetometer body-frame synthesis from a supplied fixed NED
+  reference field.
 
 Keeping these conversions out of every other layer ensures each conversion is
 applied exactly once.
+
+The runtime PX4 MAVLink path intentionally obtains sensor payloads from the
+vendored Pegasus sensors through ``_PegasusSensorSuite``. The synthesis helpers
+below remain exported as deterministic reference utilities for tests, smoke
+checks, and diagnostics; equivalence tests keep their frame and unit conventions
+aligned with the Pegasus path.
 """
 
 from __future__ import annotations
@@ -151,7 +159,7 @@ def specific_force_body_flu(
     q_flu_enu_wxyz: np.ndarray,
     gravity: float = GRAVITY_M_S2,
 ) -> np.ndarray:
-    """Compute the body-FLU specific force an accelerometer would report.
+    """Compute reference body-FLU specific force for tests/diagnostics.
 
     ``f_body = R_world->body @ (a_inertial - g_world_enu)`` where
     ``g_world_enu = [0, 0, -gravity]`` (gravity points down in ENU). At rest
@@ -167,12 +175,13 @@ def magnetometer_body_flu(
     q_flu_enu_wxyz: np.ndarray,
     mag_ned_gauss: np.ndarray = DEFAULT_MAG_NED_GAUSS,
 ) -> np.ndarray:
-    """Synthesize a body-FLU magnetometer reading from a NED reference field.
+    """Synthesize a reference body-FLU reading from a supplied NED field.
 
     The reference field is given in NED so it matches the values typically
-    quoted from geomagnetic models. This routine converts to ENU, rotates into
-    body using the attitude quaternion, and converts FRD-style readings back
-    into FLU. Output units match the input (Gauss).
+    quoted from geomagnetic models. This helper does not compute a geomagnetic
+    model; callers that need Pegasus-equivalent values should pass the field
+    derived from the vendored geomagnetic utilities for the test location.
+    Output units match the input (Gauss).
     """
     mag_ned = np.asarray(mag_ned_gauss, dtype=np.float64)
     mag_enu = np.array([mag_ned[1], mag_ned[0], -mag_ned[2]], dtype=np.float64)
@@ -189,7 +198,7 @@ def synth_gps_from_enu(
     home_lon_deg: float = DEFAULT_HOME_LON_DEG,
     home_alt_m: float = DEFAULT_HOME_ALT_M,
 ) -> dict:
-    """Synthesize PX4 ``HIL_GPS`` payload fields from a local ENU pose.
+    """Synthesize reference ``HIL_GPS`` payload fields from a local ENU pose.
 
     Treats the local ENU frame as a flat tangent plane around the home
     coordinate. Sufficient for indoor-scale operation where GPS realism is
@@ -239,7 +248,7 @@ def synth_gps_from_enu(
 
 
 def synth_barometer(altitude_m: float, sea_level_pressure_hpa: float = 1013.25) -> dict:
-    """Synthesize a minimal barometer payload (ISA approximation).
+    """Synthesize a reference barometer payload (ISA approximation).
 
     Returns:
         Dict with keys ``temperature``, ``absolute_pressure``,

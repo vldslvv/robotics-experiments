@@ -70,7 +70,7 @@ warn_redundant_casts = true
 no_implicit_optional = true
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q --basetemp=.build/pytest"
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 norecursedirs = [
