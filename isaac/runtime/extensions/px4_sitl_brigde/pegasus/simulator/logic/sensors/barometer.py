@@ -129,7 +129,9 @@ class Barometer(Sensor):
         # Apply noise and drift
         abs_pressure_noise: float = self._baro_noise_std_pa * y1
         self._baro_drift_pa = self._baro_drift_pa + (self._baro_drift_pa_per_sec * dt)  # Update the drift
-        absolute_pressure_noisy: float = absolute_pressure + abs_pressure_noise + self._baro_drift_pa_per_sec
+        # Intentional divergence from upstream Pegasus: apply accumulated drift,
+        # not the drift rate, so pressure and pressure altitude stay consistent.
+        absolute_pressure_noisy: float = absolute_pressure + abs_pressure_noise + self._baro_drift_pa
 
         # Convert to hPa (Note: 1 hPa = 100 Pa)
         absolute_pressure_noisy_hpa: float = absolute_pressure_noisy * 0.01

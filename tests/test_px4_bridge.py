@@ -422,6 +422,42 @@ def test_vendored_pegasus_backend_sends_barometer_temperature(monkeypatch):
     assert hil_sensor[14] == 6656
 
 
+def test_vendored_pegasus_barometer_applies_accumulated_drift(monkeypatch):
+    monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
+
+    from pegasus.simulator.logic.sensors.barometer import Barometer
+    from pegasus.simulator.logic.sensors.geo_mag_utils import GRAVITY_VECTOR
+    from pegasus.simulator.logic.state import State
+
+    state = State()
+    state.position = np.array([0.0, 0.0, 0.0])
+
+    baseline = Barometer({"noise_std_pa": 0.0, "drift_pa_per_sec": 0.0, "update_rate": 1.0})
+    drifted = Barometer({"noise_std_pa": 0.0, "drift_pa_per_sec": 2.0, "update_rate": 1.0})
+
+    baseline_first = baseline.update(state, 1.0)
+    drifted_first = drifted.update(state, 1.0)
+    baseline_second = baseline.update(state, 1.0)
+    drifted_second = drifted.update(state, 1.0)
+
+    assert drifted_first["absolute_pressure"] - baseline_first["absolute_pressure"] == pytest.approx(0.02)
+    assert drifted_second["absolute_pressure"] - baseline_second["absolute_pressure"] == pytest.approx(0.04)
+
+    air_density = drifted._AIR_DENSITY_MSL / np.power(
+        drifted._TEMPERATURE_MSL
+        / (drifted._TEMPERATURE_MSL - drifted._LAPSE_RATE * drifted._origin_alt),
+        4.256,
+    )
+    first_altitude_shift = -2.0 / (np.linalg.norm(GRAVITY_VECTOR) * air_density)
+    second_altitude_shift = -4.0 / (np.linalg.norm(GRAVITY_VECTOR) * air_density)
+    assert drifted_first["pressure_altitude"] - baseline_first["pressure_altitude"] == pytest.approx(
+        first_altitude_shift
+    )
+    assert drifted_second["pressure_altitude"] - baseline_second["pressure_altitude"] == pytest.approx(
+        second_altitude_shift
+    )
+
+
 def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, gps_send_rate_hz=5.0, sensor_noise_enabled=False)
