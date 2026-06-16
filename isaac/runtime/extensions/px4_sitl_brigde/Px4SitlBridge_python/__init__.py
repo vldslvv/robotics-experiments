@@ -8,7 +8,7 @@ Typical wiring (done by the drone-spawning host, not by this extension):
 >>> from Px4SitlBridge_python import (
 ...     Px4Bridge, Px4MavlinkPort, PegasusQuadraticThrustModel,
 ... )
->>> port = Px4MavlinkPort(num_rotors=4, px4_autolaunch=False)
+>>> port = Px4MavlinkPort(num_rotors=4)
 >>> model = PegasusQuadraticThrustModel(num_rotors=4)
 >>> bridge = Px4Bridge(
 ...     articulation_path="/World/DroneSpawned",

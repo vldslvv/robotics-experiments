@@ -238,7 +238,6 @@ def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> 
     return config
 
 
-# TODO get rid of px4_autolaunch and similar settings
 class Px4MavlinkPort(AbstractFlightStackBridge):
     """PX4 SITL adapter over Pegasus' ``PX4MavlinkBackend``.
 
@@ -266,9 +265,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         connection_ip: str = "localhost",
         connection_baseport: int = 4560,
         vehicle_id: int = 0,
-        px4_autolaunch: bool = False,
-        px4_dir: str = "",
-        px4_vehicle_model: str = "gazebo-classic_iris",
         input_offset: list[float] | None = None,
         input_scaling: list[float] | None = None,
         zero_position_armed: list[float] | None = None,
@@ -359,9 +355,11 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     "connection_ip": connection_ip,
                     "connection_baseport": connection_baseport,
                     "vehicle_id": vehicle_id,
-                    "px4_autolaunch": px4_autolaunch,
-                    "px4_dir": px4_dir,
-                    "px4_vehicle_model": px4_vehicle_model,
+                    # The bridge never spawns PX4; PX4 SITL runs as a separate
+                    # process (Docker: none_iris). Pin the vendored backend's
+                    # autolaunch off (its own default is True) so it only
+                    # connects over MAVLink.
+                    "px4_autolaunch": False,
                     "enable_lockstep": True,
                     "input_offset": input_offset,
                     "input_scaling": input_scaling,

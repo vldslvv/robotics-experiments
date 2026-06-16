@@ -721,10 +721,6 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     px4_config = env.px4
     if options.px4_config_transform is not None:
         px4_config = options.px4_config_transform(px4_config)
-    if px4_config.px4_autolaunch:
-        raise AssertionError(
-            "This test requires externally running PX4; px4_autolaunch must be false"
-        )
 
     context.report(f"{options.test_name}: applying configured simulation settings")
     apply_settings(context.stage)

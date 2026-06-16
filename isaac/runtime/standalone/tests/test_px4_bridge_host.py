@@ -161,11 +161,6 @@ def _run_test(context: SceneTestContext) -> None:
 
     context.report(f"{TEST_NAME}: loading experiment config")
     env = get_config()
-    if env.px4.px4_autolaunch:
-        raise AssertionError(
-            "This test requires externally running PX4; px4_autolaunch must be false"
-        )
-    context.report(f"{TEST_NAME}: confirmed PX4 autolaunch is disabled")
 
     default_prim = context.stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"

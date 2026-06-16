@@ -28,11 +28,6 @@ connection_ip: localhost
 connection_baseport: 4560
 vehicle_id: 0
 
-# Leave autolaunch off when PX4 runs in Docker.
-px4_autolaunch: false
-px4_dir: ""
-px4_vehicle_model: gazebo-classic_iris
-
 lockstep_timeout_s: 1.0
 first_heartbeat_timeout_s: 5.0
 # Prime-then-block bootstrap: send at most this many HIL_SENSOR packets

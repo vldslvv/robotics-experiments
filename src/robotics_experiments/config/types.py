@@ -162,11 +162,6 @@ class Px4BridgeConfig:
         connection_baseport: TCP port for the simulator MAVLink API.
         vehicle_id: Added to ``connection_baseport`` when more than one
             vehicle shares a host.
-        px4_autolaunch: When true, the bridge spawns a PX4 SITL process via
-            ``PX4LaunchTool`` on start. Leave false when running PX4 in
-            Docker.
-        px4_dir: Path to the PX4-Autopilot tree, only used when autolaunch.
-        px4_vehicle_model: ``PX4_SIM_MODEL`` env value passed to autolaunch.
         lockstep_timeout_s: Hard deadline on receiving an actuator message
             each tick. On timeout the port returns zeros and Isaac keeps
             ticking - required so a stalled flight stack does not freeze
@@ -246,9 +241,6 @@ class Px4BridgeConfig:
     connection_ip: str
     connection_baseport: int
     vehicle_id: int
-    px4_autolaunch: bool
-    px4_dir: str
-    px4_vehicle_model: str
     lockstep_timeout_s: float
     first_heartbeat_timeout_s: float
     bootstrap_prime_ticks: int
