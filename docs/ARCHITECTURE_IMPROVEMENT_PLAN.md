@@ -308,7 +308,11 @@ delegations.
 
 **Acceptance.** Adding a fourth container is a few variables, not a copied block.
 
-**Status.** OPEN.
+**Status.** DONE. `make/containers.mk` now uses a single
+`run-container` template for Isaac, ROS 2, and PX4, with per-container runtime
+arguments centralized in `make/docker.mk`. Stop/remove targets are generated from
+`CONTAINER_STACKS`, while documented compatibility aliases remain unchanged.
+Verified with dry-run lifecycle targets.
 
 ### Step 3.6 - Deduplicate Docker and PX4 shell boilerplate
 
@@ -332,7 +336,12 @@ build-input dir; `px4/docker/run_px4_iris_fresh.sh`, `run_px4_iris_ci.sh`.
 
 **Acceptance.** Each setup/reset block is defined once.
 
-**Status.** OPEN.
+**Status.** DONE. The current Dockerfile had already collapsed the zsh/nvim setup
+through shared `zsh -> nvim -> ai-tools` stages; the remaining duplicate tmux
+configuration is now sourced from `docker/tmux.conf` for both nvim-based images
+and PX4. PX4 SITL state reset lives in `px4/docker/reset_px4_state.sh` and is
+used by both fresh and CI launch scripts; the CI script keeps only its log-filter
+tail.
 
 ---
 

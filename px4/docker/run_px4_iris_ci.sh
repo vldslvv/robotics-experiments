@@ -2,24 +2,10 @@
 set -euo pipefail
 
 px4_dir="${PX4_DIR:-/opt/PX4-Autopilot}"
-rootfs="${PX4_ROOTFS:-${px4_dir}/build/px4_sitl_default/rootfs}"
+reset_helper="${PX4_RESET_HELPER:-/usr/local/lib/px4/reset_px4_state.sh}"
 
-fresh_state="${PX4_FRESH_STATE:-1}"
-if [[ "${fresh_state}" != "0" ]]; then
-  mkdir -p "${rootfs}"
-
-  # Keep rootfs/log mounted and persistent for post-run debugging, but remove
-  # simulated EEPROM, dataman, and parameter snapshots that PX4 reuses as
-  # non-volatile state across SITL launches.
-  rm -f \
-    "${rootfs}/dataman" \
-    "${rootfs}/parameters.bson" \
-    "${rootfs}/parameters_backup.bson"
-
-  if [[ -d "${rootfs}/eeprom" ]]; then
-    find "${rootfs}/eeprom" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  fi
-fi
+source "${reset_helper}"
+reset_px4_state
 
 cd "${px4_dir}"
 set -o pipefail

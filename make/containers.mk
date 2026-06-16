@@ -2,73 +2,75 @@
 # Persistent container lifecycle
 ########################################
 
-.PHONY: run-isaac
-run-isaac: xhost sync-nvim-caches
-	@mkdir -p $(ISAAC_RUNTIME_DIRS) "$(ISAAC_ZSH_CACHE)"
-	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ISAAC_CONTAINER_NAME)$$'; then \
-		echo "Starting existing Isaac container $(ISAAC_CONTAINER_NAME)..."; \
-		docker start -ai $(ISAAC_CONTAINER_NAME); \
-	else \
-		echo "Creating and starting Isaac container $(ISAAC_CONTAINER_NAME)..."; \
-		docker run -it \
-			--name $(ISAAC_CONTAINER_NAME) \
-			$(ISAAC_DOCKER_RUNTIME) \
-			$(ISAAC_DOCKER_ENV) \
-			$(ISAAC_INTERACTIVE_ENV) \
-			$(ISAAC_DOCKER_VOLUMES) \
-			$(ISAAC_INTERACTIVE_VOLUMES) \
-			$(ISAAC_IMAGE); \
-	fi
+CONTAINER_STACKS = isaac ros px4
 
-.PHONY: run-ros
-run-ros: xhost sync-nvim-caches
-	@if docker ps -a --format '{{.Names}}' | grep -q '^$(ROS_CONTAINER_NAME)$$'; then \
-		echo "Starting existing ROS2 container $(ROS_CONTAINER_NAME)..."; \
-		docker start -ai $(ROS_CONTAINER_NAME); \
-	else \
-		echo "Creating and starting ROS2 container $(ROS_CONTAINER_NAME)..."; \
-		docker run -it \
-			--name "$(ROS_CONTAINER_NAME)" \
-			--network=host \
-			--gpus all \
-			--device=/dev/dri \
-			-e NVIDIA_DRIVER_CAPABILITIES=all \
-			-e NVIDIA_VISIBLE_DEVICES=all \
-			-e DISPLAY="$(DISPLAY)" \
-			-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
-			-e QT_X11_NO_MITSHM=1 \
-			-e QT_QPA_PLATFORM=xcb \
-			-e ROS_DOMAIN_ID="$(ROS_DOMAIN_ID)" \
-			-e RMW_IMPLEMENTATION="$(RMW_IMPLEMENTATION)" \
-			-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE) \
-			-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
-			-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-			-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro \
-			-v $(CURDIR)/$(ROS_WS_DIR):/ros2_ws \
-			-v $(ROS_ZSH_CACHE):/cache/zsh \
-			-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
-			-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
-			-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
-			-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
-			-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim \
-			"$(ROS_IMAGE)"; \
-	fi
+isaac_DISPLAY_NAME = Isaac
+isaac_CONTAINER_NAME = $(ISAAC_CONTAINER_NAME)
+isaac_IMAGE = $(ISAAC_IMAGE)
+isaac_RUN_DEPS = xhost sync-nvim-caches
+isaac_RUNTIME_DIRS = $(ISAAC_RUNTIME_DIRS) "$(ISAAC_ZSH_CACHE)"
+isaac_DOCKER_ARGS = \
+	$(ISAAC_DOCKER_RUNTIME) \
+	$(ISAAC_DOCKER_ENV) \
+	$(ISAAC_INTERACTIVE_ENV) \
+	$(ISAAC_DOCKER_VOLUMES) \
+	$(ISAAC_INTERACTIVE_VOLUMES)
 
-.PHONY: run-px4
-run-px4:
-	@mkdir -p "$(PX4_LOGS)" "$(PX4_EEPROM)"
-	@if docker ps -a --format '{{.Names}}' | grep -q '^$(PX4_CONTAINER_NAME)$$'; then \
-		echo "Starting existing PX4 container $(PX4_CONTAINER_NAME)..."; \
-		docker start -ai $(PX4_CONTAINER_NAME); \
+ros_DISPLAY_NAME = ROS2
+ros_CONTAINER_NAME = $(ROS_CONTAINER_NAME)
+ros_IMAGE = $(ROS_IMAGE)
+ros_RUN_DEPS = xhost sync-nvim-caches
+ros_DOCKER_ARGS = \
+	$(ROS_DOCKER_RUNTIME) \
+	$(ROS_DOCKER_ENV) \
+	$(ROS_DOCKER_VOLUMES)
+
+px4_DISPLAY_NAME = PX4
+px4_CONTAINER_NAME = $(PX4_CONTAINER_NAME)
+px4_IMAGE = $(PX4_IMAGE)
+px4_RUNTIME_DIRS = "$(PX4_LOGS)" "$(PX4_EEPROM)"
+px4_DOCKER_ARGS = \
+	$(PX4_DOCKER_RUNTIME) \
+	$(PX4_DOCKER_VOLUMES)
+
+define RUN_CONTAINER_TARGET
+.PHONY: run-$(1)
+run-$(1): $$($(1)_RUN_DEPS)
+	@$$(if $$($(1)_RUNTIME_DIRS),mkdir -p $$($(1)_RUNTIME_DIRS))
+	@if docker ps -a --format '{{.Names}}' | grep -q '^$$($(1)_CONTAINER_NAME)$$$$'; then \
+		echo "Starting existing $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
+		docker start -ai $$($(1)_CONTAINER_NAME); \
 	else \
-		echo "Creating and starting PX4 container $(PX4_CONTAINER_NAME)..."; \
+		echo "Creating and starting $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
 		docker run -it \
-			--name "$(PX4_CONTAINER_NAME)" \
-			--network=host \
-			-v $(PX4_LOGS):$(PX4_ROOTFS)/log \
-			-v $(PX4_EEPROM):$(PX4_ROOTFS)/eeprom \
-			"$(PX4_IMAGE)"; \
+			--name "$$($(1)_CONTAINER_NAME)" \
+			$$($(1)_DOCKER_ARGS) \
+			"$$($(1)_IMAGE)"; \
 	fi
+endef
+
+define STOP_CONTAINER_TARGET
+.PHONY: stop-$(1)
+stop-$(1):
+	@docker stop $$($(1)_CONTAINER_NAME) 2>/dev/null || true
+endef
+
+define REMOVE_CONTAINER_TARGET
+.PHONY: remove-$(1)-container
+remove-$(1)-container:
+	@docker rm -f $$($(1)_CONTAINER_NAME) 2>/dev/null || true
+endef
+
+define REMOVE_IMAGE_TARGET
+.PHONY: remove-$(1)-image
+remove-$(1)-image:
+	@docker rmi $$($(1)_IMAGE) 2>/dev/null || true
+endef
+
+$(foreach stack,$(CONTAINER_STACKS),$(eval $(call RUN_CONTAINER_TARGET,$(stack))))
+$(foreach stack,$(CONTAINER_STACKS),$(eval $(call STOP_CONTAINER_TARGET,$(stack))))
+$(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_CONTAINER_TARGET,$(stack))))
+$(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_IMAGE_TARGET,$(stack))))
 
 .PHONY: run
 run:
@@ -76,49 +78,13 @@ run:
 	kitty --title IsaacSim --hold $(MAKE) run-isaac &
 	kitty --title PX4 --hold $(MAKE) run-px4 &
 
-.PHONY: stop-isaac
-stop-isaac:
-	@docker stop $(ISAAC_CONTAINER_NAME) 2>/dev/null || true
-
-.PHONY: stop-ros
-stop-ros:
-	@docker stop $(ROS_CONTAINER_NAME) 2>/dev/null || true
-
-.PHONY: stop-px4
-stop-px4:
-	@docker stop $(PX4_CONTAINER_NAME) 2>/dev/null || true
-
 .PHONY: stop
 stop: stop-isaac stop-ros stop-px4
 	@echo "Stopped Isaac, ROS, and PX4 containers (if running)."
 
-.PHONY: remove-isaac-container
-remove-isaac-container:
-	@docker rm -f $(ISAAC_CONTAINER_NAME) 2>/dev/null || true
-
-.PHONY: remove-ros-container
-remove-ros-container:
-	@docker rm -f $(ROS_CONTAINER_NAME) 2>/dev/null || true
-
-.PHONY: remove-px4-container
-remove-px4-container:
-	@docker rm -f $(PX4_CONTAINER_NAME) 2>/dev/null || true
-
 .PHONY: remove-containers
 remove-containers: remove-isaac-container remove-ros-container remove-px4-container
 	@echo "Removed Isaac, ROS, and PX4 containers (if they existed)."
-
-.PHONY: remove-isaac-image
-remove-isaac-image:
-	@docker rmi $(ISAAC_IMAGE) 2>/dev/null || true
-
-.PHONY: remove-ros-image
-remove-ros-image:
-	@docker rmi $(ROS_IMAGE) 2>/dev/null || true
-
-.PHONY: remove-px4-image
-remove-px4-image:
-	@docker rmi $(PX4_IMAGE) 2>/dev/null || true
 
 .PHONY: remove-images
 remove-images: remove-isaac-image remove-ros-image remove-px4-image

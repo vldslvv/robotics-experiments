@@ -64,6 +64,41 @@ ISAAC_INTERACTIVE_VOLUMES = \
 	-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
 	-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim
 
+ROS_DOCKER_RUNTIME = \
+	--network=host \
+	--gpus all \
+	--device=/dev/dri
+
+ROS_DOCKER_ENV = \
+	-e NVIDIA_DRIVER_CAPABILITIES=all \
+	-e NVIDIA_VISIBLE_DEVICES=all \
+	-e DISPLAY="$(DISPLAY)" \
+	-e XDG_RUNTIME_DIR="$(XDG_RUNTIME_DIR)" \
+	-e QT_X11_NO_MITSHM=1 \
+	-e QT_QPA_PLATFORM=xcb \
+	-e ROS_DOMAIN_ID="$(ROS_DOMAIN_ID)" \
+	-e RMW_IMPLEMENTATION="$(RMW_IMPLEMENTATION)" \
+	-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE)
+
+ROS_DOCKER_VOLUMES = \
+	-v "$(XDG_RUNTIME_DIR)":"$(XDG_RUNTIME_DIR)" \
+	-v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro \
+	-v $(CURDIR)/$(ROS_WS_DIR):/ros2_ws \
+	-v $(ROS_ZSH_CACHE):/cache/zsh \
+	-v $(BUILD_ROOT)/.config/lazyvim-starter:/root/.config/nvim \
+	-v $(BUILD_ROOT)/.config/github-copilot:/root/.config/github-copilot \
+	-v $(BUILD_ROOT)/.local/share/nvim:/root/.local/share/nvim \
+	-v $(BUILD_ROOT)/.local/state/nvim:/root/.local/state/nvim \
+	-v $(BUILD_ROOT)/.cache/nvim:/root/.cache/nvim
+
+PX4_DOCKER_RUNTIME = \
+	--network=host
+
+PX4_DOCKER_VOLUMES = \
+	-v $(PX4_LOGS):$(PX4_ROOTFS)/log \
+	-v $(PX4_EEPROM):$(PX4_ROOTFS)/eeprom
+
 .PHONY: xhost
 xhost:
 	@xhost +local:root >/dev/null 2>&1 || true

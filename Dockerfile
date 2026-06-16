@@ -150,12 +150,8 @@ RUN export NVM_DIR="${HOME}/.nvm" && \
 
 # For escape delay, see if there are any issues
 # https://superuser.com/questions/942677/consequences-of-escape-time-0-tmux-setting
-RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc && \
-  echo 'set -g default-terminal "tmux-256color"' >> ${HOME}/.tmux.conf && \
-  echo 'set -ga terminal-overrides ",*:Tc"' >> ${HOME}/.tmux.conf && \
-  echo 'set -g mouse on' >> ${HOME}/.tmux.conf && \
-  echo 'set -g history-limit 50000' >> ${HOME}/.tmux.conf && \
-  echo 'set -sg escape-time 0' >> ${HOME}/.tmux.conf
+COPY docker/tmux.conf /root/.tmux.conf
+RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc
 
 
 FROM nvim AS ai-tools
@@ -209,7 +205,7 @@ ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
 SHELL ["/bin/bash", "-lc"]
 
-RUN apt-get install --no-install-recommends -y \
+RUN apt-get update && apt-get install --no-install-recommends -y \
   ros-${ROS_DISTRO}-vision-msgs \
   ros-${ROS_DISTRO}-ackermann-msgs \
   ros-${ROS_DISTRO}-teleop-twist-keyboard \
@@ -243,7 +239,7 @@ WORKDIR /isaacsim_ros_workspaces/${ROS_DISTRO}_ws
 # First, source two workspaces, ros base and topic_based_ros2_control
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
   source /topic_based_ros2_control_ws/install/setup.bash && \
-  rosdep install -i --from-path src --rosdistro jazzy -y && \
+  PIP_BREAK_SYSTEM_PACKAGES=1 rosdep install -i --from-path src --rosdistro jazzy -y && \
   colcon build
 
 
@@ -286,12 +282,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
       tmux ranger less vim \
  && rm -rf /var/lib/apt/lists/*
 
-RUN printf '%s\n' \
-      'set -g default-terminal "tmux-256color"' \
-      'set -g mouse on' \
-      'set -g history-limit 50000' \
-      'set -sg escape-time 0' \
-      > /root/.tmux.conf
+COPY docker/tmux.conf /root/.tmux.conf
 
 RUN printf '%s\n' \
       "alias px4-iris='/usr/local/bin/run_px4_iris_fresh'" \
@@ -312,10 +303,12 @@ RUN cd ${PX4_DIR} && make px4_sitl_default
 COPY px4/docker/run_px4_iris_fresh.sh /usr/local/bin/run_px4_iris_fresh
 COPY px4/docker/run_px4_iris_ci.sh /usr/local/bin/run_px4_iris_ci
 COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
+COPY px4/docker/reset_px4_state.sh /usr/local/lib/px4/
 RUN chmod +x \
       /usr/local/bin/run_px4_iris_fresh \
       /usr/local/bin/run_px4_iris_ci \
-      /usr/local/bin/start_px4_tmux
+      /usr/local/bin/start_px4_tmux \
+      /usr/local/lib/px4/reset_px4_state.sh
 
 WORKDIR ${PX4_DIR}
 # Drop into an attached tmux with PX4 SITL running in one pane and a shell in another.
