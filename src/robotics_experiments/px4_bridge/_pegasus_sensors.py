@@ -8,6 +8,8 @@ magnetometer) and its config factories from the lockstep MAVLink transport in
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 
 from . import frames
@@ -106,8 +108,21 @@ class _PegasusSensorSuite:
         return self._gps.update(state, dt_s)
 
 
+def _zero_noise(cfg: dict, keys: Iterable[str]) -> None:
+    """Set each of ``keys`` in ``cfg`` to ``0.0`` in place.
+
+    Collapses the repeated "zero the white-noise / random-walk terms when noise
+    is disabled" step shared by the flat-keyed sensor configs. Structural
+    constants (such as a non-zero bias correlation time) are set by the caller
+    and left untouched.
+    """
+    for key in keys:
+        cfg[key] = 0.0
+
+
 def _pegasus_imu_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
+    # Holds both the scalar update_rate and the nested gyro/accel sub-dicts.
+    config: dict[str, object] = {"update_rate": update_rate_hz}
     if not noise_enabled:
         # Zero both white-noise densities and random-walk terms so precision
         # tests still exercise Pegasus frame conversion without stochastic
@@ -133,15 +148,16 @@ def _pegasus_gps_config(update_rate_hz: float, noise_enabled: bool) -> dict:
         # Pegasus GPS applies randomness to position/altitude through
         # white-noise and bias-walk terms. Its velocity-noise samples are
         # currently computed but not applied by the vendored model.
-        config.update(
-            {
-                "gps_xy_random_walk": 0.0,
-                "gps_z_random_walk": 0.0,
-                "gps_xy_noise_density": 0.0,
-                "gps_z_noise_density": 0.0,
-                "gps_vxy_noise_density": 0.0,
-                "gps_vz_noise_density": 0.0,
-            }
+        _zero_noise(
+            config,
+            (
+                "gps_xy_random_walk",
+                "gps_z_random_walk",
+                "gps_xy_noise_density",
+                "gps_z_noise_density",
+                "gps_vxy_noise_density",
+                "gps_vz_noise_density",
+            ),
         )
     return config
 
@@ -151,8 +167,7 @@ def _pegasus_barometer_config(update_rate_hz: float, noise_enabled: bool) -> dic
     if not noise_enabled:
         # Barometer randomness is pressure-domain Gaussian noise plus drift.
         # The vendored sensor now exposes noise_std_pa so it can be made exact.
-        config["noise_std_pa"] = 0.0
-        config["drift_pa_per_sec"] = 0.0
+        _zero_noise(config, ("noise_std_pa", "drift_pa_per_sec"))
     return config
 
 
@@ -160,12 +175,8 @@ def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> 
     config = {"update_rate": update_rate_hz}
     if not noise_enabled:
         # Magnetometer randomness is Gaussian field noise plus random-walk
-        # bias. Zero both terms for exact frame/field tests.
-        config.update(
-            {
-                "noise_density": 0.0,
-                "random_walk": 0.0,
-                "bias_correlation_time": 6.0e2,
-            }
-        )
+        # bias. Zero both terms for exact frame/field tests; the bias
+        # correlation time is a structural constant, not a noise term.
+        config["bias_correlation_time"] = 6.0e2
+        _zero_noise(config, ("noise_density", "random_walk"))
     return config
