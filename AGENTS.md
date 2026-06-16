@@ -1,5 +1,10 @@
 # AGENTS.md - Robotics stack (Isaac Sim + ROS 2 + PX4)
 
+> This file is the single source of project instructions. `CLAUDE.md` is a
+> symlink to `AGENTS.md`, so never edit `CLAUDE.md` directly (and do not try to
+> "sync" the two) -- always make changes here in `AGENTS.md` and they apply to
+> both.
+
 ## Project goal
 This repository integrates:
 - Isaac Sim (simulation)

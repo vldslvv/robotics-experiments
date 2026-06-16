@@ -21,6 +21,7 @@ from typing import Optional
 import numpy as np
 
 from . import frames
+from ._pegasus_sensors import _DEFAULT_SENSOR_RATE_HZ, _PegasusSensorSuite
 from .flight_stack import AbstractFlightStackBridge
 from .vehicle_state import VehicleState
 
@@ -33,7 +34,6 @@ _HIL_SENSOR_GYRO_UPDATED = 0b0000000111000
 _HIL_SENSOR_MAG_UPDATED = 0b0000111000000
 _HIL_SENSOR_BARO_UPDATED = 0b1101000000000
 _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
-_DEFAULT_SENSOR_RATE_HZ = 250.0
 _DEFAULT_DEBUG_LOG_PATH = "/tmp/robotics_experiments_px4_bridge.log"
 _FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
 
@@ -81,161 +81,6 @@ def _configure_file_logging(
     )
     package_logger.addHandler(handler)
     return resolved
-
-
-class _PegasusSensorSuite:
-    """Stateful Pegasus-style sensor update pipeline."""
-
-    def __init__(
-        self,
-        *,
-        home_lat_deg: float,
-        home_lon_deg: float,
-        home_alt_m: float,
-        gps_enabled: bool,
-        sensor_noise_enabled: bool,
-        update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
-    ):
-        self._home_lat_deg = float(home_lat_deg)
-        self._home_lon_deg = float(home_lon_deg)
-        self._home_alt_m = float(home_alt_m)
-        self._gps_enabled = bool(gps_enabled)
-        self._sensor_noise_enabled = bool(sensor_noise_enabled)
-        self._update_rate_hz = float(update_rate_hz)
-        self._last_sim_time_us: int | None = None
-
-        from pegasus.simulator.logic.sensors.barometer import Barometer
-        from pegasus.simulator.logic.sensors.gps import GPS
-        from pegasus.simulator.logic.sensors.imu import IMU
-        from pegasus.simulator.logic.sensors.magnetometer import Magnetometer
-
-        # Runtime intentionally uses Pegasus sensor classes for all PX4-bound
-        # sensor signals. With noise enabled their internal distributions are:
-        # IMU gyro/accel white noise plus bias random walks, GPS position and
-        # altitude noise plus bias walk, barometer pressure noise/drift, and
-        # magnetometer white noise plus bias walk.
-        self._imu = IMU(_pegasus_imu_config(update_rate_hz, self._sensor_noise_enabled))
-        self._gps = GPS(_pegasus_gps_config(update_rate_hz, self._sensor_noise_enabled))
-        self._barometer = Barometer(
-            _pegasus_barometer_config(update_rate_hz, self._sensor_noise_enabled)
-        )
-        self._magnetometer = Magnetometer(
-            _pegasus_magnetometer_config(update_rate_hz, self._sensor_noise_enabled)
-        )
-        for sensor in (self._imu, self._gps, self._barometer, self._magnetometer):
-            sensor.initialize(
-                None,
-                self._home_lat_deg,
-                self._home_lon_deg,
-                self._home_alt_m,
-            )
-
-    def update(self, state: VehicleState) -> dict[str, dict | None]:
-        sim_time_us = int(state.sim_time_us)
-        if self._last_sim_time_us is None:
-            dt_s = 1.0 / self._update_rate_hz
-        else:
-            dt_s = max(0.0, (sim_time_us - self._last_sim_time_us) * 1e-6)
-        self._last_sim_time_us = sim_time_us
-
-        pegasus_state = self._to_pegasus_state(state)
-        imu = self._update_imu(pegasus_state, dt_s)
-        mag = self._update_mag(pegasus_state, dt_s)
-        baro = self._update_baro(pegasus_state, dt_s)
-        gps = self._update_gps(pegasus_state, dt_s) if self._gps_enabled else None
-        return {"imu": imu, "mag": mag, "baro": baro, "gps": gps}
-
-    def _to_pegasus_state(self, state: VehicleState):
-        from pegasus.simulator.logic.state import State
-
-        pegasus_state = State()
-        q = np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64)
-        pegasus_state.position = np.asarray(state.position_enu, dtype=np.float64)
-        pegasus_state.attitude = np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
-        pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
-        pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
-        pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(
-            state.orientation_flu_enu_wxyz,
-            state.linear_velocity_enu,
-        )
-        return pegasus_state
-
-    def _update_imu(self, state, dt_s: float) -> dict | None:
-        return self._imu.update(state, dt_s)
-
-    def _update_mag(self, state, dt_s: float) -> dict | None:
-        return self._magnetometer.update(state, dt_s)
-
-    def _update_baro(self, state, dt_s: float) -> dict | None:
-        return self._barometer.update(state, dt_s)
-
-    def _update_gps(self, state, dt_s: float) -> dict | None:
-        return self._gps.update(state, dt_s)
-
-
-def _pegasus_imu_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Zero both white-noise densities and random-walk terms so precision
-        # tests still exercise Pegasus frame conversion without stochastic
-        # gyro/accelerometer perturbations.
-        config["gyroscope"] = {
-            "noise_density": 0.0,
-            "random_walk": 0.0,
-            "bias_correlation_time": 1.0e3,
-            "turn_on_bias_sigma": 0.0,
-        }
-        config["accelerometer"] = {
-            "noise_density": 0.0,
-            "random_walk": 0.0,
-            "bias_correlation_time": 300.0,
-            "turn_on_bias_sigma": 0.0,
-        }
-    return config
-
-
-def _pegasus_gps_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Pegasus GPS applies randomness to position/altitude through
-        # white-noise and bias-walk terms. Its velocity-noise samples are
-        # currently computed but not applied by the vendored model.
-        config.update(
-            {
-                "gps_xy_random_walk": 0.0,
-                "gps_z_random_walk": 0.0,
-                "gps_xy_noise_density": 0.0,
-                "gps_z_noise_density": 0.0,
-                "gps_vxy_noise_density": 0.0,
-                "gps_vz_noise_density": 0.0,
-            }
-        )
-    return config
-
-
-def _pegasus_barometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Barometer randomness is pressure-domain Gaussian noise plus drift.
-        # The vendored sensor now exposes noise_std_pa so it can be made exact.
-        config["noise_std_pa"] = 0.0
-        config["drift_pa_per_sec"] = 0.0
-    return config
-
-
-def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Magnetometer randomness is Gaussian field noise plus random-walk
-        # bias. Zero both terms for exact frame/field tests.
-        config.update(
-            {
-                "noise_density": 0.0,
-                "random_walk": 0.0,
-                "bias_correlation_time": 6.0e2,
-            }
-        )
-    return config
 
 
 class Px4MavlinkPort(AbstractFlightStackBridge):
@@ -481,27 +326,55 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             )
             return np.asarray(self._backend.input_reference(), dtype=np.float64)
 
-        # 1. Convert state into the sensor data the Pegasus backend expects.
+        # A tick is state(t) -> sensors(t) -> actuator(t): fill sensors from the
+        # state, run the heartbeat handshake, send sensors/GPS, then block for the
+        # paired actuator. Each phase returns False -- having already disconnected
+        # itself, or while still waiting for PX4's first heartbeat -- to mean
+        # "return zero rotor forces this tick".
         imu_refreshed = self._fill_sensor_data(state)
-
-        # 2. Send heartbeat at configured rate (wallclock is fine - pacing only).
         now = time.time()
+        if not self._heartbeat_phase(now):
+            return np.zeros(self._num_rotors, dtype=np.float64)
+        if not self._sensor_phase(sim_time_us, imu_refreshed):
+            return np.zeros(self._num_rotors, dtype=np.float64)
+        if not self._actuator_phase(sim_time_us):
+            return np.zeros(self._num_rotors, dtype=np.float64)
+
+        return np.asarray(self._backend.input_reference(), dtype=np.float64)
+
+    # ---- Internals ---------------------------------------------------------
+
+    def _heartbeat_phase(self, now: float) -> bool:
+        """Send the paced heartbeat and gate on PX4's first heartbeat.
+
+        Returns ``True`` once PX4's first heartbeat is in and the tick may
+        proceed; ``False`` while still waiting (or after a disconnect), meaning
+        ``step()`` returns zeros this tick.
+        """
+        # Send heartbeat at configured rate (wallclock is fine - pacing only).
         if self._should_send_heartbeat(now):
             try:
                 self._backend.send_heartbeat()
             except Exception as exc:
                 self._mark_disconnected(f"heartbeat send failed: {exc}", close_backend=True)
-                return np.zeros(self._num_rotors, dtype=np.float64)
+                return False
             self._last_heartbeat_send_s = now
 
-        # 3. Wait for the first heartbeat from PX4 before doing anything else.
+        # Wait for the first heartbeat from PX4 before doing anything else.
         if not self._backend._received_first_hearbeat:
             if not self._wait_for_first_heartbeat(now):
                 reason = self._last_disconnect_reason or "first heartbeat timeout"
                 self._mark_disconnected(reason, close_backend=True)
-            return np.zeros(self._num_rotors, dtype=np.float64)
+            return False
+        return True
 
-        # 4. Fail fast if the IMU did not refresh on a tick we are about to
+    def _sensor_phase(self, sim_time_us: int, imu_refreshed: bool) -> bool:
+        """Validate sensor cadence and send HIL_SENSOR (+GPS) for this tick.
+
+        Returns ``False`` (after a fatal disconnect) on a cadence mismatch or a
+        send failure, otherwise ``True``.
+        """
+        # Fail fast if the IMU did not refresh on a tick we are about to
         # send. With the sensor period pinned to the physics tick this only
         # happens when Isaac physics steps faster than the configured sensor
         # rate, which would otherwise ship HIL_SENSOR packets with stale
@@ -518,9 +391,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 f"sim_time_us={sim_time_us} last_sensor_us={self._last_sensor_send_us})",
                 close_backend=True,
             )
-            return np.zeros(self._num_rotors, dtype=np.float64)
+            return False
 
-        # 5. Send sensor + GPS messages with the caller's sim time.
+        # Send sensor + GPS messages with the caller's sim time.
         # This is an intentional Pegasus phase-order deviation: each port
         # instance treats a tick as state(t) -> sensors(t) -> actuator(t),
         # keeping lockstep causal per drone while retaining a hard timeout.
@@ -556,24 +429,22 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 )
         except Exception as exc:
             self._mark_disconnected(f"sensor/GPS send failed: {exc}", close_backend=True)
-            return np.zeros(self._num_rotors, dtype=np.float64)
+            return False
+        return True
 
-        # 6. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout. The first
-        # actuator may take several seconds of wallclock while PX4 boots, so the
-        # pre-first-actuator wait uses a generous deadline; steady-state ticks
-        # use the tight lockstep timeout.
+    def _actuator_phase(self, sim_time_us: int) -> bool:
+        """Poll for the paired HIL_ACTUATOR_CONTROLS with a hard timeout.
+
+        The first actuator may take several seconds of wallclock while PX4 boots,
+        so the pre-first-actuator wait uses a generous deadline; steady-state
+        ticks use the tight lockstep timeout. Returns ``False`` on timeout.
+        """
         poll_timeout = (
             self._first_actuator_timeout_s
             if not self._backend._received_first_actuator
             else self._lockstep_timeout_s
         )
-        if not self._poll_for_actuator(poll_timeout, sim_time_us):
-            return np.zeros(self._num_rotors, dtype=np.float64)
-
-        # 7. Return the up-to-date rotor reference.
-        return np.asarray(self._backend.input_reference(), dtype=np.float64)
-
-    # ---- Internals ---------------------------------------------------------
+        return self._poll_for_actuator(poll_timeout, sim_time_us)
 
     def _fill_sensor_data(self, state: VehicleState) -> bool:
         """Populate ``self._backend._sensor_data`` from a VehicleState.
@@ -789,18 +660,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         if backend._connection is None:
             self._mark_disconnected("actuator polling skipped: connection is closed")
             return False
-        # Block once PX4 has produced its first actuator (strict lockstep), OR
-        # once the bootstrap priming budget is spent. PX4 needs a few priming
-        # HIL_SENSOR packets before it emits its first actuator, so the first
-        # `_bootstrap_prime_ticks` sends stay non-blocking; after that the bridge
-        # blocks for the first actuator instead of free-running, which bounds the
-        # startup backlog (and therefore the steady-state actuator lag).
-        # `_sensor_send_count` is incremented before this call, so on the tick
-        # after the budget is spent the count exceeds the budget and we block.
-        needs_to_wait = backend._enable_lockstep and (
-            backend._received_first_actuator
-            or self._sensor_send_count > self._bootstrap_prime_ticks
-        )
+        needs_to_wait = self._needs_to_block_for_actuator()
         backend._received_actuator = False
 
         deadline = time.time() + timeout_s
@@ -833,6 +693,39 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 )
                 return False
 
+        if not self._drain_actuator_backlog():
+            return False
+        return self._actuator_is_fresh(sim_time_us)
+
+    def _needs_to_block_for_actuator(self) -> bool:
+        """Decide whether this tick must block for an actuator (prime-then-block).
+
+        Block once PX4 has produced its first actuator (strict lockstep), OR once
+        the bootstrap priming budget is spent. PX4 needs a few priming HIL_SENSOR
+        packets before it emits its first actuator, so the first
+        ``_bootstrap_prime_ticks`` sends stay non-blocking; after that the bridge
+        blocks for the first actuator instead of free-running, which bounds the
+        startup backlog (and therefore the steady-state actuator lag).
+        ``_sensor_send_count`` is incremented before this call, so on the tick
+        after the budget is spent the count exceeds the budget and we block.
+        """
+        backend = self._backend
+        return backend._enable_lockstep and (
+            backend._received_first_actuator
+            or self._sensor_send_count > self._bootstrap_prime_ticks
+        )
+
+    def _drain_actuator_backlog(self) -> bool:
+        """Apply the newest queued HIL_ACTUATOR_CONTROLS so the bridge flies fresh.
+
+        After the blocking wait has paired this tick with an actuator, any further
+        queued actuator packets are drained non-blocking and applied newest-last,
+        so a backlog never makes the bridge fly on stale motor commands. Returns
+        ``False`` (after a disconnect) on a recv failure, otherwise ``True``.
+        """
+        from pymavlink import mavutil
+
+        backend = self._backend
         while True:
             try:
                 msg = backend._connection.recv_match(blocking=False, timeout=0.0)
@@ -843,5 +736,4 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 break
             if msg.id == mavutil.mavlink.MAVLINK_MSG_ID_HIL_ACTUATOR_CONTROLS:
                 self._handle_actuator_msg(msg)
-
-        return self._actuator_is_fresh(sim_time_us)
+        return True

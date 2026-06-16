@@ -894,6 +894,39 @@ def test_mavlink_port_drains_actuator_backlog_to_newest(monkeypatch):
     assert port.is_connected is True
 
 
+def test_drain_actuator_backlog_applies_newest_queued_packet(monkeypatch):
+    # Focused unit coverage for the extracted _drain_actuator_backlog helper:
+    # a synthetic backlog of two actuator packets must be fully consumed and the
+    # newest one applied, so the bridge never flies on a stale queued command.
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, lockstep_timeout_s=1.0)
+    backend = port._backend
+    older_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=100_000,
+        controls=[0.1, 0.1, 0.1, 0.1],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    newest_msg = types.SimpleNamespace(
+        id=93,
+        time_usec=112_000,
+        controls=[0.2, 0.3, 0.4, 0.5],
+        mode=_MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
+        flags=0,
+    )
+    connection = _FakeConnection([older_msg, newest_msg])
+    backend._connection = connection
+
+    assert port._drain_actuator_backlog() is True
+    # Both queued packets are consumed (drain runs until recv returns None) and
+    # the newest packet is the applied rotor reference.
+    assert port._actuator_receive_count == 2
+    assert port._last_actuator_receive_us == 112_000
+    assert np.allclose(backend.input_reference(), [300.0, 400.0, 500.0, 600.0])
+    assert connection.recv_calls == [(False, 0.0), (False, 0.0), (False, 0.0)]
+
+
 def test_mavlink_port_disconnects_when_actuator_lag_exceeds_sustained_limit(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     # 0.02s = 20_000us absolute ceiling on steady-state actuator lag.
