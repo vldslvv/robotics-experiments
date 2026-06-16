@@ -5,6 +5,7 @@ from typing import List
 import carb
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
+from robotics_experiments.config._resolve import resolve_section
 from robotics_experiments.config.types import BoundingBox, LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState
 
@@ -182,10 +183,7 @@ def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) ->
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
-    if config is None:
-        from robotics_experiments.config import get_config as _get_experiment_config
-
-        config = _get_experiment_config().switches
+    config = resolve_section("switches", config)
     positions = _sample_positions(
         config.num_switches,
         [_to_range(b) for b in config.spawn_bounds],

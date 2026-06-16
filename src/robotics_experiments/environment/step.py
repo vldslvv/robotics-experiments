@@ -4,6 +4,7 @@ import carb
 from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
+from robotics_experiments.config._resolve import resolve_section
 from robotics_experiments.config.types import LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
@@ -96,10 +97,7 @@ def step_switches(
         config: Spawner configuration; when ``None``, resolved via
             :func:`.config.get_config` at call time.
     """
-    if config is None:
-        from robotics_experiments.config import get_config as _get_experiment_config
-
-        config = _get_experiment_config().switches
+    config = resolve_section("switches", config)
     for i, sw in enumerate(switch_state):
         if sw.articulation is None:
             carb.log_error(f"[LightSwitch] No articulation set for switch with index {i}")

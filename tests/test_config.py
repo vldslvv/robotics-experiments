@@ -75,6 +75,29 @@ def test_default_config_loads_from_root_experiment_config():
     reset_config()
 
 
+def test_resolve_section_returns_provided_untouched():
+    from robotics_experiments.config._resolve import resolve_section
+
+    sentinel = object()
+    # A provided value must be returned as-is without composing the config.
+    assert resolve_section("drone", sentinel) is sentinel
+
+
+def test_resolve_section_falls_back_to_named_section():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config._resolve import resolve_section
+
+    reset_config()
+    config = get_config()
+
+    assert resolve_section("drone", None) is config.drone
+    assert resolve_section("sim", None) is config.sim
+    assert resolve_section("switches", None) is config.switches
+    reset_config()
+
+
 def test_experiment_config_dir_override_loads(tmp_path, monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")

@@ -6,6 +6,7 @@ import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
+from robotics_experiments.config._resolve import resolve_section
 from robotics_experiments.config.types import DroneConfig
 
 __all__ = ["spawn_drone", "despawn_drone"]
@@ -179,10 +180,7 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
         config: Drone spawner configuration; when ``None``, resolved via
             :func:`.config.get_config` at call time.
     """
-    if config is None:
-        from robotics_experiments.config import get_config as _get_experiment_config
-
-        config = _get_experiment_config().drone
+    config = resolve_section("drone", config)
     parent = _resolve_parent(stage)
     _ensure_guide_cube(stage, parent, config)
 
@@ -222,10 +220,7 @@ def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     """
     if stage is None:
         return
-    if config is None:
-        from robotics_experiments.config import get_config as _get_experiment_config
-
-        config = _get_experiment_config().drone
+    config = resolve_section("drone", config)
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     drone_path = f"{parent}/{config.prim_name}"
