@@ -178,7 +178,11 @@ def _run_test(context: SceneTestContext) -> None:
     context.report(f"{TEST_NAME}: expecting live PX4 MAVLink on {endpoint}")
 
     context.report(f"{TEST_NAME}: constructing bridge host")
-    host = BridgeHost(articulation_path=articulation_path, config=env.px4)
+    host = BridgeHost(
+        articulation_path=articulation_path,
+        config=env.px4,
+        physics_hz=env.sim.physics_hz,
+    )
     startup_settle_time_s = max(0.0, float(env.px4.startup_settle_time_s))
 
     context.report(f"{TEST_NAME}: spawning configured drone")

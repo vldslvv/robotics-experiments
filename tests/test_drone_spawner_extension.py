@@ -179,12 +179,13 @@ def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
         lambda: SimpleNamespace(
             drone=SimpleNamespace(prim_name="Drone"),
             px4=SimpleNamespace(enabled=True),
+            sim=SimpleNamespace(physics_hz=250.0),
         ),
     )
 
     class BridgeHost:
-        def __init__(self, *, articulation_path, config):
-            calls.append(("bridge_init", articulation_path))
+        def __init__(self, *, articulation_path, config, physics_hz):
+            calls.append(("bridge_init", articulation_path, physics_hz))
 
         def start(self):
             calls.append("bridge_start")
@@ -202,7 +203,7 @@ def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
     assert calls == [
         "despawn",
         ("spawn", expected_drone_config),
-        ("bridge_init", "/World/Drone"),
+        ("bridge_init", "/World/Drone", 250.0),
         "bridge_start",
     ]
 

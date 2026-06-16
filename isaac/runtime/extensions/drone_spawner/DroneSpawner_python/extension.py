@@ -94,7 +94,11 @@ class Extension(omni.ext.IExt):
         default_prim = self.stage.GetDefaultPrim()
         parent = default_prim.GetPath().pathString if default_prim else "/World"
         articulation_path = f"{parent}/{drone_cfg.prim_name}"
-        self._bridge_host = BridgeHost(articulation_path=articulation_path, config=env.px4)
+        self._bridge_host = BridgeHost(
+            articulation_path=articulation_path,
+            config=env.px4,
+            physics_hz=env.sim.physics_hz,
+        )
         self._bridge_host.start()
 
     def _teardown_drone(self):

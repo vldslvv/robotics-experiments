@@ -88,6 +88,21 @@ the current contents and the intended home for that kind of code.
 - PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
   If Isaac emits duplicate or non-increasing physics timestamps, the bridge
   must not forward another HIL sensor tick or wait for a new actuator packet.
+- The PX4 sensor cadence is the Isaac physics cadence. `sim.physics_hz` is the
+  single source of truth for both; the drone-spawner host plumbs it into
+  `Px4MavlinkPort` as `physics_rate_hz` (there is no separate PX4 sensor-rate
+  config knob to drift). The port pins the Pegasus sensor `update_period` to the
+  integer-microsecond physics tick (rate derived as `1e6 / tick_us`) rather than
+  `1/physics_rate_hz`, so the `update_at_rate` gate fires on every physics step
+  at any rate. Pegasus computes the period as `1/rate` and the suite computes the
+  per-tick dt from integer-microsecond `sim_time_us` deltas; `1/physics_rate_hz`
+  can sit a float ULP above that dt (for example at 333 Hz), which would refresh
+  the IMU only every other tick and ship half the `HIL_SENSOR` packets with the
+  accel/gyro bits cleared. If the IMU does not refresh on a tick the bridge is
+  about to send (Isaac physics stepping faster than the configured sensor rate),
+  that is a fatal misconfiguration, not a recoverable runtime state: the bridge
+  disconnects with the distinct "sensor cadence mismatch" reason and returns zero
+  rotor commands, rather than silently degrading the sensor stream.
 - PX4 actuator lockstep must use fresh actuator packets. Once PX4 has produced
   its first `HIL_ACTUATOR_CONTROLS` packet, the bridge drains queued actuator
   messages after each sensor tick and applies the newest packet.

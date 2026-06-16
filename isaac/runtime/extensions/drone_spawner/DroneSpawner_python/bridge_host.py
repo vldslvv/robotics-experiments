@@ -33,8 +33,9 @@ class BridgeHost:
     that ticks it, and tears everything down on stop.
     """
 
-    def __init__(self, *, articulation_path: str, config: Px4BridgeConfig):
+    def __init__(self, *, articulation_path: str, config: Px4BridgeConfig, physics_hz: float):
         self._cfg = config
+        self._physics_hz = physics_hz
         self._articulation_path = articulation_path
         self._bridge: Any | None = None
         self._physx_sub = None
@@ -127,6 +128,7 @@ class BridgeHost:
             heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
             gps_enabled=self._cfg.gps_enabled,
             gps_send_rate_hz=self._cfg.gps_send_rate_hz,
+            physics_rate_hz=self._physics_hz,
             sensor_noise_enabled=self._cfg.sensor_noise_enabled,
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
@@ -157,6 +159,7 @@ class BridgeHost:
             f"bootstrap_prime_ticks={self._cfg.bootstrap_prime_ticks} "
             f"first_actuator_timeout_s={self._cfg.first_actuator_timeout_s} "
             f"max_sustained_actuator_lag_s={self._cfg.max_sustained_actuator_lag_s} "
+            f"physics_rate_hz={self._physics_hz} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
             f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "
             f"debug_log_path={self._cfg.debug_log_path}"

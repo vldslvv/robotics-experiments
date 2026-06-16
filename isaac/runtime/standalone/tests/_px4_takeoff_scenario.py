@@ -736,7 +736,11 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     context.report(f"{options.test_name}: using drone articulation path {articulation_path}")
     context.report(f"{options.test_name}: using rotor paths {rotor_paths}")
 
-    host = BridgeHost(articulation_path=articulation_path, config=px4_config)
+    host = BridgeHost(
+        articulation_path=articulation_path,
+        config=px4_config,
+        physics_hz=env.sim.physics_hz,
+    )
     observer = IsaacArticulationIO(
         articulation_path=articulation_path,
         rotor_link_paths=rotor_paths,

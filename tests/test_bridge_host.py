@@ -181,7 +181,9 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
 
-    host = module.BridgeHost(articulation_path="/World/Drone", config=_config())
+    host = module.BridgeHost(
+        articulation_path="/World/Drone", config=_config(), physics_hz=250.0
+    )
 
     host.start()
 
@@ -212,6 +214,7 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     host = module.BridgeHost(
         articulation_path="/World/Drone",
         config=_config(startup_settle_time_s=0.0),
+        physics_hz=250.0,
     )
 
     host.start()
@@ -230,6 +233,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
     host = module.BridgeHost(
         articulation_path="/World/Drone",
         config=_config(startup_settle_time_s=0.0),
+        physics_hz=250.0,
     )
 
     host.start()
@@ -240,6 +244,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
 
     assert port_call[1]["num_rotors"] == 2
     assert port_call[1]["sensor_noise_enabled"] is True
+    assert port_call[1]["physics_rate_hz"] == 250.0
     assert thrust_call[1]["num_rotors"] == 2
     assert thrust_call[1]["rot_dir"] == [-1.0, 1.0]
     assert bridge_call[2] == [

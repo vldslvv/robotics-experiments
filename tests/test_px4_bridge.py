@@ -563,6 +563,73 @@ def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
     assert first_baro["absolute_pressure"] != second_baro["absolute_pressure"]
 
 
+def test_mavlink_port_imu_fresh_every_tick_at_matched_rate(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=250.0, sensor_noise_enabled=False)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    port.start()
+    # 4000 us steps == the 250 Hz physics tick.
+    for sim_time_us in (100_000, 104_000, 108_000):
+        port.step(VehicleState.hover_at(sim_time_us=sim_time_us))
+
+    assert len(backend.imu_updates) == 3
+    assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
+    assert port.is_connected is True
+    assert port._last_disconnect_reason is None
+
+
+def test_mavlink_port_imu_fresh_every_tick_at_non_250_rate(monkeypatch):
+    # Regression for the float-boundary skip: at 333 Hz the naive 1/rate period
+    # is a ULP above the integer-us tick, so the IMU would refresh only every
+    # other tick. Pinning the period to the integer-us tick fixes it.
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=333.0, sensor_noise_enabled=False)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    assert port._physics_tick_us == 3003
+
+    port.start()
+    for sim_time_us in (100_000, 103_003, 106_006, 109_009):
+        port.step(VehicleState.hover_at(sim_time_us=sim_time_us))
+
+    assert len(backend.imu_updates) == 4
+    assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
+    assert port.is_connected is True
+
+
+def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=250.0, sensor_noise_enabled=False)
+    backend = port._backend
+    connection = _FakeConnection()
+    backend._connection = connection
+    backend._enable_lockstep = False
+
+    port.start()
+    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    # 1000 us step is faster than the 4000 us (250 Hz) sensor period, so the
+    # IMU gate skips and the bridge must fail closed.
+    commands = port.step(VehicleState.hover_at(sim_time_us=101_000))
+
+    assert np.allclose(commands, np.zeros(4))
+    assert port.is_connected is False
+    assert backend.stopped is True
+    assert "sensor cadence mismatch" in port._last_disconnect_reason
+    # Only the first (fresh) tick was sent before the guard tripped.
+    assert [args[0] for args in connection.hil_sensor_sends] == [100_000]
+
+
+def test_mavlink_port_requires_positive_physics_rate(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    with pytest.raises(ValueError, match="physics_rate_hz must be positive"):
+        Px4MavlinkPort(num_rotors=4, physics_rate_hz=0.0, debug_log_path=None)
+
+
 def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):
     _install_fake_pegasus(monkeypatch)
     log_path = tmp_path / "px4_bridge.log"

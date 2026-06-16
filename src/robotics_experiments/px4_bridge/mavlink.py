@@ -102,6 +102,7 @@ class _PegasusSensorSuite:
         self._home_alt_m = float(home_alt_m)
         self._gps_enabled = bool(gps_enabled)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
+        self._update_rate_hz = float(update_rate_hz)
         self._last_sim_time_us: int | None = None
 
         from pegasus.simulator.logic.sensors.barometer import Barometer
@@ -133,7 +134,7 @@ class _PegasusSensorSuite:
     def update(self, state: VehicleState) -> dict[str, dict | None]:
         sim_time_us = int(state.sim_time_us)
         if self._last_sim_time_us is None:
-            dt_s = 1.0 / _DEFAULT_SENSOR_RATE_HZ
+            dt_s = 1.0 / self._update_rate_hz
         else:
             dt_s = max(0.0, (sim_time_us - self._last_sim_time_us) * 1e-6)
         self._last_sim_time_us = sim_time_us
@@ -296,6 +297,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         heartbeat_rate_hz: float = 1.0,
         gps_enabled: bool = True,
         gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
+        physics_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
         sensor_noise_enabled: bool = True,
         home_lat_deg: float = frames.DEFAULT_HOME_LAT_DEG,
         home_lon_deg: float = frames.DEFAULT_HOME_LON_DEG,
@@ -332,12 +334,26 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._home_lat_deg = float(home_lat_deg)
         self._home_lon_deg = float(home_lon_deg)
         self._home_alt_m = float(home_alt_m)
+        # The PX4 sensor cadence is the Isaac physics cadence (single source of
+        # truth = sim.physics_hz, plumbed in as physics_rate_hz). Pin the sensor
+        # period to the integer-microsecond physics tick so the Pegasus
+        # update_at_rate gate fires on every physics step regardless of rate:
+        # deriving the rate as 1e6 / tick_us makes the suite's per-tick dt_s
+        # (computed from integer-us sim_time deltas) exactly equal the sensor
+        # period, instead of relying on 1/physics_rate_hz matching it (which
+        # fails by a float ULP at rates such as 333 Hz and silently drops the
+        # accel/gyro bits on half the HIL_SENSOR packets).
+        if physics_rate_hz <= 0:
+            raise ValueError(f"physics_rate_hz must be positive, got {physics_rate_hz}")
+        self._physics_tick_us = int(round(1_000_000 / float(physics_rate_hz)))
+        self._sensor_rate_hz = 1_000_000 / self._physics_tick_us
         self._sensor_suite = _PegasusSensorSuite(
             home_lat_deg=self._home_lat_deg,
             home_lon_deg=self._home_lon_deg,
             home_alt_m=self._home_alt_m,
             gps_enabled=self._gps_enabled,
             sensor_noise_enabled=self._sensor_noise_enabled,
+            update_rate_hz=self._sensor_rate_hz,
         )
         input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
         input_scaling = [1000.0] * self._num_rotors if input_scaling is None else input_scaling
@@ -388,6 +404,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
             "bootstrap_prime_ticks=%d first_actuator_timeout_s=%.3f "
             "max_sustained_actuator_lag_us=%s "
+            "physics_rate_hz=%s physics_tick_us=%d sensor_rate_hz=%.3f "
             "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
             "debug_log=%s sensor_debug_interval=%d",
             connection_type,
@@ -400,6 +417,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._bootstrap_prime_ticks,
             self._first_actuator_timeout_s,
             self._max_sustained_actuator_lag_us,
+            physics_rate_hz,
+            self._physics_tick_us,
+            self._sensor_rate_hz,
             self._gps_enabled,
             gps_send_rate_hz,
             self._sensor_noise_enabled,
@@ -417,6 +437,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             home_alt_m=self._home_alt_m,
             gps_enabled=self._gps_enabled,
             sensor_noise_enabled=self._sensor_noise_enabled,
+            update_rate_hz=self._sensor_rate_hz,
         )
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
@@ -480,7 +501,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             return np.asarray(self._backend.input_reference(), dtype=np.float64)
 
         # 1. Convert state into the sensor data the Pegasus backend expects.
-        self._fill_sensor_data(state)
+        imu_refreshed = self._fill_sensor_data(state)
 
         # 2. Send heartbeat at configured rate (wallclock is fine - pacing only).
         now = time.time()
@@ -499,7 +520,26 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 self._mark_disconnected(reason, close_backend=True)
             return np.zeros(self._num_rotors, dtype=np.float64)
 
-        # 4. Send sensor + GPS messages with the caller's sim time.
+        # 4. Fail fast if the IMU did not refresh on a tick we are about to
+        # send. With the sensor period pinned to the physics tick this only
+        # happens when Isaac physics steps faster than the configured sensor
+        # rate, which would otherwise ship HIL_SENSOR packets with stale
+        # accel/gyro bits and starve the EKF. This is a fatal misconfiguration,
+        # not a recoverable runtime state, so disconnect with a distinct reason
+        # (mirroring the lockstep-timeout / actuator-lag fatal paths) rather
+        # than silently degrading the sensor stream.
+        if not imu_refreshed:
+            self._mark_disconnected(
+                "sensor cadence mismatch: IMU did not refresh this tick; "
+                "Isaac physics is stepping faster than the configured sensor rate "
+                f"(sensor_rate_hz={self._sensor_rate_hz:.3f} "
+                f"physics_tick_us={self._physics_tick_us} "
+                f"sim_time_us={sim_time_us} last_sensor_us={self._last_sensor_send_us})",
+                close_backend=True,
+            )
+            return np.zeros(self._num_rotors, dtype=np.float64)
+
+        # 5. Send sensor + GPS messages with the caller's sim time.
         # This is an intentional Pegasus phase-order deviation: each port
         # instance treats a tick as state(t) -> sensors(t) -> actuator(t),
         # keeping lockstep causal per drone while retaining a hard timeout.
@@ -537,7 +577,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._mark_disconnected(f"sensor/GPS send failed: {exc}", close_backend=True)
             return np.zeros(self._num_rotors, dtype=np.float64)
 
-        # 5. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout. The first
+        # 6. Poll for HIL_ACTUATOR_CONTROLS with a hard timeout. The first
         # actuator may take several seconds of wallclock while PX4 boots, so the
         # pre-first-actuator wait uses a generous deadline; steady-state ticks
         # use the tight lockstep timeout.
@@ -549,21 +589,28 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         if not self._poll_for_actuator(poll_timeout, sim_time_us):
             return np.zeros(self._num_rotors, dtype=np.float64)
 
-        # 6. Return the up-to-date rotor reference.
+        # 7. Return the up-to-date rotor reference.
         return np.asarray(self._backend.input_reference(), dtype=np.float64)
 
     # ---- Internals ---------------------------------------------------------
 
-    def _fill_sensor_data(self, state: VehicleState) -> None:
+    def _fill_sensor_data(self, state: VehicleState) -> bool:
         """Populate ``self._backend._sensor_data`` from a VehicleState.
 
         Sensor values are generated through a Pegasus-style stateful sensor
         suite. Only sensors that refreshed on this tick update the Pegasus
         backend, which preserves the backend's ``fields_updated`` mask
         semantics.
+
+        Returns:
+            ``True`` if the IMU refreshed on this tick (so the next
+            ``HIL_SENSOR`` will carry fresh accel/gyro bits). ``False`` means
+            the Pegasus update-rate gate skipped the IMU because Isaac physics
+            is stepping faster than the configured sensor rate.
         """
         updates = self._sensor_suite.update(state)
-        if updates["imu"] is not None:
+        imu_refreshed = updates["imu"] is not None
+        if imu_refreshed:
             self._backend.update_imu_data(updates["imu"])
         if updates["mag"] is not None:
             self._backend.update_mag_data(updates["mag"])
@@ -571,6 +618,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._backend.update_bar_data(updates["baro"])
         if updates["gps"] is not None:
             self._backend.update_gps_data(updates["gps"])
+        return imu_refreshed
 
     def _should_send_heartbeat(self, now_s: float) -> bool:
         if self._heartbeat_period_s is None:
