@@ -84,8 +84,19 @@ failsafe state`.
 `make/run_px4_integration_test.sh:115-135` gates PX4 readiness on the docker-log
 line `"Waiting for simulator to accept connection on TCP port 4560"`. That marks
 the TCP port as *open*, not the PX4 commander/HIL stack as ready to produce
-actuators. Isaac connects and primes immediately; under load PX4 can take longer
-than `first_actuator_timeout_s=5.0` to answer.
+actuators. Crucially, PX4 blocks at that line and only boots commander/ekf2/
+mavlink *after* Isaac connects (48-90s later), so the shell readiness gate
+cannot wait for a flight-ready marker -- those events do not exist pre-connect.
+The only observable PX4 readiness point is the bridge's post-connect
+first-actuator wait. Isaac connects and primes immediately; under load PX4's
+controller boot competes with Isaac for the CPU and can take longer than the
+configured `first_actuator_timeout_s` to answer.
+
+**Mitigation applied (2026-06-16):** `first_actuator_timeout_s` was raised
+`5.0 -> 30.0` in `configs/experiment/px4/default.yaml`. This wait is a strict
+per-tick lockstep block (not free-running), so a longer deadline patiently
+waits out a slow PX4 boot under load WITHOUT building a startup backlog; only a
+genuinely dead PX4 still trips it, just later.
 
 ### P3 non-causation (confirmed)
 
@@ -127,7 +138,7 @@ than `first_actuator_timeout_s=5.0` to answer.
     speed 0.30 m/s, min climb 1.5 m; takeoff target 2.5 m.
 - **Bridge/lockstep config** (`configs/experiment/px4/default.yaml`):
   `lockstep_timeout_s=1.0`, `first_heartbeat_timeout_s=5.0`,
-  `bootstrap_prime_ticks=20`, `first_actuator_timeout_s=5.0`,
+  `bootstrap_prime_ticks=20`, `first_actuator_timeout_s=30.0`,
   `max_sustained_actuator_lag_s=0.5`, `startup_settle_time_s=1.0`,
   `max_tilt_angle_deg=60.0`; `sim.physics_hz=250`.
 - **`-instability` variant:** injects a post-takeoff rotor-0 thrust kill + 4.0 N*m
@@ -181,15 +192,17 @@ choice can be made later.
      by logging attempts and/or a "classify-and-stop" alternative (no auto-retry;
      a human reruns), which is the conservative variant.
 3. **Root-cause reduction (fewer triggers):**
-   - Strengthen the PX4 readiness gate (`run_px4_integration_test.sh:115-135`) to
-     wait for a *flight-ready* PX4 marker (or first heartbeat) rather than only
-     TCP-port-open, shrinking the bootstrap first-actuator timeout.
+   - DONE (2026-06-16): the bootstrap first-actuator timeout was the real
+     readiness gate, not the shell TCP-port wait -- PX4 boots its controllers
+     only after Isaac connects, so a pre-connect shell marker is impossible.
+     `first_actuator_timeout_s` raised `5.0 -> 30.0` (config); the wait is a
+     strict per-tick lockstep block, so it tolerates slow boots without a
+     backlog. Targets the bootstrap form directly.
    - Avoid co-scheduling the two heavy PX4 flights (`test-integration-px4-takeoff`
      and `-instability`) concurrently, or reconcile the `INTEGRATION_TEST_JOBS`
      guidance (CLAUDE.md says 3, config.mk says 2) to cut host contention.
-   - Possibly relax `first_actuator_timeout_s` modestly (config) for slow boots --
-     bounded by CLAUDE.md's rule that it must exceed PX4's boot need; the 1.0 s
-     mid-flight `lockstep_timeout_s` should not be relaxed (weakens lockstep).
+   - The 1.0 s mid-flight `lockstep_timeout_s` should not be relaxed (weakens
+     lockstep); only the first-actuator boot wait was loosened.
 
 ## Key files (for whoever implements)
 

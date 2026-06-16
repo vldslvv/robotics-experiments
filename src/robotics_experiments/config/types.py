@@ -179,9 +179,13 @@ class Px4BridgeConfig:
             and the bridge disconnects.
         first_actuator_timeout_s: Hard deadline on receiving PX4's first
             HIL_ACTUATOR_CONTROLS once the bridge starts blocking for it. PX4
-            boot is several seconds of wallclock, so this is larger than the
-            per-tick lockstep_timeout_s, which is used only after the first
-            actuator arrives.
+            boots its controllers only after Isaac connects and that boot
+            competes with Isaac for the host CPU, so under load it can take well
+            over the nominal couple of seconds. This wait is a strict per-tick
+            lockstep block, so a generous deadline patiently waits out a slow
+            boot without building a startup backlog; only a dead PX4 trips it.
+            Much larger than the per-tick lockstep_timeout_s, which is used only
+            after the first actuator arrives.
         max_sustained_actuator_lag_s: Safety tripwire on steady-state actuator
             lag (current sim time minus the newest applied actuator timestamp).
             This is a regression net, not a happy-path control: strict blocking

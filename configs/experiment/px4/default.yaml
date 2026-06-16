@@ -34,9 +34,15 @@ first_heartbeat_timeout_s: 5.0
 # ticks and steady-state actuator lag stays ~1 tick.
 bootstrap_prime_ticks: 20
 # Generous deadline (seconds) for PX4's first actuator once the bridge starts
-# blocking; PX4 boot is ~2s of wallclock, longer than lockstep_timeout_s (which
-# applies only after the first actuator).
-first_actuator_timeout_s: 5.0
+# blocking. PX4 boots its controllers only AFTER Isaac connects, and that boot
+# competes with Isaac for the host CPU, so under load it can take well over the
+# ~2s nominal wallclock (the "bootstrap" integration flake: sensors=N
+# actuators=0, first actuator never arrives in time). This wait is a strict
+# per-tick lockstep block, not free-running, so a longer deadline patiently
+# waits out a slow boot WITHOUT building a startup backlog; only a genuinely
+# dead PX4 still trips it, just later. Kept much larger than lockstep_timeout_s
+# (which applies only after the first actuator).
+first_actuator_timeout_s: 30.0
 # Safety tripwire (seconds) on steady-state actuator lag -- a regression net, not
 # a happy-path control. Strict blocking lockstep already holds the lag at ~1 tick
 # (0.004s), prime-then-block prevents the startup backlog, and a PX4 stall is
