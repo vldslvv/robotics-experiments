@@ -84,9 +84,8 @@ class _PegasusSensorSuite:
         from pegasus.simulator.logic.state import State
 
         pegasus_state = State()
-        q = np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64)
         pegasus_state.position = np.asarray(state.position_enu, dtype=np.float64)
-        pegasus_state.attitude = np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
+        pegasus_state.attitude = frames.quat_wxyz_to_xyzw(state.orientation_flu_enu_wxyz)
         pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
         pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
         pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(

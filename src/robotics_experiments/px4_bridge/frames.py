@@ -1,24 +1,26 @@
-"""Frame and convention conversions used at the Isaac<->PX4 boundary.
+"""Canonical frame and convention conversions for bridge-owned code.
 
-Single source of truth for:
+This module is the single source of truth for non-vendored Isaac<->PX4 frame
+math used by ``robotics_experiments.px4_bridge``:
 
 - Quaternion ordering (``[w, x, y, z]`` everywhere internally; only flipped at
-  the MAVLink wire boundary, which Pegasus' ``state.py`` already handles).
-- ENU<->NED inertial frame conversion.
-- FLU<->FRD body frame conversion.
+  the Pegasus/MAVLink boundary).
+- ENU world-frame and FLU body-frame vector conversions used by bridge-side
+  runtime code.
 - Reference-only GPS lat/lon synthesis from a local ENU offset around a fixed
   home.
 - Reference-only magnetometer body-frame synthesis from a supplied fixed NED
   reference field.
 
-Keeping these conversions out of every other layer ensures each conversion is
-applied exactly once.
+Bridge code should route frame-convention math through this module instead of
+open-coding sign flips or quaternion reorders. The vendored Pegasus
+``rotations.py`` module remains internal to the Pegasus sensor/backend path.
 
 The runtime PX4 MAVLink path intentionally obtains sensor payloads from the
 vendored Pegasus sensors through ``_PegasusSensorSuite``. The synthesis helpers
 below remain exported as deterministic reference utilities for tests, smoke
-checks, and diagnostics; equivalence tests keep their frame and unit conventions
-aligned with the Pegasus path.
+checks, and diagnostics; equivalence tests keep this canonical layer aligned
+with the Pegasus path and fail if the two drift beyond tolerance.
 """
 
 from __future__ import annotations

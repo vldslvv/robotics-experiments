@@ -15,12 +15,8 @@ def _pegasus_state_from_vehicle(state: VehicleState):
     from pegasus.simulator.logic.state import State
 
     pegasus_state = State()
-    q_wxyz = np.asarray(state.orientation_flu_enu_wxyz, dtype=np.float64)
     pegasus_state.position = np.asarray(state.position_enu, dtype=np.float64)
-    pegasus_state.attitude = np.array(
-        [q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]],
-        dtype=np.float64,
-    )
+    pegasus_state.attitude = frames.quat_wxyz_to_xyzw(state.orientation_flu_enu_wxyz)
     pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
     pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
     pegasus_state.linear_body_velocity = frames.world_enu_to_body_flu(
@@ -33,6 +29,33 @@ def _pegasus_state_from_vehicle(state: VehicleState):
 def _flu_to_frd(vector_flu: np.ndarray) -> np.ndarray:
     vector = np.asarray(vector_flu, dtype=np.float64)
     return np.array([vector[0], -vector[1], -vector[2]], dtype=np.float64)
+
+
+def _enu_to_ned(vector_enu: np.ndarray) -> np.ndarray:
+    vector = np.asarray(vector_enu, dtype=np.float64)
+    return np.array([vector[1], vector[0], -vector[2]], dtype=np.float64)
+
+
+def _quat_wxyz_from_roll_pitch_yaw_deg(
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+) -> np.ndarray:
+    roll = np.radians(roll_deg)
+    pitch = np.radians(pitch_deg)
+    yaw = np.radians(yaw_deg)
+    cr, sr = np.cos(roll / 2.0), np.sin(roll / 2.0)
+    cp, sp = np.cos(pitch / 2.0), np.sin(pitch / 2.0)
+    cy, sy = np.cos(yaw / 2.0), np.sin(yaw / 2.0)
+    return np.array(
+        [
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+        ],
+        dtype=np.float64,
+    )
 
 
 def _wmm_field_ned_gauss(
@@ -72,6 +95,84 @@ def _wmm_field_ned_gauss(
 @pytest.fixture
 def pegasus_path(monkeypatch):
     monkeypatch.syspath_prepend(str(_PX4_BRIDGE_EXTENSION_ROOT))
+
+
+def test_pegasus_state_adapter_uses_canonical_quaternion_order(pegasus_path):
+    state = VehicleState.hover_at(position_enu=(1.0, 2.0, 3.0), sim_time_us=0)
+    state.orientation_flu_enu_wxyz = np.array([0.5, -0.5, 0.5, -0.5], dtype=np.float64)
+
+    pegasus_state = _pegasus_state_from_vehicle(state)
+
+    np.testing.assert_allclose(
+        pegasus_state.attitude,
+        frames.quat_wxyz_to_xyzw(state.orientation_flu_enu_wxyz),
+        atol=1e-12,
+    )
+
+
+def test_pegasus_state_position_velocity_and_gyro_match_frame_helpers(pegasus_path):
+    state = VehicleState.hover_at(position_enu=(3.0, 4.0, 5.0), sim_time_us=0)
+    state.linear_velocity_enu = np.array([6.0, 7.0, 8.0], dtype=np.float64)
+    state.angular_velocity_flu = np.array([0.1, -0.2, 0.3], dtype=np.float64)
+
+    pegasus_state = _pegasus_state_from_vehicle(state)
+
+    np.testing.assert_allclose(pegasus_state.get_position_ned(), _enu_to_ned(state.position_enu))
+    np.testing.assert_allclose(
+        pegasus_state.get_linear_velocity_ned(),
+        _enu_to_ned(state.linear_velocity_enu),
+    )
+    np.testing.assert_allclose(
+        pegasus_state.get_angular_velocity_frd(),
+        _flu_to_frd(state.angular_velocity_flu),
+    )
+
+
+def test_pegasus_attitude_matches_frames_rotation_convention(pegasus_path):
+    from scipy.spatial.transform import Rotation
+
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_wxyz_from_roll_pitch_yaw_deg(
+        roll_deg=17.0,
+        pitch_deg=-23.0,
+        yaw_deg=41.0,
+    )
+    pegasus_state = _pegasus_state_from_vehicle(state)
+    pegasus_attitude = Rotation.from_quat(pegasus_state.get_attitude_ned_frd())
+
+    for vector_frd in (
+        np.array([1.0, 0.0, 0.0], dtype=np.float64),
+        np.array([0.0, 1.0, 0.0], dtype=np.float64),
+        np.array([0.0, 0.0, 1.0], dtype=np.float64),
+        np.array([0.25, -0.5, 0.75], dtype=np.float64),
+    ):
+        vector_flu = _flu_to_frd(vector_frd)
+        expected_ned = _enu_to_ned(
+            frames.rotate_vector_wxyz(state.orientation_flu_enu_wxyz, vector_flu)
+        )
+        np.testing.assert_allclose(
+            pegasus_attitude.apply(vector_frd),
+            expected_ned,
+            atol=1e-5,
+        )
+
+
+def test_body_velocity_helper_matches_pegasus_rotation_convention(pegasus_path):
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_wxyz_from_roll_pitch_yaw_deg(
+        roll_deg=-11.0,
+        pitch_deg=8.0,
+        yaw_deg=73.0,
+    )
+    state.linear_velocity_enu = np.array([2.0, -5.0, 1.5], dtype=np.float64)
+
+    pegasus_state = _pegasus_state_from_vehicle(state)
+
+    np.testing.assert_allclose(
+        pegasus_state.linear_body_velocity,
+        frames.body_velocity_flu_from_state(state),
+        atol=1e-12,
+    )
 
 
 def test_reference_magnetometer_matches_pegasus_with_same_wmm_field(pegasus_path):
