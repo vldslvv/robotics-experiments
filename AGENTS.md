@@ -103,7 +103,22 @@ the current contents and the intended home for that kind of code.
 - PX4 bridge behavior is configured through the Hydra `px4` group. The default
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
-  connect to PX4 SITL.
+  connect to PX4 SITL. Lockstep tunables live in the nested `px4.lockstep`
+  group (override e.g. `px4.lockstep.lockstep_timeout_s=...`), mapped to the
+  library `LockstepSettings` dataclass at construction; `physics_rate_hz` is not
+  a YAML knob there but injected from `sim.physics_hz`.
+- The PX4 bridge presents a four-part contract (see
+  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`):
+  pure-data state objects (`VehicleState` in, `RotorDynamics` out, `BridgeStatus`
+  snapshot), the `LockstepSettings` object, the flight-stack port's two-method
+  lockstep seam, and the Isaac sink. The port exposes `publish_sensors(state)`
+  (send to PX4) and `poll_commands(state) -> commands` (lockstep receive from
+  PX4) instead of a single combined `step`; they are two halves of one causal
+  tick and must be called publish-then-poll for the same tick (`Px4Bridge.
+  on_physics_step` is the canonical caller). The Isaac side exposes a single
+  `ArticulationIO.apply_dynamics(RotorDynamics)` sink (rotor forces at markers
+  plus body torque and drag). The vendored Pegasus backend stays hidden behind
+  `Px4MavlinkPort`.
 - Isaac articulation angular velocity is treated as world-frame data and must
   be rotated into body-FLU before MAVLink converts it to PX4 body-FRD gyro
   fields.
@@ -122,8 +137,8 @@ the current contents and the intended home for that kind of code.
   must not forward another HIL sensor tick or wait for a new actuator packet.
 - The PX4 sensor cadence is the Isaac physics cadence. `sim.physics_hz` is the
   single source of truth for both; the drone-spawner host plumbs it into
-  `Px4MavlinkPort` as `physics_rate_hz` (there is no separate PX4 sensor-rate
-  config knob to drift). The port pins the Pegasus sensor `update_period` to the
+  `Px4MavlinkPort` as `LockstepSettings.physics_rate_hz` (there is no separate
+  PX4 sensor-rate config knob to drift). The port pins the Pegasus sensor `update_period` to the
   integer-microsecond physics tick (rate derived as `1e6 / tick_us`) rather than
   `1/physics_rate_hz`, so the `update_at_rate` gate fires on every physics step
   at any rate. Pegasus computes the period as `1/rate` and the suite computes the
@@ -418,7 +433,8 @@ the host. They are meant to be used in the Dockerized environment.
   `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
   through. A library constructor may keep a neutral fallback default, but it must
   not duplicate the project value (for example `lockstep_timeout_s` is `0.1` in
-  the port constructor but `1.0` in `configs/experiment/px4/default.yaml`).
+  the `LockstepSettings` default but `1.0` at
+  `px4.lockstep.lockstep_timeout_s` in `configs/experiment/px4/default.yaml`).
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.
 - Invalid configuration or unexpected runtime state must not fail silently.

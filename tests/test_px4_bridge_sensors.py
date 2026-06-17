@@ -4,9 +4,14 @@ import types
 
 import numpy as np
 import pytest
-from _fakes import _PX4_BRIDGE_EXTENSION_ROOT, _FakeConnection, _install_fake_pegasus
+from _fakes import (
+    _PX4_BRIDGE_EXTENSION_ROOT,
+    _FakeConnection,
+    _install_fake_pegasus,
+    lockstep_exchange,
+)
 
-from robotics_experiments.px4_bridge import Px4MavlinkPort
+from robotics_experiments.px4_bridge import LockstepSettings, Px4MavlinkPort
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 
@@ -112,9 +117,9 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
-    port.step(VehicleState.hover_at(sim_time_us=150_000))
-    port.step(VehicleState.hover_at(sim_time_us=300_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=150_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=300_000))
 
     assert backend.started is True
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [
@@ -145,7 +150,7 @@ def test_mavlink_port_pegasus_sensors_can_disable_noise_for_precision(monkeypatc
     state.angular_velocity_flu = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
     port.start()
-    port.step(state)
+    lockstep_exchange(port, state)
 
     imu = backend.imu_updates[0]
     np.testing.assert_allclose(imu["angular_velocity"], [1.0, -2.0, -3.0], atol=1e-12)
@@ -173,7 +178,7 @@ def test_mavlink_port_pegasus_imu_rest_accel_is_frd_when_noise_disabled(monkeypa
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
 
     imu = backend.imu_updates[0]
     np.testing.assert_allclose(
@@ -191,8 +196,12 @@ def test_mavlink_port_barometer_altitude_sign_with_noise_disabled(monkeypatch):
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(position_enu=(0.0, 0.0, 1.0), sim_time_us=100_000))
-    port.step(VehicleState.hover_at(position_enu=(0.0, 0.0, 2.0), sim_time_us=110_000))
+    lockstep_exchange(
+        port, VehicleState.hover_at(position_enu=(0.0, 0.0, 1.0), sim_time_us=100_000)
+    )
+    lockstep_exchange(
+        port, VehicleState.hover_at(position_enu=(0.0, 0.0, 2.0), sim_time_us=110_000)
+    )
 
     assert backend.bar_updates[1]["pressure_altitude"] > backend.bar_updates[0]["pressure_altitude"]
 
@@ -212,8 +221,8 @@ def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
-    port.step(VehicleState.hover_at(sim_time_us=104_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=104_000))
 
     assert len(backend.mag_updates) == 2
     assert len(backend.bar_updates) == 2
@@ -228,7 +237,9 @@ def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
 
 def test_mavlink_port_imu_fresh_every_tick_at_matched_rate(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=250.0, sensor_noise_enabled=False)
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=250.0), sensor_noise_enabled=False
+    )
     backend = port._backend
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
@@ -236,7 +247,7 @@ def test_mavlink_port_imu_fresh_every_tick_at_matched_rate(monkeypatch):
     port.start()
     # 4000 us steps == the 250 Hz physics tick.
     for sim_time_us in (100_000, 104_000, 108_000):
-        port.step(VehicleState.hover_at(sim_time_us=sim_time_us))
+        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=sim_time_us))
 
     assert len(backend.imu_updates) == 3
     assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
@@ -249,7 +260,9 @@ def test_mavlink_port_imu_fresh_every_tick_at_non_250_rate(monkeypatch):
     # is a ULP above the integer-us tick, so the IMU would refresh only every
     # other tick. Pinning the period to the integer-us tick fixes it.
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=333.0, sensor_noise_enabled=False)
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=333.0), sensor_noise_enabled=False
+    )
     backend = port._backend
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
@@ -258,7 +271,7 @@ def test_mavlink_port_imu_fresh_every_tick_at_non_250_rate(monkeypatch):
 
     port.start()
     for sim_time_us in (100_000, 103_003, 106_006, 109_009):
-        port.step(VehicleState.hover_at(sim_time_us=sim_time_us))
+        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=sim_time_us))
 
     assert len(backend.imu_updates) == 4
     assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
@@ -267,17 +280,19 @@ def test_mavlink_port_imu_fresh_every_tick_at_non_250_rate(monkeypatch):
 
 def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(num_rotors=4, physics_rate_hz=250.0, sensor_noise_enabled=False)
+    port = Px4MavlinkPort(
+        num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=250.0), sensor_noise_enabled=False
+    )
     backend = port._backend
     connection = _FakeConnection()
     backend._connection = connection
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
     # 1000 us step is faster than the 4000 us (250 Hz) sensor period, so the
     # IMU gate skips and the bridge must fail closed.
-    commands = port.step(VehicleState.hover_at(sim_time_us=101_000))
+    commands = lockstep_exchange(port, VehicleState.hover_at(sim_time_us=101_000))
 
     assert np.allclose(commands, np.zeros(4))
     assert port.is_connected is False
@@ -290,7 +305,9 @@ def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypat
 def test_mavlink_port_requires_positive_physics_rate(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     with pytest.raises(ValueError, match="physics_rate_hz must be positive"):
-        Px4MavlinkPort(num_rotors=4, physics_rate_hz=0.0, debug_log_path=None)
+        Px4MavlinkPort(
+            num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=0.0), debug_log_path=None
+        )
 
 
 def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):
@@ -306,7 +323,7 @@ def test_mavlink_port_writes_sensor_diagnostics_to_file(monkeypatch, tmp_path):
     port._backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
     port.stop()
 
     log_text = log_path.read_text()
@@ -324,7 +341,7 @@ def test_mavlink_port_can_disable_gps(monkeypatch):
     backend._enable_lockstep = False
 
     port.start()
-    port.step(VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
 
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
     assert backend.gps_times == []

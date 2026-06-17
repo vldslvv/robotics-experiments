@@ -7,6 +7,7 @@ import numpy as np
 import robotics_experiments.px4_bridge.isaac_articulation as isaac_articulation_module
 from robotics_experiments.px4_bridge.asset_diagnostics import RootBodyPoseDiagnosticParams
 from robotics_experiments.px4_bridge.isaac_articulation import IsaacArticulationIO
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 
 
 class _FakeRigidBody:
@@ -277,6 +278,38 @@ def test_apply_forces_calls_isaac_with_world_space_forces_and_positions():
     assert call["is_global"] is True
     np.testing.assert_allclose(call["forces"], [[0.0, 0.0, 4.0]], atol=1e-12)
     np.testing.assert_allclose(call["positions"], [[8.0, 21.0, 30.25]], atol=1e-12)
+
+
+def test_apply_dynamics_applies_rotor_forces_then_body_torque_and_drag():
+    body = _FakeRigidBody(position=[0.0, 0.0, 0.0], orientation_wxyz=[1.0, 0.0, 0.0, 0.0])
+
+    io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=["m0"])
+    io._body = body
+    io._body_path = "/World/Drone/body"
+    io._rotor_positions_body = np.array([[1.0, 0.0, 0.0]], dtype=np.float64)
+
+    io.apply_dynamics(
+        RotorDynamics(
+            forces_n=np.array([4.0], dtype=np.float64),
+            body_torque_n_m=np.array([0.0, 0.0, 0.5], dtype=np.float64),
+            body_drag_n=np.array([-0.2, 0.0, 0.0], dtype=np.float64),
+        )
+    )
+
+    # One per-rotor world-space force, then body torque and body drag at the
+    # body origin (is_global=False), in that order.
+    assert len(body.calls) == 3
+    assert body.calls[0]["is_global"] is True
+    np.testing.assert_allclose(body.calls[0]["forces"], [[0.0, 0.0, 4.0]], atol=1e-12)
+
+    torque_call = body.calls[1]
+    assert torque_call["is_global"] is False
+    np.testing.assert_allclose(torque_call["torques"], [[0.0, 0.0, 0.5]], atol=1e-12)
+    np.testing.assert_allclose(torque_call["positions"], [[0.0, 0.0, 0.0]], atol=1e-12)
+
+    drag_call = body.calls[2]
+    assert drag_call["is_global"] is False
+    np.testing.assert_allclose(drag_call["forces"], [[-0.2, 0.0, 0.0]], atol=1e-12)
 
 
 def test_initialize_runs_root_body_diagnostics_before_rotor_resolution(monkeypatch):

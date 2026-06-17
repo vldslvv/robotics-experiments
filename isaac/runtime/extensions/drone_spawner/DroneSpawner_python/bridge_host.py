@@ -85,6 +85,7 @@ class BridgeHost:
         import omni.usd
 
         from robotics_experiments.px4_bridge import (
+            LockstepSettings,
             PegasusQuadraticThrustModel,
             Px4Bridge,
             Px4MavlinkPort,
@@ -108,6 +109,16 @@ class BridgeHost:
         rotor_paths = rotor_mapping.rotor_link_paths
         num_rotors = rotor_mapping.num_rotors
 
+        lockstep_cfg = self._cfg.lockstep
+        lockstep = LockstepSettings(
+            lockstep_timeout_s=lockstep_cfg.lockstep_timeout_s,
+            first_heartbeat_timeout_s=lockstep_cfg.first_heartbeat_timeout_s,
+            bootstrap_prime_ticks=lockstep_cfg.bootstrap_prime_ticks,
+            first_actuator_timeout_s=lockstep_cfg.first_actuator_timeout_s,
+            max_sustained_actuator_lag_s=lockstep_cfg.max_sustained_actuator_lag_s,
+            heartbeat_rate_hz=lockstep_cfg.heartbeat_rate_hz,
+            physics_rate_hz=self._physics_hz,
+        )
         port = Px4MavlinkPort(
             num_rotors=num_rotors,
             connection_type=self._cfg.connection_type,
@@ -117,15 +128,9 @@ class BridgeHost:
             input_offset=self._cfg.input_offset,
             input_scaling=self._cfg.input_scaling,
             zero_position_armed=self._cfg.zero_position_armed,
-            lockstep_timeout_s=self._cfg.lockstep_timeout_s,
-            first_heartbeat_timeout_s=self._cfg.first_heartbeat_timeout_s,
-            bootstrap_prime_ticks=self._cfg.bootstrap_prime_ticks,
-            first_actuator_timeout_s=self._cfg.first_actuator_timeout_s,
-            max_sustained_actuator_lag_s=self._cfg.max_sustained_actuator_lag_s,
-            heartbeat_rate_hz=self._cfg.heartbeat_rate_hz,
+            lockstep=lockstep,
             gps_enabled=self._cfg.gps_enabled,
             gps_send_rate_hz=self._cfg.gps_send_rate_hz,
-            physics_rate_hz=self._physics_hz,
             sensor_noise_enabled=self._cfg.sensor_noise_enabled,
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
@@ -151,11 +156,11 @@ class BridgeHost:
             f"[{_LOG_PREFIX}] starting PX4 bridge endpoint={endpoint} "
             f"articulation={articulation_path} rotor_paths={rotor_paths} "
             f"rot_dir={rotor_mapping.rot_dir} "
-            f"lockstep_timeout_s={self._cfg.lockstep_timeout_s} "
-            f"first_heartbeat_timeout_s={self._cfg.first_heartbeat_timeout_s} "
-            f"bootstrap_prime_ticks={self._cfg.bootstrap_prime_ticks} "
-            f"first_actuator_timeout_s={self._cfg.first_actuator_timeout_s} "
-            f"max_sustained_actuator_lag_s={self._cfg.max_sustained_actuator_lag_s} "
+            f"lockstep_timeout_s={lockstep.lockstep_timeout_s} "
+            f"first_heartbeat_timeout_s={lockstep.first_heartbeat_timeout_s} "
+            f"bootstrap_prime_ticks={lockstep.bootstrap_prime_ticks} "
+            f"first_actuator_timeout_s={lockstep.first_actuator_timeout_s} "
+            f"max_sustained_actuator_lag_s={lockstep.max_sustained_actuator_lag_s} "
             f"physics_rate_hz={self._physics_hz} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
             f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "

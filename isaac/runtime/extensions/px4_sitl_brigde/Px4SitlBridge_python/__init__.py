@@ -35,7 +35,9 @@ except ModuleNotFoundError as exc:
 # part of the public ``__all__`` surface.
 from robotics_experiments.px4_bridge import (  # noqa: F401
     AbstractFlightStackBridge,
+    BridgeStatus,
     LinearThrustModel,
+    LockstepSettings,
     PegasusQuadraticThrustModel,
     Px4Bridge,
     Px4MavlinkPort,
@@ -46,7 +48,9 @@ from robotics_experiments.px4_bridge import (  # noqa: F401
 
 __all__ = [
     "AbstractFlightStackBridge",
+    "BridgeStatus",
     "LinearThrustModel",
+    "LockstepSettings",
     "PegasusQuadraticThrustModel",
     "Px4Bridge",
     "Px4MavlinkPort",

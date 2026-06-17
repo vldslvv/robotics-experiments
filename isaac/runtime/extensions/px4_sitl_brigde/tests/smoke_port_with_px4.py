@@ -31,7 +31,11 @@ import numpy as np
 EXT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXT_ROOT))
 
-from Px4SitlBridge_python import Px4MavlinkPort, VehicleState  # noqa: E402
+from Px4SitlBridge_python import (  # noqa: E402
+    LockstepSettings,
+    Px4MavlinkPort,
+    VehicleState,
+)
 
 
 def main() -> int:
@@ -50,7 +54,7 @@ def main() -> int:
         connection_type=args.connection_type,
         connection_ip=args.connection_ip,
         connection_baseport=args.connection_baseport,
-        lockstep_timeout_s=args.lockstep_timeout_s,
+        lockstep=LockstepSettings(lockstep_timeout_s=args.lockstep_timeout_s),
     )
     port.start()
     print(
@@ -68,7 +72,8 @@ def main() -> int:
             tick_start = time.time()
 
             state = VehicleState.hover_at(sim_time_us=sim_time_us)
-            commands = port.step(state)
+            port.publish_sensors(state)
+            commands = port.poll_commands(state)
             if not port.is_connected:
                 disconnected = True
 

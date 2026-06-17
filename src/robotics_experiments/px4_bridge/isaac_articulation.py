@@ -1,9 +1,8 @@
 """Isaac Sim articulation read/write - the only Isaac-aware module.
 
-Encapsulates state extraction (pose, velocities) and per-rotor force
-application so the rest of the bridge has no Isaac Sim dependency. Tests can
-substitute a fake implementing the same two ``read_state`` / ``apply_forces``
-methods.
+Encapsulates state extraction (pose, velocities) and force application so the
+rest of the bridge has no Isaac Sim dependency. Tests can substitute a fake
+implementing the same ``read_state`` / ``apply_dynamics`` seam.
 
 Initialization is deferred until the first tick after Play because Isaac's
 articulation handles cannot be opened before the physics scene exists.
@@ -20,6 +19,7 @@ from robotics_experiments.px4_bridge.asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
     validate_root_body_pose,
 )
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 from . import frames
@@ -386,6 +386,17 @@ class IsaacArticulationIO:
     def apply_body_torque(self, torque_n_m: np.ndarray) -> None:
         """Apply a body-frame torque at the drone body origin."""
         self._apply_body_effect(force_n=None, torque_n_m=torque_n_m)
+
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None:
+        """Apply a full rotor-model result to the drone - the single sink to Isaac.
+
+        Per-rotor thrust is applied at each marker; the body reaction torque and
+        linear drag are applied at the body origin so yaw authority and damping
+        match the Pegasus thrust model.
+        """
+        self.apply_forces(dynamics.forces_n)
+        self.apply_body_torque(dynamics.body_torque_n_m)
+        self.apply_body_force(dynamics.body_drag_n)
 
     def _apply_body_effect(
         self,

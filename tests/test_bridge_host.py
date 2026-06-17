@@ -118,9 +118,14 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             num_rotors=2,
         )
 
+    class LockstepSettings:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
     fake_px4_bridge.Px4MavlinkPort = Px4MavlinkPort
     fake_px4_bridge.PegasusQuadraticThrustModel = PegasusQuadraticThrustModel
     fake_px4_bridge.Px4Bridge = Px4Bridge
+    fake_px4_bridge.LockstepSettings = LockstepSettings
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
 
@@ -150,12 +155,14 @@ def _config(**overrides):
         "connection_ip": "localhost",
         "connection_baseport": 4560,
         "vehicle_id": 0,
-        "lockstep_timeout_s": 1.0,
-        "first_heartbeat_timeout_s": 5.0,
-        "bootstrap_prime_ticks": 20,
-        "first_actuator_timeout_s": 5.0,
-        "max_sustained_actuator_lag_s": 0.5,
-        "heartbeat_rate_hz": 1.0,
+        "lockstep": SimpleNamespace(
+            lockstep_timeout_s=1.0,
+            first_heartbeat_timeout_s=5.0,
+            bootstrap_prime_ticks=20,
+            first_actuator_timeout_s=5.0,
+            max_sustained_actuator_lag_s=0.5,
+            heartbeat_rate_hz=1.0,
+        ),
         "startup_settle_time_s": 0.012,
         "gps_enabled": True,
         "gps_send_rate_hz": 250.0,
@@ -239,7 +246,8 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
 
     assert port_call[1]["num_rotors"] == 2
     assert port_call[1]["sensor_noise_enabled"] is True
-    assert port_call[1]["physics_rate_hz"] == 250.0
+    assert port_call[1]["lockstep"].physics_rate_hz == 250.0
+    assert port_call[1]["lockstep"].lockstep_timeout_s == 1.0
     assert thrust_call[1]["num_rotors"] == 2
     assert thrust_call[1]["rot_dir"] == [-1.0, 1.0]
     assert bridge_call[2] == [

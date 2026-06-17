@@ -161,8 +161,9 @@ harmful.
         ▼
 [Each bridge tick]        bridge.on_physics_step(dt, sim_time_us):
                             - read resolved body state
-                            - call port.step()
-                            - apply forces to drone body at rotor markers
+                            - port.publish_sensors(state) (send to PX4)
+                            - port.poll_commands(state)   (lockstep recv from PX4)
+                            - apply_dynamics to drone body at rotor markers
         │
         ▼
 [Stop / pause / teardown] BridgeHost.stop(), bridge.stop(), then despawn drone:
@@ -188,7 +189,56 @@ Isaac session — common during development when pressing Play repeatedly.
 
 ### Public API shape
 
+The contract is expressed as four explicit pieces: pure-data state objects, a
+settings object, a two-method lockstep port, and a single Isaac sink call.
+
 ```python
+# State objects (pure data; no Isaac / MAVLink / Pegasus deps)
+@dataclass
+class VehicleState:        # Isaac -> bridge each tick
+    position_enu; orientation_flu_enu_wxyz; linear_velocity_enu
+    angular_velocity_flu; sim_time_us
+
+@dataclass(frozen=True)
+class RotorDynamics:       # thrust model -> Isaac each tick
+    forces_n; body_torque_n_m; body_drag_n
+
+@dataclass(frozen=True)
+class BridgeStatus:        # read-only runtime snapshot for consumers
+    is_connected; is_armed; first_heartbeat_received
+    sensor_send_count; actuator_receive_count
+    last_sensor_send_us; last_actuator_receive_us; actuator_lag_us
+    last_disconnect_reason
+
+# Settings object for the lockstep exchange
+@dataclass(frozen=True)
+class LockstepSettings:
+    lockstep_timeout_s; first_heartbeat_timeout_s; bootstrap_prime_ticks
+    first_actuator_timeout_s; max_sustained_actuator_lag_s
+    heartbeat_rate_hz; physics_rate_hz
+
+# The flight-stack port: the lockstep seam (Pegasus stays hidden behind it).
+class AbstractFlightStackBridge:
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def publish_sensors(self, state: VehicleState) -> None: ...    # send -> PX4
+    def poll_commands(self, state: VehicleState) -> np.ndarray: ...  # lockstep recv <- PX4
+    @property
+    def status(self) -> BridgeStatus: ...
+    @property
+    def num_rotors(self) -> int: ...
+    @property
+    def is_connected(self) -> bool: ...
+    @property
+    def is_armed(self) -> bool: ...
+
+# The Isaac seam: read state in, apply a full rotor-model result out.
+class ArticulationIO(Protocol):
+    def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac
+    # plus initialize / shutdown / is_initialized / num_rotors
+
+# The orchestrator ties the four pieces into a per-tick pipeline.
 class Px4Bridge:
     def __init__(
         self,
@@ -197,6 +247,8 @@ class Px4Bridge:
         rotor_link_paths: list[str],    # discovered rotor marker paths in PX4 motor-index order
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
+        articulation_io: ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
+        max_tilt_angle_deg: float | None = None,        # zeros forces past this tilt; lockstep preserved
     ): ...
 
     def start(self) -> None: ...
@@ -204,10 +256,20 @@ class Px4Bridge:
     def on_physics_step(self, dt: float, sim_time_us: int) -> None: ...
 
     @property
+    def status(self) -> BridgeStatus: ...
+    @property
     def is_connected(self) -> bool: ...
     @property
     def is_armed(self) -> bool: ...
 ```
+
+**Lockstep ordering contract:** `publish_sensors(state)` and
+`poll_commands(state)` are two halves of one causal tick and MUST be called in
+that order for the same tick. `publish_sensors` sends `HIL_SENSOR` (advancing
+`time_usec`); `poll_commands` then blocks for the paired
+`HIL_ACTUATOR_CONTROLS`. Splitting them names the data flow in each direction
+but does not make them independently orderable - calling `poll_commands` first,
+or twice, breaks lockstep. `Px4Bridge.on_physics_step` is the canonical caller.
 
 ---
 
@@ -341,7 +403,7 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 
 ### Implementation requirements derived from lockstep
 
-- **`port.step()` is blocking.** When the bridge calls into the port to exchange messages, it blocks until PX4 has responded with actuator commands for this step. If PX4 is slow, Isaac Sim slows down.
+- **`port.poll_commands()` is blocking.** After `publish_sensors` sends this step's sensors, `poll_commands` blocks until PX4 has responded with actuator commands for this step. If PX4 is slow, Isaac Sim slows down.
 - **Timeouts MUST exist.** Recommended default: 100 ms. If PX4 doesn't reply in 100 ms, the bridge marks itself disconnected, returns zero commands, and lets the surrounding system handle recovery. A frozen lockstep without a timeout means a frozen Isaac Sim.
 - **Timestamps MUST be sim time, not wall clock.** PX4 uses `HIL_SENSOR.time_usec` to advance its own clock. Wall-clock timestamps break lockstep. The bridge passes `sim_time_us` straight through to `HIL_SENSOR.time_usec`.
 - **Sim speed scaling works for free.** If Isaac runs at 0.5× real time, PX4's clock advances at 0.5× real time. Same for 2× speedup. PX4 has no notion of wall-clock.
@@ -359,7 +421,7 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 
 ### What the bridge does NOT expose to surrounding code
 
-- MAVLink messages themselves (the API is `step(state) -> commands`, never raw MAVLink).
+- MAVLink messages themselves (the API is `publish_sensors(state)` / `poll_commands(state) -> commands`, never raw MAVLink).
 - The TCP socket.
 - PX4 heartbeat or system-state details, beyond binary `is_connected` and `is_armed`.
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
+from robotics_experiments.px4_bridge.contract import BridgeStatus
 from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
@@ -27,6 +28,7 @@ class _FakeArticulationIO:
         self.initialized = False
         self.shutdown_called = False
         self.applied_forces: list[np.ndarray] = []
+        self.applied_dynamics: list[RotorDynamics] = []
 
     @property
     def is_initialized(self):
@@ -42,8 +44,9 @@ class _FakeArticulationIO:
         self.state.sim_time_us = sim_time_us
         return self.state
 
-    def apply_forces(self, forces_n: np.ndarray):
-        self.applied_forces.append(np.asarray(forces_n, dtype=np.float64))
+    def apply_dynamics(self, dynamics: RotorDynamics):
+        self.applied_dynamics.append(dynamics)
+        self.applied_forces.append(np.asarray(dynamics.forces_n, dtype=np.float64))
 
 
 class _FakeFlightStack:
@@ -69,15 +72,31 @@ class _FakeFlightStack:
     def is_armed(self):
         return bool(np.any(self.commands))
 
+    @property
+    def status(self):
+        return BridgeStatus(
+            is_connected=self.is_connected,
+            is_armed=self.is_armed,
+            first_heartbeat_received=self.started,
+            sensor_send_count=len(self.sim_times),
+            actuator_receive_count=len(self.sim_times),
+            last_sensor_send_us=self.sim_times[-1] if self.sim_times else None,
+            last_actuator_receive_us=self.sim_times[-1] if self.sim_times else None,
+            actuator_lag_us=0 if self.sim_times else None,
+            last_disconnect_reason=None,
+        )
+
     def start(self):
         self.started = True
 
     def stop(self):
         self.stopped = True
 
-    def step(self, state: VehicleState):
+    def publish_sensors(self, state: VehicleState):
         self.states.append(state)
         self.sim_times.append(int(state.sim_time_us))
+
+    def poll_commands(self, state: VehicleState):
         return self.commands
 
 
@@ -301,6 +320,17 @@ def _install_fake_pegasus(monkeypatch):
     pymavlink.mavutil = mavutil
     monkeypatch.setitem(sys.modules, "pymavlink", pymavlink)
     monkeypatch.setitem(sys.modules, "pymavlink.mavutil", mavutil)
+
+
+def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
+    """Run one publish-then-poll lockstep tick and return the rotor commands.
+
+    Mirrors how ``Px4Bridge`` drives the port each physics step: send sensors
+    out, then block for the paired actuator. Keeps the ordering contract in one
+    place for the port test suite.
+    """
+    port.publish_sensors(state)
+    return port.poll_commands(state)
 
 
 def _quat_pitch_deg(angle_deg: float) -> np.ndarray:

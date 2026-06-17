@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-import numpy as np
-
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["ArticulationIO"]
@@ -19,8 +18,4 @@ class ArticulationIO(Protocol):
 
     def read_state(self, sim_time_us: int) -> VehicleState: ...
 
-    def apply_forces(self, forces_n: np.ndarray) -> None: ...
-
-    def apply_body_force(self, force_n: np.ndarray) -> None: ...
-
-    def apply_body_torque(self, torque_n_m: np.ndarray) -> None: ...
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...

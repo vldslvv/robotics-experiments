@@ -8,6 +8,7 @@ __all__ = [
     "RosQosConfig",
     "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
+    "LockstepConfig",
     "Px4BridgeConfig",
     "IsaacLabConfig",
     "EnvConfig",
@@ -138,6 +139,66 @@ class LightSwitchConfig:
 
 
 @dataclass
+class LockstepConfig:
+    """Tunables for the PX4 lockstep exchange (the ``px4.lockstep`` group).
+
+    Maps onto the library :class:`robotics_experiments.px4_bridge.LockstepSettings`
+    at construction time, with ``physics_rate_hz`` injected from ``sim.physics_hz``
+    (the single source of truth for the physics/sensor cadence, so it is not a
+    standalone knob here).
+
+    Attributes:
+        lockstep_timeout_s: Hard deadline on receiving an actuator message each
+            steady-state tick. On timeout the port returns zeros and Isaac keeps
+            ticking - required so a stalled flight stack does not freeze the
+            simulator.
+        first_heartbeat_timeout_s: Hard deadline on receiving PX4's first
+            heartbeat after the port starts. On timeout, the bridge marks the
+            port disconnected instead of waiting indefinitely.
+        bootstrap_prime_ticks: Number of priming HIL_SENSOR sends allowed before
+            the bridge blocks for PX4's first HIL_ACTUATOR_CONTROLS. During PX4
+            boot the controller needs a few sensor packets (~15) before it emits
+            actuators; without a cap, Isaac free-runs and floods PX4, building a
+            startup backlog that PX4 delivers with stale timestamps and that may
+            never drain, so the bridge flies on stale motor commands. Capping the
+            free-run bounds the backlog to ~this many ticks, keeping steady-state
+            actuator lag at ~1 tick. Must exceed PX4's boot sensor need or the
+            first-actuator wait times out and the bridge disconnects.
+        first_actuator_timeout_s: Hard deadline on receiving PX4's first
+            HIL_ACTUATOR_CONTROLS once the bridge starts blocking for it. PX4
+            boots its controllers only after Isaac connects and that boot competes
+            with Isaac for the host CPU, so under load it can take well over the
+            nominal couple of seconds. This wait is a strict per-tick lockstep
+            block, so a generous deadline patiently waits out a slow boot without
+            building a startup backlog; only a dead PX4 trips it. Much larger than
+            the per-tick lockstep_timeout_s, which is used only after the first
+            actuator arrives.
+        max_sustained_actuator_lag_s: Safety tripwire on steady-state actuator
+            lag (current sim time minus the newest applied actuator timestamp).
+            This is a regression net, not a happy-path control: strict blocking
+            lockstep already keeps the lag at ~1 tick, prime-then-block prevents
+            the startup backlog, and a PX4 stall is caught by lockstep_timeout_s.
+            It exists to catch the one remaining failure mode -- a regression that
+            reintroduces a stale-but-still-flowing actuator backlog (PX4 keeps
+            answering, but with persistently old timestamps), which would otherwise
+            silently fly stale motor commands. On exceed the bridge fails closed
+            with a distinct "actuator lag exceeded sustained limit" reason instead
+            of surfacing as a confusing attitude divergence. Set above the brief
+            post-bootstrap drain transient and below the lag that destabilizes
+            flight.
+        heartbeat_rate_hz: Wall-clock rate for bridge-originated MAVLink heartbeat
+            messages.
+    """
+
+    lockstep_timeout_s: float
+    first_heartbeat_timeout_s: float
+    bootstrap_prime_ticks: int
+    first_actuator_timeout_s: float
+    max_sustained_actuator_lag_s: float
+    heartbeat_rate_hz: float
+
+
+@dataclass
 class Px4BridgeConfig:
     """Configuration for the PX4 SITL bridge.
 
@@ -161,47 +222,8 @@ class Px4BridgeConfig:
         connection_baseport: TCP port for the simulator MAVLink API.
         vehicle_id: Added to ``connection_baseport`` when more than one
             vehicle shares a host.
-        lockstep_timeout_s: Hard deadline on receiving an actuator message
-            each tick. On timeout the port returns zeros and Isaac keeps
-            ticking - required so a stalled flight stack does not freeze
-            the simulator.
-        first_heartbeat_timeout_s: Hard deadline on receiving PX4's first
-            heartbeat after the port starts. On timeout, the bridge marks
-            the port disconnected instead of waiting indefinitely.
-        bootstrap_prime_ticks: Number of priming HIL_SENSOR sends allowed
-            before the bridge blocks for PX4's first HIL_ACTUATOR_CONTROLS.
-            During PX4 boot the controller needs a few sensor packets (~15)
-            before it emits actuators; without a cap, Isaac free-runs and floods
-            PX4 with sensors, building a startup backlog that PX4 delivers with
-            stale timestamps and that may never drain, so the bridge flies on
-            stale motor commands. Capping the free-run bounds the backlog to
-            ~this many ticks, keeping steady-state actuator lag at ~1 tick. Must
-            exceed PX4's boot sensor need or the first-actuator wait times out
-            and the bridge disconnects.
-        first_actuator_timeout_s: Hard deadline on receiving PX4's first
-            HIL_ACTUATOR_CONTROLS once the bridge starts blocking for it. PX4
-            boots its controllers only after Isaac connects and that boot
-            competes with Isaac for the host CPU, so under load it can take well
-            over the nominal couple of seconds. This wait is a strict per-tick
-            lockstep block, so a generous deadline patiently waits out a slow
-            boot without building a startup backlog; only a dead PX4 trips it.
-            Much larger than the per-tick lockstep_timeout_s, which is used only
-            after the first actuator arrives.
-        max_sustained_actuator_lag_s: Safety tripwire on steady-state actuator
-            lag (current sim time minus the newest applied actuator timestamp).
-            This is a regression net, not a happy-path control: strict blocking
-            lockstep already keeps the lag at ~1 tick, prime-then-block prevents
-            the startup backlog, and a PX4 stall is caught by lockstep_timeout_s.
-            It exists to catch the one remaining failure mode -- a regression
-            that reintroduces a stale-but-still-flowing actuator backlog (PX4
-            keeps answering, but with persistently old timestamps), which would
-            otherwise silently fly stale motor commands. On exceed the bridge
-            fails closed with a distinct "actuator lag exceeded sustained limit"
-            reason instead of surfacing as a confusing attitude divergence. Set
-            above the brief post-bootstrap drain transient and below the lag that
-            destabilizes flight.
-        heartbeat_rate_hz: Wall-clock rate for bridge-originated MAVLink
-            heartbeat messages.
+        lockstep: Lockstep exchange tunables (timeouts, bootstrap priming,
+            actuator-lag tripwire, heartbeat rate). See :class:`LockstepConfig`.
         startup_settle_time_s: Sim-time delay before opening the PX4
             simulator MAVLink endpoint. The drone is allowed to settle in
             Isaac physics first so PX4 does not initialize from spawn-drop
@@ -243,12 +265,7 @@ class Px4BridgeConfig:
     connection_ip: str
     connection_baseport: int
     vehicle_id: int
-    lockstep_timeout_s: float
-    first_heartbeat_timeout_s: float
-    bootstrap_prime_ticks: int
-    first_actuator_timeout_s: float
-    max_sustained_actuator_lag_s: float
-    heartbeat_rate_hz: float
+    lockstep: LockstepConfig
     startup_settle_time_s: float
     gps_enabled: bool
     gps_send_rate_hz: float

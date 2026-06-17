@@ -58,8 +58,8 @@ def test_default_config_loads_from_root_experiment_config():
     assert not hasattr(config.px4, "rotor_link_paths")
     assert config.px4.connection_type == "tcpin"
     assert config.px4.enabled is True
-    assert config.px4.first_heartbeat_timeout_s == 5.0
-    assert config.px4.heartbeat_rate_hz == 1.0
+    assert config.px4.lockstep.first_heartbeat_timeout_s == 5.0
+    assert config.px4.lockstep.heartbeat_rate_hz == 1.0
     assert config.px4.startup_settle_time_s == 1.0
     assert config.px4.gps_enabled is True
     assert config.px4.gps_send_rate_hz == 250.0

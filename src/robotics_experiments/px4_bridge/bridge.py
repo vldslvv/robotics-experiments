@@ -8,9 +8,10 @@ apply the resulting actuator commands as forces.
 The class composes three injected collaborators so each layer can be staged
 and tested independently:
 
-- ``articulation_io``: reads ``VehicleState``, applies per-rotor forces.
-- ``port``: pumps state out, pulls actuator commands back (MAVLink in prod,
-  fake in tests).
+- ``articulation_io``: reads ``VehicleState``, applies a ``RotorDynamics`` via
+  ``apply_dynamics`` (rotor forces at markers plus body torque and drag).
+- ``port``: ``publish_sensors`` pumps state out, ``poll_commands`` pulls actuator
+  commands back in lockstep (MAVLink in prod, fake in tests).
 - ``thrust_model``: maps rotor references to Pegasus-compatible dynamics.
 """
 
@@ -22,9 +23,10 @@ from typing import Optional
 import numpy as np
 
 from . import frames
+from .contract import BridgeStatus
 from .flight_stack import AbstractFlightStackBridge
 from .simulator import ArticulationIO
-from .thrust_model import RotorThrustModel
+from .thrust_model import RotorDynamics, RotorThrustModel
 
 __all__ = ["Px4Bridge"]
 
@@ -153,11 +155,19 @@ class Px4Bridge:
                         self._max_tilt_angle_deg,
                     )
 
-        # Always exchange sensors/actuators with PX4 (lockstep), using the real
-        # state, before gating the applied forces.
-        commands = self._port.step(state)
+        # Lockstep exchange, using the real state, before gating applied forces:
+        # send sensors out to PX4, then block for the paired actuator commands.
+        self._port.publish_sensors(state)
+        commands = self._port.poll_commands(state)
         if force_cutoff:
-            self._io.apply_forces(np.zeros(self._thrust_model.num_rotors, dtype=np.float64))
+            zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
+            self._io.apply_dynamics(
+                RotorDynamics(
+                    forces_n=zero,
+                    body_torque_n_m=np.zeros(3, dtype=np.float64),
+                    body_drag_n=np.zeros(3, dtype=np.float64),
+                )
+            )
             return
 
         body_velocity_flu = frames.body_velocity_flu_from_state(state)
@@ -184,13 +194,13 @@ class Px4Bridge:
                 np.asarray(state.linear_velocity_enu, dtype=np.float64).tolist(),
                 np.asarray(body_velocity_flu, dtype=np.float64).tolist(),
             )
-        self._io.apply_forces(dynamics.forces_n)
-        if hasattr(self._io, "apply_body_torque"):
-            self._io.apply_body_torque(dynamics.body_torque_n_m)
-        if hasattr(self._io, "apply_body_force"):
-            self._io.apply_body_force(dynamics.body_drag_n)
+        self._io.apply_dynamics(dynamics)
 
     # ---- Status ------------------------------------------------------------
+
+    @property
+    def status(self) -> BridgeStatus:
+        return self._port.status
 
     @property
     def is_connected(self) -> bool:
