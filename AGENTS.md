@@ -227,12 +227,17 @@ the host. They are meant to be used in the Dockerized environment.
   root USER (GPU/NVML/Vulkan needs root), apt cache retention, and apt/pip/npm
   version pinning are ignored project-wide, while genuine correctness lints
   (DL4006 pipefail, SC2086 quoting) are fixed in the Dockerfile. shellcheck
-  (shell scripts) is still wired but `stages: [manual]`, so it does not run on
-  commit or in `pre-commit run --all-files` yet; run it on demand with
-  `uv run pre-commit run shellcheck --hook-stage manual --all-files`, and drop
+  (shell scripts) is enforced on commit now that its findings are addressed; the
+  only ones needed were SC1090 source directives in the `px4/docker` run scripts
+  (`# shellcheck source-path=SCRIPTDIR` + `# shellcheck source=...`), so it lints
+  the sourced helper instead of skipping it. checkmake (the top-level `Makefile`
+  and `make/*.mk` includes) is still wired but `stages: [manual]`, so it does not
+  run on commit or in `pre-commit run --all-files` yet; run it on demand with
+  `uv run pre-commit run checkmake --hook-stage manual --all-files`, and drop
   `stages: [manual]` to enforce once its findings are addressed. These hooks
-  (uv-lock, shellcheck, hadolint) are new tooling added by explicit request;
-  they self-bootstrap (no host shellcheck/hadolint or Docker needed).
+  (uv-lock, shellcheck, hadolint, checkmake) are new tooling added by explicit
+  request; they self-bootstrap (no host shellcheck/hadolint/checkmake, Go, or
+  Docker needed -- pre-commit builds checkmake via its own Go toolchain).
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all

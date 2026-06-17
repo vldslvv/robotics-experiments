@@ -56,21 +56,34 @@ repos:
       - id: uv-lock
 
   # Shell + Dockerfile linters. Self-bootstrapping: no host shellcheck/hadolint
-  # or Docker needed. hadolint is enforced on commit now that its findings are
-  # addressed; the intentional ignores (root USER, apt cache retention, version
-  # pinning, etc.) live in `.hadolint.yaml` at the repo root. shellcheck stays
-  # manual until its findings are addressed; run it on demand with:
-  #   uv run pre-commit run shellcheck --hook-stage manual --all-files
+  # or Docker needed. Both are enforced on commit now that their findings are
+  # addressed. hadolint's intentional ignores (root USER, apt cache retention,
+  # version pinning, etc.) live in `.hadolint.yaml` at the repo root; shellcheck
+  # uses in-script `# shellcheck` directives (for example the SC1090 source
+  # directives in the px4/docker run scripts) where needed.
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
-        stages: [manual]
 
   - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.14.0
     hooks:
       - id: hadolint
+
+  # Makefile linter. Like shellcheck, staged manual until its findings are
+  # addressed; run it on demand with:
+  #   uv run pre-commit run checkmake --hook-stage manual --all-files
+  # Self-bootstrapping: pre-commit builds it via its own Go toolchain (no host
+  # checkmake or Go needed). The default hook only matches lowercase
+  # `makefile`, so `files` is overridden to cover the top-level `Makefile` and
+  # the `make/*.mk` includes.
+  - repo: https://github.com/mrtazz/checkmake
+    rev: v0.3.2
+    hooks:
+      - id: checkmake
+        stages: [manual]
+        files: '(?x)((^|/)Makefile$|\.mk$)'
 
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.5
