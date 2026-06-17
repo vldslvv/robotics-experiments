@@ -436,7 +436,11 @@ conversion not yet asserted.
 **Acceptance.** A test fails on any divergence beyond tolerance (noise disabled);
 `frames.py` is documented as the single source.
 
-**Status.** PARTIAL (guard exists; ownership/consolidation remains).
+**Status.** DONE. `frames.py` is documented as the canonical source for
+bridge-owned frame math, `_PegasusSensorSuite` uses its quaternion-order helper
+when adapting `VehicleState` into Pegasus `State`, and the Pegasus equivalence
+test now covers quaternion order, ENU/NED position and velocity, FLU/FRD gyro,
+attitude rotation convention, body velocity, GPS, magnetometer, and barometer.
 
 ### Step 5.2 - Pegasus de-vendoring strategy
 
@@ -464,7 +468,18 @@ pass after slimming.
 **Acceptance.** A short vendoring-policy section in CLAUDE.md; the vendor tree is
 reduced to the reachable set with divergences marked.
 
-**Status.** OPEN.
+**Status.** DONE (documentation/policy; no runtime change). New
+`isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` records the
+honest unpinned-snapshot provenance (upstream repo/BSD-3 license; commit
+`UNKNOWN`, not guessed), the bridge-reachable module set, and a divergence index
+(GPS degrees, accumulated barometer drift, `HIL_SENSOR` temperature field,
+bridge-side sim-time lockstep) with each divergence's `file:line` and guarding
+test. CLAUDE.md gains a "Pegasus vendoring policy" section; the three in-tree
+inline divergence comments now point at PROVENANCE.md. The reachable-set slimming
+was already complete (dead modules removed in `Cleanup unused pegasus modules --
+Step 9`); `px4_launch_tool.py` + the autolaunch branches are dead at runtime
+(`px4_autolaunch=False`) and were deliberately kept and documented rather than
+removed, to minimize divergence.
 
 ### Step 5.3 - Isaac Lab task/env alignment
 

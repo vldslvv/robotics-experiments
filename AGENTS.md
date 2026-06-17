@@ -148,6 +148,34 @@ the current contents and the intended home for that kind of code.
   logs the offending state and raises rather than forwarding NaN/Inf into the
   lockstep exchange.
 
+## Pegasus vendoring policy
+- The Pegasus Simulator under
+  `isaac/runtime/extensions/px4_sitl_brigde/pegasus/` is a vendored, stripped,
+  unpinned source snapshot (not a PyPI dependency), reduced to the modules the
+  PX4 bridge transitively imports and excluded from ruff/mypy via
+  `pyproject.toml`.
+  `isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` is the single
+  source of truth for its provenance (upstream repo/license, commit currently
+  `UNKNOWN`), the reachable module set, and the divergence index. Update that
+  file -- not just code comments -- when the snapshot or a divergence changes.
+- The project's deviations from upstream Pegasus are load-bearing fixes, not
+  drift, and each has a guarding unit test: GPS ground-truth lat/lon in degrees
+  (`gps.py`), accumulated barometer drift (`barometer.py`), the `HIL_SENSOR` 14th
+  field carrying temperature not GPS altitude (`px4_mavlink_backend.py`), and
+  bridge-side sim-time lockstep (`_pegasus_sensors.py`, documented in
+  `mavlink.py`). The three in-tree divergences carry inline
+  `# Intentional divergence from upstream Pegasus` comments that point at
+  PROVENANCE.md. Never "sync them away."
+- `px4_launch_tool.py` and the `px4_autolaunch` branches in
+  `px4_mavlink_backend.py` are retained verbatim from upstream but dead at
+  runtime: the bridge constructs the backend with `px4_autolaunch=False` and PX4
+  SITL is launched separately (`make run-px4`). They are kept to minimize
+  divergence, not because they run.
+- A re-sync is mechanical: record the upstream commit in PROVENANCE.md, diff
+  upstream into the reachable module set only, re-apply each indexed divergence,
+  then run `uv run pytest tests/` (the four guarding tests are the drift guard)
+  and the smoke tests under `isaac/runtime/extensions/px4_sitl_brigde/tests/`.
+
 ## Python environment
 - This project uses `uv` for all host-side Python work. Do not call `pip`,
   `python -m venv`, or a system/global Python directly.

@@ -131,6 +131,7 @@ class Barometer(Sensor):
         self._baro_drift_pa = self._baro_drift_pa + (self._baro_drift_pa_per_sec * dt)  # Update the drift
         # Intentional divergence from upstream Pegasus: apply accumulated drift,
         # not the drift rate, so pressure and pressure altitude stay consistent.
+        # See ../../../PROVENANCE.md (divergence index).
         absolute_pressure_noisy: float = absolute_pressure + abs_pressure_noise + self._baro_drift_pa
 
         # Convert to hPa (Note: 1 hPa = 100 Pa)

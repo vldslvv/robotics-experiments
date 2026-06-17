@@ -89,6 +89,7 @@ class GPS(Sensor):
             # primary "latitude"/"longitude" fields. This diverges from upstream
             # Pegasus (radians) on purpose; the backend consumes these via
             # ``* 10000000`` expecting degrees. Do not "sync away" the units.
+            # See ../../../PROVENANCE.md (divergence index).
             "latitude_gt": self._origin_lat,
             "longitude_gt": self._origin_lon,
             "altitude_gt": self._origin_alt,
