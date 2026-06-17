@@ -200,6 +200,24 @@ the host. They are meant to be used in the Dockerized environment.
   `uv sync --extra dev` if missing. The target activates `.venv` and runs
   `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
   under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
+- Shared unit-test fakes/helpers live in `tests/_fakes.py` (pytest puts `tests/`
+  on `sys.path`, so test modules import them with `from _fakes import ...`).
+  Define each fake once there rather than inline per test file. The PX4 bridge
+  unit tests are split by concern across `tests/test_px4_bridge_sensors.py`,
+  `tests/test_px4_bridge_lockstep.py`, `tests/test_px4_bridge_actuator.py`, and
+  `tests/test_px4_bridge_gating.py` (there is no single `test_px4_bridge.py`).
+- pre-commit is the local quality gate; there is no CI pipeline (local-only for
+  now). Install it once with `uv run pre-commit install` and run it with
+  `uv run pre-commit run --all-files`. ruff and mypy run as mirror hooks
+  (per-changed-file, self-bootstrapping, ruff auto-fixes on commit) with their
+  `rev:` kept in sync with the `dev` extra in `pyproject.toml`; `pytest` runs as
+  a `repo: local` hook through the project venv over the whole suite. mypy is
+  scoped to `src`/`tests` (the typed tree; the isaac/runtime and vendored
+  pegasus trees only yield false positives in the mirror's isolated env).
+  Because the mirror hooks only see staged files, they are not a whole-repo
+  gate -- run `uv run ruff check` / `uv run ruff format --check` /
+  `uv run mypy src tests` for a full sweep. Vendored Pegasus stays excluded from
+  ruff/mypy via `pyproject.toml`.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all
@@ -304,7 +322,7 @@ the host. They are meant to be used in the Dockerized environment.
   Prefer extracting a focused topic summary over exporting every topic.
 
 ## Hard rules
-- Do NOT commit USD assets or binary files.
+- Do NOT commit binary files.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in

@@ -178,9 +178,7 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
 
-    host = module.BridgeHost(
-        articulation_path="/World/Drone", config=_config(), physics_hz=250.0
-    )
+    host = module.BridgeHost(articulation_path="/World/Drone", config=_config(), physics_hz=250.0)
 
     host.start()
 

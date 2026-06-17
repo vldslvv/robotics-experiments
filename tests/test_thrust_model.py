@@ -56,9 +56,7 @@ def test_pegasus_quadratic_model_matches_reaction_torque_formula(commands):
     )
 
     omega = np.clip(commands, 0.0, 1100.0)
-    expected_yaw_torque = 1e-6 * np.sum(
-        np.square(omega) * np.array([-1.0, -1.0, 1.0, 1.0])
-    )
+    expected_yaw_torque = 1e-6 * np.sum(np.square(omega) * np.array([-1.0, -1.0, 1.0, 1.0]))
     np.testing.assert_allclose(dynamics.body_torque_n_m, [0.0, 0.0, expected_yaw_torque])
     np.testing.assert_allclose(dynamics.body_drag_n, [-1.0, 0.9, 0.0])
 

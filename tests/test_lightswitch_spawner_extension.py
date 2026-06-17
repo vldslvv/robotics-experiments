@@ -77,7 +77,7 @@ class _Publisher:
 
 
 class _Node:
-    destroyed = []
+    destroyed: list["_Node"] = []
 
     def __init__(self, name):
         self.name = name

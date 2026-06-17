@@ -46,7 +46,7 @@ class _Timeline:
 
 
 class _BridgeHost:
-    instances = []
+    instances: list["_BridgeHost"] = []
 
     def __init__(self, *, articulation_path, config):
         self.articulation_path = articulation_path

@@ -9,6 +9,11 @@ repos:
       - id: check-added-large-files
       - id: check-merge-conflict
 
+  # ruff/mypy run as mirror hooks: fast, self-bootstrapping, per-changed-file,
+  # and ruff auto-fixes in place on commit. Versions are kept in sync with the
+  # `dev` extra in pyproject.toml. Because they only see staged files, they are
+  # not a whole-repo gate -- run `uv run ruff check` / `uv run mypy src tests`
+  # for a full sweep.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
@@ -20,10 +25,26 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        exclude: ^isaac/runtime/extensions/px4_sitl_brigde/pegasus/
+        # Scoped to the typed source/test tree, matching the
+        # `uv run mypy src tests` full sweep. The isaac/runtime and vendored
+        # pegasus trees can't resolve isaacsim/pxr/carb in the mirror's
+        # isolated env, so checking them only yields false positives.
+        files: ^(src|tests)/
         additional_dependencies:
           - types-requests
         args: ["--ignore-missing-imports"]
+
+  # pytest has no per-file notion, so it runs locally through the project venv
+  # over the whole suite on every commit. There is no CI pipeline; this is the
+  # local-only test gate of record.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (uv run pytest)
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
 
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.5

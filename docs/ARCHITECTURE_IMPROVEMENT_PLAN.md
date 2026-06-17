@@ -367,27 +367,46 @@ inline, and `tests/test_px4_bridge.py` is a 1,246-LOC / 41-test monolith.
 
 **Acceptance.** Each fake has a single definition; no test file over ~400 LOC.
 
-**Status.** OPEN. Do before Track P2 -- it makes the decomposition test net cheaper.
+**Status.** DONE. Shared fakes/helpers live in `tests/_fakes.py` (imported as
+`from _fakes import ...`); the 42-test monolith is split by concern into
+`tests/test_px4_bridge_sensors.py` (15), `tests/test_px4_bridge_lockstep.py`
+(8), `tests/test_px4_bridge_actuator.py` (7), and
+`tests/test_px4_bridge_gating.py` (12). `tests/test_px4_bridge.py` is removed.
+Each fake is defined once; no split file exceeds ~400 LOC; suite count
+unchanged (128 total).
 
-### Step 4.2 - Add a CI gate
+### Step 4.2 - Local pre-commit gate (no CI for now)
 
-**Problem.** Quality is gated only locally. A red unit test or lint error can be
-merged.
+**Problem.** Quality is gated only by ad hoc local runs. A red unit test, type
+error, or lint error can land. The original plan proposed a GitHub Actions CI
+gate; the project is local-only for now, so the gate lives in pre-commit
+instead.
 
-**Files.** New `.github/workflows/ci.yml`.
+**Files.** `.pre-commit-config.yaml`.
 
-**Outline.** On pull request: `uv sync --extra dev`, then `uv run ruff check`,
-`uv run ruff format --check`, `uv run mypy`, `uv run pytest` (host unit suite
-only -- no Docker / Isaac / PX4). This is the one explicitly justified new tool;
-it mirrors the existing pre-commit config, adding a gate rather than a new style.
-Container-backed `make test-integration-*` targets stay manual.
+**Outline.** Keep ruff/mypy as mirror hooks (fast, self-bootstrapping,
+per-changed-file, ruff auto-fixes on commit; `rev:` kept in sync with the `dev`
+extra) and add a `repo: local` `pytest` hook (`pass_filenames: false` /
+`always_run: true`) that runs the whole suite through the project venv on every
+commit. The utility (`pre-commit-hooks`) and `Lucas-C` crlf/tabs/chmod hooks are
+unchanged. Container-backed `make test-integration-*` targets stay manual.
 
-**Tests.** The workflow itself; confirm it fails on an intentionally broken test
-in a scratch branch.
+This is the hybrid choice: commits stay fast and self-fixing, but the mirror
+hooks only see staged files, so they are not a whole-repo gate -- the
+pre-existing-error class (stale lint/type errors in untouched files) can recur.
+Run `uv run ruff check` / `uv run ruff format --check` / `uv run mypy src tests`
+for a full sweep. If CI is added later, those three plus `pytest` port directly
+to a workflow as the whole-repo gate.
 
-**Acceptance.** A failing unit test or lint error blocks merge.
+**Tests.** `uv run pre-commit run --all-files` passes every hook; confirm
+`pytest` fails the commit on an intentionally broken test.
 
-**Status.** OPEN.
+**Acceptance.** A failing unit test blocks the commit; ruff/mypy block on
+changed files.
+
+**Status.** DONE. `.pre-commit-config.yaml` keeps the mirror ruff/mypy hooks and
+adds the local `pytest` hook alongside the utility/crlf/tabs hooks; all pass on
+`--all-files`. Documented in CLAUDE.md (Isaac Sim test workflow).
 
 ---
 
