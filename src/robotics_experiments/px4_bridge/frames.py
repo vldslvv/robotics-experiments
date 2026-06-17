@@ -130,8 +130,10 @@ def world_enu_to_body_flu(
 def body_velocity_flu_from_state(state) -> np.ndarray:
     """Return true body-FLU linear velocity from a ``VehicleState``.
 
-    Do not route this through Pegasus ``State.get_linear_body_velocity_ned_frd``:
-    that reference method currently returns acceleration despite its name.
+    This is computed directly from the world-ENU velocity and the body
+    attitude. Pegasus ``State.get_linear_body_velocity_ned_frd`` (fixed upstream
+    in ``bef3c57``) returns body velocity in the NED-FRD convention, whereas the
+    bridge needs body-FLU here, so we compute it rather than route through it.
     """
     return world_enu_to_body_flu(
         state.orientation_flu_enu_wxyz,
