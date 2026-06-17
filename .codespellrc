@@ -1,0 +1,8 @@
+[codespell]
+# Vendored Pegasus simulator code is excluded from linting (mirrors the ruff
+# extend-exclude in pyproject.toml); USD assets and lockfiles are not prose.
+skip = .git,*.lock,*.usd,*.usda,*/px4_sitl_brigde/pegasus/*
+# Domain terms codespell mistakes for misspellings:
+#   sitl -> PX4 Software-In-The-Loop; ned -> North-East-Down frame;
+#   empy -> the empy templating package used by the ROS build.
+ignore-words-list = sitl,ned,empy

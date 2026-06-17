@@ -1,0 +1,10 @@
+# Keep yamllint's valuable semantic checks (duplicate keys, indentation,
+# truthy ambiguity) while relaxing two purely stylistic defaults that do not
+# fit this repo: Hydra configs do not use an explicit document-start marker,
+# and 80 columns is tighter than the project's YAML actually needs.
+extends: default
+
+rules:
+  document-start: disable
+  line-length:
+    max: 120

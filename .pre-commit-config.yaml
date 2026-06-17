@@ -71,19 +71,30 @@ repos:
     hooks:
       - id: hadolint
 
-  # Makefile linter. Like shellcheck, staged manual until its findings are
-  # addressed; run it on demand with:
-  #   uv run pre-commit run checkmake --hook-stage manual --all-files
-  # Self-bootstrapping: pre-commit builds it via its own Go toolchain (no host
-  # checkmake or Go needed). The default hook only matches lowercase
-  # `makefile`, so `files` is overridden to cover the top-level `Makefile` and
-  # the `make/*.mk` includes.
-  - repo: https://github.com/mrtazz/checkmake
-    rev: v0.3.2
+  # Text/config linters. Self-bootstrapping (pure-Python / vendored binary, no
+  # host tools needed). codespell catches misspellings across the doc-heavy
+  # tree; yamllint lints YAML semantics beyond the parse-only check-yaml hook
+  # (duplicate keys, indentation, truthy ambiguity) over the Hydra configs;
+  # taplo lints TOML beyond parse-only check-toml. Tunables live at the repo
+  # root: `.codespellrc`, `.yamllint.yaml`, and `.taplo.toml`.
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
     hooks:
-      - id: checkmake
-        stages: [manual]
-        files: '(?x)((^|/)Makefile$|\.mk$)'
+      - id: codespell
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      # Drop the default --default-schema-catalogs: that schemastore catalog
+      # endpoint fails to decode at taplo v0.9.3. Schemas are instead associated
+      # directly in `.taplo.toml` (pyproject.toml is still schema-validated).
+      - id: taplo-lint
+        args: []
 
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.5

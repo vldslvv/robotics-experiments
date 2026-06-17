@@ -230,14 +230,29 @@ the host. They are meant to be used in the Dockerized environment.
   (shell scripts) is enforced on commit now that its findings are addressed; the
   only ones needed were SC1090 source directives in the `px4/docker` run scripts
   (`# shellcheck source-path=SCRIPTDIR` + `# shellcheck source=...`), so it lints
-  the sourced helper instead of skipping it. checkmake (the top-level `Makefile`
-  and `make/*.mk` includes) is still wired but `stages: [manual]`, so it does not
-  run on commit or in `pre-commit run --all-files` yet; run it on demand with
-  `uv run pre-commit run checkmake --hook-stage manual --all-files`, and drop
-  `stages: [manual]` to enforce once its findings are addressed. These hooks
-  (uv-lock, shellcheck, hadolint, checkmake) are new tooling added by explicit
-  request; they self-bootstrap (no host shellcheck/hadolint/checkmake, Go, or
-  Docker needed -- pre-commit builds checkmake via its own Go toolchain).
+  the sourced helper instead of skipping it. checkmake was evaluated and removed:
+  its rules misfire on this repo's include-split, variable-heavy makefiles
+  (minphony cannot follow `include`s so it flags missing `all`/`clean`/`test` on
+  every file; the `:`-bearing docker-run continuation lines in `make/docker.mk`
+  are misparsed as duplicate/oversized targets) and it surfaced no real issues.
+  These hooks (uv-lock, shellcheck, hadolint) are new tooling added by explicit
+  request; they self-bootstrap (no host shellcheck/hadolint or Docker needed).
+- The enforced gate also runs three text/config linters, all self-bootstrapping
+  and added by explicit request: `codespell` (misspellings across the doc-heavy
+  tree), `yamllint` (YAML semantics beyond the parse-only `check-yaml`:
+  duplicate keys, indentation, truthy ambiguity), and `taplo-lint` (TOML beyond
+  the parse-only `check-toml`). Their tunables live at the repo root:
+  - `.codespellrc`: skips the vendored Pegasus tree (mirrors the ruff
+    `extend-exclude`) and USD/lock files, and ignores the domain terms `sitl`
+    (PX4 Software-In-The-Loop), `ned` (North-East-Down frame), and `empy` (the
+    ROS-build templating package). Add real fixes; extend `ignore-words-list`
+    only for genuine domain vocabulary.
+  - `.yamllint.yaml`: `extends: default` with two relaxations -- `document-start`
+    disabled (Hydra configs use no `---` marker) and `line-length` raised to 120.
+  - `.taplo.toml`: associates the pyproject.toml schema directly. The hook runs
+    with `args: []` (not the default `--default-schema-catalogs`) because that
+    schemastore catalog endpoint fails to decode at taplo v0.9.3; the per-file
+    schema in `.taplo.toml` still validates pyproject.toml over the network.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all

@@ -1,0 +1,9 @@
+# taplo's --default-schema-catalogs endpoint (schemastore catalog) fails to
+# decode at taplo v0.9.3, so we associate schemas directly here instead. This
+# keeps schema validation on for pyproject.toml (the schema itself is fetched
+# over the network) while the Isaac Kit extension.toml files, which have no
+# public schema, are linted for syntax only.
+[[rule]]
+include = ["pyproject.toml"]
+[rule.schema]
+path = "https://json.schemastore.org/pyproject.json"

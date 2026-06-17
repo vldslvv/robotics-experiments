@@ -8,7 +8,7 @@
 # Populate __init__.py at every level, if not already created
 # [ ! -e "$SYMLINKS/isaacsim/__init__.py" ] && touch "$SYMLINKS/isaacsim/__init__.py"
 # [ ! -e "$SYMLINKS/isaacsim/core/__init__.py" ] && touch "$SYMLINKS/isaacsim/core/__init__.py"
-# Now, create a symlink for api, if doens't exist already
+# Now, create a symlink for api, if doesn't exist already
 
 # TODO: create symlinks for /isaac-sim/kit/kernel/py/omni/ext/
 # and /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy/
