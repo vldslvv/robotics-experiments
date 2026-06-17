@@ -48,11 +48,11 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 
 # Enable autosuggestions
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
-    ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
 
 # Enable VI mode
 RUN git clone https://github.com/jeffreytse/zsh-vi-mode \
-    ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-vi-mode
+    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-vi-mode"
 
 # --- write a deterministic .zshrc ---
 # Enables completion, autosuggestions, syntax highlighting, and uses persistent cache paths.
@@ -114,7 +114,7 @@ RUN chmod 755 /usr/local/share/zsh
 
 # If neovim is not needed, this step can be skipped
 FROM zsh AS nvim
-SHELL ["/bin/bash", "-lc"]
+SHELL ["/bin/bash", "-o", "pipefail", "-lc"]
 
 RUN apt-get update && \
   DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
@@ -151,12 +151,13 @@ RUN export NVM_DIR="${HOME}/.nvm" && \
 # For escape delay, see if there are any issues
 # https://superuser.com/questions/942677/consequences-of-escape-time-0-tmux-setting
 COPY docker/tmux.conf /root/.tmux.conf
-RUN echo "alias vim='nvim'" >> ${HOME}/.bashrc
+RUN echo "alias vim='nvim'" >> "${HOME}/.bashrc"
 
 
 FROM nvim AS ai-tools
-SHELL ["/bin/bash", "-lc"]
+SHELL ["/bin/bash", "-o", "pipefail", "-lc"]
 
+# hadolint ignore=SC2016
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
@@ -187,8 +188,8 @@ RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \
 # The problem being solved:
 # https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
 # Uses custom environment script to be able to use LSP properly
-RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> ${HOME}/.bashrc
-RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> ${HOME}/.zshrc
+RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> "${HOME}/.bashrc"
+RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> "${HOME}/.zshrc"
 
 # This script will populate symlinks for editor's LSP to work
 ARG SCRIPTS_DIR
@@ -220,13 +221,13 @@ WORKDIR /topic_based_ros2_control_ws
 # Used as reference: https://github.com/PickNikRobotics/topic_based_ros2_control/blob/main/doc/installation.md
 # The approach is to layer three workspaces: base -> where topic is built -> where isaac examples are
 # To build this workspace, activate a base ros workspace first, then perform installation
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
-  export COLCON_WS=$(pwd) && \
-  mkdir -p ${COLCON_WS}/src && \
-  cd ${COLCON_WS}/src && \
+RUN source "/opt/ros/${ROS_DISTRO}/setup.bash" && \
+  COLCON_WS="$(pwd)" && export COLCON_WS && \
+  mkdir -p "${COLCON_WS}/src" && \
+  cd "${COLCON_WS}/src" && \
   git clone https://github.com/PickNikRobotics/topic_based_ros2_control && \
   rosdep install --ignore-src --from-paths . -y && \
-  cd ${COLCON_WS} && \
+  cd "${COLCON_WS}" && \
   colcon build --symlink-install --event-handlers log-
 
 WORKDIR /

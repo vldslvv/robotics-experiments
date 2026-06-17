@@ -1,0 +1,12 @@
+# hadolint config for the robotics dev/sim images. These are developer- and
+# simulation-facing containers: the goal is a workable system inside the image,
+# not a minimal production image. Rules below are intentionally ignored; genuine
+# correctness lints (DL4006 pipefail, SC2086 quoting) are fixed in the Dockerfiles.
+ignored:
+  - DL3002  # Last USER root: GPU access (NVML/Vulkan) requires root.
+  - DL3009  # Keep /var/lib/apt/lists: apt stays usable for interactive dev.
+  - DL3008  # apt version pinning breaks Ubuntu 22/24 cross-distro builds.
+  - DL3013  # pip version pinning: build/dev tooling tracks current versions.
+  - DL3016  # npm version pinning: dev CLI tools track current versions.
+  - DL3059  # Consecutive RUNs are intentionally separated and documented.
+  - DL3003  # cd inside compound clone+build+cleanup RUNs is intentional.

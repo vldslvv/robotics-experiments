@@ -46,6 +46,32 @@ repos:
         pass_filenames: false
         always_run: true
 
+  # Keep uv.lock in sync with pyproject.toml. The official uv-lock hook
+  # regenerates the lockfile and fails if that changes anything, so the lock
+  # can't silently drift (reinforces the `uv lock --check` hard rule). It
+  # self-bootstraps its own uv and is scoped to the lock/manifest files.
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.21
+    hooks:
+      - id: uv-lock
+
+  # Shell + Dockerfile linters. Self-bootstrapping: no host shellcheck/hadolint
+  # or Docker needed. hadolint is enforced on commit now that its findings are
+  # addressed; the intentional ignores (root USER, apt cache retention, version
+  # pinning, etc.) live in `.hadolint.yaml` at the repo root. shellcheck stays
+  # manual until its findings are addressed; run it on demand with:
+  #   uv run pre-commit run shellcheck --hook-stage manual --all-files
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        stages: [manual]
+
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.14.0
+    hooks:
+      - id: hadolint
+
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.5
     hooks:

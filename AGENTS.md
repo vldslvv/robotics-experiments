@@ -218,6 +218,21 @@ the host. They are meant to be used in the Dockerized environment.
   gate -- run `uv run ruff check` / `uv run ruff format --check` /
   `uv run mypy src tests` for a full sweep. Vendored Pegasus stays excluded from
   ruff/mypy via `pyproject.toml`.
+- The enforced gate also runs the official `uv-lock` hook
+  (`astral-sh/uv-pre-commit`), which regenerates `uv.lock` and fails on drift,
+  reinforcing the `uv lock --check` hard rule, and `hadolint` (`Dockerfile`),
+  whose findings have been addressed. hadolint's intentional ignores live in
+  `.hadolint.yaml` at the repo root: these are dev/sim images where the goal is
+  a workable system inside the container, not a minimal production image, so
+  root USER (GPU/NVML/Vulkan needs root), apt cache retention, and apt/pip/npm
+  version pinning are ignored project-wide, while genuine correctness lints
+  (DL4006 pipefail, SC2086 quoting) are fixed in the Dockerfile. shellcheck
+  (shell scripts) is still wired but `stages: [manual]`, so it does not run on
+  commit or in `pre-commit run --all-files` yet; run it on demand with
+  `uv run pre-commit run shellcheck --hook-stage manual --all-files`, and drop
+  `stages: [manual]` to enforce once its findings are addressed. These hooks
+  (uv-lock, shellcheck, hadolint) are new tooling added by explicit request;
+  they self-bootstrap (no host shellcheck/hadolint or Docker needed).
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all
