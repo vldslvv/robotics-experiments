@@ -502,7 +502,17 @@ absent.
 **Acceptance.** A documented env/task layout and one minimal skeleton that
 compiles/imports.
 
-**Status.** OPEN.
+**Status.** DONE. Importable Isaac Lab task code now lives under
+`src/robotics_experiments/workflows/isaac_lab/` with package initializers kept
+lazy-import clean. Added guarded Gymnasium registration for
+`Isaac-Drone-Hover-Direct-v0` and a minimal DirectRLEnv drone-hover scaffold
+(`DroneHoverEnvCfg` / `DroneHoverEnv`) that defines the action/observation
+surfaces, timeout-only termination, and no-op action application without
+duplicating PX4/thrust policy. The scaffold's tunable task defaults live in the
+Hydra `isaac_lab` group. `isaac/runtime/lab/README.md` documents the task/env
+layout, and AGENTS.md records the convention. Host tests cover import behavior
+without Isaac Lab and registration metadata; the task import/config test is
+skipped when Isaac Lab/Gymnasium are absent.
 
 ### Step 5.4 - Enforce package layering
 

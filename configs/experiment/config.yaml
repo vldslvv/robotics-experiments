@@ -4,4 +4,5 @@ defaults:
   - drone: default
   - switches: default
   - px4: default
+  - isaac_lab: default
   - _self_

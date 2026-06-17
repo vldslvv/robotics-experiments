@@ -26,6 +26,7 @@ def test_default_config_loads_from_root_experiment_config():
     expected_drone = _group_defaults("drone")
     expected_switches = _group_defaults("switches")
     expected_px4 = _group_defaults("px4")
+    expected_isaac_lab = _group_defaults("isaac_lab")
 
     assert isinstance(config, EnvConfig)
     assert config.sim.physics_hz == expected_sim.physics_hz
@@ -72,6 +73,13 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.debug_log_level == "DEBUG"
     assert config.px4.sensor_debug_log_interval == 50
     assert config.px4.max_tilt_angle_deg == 60.0
+    assert (
+        config.isaac_lab.drone_hover_episode_length_s
+        == expected_isaac_lab.drone_hover_episode_length_s
+    )
+    assert config.isaac_lab.drone_hover_num_envs == expected_isaac_lab.drone_hover_num_envs
+    assert config.isaac_lab.drone_hover_env_spacing == expected_isaac_lab.drone_hover_env_spacing
+    assert config.isaac_lab.drone_hover_action_scale == expected_isaac_lab.drone_hover_action_scale
     reset_config()
 
 

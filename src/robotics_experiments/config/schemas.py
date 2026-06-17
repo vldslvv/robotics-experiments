@@ -4,6 +4,7 @@ from .types import (
     BoundingBox,
     DroneConfig,
     EnvConfig,
+    IsaacLabConfig,
     LightSwitchConfig,
     LightSwitchStatePublisherConfig,
     Px4BridgeConfig,
@@ -20,6 +21,7 @@ __all__ = [
     "LightSwitchConfig",
     "Px4BridgeConfig",
     "EnvConfig",
+    "IsaacLabConfig",
     "register_schemas",
 ]
 
@@ -37,3 +39,4 @@ def register_schemas() -> None:
     cs.store(group="drone", name="base_drone", node=DroneConfig)
     cs.store(group="switches", name="base_switches", node=LightSwitchConfig)
     cs.store(group="px4", name="base_px4", node=Px4BridgeConfig)
+    cs.store(group="isaac_lab", name="base_isaac_lab", node=IsaacLabConfig)

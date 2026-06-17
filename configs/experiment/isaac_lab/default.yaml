@@ -1,0 +1,7 @@
+defaults:
+  - base_isaac_lab
+
+drone_hover_episode_length_s: 5.0
+drone_hover_num_envs: 16
+drone_hover_env_spacing: 4.0
+drone_hover_action_scale: 1.0

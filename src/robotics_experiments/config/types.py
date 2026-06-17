@@ -9,6 +9,7 @@ __all__ = [
     "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
     "Px4BridgeConfig",
+    "IsaacLabConfig",
     "EnvConfig",
 ]
 
@@ -262,6 +263,26 @@ class Px4BridgeConfig:
 
 
 @dataclass
+class IsaacLabConfig:
+    """Configuration for Isaac Lab workflow skeletons.
+
+    Attributes:
+        drone_hover_episode_length_s: Episode timeout for the DirectRLEnv
+            drone-hover scaffold.
+        drone_hover_num_envs: Number of parallel envs used by the scaffold
+            unless overridden by Isaac Lab tooling.
+        drone_hover_env_spacing: Distance between cloned env origins in meters.
+        drone_hover_action_scale: Scale applied to normalized placeholder
+            actions before future dynamics consume them.
+    """
+
+    drone_hover_episode_length_s: float
+    drone_hover_num_envs: int
+    drone_hover_env_spacing: float
+    drone_hover_action_scale: float
+
+
+@dataclass
 class EnvConfig:
     """Composite experiment config consumed by the Isaac Sim extensions.
 
@@ -270,9 +291,11 @@ class EnvConfig:
         drone: Drone spawner configuration.
         switches: Light-switch spawner configuration.
         px4: PX4 SITL bridge configuration.
+        isaac_lab: Isaac Lab workflow configuration.
     """
 
     sim: SimSettings
     drone: DroneConfig
     switches: LightSwitchConfig
     px4: Px4BridgeConfig
+    isaac_lab: IsaacLabConfig

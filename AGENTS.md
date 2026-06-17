@@ -76,6 +76,18 @@ the current contents and the intended home for that kind of code.
   Hydra config lazily and caches it for the process.
 - Feature extensions should depend on `robotics_experiments_core` and use a
   small local `config.py` adapter when they need feature-specific config access.
+- Importable Isaac Lab task/env code lives under
+  `src/robotics_experiments/workflows/isaac_lab/`; `isaac/runtime/lab/` is the
+  workflow/design-note area for Isaac Lab runtime files. Keep package
+  `__init__` modules lazy-import clean: expose guarded registration helpers
+  there, but do not import DirectRLEnv task modules unless Isaac Lab is actually
+  constructing the task.
+- Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
+  for direct-workflow environments. The first scaffold task is
+  `Isaac-Drone-Hover-Direct-v0`; it is intentionally a no-op DirectRLEnv
+  lifecycle skeleton until a later step defines real thrust dynamics/rewards.
+  Isaac Lab workflow tunables live in the Hydra `isaac_lab` group with matching
+  bare annotations in `src/robotics_experiments/config/types.py`.
 - PX4 bridge behavior is configured through the Hydra `px4` group. The default
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
