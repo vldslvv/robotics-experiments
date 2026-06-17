@@ -538,7 +538,16 @@ outside Isaac.
 **Acceptance.** `python -c "import robotics_experiments"` works outside Isaac; a
 test guards the boundary.
 
-**Status.** OPEN.
+**Status.** DONE. The boundary holds via the lazy package `__init__` shields
+(`drone`/`environment` `__getattr__`, `simulation` re-export-only). The three
+wholly-Isaac leaf modules (`drone/spawn.py`, `environment/stage.py`,
+`environment/step.py`) keep their top-level `carb`/`pxr`/`isaacsim` imports but
+now carry a docstring declaring the exception (matching the
+`simulation/_isaac_settings.py` precedent), rather than scattering function-scope
+imports across modules never on the core path. `tests/test_core_imports.py`'s
+`test_role_packages_import_without_simulator_dependencies` was hardened to block
+`carb`/`pxr`/`isaacsim` via `_BlockedDependencyFinder` and assert the leaf
+modules are not eager-imported. Convention recorded in AGENTS.md.
 
 ---
 

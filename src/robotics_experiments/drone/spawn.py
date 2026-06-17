@@ -1,3 +1,14 @@
+"""Drone spawning and pose randomization on a USD stage.
+
+This module is intentionally Isaac-only: it imports ``carb``, ``pxr``, and
+``isaacsim`` at import time because every function operates on a live USD stage.
+The core import path never loads it directly; ``drone/__init__.py`` exposes the
+public API (``spawn_drone`` / ``despawn_drone``) lazily via ``__getattr__``, so
+``import robotics_experiments`` works outside the Isaac runtime. See
+``robotics_experiments.simulation._isaac_settings`` for the same pattern and
+``tests/test_core_imports.py`` for the boundary guard.
+"""
+
 import math
 import random
 from typing import Optional

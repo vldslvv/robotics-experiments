@@ -1,3 +1,14 @@
+"""Switch and lamp asset spawning on a USD stage.
+
+This module is intentionally Isaac-only: it imports ``carb`` and ``pxr`` at
+import time because every function operates on a live USD stage. The core import
+path never loads it directly; ``environment/__init__.py`` exposes the public API
+(``spawn_switches`` / ``despawn_switches`` / ``validate_switches``) lazily via
+``__getattr__``, so ``import robotics_experiments`` works outside the Isaac
+runtime. See ``robotics_experiments.simulation._isaac_settings`` for the same
+pattern and ``tests/test_core_imports.py`` for the boundary guard.
+"""
+
 import os
 import random
 from typing import List

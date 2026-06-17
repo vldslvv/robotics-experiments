@@ -42,6 +42,18 @@ the current contents and the intended home for that kind of code.
   declarations read from implementation helpers into public entrypoints.
 - Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
   loading during lightweight package imports.
+- Package layering runs `config -> domain (drone / environment / simulation /
+  px4_bridge) -> Isaac extensions`, and `import robotics_experiments` (plus its
+  subpackages) must succeed with Isaac absent. A domain leaf module that is
+  wholly Isaac-only (every function operates on a live USD stage) may keep
+  top-level `carb`/`pxr`/`isaacsim` imports rather than scattering function-scope
+  imports, but it must (a) carry a module docstring declaring the exception and
+  (b) stay off the core import path, shielded by a lazy package `__init__`
+  (re-export-only, or `__getattr__` deferral). `drone/spawn.py`,
+  `environment/stage.py`, `environment/step.py`, and
+  `simulation/_isaac_settings.py` follow this pattern;
+  `tests/test_core_imports.py` is the regression guard (it blocks
+  `carb`/`pxr`/`isaacsim` and asserts the leaf modules are not eager-imported).
 - Do not rename, remove, or broaden public exports as part of cleanup unless explicitly requested.
 - `VehicleState` carries pose, velocity, angular velocity, and sim time only.
   Do not add a kinematic acceleration field for the PX4 HIL path; the Pegasus

@@ -21,10 +21,35 @@ def _drop_modules(*prefixes: str) -> None:
             sys.modules.pop(name, None)
 
 
-def test_role_packages_import_without_simulator_dependencies():
-    importlib.import_module("robotics_experiments.environment")
-    importlib.import_module("robotics_experiments.drone")
-    importlib.import_module("robotics_experiments.px4_bridge")
+def test_role_packages_import_without_simulator_dependencies(monkeypatch):
+    # Re-importing the package tree under a blocker creates fresh module objects,
+    # so snapshot sys.modules and restore it afterwards to avoid leaking that
+    # state into other tests (some mock module-level state by import).
+    saved_modules = dict(sys.modules)
+    try:
+        _drop_modules("carb", "pxr", "isaacsim", "robotics_experiments")
+        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim"})
+        monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
+
+        importlib.import_module("robotics_experiments")
+        importlib.import_module("robotics_experiments.environment")
+        importlib.import_module("robotics_experiments.drone")
+        importlib.import_module("robotics_experiments.simulation")
+        importlib.import_module("robotics_experiments.px4_bridge")
+
+        # The Isaac-only leaf modules must stay off the core import path: the lazy
+        # package __init__ shields (drone/environment __getattr__, simulation
+        # re-export) must not eager-import them.
+        for leaf in (
+            "robotics_experiments.drone.spawn",
+            "robotics_experiments.environment.stage",
+            "robotics_experiments.environment.step",
+            "robotics_experiments.simulation._isaac_settings",
+        ):
+            assert leaf not in sys.modules
+    finally:
+        sys.modules.clear()
+        sys.modules.update(saved_modules)
 
 
 def test_px4_bridge_orchestrator_import_without_isaac():

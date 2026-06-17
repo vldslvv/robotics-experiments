@@ -1,3 +1,15 @@
+"""Switch articulation init and per-step toggle handling on a USD stage.
+
+This module is intentionally Isaac-only: it imports ``carb``, ``pxr``, and
+``isaacsim`` at import time because every function operates on a live USD stage
+and PhysX articulations. The core import path never loads it directly;
+``environment/__init__.py`` exposes the public API (``init_articulations`` /
+``step_switches``) lazily via ``__getattr__``, so ``import robotics_experiments``
+works outside the Isaac runtime. See
+``robotics_experiments.simulation._isaac_settings`` for the same pattern and
+``tests/test_core_imports.py`` for the boundary guard.
+"""
+
 from typing import Callable, List
 
 import carb
