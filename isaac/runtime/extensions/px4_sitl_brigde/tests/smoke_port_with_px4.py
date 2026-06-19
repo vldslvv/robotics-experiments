@@ -72,8 +72,7 @@ def main() -> int:
             tick_start = time.time()
 
             state = VehicleState.hover_at(sim_time_us=sim_time_us)
-            port.publish_sensors(state)
-            commands = port.poll_commands(state)
+            commands = port.exchange(state)
             if not port.is_connected:
                 disconnected = True
 
@@ -88,7 +87,7 @@ def main() -> int:
                     f"last_sensor_us={getattr(port, '_last_sensor_send_us', None)}  "
                     f"last_actuator_us={getattr(port, '_last_actuator_receive_us', None)}  "
                     f"disconnect={getattr(port, '_last_disconnect_reason', None)!r}  "
-                    f"cmd={np.round(commands, 3).tolist()}"
+                    f"cmd={np.round(commands.controls, 3).tolist()}"
                 )
                 last_print = now
             if disconnected:

@@ -16,9 +16,11 @@ INTEGRATION_RUN_ROOT = $(INTEGRATION_ROOT)/$(1).$$(date -u +%Y%m%dT%H%M%SZ).$$$$
 define RUN_ISAAC_INTEGRATION_TEST
 @run_root="$(call INTEGRATION_RUN_ROOT,$(1))"; \
     ISAAC_RUN_ROOT="$$run_root/isaac"; \
+    run_start_ms=$$(date +%s%3N); \
     mkdir -p "$$ISAAC_RUN_ROOT"; \
     echo "Integration artifacts: $$run_root"; \
-    docker run --rm \
+    container_start_ms=$$(date +%s%3N); \
+    if docker run --rm \
         --network=host \
         $(ISAAC_INTEGRATION_DOCKER_RUNTIME) \
         $(ISAAC_DOCKER_ENV) \
@@ -26,17 +28,50 @@ define RUN_ISAAC_INTEGRATION_TEST
         --entrypoint /bin/bash \
         $(ISAAC_IMAGE) \
         -lc 'set -o pipefail && \
+            script_start_ms=$$(date +%s%3N); \
+            fmt_ms() { ms="$$1"; printf "%s.%03d" "$$((ms / 1000))" "$$((ms % 1000))"; }; \
+            timing() { stage="$$1"; start_ms="$$2"; status="$${3:-ok}"; end_ms=$$(date +%s%3N); printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\n" "$(1)" "$$stage" "$$(fmt_ms "$$((end_ms - start_ms))")" "$$(fmt_ms "$$((end_ms - script_start_ms))")" "$$status"; }; \
             cd /isaac-sim && \
             rm -f "$(3)" && \
+            stage_start_ms=$$(date +%s%3N) && \
             { PIP_ROOT_USER_ACTION=ignore $(ISAAC_PYTHON) -m pip install \
                 --quiet --disable-pip-version-check hydra-core omegaconf \
                 >>"$(3)" 2>&1 || \
                 { grep -E "$(ISAAC_TEST_ERROR_FILTER)" \
                     "$(3)"; exit 1; }; } && \
-            $(ISAAC_PYTHON) $(2) --scene "$(SCENE)" \
+            timing pip_install "$$stage_start_ms" && \
+            stage_start_ms=$$(date +%s%3N) && \
+            if $(ISAAC_PYTHON) $(2) --scene "$(SCENE)" \
                 2>&1 | tee -a "$(3)" | $(TERMINAL_CONTROL_FILTER) | \
-                    grep --line-buffered -E "$(ISAAC_TEST_LOG_FILTER)" && \
-            ! grep -q "$(ISAAC_TEST_FAILURE_FILTER)" "$(3)"'
+                    grep --line-buffered -E "$(ISAAC_TEST_LOG_FILTER)"; then \
+                timing test_script "$$stage_start_ms"; \
+            else \
+                status=$$?; timing test_script "$$stage_start_ms" fail; exit "$$status"; \
+            fi && \
+            stage_start_ms=$$(date +%s%3N) && \
+            if ! grep -q "$(ISAAC_TEST_FAILURE_FILTER)" "$(3)"; then \
+                timing failure_scan "$$stage_start_ms"; \
+            else \
+                timing failure_scan "$$stage_start_ms" fail; exit 1; \
+            fi'; then \
+        container_end_ms=$$(date +%s%3N); \
+        printf "[integration-timing] target=%s stage=isaac_container elapsed_s=%s.%03d total_s=%s.%03d status=ok\n" \
+            "$(1)" \
+            $$(((container_end_ms - container_start_ms) / 1000)) \
+            $$(((container_end_ms - container_start_ms) % 1000)) \
+            $$(((container_end_ms - run_start_ms) / 1000)) \
+            $$(((container_end_ms - run_start_ms) % 1000)); \
+    else \
+        status=$$?; \
+        container_end_ms=$$(date +%s%3N); \
+        printf "[integration-timing] target=%s stage=isaac_container elapsed_s=%s.%03d total_s=%s.%03d status=fail\n" \
+            "$(1)" \
+            $$(((container_end_ms - container_start_ms) / 1000)) \
+            $$(((container_end_ms - container_start_ms) % 1000)) \
+            $$(((container_end_ms - run_start_ms) / 1000)) \
+            $$(((container_end_ms - run_start_ms) % 1000)); \
+        exit "$$status"; \
+    fi
 endef
 
 define RUN_PX4_INTEGRATION_TEST

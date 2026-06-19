@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.contract import BridgeStatus
+from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
 from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
@@ -92,12 +92,10 @@ class _FakeFlightStack:
     def stop(self):
         self.stopped = True
 
-    def publish_sensors(self, state: VehicleState):
+    def exchange(self, state: VehicleState) -> ActuatorCommands:
         self.states.append(state)
         self.sim_times.append(int(state.sim_time_us))
-
-    def poll_commands(self, state: VehicleState):
-        return self.commands
+        return ActuatorCommands(self.commands)
 
 
 class _CapturingThrustModel:
@@ -109,10 +107,10 @@ class _CapturingThrustModel:
     def num_rotors(self):
         return self._num_rotors
 
-    def commands_to_forces(self, controls: np.ndarray) -> np.ndarray:
+    def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
         return np.zeros(self._num_rotors, dtype=np.float64)
 
-    def commands_to_dynamics(self, controls, *, linear_body_velocity_flu=None):
+    def commands_to_dynamics(self, commands, *, linear_body_velocity_flu=None):
         self.captured_body_velocity_flu = np.asarray(
             linear_body_velocity_flu,
             dtype=np.float64,
@@ -323,14 +321,14 @@ def _install_fake_pegasus(monkeypatch):
 
 
 def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
-    """Run one publish-then-poll lockstep tick and return the rotor commands.
+    """Run one lockstep tick and return the raw rotor-command array.
 
-    Mirrors how ``Px4Bridge`` drives the port each physics step: send sensors
-    out, then block for the paired actuator. Keeps the ordering contract in one
-    place for the port test suite.
+    Mirrors how ``Px4Bridge`` drives the port each physics step (send sensors
+    out, block for the paired actuator). Unwraps the ``ActuatorCommands`` to its
+    ``controls`` array so the port-test assertions can compare directly; kept in
+    one place for the port test suite.
     """
-    port.publish_sensors(state)
-    return port.poll_commands(state)
+    return port.exchange(state).controls
 
 
 def _quat_pitch_deg(angle_deg: float) -> np.ndarray:

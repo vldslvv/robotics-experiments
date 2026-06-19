@@ -304,7 +304,7 @@ def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypat
 
 def test_mavlink_port_requires_positive_physics_rate(monkeypatch):
     _install_fake_pegasus(monkeypatch)
-    with pytest.raises(ValueError, match="physics_rate_hz must be positive"):
+    with pytest.raises(ValueError, match="physics_hz must be positive"):
         Px4MavlinkPort(
             num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=0.0), debug_log_path=None
         )

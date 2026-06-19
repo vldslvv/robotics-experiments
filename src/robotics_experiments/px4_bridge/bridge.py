@@ -10,8 +10,8 @@ and tested independently:
 
 - ``articulation_io``: reads ``VehicleState``, applies a ``RotorDynamics`` via
   ``apply_dynamics`` (rotor forces at markers plus body torque and drag).
-- ``port``: ``publish_sensors`` pumps state out, ``poll_commands`` pulls actuator
-  commands back in lockstep (MAVLink in prod, fake in tests).
+- ``port``: ``exchange`` pumps state out and pulls actuator commands back in
+  lockstep, as one indivisible tick (MAVLink in prod, fake in tests).
 - ``thrust_model``: maps rotor references to Pegasus-compatible dynamics.
 """
 
@@ -44,7 +44,7 @@ class Px4Bridge:
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
         articulation_io: Optional[ArticulationIO] = None,
-        max_tilt_angle_deg: Optional[float] = None,
+        max_tilt_angle_deg: float = 180.0,
     ):
         """Build the bridge. No sockets or articulation handles are touched here.
 
@@ -60,7 +60,8 @@ class Px4Bridge:
                 drone's body-Z axis deviates from world-Z by more than this
                 angle, the bridge zeros all rotor forces while continuing the
                 MAVLink sensor/actuator exchange every tick, so PX4 lockstep is
-                preserved. ``None`` disables the check.
+                preserved. Defaults to ``180.0`` - the maximum possible tilt, so
+                the cutoff never fires (disabled) unless a smaller limit is set.
         """
         if thrust_model.num_rotors != port.num_rotors:
             raise ValueError(
@@ -141,24 +142,23 @@ class Px4Bridge:
         # HIL_SENSOR.time_usec stays strictly increasing and PX4 lockstep is
         # preserved even while the safety condition holds.
         force_cutoff = False
-        if self._max_tilt_angle_deg is not None and self._max_tilt_angle_deg > 0.0:
-            tilt = frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)
-            if tilt > self._max_tilt_angle_deg:
-                force_cutoff = True
-                self._tilt_cutoff_count += 1
-                if self._tilt_cutoff_count <= 10 or self._tilt_cutoff_count % 250 == 0:
-                    _LOGGER.warning(
-                        "PX4 bridge tilt cutoff: count=%d tilt=%.1f deg "
-                        "limit=%.1f deg; zeroing rotor forces",
-                        self._tilt_cutoff_count,
-                        tilt,
-                        self._max_tilt_angle_deg,
-                    )
+        tilt = frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)
+        if tilt > self._max_tilt_angle_deg:
+            force_cutoff = True
+            self._tilt_cutoff_count += 1
+            if self._tilt_cutoff_count <= 10 or self._tilt_cutoff_count % 250 == 0:
+                _LOGGER.warning(
+                    "PX4 bridge tilt cutoff: count=%d tilt=%.1f deg "
+                    "limit=%.1f deg; zeroing rotor forces",
+                    self._tilt_cutoff_count,
+                    tilt,
+                    self._max_tilt_angle_deg,
+                )
 
         # Lockstep exchange, using the real state, before gating applied forces:
-        # send sensors out to PX4, then block for the paired actuator commands.
-        self._port.publish_sensors(state)
-        commands = self._port.poll_commands(state)
+        # one causal tick sends sensors out to PX4 and blocks for the paired
+        # actuator commands.
+        commands = self._port.exchange(state)
         if force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
@@ -185,7 +185,7 @@ class Px4Bridge:
                 int(sim_time_us),
                 self.is_connected,
                 self.is_armed,
-                np.asarray(commands, dtype=np.float64).tolist(),
+                np.asarray(commands.controls, dtype=np.float64).tolist(),
                 np.asarray(dynamics.forces_n, dtype=np.float64).tolist(),
                 np.asarray(dynamics.body_torque_n_m, dtype=np.float64).tolist(),
                 np.asarray(dynamics.body_drag_n, dtype=np.float64).tolist(),

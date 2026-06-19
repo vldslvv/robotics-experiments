@@ -9,6 +9,33 @@ This document specifies the two contracts implemented by the `Px4Bridge` compone
 
 Both contracts execute synchronously per physics tick. Failure on either side stalls or corrupts the simulation loop.
 
+## Invariants (MUST)
+
+The load-bearing rules, each detailed in the section noted. Breaking any of
+these silently corrupts the flight or the lockstep loop.
+
+- **Monotonic sim-time.** `HIL_SENSOR.time_usec` is strictly increasing and
+  derived from sim time, not wall clock; the bridge passes `sim_time_us`
+  straight through. Enforced at the source by `SimClock` (Contract 1, *Required
+  state inputs*; Contract 2, *Lockstep semantics*).
+- **Bridge listens first.** The bridge must be listening on the simulator port
+  before PX4 dials in (Contract 2, *Connection lifecycle*).
+- **Rotor order.** `rotor_link_paths` are passed in PX4 motor-index order and
+  validated at discovery (resolve, unique, plausible arm geometry, spin match)
+  (Contract 1, *Motor index ordering*).
+- **Clean socket teardown.** Close the TCP connection cleanly before USD removal;
+  a half-closed lockstep socket hangs the next session (Contract 1, *Lifecycle*).
+- **Post-settle clock origin.** When `startup_settle_time_s > 0`, the
+  bridge-facing `sim_time_us` is the accumulated time minus the settle offset, so
+  it starts near zero on the first post-settle tick (Contract 1, *Construction
+  checklist*).
+- **One indivisible exchange.** A tick is a single `port.exchange(state)`:
+  publish-then-block-recv cannot be split or reordered (Contract 1, *Public API
+  shape*).
+- **Non-finite state raises.** A NaN/Inf vehicle state is unrecoverable; the
+  bridge logs it and raises rather than forwarding it into lockstep (Contract 1,
+  *Failure semantics*).
+
 ## Scope and non-scope
 
 The bridge has exactly one responsibility: orchestrate a physics tick by reading
@@ -161,8 +188,8 @@ harmful.
         ▼
 [Each bridge tick]        bridge.on_physics_step(dt, sim_time_us):
                             - read resolved body state
-                            - port.publish_sensors(state) (send to PX4)
-                            - port.poll_commands(state)   (lockstep recv from PX4)
+                            - port.exchange(state) (send sensors to PX4, then
+                              block for the paired actuator commands)
                             - apply_dynamics to drone body at rotor markers
         │
         ▼
@@ -183,21 +210,37 @@ Isaac session — common during development when pressing Play repeatedly.
 | TCP disconnect mid-flight | Set `is_connected = False`, return zero commands | Drone loses thrust; state machine sees flag flip and triggers ABORT |
 | Lockstep response timeout (PX4 not replying within deadline) | Same as above | Same as above |
 | Articulation handle still `None` on `start()` | Defer one tick, then raise | Scene wiring bug — loud failure is correct |
-| NaN in articulation state | Log, send last good state | One bad tick is recoverable; persistent NaN indicates physics divergence |
+| Non-finite (NaN/Inf) articulation state | Log the offending state and raise `RuntimeError` | `on_physics_step` raises; `BridgeHost`'s per-tick `try/except` keeps the sim loop alive; persistent corruption surfaces loudly |
 
-**Principle:** the bridge never crashes the simulation. It either succeeds or surfaces a clean error state that the surrounding system can interpret.
+**Deferred:** last-good-state caching (cache the last finite `VehicleState` and,
+on a non-finite tick, send `HIL_SENSOR` from it with a bumped `sim_time_us`
+while applying zero forces) is *not* implemented. The bridge currently raises on
+the first non-finite tick. The breadcrumb design lives in the comment block in
+`bridge.py::Px4Bridge.on_physics_step`.
+
+**Principle:** the bridge never silently corrupts the simulation. It either
+succeeds or surfaces a clean error the surrounding system can interpret — a flag
+flip for recoverable failures (disconnect, timeout), or a raised exception for
+unrecoverable state (non-finite vehicle state). The bridge itself does not
+swallow the latter; `BridgeHost._on_physics_step` contains the raise so one bad
+tick does not crash the simulator loop.
 
 ### Public API shape
 
 The contract is expressed as four explicit pieces: pure-data state objects, a
-settings object, a two-method lockstep port, and a single Isaac sink call.
+settings object, a single-call lockstep port, and a single Isaac sink call.
 
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
+# Per-tick data flow: VehicleState -> ActuatorCommands -> RotorDynamics
 @dataclass
 class VehicleState:        # Isaac -> bridge each tick
     position_enu; orientation_flu_enu_wxyz; linear_velocity_enu
     angular_velocity_flu; sim_time_us
+
+@dataclass(frozen=True)
+class ActuatorCommands:    # flight stack -> bridge each tick (port output, thrust-model input)
+    controls               # length num_rotors; PX4 actuator references, interpretation owned by thrust model
 
 @dataclass(frozen=True)
 class RotorDynamics:       # thrust model -> Isaac each tick
@@ -221,8 +264,7 @@ class LockstepSettings:
 class AbstractFlightStackBridge:
     def start(self) -> None: ...
     def stop(self) -> None: ...
-    def publish_sensors(self, state: VehicleState) -> None: ...    # send -> PX4
-    def poll_commands(self, state: VehicleState) -> np.ndarray: ...  # lockstep recv <- PX4
+    def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send -> PX4, block, recv <- PX4
     @property
     def status(self) -> BridgeStatus: ...
     @property
@@ -248,7 +290,7 @@ class Px4Bridge:
         thrust_model: RotorThrustModel,
         port: AbstractFlightStackBridge,
         articulation_io: ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
-        max_tilt_angle_deg: float | None = None,        # zeros forces past this tilt; lockstep preserved
+        max_tilt_angle_deg: float = 180.0,              # zeros forces past this tilt; 180 = disabled
     ): ...
 
     def start(self) -> None: ...
@@ -263,13 +305,12 @@ class Px4Bridge:
     def is_armed(self) -> bool: ...
 ```
 
-**Lockstep ordering contract:** `publish_sensors(state)` and
-`poll_commands(state)` are two halves of one causal tick and MUST be called in
-that order for the same tick. `publish_sensors` sends `HIL_SENSOR` (advancing
-`time_usec`); `poll_commands` then blocks for the paired
-`HIL_ACTUATOR_CONTROLS`. Splitting them names the data flow in each direction
-but does not make them independently orderable - calling `poll_commands` first,
-or twice, breaks lockstep. `Px4Bridge.on_physics_step` is the canonical caller.
+**Lockstep ordering contract:** a tick is a single `exchange(state)` call. It
+sends `HIL_SENSOR` (advancing `time_usec`), then blocks for the paired
+`HIL_ACTUATOR_CONTROLS`, and returns the rotor references. The send and the
+blocking receive are one indivisible operation, so the causal lockstep order
+cannot be broken from the caller side — there is no way to receive before
+sending, or twice. `Px4Bridge.on_physics_step` is the canonical caller.
 
 ---
 
@@ -403,7 +444,7 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 
 ### Implementation requirements derived from lockstep
 
-- **`port.poll_commands()` is blocking.** After `publish_sensors` sends this step's sensors, `poll_commands` blocks until PX4 has responded with actuator commands for this step. If PX4 is slow, Isaac Sim slows down.
+- **`port.exchange()` is blocking.** After sending this step's sensors, it blocks until PX4 has responded with actuator commands for this step before returning. If PX4 is slow, Isaac Sim slows down.
 - **Timeouts MUST exist.** Recommended default: 100 ms. If PX4 doesn't reply in 100 ms, the bridge marks itself disconnected, returns zero commands, and lets the surrounding system handle recovery. A frozen lockstep without a timeout means a frozen Isaac Sim.
 - **Timestamps MUST be sim time, not wall clock.** PX4 uses `HIL_SENSOR.time_usec` to advance its own clock. Wall-clock timestamps break lockstep. The bridge passes `sim_time_us` straight through to `HIL_SENSOR.time_usec`.
 - **Sim speed scaling works for free.** If Isaac runs at 0.5× real time, PX4's clock advances at 0.5× real time. Same for 2× speedup. PX4 has no notion of wall-clock.
@@ -421,7 +462,7 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 
 ### What the bridge does NOT expose to surrounding code
 
-- MAVLink messages themselves (the API is `publish_sensors(state)` / `poll_commands(state) -> commands`, never raw MAVLink).
+- MAVLink messages themselves (the API is `exchange(state) -> commands`, never raw MAVLink).
 - The TCP socket.
 - PX4 heartbeat or system-state details, beyond binary `is_connected` and `is_armed`.
 
@@ -447,11 +488,11 @@ One physics step at simulation time `t = 4.000000 s`:
 
 Isaac → Bridge:
     state = VehicleState(
-        position_enu        = [1.2, 0.5, 1.4],
-        orientation_wxyz    = [0.99, 0.0, 0.0, 0.14],
-        velocity_enu        = [0.3, 0.0, 0.0],
-        angular_velocity_flu = [0.0, 0.0, 0.0],
-        timestamp_us        = 4_000_000,
+        position_enu             = [1.2, 0.5, 1.4],
+        orientation_flu_enu_wxyz = [0.99, 0.0, 0.0, 0.14],
+        linear_velocity_enu      = [0.3, 0.0, 0.0],
+        angular_velocity_flu     = [0.0, 0.0, 0.0],
+        sim_time_us              = 4_000_000,
     )
 
 Bridge → PX4 (TCP 4560):
@@ -464,7 +505,8 @@ PX4: reads HIL_SENSOR → EKF → position controller → mixer → emits:
     HIL_ACTUATOR_CONTROLS{time_usec=4_000_000, controls=[0.52, 0.51, 0.52, 0.51, 0, 0, ...]}
 
 Bridge → Isaac:
-    forces = thrust_model([0.52, 0.51, 0.52, 0.51])
+    commands = ActuatorCommands(controls=[0.52, 0.51, 0.52, 0.51])  # port.exchange(...) return
+    forces = thrust_model.commands_to_forces(commands)
            = [4.0, 3.85, 4.0, 3.85] Newtons
     apply_force(rotor_0_link, [0, 0, 4.0])    # +Z in link's local frame
     apply_force(rotor_1_link, [0, 0, 3.85])
@@ -495,11 +537,11 @@ Isaac articulation
    │         │ ◄────────────────────────────────────────── │           │
    └─────────┘            HIL_ACTUATOR_CONTROLS             └───────────┘
         │
-        │ Pegasus rotor angular velocity references
+        │ ActuatorCommands (port.exchange return; Pegasus rotor angular velocity references)
         ▼
    Thrust model
         │
-        │ per-rotor forces, body reaction torque, body drag
+        │ RotorDynamics (per-rotor forces, body reaction torque, body drag)
         ▼
 Isaac articulation (apply rotor forces and body effects)
 ```

@@ -39,13 +39,23 @@ class BridgeHost:
         self._articulation_path = articulation_path
         self._bridge: Any | None = None
         self._physx_sub = None
-        self._sim_time_us: int = 0
-        self._physics_tick_count: int = 0
+        self._clock: Any = None
         self._start_attempted: bool = False
 
     @property
     def is_running(self) -> bool:
         return self._bridge is not None
+
+    @property
+    def sim_time_us(self) -> int:
+        """Total accumulated sim time in microseconds since the clock started.
+
+        Zero before :meth:`start`. This is the host-side counter (pre settle
+        offset); the bridge-facing timestamp the host feeds the bridge is
+        derived from it via the clock. Exposed for diagnostics and test
+        scenarios that drive physics and wait on simulated time.
+        """
+        return int(self._clock.total_us) if self._clock is not None else 0
 
     def start(self) -> None:
         """Construct the bridge and subscribe to physics steps.
@@ -59,12 +69,15 @@ class BridgeHost:
         if not self._cfg.enabled:
             return
 
-        self._sim_time_us = 0
-        self._physics_tick_count = 0
+        # SimClock is pure Python (no Isaac deps); import it here so a disabled
+        # bridge does not pay the px4_bridge import cost.
+        from robotics_experiments.px4_bridge import SimClock
+
+        settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
+        self._clock = SimClock(physics_hz=self._physics_hz, settle_time_s=settle_time_s)
         self._start_attempted = False
         physx = omni.physx.get_physx_interface()
         self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
-        settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
         if settle_time_s > 0.0:
             carb.log_info(
                 f"[{_LOG_PREFIX}] delaying PX4 bridge start for "
@@ -194,31 +207,29 @@ class BridgeHost:
             self._bridge = None
 
     def _on_physics_step(self, dt: float) -> None:
-        self._sim_time_us += int(round(dt * 1_000_000))
-        self._physics_tick_count += 1
-        settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
-        settle_time_us = int(round(settle_time_s * 1_000_000))
+        total_us = self._clock.advance(dt)
+        tick = self._clock.tick_count
         if self._bridge is None:
-            if self._sim_time_us >= settle_time_us:
+            if not self._clock.is_settling:
                 carb.log_info(
                     f"[{_LOG_PREFIX}] startup settle complete at "
-                    f"tick={self._physics_tick_count} sim_time_us={self._sim_time_us}; "
+                    f"tick={tick} sim_time_us={total_us}; "
                     f"starting PX4 bridge"
                 )
                 self._start_bridge()
                 return
-            elif self._physics_tick_count == 1 or self._physics_tick_count % 250 == 0:
+            elif tick == 1 or tick % 250 == 0:
                 carb.log_info(
                     f"[{_LOG_PREFIX}] waiting for startup settle "
-                    f"tick={self._physics_tick_count} dt={dt:.6f} "
-                    f"sim_time_us={self._sim_time_us} target_us={settle_time_us}"
+                    f"tick={tick} dt={dt:.6f} "
+                    f"sim_time_us={total_us} target_us={self._clock.settle_time_us}"
                 )
             return
 
-        bridge_sim_time_us = self._sim_time_us - settle_time_us
-        if self._physics_tick_count == 1 or self._physics_tick_count % 250 == 0:
+        bridge_sim_time_us = self._clock.bridge_time_us()
+        if tick == 1 or tick % 250 == 0:
             carb.log_info(
-                f"[{_LOG_PREFIX}] physics tick={self._physics_tick_count} "
+                f"[{_LOG_PREFIX}] physics tick={tick} "
                 f"dt={dt:.6f} sim_time_us={bridge_sim_time_us} "
                 f"connected={self._bridge.is_connected}"
             )
@@ -228,6 +239,6 @@ class BridgeHost:
             # One bad tick must not crash the simulator. Log and continue;
             # persistent failure will be visible via is_connected.
             carb.log_warn(
-                f"[{_LOG_PREFIX}] on_physics_step error at tick={self._physics_tick_count} "
+                f"[{_LOG_PREFIX}] on_physics_step error at tick={tick} "
                 f"sim_time_us={bridge_sim_time_us}: {exc}"
             )

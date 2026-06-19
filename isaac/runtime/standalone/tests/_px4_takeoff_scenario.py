@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -161,12 +162,12 @@ def _advance_sim_time(
     seconds: float,
     wall_timeout_s: float | None = None,
 ) -> None:
-    start_us = int(getattr(host, "_sim_time_us", 0))
+    start_us = int(getattr(host, "sim_time_us", 0))
     target_us = start_us + int(round(float(seconds) * 1_000_000))
     deadline = time.monotonic() + (wall_timeout_s or max(10.0, seconds * 5.0))
-    while int(getattr(host, "_sim_time_us", 0)) < target_us:
+    while int(getattr(host, "sim_time_us", 0)) < target_us:
         if time.monotonic() > deadline:
-            actual_s = (int(getattr(host, "_sim_time_us", 0)) - start_us) * 1e-6
+            actual_s = (int(getattr(host, "sim_time_us", 0)) - start_us) * 1e-6
             raise AssertionError(
                 f"Timed out advancing Isaac simulation: target={seconds:.2f}s "
                 f"actual={actual_s:.2f}s"
@@ -318,12 +319,12 @@ def _settle_px4_prearm(
     seconds: float,
 ) -> None:
     context.report(f"{test_name}: settling PX4 estimator before arm for {seconds:.1f}s")
-    start_us = int(getattr(host, "_sim_time_us", 0))
+    start_us = int(getattr(host, "sim_time_us", 0))
     target_us = start_us + int(round(seconds * 1_000_000))
     deadline_s = time.monotonic() + max(20.0, seconds * 5.0)
-    while int(getattr(host, "_sim_time_us", 0)) < target_us:
+    while int(getattr(host, "sim_time_us", 0)) < target_us:
         if time.monotonic() > deadline_s:
-            actual_s = (int(getattr(host, "_sim_time_us", 0)) - start_us) * 1e-6
+            actual_s = (int(getattr(host, "sim_time_us", 0)) - start_us) * 1e-6
             raise AssertionError(
                 f"Timed out settling PX4 before arm: target={seconds:.2f}s "
                 f"actual={actual_s:.2f}s"
@@ -534,7 +535,7 @@ def _observe_stability(
         f"{test_name}: observing takeoff for up to {_TAKEOFF_TIMEOUT_S:.1f}s "
         f"until climb >= {_MIN_TAKEOFF_CLIMB_M:.2f}m"
     )
-    start_us = int(getattr(host, "_sim_time_us", 0))
+    start_us = int(getattr(host, "sim_time_us", 0))
     takeoff_deadline_us = start_us + int(round(_TAKEOFF_TIMEOUT_S * 1_000_000))
     hover_settle_end_us: int | None = None
     hover_end_us: int | None = None
@@ -559,7 +560,7 @@ def _observe_stability(
             if _message_indicates_failsafe(msg):
                 failsafe_status = int(msg.system_status)
 
-        sim_time_us = int(getattr(host, "_sim_time_us", 0))
+        sim_time_us = int(getattr(host, "sim_time_us", 0))
         sample = _sample_state(articulation_io, sim_time_us)
         sample_count += 1
         highest_altitude_m = max(highest_altitude_m, float(sample.position_enu[2]))
@@ -731,18 +732,48 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     from robotics_experiments.px4_bridge import IsaacArticulationIO
     from robotics_experiments.simulation import apply_settings
 
+    scenario_start_s = time.monotonic()
+
+    @contextmanager
+    def timed_stage(stage: str, host=None):
+        start_s = time.monotonic()
+        start_us = int(getattr(host, "sim_time_us", 0)) if host is not None else None
+        status = "ok"
+        try:
+            yield
+        except BaseException:
+            status = "fail"
+            raise
+        finally:
+            now_s = time.monotonic()
+            parts = [
+                "TIMING",
+                f"test={options.test_name}",
+                f"stage={stage}",
+                f"elapsed_s={now_s - start_s:.3f}",
+                f"total_s={now_s - scenario_start_s:.3f}",
+                f"status={status}",
+            ]
+            if start_us is not None:
+                end_us = int(getattr(host, "sim_time_us", 0))
+                parts.append(f"sim_elapsed_s={(end_us - start_us) * 1e-6:.3f}")
+            context.report(" ".join(parts))
+
     env = get_config()
     px4_config = env.px4
     if options.px4_config_transform is not None:
         px4_config = options.px4_config_transform(px4_config)
 
     context.report(f"{options.test_name}: applying configured simulation settings")
-    apply_settings(context.stage)
+    with timed_stage("apply_settings"):
+        apply_settings(context.stage)
 
     context.report(f"{options.test_name}: spawning configured drone")
-    spawn_drone(context.stage, env.drone)
+    with timed_stage("spawn_drone"):
+        spawn_drone(context.stage, env.drone)
 
-    articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env, px4_config)
+    with timed_stage("resolve_drone_paths"):
+        articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env, px4_config)
     context.report(f"{options.test_name}: using drone articulation path {articulation_path}")
     context.report(f"{options.test_name}: using rotor paths {rotor_paths}")
 
@@ -760,23 +791,27 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
 
     try:
         context.report(f"{options.test_name}: starting PX4 bridge host")
-        host.start()
-        timeline.play()
+        with timed_stage("bridge_host_start", host):
+            host.start()
+            timeline.play()
 
         context.report(f"{options.test_name}: settling drone on ground for {_GROUND_SETTLE_S:.1f}s")
-        _advance_sim_time(context, host, seconds=_GROUND_SETTLE_S, wall_timeout_s=20.0)
-        _wait_for_bridge_heartbeat(
-            context,
-            host,
-            test_name=options.test_name,
-            timeout_s=_HEARTBEAT_TIMEOUT_S,
-        )
+        with timed_stage("ground_settle", host):
+            _advance_sim_time(context, host, seconds=_GROUND_SETTLE_S, wall_timeout_s=20.0)
+        with timed_stage("bridge_heartbeat_wait", host):
+            _wait_for_bridge_heartbeat(
+                context,
+                host,
+                test_name=options.test_name,
+                timeout_s=_HEARTBEAT_TIMEOUT_S,
+            )
         if not bool(getattr(host, "is_running", False)):
             raise AssertionError("PX4 bridge host stopped before command flow")
         _require_bridge_connected(host)
 
-        observer.initialize()
-        start_sample = _sample_state(observer, int(getattr(host, "_sim_time_us", 0)))
+        with timed_stage("observer_initialize", host):
+            observer.initialize()
+            start_sample = _sample_state(observer, int(getattr(host, "sim_time_us", 0)))
         start_position = start_sample.position_enu.copy()
         context.report(
             f"{options.test_name}: start position z={start_position[2]:.2f}m "
@@ -787,63 +822,81 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 f"Drone is too tilted before takeoff: tilt={start_sample.tilt_deg:.1f}deg"
             )
 
-        mav = _connect_gcs(context, test_name=options.test_name)
-        _wait_for_gcs_heartbeat(
-            context,
-            host,
-            mav,
-            test_name=options.test_name,
-            timeout_s=_HEARTBEAT_TIMEOUT_S,
-        )
-        _settle_px4_prearm(
-            context,
-            host,
-            mav,
-            test_name=options.test_name,
-            seconds=_PREARM_SETTLE_S,
-        )
-        _send_arm(context, host, mav, test_name=options.test_name)
-        takeoff_target = _wait_for_takeoff_target(
-            context,
-            host,
-            mav,
-            test_name=options.test_name,
-            climb_m=_TAKEOFF_ALTITUDE_M,
-            timeout_s=_HEARTBEAT_TIMEOUT_S,
-        )
-        _send_takeoff(
-            context,
-            host,
-            mav,
-            test_name=options.test_name,
-            climb_m=_TAKEOFF_ALTITUDE_M,
-            target=takeoff_target,
-        )
+        with timed_stage("gcs_connect", host):
+            mav = _connect_gcs(context, test_name=options.test_name)
+        with timed_stage("gcs_heartbeat_wait", host):
+            _wait_for_gcs_heartbeat(
+                context,
+                host,
+                mav,
+                test_name=options.test_name,
+                timeout_s=_HEARTBEAT_TIMEOUT_S,
+            )
+        with timed_stage("px4_prearm_settle", host):
+            _settle_px4_prearm(
+                context,
+                host,
+                mav,
+                test_name=options.test_name,
+                seconds=_PREARM_SETTLE_S,
+            )
+        with timed_stage("arm_command_ack", host):
+            _send_arm(context, host, mav, test_name=options.test_name)
+        with timed_stage("takeoff_telemetry_wait", host):
+            takeoff_target = _wait_for_takeoff_target(
+                context,
+                host,
+                mav,
+                test_name=options.test_name,
+                climb_m=_TAKEOFF_ALTITUDE_M,
+                timeout_s=_HEARTBEAT_TIMEOUT_S,
+            )
+        with timed_stage("takeoff_command_ack", host):
+            _send_takeoff(
+                context,
+                host,
+                mav,
+                test_name=options.test_name,
+                climb_m=_TAKEOFF_ALTITUDE_M,
+                target=takeoff_target,
+            )
         if options.post_takeoff_hook is not None:
-            options.post_takeoff_hook(context, host)
-        _observe_stability(
-            context,
-            host,
-            mav,
-            observer,
-            test_name=options.test_name,
-            start_position=start_position,
-        )
+            with timed_stage("post_takeoff_hook", host):
+                options.post_takeoff_hook(context, host)
+        with timed_stage("takeoff_hover_observation", host):
+            _observe_stability(
+                context,
+                host,
+                mav,
+                observer,
+                test_name=options.test_name,
+                start_position=start_position,
+            )
 
         bridge_log = _bridge_debug_log_path(host)
     finally:
         context.report(f"{options.test_name}: stopping timeline, bridge host, and drone")
-        timeline.stop()
-        if mav is not None:
-            try:
-                mav.close()
-            except Exception:
-                pass
-        observer.shutdown()
-        host.stop()
-        despawn_drone(context.stage, env.drone)
+        with timed_stage("teardown", host):
+            timeline.stop()
+            if mav is not None:
+                try:
+                    mav.close()
+                except Exception:
+                    pass
+            observer.shutdown()
+            host.stop()
+            despawn_drone(context.stage, env.drone)
 
-    _assert_bridge_log_clean(bridge_log)
+    with timed_stage("bridge_log_validation"):
+        _assert_bridge_log_clean(bridge_log)
+    context.report(
+        "TIMING "
+        f"test={options.test_name} "
+        "stage=scenario_total "
+        f"elapsed_s={time.monotonic() - scenario_start_s:.3f} "
+        f"total_s={time.monotonic() - scenario_start_s:.3f} "
+        "status=ok"
+    )
     context.report(f"{options.test_name}: verified arm/takeoff stability envelope")
 
 

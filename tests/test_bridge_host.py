@@ -73,6 +73,11 @@ def _install_fake_isaac(monkeypatch):
 
 
 def _install_fake_px4_bridge(monkeypatch, calls):
+    # SimClock is pure Python with no Isaac deps and the host's sim-time
+    # behavior is exercised here, so the fake reuses the real implementation.
+    # Import it before the module is replaced in sys.modules below.
+    from robotics_experiments.px4_bridge.sim_clock import SimClock
+
     fake_px4_bridge = types.ModuleType("robotics_experiments.px4_bridge")
 
     class Px4MavlinkPort:
@@ -91,7 +96,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             rotor_link_paths,
             thrust_model,
             port,
-            max_tilt_angle_deg=None,
+            max_tilt_angle_deg=180.0,
         ):
             self.is_connected = True
             self.step_times = []
@@ -127,6 +132,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.Px4Bridge = Px4Bridge
     fake_px4_bridge.LockstepSettings = LockstepSettings
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
+    fake_px4_bridge.SimClock = SimClock
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
 
 

@@ -22,17 +22,12 @@ import numpy as np
 
 from . import frames
 from ._pegasus_sensors import _DEFAULT_SENSOR_RATE_HZ, _PegasusSensorSuite
-from .contract import BridgeStatus, LockstepSettings
+from .contract import ActuatorCommands, BridgeStatus, LockstepSettings
 from .flight_stack import AbstractFlightStackBridge
+from .sim_clock import physics_tick_us
 from .vehicle_state import VehicleState
 
 __all__ = ["Px4MavlinkPort"]
-
-# Per-tick publish outcome carried from publish_sensors to poll_commands so the
-# split halves reproduce the original single-step branch behavior.
-_TICK_SENT = "sent"
-_TICK_SKIPPED_NONINCREASING = "skipped_nonincreasing"
-_TICK_NOT_READY = "not_ready"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -175,9 +170,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         # fails by a float ULP at rates such as 333 Hz and silently drops the
         # accel/gyro bits on half the HIL_SENSOR packets).
         physics_rate_hz = lockstep.physics_rate_hz
-        if physics_rate_hz <= 0:
-            raise ValueError(f"physics_rate_hz must be positive, got {physics_rate_hz}")
-        self._physics_tick_us = int(round(1_000_000 / float(physics_rate_hz)))
+        # physics_tick_us is the single source of the integer tick (shared with
+        # SimClock); it raises on a non-positive rate.
+        self._physics_tick_us = physics_tick_us(physics_rate_hz)
         self._sensor_rate_hz = 1_000_000 / self._physics_tick_us
         self._sensor_suite = _PegasusSensorSuite(
             home_lat_deg=self._home_lat_deg,
@@ -233,7 +228,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._actuator_receive_count: int = 0
         self._last_actuator_receive_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
-        self._tick: str = _TICK_NOT_READY
         _LOGGER.info(
             "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
             "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
@@ -285,7 +279,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._actuator_receive_count = 0
         self._last_actuator_receive_us = None
         self._sensor_payload_debug_count = 0
-        self._tick = _TICK_NOT_READY
         self._is_connected = True
         _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self._debug_log_path)
 
@@ -340,25 +333,26 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
     # ---- Per-tick ----------------------------------------------------------
 
-    def publish_sensors(self, state: VehicleState) -> None:
-        """Send HIL_SENSOR (+GPS) for this tick - the data flow out to PX4.
+    def exchange(self, state: VehicleState) -> ActuatorCommands:
+        """Run one causal tick: send HIL_SENSOR (+GPS), then block for the actuator.
 
         A tick is state(t) -> sensors(t) -> actuator(t): fill sensors from the
-        state, run the heartbeat handshake, then send sensors/GPS. The paired
-        actuator is awaited by :meth:`poll_commands`, which must be called next
-        for the same tick. The per-tick outcome is recorded so ``poll_commands``
-        reproduces the original blocking semantics:
-
-        - ``_TICK_SENT``: sensors went out; ``poll_commands`` blocks for the
-          actuator.
-        - ``_TICK_SKIPPED_NONINCREASING``: a non-increasing timestamp; the last
-          references are reused without sending or blocking.
-        - ``_TICK_NOT_READY``: disconnected, or still waiting on PX4's first
-          heartbeat; ``poll_commands`` returns zeros.
+        state, run the heartbeat handshake, send sensors/GPS, then block (with a
+        hard timeout) for PX4's paired HIL_ACTUATOR_CONTROLS. The send and the
+        blocking receive are one indivisible operation, so they cannot be
+        misordered. Returns the current rotor references; the last references on
+        a non-increasing timestamp (no send, no block), or zeros when
+        disconnected, still waiting on PX4's first heartbeat, or on an actuator
+        timeout.
         """
+
+        def references() -> ActuatorCommands:
+            return ActuatorCommands(np.asarray(self._backend.input_reference(), dtype=np.float64))
+
+        zeros = ActuatorCommands(np.zeros(self._num_rotors, dtype=np.float64))
+
         if not self.is_connected:
-            self._tick = _TICK_NOT_READY
-            return
+            return zeros
 
         sim_time_us = int(state.sim_time_us)
         if self._last_sensor_send_us is not None and sim_time_us <= self._last_sensor_send_us:
@@ -367,33 +361,17 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 sim_time_us,
                 self._last_sensor_send_us,
             )
-            self._tick = _TICK_SKIPPED_NONINCREASING
-            return
+            return references()
 
         imu_refreshed = self._fill_sensor_data(state)
         now = time.time()
         if not self._heartbeat_phase(now):
-            self._tick = _TICK_NOT_READY
-            return
+            return zeros
         if not self._sensor_phase(sim_time_us, imu_refreshed):
-            self._tick = _TICK_NOT_READY
-            return
-        self._tick = _TICK_SENT
-
-    def poll_commands(self, state: VehicleState) -> np.ndarray:
-        """Block (with timeout) for the paired actuator - the data flow in from PX4.
-
-        Must follow a :meth:`publish_sensors` call for the same tick. Returns the
-        current rotor references; the last references on a non-increasing tick
-        (no block), or zeros when not ready / disconnected / on actuator timeout.
-        """
-        if self._tick == _TICK_SKIPPED_NONINCREASING:
-            return np.asarray(self._backend.input_reference(), dtype=np.float64)
-        if self._tick != _TICK_SENT or not self.is_connected:
-            return np.zeros(self._num_rotors, dtype=np.float64)
-        if not self._actuator_phase(int(state.sim_time_us)):
-            return np.zeros(self._num_rotors, dtype=np.float64)
-        return np.asarray(self._backend.input_reference(), dtype=np.float64)
+            return zeros
+        if not self._actuator_phase(sim_time_us):
+            return zeros
+        return references()
 
     # ---- Internals ---------------------------------------------------------
 
@@ -402,7 +380,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
         Returns ``True`` once PX4's first heartbeat is in and the tick may
         proceed; ``False`` while still waiting (or after a disconnect), meaning
-        ``step()`` returns zeros this tick.
+        ``exchange()`` returns zeros this tick.
         """
         # Send heartbeat at configured rate (wallclock is fine - pacing only).
         if self._should_send_heartbeat(now):

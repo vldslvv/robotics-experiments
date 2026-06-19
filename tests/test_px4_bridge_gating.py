@@ -205,7 +205,9 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
     assert bridge._tilt_cutoff_count == 0
 
 
-def test_bridge_tilt_cutoff_disabled_when_none():
+def test_bridge_tilt_cutoff_disabled_by_default():
+    # The default max_tilt_angle_deg of 180.0 is the maximum possible tilt, so
+    # the cutoff never fires: a 170 deg pitch must still apply forces.
     state = VehicleState.hover_at(sim_time_us=0)
     state.orientation_flu_enu_wxyz = _quat_pitch_deg(170.0)
     io = _FakeArticulationIO(state)
@@ -216,7 +218,6 @@ def test_bridge_tilt_cutoff_disabled_when_none():
         thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
-        max_tilt_angle_deg=None,
     )
 
     bridge.start()

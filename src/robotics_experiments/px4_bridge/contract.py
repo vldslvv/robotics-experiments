@@ -1,12 +1,16 @@
-"""Settings and status objects that make up the bridge's public contract.
+"""Settings and seam objects that make up the bridge's public contract.
 
 These are pure-Python dataclasses with no Isaac Sim, MAVLink, or Pegasus
 dependency, so they are safe to import from unit tests, staging scripts, and
 any consuming logic. Together with :class:`VehicleState` (input) and
-:class:`RotorDynamics` (output) they form the four-part bridge seam:
+:class:`RotorDynamics` (output) they form the bridge seam:
 
 - :class:`LockstepSettings` configures the lockstep exchange.
 - :class:`BridgeStatus` is the read-only runtime snapshot of that exchange.
+- :class:`ActuatorCommands` is what the flight stack returns each tick (PX4 ->
+  bridge) and what the thrust model consumes to produce :class:`RotorDynamics`,
+  so the per-tick data flow is fully typed:
+  ``VehicleState -> ActuatorCommands -> RotorDynamics``.
 """
 
 from __future__ import annotations
@@ -14,7 +18,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-__all__ = ["BridgeStatus", "LockstepSettings"]
+import numpy as np
+
+__all__ = ["ActuatorCommands", "BridgeStatus", "LockstepSettings"]
+
+
+@dataclass(frozen=True)
+class ActuatorCommands:
+    """Per-motor actuator command references returned by the flight stack.
+
+    These are PX4's ``HIL_ACTUATOR_CONTROLS`` outputs (``controls[0:num_rotors]``)
+    after the port's offset/scaling - one entry per rotor in PX4 motor-index
+    order. They are commands, not realized forces: the thrust model converts
+    them into a :class:`RotorDynamics` (forces, body torque, drag). Their
+    physical interpretation is owned by the thrust model - the Pegasus quadratic
+    model reads them as rotor angular-velocity references in rad/s, the linear
+    model as normalized 0..1 force fractions.
+
+    Attributes:
+        controls: Length-``num_rotors`` ``np.ndarray`` of command references.
+    """
+
+    controls: np.ndarray
 
 
 @dataclass(frozen=True)

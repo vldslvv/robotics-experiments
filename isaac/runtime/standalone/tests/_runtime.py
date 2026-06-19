@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,31 @@ class SceneTestContext:
     scene_path: Path
     simulation_app: SimulationApp
     report: Callable[[str], None]
+
+
+class TimingReporter:
+    """Emit elapsed wall-clock timings for standalone integration stages."""
+
+    def __init__(self, test_name: str):
+        self._test_name = test_name
+        self._total_start_s = time.monotonic()
+
+    def report_stage(self, stage: str, start_s: float, *, status: str = "ok") -> None:
+        now_s = time.monotonic()
+        report(
+            "TIMING "
+            f"test={self._test_name} "
+            f"stage={stage} "
+            f"elapsed_s={now_s - start_s:.3f} "
+            f"total_s={now_s - self._total_start_s:.3f} "
+            f"status={status}"
+        )
+
+    def start(self) -> float:
+        return time.monotonic()
+
+    def total_start(self) -> float:
+        return self._total_start_s
 
 
 def report(message: str) -> None:
@@ -80,18 +106,28 @@ def run_scene_test(
 
     simulation_app = None
     error: BaseException | None = None
+    timing = TimingReporter(test_name)
     try:
+        stage_start_s = timing.start()
         report(f"{test_name}: starting SimulationApp")
         simulation_app = SimulationApp({"headless": True, "hide_ui": True})
         report(f"{test_name}: SimulationApp started")
+        timing.report_stage("simulation_app_start", stage_start_s)
 
+        stage_start_s = timing.start()
         report(f"{test_name}: importing omni.usd")
         import omni.usd
 
+        timing.report_stage("import_omni_usd", stage_start_s)
+
+        stage_start_s = timing.start()
         report(f"{test_name}: resetting Hydra config cache")
         from robotics_experiments.config import reset_config
 
         reset_config()
+        timing.report_stage("hydra_reset", stage_start_s)
+
+        stage_start_s = timing.start()
         report(f"{test_name}: getting USD context")
         usd_context = omni.usd.get_context()
         report(f"{test_name}: opening stage")
@@ -102,7 +138,9 @@ def run_scene_test(
         stage = usd_context.get_stage()
         if stage is None:
             raise RuntimeError(f"Stage did not load: {scene_path}")
+        timing.report_stage("stage_open", stage_start_s)
 
+        stage_start_s = timing.start()
         test_body(
             SceneTestContext(
                 stage=stage,
@@ -111,6 +149,7 @@ def run_scene_test(
                 report=report,
             )
         )
+        timing.report_stage("test_body", stage_start_s)
         report(f"{test_name}: PASS")
     except SystemExit as exc:
         error = RuntimeError(f"{test_name}: Isaac test exited before completion: {exc}")
@@ -120,12 +159,16 @@ def run_scene_test(
         report(f"ERROR: {type(exc).__name__}: {exc}")
     finally:
         if simulation_app is not None:
+            stage_start_s = timing.start()
             try:
                 simulation_app.close()
+                timing.report_stage("simulation_app_close", stage_start_s)
             except SystemExit as exc:
+                timing.report_stage("simulation_app_close", stage_start_s, status="fail")
                 if error is None:
                     error = RuntimeError(
                         f"{test_name}: SimulationApp.close exited unexpectedly: {exc}"
                     )
+        timing.report_stage("total", timing.total_start(), status="fail" if error else "ok")
     if error is not None:
         raise error

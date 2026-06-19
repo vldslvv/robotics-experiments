@@ -20,6 +20,8 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
+from robotics_experiments.px4_bridge import ActuatorCommands
+
 DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 TEST_NAME = "px4_takeoff_instability_detection"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_instability_px4.log"
@@ -50,19 +52,19 @@ class _RotorFailureFault:
     def num_rotors(self) -> int:
         return self._base_model.num_rotors
 
-    def _faulted_controls(self, controls):
-        faulted = np.asarray(controls, dtype=np.float64).copy()
+    def _faulted_commands(self, commands: ActuatorCommands) -> ActuatorCommands:
+        faulted = np.asarray(commands.controls, dtype=np.float64).copy()
         if faulted.shape != (self.num_rotors,):
             raise ValueError(f"Rotor fault expects shape ({self.num_rotors},), got {faulted.shape}")
         faulted[self._rotor_index] *= self._command_scale
-        return faulted
+        return ActuatorCommands(faulted)
 
-    def commands_to_forces(self, controls):
-        return self._base_model.commands_to_forces(self._faulted_controls(controls))
+    def commands_to_forces(self, commands):
+        return self._base_model.commands_to_forces(self._faulted_commands(commands))
 
-    def commands_to_dynamics(self, controls, *, linear_body_velocity_flu=None):
+    def commands_to_dynamics(self, commands, *, linear_body_velocity_flu=None):
         dynamics = self._base_model.commands_to_dynamics(
-            self._faulted_controls(controls),
+            self._faulted_commands(commands),
             linear_body_velocity_flu=linear_body_velocity_flu,
         )
         return type(dynamics)(

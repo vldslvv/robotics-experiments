@@ -109,12 +109,17 @@ the current contents and the intended home for that kind of code.
   a YAML knob there but injected from `sim.physics_hz`.
 - The PX4 bridge presents a four-part contract (see
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`):
-  pure-data state objects (`VehicleState` in, `RotorDynamics` out, `BridgeStatus`
-  snapshot), the `LockstepSettings` object, the flight-stack port's two-method
-  lockstep seam, and the Isaac sink. The port exposes `publish_sensors(state)`
-  (send to PX4) and `poll_commands(state) -> commands` (lockstep receive from
-  PX4) instead of a single combined `step`; they are two halves of one causal
-  tick and must be called publish-then-poll for the same tick (`Px4Bridge.
+  pure-data state objects (the per-tick flow is fully typed,
+  `VehicleState` in -> `ActuatorCommands` -> `RotorDynamics` out, plus the
+  `BridgeStatus` snapshot), the `LockstepSettings` object, the flight-stack
+  port's single-call lockstep seam, and the Isaac sink. The port exposes one
+  `exchange(state) -> ActuatorCommands` method: it sends `HIL_SENSOR` to PX4 and
+  then blocks for the paired actuator commands, as one indivisible causal tick.
+  `ActuatorCommands` carries the per-motor PX4 actuator references (commands, not
+  forces); the thrust model converts it to `RotorDynamics`, and the physical
+  interpretation of the references is owned by the thrust model. The
+  send and the blocking receive are deliberately not separately callable, so the
+  lockstep order cannot be broken from the caller side (`Px4Bridge.
   on_physics_step` is the canonical caller). The Isaac side exposes a single
   `ArticulationIO.apply_dynamics(RotorDynamics)` sink (rotor forces at markers
   plus body torque and drag). The vendored Pegasus backend stays hidden behind
@@ -138,8 +143,13 @@ the current contents and the intended home for that kind of code.
 - The PX4 sensor cadence is the Isaac physics cadence. `sim.physics_hz` is the
   single source of truth for both; the drone-spawner host plumbs it into
   `Px4MavlinkPort` as `LockstepSettings.physics_rate_hz` (there is no separate
-  PX4 sensor-rate config knob to drift). The port pins the Pegasus sensor `update_period` to the
-  integer-microsecond physics tick (rate derived as `1e6 / tick_us`) rather than
+  PX4 sensor-rate config knob to drift). The integer-microsecond tick is derived
+  in exactly one place -- the `physics_tick_us(physics_hz)` helper in
+  `px4_bridge/sim_clock.py`, shared by the port and by `SimClock` (the
+  drone-spawner host's sim-time counter, which owns the monotonic accumulation
+  and the post-settle offset). The port pins the Pegasus sensor `update_period`
+  to that integer-microsecond physics tick (rate derived as `1e6 / tick_us`)
+  rather than
   `1/physics_rate_hz`, so the `update_at_rate` gate fires on every physics step
   at any rate. Pegasus computes the period as `1/rate` and the suite computes the
   per-tick dt from integer-microsecond `sim_time_us` deltas; `1/physics_rate_hz`
@@ -332,6 +342,12 @@ the host. They are meant to be used in the Dockerized environment.
   Their standalone Isaac test scripts live under
   `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
   scenario-specific notes.
+- Integration logs include structured timing lines for performance triage.
+  Host/container stages use `[integration-timing] target=... stage=...
+  elapsed_s=... total_s=... status=...`; standalone Isaac stages use
+  `[isaac-standalone-test] TIMING test=... stage=... elapsed_s=... total_s=...`.
+  PX4 scenario stage timings also include `sim_elapsed_s=...` when the stage
+  advances simulated time.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
   runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
   isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and

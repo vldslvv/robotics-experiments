@@ -25,7 +25,12 @@ import numpy as np
 EXT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXT_ROOT))
 
-from Px4SitlBridge_python import LinearThrustModel, VehicleState, frames  # noqa: E402
+from Px4SitlBridge_python import (  # noqa: E402
+    ActuatorCommands,
+    LinearThrustModel,
+    VehicleState,
+    frames,
+)
 
 _failed = 0
 
@@ -66,7 +71,7 @@ def main() -> int:
     )
 
     model = LinearThrustModel(num_rotors=4, max_force_n=8.0)
-    forces = model.commands_to_forces(np.array([0.0, 0.5, 1.0, 1.5]))
+    forces = model.commands_to_forces(ActuatorCommands(np.array([0.0, 0.5, 1.0, 1.5])))
     _check(
         "linear thrust model clips above 1.0",
         np.allclose(forces, [0.0, 4.0, 8.0, 8.0]),

@@ -14,6 +14,8 @@ from typing import Sequence
 
 import numpy as np
 
+from .contract import ActuatorCommands
+
 __all__ = [
     "LinearThrustModel",
     "PegasusQuadraticThrustModel",
@@ -47,10 +49,10 @@ class RotorDynamics:
 class RotorThrustModel(ABC):
     """Abstract per-motor force model.
 
-    Implementations take an ``np.ndarray`` of ``num_rotors`` command values.
-    The Pegasus-compatible implementation interprets them as rotor angular
-    velocity references in rad/s; the legacy linear model interprets them as
-    normalized force fractions.
+    Implementations take an :class:`ActuatorCommands` of ``num_rotors`` command
+    references. The Pegasus-compatible implementation interprets them as rotor
+    angular velocity references in rad/s; the legacy linear model interprets
+    them as normalized force fractions.
     """
 
     @property
@@ -58,11 +60,11 @@ class RotorThrustModel(ABC):
     def num_rotors(self) -> int: ...
 
     @abstractmethod
-    def commands_to_forces(self, controls: np.ndarray) -> np.ndarray: ...
+    def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray: ...
 
     def commands_to_dynamics(
         self,
-        controls: np.ndarray,
+        commands: ActuatorCommands,
         *,
         linear_body_velocity_flu: np.ndarray | None = None,
     ) -> RotorDynamics:
@@ -72,7 +74,7 @@ class RotorThrustModel(ABC):
         preserves the original force-only contract.
         """
         return RotorDynamics(
-            forces_n=self.commands_to_forces(controls),
+            forces_n=self.commands_to_forces(commands),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),
         )
@@ -104,8 +106,8 @@ class LinearThrustModel(RotorThrustModel):
     def max_force_n(self) -> float:
         return self._max_force_n
 
-    def commands_to_forces(self, controls: np.ndarray) -> np.ndarray:
-        c = np.clip(np.asarray(controls, dtype=np.float64), 0.0, 1.0)
+    def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
+        c = np.clip(np.asarray(commands.controls, dtype=np.float64), 0.0, 1.0)
         if c.shape != (self._num_rotors,):
             raise ValueError(
                 f"LinearThrustModel expects shape ({self._num_rotors},), got {c.shape}"
@@ -158,8 +160,8 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
             raise ValueError(f"{label} expects shape ({self._num_rotors},), got {array.shape}")
         return array
 
-    def _rotor_velocity(self, controls: np.ndarray) -> np.ndarray:
-        omega_ref = np.asarray(controls, dtype=np.float64)
+    def _rotor_velocity(self, commands: ActuatorCommands) -> np.ndarray:
+        omega_ref = np.asarray(commands.controls, dtype=np.float64)
         if omega_ref.shape != (self._num_rotors,):
             raise ValueError(
                 f"PegasusQuadraticThrustModel expects shape ({self._num_rotors},), "
@@ -167,17 +169,17 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
             )
         return np.clip(omega_ref, self._min_rotor_velocity, self._max_rotor_velocity)
 
-    def commands_to_forces(self, controls: np.ndarray) -> np.ndarray:
-        omega = self._rotor_velocity(controls)
+    def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
+        omega = self._rotor_velocity(commands)
         return self._rotor_constant * np.square(omega)
 
     def commands_to_dynamics(
         self,
-        controls: np.ndarray,
+        commands: ActuatorCommands,
         *,
         linear_body_velocity_flu: np.ndarray | None = None,
     ) -> RotorDynamics:
-        omega = self._rotor_velocity(controls)
+        omega = self._rotor_velocity(commands)
         omega_squared = np.square(omega)
         forces = self._rotor_constant * omega_squared
         rolling_moment = float(
