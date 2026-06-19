@@ -7,13 +7,12 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-from _runtime import SceneTestContext
+from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
 
 __all__ = [
     "ExpectedInstabilityDetected",
@@ -550,6 +549,7 @@ def _observe_stability(
     max_hover_x_m = -math.inf
     min_hover_y_m = math.inf
     max_hover_y_m = -math.inf
+    latest_sample: _FlightSample | None = None
 
     while True:
         _advance_one(context, host)
@@ -562,6 +562,7 @@ def _observe_stability(
 
         sim_time_us = int(getattr(host, "sim_time_us", 0))
         sample = _sample_state(articulation_io, sim_time_us)
+        latest_sample = sample
         sample_count += 1
         highest_altitude_m = max(highest_altitude_m, float(sample.position_enu[2]))
 
@@ -578,15 +579,18 @@ def _observe_stability(
         if lateral_drift_m > _MAX_LATERAL_DRIFT_M:
             _raise_instability(
                 f"Drone lateral drift exceeded limit: drift={lateral_drift_m:.2f}m "
-                f"limit={_MAX_LATERAL_DRIFT_M:.2f}m"
+                f"limit={_MAX_LATERAL_DRIFT_M:.2f}m "
+                f"{format_vehicle_state_vectors(sample)}"
             )
         if vertical_velocity_m_s > _MAX_VERTICAL_SPEED_M_S:
             _raise_instability(
-                f"Drone vertical velocity diverged upward: vz={vertical_velocity_m_s:.2f}m/s"
+                "Drone vertical velocity diverged upward: "
+                f"vz={vertical_velocity_m_s:.2f}m/s {format_vehicle_state_vectors(sample)}"
             )
         if vertical_velocity_m_s < _MAX_DOWNWARD_SPEED_M_S:
             _raise_instability(
-                f"Drone vertical velocity diverged downward: vz={vertical_velocity_m_s:.2f}m/s"
+                "Drone vertical velocity diverged downward: "
+                f"vz={vertical_velocity_m_s:.2f}m/s {format_vehicle_state_vectors(sample)}"
             )
         if angular_speed_rad_s > _MAX_ANGULAR_SPEED_RAD_S:
             _raise_instability(
@@ -610,6 +614,7 @@ def _observe_stability(
             context.report(
                 f"{test_name}: reached takeoff altitude envelope: "
                 f"climb={climb_m:.2f}m required={_MIN_TAKEOFF_CLIMB_M:.2f}m; "
+                f"{format_vehicle_state_vectors(sample)} "
                 f"settling hover for {_HOVER_SETTLE_S:.1f}s"
             )
 
@@ -636,6 +641,7 @@ def _observe_stability(
                 f"{test_name}: sample t={sim_time_us * 1e-6:.2f}s "
                 f"z={sample.position_enu[2]:.2f}m "
                 f"vz={vertical_velocity_m_s:.2f}m/s "
+                f"{format_vehicle_state_vectors(sample)} "
                 f"tilt={sample.tilt_deg:.1f}deg "
                 f"drift={lateral_drift_m:.2f}m"
             )
@@ -647,9 +653,12 @@ def _observe_stability(
 
     climb_m = highest_altitude_m - float(start_position[2])
     if climb_m < _MIN_TAKEOFF_CLIMB_M:
+        sample_text = (
+            f" {format_vehicle_state_vectors(latest_sample)}" if latest_sample is not None else ""
+        )
         _raise_instability(
             f"Drone altitude did not increase enough: climb={climb_m:.2f}m "
-            f"required={_MIN_TAKEOFF_CLIMB_M:.2f}m"
+            f"required={_MIN_TAKEOFF_CLIMB_M:.2f}m{sample_text}"
         )
 
     if hover_sample_count <= 0:
@@ -657,37 +666,54 @@ def _observe_stability(
 
     hover_altitude_range_m = max_hover_climb_m - min_hover_climb_m
     if hover_altitude_range_m > _HOVER_MAX_ALTITUDE_RANGE_M:
+        sample_text = (
+            f" {format_vehicle_state_vectors(latest_sample)}" if latest_sample is not None else ""
+        )
         _raise_instability(
             "Drone did not hold hover height: "
             f"climb_range={hover_altitude_range_m:.2f}m "
             f"limit={_HOVER_MAX_ALTITUDE_RANGE_M:.2f}m "
-            f"min_climb={min_hover_climb_m:.2f}m max_climb={max_hover_climb_m:.2f}m"
+            f"min_climb={min_hover_climb_m:.2f}m "
+            f"max_climb={max_hover_climb_m:.2f}m{sample_text}"
         )
     if max_hover_abs_vertical_speed_m_s > _HOVER_MAX_ABS_VERTICAL_SPEED_M_S:
+        sample_text = (
+            f" {format_vehicle_state_vectors(latest_sample)}" if latest_sample is not None else ""
+        )
         _raise_instability(
             "Drone vertical speed did not settle during hover: "
             f"max_abs_vz={max_hover_abs_vertical_speed_m_s:.2f}m/s "
-            f"limit={_HOVER_MAX_ABS_VERTICAL_SPEED_M_S:.2f}m/s"
+            f"limit={_HOVER_MAX_ABS_VERTICAL_SPEED_M_S:.2f}m/s{sample_text}"
         )
 
     hover_horizontal_range_m = math.hypot(
         max_hover_x_m - min_hover_x_m, max_hover_y_m - min_hover_y_m
     )
     if hover_horizontal_range_m > _HOVER_MAX_HORIZONTAL_RANGE_M:
+        sample_text = (
+            f" {format_vehicle_state_vectors(latest_sample)}" if latest_sample is not None else ""
+        )
         _raise_instability(
             "Drone did not hold hover position: "
             f"horizontal_range={hover_horizontal_range_m:.2f}m "
-            f"limit={_HOVER_MAX_HORIZONTAL_RANGE_M:.2f}m"
+            f"limit={_HOVER_MAX_HORIZONTAL_RANGE_M:.2f}m{sample_text}"
         )
     if max_hover_abs_horizontal_speed_m_s > _HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S:
+        sample_text = (
+            f" {format_vehicle_state_vectors(latest_sample)}" if latest_sample is not None else ""
+        )
         _raise_instability(
             "Drone horizontal speed did not settle during hover: "
             f"max_horizontal_speed={max_hover_abs_horizontal_speed_m_s:.2f}m/s "
-            f"limit={_HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S:.2f}m/s"
+            f"limit={_HOVER_MAX_ABS_HORIZONTAL_SPEED_M_S:.2f}m/s{sample_text}"
         )
 
+    final_sample_text = (
+        f"{format_vehicle_state_vectors(latest_sample)} " if latest_sample is not None else ""
+    )
     context.report(
         f"{test_name}: observed stable takeoff and hover: "
+        f"{final_sample_text}"
         f"max_climb={climb_m:.2f}m "
         f"hover_climb_range={min_hover_climb_m:.2f}-{max_hover_climb_m:.2f}m "
         f"max_hover_abs_vz={max_hover_abs_vertical_speed_m_s:.2f}m/s "
@@ -732,32 +758,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     from robotics_experiments.px4_bridge import IsaacArticulationIO
     from robotics_experiments.simulation import apply_settings
 
-    scenario_start_s = time.monotonic()
-
-    @contextmanager
-    def timed_stage(stage: str, host=None):
-        start_s = time.monotonic()
-        start_us = int(getattr(host, "sim_time_us", 0)) if host is not None else None
-        status = "ok"
-        try:
-            yield
-        except BaseException:
-            status = "fail"
-            raise
-        finally:
-            now_s = time.monotonic()
-            parts = [
-                "TIMING",
-                f"test={options.test_name}",
-                f"stage={stage}",
-                f"elapsed_s={now_s - start_s:.3f}",
-                f"total_s={now_s - scenario_start_s:.3f}",
-                f"status={status}",
-            ]
-            if start_us is not None:
-                end_us = int(getattr(host, "sim_time_us", 0))
-                parts.append(f"sim_elapsed_s={(end_us - start_us) * 1e-6:.3f}")
-            context.report(" ".join(parts))
+    timing = TimingReporter(options.test_name, emit=context.report)
 
     env = get_config()
     px4_config = env.px4
@@ -765,14 +766,14 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         px4_config = options.px4_config_transform(px4_config)
 
     context.report(f"{options.test_name}: applying configured simulation settings")
-    with timed_stage("apply_settings"):
+    with timing.timed_stage("apply_settings"):
         apply_settings(context.stage)
 
     context.report(f"{options.test_name}: spawning configured drone")
-    with timed_stage("spawn_drone"):
+    with timing.timed_stage("spawn_drone"):
         spawn_drone(context.stage, env.drone)
 
-    with timed_stage("resolve_drone_paths"):
+    with timing.timed_stage("resolve_drone_paths"):
         articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env, px4_config)
     context.report(f"{options.test_name}: using drone articulation path {articulation_path}")
     context.report(f"{options.test_name}: using rotor paths {rotor_paths}")
@@ -791,14 +792,14 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
 
     try:
         context.report(f"{options.test_name}: starting PX4 bridge host")
-        with timed_stage("bridge_host_start", host):
+        with timing.timed_stage("bridge_host_start", sim_clock=host):
             host.start()
             timeline.play()
 
         context.report(f"{options.test_name}: settling drone on ground for {_GROUND_SETTLE_S:.1f}s")
-        with timed_stage("ground_settle", host):
+        with timing.timed_stage("ground_settle", sim_clock=host):
             _advance_sim_time(context, host, seconds=_GROUND_SETTLE_S, wall_timeout_s=20.0)
-        with timed_stage("bridge_heartbeat_wait", host):
+        with timing.timed_stage("bridge_heartbeat_wait", sim_clock=host):
             _wait_for_bridge_heartbeat(
                 context,
                 host,
@@ -809,12 +810,13 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
             raise AssertionError("PX4 bridge host stopped before command flow")
         _require_bridge_connected(host)
 
-        with timed_stage("observer_initialize", host):
+        with timing.timed_stage("observer_initialize", sim_clock=host):
             observer.initialize()
             start_sample = _sample_state(observer, int(getattr(host, "sim_time_us", 0)))
         start_position = start_sample.position_enu.copy()
         context.report(
             f"{options.test_name}: start position z={start_position[2]:.2f}m "
+            f"{format_vehicle_state_vectors(start_sample)} "
             f"tilt={start_sample.tilt_deg:.1f}deg"
         )
         if start_sample.tilt_deg > _MAX_TILT_DEG:
@@ -822,9 +824,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 f"Drone is too tilted before takeoff: tilt={start_sample.tilt_deg:.1f}deg"
             )
 
-        with timed_stage("gcs_connect", host):
+        with timing.timed_stage("gcs_connect", sim_clock=host):
             mav = _connect_gcs(context, test_name=options.test_name)
-        with timed_stage("gcs_heartbeat_wait", host):
+        with timing.timed_stage("gcs_heartbeat_wait", sim_clock=host):
             _wait_for_gcs_heartbeat(
                 context,
                 host,
@@ -832,7 +834,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 test_name=options.test_name,
                 timeout_s=_HEARTBEAT_TIMEOUT_S,
             )
-        with timed_stage("px4_prearm_settle", host):
+        with timing.timed_stage("px4_prearm_settle", sim_clock=host):
             _settle_px4_prearm(
                 context,
                 host,
@@ -840,9 +842,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 test_name=options.test_name,
                 seconds=_PREARM_SETTLE_S,
             )
-        with timed_stage("arm_command_ack", host):
+        with timing.timed_stage("arm_command_ack", sim_clock=host):
             _send_arm(context, host, mav, test_name=options.test_name)
-        with timed_stage("takeoff_telemetry_wait", host):
+        with timing.timed_stage("takeoff_telemetry_wait", sim_clock=host):
             takeoff_target = _wait_for_takeoff_target(
                 context,
                 host,
@@ -851,7 +853,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 climb_m=_TAKEOFF_ALTITUDE_M,
                 timeout_s=_HEARTBEAT_TIMEOUT_S,
             )
-        with timed_stage("takeoff_command_ack", host):
+        with timing.timed_stage("takeoff_command_ack", sim_clock=host):
             _send_takeoff(
                 context,
                 host,
@@ -861,9 +863,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 target=takeoff_target,
             )
         if options.post_takeoff_hook is not None:
-            with timed_stage("post_takeoff_hook", host):
+            with timing.timed_stage("post_takeoff_hook", sim_clock=host):
                 options.post_takeoff_hook(context, host)
-        with timed_stage("takeoff_hover_observation", host):
+        with timing.timed_stage("takeoff_hover_observation", sim_clock=host):
             _observe_stability(
                 context,
                 host,
@@ -876,7 +878,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         bridge_log = _bridge_debug_log_path(host)
     finally:
         context.report(f"{options.test_name}: stopping timeline, bridge host, and drone")
-        with timed_stage("teardown", host):
+        with timing.timed_stage("teardown", sim_clock=host):
             timeline.stop()
             if mav is not None:
                 try:
@@ -887,16 +889,9 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
             host.stop()
             despawn_drone(context.stage, env.drone)
 
-    with timed_stage("bridge_log_validation"):
+    with timing.timed_stage("bridge_log_validation"):
         _assert_bridge_log_clean(bridge_log)
-    context.report(
-        "TIMING "
-        f"test={options.test_name} "
-        "stage=scenario_total "
-        f"elapsed_s={time.monotonic() - scenario_start_s:.3f} "
-        f"total_s={time.monotonic() - scenario_start_s:.3f} "
-        "status=ok"
-    )
+    timing.report_stage("scenario_total", timing.total_start())
     context.report(f"{options.test_name}: verified arm/takeoff stability envelope")
 
 

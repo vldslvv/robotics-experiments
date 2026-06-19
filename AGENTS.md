@@ -348,6 +348,10 @@ the host. They are meant to be used in the Dockerized environment.
   `[isaac-standalone-test] TIMING test=... stage=... elapsed_s=... total_s=...`.
   PX4 scenario stage timings also include `sim_elapsed_s=...` when the stage
   advances simulated time.
+- Standalone integration logs that report drone state use the shared
+  `_runtime.py` vector formatter and include full ENU position and linear
+  velocity (`pos_enu_m=(x=..., y=..., z=...)`,
+  `vel_enu_m_s=(x=..., y=..., z=...)`) for flight-performance triage.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
   runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
   isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and

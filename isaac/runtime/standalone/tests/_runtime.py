@@ -13,12 +13,44 @@ import argparse
 import sys
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Iterator
 
 from isaacsim import SimulationApp
 
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
+
+__all__ = [
+    "SceneTestContext",
+    "TimingReporter",
+    "format_vehicle_state_vectors",
+    "format_xyz",
+    "report",
+    "run_scene_test",
+]
+
+
+def report(message: str) -> None:
+    """Emit a line intended to survive Makefile log filtering."""
+    print(f"{TEST_OUTPUT_PREFIX} {message}", file=sys.__stderr__, flush=True)
+
+
+def format_xyz(label: str, values: Any, unit: str) -> str:
+    """Format a 3-vector with stable x/y/z field names for integration logs."""
+    return (
+        f"{label}_{unit}="
+        f"(x={float(values[0]):.2f}, y={float(values[1]):.2f}, z={float(values[2]):.2f})"
+    )
+
+
+def format_vehicle_state_vectors(state_or_sample: Any) -> str:
+    """Format full ENU position and linear velocity vectors for flight triage."""
+    return (
+        f"{format_xyz('pos_enu', state_or_sample.position_enu, 'm')} "
+        f"{format_xyz('vel_enu', state_or_sample.linear_velocity_enu, 'm_s')}"
+    )
 
 
 @dataclass(frozen=True)
@@ -30,17 +62,22 @@ class SceneTestContext:
     simulation_app: SimulationApp
     report: Callable[[str], None]
 
+    def report_vehicle_state(self, label: str, state_or_sample: Any) -> None:
+        """Emit a standardized drone state vector log line."""
+        self.report(f"{label}: {format_vehicle_state_vectors(state_or_sample)}")
+
 
 class TimingReporter:
     """Emit elapsed wall-clock timings for standalone integration stages."""
 
-    def __init__(self, test_name: str):
+    def __init__(self, test_name: str, *, emit: Callable[[str], None] | None = None):
         self._test_name = test_name
+        self._emit = emit or report
         self._total_start_s = time.monotonic()
 
     def report_stage(self, stage: str, start_s: float, *, status: str = "ok") -> None:
         now_s = time.monotonic()
-        report(
+        self._emit(
             "TIMING "
             f"test={self._test_name} "
             f"stage={stage} "
@@ -49,16 +86,37 @@ class TimingReporter:
             f"status={status}"
         )
 
+    @contextmanager
+    def timed_stage(self, stage: str, *, sim_clock: object | None = None) -> Iterator[None]:
+        """Report one timed stage, optionally including simulated elapsed time."""
+        start_s = time.monotonic()
+        start_us = int(getattr(sim_clock, "sim_time_us", 0)) if sim_clock is not None else None
+        status = "ok"
+        try:
+            yield
+        except BaseException:
+            status = "fail"
+            raise
+        finally:
+            now_s = time.monotonic()
+            parts = [
+                "TIMING",
+                f"test={self._test_name}",
+                f"stage={stage}",
+                f"elapsed_s={now_s - start_s:.3f}",
+                f"total_s={now_s - self._total_start_s:.3f}",
+                f"status={status}",
+            ]
+            if start_us is not None:
+                end_us = int(getattr(sim_clock, "sim_time_us", 0))
+                parts.append(f"sim_elapsed_s={(end_us - start_us) * 1e-6:.3f}")
+            self._emit(" ".join(parts))
+
     def start(self) -> float:
         return time.monotonic()
 
     def total_start(self) -> float:
         return self._total_start_s
-
-
-def report(message: str) -> None:
-    """Emit a line intended to survive Makefile log filtering."""
-    print(f"{TEST_OUTPUT_PREFIX} {message}", file=sys.__stderr__, flush=True)
 
 
 def _repo_root() -> Path:

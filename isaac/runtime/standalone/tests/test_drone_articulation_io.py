@@ -114,6 +114,7 @@ def _run_test(context: SceneTestContext) -> None:
 
         context.report(f"{TEST_NAME}: reading spawned drone state")
         state = articulation_io.read_state(sim_time_us=int(PHYSICS_DT_S * 1_000_000))
+        context.report_vehicle_state(f"{TEST_NAME}: initial drone state", state)
         _assert_vehicle_state(state, sim_time_us=int(PHYSICS_DT_S * 1_000_000))
 
         forces_n = np.full(len(rotor_paths), 0.25, dtype=np.float64)
@@ -124,6 +125,7 @@ def _run_test(context: SceneTestContext) -> None:
         state_after_force = articulation_io.read_state(
             sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000)
         )
+        context.report_vehicle_state(f"{TEST_NAME}: post-force drone state", state_after_force)
         _assert_vehicle_state(state_after_force, sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000))
     finally:
         context.report(f"{TEST_NAME}: stopping timeline and despawning drone")
