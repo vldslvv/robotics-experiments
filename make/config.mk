@@ -33,7 +33,7 @@ PX4_PROMPT_FILTER = sed -u -E "s|\r|\n|g" | sed -u -E "s|^pxh>[[:space:]]*||; /^
 INTEGRATION_VERBOSE ?= 0
 INTEGRATION_LOG_TAIL_LINES ?= 120
 INTEGRATION_ROOT ?= $(BUILD_ROOT)/integration
-INTEGRATION_TEST_JOBS ?= 2
+INTEGRATION_TEST_JOBS ?= 1
 SCENE                ?= @isaac/assets/TestScenes/MinimalIntegration.usda
 
 # Host paths for persistence

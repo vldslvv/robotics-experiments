@@ -33,11 +33,11 @@ ISAAC_DOCKER_VOLUMES = \
 	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
 
 ISAAC_INTEGRATION_DOCKER_VOLUMES = \
-	-v $${ISAAC_RUN_ROOT}/kit-cache:/isaac-sim/kit/cache \
-	-v $${ISAAC_RUN_ROOT}/ov-cache:/isaac-sim/.cache/ov \
-	-v $${ISAAC_RUN_ROOT}/pip-cache:/isaac-sim/.cache/pip \
-	-v $${ISAAC_RUN_ROOT}/gl-cache:/isaac-sim/.cache/nvidia/GLCache \
-	-v $${ISAAC_RUN_ROOT}/compute-cache:/isaac-sim/.nv/ComputeCache \
+	-v $(ISAAC_KIT_CACHE):/isaac-sim/kit/cache \
+	-v $(ISAAC_OV_CACHE):/isaac-sim/.cache/ov \
+	-v $(ISAAC_PIP_CACHE):/isaac-sim/.cache/pip \
+	-v $(ISAAC_GLCACHE):/isaac-sim/.cache/nvidia/GLCache \
+	-v $(ISAAC_COMPUTEC):/isaac-sim/.nv/ComputeCache \
 	-v $${ISAAC_RUN_ROOT}/logs:/isaac-sim/.nvidia-omniverse/logs \
 	-v $${ISAAC_RUN_ROOT}/data:/isaac-sim/.local/share/ov/data \
 	-v $${ISAAC_RUN_ROOT}/documents:/isaac-sim/Documents \

@@ -12,6 +12,27 @@ INTEGRATION_TEST_TARGETS = \
     test-integration-px4-takeoff-instability
 
 INTEGRATION_RUN_ROOT = $(INTEGRATION_ROOT)/$(1).$$(date -u +%Y%m%dT%H%M%SZ).$$$$
+ISAAC_CACHE_WARMUP_RUNNER = make/warm_isaac_cache.sh
+
+define RUN_ISAAC_CACHE_WARMUP
+@run_root="$(call INTEGRATION_RUN_ROOT,test-integration-warm-isaac-cache)"; \
+    ISAAC_RUN_ROOT="$$run_root/isaac"; \
+    HOST_TIMING_LOG="$$run_root/integration-timing.log"; \
+    CONTAINER_TIMING_LOG="$(ISAAC_PROJECT_DIR)/.build/docker/integration/$$(basename "$$run_root")/integration-timing.log"; \
+    mkdir -p "$$ISAAC_RUN_ROOT" $(ISAAC_RUNTIME_DIRS); \
+    echo "Integration artifacts: $$run_root"; \
+    TEST_TARGET='test-integration-warm-isaac-cache' \
+        HOST_TIMING_LOG="$$HOST_TIMING_LOG" \
+        CONTAINER_TIMING_LOG="$$CONTAINER_TIMING_LOG" \
+        ISAAC_DOCKER_RUNTIME='$(ISAAC_INTEGRATION_DOCKER_RUNTIME)' \
+        ISAAC_DOCKER_ENV='$(ISAAC_DOCKER_ENV)' \
+        ISAAC_DOCKER_VOLUMES='$(ISAAC_INTEGRATION_DOCKER_VOLUMES)' \
+        ISAAC_IMAGE='$(ISAAC_IMAGE)' \
+        ISAAC_PYTHON='$(ISAAC_PYTHON)' \
+        ISAAC_RUN_ROOT="$$ISAAC_RUN_ROOT" \
+        ISAAC_TEST_ERROR_FILTER='$(ISAAC_TEST_ERROR_FILTER)' \
+        bash "$(ISAAC_CACHE_WARMUP_RUNNER)"
+endef
 
 define RUN_ISAAC_INTEGRATION_TEST
 @run_root="$(call INTEGRATION_RUN_ROOT,$(1))"; \
@@ -19,7 +40,7 @@ define RUN_ISAAC_INTEGRATION_TEST
     HOST_TIMING_LOG="$$run_root/integration-timing.log"; \
     CONTAINER_TIMING_LOG="$(ISAAC_PROJECT_DIR)/.build/docker/integration/$$(basename "$$run_root")/integration-timing.log"; \
     run_start_ms=$$(date +%s%3N); \
-    mkdir -p "$$ISAAC_RUN_ROOT"; \
+    mkdir -p "$$ISAAC_RUN_ROOT" $(ISAAC_RUNTIME_DIRS); \
     : >"$$HOST_TIMING_LOG"; \
     echo "Integration artifacts: $$run_root"; \
     host_fmt_ms() { ms="$$1"; printf "%s.%03d" "$$((ms / 1000))" "$$((ms % 1000))"; }; \
@@ -74,7 +95,7 @@ define RUN_PX4_INTEGRATION_TEST
     PX4_RUN_ROOT="$$run_root/px4"; \
     HOST_TIMING_LOG="$$run_root/integration-timing.log"; \
     CONTAINER_TIMING_LOG="$(ISAAC_PROJECT_DIR)/.build/docker/integration/$$(basename "$$run_root")/integration-timing.log"; \
-    mkdir -p "$$ISAAC_RUN_ROOT" "$$PX4_RUN_ROOT/logs" "$$PX4_RUN_ROOT/eeprom"; \
+    mkdir -p "$$ISAAC_RUN_ROOT" "$$PX4_RUN_ROOT/logs" "$$PX4_RUN_ROOT/eeprom" $(ISAAC_RUNTIME_DIRS); \
     : >"$$HOST_TIMING_LOG"; \
     echo "Integration artifacts: $$run_root"; \
     TEST_TARGET='$(1)' \
@@ -93,8 +114,12 @@ define RUN_PX4_INTEGRATION_TEST
         bash "$(PX4_INTEGRATION_RUNNER)"
 endef
 
+.PHONY: test-integration-warm-isaac-cache
+test-integration-warm-isaac-cache:
+	$(call RUN_ISAAC_CACHE_WARMUP)
+
 .PHONY: test-integration-all
-test-integration-all:
+test-integration-all: test-integration-warm-isaac-cache
 	@mkdir -p "$(INTEGRATION_ROOT)"; \
 	results_file="$(BUILD_ROOT)/integration-test-results.$$$$"; \
 	: >"$$results_file"; \

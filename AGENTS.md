@@ -330,6 +330,10 @@ the host. They are meant to be used in the Dockerized environment.
     with `args: []` (not the default `--default-schema-catalogs`) because that
     schemastore catalog endpoint fails to decode at taplo v0.9.3; the per-file
     schema in `.taplo.toml` still validates pyproject.toml over the network.
+- Keep Make recipes thin. If Makefile logic grows into a complex Bash script
+  with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
+  it into a separate shell script and let Make prepare variables and call that
+  script.
 - `make test-integration` runs container-backed integration tests.
 - `make test-integration-all` runs every integration test target using isolated
   transient containers and prints an aggregate passed/failed summary after all
@@ -347,6 +351,14 @@ the host. They are meant to be used in the Dockerized environment.
   scenarios do not validate warehouse interactions. Override with
   `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual
   warehouse run is needed.
+- Integration Isaac runs share the persistent Isaac cache mounts under
+  `isaac/isaac-sim/cache/` to avoid repeating identical Kit, OV, pip, GL, and
+  Compute cache initialization. Per-run logs, data, documents, PX4 logs, and
+  timing artifacts remain isolated under `.build/docker/integration/<target>.<run-id>/`.
+- `make test-integration-all` first runs `test-integration-warm-isaac-cache`
+  before launching integration targets in parallel. This makes cold or cleared
+  shared-cache initialization single-writer, then lets the real test fan-out use
+  warmed caches.
 - Integration logs include structured timing lines for performance triage.
   Host/container stages use `[integration-timing] target=... stage=...
   elapsed_s=... total_s=... status=...`; standalone Isaac stages use
@@ -476,6 +488,8 @@ the host. They are meant to be used in the Dockerized environment.
   safety padding.
 - Every behavior change must be reflected in this file when it changes project conventions,
   error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
+- After implementing a task, run `uv run pre-commit run --all-files` and fix any
+  issues it reports before considering the task complete.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.

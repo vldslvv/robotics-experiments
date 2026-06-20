@@ -193,9 +193,9 @@ fi
 integration_timing "px4_readiness_wait" "${stage_start_ms}"
 echo "PX4 simulator is waiting for Isaac on TCP port 4560."
 
+stage_start_ms="$(now_ms)"
 # The Docker option variables are Make-provided argument fragments.
 # shellcheck disable=SC2086
-stage_start_ms="$(now_ms)"
 if docker run --rm \
     --network "container:${PX4_TEST_CONTAINER_NAME}" \
     ${ISAAC_DOCKER_RUNTIME} \
