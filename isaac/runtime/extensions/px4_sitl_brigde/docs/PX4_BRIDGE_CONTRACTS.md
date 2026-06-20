@@ -35,6 +35,17 @@ these silently corrupts the flight or the lockstep loop.
 - **Non-finite state raises.** A NaN/Inf vehicle state is unrecoverable; the
   bridge logs it and raises rather than forwarding it into lockstep (Contract 1,
   *Failure semantics*).
+- **Sensor cadence == physics cadence.** The IMU must refresh on every tick the
+  bridge sends; if it does not, the bridge disconnects with "sensor cadence
+  mismatch" rather than shipping `HIL_SENSOR` packets with cleared accel/gyro
+  bits (Contract 2, *Sensor cadence and actuator freshness*).
+- **Fresh actuators only.** Prime-then-block startup prevents a stale actuator
+  backlog; after PX4's first actuator the queue is drained newest-last, and a
+  persistently stale backlog trips `max_sustained_actuator_lag_s` (Contract 2,
+  *Sensor cadence and actuator freshness*).
+- **Gating preserves lockstep.** Safety gating zeros applied rotor forces only;
+  the per-tick MAVLink exchange still runs so `HIL_SENSOR.time_usec` keeps
+  advancing (Contract 2, *Sensor cadence and actuator freshness*).
 
 ## Scope and non-scope
 
@@ -88,6 +99,10 @@ These conventions MUST be documented in a single `frames.py` module and never cr
 - **Stage up-axis:** Isaac Sim defaults vary. Many demos use Y-up; most robotics scenes (and Pegasus) use Z-up. Confirm the project's choice once and treat it as fixed. PX4 expects ENU world (X-east, Y-north, Z-up). The bridge converts at the boundary.
 - **Quaternion ordering:** Isaac's `get_world_pose` returns `(w, x, y, z)`. Some other Isaac APIs return `(x, y, z, w)`. The bridge accepts ONE convention only and converts at the input boundary.
 - **PX4 body frame:** FLU (X-forward, Y-left, Z-up).
+- **Angular velocity is world-frame.** Isaac articulation angular velocity is
+  world-frame data and MUST be rotated into body-FLU before MAVLink converts it
+  to PX4 body-FRD gyro fields. Treating it as already body-frame was the root
+  cause of a past takeoff attitude divergence.
 
 ### Returned commands (Bridge → Isaac each tick)
 
@@ -126,7 +141,11 @@ For PX4's `Octocopter Coaxial X` (Stage 2 X8): 8 motors with airframe-specific u
 
 A wrong list means the drone arms, spins up, and immediately flips. Rotor
 discovery must validate that marker paths resolve, are unique, have plausible
-arm geometry, and match authored spin direction metadata where present.
+arm geometry, and match authored spin direction metadata where present. The
+default runtime discovers markers from USD metadata: prims with
+`drone:rotorMarker = true`, ordered by `drone:px4MotorIndex`, with spin from
+`drone:spinDir`. PX4 geometry is FRD while Isaac marker positions are FLU, so PX4
+right maps to Isaac negative Y when resolving marker positions.
 
 ### Construction ownership
 
@@ -448,6 +467,63 @@ Bridge sends HIL_SENSOR(t=N+dt)   ── loop
 - **Timeouts MUST exist.** Recommended default: 100 ms. If PX4 doesn't reply in 100 ms, the bridge marks itself disconnected, returns zero commands, and lets the surrounding system handle recovery. A frozen lockstep without a timeout means a frozen Isaac Sim.
 - **Timestamps MUST be sim time, not wall clock.** PX4 uses `HIL_SENSOR.time_usec` to advance its own clock. Wall-clock timestamps break lockstep. The bridge passes `sim_time_us` straight through to `HIL_SENSOR.time_usec`.
 - **Sim speed scaling works for free.** If Isaac runs at 0.5× real time, PX4's clock advances at 0.5× real time. Same for 2× speedup. PX4 has no notion of wall-clock.
+
+### Sensor cadence and actuator freshness
+
+These guards keep the lockstep loop fed with fresh data on both legs. They are
+project-specific hardening beyond the bare lockstep algorithm above; each maps to
+a `LockstepSettings` field and a distinct fatal disconnect reason. Behavior is
+implemented in `src/robotics_experiments/px4_bridge/mavlink.py`.
+
+**Sensor cadence is the physics cadence.** `sim.physics_hz` is the single source
+of truth for both the Isaac physics rate and the PX4 sensor rate; the host plumbs
+it into the port as `LockstepSettings.physics_rate_hz` (there is no separate
+sensor-rate knob to drift). The integer-microsecond tick is derived in exactly
+one place -- `physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
+the port and by `SimClock`. The port pins the Pegasus sensor `update_period` to
+that integer-microsecond tick (rate `1e6 / tick_us`), not `1/physics_rate_hz`, so
+the `update_at_rate` gate fires on every physics step at any rate;
+`1/physics_rate_hz` can sit a float ULP above the per-tick dt (for example at
+333 Hz) and refresh the IMU only every other tick, shipping half the `HIL_SENSOR`
+packets with the accel/gyro bits cleared. If the IMU does not refresh on a tick
+the bridge is about to send (Isaac stepping faster than the configured sensor
+rate), that is a fatal misconfiguration, not a recoverable state: the bridge
+disconnects with the distinct **"sensor cadence mismatch"** reason and returns
+zero rotor commands.
+
+**Prime-then-block startup (no actuator backlog).** PX4 needs a few priming
+`HIL_SENSOR` packets while it boots before it emits its first actuator. If Isaac
+free-runs during that window it floods PX4 and builds a FIFO backlog of
+stale-timestamp actuators that may never drain (host-load dependent) and
+destabilizes takeoff. The bridge therefore sends at most `bootstrap_prime_ticks`
+priming sensor packets non-blocking, then blocks (up to `first_actuator_timeout_s`,
+larger than `lockstep_timeout_s` because PX4 boot takes seconds of wallclock) for
+the first actuator. `bootstrap_prime_ticks` must exceed PX4's boot sensor need
+(~15) or the first-actuator wait times out and the bridge disconnects. This bounds
+the backlog to ~`bootstrap_prime_ticks` ticks, so steady-state actuator lag stays
+~1 tick regardless of host load -- a deliberate improvement over upstream Pegasus,
+which also free-runs before the first actuator but blocks without a timeout or
+drain.
+
+**Fresh actuators (drain the backlog).** Once PX4 has produced its first
+`HIL_ACTUATOR_CONTROLS`, the bridge drains queued actuator messages after each
+sensor tick and applies the newest packet, so it never flies a stale queued
+command.
+
+**Sustained-lag tripwire.** `max_sustained_actuator_lag_s` is a safety tripwire on
+steady-state actuator lag (current sim time minus the newest applied actuator
+timestamp), not a happy-path control. Strict blocking lockstep already holds the
+lag at ~1 tick, prime-then-block prevents the startup backlog, and a PX4 stall is
+caught by `lockstep_timeout_s`. The ceiling catches the one remaining failure mode
+-- a regression that reintroduces a stale-but-still-flowing backlog (PX4 keeps
+answering, but with persistently old timestamps). On exceed the bridge disconnects
+with the distinct **"actuator lag exceeded sustained limit"** reason and returns
+zero rotor commands.
+
+**Safety gating preserves lockstep.** Safety gating gates only the applied rotor
+forces, never the per-tick exchange. The tilt cutoff (`max_tilt_angle_deg`) zeros
+forces and skips body torque/drag but still calls the MAVLink `step` every tick,
+so `HIL_SENSOR.time_usec` keeps advancing and lockstep is preserved.
 
 ### PX4-specific failure modes
 

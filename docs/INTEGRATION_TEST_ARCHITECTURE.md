@@ -1,0 +1,85 @@
+# Integration-test architecture
+
+This is the architecture and rationale for the container-backed integration
+tests. `AGENTS.md` keeps the command entrypoints; the orchestration, caching,
+artifact-isolation, and timing details live here. The authoritative definitions
+are `make/integration-tests.mk`, `make/config.mk`, and
+`make/warm_isaac_cache.sh` -- if this doc disagrees with them, the makefiles win
+and this doc should be corrected.
+
+The standalone Isaac test scripts these targets run live under
+`isaac/runtime/standalone/tests/`; see that directory's `README.md` for
+scenario-specific notes.
+
+## Targets
+
+- `make test-integration` runs `test-integration-isaac` and
+  `test-integration-px4-takeoff`.
+- `make test-integration-all` runs every target in `INTEGRATION_TEST_TARGETS`:
+  `test-integration-isaac`, `test-integration-drone-articulation`,
+  `test-integration-px4-takeoff`, and `test-integration-px4-takeoff-instability`.
+  It prints an aggregate passed/failed summary after all targets finish.
+- `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
+  the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
+  artifacts, and removes the temporary PX4 container.
+- `make test-integration-px4-takeoff-instability` runs the same scenario with a
+  test-local PX4 rotor mapping fault and passes only when the stability envelope
+  detects the resulting instability.
+
+## Concurrency
+
+`make test-integration-all` fans the targets out with
+`xargs -P "$(INTEGRATION_TEST_JOBS)"`. **`INTEGRATION_TEST_JOBS` defaults to `1`**
+(serial; `make/config.mk`). Raise it (for example `INTEGRATION_TEST_JOBS=3`) when
+the host can sustain more parallelism. Higher concurrency risks Isaac/GPU
+resource starvation and the host-load-dependent PX4 SITL startup actuator backlog
+that destabilizes takeoff, so increase it only on a host that can keep up.
+
+## Warm-cache pre-stage
+
+`make test-integration-all` depends on `test-integration-warm-isaac-cache`, which
+runs first via `make/warm_isaac_cache.sh`. It does a one-off `pip install` of the
+test deps and a headless `SimulationApp` start/stop inside the Isaac image. This
+makes cold or cleared shared-cache initialization single-writer, then lets the
+real test fan-out use warmed caches instead of each parallel target racing to
+initialize identical caches.
+
+## Shared cache vs isolated artifacts
+
+Integration Isaac runs share the persistent Isaac cache mounts under
+`isaac/isaac-sim/cache/` (`kit`, `ov`, `pip`, `glcache`, `computecache`; see
+`make/config.mk`) to avoid repeating identical Kit, OV, pip, GL, and Compute
+cache initialization.
+
+Per-run logs, data, PX4 logs, and timing artifacts are isolated under
+`.build/docker/integration/<target>.<run-id>/`, where `<run-id>` is a UTC
+timestamp plus the shell PID (`$(1).$(date -u +%Y%m%dT%H%M%SZ).$$`), so parallel
+runs never share PX4 state or diagnostics. PX4 runs additionally get isolated
+`px4/logs` and `px4/eeprom` subdirectories and a per-run PX4 container name.
+
+## Structured timing lines
+
+Logs include structured timing lines for performance triage:
+
+- Host/container stages:
+  `[integration-timing] target=... stage=... elapsed_s=... total_s=... status=...`
+- Standalone Isaac stages:
+  `[isaac-standalone-test] TIMING test=... stage=... elapsed_s=... total_s=...`
+
+PX4 scenario stage timings also include `sim_elapsed_s=...` when the stage
+advances simulated time. Each per-run artifact directory persists the
+host/container timing lines in `integration-timing.log`.
+
+Standalone integration logs that report drone state use the shared `_runtime.py`
+vector formatter and include full ENU position and linear velocity
+(`pos_enu_m=(x=..., y=..., z=...)`, `vel_enu_m_s=(x=..., y=..., z=...)`) for
+flight-performance triage.
+
+## Scene selection
+
+Integration tests default to the minimal
+`@isaac/assets/TestScenes/MinimalIntegration.usda` scene (`SCENE` in
+`make/config.mk`) because the current scenarios do not validate warehouse
+interactions. Override with
+`SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual warehouse
+run is needed.

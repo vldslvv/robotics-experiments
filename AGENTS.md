@@ -107,123 +107,35 @@ the current contents and the intended home for that kind of code.
   group (override e.g. `px4.lockstep.lockstep_timeout_s=...`), mapped to the
   library `LockstepSettings` dataclass at construction; `physics_rate_hz` is not
   a YAML knob there but injected from `sim.physics_hz`.
-- The PX4 bridge presents a four-part contract (see
-  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`):
-  pure-data state objects (the per-tick flow is fully typed,
-  `VehicleState` in -> `ActuatorCommands` -> `RotorDynamics` out, plus the
-  `BridgeStatus` snapshot), the `LockstepSettings` object, the flight-stack
-  port's single-call lockstep seam, and the Isaac sink. The port exposes one
-  `exchange(state) -> ActuatorCommands` method: it sends `HIL_SENSOR` to PX4 and
-  then blocks for the paired actuator commands, as one indivisible causal tick.
-  `ActuatorCommands` carries the per-motor PX4 actuator references (commands, not
-  forces); the thrust model converts it to `RotorDynamics`, and the physical
-  interpretation of the references is owned by the thrust model. The
-  send and the blocking receive are deliberately not separately callable, so the
-  lockstep order cannot be broken from the caller side (`Px4Bridge.
-  on_physics_step` is the canonical caller). The Isaac side exposes a single
-  `ArticulationIO.apply_dynamics(RotorDynamics)` sink (rotor forces at markers
-  plus body torque and drag). The vendored Pegasus backend stays hidden behind
-  `Px4MavlinkPort`.
-- Isaac articulation angular velocity is treated as world-frame data and must
-  be rotated into body-FLU before MAVLink converts it to PX4 body-FRD gyro
-  fields.
-- USD rotor marker metadata identifies thrust marker prims in PX4 motor-index
-  order. The bridge discovers prims with `drone:rotorMarker = true`, orders
-  them by `drone:px4MotorIndex`, and derives spin from `drone:spinDir`. The
-  Isaac adapter applies thrust to the drone rigid body at those marker
-  positions; marker prims must not be treated as separate free rotor rigid
-  bodies unless joints are explicitly authored for that topology.
-- For `none_iris` / Generic Quad X, PX4 motor-index order is
-  front-right CW, rear-left CW, front-left CCW, rear-right CCW. PX4 geometry is
-  FRD, while Isaac marker positions are FLU, so PX4 right maps to Isaac
-  negative Y when resolving USD marker positions.
-- PX4 lockstep requires strictly increasing `HIL_SENSOR.time_usec` values.
-  If Isaac emits duplicate or non-increasing physics timestamps, the bridge
-  must not forward another HIL sensor tick or wait for a new actuator packet.
-- The PX4 sensor cadence is the Isaac physics cadence. `sim.physics_hz` is the
-  single source of truth for both; the drone-spawner host plumbs it into
-  `Px4MavlinkPort` as `LockstepSettings.physics_rate_hz` (there is no separate
-  PX4 sensor-rate config knob to drift). The integer-microsecond tick is derived
-  in exactly one place -- the `physics_tick_us(physics_hz)` helper in
-  `px4_bridge/sim_clock.py`, shared by the port and by `SimClock` (the
-  drone-spawner host's sim-time counter, which owns the monotonic accumulation
-  and the post-settle offset). The port pins the Pegasus sensor `update_period`
-  to that integer-microsecond physics tick (rate derived as `1e6 / tick_us`)
-  rather than
-  `1/physics_rate_hz`, so the `update_at_rate` gate fires on every physics step
-  at any rate. Pegasus computes the period as `1/rate` and the suite computes the
-  per-tick dt from integer-microsecond `sim_time_us` deltas; `1/physics_rate_hz`
-  can sit a float ULP above that dt (for example at 333 Hz), which would refresh
-  the IMU only every other tick and ship half the `HIL_SENSOR` packets with the
-  accel/gyro bits cleared. If the IMU does not refresh on a tick the bridge is
-  about to send (Isaac physics stepping faster than the configured sensor rate),
-  that is a fatal misconfiguration, not a recoverable runtime state: the bridge
-  disconnects with the distinct "sensor cadence mismatch" reason and returns zero
-  rotor commands, rather than silently degrading the sensor stream.
-- PX4 actuator lockstep must use fresh actuator packets. Once PX4 has produced
-  its first `HIL_ACTUATOR_CONTROLS` packet, the bridge drains queued actuator
-  messages after each sensor tick and applies the newest packet.
-- The bridge must prevent a startup actuator backlog from forming, because a
-  backlog makes it fly on stale motor commands and destabilizes takeoff. PX4
-  needs a few priming `HIL_SENSOR` packets while it boots before it emits its
-  first actuator; if Isaac free-runs during that window it floods PX4 and builds
-  a backlog that PX4 then delivers FIFO with stale timestamps and that may never
-  drain (host-load dependent). The bridge therefore sends at most
-  `px4.bootstrap_prime_ticks` priming sensor packets non-blocking, then blocks
-  (up to `px4.first_actuator_timeout_s`, which is larger than
-  `lockstep_timeout_s` because PX4 boot takes seconds of wallclock) for the first
-  actuator instead of racing ahead. `bootstrap_prime_ticks` must exceed PX4's
-  boot sensor need (~15) or the first-actuator wait times out and the bridge
-  disconnects. This bounds the backlog to ~`bootstrap_prime_ticks` ticks, so the
-  steady-state actuator lag stays ~1 tick regardless of host load. This is a
-  deliberate improvement over upstream Pegasus, which also free-runs before the
-  first actuator (it merely avoids the backlog by running near real-time) and
-  blocks without a timeout and without draining.
-- `px4.max_sustained_actuator_lag_s` is a safety tripwire on steady-state
-  actuator lag (current sim time minus the newest applied actuator timestamp),
-  not a happy-path control. Strict blocking lockstep already holds the lag at ~1
-  tick, prime-then-block prevents the startup backlog, and a PX4 stall is caught
-  by `lockstep_timeout_s`. The ceiling exists to catch the one remaining failure
-  mode -- a regression that reintroduces a stale-but-still-flowing actuator
-  backlog (PX4 keeps answering, but with persistently old timestamps) -- which
-  would otherwise silently fly stale motor commands. On exceed the bridge
-  disconnects with the distinct "actuator lag exceeded sustained limit" reason
-  and returns zero rotor commands.
-- Bridge safety gating must gate only the applied rotor forces, never the
-  per-tick sensor/actuator exchange. The tilt cutoff zeros forces (and skips
-  body torque/drag) but still calls the MAVLink `step` every tick so
-  `HIL_SENSOR.time_usec` keeps advancing and lockstep is preserved. A
-  non-finite vehicle state is treated as unrecoverable corruption: the bridge
-  logs the offending state and raises rather than forwarding NaN/Inf into the
-  lockstep exchange.
+- The PX4 bridge's full interface contract lives in
+  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` -- read
+  it before changing bridge code. It is the single source for the four-part
+  contract (`VehicleState` -> `ActuatorCommands` -> `RotorDynamics` plus the
+  `BridgeStatus` snapshot, the `LockstepSettings` object, the single-call
+  `exchange(state)` lockstep seam, and the `ArticulationIO.apply_dynamics` Isaac
+  sink), the frame conventions, motor-index ordering, the lockstep algorithm, and
+  the cadence/actuator-freshness guards. Load-bearing invariants you must not
+  break (all detailed there): `HIL_SENSOR.time_usec` strictly increasing from sim
+  time; the `exchange()` send+blocking-recv is one indivisible tick; angular
+  velocity is rotated world -> body-FLU before the FRD gyro conversion; sensor
+  cadence must equal physics cadence (else disconnect "sensor cadence mismatch");
+  prime-then-block startup plus newest-packet draining keep actuators fresh
+  (backlog trips `max_sustained_actuator_lag_s`); safety gating zeros forces only,
+  never the per-tick exchange; a non-finite vehicle state raises.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
   `isaac/runtime/extensions/px4_sitl_brigde/pegasus/` is a vendored, stripped,
   unpinned source snapshot (not a PyPI dependency), reduced to the modules the
   PX4 bridge transitively imports and excluded from ruff/mypy via
-  `pyproject.toml`.
-  `isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` is the single
-  source of truth for its provenance (upstream repo/license, commit currently
-  `UNKNOWN`), the reachable module set, and the divergence index. Update that
-  file -- not just code comments -- when the snapshot or a divergence changes.
-- The project's deviations from upstream Pegasus are load-bearing fixes, not
-  drift, and each has a guarding unit test: GPS ground-truth lat/lon in degrees
-  (`gps.py`), accumulated barometer drift (`barometer.py`), the `HIL_SENSOR` 14th
-  field carrying temperature not GPS altitude (`px4_mavlink_backend.py`), and
-  bridge-side sim-time lockstep (`_pegasus_sensors.py`, documented in
-  `mavlink.py`). The three in-tree divergences carry inline
-  `# Intentional divergence from upstream Pegasus` comments that point at
-  PROVENANCE.md. Never "sync them away."
-- `px4_launch_tool.py` and the `px4_autolaunch` branches in
-  `px4_mavlink_backend.py` are retained verbatim from upstream but dead at
-  runtime: the bridge constructs the backend with `px4_autolaunch=False` and PX4
-  SITL is launched separately (`make run-px4`). They are kept to minimize
-  divergence, not because they run.
-- A re-sync is mechanical: record the upstream commit in PROVENANCE.md, diff
-  upstream into the reachable module set only, re-apply each indexed divergence,
-  then run `uv run pytest tests/` (the four guarding tests are the drift guard)
-  and the smoke tests under `isaac/runtime/extensions/px4_sitl_brigde/tests/`.
+  `pyproject.toml`. The project's deviations from upstream are load-bearing fixes,
+  each with a guarding unit test -- never "sync them away."
+- `isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` is the single
+  source of truth: upstream repo/license and synced commit, the reachable module
+  set, the dead-at-runtime modules, the full divergence index (with guarding
+  tests), and the re-sync procedure. Read it before touching the vendored tree or
+  re-syncing, and update it -- not just code comments -- when the snapshot or a
+  divergence changes.
 
 ## Python environment
 - This project uses `uv` for all host-side Python work. Do not call `pip`,
@@ -285,91 +197,29 @@ the host. They are meant to be used in the Dockerized environment.
   `tests/test_px4_bridge_gating.py` (there is no single `test_px4_bridge.py`).
 - pre-commit is the local quality gate; there is no CI pipeline (local-only for
   now). Install it once with `uv run pre-commit install` and run it with
-  `uv run pre-commit run --all-files`. ruff and mypy run as mirror hooks
-  (per-changed-file, self-bootstrapping, ruff auto-fixes on commit) with their
-  `rev:` kept in sync with the `dev` extra in `pyproject.toml`; `pytest` runs as
-  a `repo: local` hook through the project venv over the whole suite. mypy is
-  scoped to `src`/`tests` (the typed tree; the isaac/runtime and vendored
-  pegasus trees only yield false positives in the mirror's isolated env).
-  Because the mirror hooks only see staged files, they are not a whole-repo
-  gate -- run `uv run ruff check` / `uv run ruff format --check` /
-  `uv run mypy src tests` for a full sweep. Vendored Pegasus stays excluded from
-  ruff/mypy via `pyproject.toml`.
-- The enforced gate also runs the official `uv-lock` hook
-  (`astral-sh/uv-pre-commit`), which regenerates `uv.lock` and fails on drift,
-  reinforcing the `uv lock --check` hard rule, and `hadolint` (`Dockerfile`),
-  whose findings have been addressed. hadolint's intentional ignores live in
-  `.hadolint.yaml` at the repo root: these are dev/sim images where the goal is
-  a workable system inside the container, not a minimal production image, so
-  root USER (GPU/NVML/Vulkan needs root), apt cache retention, and apt/pip/npm
-  version pinning are ignored project-wide, while genuine correctness lints
-  (DL4006 pipefail, SC2086 quoting) are fixed in the Dockerfile. shellcheck
-  (shell scripts) is enforced on commit now that its findings are addressed; the
-  only ones needed were SC1090 source directives in the `px4/docker` run scripts
-  (`# shellcheck source-path=SCRIPTDIR` + `# shellcheck source=...`), so it lints
-  the sourced helper instead of skipping it. checkmake was evaluated and removed:
-  its rules misfire on this repo's include-split, variable-heavy makefiles
-  (minphony cannot follow `include`s so it flags missing `all`/`clean`/`test` on
-  every file; the `:`-bearing docker-run continuation lines in `make/docker.mk`
-  are misparsed as duplicate/oversized targets) and it surfaced no real issues.
-  These hooks (uv-lock, shellcheck, hadolint) are new tooling added by explicit
-  request; they self-bootstrap (no host shellcheck/hadolint or Docker needed).
-- The enforced gate also runs three text/config linters, all self-bootstrapping
-  and added by explicit request: `codespell` (misspellings across the doc-heavy
-  tree), `yamllint` (YAML semantics beyond the parse-only `check-yaml`:
-  duplicate keys, indentation, truthy ambiguity), and `taplo-lint` (TOML beyond
-  the parse-only `check-toml`). Their tunables live at the repo root:
-  - `.codespellrc`: skips the vendored Pegasus tree (mirrors the ruff
-    `extend-exclude`) and USD/lock files, and ignores the domain terms `sitl`
-    (PX4 Software-In-The-Loop), `ned` (North-East-Down frame), and `empy` (the
-    ROS-build templating package). Add real fixes; extend `ignore-words-list`
-    only for genuine domain vocabulary.
-  - `.yamllint.yaml`: `extends: default` with two relaxations -- `document-start`
-    disabled (Hydra configs use no `---` marker) and `line-length` raised to 120.
-  - `.taplo.toml`: associates the pyproject.toml schema directly. The hook runs
-    with `args: []` (not the default `--default-schema-catalogs`) because that
-    schemastore catalog endpoint fails to decode at taplo v0.9.3; the per-file
-    schema in `.taplo.toml` still validates pyproject.toml over the network.
+  `uv run pre-commit run --all-files`. The mirror hooks (ruff, mypy) only see
+  staged files, so for a full sweep run `uv run ruff check` /
+  `uv run ruff format --check` / `uv run mypy src tests`. The hook list and the
+  per-tool tunables (`.hadolint.yaml`, `.codespellrc`, `.yamllint.yaml`,
+  `.taplo.toml`) live in `.pre-commit-config.yaml` and those dotfiles at the repo
+  root.
 - Keep Make recipes thin. If Makefile logic grows into a complex Bash script
   with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
   it into a separate shell script and let Make prepare variables and call that
   script.
-- `make test-integration` runs container-backed integration tests.
-- `make test-integration-all` runs every integration test target using isolated
-  transient containers and prints an aggregate passed/failed summary after all
-  targets finish. It defaults to running 3 targets concurrently
-  (`INTEGRATION_TEST_JOBS=3`); lower it (for example `INTEGRATION_TEST_JOBS=1`
-  to run serially) to avoid Isaac/GPU resource starvation and the
-  host-load-dependent PX4 SITL startup actuator backlog that destabilizes
-  takeoff, or raise it when the host can sustain more.
-- Integration test Make targets are defined in `make/integration-tests.mk`.
-  Their standalone Isaac test scripts live under
-  `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
-  scenario-specific notes.
-- Integration tests default to the minimal
-  `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
-  scenarios do not validate warehouse interactions. Override with
-  `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual
-  warehouse run is needed.
-- Integration Isaac runs share the persistent Isaac cache mounts under
-  `isaac/isaac-sim/cache/` to avoid repeating identical Kit, OV, pip, GL, and
-  Compute cache initialization. Per-run logs, data, documents, PX4 logs, and
-  timing artifacts remain isolated under `.build/docker/integration/<target>.<run-id>/`.
-- `make test-integration-all` first runs `test-integration-warm-isaac-cache`
-  before launching integration targets in parallel. This makes cold or cleared
-  shared-cache initialization single-writer, then lets the real test fan-out use
-  warmed caches.
-- Integration logs include structured timing lines for performance triage.
-  Host/container stages use `[integration-timing] target=... stage=...
-  elapsed_s=... total_s=... status=...`; standalone Isaac stages use
-  `[isaac-standalone-test] TIMING test=... stage=... elapsed_s=... total_s=...`.
-  PX4 scenario stage timings also include `sim_elapsed_s=...` when the stage
-  advances simulated time. Each per-run artifact directory also persists the
-  host/container timing lines in `integration-timing.log`.
-- Standalone integration logs that report drone state use the shared
-  `_runtime.py` vector formatter and include full ENU position and linear
-  velocity (`pos_enu_m=(x=..., y=..., z=...)`,
-  `vel_enu_m_s=(x=..., y=..., z=...)`) for flight-performance triage.
+- `make test-integration` runs container-backed integration tests;
+  `make test-integration-all` runs every target (Isaac, drone-articulation, and
+  the two PX4 takeoff scenarios) with isolated transient containers and prints an
+  aggregate passed/failed summary. Targets are defined in
+  `make/integration-tests.mk`; their standalone Isaac scripts live under
+  `isaac/runtime/standalone/tests/` (see its `README.md` for scenario notes).
+- The integration harness internals -- `INTEGRATION_TEST_JOBS` concurrency
+  (default 1, serial; raise it only when the host can sustain more), the
+  warm-Isaac-cache pre-stage, shared cache mounts vs per-run artifact isolation
+  under `.build/docker/integration/<target>.<run-id>/`, the `SCENE`
+  default/override, the structured timing-line formats, and the standalone
+  `_runtime.py` ENU pos/vel state logging -- are documented in
+  `docs/INTEGRATION_TEST_ARCHITECTURE.md`; read it before changing the harness.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
   runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
   isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and
@@ -384,82 +234,26 @@ the host. They are meant to be used in the Dockerized environment.
 - Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
   `make px4_sitl_default none_iris` from the PX4 source directory on demand.
 
-### Flight log analysis
-- Make targets in `make/flight-analysis.mk` run the host ULog analysis tools
-  through a throwaway `uv run --no-project --with pyulog --with numpy`
-  environment, so pyulog/numpy never enter the project `.venv`.
-- `make compare-logs A=<log_a.ulg> B=<log_b.ulg>` compares two PX4 ULogs and
-  prints a per-metric divergence table (horizontal drift, vertical range, speed,
-  tilt, yaw, body rates, motor effort). The comparison is symmetric and
-  origin-agnostic: any pairing works (sim-vs-real, sim-vs-sim, real-vs-real),
-  neither log is a reference, and swapping `A`/`B` only flips the sign of each
-  delta. Optional overrides: `ALIGN=takeoff|arm|none` (clock anchor, default
-  takeoff), `HOVER_LAST=<seconds>` (window, default 2.0), `WINDOW=START,END`,
-  `LABELS=A,B`, `CSV=<out.csv>` (aligned resampled series for plotting).
-- `make ulog-timeline ULOG=<log.ulg> [SAMPLES=10,11,12]` prints a focused
-  single-log flight timeline.
-- See `flight_analysis/README.md` for the required real-drone SDLOG topic set,
-  the NED / aiding-source caveats, and the underlying tool invocations.
-
-### PX4 bridge debugging
-- Use `flight_analysis/README.md` for the detailed repeatable log-analysis
-  workflow and helper scripts.
-- PX4 ULog files and custom bridge logs are persisted under
-  `px4/logs/<yyyy-mm-dd>/` for manual PX4 runs. Automated integration tests
-  keep PX4 logs, bridge logs, and Isaac logs under
-  `.build/docker/integration/<target>.<run-id>/` so parallel runs do not share
-  PX4 state or diagnostics.
-- PX4 creates the ULog when the SITL logger starts, before arm/takeoff. The
-  bridge creates its log when the Isaac bridge opens the PX4 MAVLink endpoint.
-  A normal paired run has matching names such as:
-  - `px4/logs/2026-06-10/23_20_44.ulg`
-  - `px4/logs/2026-06-10/23_20_44_bridge.log`
-- Pair logs by the date directory and `HH_MM_SS` stem first. If there are
-  nearby bridge logs with adjacent seconds, use file modification time and the
-  bridge first line (`PX4 MAVLink port constructed`) to confirm the pair.
-- Do not rely on `docker logs` alone for flight analysis. The PX4 terminal
-  scrollback can contain repeated starts and ANSI redraw output. Use it only to
-  identify high-level warnings, then inspect the persisted ULog and bridge log.
-- For a fresh run, `px4-iris` clears PX4 non-volatile SITL state but keeps
-  `px4/logs` persistent. If a warning might be stale, first confirm the latest
-  `.ulg` and `_bridge.log` modification times.
-- The bridge log records MAVLink connection, first heartbeat, first HIL sensor,
-  periodic sensor freshness, actuator controls, rotor mapping, per-rotor forces,
-  body torque/drag, pose, velocity, and stop counters. Use it to verify:
-  - `HIL_SENSOR.time_usec` is strictly increasing.
-  - `HIL_ACTUATOR_CONTROLS` timestamps stay close to sensor simulation time;
-    stale actuator lag means the bridge is applying old control outputs.
-  - `fresh={imu:True mag:True baro:True ...}` is present before send.
-  - `input_reference` and `commands` match expected PX4 actuator behavior.
-  - discovered rotor marker paths resolve to the expected body-frame positions
-    and spin directions for PX4 motor-index order.
-- Use the ULog to decide whether PX4 commanded the bad motion or the bridge
-  applied the command incorrectly. The minimum topics for flight divergence are:
-  `vehicle_command`, `vehicle_command_ack`, `vehicle_status`,
-  `vehicle_local_position`, `vehicle_local_position_setpoint`,
-  `trajectory_setpoint`, `vehicle_attitude`, `vehicle_attitude_setpoint`,
-  `vehicle_rates_setpoint`, `vehicle_thrust_setpoint`,
-  `vehicle_torque_setpoint`, `actuator_motors`, `actuator_outputs`,
-  `estimator_status`, `estimator_aid_src_mag_heading`,
-  `vehicle_magnetometer`, `vehicle_air_data`, `battery_status`,
-  `failsafe_flags`, `vehicle_land_detected`, and `takeoff_status`.
-- Interpret the logs in this order:
-  1. Confirm the ULog and bridge log are from the same run.
-  2. Check PX4 accepted `commander arm` / `commander takeoff` in
-     `vehicle_command_ack`.
-  3. Check `trajectory_setpoint` and `vehicle_local_position_setpoint` to see
-     whether PX4 requested lateral motion.
-  4. Compare `vehicle_attitude_setpoint` / `vehicle_rates_setpoint` against
-     actual `vehicle_attitude`.
-  5. Compare `actuator_motors` with bridge `input_reference`, `commands`, and
-     `forces_n`.
-  6. If PX4 commands a correction and the vehicle moves farther in the wrong
-     direction, suspect rotor order, thrust axis, body frame, or sign mismatch.
-  7. Treat compass/failsafe warnings that appear after the attitude diverges as
-     likely consequences unless estimator topics show rejection before motion.
-- If local ULog tools are unavailable, a temporary parser can be run with:
-  `env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python`.
-  Prefer extracting a focused topic summary over exporting every topic.
+### Flight log analysis and PX4 bridge debugging
+- `flight_analysis/README.md` is the single source for the repeatable flight-log
+  workflow. Read it when you start investigating an unstable flight, a diverging
+  takeoff, or a sim-to-real comparison; do not reconstruct the procedure from
+  this file. It documents the helper tools (`list_pairs.py`, `bridge_summary.py`,
+  `ulog_timeline.py`, `compare_logs.py`), the bridge-log fields, the minimum
+  ULog topic set and required real-drone SDLOG profile, the NED / aiding-source
+  caveats, and the step-by-step order for deciding whether PX4 commanded the bad
+  motion or the bridge applied it incorrectly.
+- Make targets in `make/flight-analysis.mk` run those tools through a throwaway
+  `uv run --no-project --with pyulog --with numpy` environment, so pyulog/numpy
+  never enter the project `.venv`: `make compare-logs A=<log_a.ulg> B=<log_b.ulg>`
+  prints a per-metric divergence table, and
+  `make ulog-timeline ULOG=<log.ulg> [SAMPLES=...]` prints a single-log timeline.
+- Debug from the persisted logs, not `docker logs` (PX4 terminal scrollback has
+  repeated starts and ANSI redraw noise; use it only for high-level warnings).
+  PX4 ULogs and bridge logs are persisted under `px4/logs/<yyyy-mm-dd>/` for
+  manual runs and under `.build/docker/integration/<target>.<run-id>/` for
+  integration tests; pair a ULog and bridge log by date directory and `HH_MM_SS`
+  stem.
 
 ## Hard rules
 - Do NOT commit binary files.
@@ -488,6 +282,14 @@ the host. They are meant to be used in the Dockerized environment.
   safety padding.
 - Every behavior change must be reflected in this file when it changes project conventions,
   error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
+- Per-area README and doc files are on-demand context: read a task's relevant doc
+  (for example `PX4_BRIDGE_CONTRACTS.md`, the Pegasus `PROVENANCE.md`,
+  `flight_analysis/README.md`, the standalone-test README, or
+  `docs/INTEGRATION_TEST_ARCHITECTURE.md`) only when the task actually touches
+  that area, not
+  preemptively. If a doc has diverged from the actual code, correct the doc as
+  part of the same task -- a doc fix is in scope whenever you change the code it
+  documents.
 - After implementing a task, run `uv run pre-commit run --all-files` and fix any
   issues it reports before considering the task complete.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
