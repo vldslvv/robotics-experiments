@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional, cast
 
@@ -14,6 +15,23 @@ _CACHED: Optional[EnvConfig] = None
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs" / "experiment"
 _DEFAULT_CONFIG_NAME = "config"
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+
+
+def _resolve_config_path() -> Path:
+    raw_path = os.environ.get(_CONFIG_PATH_ENV)
+    if raw_path is None or not raw_path.strip():
+        return _DEFAULT_CONF_DIR / f"{_DEFAULT_CONFIG_NAME}.yaml"
+
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[3] / path
+    path = path.resolve()
+    if path.suffix not in {".yaml", ".yml"}:
+        raise ValueError(f"{_CONFIG_PATH_ENV} must point to a YAML file, got {path}")
+    if not path.is_file():
+        raise ValueError(f"{_CONFIG_PATH_ENV} does not exist: {path}")
+    return path
 
 
 def _validate_vehicles(vehicles: list[VehicleConfig]) -> None:
@@ -90,8 +108,8 @@ def _resolve_vehicles(cfg) -> list[VehicleConfig]:
 def get_config() -> EnvConfig:
     """Return the process-wide composed :class:`EnvConfig`, loading once.
 
-    The first call composes Hydra against the repository's active
-    ``configs/experiment/config.yaml`` and caches the resulting dataclass.
+    The first call composes Hydra against the selected top-level experiment
+    config and caches the resulting dataclass.
     Subsequent calls return the cached instance - safe to call from any extension's
     ``on_startup`` and from per-step hot paths.
 
@@ -106,8 +124,9 @@ def get_config() -> EnvConfig:
 
     if GlobalHydra.instance().is_initialized():
         GlobalHydra.instance().clear()
-    with initialize_config_dir(config_dir=str(_DEFAULT_CONF_DIR.resolve()), version_base=None):
-        cfg = compose(config_name=_DEFAULT_CONFIG_NAME)
+    config_path = _resolve_config_path()
+    with initialize_config_dir(config_dir=str(config_path.parent), version_base=None):
+        cfg = compose(config_name=config_path.stem)
 
     # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
     # them with the typed, validated list before caching/returning.

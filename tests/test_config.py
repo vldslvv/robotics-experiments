@@ -130,3 +130,22 @@ def test_enabled_px4_vehicle_count_matches_active_config():
         1 for vehicle in config.vehicles if vehicle.px4.enabled
     )
     reset_config()
+
+
+def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, get_enabled_px4_vehicle_count, reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/experiment/multi_drone_takeoff.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+
+    assert [vehicle.id for vehicle in config.vehicles] == [0, 1]
+    assert [vehicle.drone.prim_name for vehicle in config.vehicles] == ["Drone0", "Drone1"]
+    assert get_enabled_px4_vehicle_count() == 2
+    reset_config()

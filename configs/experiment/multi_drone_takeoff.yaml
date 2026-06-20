@@ -8,9 +8,8 @@ defaults:
   - scenario: default
   - _self_
 
-# Copyable reference config for a dual-PX4 multi-drone takeoff. To use it, copy
-# its vehicle/scenario choices into the active configs/experiment/config.yaml
-# tree. Runtime selection is intentionally concentrated in Hydra YAML.
+# Dual-PX4 multi-drone takeoff config. To use it for persistent runtime, pass
+# HYDRA_CONFIG=configs/experiment/multi_drone_takeoff.yaml to the Make target.
 #
 # Two drones, each bound to its own PX4 SITL instance: vehicle_id 0/1 ->
 # simulator ports 4560/4561, GCS links scenario.gcs_baseport + id (14550/14551).

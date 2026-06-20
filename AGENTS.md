@@ -262,8 +262,8 @@ the host. They are meant to be used in the Dockerized environment.
   command-flow timeouts, and the flight-envelope gates. The standalone runner's
   `--scene` is optional and overrides it; the multi-drone target passes the
   `@scenario` sentinel so the scene comes from config. Persistent and
-  integration experiment variants are selected by editing Hydra YAML; the active
-  runtime config is `configs/experiment/config.yaml`.
+  integration experiment variants are selected with the `HYDRA_CONFIG` Make
+  variable; the default runtime config is `configs/experiment/config.yaml`.
 
 ### PX4
 - `make run-px4` derives the number of PX4 SITL containers from the active Hydra
@@ -271,6 +271,10 @@ the host. They are meant to be used in the Dockerized environment.
   persistent PX4 container attaches to a `px4` tmux session with the interactive
   PX4 console selected, so manual commands such as `commander arm` and
   `commander takeoff` can be entered directly.
+- Persistent and integration Make targets accept `HYDRA_CONFIG=<path>` to select
+  a top-level Hydra experiment config for both host-side PX4 counting and Isaac
+  runtime config composition, for example
+  `make run-all HYDRA_CONFIG=configs/experiment/multi_drone_takeoff.yaml`.
 
 ### Flight log analysis and PX4 bridge debugging
 - `flight_analysis/README.md` is the single source for the repeatable flight-log
@@ -309,15 +313,18 @@ the host. They are meant to be used in the Dockerized environment.
 - Avoid using Unicode symbols.
 - Invalid configuration or unexpected runtime state must not fail silently.
   Raise an error for wrong configuration; log a warning for recoverable runtime fallbacks.
-- Avoid overly defensive guards. Do not wrap a value in `Optional`/`None`, add
-  `is not None` checks, or carry a `<= 0 disables` special case when a plain
-  concrete default works. A numerical runtime parameter must carry a concrete
-  default in its library constructor and a value in the Hydra YAML, and be used
-  directly (the `*Config` dataclass field still stays a bare annotation per the
-  configs rule above). Reserve `None`/optional handling and disable branches for
-  states that are genuinely distinct and required for correctness (for example
-  "no actuator received yet" before any timestamp exists), not as routine
-  safety padding.
+- Avoid overly defensive code. Use the minimal checks needed for correctness,
+  and otherwise let code fail naturally. Add explicit checks only when the code
+  would otherwise fail silently, continue with an incorrect result without
+  notice, or when a genuinely distinct state must be represented. Do not wrap a
+  value in `Optional`/`None`, add routine `is not None` checks, or carry a
+  `<= 0 disables` special case when a plain concrete default works. A numerical
+  runtime parameter must carry a concrete default in its library constructor and
+  a value in the Hydra YAML, and be used directly (the `*Config` dataclass field
+  still stays a bare annotation per the configs rule above). Reserve
+  `None`/optional handling and disable branches for states that are required for
+  correctness (for example "no actuator received yet" before any timestamp
+  exists), not as routine safety padding.
 - Every behavior change must be reflected in this file when it changes project conventions,
   error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
 - Per-area README and doc files are on-demand context: read a task's relevant doc

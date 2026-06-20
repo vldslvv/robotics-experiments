@@ -9,6 +9,7 @@ isaac_CONTAINER_NAME = $(ISAAC_CONTAINER_NAME)
 isaac_IMAGE = $(ISAAC_IMAGE)
 isaac_RUN_DEPS = xhost sync-nvim-caches
 isaac_RUNTIME_DIRS = $(ISAAC_RUNTIME_DIRS) "$(ISAAC_ZSH_CACHE)"
+isaac_RECREATE_IF_ENV = ROBOTICS_EXPERIMENT_CONFIG_PATH=$(HYDRA_CONFIG_CONTAINER_PATH)
 isaac_DOCKER_ARGS = \
 	$(ISAAC_DOCKER_RUNTIME) \
 	$(ISAAC_DOCKER_ENV) \
@@ -30,6 +31,17 @@ define RUN_CONTAINER_TARGET
 run-$(1): $$($(1)_RUN_DEPS)
 	@$$(if $$($(1)_RUNTIME_DIRS),mkdir -p $$($(1)_RUNTIME_DIRS))
 	@if docker ps -a --format '{{.Names}}' | grep -q '^$$($(1)_CONTAINER_NAME)$$$$'; then \
+		expected_env='$$($(1)_RECREATE_IF_ENV)'; \
+		if [ -n "$$$$expected_env" ] && ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$$($(1)_CONTAINER_NAME)" | grep -qx "$$$$expected_env"; then \
+			echo "Recreating $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME) for updated runtime environment..."; \
+			docker rm -f "$$($(1)_CONTAINER_NAME)" >/dev/null; \
+		else \
+		echo "Starting existing $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
+		docker start -ai $$($(1)_CONTAINER_NAME); \
+			exit 0; \
+		fi; \
+	fi; \
+	if docker ps -a --format '{{.Names}}' | grep -q '^$$($(1)_CONTAINER_NAME)$$$$'; then \
 		echo "Starting existing $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
 		docker start -ai $$($(1)_CONTAINER_NAME); \
 	else \
@@ -64,7 +76,7 @@ $(foreach stack,$(CONTAINER_STACKS),$(eval $(call STOP_CONTAINER_TARGET,$(stack)
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_CONTAINER_TARGET,$(stack))))
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_IMAGE_TARGET,$(stack))))
 
-PX4_ENABLED_INSTANCE_COUNT_CMD = uv run python -c 'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
+PX4_ENABLED_INSTANCE_COUNT_CMD = ROBOTICS_EXPERIMENT_CONFIG_PATH='$(HYDRA_CONFIG_HOST_PATH)' uv run python -c 'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
 
 .PHONY: run-px4
 run-px4:

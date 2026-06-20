@@ -60,6 +60,13 @@ separate non-interactive PX4 launcher that suppresses prompt-only `pxh>` lines
 while preserving PX4 logs under `px4/logs`. Set `INTEGRATION_VERBOSE=1` when
 running a test target to print the full captured PX4 container log.
 
+Select a different top-level Hydra experiment config with `HYDRA_CONFIG`, for
+example:
+
+```bash
+make run-all HYDRA_CONFIG=configs/experiment/multi_drone_takeoff.yaml
+```
+
 Run host Python tests:
 
 ```bash

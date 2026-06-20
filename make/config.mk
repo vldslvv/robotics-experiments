@@ -16,6 +16,8 @@ ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
+HYDRA_CONFIG_HOST_PATH      = $(abspath $(HYDRA_CONFIG))
+HYDRA_CONFIG_CONTAINER_PATH = $(if $(filter $(CURDIR)/%,$(HYDRA_CONFIG_HOST_PATH)),$(patsubst $(CURDIR)%,$(ISAAC_PROJECT_DIR)%,$(HYDRA_CONFIG_HOST_PATH)),$(HYDRA_CONFIG_HOST_PATH))
 ISAAC_PYTHON         = /isaac-sim/python.sh
 ISAAC_SIM_TEST       = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_sim_settings.py
 ISAAC_SIM_TEST_LOG   = /isaac-sim/.nvidia-omniverse/logs/test_simulation_settings.log
@@ -37,6 +39,7 @@ INTEGRATION_LOG_TAIL_LINES ?= 120
 INTEGRATION_ROOT ?= $(BUILD_ROOT)/integration
 INTEGRATION_TEST_JOBS ?= 1
 SCENE                ?= @isaac/assets/TestScenes/MinimalIntegration.usda
+HYDRA_CONFIG         ?= configs/experiment/config.yaml
 
 # Host paths for persistence
 ISAAC_HOME             = $(CURDIR)/isaac

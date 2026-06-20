@@ -11,7 +11,7 @@ LIGHTSWITCH_EXT="lightswitch_spawner"
 DRONE_SPAWNER_EXT="drone_spawner"
 PX4_SITL_BRIDGE_EXT="px4_sitl_brigde"
 
-# Extensions read the active Hydra config at /isaac-sim/proj/configs/experiment/config.yaml.
+# Extensions read the active Hydra config from ROBOTICS_EXPERIMENT_CONFIG_PATH.
 
 # For log level changes, use:
 # LOG_LEVEL="info"
