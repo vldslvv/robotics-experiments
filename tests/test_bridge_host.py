@@ -260,3 +260,41 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
         "/World/Drone/body/propulsion/motor_4/prop",
         "/World/Drone/body/propulsion/motor_2/prop",
     ]
+
+
+def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):
+    _install_fake_isaac(monkeypatch)
+    calls = []
+    _install_fake_px4_bridge(monkeypatch, calls)
+    module = _import_bridge_host(monkeypatch)
+
+    host0 = module.BridgeHost(
+        articulation_path="/World/Drone",
+        config=_config(startup_settle_time_s=0.0, vehicle_id=0),
+        physics_hz=250.0,
+    )
+    host1 = module.BridgeHost(
+        articulation_path="/World/Drone1",
+        config=_config(startup_settle_time_s=0.0, vehicle_id=1),
+        physics_hz=250.0,
+    )
+
+    host0.start()
+    host1.start()
+
+    # Each host constructs its own port with the same baseport but a distinct
+    # vehicle_id, so the simulator endpoints (baseport + vehicle_id) differ.
+    port_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "port"]
+    assert len(port_calls) == 2
+    endpoints = [c[1]["connection_baseport"] + c[1]["vehicle_id"] for c in port_calls]
+    assert endpoints == [4560, 4561]
+
+    # Each host targets its own articulation prim.
+    bridge_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "bridge"]
+    assert [c[1] for c in bridge_calls] == ["/World/Drone", "/World/Drone1"]
+
+    assert host0.is_running
+    assert host1.is_running
+    host0.stop()
+    assert not host0.is_running
+    assert host1.is_running

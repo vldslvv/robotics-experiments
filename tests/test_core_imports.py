@@ -68,6 +68,11 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
 
     config = importlib.import_module("robotics_experiments.config")
     assert config.SimSettings.__name__ == "SimSettings"
+    # VehicleConfig is a plain dataclass over DroneConfig/Px4BridgeConfig; it
+    # must not drag Isaac (or Hydra) onto the core import path.
+    types_module = importlib.import_module("robotics_experiments.config.types")
+    assert types_module.VehicleConfig.__name__ == "VehicleConfig"
+    assert config.VehicleConfig is types_module.VehicleConfig
 
     simulation = importlib.import_module("robotics_experiments.simulation")
     assert simulation.__all__ == ["apply_settings"]

@@ -44,12 +44,13 @@ _FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
 _DEFAULT_LOCKSTEP = LockstepSettings()
 
 
-def _resolve_log_path_template(log_path: str, now: datetime) -> Path:
+def _resolve_log_path_template(log_path: str, now: datetime, vehicle_id: int) -> Path:
     return Path(
         log_path.format(
             date=now.strftime("%Y-%m-%d"),
             time=now.strftime("%H_%M_%S"),
             timestamp=now.strftime("%Y-%m-%d/%H_%M_%S"),
+            vehicle=vehicle_id,
         )
     ).expanduser()
 
@@ -57,13 +58,14 @@ def _resolve_log_path_template(log_path: str, now: datetime) -> Path:
 def _configure_file_logging(
     log_path: str | None,
     level_name: str,
+    vehicle_id: int,
     now: datetime | None = None,
 ) -> Path | None:
     if not log_path:
         return None
 
     now = now or datetime.now()
-    path = _resolve_log_path_template(log_path, now)
+    path = _resolve_log_path_template(log_path, now, vehicle_id)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     level = getattr(logging, str(level_name).upper(), logging.DEBUG)
@@ -131,7 +133,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         sensor_debug_log_interval: int = 50,
     ):
         """Initialize the port. No socket is opened until :meth:`start`."""
-        self._debug_log_path = _configure_file_logging(debug_log_path, debug_log_level)
+        self._debug_log_path = _configure_file_logging(debug_log_path, debug_log_level, vehicle_id)
         self._sensor_debug_log_interval = max(1, int(sensor_debug_log_interval))
         self._num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep.lockstep_timeout_s)

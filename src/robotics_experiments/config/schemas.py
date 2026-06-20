@@ -10,6 +10,7 @@ from .types import (
     Px4BridgeConfig,
     RosQosConfig,
     SimSettings,
+    VehicleConfig,
 )
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
     "Px4BridgeConfig",
+    "VehicleConfig",
     "EnvConfig",
     "IsaacLabConfig",
     "register_schemas",

@@ -80,10 +80,12 @@ home_alt_m: 488.0
 
 # Persistent diagnostics for PX4 sensor freshness, lockstep, actuator, rotor
 # mapping, and disconnect debugging. The template uses the same date directory
-# and HH_MM_SS filename convention as PX4 ULog files, with a bridge suffix.
-# This path is inside the Isaac container's project mount and maps to
-# ./px4/logs/<date>/<time>_bridge.log on the host.
-debug_log_path: /isaac-sim/proj/px4/logs/{date}/{time}_bridge.log
+# and HH_MM_SS filename convention as PX4 ULog files, with a per-vehicle suffix.
+# The HH_MM_SS stem stays first so flight-analysis pairing (date dir + HH_MM_SS)
+# still works; the _v{vehicle} segment disambiguates vehicles so their logs never
+# collide. This path is inside the Isaac container's project mount and maps to
+# ./px4/logs/<date>/<time>_v<vehicle>_bridge.log on the host.
+debug_log_path: /isaac-sim/proj/px4/logs/{date}/{time}_v{vehicle}_bridge.log
 debug_log_level: DEBUG
 sensor_debug_log_interval: 50
 

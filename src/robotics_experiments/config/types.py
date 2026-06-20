@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 __all__ = [
     "SimSettings",
@@ -10,6 +10,7 @@ __all__ = [
     "LightSwitchConfig",
     "LockstepConfig",
     "Px4BridgeConfig",
+    "VehicleConfig",
     "IsaacLabConfig",
     "EnvConfig",
 ]
@@ -239,9 +240,10 @@ class Px4BridgeConfig:
             built-in default (Zurich).
         debug_log_path: Path template for persistent bridge diagnostics. Empty
             disables file logging. Supports ``{date}`` (``YYYY-MM-DD``),
-            ``{time}`` (``HH_MM_SS``), and ``{timestamp}``
-            (``YYYY-MM-DD/HH_MM_SS``) so bridge logs can be paired with PX4
-            ULog files without appending across runs.
+            ``{time}`` (``HH_MM_SS``), ``{timestamp}`` (``YYYY-MM-DD/HH_MM_SS``),
+            and ``{vehicle}`` (the per-vehicle ``vehicle_id``) so bridge logs can
+            be paired with PX4 ULog files without appending across runs and so
+            multiple vehicles never overwrite each other's logs.
         debug_log_level: Python logging level name used by the bridge file log.
         sensor_debug_log_interval: Emit one detailed HIL_SENSOR payload log
             every N sensor sends after the initial startup samples.
@@ -280,6 +282,27 @@ class Px4BridgeConfig:
 
 
 @dataclass
+class VehicleConfig:
+    """One drone instance: its asset/spawn and its PX4 bridge config.
+
+    ``drone`` and ``px4`` are fully resolved (the global ``EnvConfig`` defaults
+    merged with the per-vehicle override). ``spawn_xy`` is the world X/Y; Z is
+    computed from asset bounds at spawn; yaw is 0.
+
+    Attributes:
+        id: Stable, unique vehicle identifier within the scene.
+        spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
+        drone: Fully resolved per-vehicle drone spawner configuration.
+        px4: Fully resolved per-vehicle PX4 bridge configuration.
+    """
+
+    id: int
+    spawn_xy: Tuple[float, float]
+    drone: DroneConfig
+    px4: Px4BridgeConfig
+
+
+@dataclass
 class IsaacLabConfig:
     """Configuration for Isaac Lab workflow skeletons.
 
@@ -309,6 +332,15 @@ class EnvConfig:
         switches: Light-switch spawner configuration.
         px4: PX4 SITL bridge configuration.
         isaac_lab: Isaac Lab workflow configuration.
+        vehicles: Multi-vehicle scaffolding. Each entry merges its ``drone`` /
+            ``px4`` partial over the global ``drone`` / ``px4`` defaults above.
+            The list is the only spawn path (one vehicle = a one-element list).
+
+            Typing note: the annotation is intentionally ``List[Any]`` so Hydra's
+            structured-config validation accepts the *partial* YAML entries
+            during ``compose()``. The loader replaces the raw dicts with a typed,
+            validated ``list[VehicleConfig]`` (see
+            ``config.load._resolve_vehicles``), which is the public/runtime type.
     """
 
     sim: SimSettings
@@ -316,3 +348,4 @@ class EnvConfig:
     switches: LightSwitchConfig
     px4: Px4BridgeConfig
     isaac_lab: IsaacLabConfig
+    vehicles: List[Any]

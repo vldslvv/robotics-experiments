@@ -11,7 +11,7 @@ Run the helpers from the repository root.
 
 ```bash
 python flight_analysis/tools/list_pairs.py px4/logs
-python flight_analysis/tools/bridge_summary.py px4/logs/2026-06-11/05_11_40_bridge.log
+python flight_analysis/tools/bridge_summary.py px4/logs/2026-06-11/05_11_40_v0_bridge.log
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
   flight_analysis/tools/ulog_timeline.py px4/logs/2026-06-11/05_11_40.ulg
 ```
@@ -78,7 +78,13 @@ topics `compare_logs.py` reads) into the airframe's SDLOG profile:
 
 1. Pair the logs by date directory and `HH_MM_SS` stem. A normal run has:
    - `px4/logs/<date>/HH_MM_SS.ulg`
-   - `px4/logs/<date>/HH_MM_SS_bridge.log`
+   - `px4/logs/<date>/HH_MM_SS_v<vehicle>_bridge.log`
+
+   The bridge-log filename carries a `_v<vehicle>` segment (the per-vehicle
+   `vehicle_id`) after the `HH_MM_SS` stem so multiple vehicles in one scene never
+   overwrite each other's logs. The `HH_MM_SS` stem stays first, so pairing by
+   date directory + `HH_MM_SS` is unchanged; the single-vehicle default is
+   `_v0_bridge.log`.
 2. Confirm the bridge connected and streamed valid sensors:
    - first heartbeat received
    - first `HIL_SENSOR` sent
@@ -112,7 +118,7 @@ topics `compare_logs.py` reads) into the airframe's SDLOG profile:
 Use `rg` first; bridge logs are text and usually contain the fastest answer.
 
 ```bash
-LOG=px4/logs/2026-06-11/05_11_40_bridge.log
+LOG=px4/logs/2026-06-11/05_11_40_v0_bridge.log
 
 rg -n "PX4 MAVLink port constructed|first heartbeat|first HIL_SENSOR|stopped" "$LOG"
 rg -n "HIL_ACTUATOR_CONTROLS|actuator_lag_us|bootstrap lag|timestamp stale|timed out" "$LOG"

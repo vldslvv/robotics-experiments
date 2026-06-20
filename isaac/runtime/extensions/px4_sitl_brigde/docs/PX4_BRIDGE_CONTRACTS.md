@@ -342,10 +342,17 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 | Property | Value |
 |----------|-------|
 | Transport | TCP |
-| Default port | 4560 |
+| Default port | `connection_baseport + vehicle_id` (4560 for vehicle 0) |
 | Framing | Standard MAVLink v2 |
 | Connection direction | Configurable. `tcpin`: bridge listens, PX4 dials in (Pegasus default). `tcpout`: reverse. |
 | Connections per vehicle | 1 |
+
+**Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
+list; see `docs/MULTI_VEHICLE_BRIDGE_PLAN.md`). The scene-owning extension then
+constructs N fully independent bridges -- one per vehicle -- each owning its own
+simulator port `4560 + vehicle_id`, its own physics-step subscription, and its
+own `SimClock`. PhysX invokes their per-tick `exchange()` callbacks serially in
+registration order; the per-instance contract on this page is unchanged.
 
 ### Connection lifecycle
 

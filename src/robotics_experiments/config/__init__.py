@@ -6,6 +6,7 @@ from .types import (
     LightSwitchConfig,
     Px4BridgeConfig,
     SimSettings,
+    VehicleConfig,
 )
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "LightSwitchConfig",
     "Px4BridgeConfig",
     "SimSettings",
+    "VehicleConfig",
     "get_config",
     "reset_config",
 ]

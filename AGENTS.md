@@ -122,6 +122,23 @@ the current contents and the intended home for that kind of code.
   prime-then-block startup plus newest-packet draining keep actuators fresh
   (backlog trips `max_sustained_actuator_lag_s`); safety gating zeros forces only,
   never the per-tick exchange; a non-finite vehicle state raises.
+- Multi-vehicle scenes are driven by a top-level `vehicles:` list (see
+  `docs/MULTI_VEHICLE_BRIDGE_PLAN.md`). It is the single source of truth and the
+  only spawn path: one vehicle = a one-element list (the default config ships
+  exactly that, reproducing the single-drone behavior). Each entry has an `id`, a
+  `spawn_xy`, and partial `drone`/`px4` overrides that the loader merges over the
+  global `drone`/`px4` defaults into fully resolved per-vehicle configs
+  (`config.load._resolve_vehicles`, validated by `_validate_vehicles` -- duplicate
+  id/endpoint/`prim_name`, bad `spawn_xy`, or colliding `debug_log_path` raise a
+  `ValueError` at resolution time). The drone-spawner extension spawns each
+  vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
+  independent `BridgeHost`; the hosts tick serially in registration order on each
+  PhysX step (per-tick latency is the sum across vehicles -- accepted for v1).
+  Per-vehicle isolation: MAVLink simulator port is `connection_baseport +
+  vehicle_id`, the USD prim is `<default_prim>/<drone.prim_name>`, and bridge
+  debug logs carry a `{vehicle}` token so they never collide. `EnvConfig.vehicles`
+  is annotated `List[Any]` for Hydra compose-time tolerance of partial entries;
+  the runtime value is `list[VehicleConfig]`.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under

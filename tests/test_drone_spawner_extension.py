@@ -48,9 +48,10 @@ class _Timeline:
 class _BridgeHost:
     instances: list["_BridgeHost"] = []
 
-    def __init__(self, *, articulation_path, config):
+    def __init__(self, *, articulation_path, config, physics_hz):
         self.articulation_path = articulation_path
         self.config = config
+        self.physics_hz = physics_hz
         self.started = False
         self.stopped = False
         self.__class__.instances.append(self)
@@ -60,6 +61,19 @@ class _BridgeHost:
 
     def stop(self):
         self.stopped = True
+
+
+def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
+    return SimpleNamespace(
+        id=vehicle_id,
+        spawn_xy=spawn_xy,
+        drone=SimpleNamespace(prim_name=prim_name),
+        px4=SimpleNamespace(enabled=enabled, vehicle_id=vehicle_id),
+    )
+
+
+def _env(*vehicles, physics_hz=250.0):
+    return SimpleNamespace(sim=SimpleNamespace(physics_hz=physics_hz), vehicles=list(vehicles))
 
 
 class _DefaultPrim:
@@ -88,14 +102,15 @@ def _install_fake_modules(monkeypatch, usd_context):
     omni.usd = omni_usd
 
     fake_config = types.ModuleType("robotics_experiments.config")
-    fake_config.get_config = lambda: SimpleNamespace(
-        drone=SimpleNamespace(prim_name="Drone"),
-        px4=SimpleNamespace(enabled=False),
+    fake_config.get_config = lambda: _env(
+        _vehicle(0, "Drone", (0.0, 0.0), enabled=False),
     )
 
     fake_drone = types.ModuleType("robotics_experiments.drone")
-    fake_drone.spawn_drone = lambda stage, config=None: None
-    fake_drone.despawn_drone = lambda stage: None
+    fake_drone.spawn_drone = (
+        lambda stage, config=None, *, position=None, yaw=0.0: f"/World/{config.prim_name}"
+    )
+    fake_drone.despawn_drone = lambda stage, config=None: None
 
     fake_bridge_host = types.ModuleType("DroneSpawner_python.bridge_host")
     fake_bridge_host.BridgeHost = _BridgeHost
@@ -134,64 +149,74 @@ def test_startup_and_stage_open_do_not_spawn(monkeypatch):
     monkeypatch.setattr(
         module,
         "spawn_drone",
-        lambda stage, config=None: calls.append(("spawn", stage, config)),
+        lambda stage, config=None, *, position=None, yaw=0.0: calls.append(
+            ("spawn", stage, config)
+        ),
     )
-    monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append(("despawn", stage)))
+    monkeypatch.setattr(
+        module, "despawn_drone", lambda stage, config=None: calls.append(("despawn", stage))
+    )
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
     extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
 
-    assert calls == [("despawn", _usd_context.stage)]
+    # Nothing has been spawned yet, so teardown despawns nothing.
+    assert calls == []
 
 
-def test_play_spawns_once_after_clearing_stale_runtime_drone(monkeypatch):
-    stage = object()
+def test_play_spawns_each_vehicle_after_clearing_stale_runtime_drone(monkeypatch):
+    stage = _Stage()
     module, _usd_context = _import_extension(monkeypatch, stage=stage)
     calls = []
-    monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append(("despawn", stage)))
+    monkeypatch.setattr(
+        module, "despawn_drone", lambda stage, config=None: calls.append(("despawn", config))
+    )
     monkeypatch.setattr(
         module,
         "spawn_drone",
-        lambda stage, config=None: calls.append(("spawn", stage, config)),
+        lambda stage, config=None, *, position=None, yaw=0.0: calls.append(
+            ("spawn", config.prim_name, position)
+        )
+        or f"/World/{config.prim_name}",
     )
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=False)
+    v1 = _vehicle(1, "Drone1", (2.0, 0.0), enabled=False)
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, v1))
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    expected_drone_config = sys.modules["robotics_experiments.config"].get_config().drone
-    assert calls == [("despawn", stage), ("spawn", stage, expected_drone_config)]
+    assert calls == [
+        ("spawn", "Drone", (0.0, 0.0)),
+        ("spawn", "Drone1", (2.0, 0.0)),
+    ]
 
 
-def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
+def test_play_starts_one_bridge_per_enabled_vehicle(monkeypatch):
     module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
     calls = []
-    monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append("despawn"))
+    monkeypatch.setattr(module, "despawn_drone", lambda stage, config=None: None)
     monkeypatch.setattr(
         module,
         "spawn_drone",
-        lambda stage, config=None: calls.append(("spawn", config)),
+        lambda stage, config=None, *, position=None, yaw=0.0: f"/World/{config.prim_name}",
     )
-    monkeypatch.setattr(
-        module,
-        "_get_experiment_config",
-        lambda: SimpleNamespace(
-            drone=SimpleNamespace(prim_name="Drone"),
-            px4=SimpleNamespace(enabled=True),
-            sim=SimpleNamespace(physics_hz=250.0),
-        ),
-    )
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
+    v1 = _vehicle(1, "Drone1", (2.0, 0.0), enabled=True)
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, v1, physics_hz=250.0))
 
     class BridgeHost:
         def __init__(self, *, articulation_path, config, physics_hz):
-            calls.append(("bridge_init", articulation_path, physics_hz))
+            self.config = config
+            calls.append(("bridge_init", articulation_path, config.vehicle_id, physics_hz))
 
         def start(self):
-            calls.append("bridge_start")
+            calls.append(("bridge_start", self.config.vehicle_id))
 
         def stop(self):
-            calls.append("bridge_stop")
+            calls.append(("bridge_stop", self.config.vehicle_id))
 
     monkeypatch.setattr(module, "BridgeHost", BridgeHost)
 
@@ -199,35 +224,85 @@ def test_play_starts_enabled_bridge_after_spawn(monkeypatch):
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    expected_drone_config = sys.modules["robotics_experiments.config"].get_config().drone
     assert calls == [
-        "despawn",
-        ("spawn", expected_drone_config),
-        ("bridge_init", "/World/Drone", 250.0),
-        "bridge_start",
+        ("bridge_init", "/World/Drone", 0, 250.0),
+        ("bridge_start", 0),
+        ("bridge_init", "/World/Drone1", 1, 250.0),
+        ("bridge_start", 1),
     ]
+    assert len(extension._bridge_hosts) == 2
+
+    # STOP tears down both bridges and despawns both vehicles.
+    despawned = []
+    monkeypatch.setattr(
+        module, "despawn_drone", lambda stage, config=None: despawned.append(config.prim_name)
+    )
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.STOP)))
+
+    assert ("bridge_stop", 0) in calls
+    assert ("bridge_stop", 1) in calls
+    assert extension._bridge_hosts == []
+    assert despawned == ["Drone", "Drone1"]
 
 
-def test_stop_pause_and_shutdown_stop_bridge_and_despawn(monkeypatch):
-    stage = object()
-    module, _usd_context = _import_extension(monkeypatch, stage=stage)
-    calls = []
-    monkeypatch.setattr(module, "despawn_drone", lambda stage: calls.append(("despawn", stage)))
+def test_disabled_vehicle_spawns_without_a_bridge(monkeypatch):
+    module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
+    monkeypatch.setattr(module, "despawn_drone", lambda stage, config=None: None)
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None, *, position=None, yaw=0.0: f"/World/{config.prim_name}",
+    )
+    bridge_inits = []
 
     class BridgeHost:
+        def __init__(self, *, articulation_path, config, physics_hz):
+            bridge_inits.append(config.vehicle_id)
+
+        def start(self):
+            pass
+
         def stop(self):
-            calls.append("bridge_stop")
+            pass
+
+    monkeypatch.setattr(module, "BridgeHost", BridgeHost)
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
+    v1 = _vehicle(1, "Drone1", (2.0, 0.0), enabled=False)
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, v1))
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
-    bridge = BridgeHost()
-    extension._bridge_host = bridge
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PAUSE)))
+    # Only the enabled vehicle gets a bridge; both vehicles were spawned.
+    assert bridge_inits == [0]
+    assert len(extension._bridge_hosts) == 1
+    assert len(extension._spawned_drones) == 2
 
-    assert extension._bridge_host is None
-    assert calls == ["bridge_stop", ("despawn", stage)]
+
+def test_shutdown_stops_bridges_and_despawns(monkeypatch):
+    module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "despawn_drone",
+        lambda stage, config=None: calls.append(("despawn", config.prim_name)),
+    )
+
+    class BridgeHost:
+        def __init__(self, vehicle_id):
+            self.vehicle_id = vehicle_id
+
+        def stop(self):
+            calls.append(("bridge_stop", self.vehicle_id))
+
+    extension = module.Extension()
+    extension.on_startup("drone_spawner")
+    extension._bridge_hosts = [BridgeHost(0)]
+    extension._spawned_drones = [SimpleNamespace(prim_name="Drone")]
 
     extension.on_shutdown()
 
-    assert calls == ["bridge_stop", ("despawn", stage), ("despawn", stage)]
+    assert calls == [("bridge_stop", 0), ("despawn", "Drone")]
+    assert extension._bridge_hosts == []
+    assert extension._spawned_drones == []

@@ -20,12 +20,13 @@ def test_bridge_log_path_uses_px4_style_timestamp_and_fresh_handler(tmp_path):
 
     logger = logging.getLogger("robotics_experiments.px4_bridge")
     first_path = tmp_path / "old_bridge.log"
-    second_template = str(tmp_path / "{date}" / "{time}_bridge.log")
+    second_template = str(tmp_path / "{date}" / "{time}_v{vehicle}_bridge.log")
 
     try:
         resolved_first = mavlink_module._configure_file_logging(
             str(first_path),
             "DEBUG",
+            0,
             now=datetime(2026, 6, 10, 21, 9, 59),
         )
         logger.debug("old run marker")
@@ -33,12 +34,14 @@ def test_bridge_log_path_uses_px4_style_timestamp_and_fresh_handler(tmp_path):
         resolved_second = mavlink_module._configure_file_logging(
             second_template,
             "DEBUG",
+            1,
             now=datetime(2026, 6, 10, 21, 10, 5),
         )
         logger.debug("new run marker")
 
         assert resolved_first == first_path.resolve()
-        assert resolved_second == (tmp_path / "2026-06-10" / "21_10_05_bridge.log").resolve()
+        # The {vehicle} token renders the vehicle id into the filename.
+        assert resolved_second == (tmp_path / "2026-06-10" / "21_10_05_v1_bridge.log").resolve()
         assert "old run marker" in first_path.read_text()
         assert "new run marker" not in first_path.read_text()
         assert "new run marker" in resolved_second.read_text()

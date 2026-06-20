@@ -177,30 +177,53 @@ def _clear_rigid_body_velocities(stage: Usd.Stage, prim_path: str) -> None:
         carb.log_warn(f"[DroneSpawner] Could not clear rigid body velocity for {body_path}: {exc}")
 
 
-def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
-    """Spawn (or re-pose) the drone prim.
+def spawn_drone(
+    stage: Usd.Stage,
+    config: DroneConfig | None = None,
+    *,
+    position: tuple[float, float] | None = None,
+    yaw: float = 0.0,
+) -> str:
+    """Spawn (or re-pose) the drone prim and return its prim path.
 
     Adds the drone's USD asset as a reference under the stage default prim on
-    first call, ensures a guide cube exists to visualize the spawn volume, then
-    assigns a sampled translation and yaw. When ``config.spawn_stationary`` is
-    true, X/Y/yaw are sampled but Z is computed from the referenced asset bounds
-    so PX4 starts from a stationary ground pose.
+    first call, then assigns a translation and yaw.
+
+    When ``position`` is given (the multi-vehicle path), the drone is placed at
+    that explicit world X/Y with the given ``yaw`` (no random sampling, no guide
+    cube). When ``position`` is ``None`` (the legacy single-drone path), X/Y/yaw
+    are sampled inside the configured spawn volume and the guide cube is ensured.
+    In both cases, when ``config.spawn_stationary`` is true, Z is computed from
+    the referenced asset bounds so PX4 starts from a stationary ground pose and
+    velocities are cleared.
 
     Args:
         stage: Target USD stage. Must be non-None and writable.
         config: Drone spawner configuration; when ``None``, resolved via
             :func:`.config.get_config` at call time.
+        position: Explicit world ``(x, y)`` spawn position, or ``None`` to sample
+            randomly inside the spawn volume.
+        yaw: Fixed yaw (radians) used when ``position`` is given; ignored when
+            sampling randomly.
+
+    Returns:
+        The drone prim path (``<parent>/<config.prim_name>``).
     """
     config = resolve_section("drone", config)
     parent = _resolve_parent(stage)
-    _ensure_guide_cube(stage, parent, config)
 
     drone_path = f"{parent}/{config.prim_name}"
     if not stage.GetPrimAtPath(drone_path).IsValid():
         add_reference_to_stage(config.usd_path, drone_path)
 
+    if position is not None:
+        xy_yaw = ((float(position[0]), float(position[1]), 0.0), float(yaw))
+    else:
+        _ensure_guide_cube(stage, parent, config)
+        xy_yaw = None
+
     if config.spawn_stationary:
-        sampled_pos, yaw = _random_pose(config, include_z=False)
+        sampled_pos, yaw = xy_yaw if xy_yaw is not None else _random_pose(config, include_z=False)
         _apply_pose(stage, drone_path, sampled_pos, yaw)
         pos = (
             sampled_pos[0],
@@ -209,13 +232,14 @@ def spawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
         )
         mode = "stationary"
     else:
-        pos, yaw = _random_pose(config)
+        pos, yaw = xy_yaw if xy_yaw is not None else _random_pose(config)
         mode = "volume"
 
     _apply_pose(stage, drone_path, pos, yaw)
     if config.spawn_stationary:
         _clear_rigid_body_velocities(stage, drone_path)
     carb.log_info(f"[DroneSpawner] Spawned mode={mode} at pos={pos} yaw={math.degrees(yaw):.1f}deg")
+    return drone_path
 
 
 def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:

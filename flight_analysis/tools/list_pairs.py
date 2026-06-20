@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = ["main"]
+
+# Bridge-log filenames are "<HH_MM_SS>_v<vehicle>_bridge.log"; the trailing
+# "_v<vehicle>" segment disambiguates vehicles in a multi-vehicle scene. Strip it
+# so the timestamp stem still pairs with the "<HH_MM_SS>.ulg" ULog. Older
+# single-vehicle logs without the segment still parse.
+_VEHICLE_SUFFIX_RE = re.compile(r"^(.*)_v\d+$")
 
 
 @dataclass(frozen=True)
@@ -36,6 +43,9 @@ def _collect_logs(root: Path) -> tuple[dict[Path, list[_LogFile]], dict[Path, li
             continue
         if path.name.endswith("_bridge.log"):
             stem = path.name[: -len("_bridge.log")]
+            vehicle_match = _VEHICLE_SUFFIX_RE.match(stem)
+            if vehicle_match:
+                stem = vehicle_match.group(1)
             seconds = _stem_seconds(stem)
             if seconds is None:
                 continue
