@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 
 import pytest
@@ -95,34 +94,6 @@ def test_default_config_loads_from_root_experiment_config():
     reset_config()
 
 
-def test_multi_drone_takeoff_config_composes_two_enabled_vehicles(monkeypatch):
-    pytest.importorskip("hydra")
-    pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
-
-    monkeypatch.setenv("EXPERIMENT_CONFIG_NAME", "multi_drone_takeoff")
-    reset_config()
-    config = get_config()
-
-    assert len(config.vehicles) == 2
-    v0, v1 = config.vehicles
-    assert (v0.id, v1.id) == (0, 1)
-    assert v0.drone.prim_name == "Drone0"
-    assert v1.drone.prim_name == "Drone1"
-    assert v0.spawn_xy == (0.0, 0.0)
-    assert v1.spawn_xy == (4.0, 0.0)
-    assert v0.px4.enabled is True
-    assert v1.px4.enabled is True
-    # Distinct simulator endpoints: connection_baseport + vehicle_id.
-    assert v0.px4.connection_baseport + v0.px4.vehicle_id == 4560
-    assert v1.px4.connection_baseport + v1.px4.vehicle_id == 4561
-    # Per-vehicle bridge logs carry the {vehicle} token so they never collide.
-    assert "{vehicle}" in v0.px4.debug_log_path
-    # Scenario tunables come from the scenario group.
-    assert config.scenario.takeoff_altitude_m == 2.5
-    reset_config()
-
-
 def test_resolve_section_returns_provided_untouched():
     from robotics_experiments.config._resolve import resolve_section
 
@@ -146,25 +117,16 @@ def test_resolve_section_falls_back_to_named_section():
     reset_config()
 
 
-def test_experiment_config_dir_override_loads(tmp_path, monkeypatch):
+def test_enabled_px4_vehicle_count_matches_active_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import EnvConfig, get_config, reset_config
+    from robotics_experiments.config import get_config, get_enabled_px4_vehicle_count, reset_config
 
-    conf_dir = tmp_path / "experiment"
-    shutil.copytree(_CONFIG_DIR, conf_dir)
-
-    monkeypatch.setenv("EXPERIMENT_CONFIG_DIR", str(conf_dir))
-    monkeypatch.setenv(
-        "EXPERIMENT_CONFIG_OVERRIDES",
-        "sim.physics_hz=123.0 drone.prim_name=OverrideDrone switches.num_switches=3",
-    )
     reset_config()
 
     config = get_config()
 
-    assert isinstance(config, EnvConfig)
-    assert config.sim.physics_hz == 123.0
-    assert config.drone.prim_name == "OverrideDrone"
-    assert config.switches.num_switches == 3
+    assert get_enabled_px4_vehicle_count() == sum(
+        1 for vehicle in config.vehicles if vehicle.px4.enabled
+    )
     reset_config()

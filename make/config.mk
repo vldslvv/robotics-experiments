@@ -90,12 +90,6 @@ PX4_TEST_CONTAINER_NAME ?= vv-px4-sitl-test
 PX4_TAKEOFF_TEST_LOG = $(PX4_HOME)/logs/test_px4_takeoff_stability_px4.log
 PX4_TAKEOFF_INSTABILITY_TEST_LOG = $(PX4_HOME)/logs/test_px4_takeoff_instability_px4.log
 PX4_TEST_READY_TIMEOUT_S ?= 60
-# Number of PX4 SITL instances to start for a PX4 integration target (one per
-# vehicle). Default 1 = single-vehicle baseline; the multi-drone target sets 2.
-PX4_INSTANCE_COUNT ?= 1
-# Selects a non-default composed Hydra config by name (EXPERIMENT_CONFIG_NAME).
-# Empty = the default config.yaml; the multi-drone target sets multi_drone_takeoff.
-EXPERIMENT_CONFIG_NAME ?=
 
 # Host-side persistence for PX4 SITL (ULog flight logs + simulated EEPROM params).
 PX4_HOME           = $(CURDIR)/px4

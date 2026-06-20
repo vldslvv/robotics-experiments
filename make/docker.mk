@@ -17,7 +17,6 @@ ISAAC_DOCKER_ENV = \
 	-e ACCEPT_EULA=Y \
 	-e OMNI_KIT_DISABLE_TELEMETRY=1 \
 	-e PYTHONPATH=$(ISAAC_PROJECT_DIR)/src \
-	-e EXPERIMENT_CONFIG_DIR=$(ISAAC_PROJECT_DIR)/configs/experiment \
 	-e isaac_sim_package_path=/isaac-sim
 
 ISAAC_DOCKER_VOLUMES = \

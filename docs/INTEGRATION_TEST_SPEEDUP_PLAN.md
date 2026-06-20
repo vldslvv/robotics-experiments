@@ -207,8 +207,7 @@ introduces a typed runtime/test harness config that is loaded before stage open.
 ### Implementation Plan
 
 - Create a Hydra integration profile after deciding the exact override set.
-- Wire the profile through `EXPERIMENT_CONFIG_OVERRIDES` in integration Make
-  targets.
+- Wire the profile through Hydra YAML used by integration Make targets.
 - Keep scene path out of Hydra unless startup order is refactored so a typed
   runtime/test harness config is loaded before stage open.
 

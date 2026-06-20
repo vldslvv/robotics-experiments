@@ -2,7 +2,7 @@
 # Persistent container lifecycle
 ########################################
 
-CONTAINER_STACKS = isaac ros px4
+CONTAINER_STACKS = isaac ros
 
 isaac_DISPLAY_NAME = Isaac
 isaac_CONTAINER_NAME = $(ISAAC_CONTAINER_NAME)
@@ -24,14 +24,6 @@ ros_DOCKER_ARGS = \
 	$(ROS_DOCKER_RUNTIME) \
 	$(ROS_DOCKER_ENV) \
 	$(ROS_DOCKER_VOLUMES)
-
-px4_DISPLAY_NAME = PX4
-px4_CONTAINER_NAME = $(PX4_CONTAINER_NAME)
-px4_IMAGE = $(PX4_IMAGE)
-px4_RUNTIME_DIRS = "$(PX4_LOGS)" "$(PX4_EEPROM)"
-px4_DOCKER_ARGS = \
-	$(PX4_DOCKER_RUNTIME) \
-	$(PX4_DOCKER_VOLUMES)
 
 define RUN_CONTAINER_TARGET
 .PHONY: run-$(1)
@@ -72,11 +64,56 @@ $(foreach stack,$(CONTAINER_STACKS),$(eval $(call STOP_CONTAINER_TARGET,$(stack)
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_CONTAINER_TARGET,$(stack))))
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_IMAGE_TARGET,$(stack))))
 
+PX4_ENABLED_INSTANCE_COUNT_CMD = uv run python -c 'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
+
+.PHONY: run-px4
+run-px4:
+	@count="$$( $(PX4_ENABLED_INSTANCE_COUNT_CMD) )"; \
+	if [ "$$count" -eq 0 ]; then \
+		echo "No PX4-enabled vehicles in Hydra config; skipping PX4 SITL."; \
+		exit 0; \
+	fi; \
+	i=0; \
+	while [ "$$i" -lt "$$count" ]; do \
+		kitty --title "PX4[$$i]" --hold $(MAKE) run-px4-instance PX4_INSTANCE="$$i" PX4_TOTAL_INSTANCES="$$count" & \
+		i=$$((i + 1)); \
+	done
+
+.PHONY: run-px4-instance
+run-px4-instance:
+	@PX4_INSTANCE='$(PX4_INSTANCE)' \
+	PX4_TOTAL_INSTANCES='$(PX4_TOTAL_INSTANCES)' \
+	PX4_CONTAINER_NAME='$(PX4_CONTAINER_NAME)' \
+	PX4_IMAGE='$(PX4_IMAGE)' \
+	PX4_LOGS='$(PX4_LOGS)' \
+	PX4_EEPROM='$(PX4_EEPROM)' \
+	PX4_ROOTFS='$(PX4_ROOTFS)' \
+	PX4_DOCKER_RUNTIME='$(PX4_DOCKER_RUNTIME)' \
+	px4/scripts/run_px4_persistent_instance.sh
+
+.PHONY: stop-px4
+stop-px4:
+	@containers="$$(docker ps -a --format '{{.Names}}' | grep -E '^$(PX4_CONTAINER_NAME)(\.[0-9]+)?$$' || true)"; \
+	if [ -n "$$containers" ]; then \
+		echo "$$containers" | xargs docker stop >/dev/null 2>&1 || true; \
+	fi
+
+.PHONY: remove-px4-container
+remove-px4-container:
+	@containers="$$(docker ps -a --format '{{.Names}}' | grep -E '^$(PX4_CONTAINER_NAME)(\.[0-9]+)?$$' || true)"; \
+	if [ -n "$$containers" ]; then \
+		echo "$$containers" | xargs docker rm -f >/dev/null 2>&1 || true; \
+	fi
+
+.PHONY: remove-px4-image
+remove-px4-image:
+	@docker rmi $(PX4_IMAGE) 2>/dev/null || true
+
 .PHONY: run
 run:
 	kitty --title ROS2 --hold $(MAKE) run-ros &
 	kitty --title IsaacSim --hold $(MAKE) run-isaac &
-	kitty --title PX4 --hold $(MAKE) run-px4 &
+	$(MAKE) run-px4
 
 .PHONY: stop
 stop: stop-isaac stop-ros stop-px4

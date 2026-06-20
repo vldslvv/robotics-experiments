@@ -174,8 +174,6 @@ PX4_INTEGRATION_COMMON_ENV = \
     PX4_IMAGE='$(PX4_IMAGE)' \
     PX4_ROOTFS='$(PX4_ROOTFS)' \
     PX4_TEST_READY_TIMEOUT_S='$(PX4_TEST_READY_TIMEOUT_S)' \
-    PX4_INSTANCE_COUNT='$(PX4_INSTANCE_COUNT)' \
-    EXPERIMENT_CONFIG_NAME='$(EXPERIMENT_CONFIG_NAME)' \
     SCENE='$(SCENE)'
 
 .PHONY: test-integration-px4-takeoff
@@ -186,13 +184,10 @@ test-integration-px4-takeoff:
 test-integration-px4-takeoff-instability:
 	$(call RUN_PX4_INTEGRATION_TEST,test-integration-px4-takeoff-instability,$(ISAAC_PX4_TAKEOFF_INSTABILITY_TEST),$(ISAAC_PX4_TAKEOFF_INSTABILITY_TEST_LOG),test_px4_takeoff_instability_detection.log,test_px4_takeoff_instability_px4.log)
 
-# Dual-PX4 multi-drone takeoff. Starts PX4_INSTANCE_COUNT PX4 SITL instances in
-# one shared network namespace, composes the multi_drone_takeoff Hydra config
-# (its scene comes from scenario.scene, so SCENE is the @scenario sentinel), and
-# requires every drone to hold its takeoff/hover envelope.
+# Multi-drone takeoff. Starts one PX4 SITL instance per PX4-enabled vehicle in
+# the active Hydra config, uses the scenario.scene config via the @scenario
+# sentinel, and requires every drone to hold its takeoff/hover envelope.
 .PHONY: test-integration-px4-multi-drone-takeoff
-test-integration-px4-multi-drone-takeoff: PX4_INSTANCE_COUNT = 2
-test-integration-px4-multi-drone-takeoff: EXPERIMENT_CONFIG_NAME = multi_drone_takeoff
 test-integration-px4-multi-drone-takeoff: SCENE = @scenario
 test-integration-px4-multi-drone-takeoff:
 	$(call RUN_PX4_INTEGRATION_TEST,test-integration-px4-multi-drone-takeoff,$(ISAAC_PX4_MULTI_DRONE_TEST),$(ISAAC_PX4_MULTI_DRONE_TEST_LOG),test_px4_multi_drone_takeoff.log,test_px4_multi_drone_takeoff_px4.log)

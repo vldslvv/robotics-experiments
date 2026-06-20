@@ -77,41 +77,30 @@ do
 done
 
 : "${ISAAC_DOCKER_RUNTIME:=}"
-: "${EXPERIMENT_CONFIG_OVERRIDES:=}"
-: "${EXPERIMENT_CONFIG_NAME:=}"
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
-# Number of PX4 SITL instances to start (one per vehicle). Default 1 keeps the
-# single-vehicle baseline path unchanged.
-: "${PX4_INSTANCE_COUNT:=1}"
+PX4_TOTAL_INSTANCES="$(
+    uv run python -c \
+        'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
+)"
+if [ "${PX4_TOTAL_INSTANCES}" -lt 1 ]; then
+    echo "Active Hydra config has no PX4-enabled vehicles; PX4 integration requires at least one." >&2
+    exit 2
+fi
 
 SCRIPT_START_MS="$(now_ms)"
 mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
 : >"${HOST_TIMING_LOG}"
-# The bridge debug-log template carries the {vehicle} token so the N per-vehicle
-# bridge logs never collide (config validation rejects two vehicles resolving to
-# the same template). For N=1 it renders ..._v0_bridge.log.
-px4_debug_log_path="${PX4_TEST_LOGS_DIR}/{date}/{time}_v{vehicle}_bridge.log"
-config_overrides="${EXPERIMENT_CONFIG_OVERRIDES}"
-if [ -n "${config_overrides}" ]; then
-    config_overrides="${config_overrides} "
-fi
-config_overrides="${config_overrides}px4.debug_log_path=\\'${px4_debug_log_path}\\'"
 ISAAC_DOCKER_VOLUMES="${ISAAC_DOCKER_VOLUMES//\$\{ISAAC_RUN_ROOT\}/${ISAAC_RUN_ROOT}}"
 
 # Container names and the primary container (whose network namespace Isaac and
-# every additional PX4 instance share). For N=1 the primary keeps the unsuffixed
-# base name so the single-vehicle path is unchanged.
+# every additional PX4 instance share).
 STARTED_CONTAINERS=()
 PRIMARY_PX4_CONTAINER=""
 
 px4_container_name() {
     local idx="$1"
-    if [ "${PX4_INSTANCE_COUNT}" -eq 1 ]; then
-        printf "%s" "${PX4_TEST_CONTAINER_NAME}"
-    else
-        printf "%s.%s" "${PX4_TEST_CONTAINER_NAME}" "${idx}"
-    fi
+    printf "%s.%s" "${PX4_TEST_CONTAINER_NAME}" "${idx}"
 }
 
 px4_host_log() {
@@ -216,7 +205,7 @@ integration_timing "prepare_logs" "${stage_start_ms}"
 # distinct PX4 instance index so each listens on simulator TCP port 4560 + i and
 # GCS UDP 14550 + i. Per-instance log/eeprom mounts keep their state isolated.
 stage_start_ms="$(now_ms)"
-for ((i = 0; i < PX4_INSTANCE_COUNT; i++)); do
+for ((i = 0; i < PX4_TOTAL_INSTANCES; i++)); do
     container="$(px4_container_name "${i}")"
     docker rm -f "${container}" >/dev/null 2>&1 || true
 
@@ -255,7 +244,7 @@ for ((i = 0; i < PX4_INSTANCE_COUNT; i++)); do
     fi
 done
 integration_timing "px4_readiness_wait" "${stage_start_ms}"
-echo "All ${PX4_INSTANCE_COUNT} PX4 instance(s) are waiting for Isaac."
+echo "All ${PX4_TOTAL_INSTANCES} PX4 instance(s) are waiting for Isaac."
 
 stage_start_ms="$(now_ms)"
 # The Docker option variables are Make-provided argument fragments.
@@ -267,8 +256,6 @@ if docker run --rm \
     -e "HOST_TIMING_LOG=${CONTAINER_TIMING_LOG}" \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
-    -e "EXPERIMENT_CONFIG_NAME=${EXPERIMENT_CONFIG_NAME}" \
-    -e "EXPERIMENT_CONFIG_OVERRIDES=${config_overrides}" \
     ${ISAAC_DOCKER_VOLUMES} \
     --entrypoint /bin/bash \
     "${ISAAC_IMAGE}" \

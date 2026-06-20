@@ -14,6 +14,7 @@ PX4 v1.14.3 shifts the GCS local UDP port for `-i` but leaves its remote GCS
 port at `14550`, so `run_px4_iris_ci.sh` patches `px4-rc.mavlink` at container
 startup to set the GCS remote port to `14550 + PX4_INSTANCE`.
 `reset_px4_state.sh` clears `dataman` / `parameters*.bson` / `eeprom` under the
-per-instance rootfs so instances never share non-volatile state. The integration
-harness (`make/run_px4_integration_test.sh`) starts `PX4_INSTANCE_COUNT`
-containers in one shared namespace; the dual-PX4 test target sets it to `2`.
+per-instance rootfs so instances never share non-volatile state. The persistent
+`make run-px4` path starts one interactive tmux-backed PX4 container per
+PX4-enabled vehicle in the active Hydra config. The integration harness starts
+the same instance count with the non-interactive `run_px4_iris_ci.sh` launcher.

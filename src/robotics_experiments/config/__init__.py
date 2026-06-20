@@ -20,14 +20,19 @@ __all__ = [
     "ScenarioConfig",
     "SimSettings",
     "VehicleConfig",
+    "get_enabled_px4_vehicle_count",
     "get_config",
     "reset_config",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"get_config", "reset_config"}:
-        from .load import get_config, reset_config
+    if name in {"get_config", "get_enabled_px4_vehicle_count", "reset_config"}:
+        from .load import get_config, get_enabled_px4_vehicle_count, reset_config
 
-        return {"get_config": get_config, "reset_config": reset_config}[name]
+        return {
+            "get_config": get_config,
+            "get_enabled_px4_vehicle_count": get_enabled_px4_vehicle_count,
+            "reset_config": reset_config,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

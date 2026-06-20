@@ -195,7 +195,7 @@ the host. They are meant to be used in the Dockerized environment.
 - `make destroy` stops/removes containers and removes built images.
 - `make run-isaac` starts the Isaac Sim container.
 - `make run-ros` starts the ROS 2 container.
-- `make run-px4` starts the PX4 SITL container.
+- `make run-px4` starts one PX4 SITL container per PX4-enabled vehicle.
 - `make stop` stops persistent containers without removing them.
 - Legacy targets such as `build-all`, `run-all`, and `clean-all` are
   compatibility aliases.
@@ -244,12 +244,13 @@ the host. They are meant to be used in the Dockerized environment.
 - `make test-integration-px4-takeoff-instability` runs the same scenario with
   a test-local PX4 rotor mapping fault and passes only when the stability
   envelope detects the resulting instability.
-- `make test-integration-px4-multi-drone-takeoff` runs the dual-PX4 multi-drone
-  takeoff: it sets `PX4_INSTANCE_COUNT=2` and `EXPERIMENT_CONFIG_NAME=multi_drone_takeoff`,
-  starts N PX4 SITL containers in one shared network namespace (instance 0 owns
-  it; instance `i>0` joins via `--network container:` and runs PX4 `-i i` so it
-  listens on simulator TCP `4560 + i` / GCS UDP `14550 + i` with a per-instance
-  rootfs), and passes only when *every* drone holds its takeoff/hover envelope.
+- `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
+  scenario from the active Hydra config: it starts one PX4 SITL container per
+  resolved `vehicles` entry whose `px4.enabled` is true, in one shared network
+  namespace (instance 0 owns it; instance `i>0` joins via
+  `--network container:` and runs PX4 `-i i` so it listens on simulator TCP
+  `4560 + i` / GCS UDP `14550 + i` with a per-instance rootfs), and passes only
+  when *every* drone holds its takeoff/hover envelope.
   `PX4_INSTANCE` is the per-container index threaded into `run_px4_iris_ci.sh` /
   `reset_px4_state.sh` (see `px4/docker/README.md`). The runner injects a
   `px4.debug_log_path` override carrying the `{vehicle}` token so the per-vehicle
@@ -260,16 +261,16 @@ the host. They are meant to be used in the Dockerized environment.
   (`ScenarioConfig`): the scene (`scenario.scene`), the takeoff target, the
   command-flow timeouts, and the flight-envelope gates. The standalone runner's
   `--scene` is optional and overrides it; the multi-drone target passes the
-  `@scenario` sentinel so the scene comes from config. Integration experiments
-  are selected by name via `EXPERIMENT_CONFIG_NAME` (e.g.
-  `configs/experiment/multi_drone_takeoff.yaml`, which sets the 2-vehicle
-  `vehicles` list, the scene, and any scenario overrides).
+  `@scenario` sentinel so the scene comes from config. Persistent and
+  integration experiment variants are selected by editing Hydra YAML; the active
+  runtime config is `configs/experiment/config.yaml`.
 
 ### PX4
-- `make run-px4` opens a `px4` tmux session with side-by-side panes. One pane
-  starts `px4-iris`; the other remains an interactive shell.
-- Inside the PX4 container, `px4-iris` clears simulated PX4 state and then runs
-  `make px4_sitl_default none_iris` from the PX4 source directory on demand.
+- `make run-px4` derives the number of PX4 SITL containers from the active Hydra
+  `vehicles` list and opens one terminal per PX4-enabled vehicle. Each
+  persistent PX4 container attaches to a `px4` tmux session with the interactive
+  PX4 console selected, so manual commands such as `commander arm` and
+  `commander takeoff` can be entered directly.
 
 ### Flight log analysis and PX4 bridge debugging
 - `flight_analysis/README.md` is the single source for the repeatable flight-log
