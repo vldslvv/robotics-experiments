@@ -16,6 +16,13 @@ navigation through obstacles. Use `SCENE=@isaac/assets/LightSwitchWarehouse/Ware
 on a Make invocation, or pass `--scene` to a standalone script, when manually
 running against the warehouse.
 
+`--scene` is optional. When omitted, or when passed the sentinel `@scenario`,
+the scene is read from the Hydra `scenario.scene` config (see `ScenarioConfig`).
+The takeoff scenario's tunables - takeoff target, command-flow timeouts, and the
+flight-envelope gates - also come from the `scenario` Hydra group rather than
+being hardcoded; `configs/experiment/scenario/default.yaml` holds the baseline
+values.
+
 PX4-backed scenario tests should be run from their host Make targets so Docker
 lifecycle, mounted EEPROM state, and persisted `px4/logs` diagnostics stay
 owned by the repository workflow. For example, use
@@ -27,3 +34,14 @@ without changing PX4 takeoff-height parameters. It currently passes after the
 vehicle reaches the observed airborne envelope, waits 2 seconds for hover
 settle, then holds 5 seconds of hover with no more than 0.35 m of height range
 and no more than 0.35 m/s vertical speed in magnitude.
+
+`make test-integration-px4-multi-drone-takeoff` runs the same command flow for
+two drones at once (the `multi_drone_takeoff` Hydra config). The shared scenario
+in `_px4_takeoff_scenario.py` is driven by the `vehicles` list: one entry is the
+single-vehicle baseline, N entries drive N drones, each bound to its own PX4 SITL
+instance (simulator port `4560 + vehicle_id`, GCS link
+`scenario.gcs_baseport + vehicle_id`). All bridges tick on the same PhysX steps,
+so one `simulation_app.update()` advances every drone's lockstep exchange; each
+phase runs across all drones over the shared clock, and the envelope gates are
+evaluated per drone (drone-id-tagged) against its own spawn position - every
+drone must pass.

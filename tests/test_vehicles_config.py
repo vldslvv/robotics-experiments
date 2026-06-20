@@ -92,9 +92,7 @@ def _two_vehicles(**v1_overrides):
     v1 = VehicleConfig(
         id=v1_overrides.get("id", 1),
         spawn_xy=v1_overrides.get("spawn_xy", (2.0, 0.0)),
-        drone=dataclasses.replace(
-            base_drone, prim_name=v1_overrides.get("prim_name", "Drone1")
-        ),
+        drone=dataclasses.replace(base_drone, prim_name=v1_overrides.get("prim_name", "Drone1")),
         px4=dataclasses.replace(
             base_px4,
             vehicle_id=v1_overrides.get("vehicle_id", 1),

@@ -78,13 +78,20 @@ done
 
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${EXPERIMENT_CONFIG_OVERRIDES:=}"
+: "${EXPERIMENT_CONFIG_NAME:=}"
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
+# Number of PX4 SITL instances to start (one per vehicle). Default 1 keeps the
+# single-vehicle baseline path unchanged.
+: "${PX4_INSTANCE_COUNT:=1}"
 
 SCRIPT_START_MS="$(now_ms)"
 mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
 : >"${HOST_TIMING_LOG}"
-px4_debug_log_path="${PX4_TEST_LOGS_DIR}/{date}/{time}_bridge.log"
+# The bridge debug-log template carries the {vehicle} token so the N per-vehicle
+# bridge logs never collide (config validation rejects two vehicles resolving to
+# the same template). For N=1 it renders ..._v0_bridge.log.
+px4_debug_log_path="${PX4_TEST_LOGS_DIR}/{date}/{time}_v{vehicle}_bridge.log"
 config_overrides="${EXPERIMENT_CONFIG_OVERRIDES}"
 if [ -n "${config_overrides}" ]; then
     config_overrides="${config_overrides} "
@@ -92,10 +99,55 @@ fi
 config_overrides="${config_overrides}px4.debug_log_path=\\'${px4_debug_log_path}\\'"
 ISAAC_DOCKER_VOLUMES="${ISAAC_DOCKER_VOLUMES//\$\{ISAAC_RUN_ROOT\}/${ISAAC_RUN_ROOT}}"
 
+# Container names and the primary container (whose network namespace Isaac and
+# every additional PX4 instance share). For N=1 the primary keeps the unsuffixed
+# base name so the single-vehicle path is unchanged.
+STARTED_CONTAINERS=()
+PRIMARY_PX4_CONTAINER=""
+
+px4_container_name() {
+    local idx="$1"
+    if [ "${PX4_INSTANCE_COUNT}" -eq 1 ]; then
+        printf "%s" "${PX4_TEST_CONTAINER_NAME}"
+    else
+        printf "%s.%s" "${PX4_TEST_CONTAINER_NAME}" "${idx}"
+    fi
+}
+
+px4_host_log() {
+    local idx="$1"
+    if [ "${idx}" -eq 0 ]; then
+        printf "%s" "${HOST_PX4_LOG}"
+    else
+        printf "%s.%s" "${HOST_PX4_LOG}" "${idx}"
+    fi
+}
+
+wait_px4_ready() {
+    local container="$1"
+    local port="$2"
+    local _
+    for _ in $(seq 1 "${PX4_TEST_READY_TIMEOUT_S}"); do
+        if docker logs "${container}" 2>&1 \
+            | grep -q "Waiting for simulator to accept connection on TCP port ${port}"; then
+            return 0
+        fi
+        if ! docker inspect --format "{{.State.Running}}" "${container}" 2>/dev/null \
+            | grep -qx true; then
+            echo "PX4 container ${container} exited before simulator port ${port} became ready."
+            return 1
+        fi
+        sleep 1
+    done
+    echo "Timed out waiting for PX4 port ${port} readiness after ${PX4_TEST_READY_TIMEOUT_S}s."
+    return 1
+}
+
 cleanup() {
     local status=$?
     local timing_status
     local stage_start_ms
+    local idx
 
     stage_start_ms="$(now_ms)"
     timing_status="fail"
@@ -116,30 +168,38 @@ cleanup() {
         echo "  Isaac: ${HOST_ISAAC_LOG} (not written)"
     fi
 
-    if docker inspect "${PX4_TEST_CONTAINER_NAME}" >/dev/null 2>&1; then
-        if docker logs "${PX4_TEST_CONTAINER_NAME}" >"${HOST_PX4_LOG}" 2>&1; then
-            echo "  PX4 SITL: ${HOST_PX4_LOG}"
-        else
-            echo "  PX4 SITL: ${HOST_PX4_LOG} (docker logs failed)"
-        fi
+    idx=0
+    for container in "${STARTED_CONTAINERS[@]}"; do
+        local host_log
+        host_log="$(px4_host_log "${idx}")"
+        if docker inspect "${container}" >/dev/null 2>&1; then
+            if docker logs "${container}" >"${host_log}" 2>&1; then
+                echo "  PX4 SITL[${idx}]: ${host_log}"
+            else
+                echo "  PX4 SITL[${idx}]: ${host_log} (docker logs failed)"
+            fi
 
-        if [ "${INTEGRATION_VERBOSE}" = "1" ]; then
-            terminal_control_filter <"${HOST_PX4_LOG}" | px4_prompt_filter || true
-        elif [ "${status}" -ne 0 ]; then
-            echo "PX4 SITL log tail:"
-            tail -n "${INTEGRATION_LOG_TAIL_LINES}" "${HOST_PX4_LOG}" \
-                | terminal_control_filter \
-                | px4_prompt_filter \
-                || true
+            if [ "${INTEGRATION_VERBOSE}" = "1" ]; then
+                terminal_control_filter <"${host_log}" | px4_prompt_filter || true
+            elif [ "${status}" -ne 0 ]; then
+                echo "PX4 SITL[${idx}] log tail:"
+                tail -n "${INTEGRATION_LOG_TAIL_LINES}" "${host_log}" \
+                    | terminal_control_filter \
+                    | px4_prompt_filter \
+                    || true
+            fi
+        else
+            echo "  PX4 SITL[${idx}]: ${host_log} (not written; container was not started)"
         fi
-    else
-        echo "  PX4 SITL: ${HOST_PX4_LOG} (not written; test container was not started)"
-    fi
+        idx=$((idx + 1))
+    done
     integration_timing "collect_logs" "${stage_start_ms}" "${timing_status}"
 
     stage_start_ms="$(now_ms)"
-    docker rm -f "${PX4_TEST_CONTAINER_NAME}" >/dev/null 2>&1 || true
-    integration_timing "remove_px4_container" "${stage_start_ms}"
+    for container in "${STARTED_CONTAINERS[@]}"; do
+        docker rm -f "${container}" >/dev/null 2>&1 || true
+    done
+    integration_timing "remove_px4_containers" "${stage_start_ms}"
     integration_timing "total" "${SCRIPT_START_MS}" "${timing_status}"
     exit "${status}"
 }
@@ -151,58 +211,63 @@ mkdir -p "$(dirname "${HOST_ISAAC_LOG}")" "$(dirname "${HOST_PX4_LOG}")"
 rm -f "${HOST_ISAAC_LOG}" "${HOST_PX4_LOG}"
 integration_timing "prepare_logs" "${stage_start_ms}"
 
+# Start one PX4 SITL container per instance. Instance 0 owns the network
+# namespace; additional instances join it (--network container:) and run with a
+# distinct PX4 instance index so each listens on simulator TCP port 4560 + i and
+# GCS UDP 14550 + i. Per-instance log/eeprom mounts keep their state isolated.
 stage_start_ms="$(now_ms)"
-docker rm -f "${PX4_TEST_CONTAINER_NAME}" >/dev/null 2>&1 || true
-integration_timing "remove_existing_px4_container" "${stage_start_ms}"
+for ((i = 0; i < PX4_INSTANCE_COUNT; i++)); do
+    container="$(px4_container_name "${i}")"
+    docker rm -f "${container}" >/dev/null 2>&1 || true
 
-echo "Starting temporary PX4 SITL container ${PX4_TEST_CONTAINER_NAME}..."
-stage_start_ms="$(now_ms)"
-docker run -d \
-    --name "${PX4_TEST_CONTAINER_NAME}" \
-    -v "${PX4_LOGS}:${PX4_ROOTFS}/log" \
-    -v "${PX4_EEPROM}:${PX4_ROOTFS}/eeprom" \
-    "${PX4_IMAGE}" \
-    /bin/bash -lc "exec /usr/local/bin/run_px4_iris_ci" \
-    >/dev/null
-integration_timing "start_px4_container" "${stage_start_ms}"
-
-echo "Waiting for PX4 simulator TCP port 4560 readiness..."
-stage_start_ms="$(now_ms)"
-ready=0
-for _ in $(seq 1 "${PX4_TEST_READY_TIMEOUT_S}"); do
-    if docker logs "${PX4_TEST_CONTAINER_NAME}" 2>&1 \
-        | grep -q "Waiting for simulator to accept connection on TCP port 4560"; then
-        ready=1
-        break
+    net_args=()
+    log_mount="${PX4_LOGS}"
+    eeprom_mount="${PX4_EEPROM}"
+    rootfs_log="${PX4_ROOTFS}/log"
+    rootfs_eeprom="${PX4_ROOTFS}/eeprom"
+    if [ "${i}" -eq 0 ]; then
+        PRIMARY_PX4_CONTAINER="${container}"
+    else
+        net_args=(--network "container:${PRIMARY_PX4_CONTAINER}")
+        log_mount="${PX4_LOGS}/${i}"
+        eeprom_mount="${PX4_EEPROM}/${i}"
+        rootfs_log="${PX4_ROOTFS}/${i}/log"
+        rootfs_eeprom="${PX4_ROOTFS}/${i}/eeprom"
+        mkdir -p "${log_mount}" "${eeprom_mount}"
     fi
 
-    if ! docker inspect --format "{{.State.Running}}" "${PX4_TEST_CONTAINER_NAME}" 2>/dev/null | grep -qx true; then
-        echo "PX4 test container exited before simulator port became ready."
+    echo "Starting temporary PX4 SITL container ${container} (instance ${i})..."
+    docker run -d \
+        --name "${container}" \
+        "${net_args[@]}" \
+        -e "PX4_INSTANCE=${i}" \
+        -v "${log_mount}:${rootfs_log}" \
+        -v "${eeprom_mount}:${rootfs_eeprom}" \
+        "${PX4_IMAGE}" \
+        /bin/bash -lc "exec /usr/local/bin/run_px4_iris_ci" \
+        >/dev/null
+    STARTED_CONTAINERS+=("${container}")
+
+    echo "Waiting for PX4 instance ${i} simulator TCP port $((4560 + i)) readiness..."
+    if ! wait_px4_ready "${container}" "$((4560 + i))"; then
+        integration_timing "px4_readiness_wait" "${stage_start_ms}" "fail"
         exit 1
     fi
-
-    sleep 1
 done
-
-if [ "${ready}" -ne 1 ]; then
-    echo "Timed out waiting for PX4 simulator port readiness after ${PX4_TEST_READY_TIMEOUT_S}s."
-    integration_timing "px4_readiness_wait" "${stage_start_ms}" "fail"
-    exit 1
-fi
-
 integration_timing "px4_readiness_wait" "${stage_start_ms}"
-echo "PX4 simulator is waiting for Isaac on TCP port 4560."
+echo "All ${PX4_INSTANCE_COUNT} PX4 instance(s) are waiting for Isaac."
 
 stage_start_ms="$(now_ms)"
 # The Docker option variables are Make-provided argument fragments.
 # shellcheck disable=SC2086
 if docker run --rm \
-    --network "container:${PX4_TEST_CONTAINER_NAME}" \
+    --network "container:${PRIMARY_PX4_CONTAINER}" \
     ${ISAAC_DOCKER_RUNTIME} \
     ${ISAAC_DOCKER_ENV} \
     -e "HOST_TIMING_LOG=${CONTAINER_TIMING_LOG}" \
-    -e "PX4_TEST_CONTAINER_NAME=${PX4_TEST_CONTAINER_NAME}" \
+    -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
+    -e "EXPERIMENT_CONFIG_NAME=${EXPERIMENT_CONFIG_NAME}" \
     -e "EXPERIMENT_CONFIG_OVERRIDES=${config_overrides}" \
     ${ISAAC_DOCKER_VOLUMES} \
     --entrypoint /bin/bash \

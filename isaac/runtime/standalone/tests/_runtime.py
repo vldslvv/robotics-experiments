@@ -22,6 +22,12 @@ from isaacsim import SimulationApp
 
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
 
+# Sentinel ``--scene`` value meaning "load the scene from the Hydra
+# ``scenario.scene`` config" rather than an explicit path. The integration
+# harness always injects ``--scene "$(SCENE)"``; a target that wants the
+# config-driven scene sets ``SCENE := @scenario``.
+SCENE_FROM_CONFIG = "@scenario"
+
 __all__ = [
     "SceneTestContext",
     "TimingReporter",
@@ -129,35 +135,59 @@ def _resolve_scene_path(scene: str) -> Path:
     return Path(scene).expanduser().resolve()
 
 
-def _parse_scene_args(description: str, default_scene: str) -> argparse.Namespace:
+def _parse_scene_args(description: str, default_scene: str | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--scene",
         default=default_scene,
-        help="USD scene path to load. Prefix with @ for a repository-relative path.",
+        help=(
+            "USD scene path to load. Prefix with @ for a repository-relative "
+            f"path. Pass {SCENE_FROM_CONFIG!r} (or omit) to load the scene from "
+            "the Hydra scenario.scene config."
+        ),
     )
     return parser.parse_args()
+
+
+def _resolve_scene_from_config(test_name: str) -> str:
+    """Return ``scenario.scene`` from the composed Hydra config.
+
+    Used when no explicit ``--scene`` is given (or the sentinel is passed). The
+    config composes without Isaac, so this is safe before ``SimulationApp``
+    starts; the test body later resets and recomposes the cache.
+    """
+    from robotics_experiments.config import get_config, reset_config
+
+    reset_config()
+    scene = get_config().scenario.scene
+    report(f"{test_name}: scene from scenario.scene config: {scene}")
+    return scene
 
 
 def run_scene_test(
     *,
     test_name: str,
-    default_scene: str,
     test_body: Callable[[SceneTestContext], None],
     description: str,
+    default_scene: str | None = None,
 ) -> None:
     """Run a standalone Isaac scene test against Hydra-backed project config.
 
     Args:
         test_name: Short human-readable test name shown in filtered output.
-        default_scene: Default USD scene path. ``@`` prefixes are resolved
-            relative to the repository root.
         test_body: Extension-specific assertions to run after the stage loads.
         description: CLI description for the test script.
+        default_scene: Default USD scene path when ``--scene`` is not passed.
+            ``@`` prefixes are resolved relative to the repository root. When
+            ``None`` (or when ``--scene`` is the :data:`SCENE_FROM_CONFIG`
+            sentinel), the scene is read from the Hydra ``scenario.scene`` config.
     """
     args = _parse_scene_args(description, default_scene)
-    scene_path = _resolve_scene_path(args.scene)
-    report(f"{test_name}: scene argument: {args.scene}")
+    scene = args.scene
+    if scene in (None, SCENE_FROM_CONFIG):
+        scene = _resolve_scene_from_config(test_name)
+    scene_path = _resolve_scene_path(scene)
+    report(f"{test_name}: scene argument: {scene}")
     report(f"{test_name}: resolved scene path: {scene_path}")
     if not scene_path.exists():
         raise FileNotFoundError(f"Scene does not exist: {scene_path}")

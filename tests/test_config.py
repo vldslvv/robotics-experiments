@@ -82,6 +82,44 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.isaac_lab.drone_hover_num_envs == expected_isaac_lab.drone_hover_num_envs
     assert config.isaac_lab.drone_hover_env_spacing == expected_isaac_lab.drone_hover_env_spacing
     assert config.isaac_lab.drone_hover_action_scale == expected_isaac_lab.drone_hover_action_scale
+    expected_scenario = _group_defaults("scenario")
+    assert config.scenario.scene == expected_scenario.scene
+    assert config.scenario.takeoff_altitude_m == expected_scenario.takeoff_altitude_m
+    assert config.scenario.min_takeoff_climb_m == expected_scenario.min_takeoff_climb_m
+    assert config.scenario.gcs_baseport == expected_scenario.gcs_baseport
+    assert config.scenario.max_downward_speed_m_s == expected_scenario.max_downward_speed_m_s
+    assert (
+        config.scenario.hover_max_horizontal_range_m
+        == expected_scenario.hover_max_horizontal_range_m
+    )
+    reset_config()
+
+
+def test_multi_drone_takeoff_config_composes_two_enabled_vehicles(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, reset_config
+
+    monkeypatch.setenv("EXPERIMENT_CONFIG_NAME", "multi_drone_takeoff")
+    reset_config()
+    config = get_config()
+
+    assert len(config.vehicles) == 2
+    v0, v1 = config.vehicles
+    assert (v0.id, v1.id) == (0, 1)
+    assert v0.drone.prim_name == "Drone0"
+    assert v1.drone.prim_name == "Drone1"
+    assert v0.spawn_xy == (0.0, 0.0)
+    assert v1.spawn_xy == (4.0, 0.0)
+    assert v0.px4.enabled is True
+    assert v1.px4.enabled is True
+    # Distinct simulator endpoints: connection_baseport + vehicle_id.
+    assert v0.px4.connection_baseport + v0.px4.vehicle_id == 4560
+    assert v1.px4.connection_baseport + v1.px4.vehicle_id == 4561
+    # Per-vehicle bridge logs carry the {vehicle} token so they never collide.
+    assert "{vehicle}" in v0.px4.debug_log_path
+    # Scenario tunables come from the scenario group.
+    assert config.scenario.takeoff_altitude_m == 2.5
     reset_config()
 
 

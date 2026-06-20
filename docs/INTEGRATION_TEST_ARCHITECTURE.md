@@ -17,14 +17,20 @@ scenario-specific notes.
   `test-integration-px4-takeoff`.
 - `make test-integration-all` runs every target in `INTEGRATION_TEST_TARGETS`:
   `test-integration-isaac`, `test-integration-drone-articulation`,
-  `test-integration-px4-takeoff`, and `test-integration-px4-takeoff-instability`.
-  It prints an aggregate passed/failed summary after all targets finish.
+  `test-integration-px4-takeoff`, `test-integration-px4-takeoff-instability`, and
+  `test-integration-px4-multi-drone-takeoff`. It prints an aggregate
+  passed/failed summary after all targets finish.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.
 - `make test-integration-px4-takeoff-instability` runs the same scenario with a
   test-local PX4 rotor mapping fault and passes only when the stability envelope
   detects the resulting instability.
+- `make test-integration-px4-multi-drone-takeoff` runs the dual-PX4 multi-drone
+  takeoff. It sets `PX4_INSTANCE_COUNT=2` and
+  `EXPERIMENT_CONFIG_NAME=multi_drone_takeoff`, starts N PX4 SITL containers
+  sharing one network namespace, and passes only when every drone holds its
+  takeoff/hover envelope. See "Multi-instance PX4" below.
 
 ## Concurrency
 
@@ -83,3 +89,27 @@ Integration tests default to the minimal
 interactions. Override with
 `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual warehouse
 run is needed.
+
+`--scene` can also be the sentinel `@scenario`, which makes the standalone runner
+read the scene from the Hydra `scenario.scene` config instead of a path. The
+multi-drone target sets `SCENE=@scenario` so its scene (and all scenario
+tunables) come from `configs/experiment/multi_drone_takeoff.yaml`.
+
+## Multi-instance PX4
+
+`make/run_px4_integration_test.sh` starts `PX4_INSTANCE_COUNT` PX4 SITL
+containers (default 1). Instance 0 owns the network namespace and keeps the
+unsuffixed container name and the unchanged single-vehicle launch
+(`make px4_sitl_default none_iris`, simulator TCP `4560`). Each additional
+instance `i` joins instance 0's namespace (`--network container:<primary>`), runs
+with `PX4_INSTANCE=i` so `run_px4_iris_ci.sh` launches PX4 `-i i` (simulator TCP
+`4560 + i`, GCS UDP `14550 + i`), and uses an isolated per-instance rootfs plus
+per-instance `px4/logs.<i>` / `px4/eeprom.<i>` mounts so non-volatile state never
+collides. The runner waits on each instance's `TCP port 456i` readiness line,
+then the Isaac container joins the primary namespace and connects all N bridges.
+The cleanup trap collects each container's `docker logs` (`<px4-log>`,
+`<px4-log>.<i>`) and removes every container. `EXPERIMENT_CONFIG_NAME` selects
+the composed config (e.g. `multi_drone_takeoff`), and the runner injects a
+`px4.debug_log_path` template carrying the `{vehicle}` token so the per-vehicle
+bridge logs stay distinct. Keep `INTEGRATION_TEST_JOBS=1`: a 2-drone run already
+loads the host with two PX4 boots and two serial lockstep exchanges per tick.

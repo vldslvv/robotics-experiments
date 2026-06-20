@@ -1,0 +1,39 @@
+defaults:
+  - base_scenario
+
+# Default scene for standalone integration scenarios. '@' is repo-relative.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+# Per-drone GCS MAVLink link. PX4 instance i broadcasts to gcs_baseport + i.
+gcs_baseport: 14550
+gcs_heartbeat_period_s: 0.5
+
+# Command-flow timeouts (sim-time budgets / wall-clock handshake deadlines).
+ground_settle_s: 1.5
+heartbeat_timeout_s: 12.0
+prearm_settle_s: 10.0
+command_ack_timeout_s: 10.0
+
+# Takeoff target. PX4 currently settles below the requested 2.5m in this
+# SITL/Isaac loop, so the scenario verifies it reaches the observed airborne
+# envelope (min_takeoff_climb_m) and then holds hover.
+takeoff_altitude_m: 2.5
+min_takeoff_climb_m: 1.5
+takeoff_timeout_s: 30.0
+
+# Hover envelope (evaluated per drone, after a settle, against its own spawn).
+hover_settle_s: 2.0
+hover_observation_s: 5.0
+hover_max_altitude_range_m: 0.35
+hover_max_abs_vertical_speed_m_s: 0.35
+# Horizontal hover-quality gates. Sized from recent passing runs (worst case:
+# bbox-diagonal range 4.3cm, horizontal speed 0.022m/s) with ~7x / ~14x headroom.
+hover_max_horizontal_range_m: 0.30
+hover_max_abs_horizontal_speed_m_s: 0.30
+
+# Continuous divergence gates during takeoff.
+max_tilt_deg: 35.0
+max_lateral_drift_m: 2.0
+max_vertical_speed_m_s: 8.0
+max_downward_speed_m_s: -4.0
+max_angular_speed_rad_s: 8.0

@@ -5,6 +5,7 @@ defaults:
   - switches: default
   - px4: default
   - isaac_lab: default
+  - scenario: default
   - _self_
 
 # Multi-vehicle scaffolding. Each entry merges its drone/px4 over the global

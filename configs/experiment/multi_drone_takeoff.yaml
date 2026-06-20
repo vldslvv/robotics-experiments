@@ -1,0 +1,29 @@
+defaults:
+  - base_env
+  - sim: default
+  - drone: default
+  - switches: default
+  - px4: default
+  - isaac_lab: default
+  - scenario: default
+  - _self_
+
+# Dedicated config for the dual-PX4 multi-drone takeoff integration test
+# (make test-integration-px4-multi-drone-takeoff). Selected via
+# EXPERIMENT_CONFIG_NAME=multi_drone_takeoff. It specifies how many drones to
+# spawn and where, the scene, and the test settings (the scenario group).
+#
+# Two drones, each bound to its own PX4 SITL instance: vehicle_id 0/1 ->
+# simulator ports 4560/4561, GCS links scenario.gcs_baseport + id (14550/14551).
+# Distinct prim_name avoids prim collisions; the px4 default debug_log_path
+# carries the {vehicle} token so the two bridge logs never collide. Spawned ~4m
+# apart so the two drones never cross paths within the hover envelope.
+vehicles:
+  - id: 0
+    spawn_xy: [0.0, 0.0]
+    drone: {prim_name: Drone0}
+    px4: {vehicle_id: 0}
+  - id: 1
+    spawn_xy: [4.0, 0.0]
+    drone: {prim_name: Drone1}
+    px4: {vehicle_id: 1}

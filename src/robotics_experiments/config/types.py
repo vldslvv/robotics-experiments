@@ -12,6 +12,7 @@ __all__ = [
     "Px4BridgeConfig",
     "VehicleConfig",
     "IsaacLabConfig",
+    "ScenarioConfig",
     "EnvConfig",
 ]
 
@@ -323,6 +324,71 @@ class IsaacLabConfig:
 
 
 @dataclass
+class ScenarioConfig:
+    """Tunables for the standalone PX4 takeoff/hover integration scenario.
+
+    Single source of truth for the integration test's scene, command-flow
+    timeouts, takeoff target, and the flight-envelope gates the scenario asserts
+    (previously module-level constants in the standalone test). The same scenario
+    drives one drone (single-vehicle baseline) or N drones (multi-vehicle
+    takeoff); each gate is evaluated per drone against its own spawn position.
+
+    Attributes:
+        scene: USD scene to load. ``@``-prefixed paths are repository-relative.
+            Used when the standalone runner is not given an explicit ``--scene``.
+        gcs_baseport: Base UDP port for the per-drone GCS MAVLink link; drone
+            ``vehicle_id`` is added (PX4 instance ``i`` broadcasts to
+            ``gcs_baseport + i``).
+        gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
+        ground_settle_s: Sim-time the drone settles on the ground before the
+            command flow starts.
+        heartbeat_timeout_s: Wall-clock deadline for each handshake wait (bridge
+            heartbeat, GCS heartbeat, takeoff telemetry).
+        prearm_settle_s: Sim-time the PX4 estimator is allowed to settle before
+            arming.
+        command_ack_timeout_s: Wall-clock deadline for a MAVLink COMMAND_ACK.
+        takeoff_altitude_m: Climb commanded in MAV_CMD_NAV_TAKEOFF.
+        min_takeoff_climb_m: Minimum climb (m) that counts as airborne before the
+            hover envelope is evaluated.
+        takeoff_timeout_s: Sim-time budget to reach ``min_takeoff_climb_m``.
+        hover_settle_s: Sim-time after reaching altitude before hover sampling.
+        hover_observation_s: Sim-time the hover envelope is sampled.
+        hover_max_altitude_range_m: Max allowed spread of hover climb height.
+        hover_max_abs_vertical_speed_m_s: Max allowed hover vertical speed.
+        hover_max_horizontal_range_m: Max allowed hover horizontal bbox diagonal.
+        hover_max_abs_horizontal_speed_m_s: Max allowed hover horizontal speed.
+        max_tilt_deg: Continuous tilt gate during takeoff.
+        max_lateral_drift_m: Continuous lateral-drift gate during takeoff.
+        max_vertical_speed_m_s: Continuous upward-speed divergence gate.
+        max_downward_speed_m_s: Continuous downward-speed divergence gate
+            (negative).
+        max_angular_speed_rad_s: Continuous angular-speed divergence gate.
+    """
+
+    scene: str
+    gcs_baseport: int
+    gcs_heartbeat_period_s: float
+    ground_settle_s: float
+    heartbeat_timeout_s: float
+    prearm_settle_s: float
+    command_ack_timeout_s: float
+    takeoff_altitude_m: float
+    min_takeoff_climb_m: float
+    takeoff_timeout_s: float
+    hover_settle_s: float
+    hover_observation_s: float
+    hover_max_altitude_range_m: float
+    hover_max_abs_vertical_speed_m_s: float
+    hover_max_horizontal_range_m: float
+    hover_max_abs_horizontal_speed_m_s: float
+    max_tilt_deg: float
+    max_lateral_drift_m: float
+    max_vertical_speed_m_s: float
+    max_downward_speed_m_s: float
+    max_angular_speed_rad_s: float
+
+
+@dataclass
 class EnvConfig:
     """Composite experiment config consumed by the Isaac Sim extensions.
 
@@ -332,6 +398,8 @@ class EnvConfig:
         switches: Light-switch spawner configuration.
         px4: PX4 SITL bridge configuration.
         isaac_lab: Isaac Lab workflow configuration.
+        scenario: Standalone integration-scenario tunables (scene, envelopes,
+            timeouts).
         vehicles: Multi-vehicle scaffolding. Each entry merges its ``drone`` /
             ``px4`` partial over the global ``drone`` / ``px4`` defaults above.
             The list is the only spawn path (one vehicle = a one-element list).
@@ -348,4 +416,5 @@ class EnvConfig:
     switches: LightSwitchConfig
     px4: Px4BridgeConfig
     isaac_lab: IsaacLabConfig
+    scenario: ScenarioConfig
     vehicles: List[Any]

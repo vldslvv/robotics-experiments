@@ -2,11 +2,21 @@
 
 reset_px4_state() {
   local px4_dir="${PX4_DIR:-/opt/PX4-Autopilot}"
-  local rootfs="${PX4_ROOTFS:-${px4_dir}/build/px4_sitl_default/rootfs}"
+  local base_rootfs="${PX4_ROOTFS:-${px4_dir}/build/px4_sitl_default/rootfs}"
+  local instance="${PX4_INSTANCE:-0}"
   local fresh_state="${PX4_FRESH_STATE:-1}"
 
   if [[ "${fresh_state}" == "0" ]]; then
     return
+  fi
+
+  # Instance 0 uses the base rootfs (unchanged single-vehicle behavior). Each
+  # additional PX4 instance runs from a per-instance rootfs subdir so its
+  # non-volatile state (dataman / parameters / eeprom) never collides with the
+  # other instances sharing the network namespace.
+  local rootfs="${base_rootfs}"
+  if [[ "${instance}" -ne 0 ]]; then
+    rootfs="${base_rootfs}/${instance}"
   fi
 
   mkdir -p "${rootfs}"

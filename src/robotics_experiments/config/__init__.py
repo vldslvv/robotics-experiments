@@ -5,6 +5,7 @@ from .types import (
     IsaacLabConfig,
     LightSwitchConfig,
     Px4BridgeConfig,
+    ScenarioConfig,
     SimSettings,
     VehicleConfig,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "IsaacLabConfig",
     "LightSwitchConfig",
     "Px4BridgeConfig",
+    "ScenarioConfig",
     "SimSettings",
     "VehicleConfig",
     "get_config",

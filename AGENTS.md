@@ -244,6 +244,26 @@ the host. They are meant to be used in the Dockerized environment.
 - `make test-integration-px4-takeoff-instability` runs the same scenario with
   a test-local PX4 rotor mapping fault and passes only when the stability
   envelope detects the resulting instability.
+- `make test-integration-px4-multi-drone-takeoff` runs the dual-PX4 multi-drone
+  takeoff: it sets `PX4_INSTANCE_COUNT=2` and `EXPERIMENT_CONFIG_NAME=multi_drone_takeoff`,
+  starts N PX4 SITL containers in one shared network namespace (instance 0 owns
+  it; instance `i>0` joins via `--network container:` and runs PX4 `-i i` so it
+  listens on simulator TCP `4560 + i` / GCS UDP `14550 + i` with a per-instance
+  rootfs), and passes only when *every* drone holds its takeoff/hover envelope.
+  `PX4_INSTANCE` is the per-container index threaded into `run_px4_iris_ci.sh` /
+  `reset_px4_state.sh` (see `px4/docker/README.md`). The runner injects a
+  `px4.debug_log_path` override carrying the `{vehicle}` token so the per-vehicle
+  bridge logs never collide (config validation rejects two vehicles resolving to
+  the same template). The PX4 `-i` port/rootfs behavior must be confirmed against
+  the live image (a manual probe) before relying on the `i>0` branch in CI.
+- Standalone scenario tunables live in the Hydra `scenario` group
+  (`ScenarioConfig`): the scene (`scenario.scene`), the takeoff target, the
+  command-flow timeouts, and the flight-envelope gates. The standalone runner's
+  `--scene` is optional and overrides it; the multi-drone target passes the
+  `@scenario` sentinel so the scene comes from config. Integration experiments
+  are selected by name via `EXPERIMENT_CONFIG_NAME` (e.g.
+  `configs/experiment/multi_drone_takeoff.yaml`, which sets the 2-vehicle
+  `vehicles` list, the scene, and any scenario overrides).
 
 ### PX4
 - `make run-px4` opens a `px4` tmux session with side-by-side panes. One pane
