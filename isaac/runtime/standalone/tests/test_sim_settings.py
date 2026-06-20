@@ -16,7 +16,7 @@ import math
 
 from _runtime import SceneTestContext, run_scene_test
 
-DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "sim_settings"
 
 

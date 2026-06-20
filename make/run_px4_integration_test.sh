@@ -32,23 +32,28 @@ integration_timing() {
     local status="${3:-ok}"
     local end_ms
     local elapsed_ms
+    local line
     local total_ms
 
     end_ms="$(now_ms)"
     elapsed_ms="$((end_ms - start_ms))"
     total_ms="$((end_ms - SCRIPT_START_MS))"
-    printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\n" \
+    line="$(printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s" \
         "${TEST_TARGET}" \
         "${stage}" \
         "$(format_ms "${elapsed_ms}")" \
         "$(format_ms "${total_ms}")" \
-        "${status}"
+        "${status}")"
+    printf "%s\n" "${line}"
+    printf "%s\n" "${line}" >>"${HOST_TIMING_LOG}" || true
 }
 
 for name in \
     TEST_TARGET \
+    CONTAINER_TIMING_LOG \
     HOST_ISAAC_LOG \
     HOST_PX4_LOG \
+    HOST_TIMING_LOG \
     ISAAC_TEST_LOG \
     ISAAC_TEST_SCRIPT \
     ISAAC_DOCKER_ENV \
@@ -77,6 +82,8 @@ done
 : "${INTEGRATION_VERBOSE:=0}"
 
 SCRIPT_START_MS="$(now_ms)"
+mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
+: >"${HOST_TIMING_LOG}"
 px4_debug_log_path="${PX4_TEST_LOGS_DIR}/{date}/{time}_bridge.log"
 config_overrides="${EXPERIMENT_CONFIG_OVERRIDES}"
 if [ -n "${config_overrides}" ]; then
@@ -193,6 +200,7 @@ if docker run --rm \
     --network "container:${PX4_TEST_CONTAINER_NAME}" \
     ${ISAAC_DOCKER_RUNTIME} \
     ${ISAAC_DOCKER_ENV} \
+    -e "HOST_TIMING_LOG=${CONTAINER_TIMING_LOG}" \
     -e "PX4_TEST_CONTAINER_NAME=${PX4_TEST_CONTAINER_NAME}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
     -e "EXPERIMENT_CONFIG_OVERRIDES=${config_overrides}" \
@@ -202,7 +210,7 @@ if docker run --rm \
     -lc "set -o pipefail && \
         script_start_ms=\$(date +%s%3N); \
         fmt_ms() { ms=\"\$1\"; printf \"%s.%03d\" \"\$((ms / 1000))\" \"\$((ms % 1000))\"; }; \
-        timing() { stage=\"\$1\"; start_ms=\"\$2\"; status=\"\${3:-ok}\"; end_ms=\$(date +%s%3N); printf \"[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\n\" \"${TEST_TARGET}\" \"\$stage\" \"\$(fmt_ms \"\$((end_ms - start_ms))\")\" \"\$(fmt_ms \"\$((end_ms - script_start_ms))\")\" \"\$status\"; }; \
+        timing() { stage=\"\$1\"; start_ms=\"\$2\"; status=\"\${3:-ok}\"; end_ms=\$(date +%s%3N); line=\$(printf \"[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\" \"${TEST_TARGET}\" \"\$stage\" \"\$(fmt_ms \"\$((end_ms - start_ms))\")\" \"\$(fmt_ms \"\$((end_ms - script_start_ms))\")\" \"\$status\"); printf \"%s\n\" \"\$line\"; printf \"%s\n\" \"\$line\" >>\"\$HOST_TIMING_LOG\" || true; }; \
         cd /isaac-sim && \
         rm -f \"${ISAAC_TEST_LOG}\" && \
         stage_start_ms=\$(date +%s%3N) && \

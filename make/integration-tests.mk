@@ -16,21 +16,27 @@ INTEGRATION_RUN_ROOT = $(INTEGRATION_ROOT)/$(1).$$(date -u +%Y%m%dT%H%M%SZ).$$$$
 define RUN_ISAAC_INTEGRATION_TEST
 @run_root="$(call INTEGRATION_RUN_ROOT,$(1))"; \
     ISAAC_RUN_ROOT="$$run_root/isaac"; \
+    HOST_TIMING_LOG="$$run_root/integration-timing.log"; \
+    CONTAINER_TIMING_LOG="$(ISAAC_PROJECT_DIR)/.build/docker/integration/$$(basename "$$run_root")/integration-timing.log"; \
     run_start_ms=$$(date +%s%3N); \
     mkdir -p "$$ISAAC_RUN_ROOT"; \
+    : >"$$HOST_TIMING_LOG"; \
     echo "Integration artifacts: $$run_root"; \
+    host_fmt_ms() { ms="$$1"; printf "%s.%03d" "$$((ms / 1000))" "$$((ms % 1000))"; }; \
+    host_timing() { stage="$$1"; start_ms="$$2"; status="$${3:-ok}"; end_ms=$$(date +%s%3N); line=$$(printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s" "$(1)" "$$stage" "$$(host_fmt_ms "$$((end_ms - start_ms))")" "$$(host_fmt_ms "$$((end_ms - run_start_ms))")" "$$status"); printf "%s\n" "$$line"; printf "%s\n" "$$line" >>"$$HOST_TIMING_LOG" || true; }; \
     container_start_ms=$$(date +%s%3N); \
     if docker run --rm \
         --network=host \
         $(ISAAC_INTEGRATION_DOCKER_RUNTIME) \
         $(ISAAC_DOCKER_ENV) \
+        -e "HOST_TIMING_LOG=$$CONTAINER_TIMING_LOG" \
         $(ISAAC_INTEGRATION_DOCKER_VOLUMES) \
         --entrypoint /bin/bash \
         $(ISAAC_IMAGE) \
         -lc 'set -o pipefail && \
             script_start_ms=$$(date +%s%3N); \
             fmt_ms() { ms="$$1"; printf "%s.%03d" "$$((ms / 1000))" "$$((ms % 1000))"; }; \
-            timing() { stage="$$1"; start_ms="$$2"; status="$${3:-ok}"; end_ms=$$(date +%s%3N); printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\n" "$(1)" "$$stage" "$$(fmt_ms "$$((end_ms - start_ms))")" "$$(fmt_ms "$$((end_ms - script_start_ms))")" "$$status"; }; \
+            timing() { stage="$$1"; start_ms="$$2"; status="$${3:-ok}"; end_ms=$$(date +%s%3N); line=$$(printf "[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s" "$(1)" "$$stage" "$$(fmt_ms "$$((end_ms - start_ms))")" "$$(fmt_ms "$$((end_ms - script_start_ms))")" "$$status"); printf "%s\n" "$$line"; printf "%s\n" "$$line" >>"$$HOST_TIMING_LOG" || true; }; \
             cd /isaac-sim && \
             rm -f "$(3)" && \
             stage_start_ms=$$(date +%s%3N) && \
@@ -54,22 +60,10 @@ define RUN_ISAAC_INTEGRATION_TEST
             else \
                 timing failure_scan "$$stage_start_ms" fail; exit 1; \
             fi'; then \
-        container_end_ms=$$(date +%s%3N); \
-        printf "[integration-timing] target=%s stage=isaac_container elapsed_s=%s.%03d total_s=%s.%03d status=ok\n" \
-            "$(1)" \
-            $$(((container_end_ms - container_start_ms) / 1000)) \
-            $$(((container_end_ms - container_start_ms) % 1000)) \
-            $$(((container_end_ms - run_start_ms) / 1000)) \
-            $$(((container_end_ms - run_start_ms) % 1000)); \
+        host_timing isaac_container "$$container_start_ms"; \
     else \
         status=$$?; \
-        container_end_ms=$$(date +%s%3N); \
-        printf "[integration-timing] target=%s stage=isaac_container elapsed_s=%s.%03d total_s=%s.%03d status=fail\n" \
-            "$(1)" \
-            $$(((container_end_ms - container_start_ms) / 1000)) \
-            $$(((container_end_ms - container_start_ms) % 1000)) \
-            $$(((container_end_ms - run_start_ms) / 1000)) \
-            $$(((container_end_ms - run_start_ms) % 1000)); \
+        host_timing isaac_container "$$container_start_ms" fail; \
         exit "$$status"; \
     fi
 endef
@@ -78,9 +72,14 @@ define RUN_PX4_INTEGRATION_TEST
 @run_root="$(call INTEGRATION_RUN_ROOT,$(1))"; \
     ISAAC_RUN_ROOT="$$run_root/isaac"; \
     PX4_RUN_ROOT="$$run_root/px4"; \
+    HOST_TIMING_LOG="$$run_root/integration-timing.log"; \
+    CONTAINER_TIMING_LOG="$(ISAAC_PROJECT_DIR)/.build/docker/integration/$$(basename "$$run_root")/integration-timing.log"; \
     mkdir -p "$$ISAAC_RUN_ROOT" "$$PX4_RUN_ROOT/logs" "$$PX4_RUN_ROOT/eeprom"; \
+    : >"$$HOST_TIMING_LOG"; \
     echo "Integration artifacts: $$run_root"; \
     TEST_TARGET='$(1)' \
+        HOST_TIMING_LOG="$$HOST_TIMING_LOG" \
+        CONTAINER_TIMING_LOG="$$CONTAINER_TIMING_LOG" \
         HOST_ISAAC_LOG="$$ISAAC_RUN_ROOT/logs/$(4)" \
         HOST_PX4_LOG="$$PX4_RUN_ROOT/$(5)" \
         ISAAC_TEST_LOG='$(3)' \

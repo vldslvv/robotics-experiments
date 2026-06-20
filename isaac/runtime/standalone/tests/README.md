@@ -9,6 +9,13 @@ Use `_runtime.py` for shared setup and teardown. Each extension should get its
 own test module when it has real standalone coverage to add, for example
 `test_sim_settings.py`.
 
+Integration Make targets default to the minimal
+`@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
+tests do not validate warehouse geometry, lights, pusher mechanisms, or
+navigation through obstacles. Use `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd`
+on a Make invocation, or pass `--scene` to a standalone script, when manually
+running against the warehouse.
+
 PX4-backed scenario tests should be run from their host Make targets so Docker
 lifecycle, mounted EEPROM state, and persisted `px4/logs` diagnostics stay
 owned by the repository workflow. For example, use

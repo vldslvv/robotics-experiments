@@ -1,0 +1,23 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def PhysicsScene "physicsScene"
+    {
+    }
+
+    def Cube "GroundPlane" (
+        apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        double3 xformOp:translate = (0, 0, -0.05)
+        float3 xformOp:scale = (50, 50, 0.05)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+}

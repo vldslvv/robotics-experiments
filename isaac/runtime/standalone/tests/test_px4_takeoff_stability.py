@@ -20,7 +20,7 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import run_scene_test
 
-DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_stability"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_stability_px4.log"
 

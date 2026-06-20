@@ -342,12 +342,18 @@ the host. They are meant to be used in the Dockerized environment.
   Their standalone Isaac test scripts live under
   `isaac/runtime/standalone/tests/`; use that directory's `README.md` for
   scenario-specific notes.
+- Integration tests default to the minimal
+  `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
+  scenarios do not validate warehouse interactions. Override with
+  `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual
+  warehouse run is needed.
 - Integration logs include structured timing lines for performance triage.
   Host/container stages use `[integration-timing] target=... stage=...
   elapsed_s=... total_s=... status=...`; standalone Isaac stages use
   `[isaac-standalone-test] TIMING test=... stage=... elapsed_s=... total_s=...`.
   PX4 scenario stage timings also include `sim_elapsed_s=...` when the stage
-  advances simulated time.
+  advances simulated time. Each per-run artifact directory also persists the
+  host/container timing lines in `integration-timing.log`.
 - Standalone integration logs that report drone state use the shared
   `_runtime.py` vector formatter and include full ENU position and linear
   velocity (`pos_enu_m=(x=..., y=..., z=...)`,

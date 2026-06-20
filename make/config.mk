@@ -34,7 +34,7 @@ INTEGRATION_VERBOSE ?= 0
 INTEGRATION_LOG_TAIL_LINES ?= 120
 INTEGRATION_ROOT ?= $(BUILD_ROOT)/integration
 INTEGRATION_TEST_JOBS ?= 2
-SCENE                ?= @isaac/assets/LightSwitchWarehouse/Warehouse.usd
+SCENE                ?= @isaac/assets/TestScenes/MinimalIntegration.usda
 
 # Host paths for persistence
 ISAAC_HOME             = $(CURDIR)/isaac

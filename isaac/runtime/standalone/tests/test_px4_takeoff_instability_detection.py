@@ -22,7 +22,7 @@ from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.px4_bridge import ActuatorCommands
 
-DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_instability_detection"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_instability_px4.log"
 FAULTED_ROTOR_INDEX = 0

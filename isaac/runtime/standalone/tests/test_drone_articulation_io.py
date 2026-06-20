@@ -17,7 +17,7 @@ import math
 import numpy as np
 from _runtime import SceneTestContext, run_scene_test
 
-DEFAULT_SCENE = "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "drone_articulation_io"
 PHYSICS_DT_S = 0.004
 SETTLE_UPDATES = 8
