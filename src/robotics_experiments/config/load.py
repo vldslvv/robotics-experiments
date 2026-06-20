@@ -20,18 +20,13 @@ _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 def _resolve_config_path() -> Path:
     raw_path = os.environ.get(_CONFIG_PATH_ENV)
-    if raw_path is None or not raw_path.strip():
+    if raw_path is None:
         return _DEFAULT_CONF_DIR / f"{_DEFAULT_CONFIG_NAME}.yaml"
 
     path = Path(raw_path)
     if not path.is_absolute():
         path = Path(__file__).resolve().parents[3] / path
-    path = path.resolve()
-    if path.suffix not in {".yaml", ".yml"}:
-        raise ValueError(f"{_CONFIG_PATH_ENV} must point to a YAML file, got {path}")
-    if not path.is_file():
-        raise ValueError(f"{_CONFIG_PATH_ENV} does not exist: {path}")
-    return path
+    return path.resolve()
 
 
 def _validate_vehicles(vehicles: list[VehicleConfig]) -> None:

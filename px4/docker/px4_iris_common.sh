@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016
 
+px4_dir="${PX4_DIR:-/opt/PX4-Autopilot}"
+
 px4_iris_configure_instance() {
   instance="${PX4_INSTANCE:-0}"
   export PX4_INSTANCE="${instance}"
@@ -53,7 +55,7 @@ launch_px4_iris() {
     base_rootfs="${PX4_ROOTFS:-${build_path}/rootfs}"
     instance_dir="${base_rootfs}/${instance}"
     mkdir -p "${instance_dir}"
-    cd "${instance_dir}"
+    cd "${instance_dir}" || exit
     export PX4_SIM_MODEL="none_iris"
     "${build_path}/bin/px4" -i "${instance}" \
       -d "${build_path}/etc" \

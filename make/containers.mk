@@ -30,27 +30,12 @@ define RUN_CONTAINER_TARGET
 .PHONY: run-$(1)
 run-$(1): $$($(1)_RUN_DEPS)
 	@$$(if $$($(1)_RUNTIME_DIRS),mkdir -p $$($(1)_RUNTIME_DIRS))
-	@if docker ps -a --format '{{.Names}}' | grep -q '^$$($(1)_CONTAINER_NAME)$$$$'; then \
-		expected_env='$$($(1)_RECREATE_IF_ENV)'; \
-		if [ -n "$$$$expected_env" ] && ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$$($(1)_CONTAINER_NAME)" | grep -qx "$$$$expected_env"; then \
-			echo "Recreating $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME) for updated runtime environment..."; \
-			docker rm -f "$$($(1)_CONTAINER_NAME)" >/dev/null; \
-		else \
-		echo "Starting existing $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
-		docker start -ai $$($(1)_CONTAINER_NAME); \
-			exit 0; \
-		fi; \
-	fi; \
-	if docker ps -a --format '{{.Names}}' | grep -q '^$$($(1)_CONTAINER_NAME)$$$$'; then \
-		echo "Starting existing $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
-		docker start -ai $$($(1)_CONTAINER_NAME); \
-	else \
-		echo "Creating and starting $$($(1)_DISPLAY_NAME) container $$($(1)_CONTAINER_NAME)..."; \
-		docker run -it \
-			--name "$$($(1)_CONTAINER_NAME)" \
-			$$($(1)_DOCKER_ARGS) \
-			"$$($(1)_IMAGE)"; \
-	fi
+	@make/run_persistent_container.sh \
+		"$$($(1)_DISPLAY_NAME)" \
+		"$$($(1)_CONTAINER_NAME)" \
+		"$$($(1)_IMAGE)" \
+		"$$($(1)_RECREATE_IF_ENV)" \
+		-- $$($(1)_DOCKER_ARGS)
 endef
 
 define STOP_CONTAINER_TARGET
@@ -76,20 +61,11 @@ $(foreach stack,$(CONTAINER_STACKS),$(eval $(call STOP_CONTAINER_TARGET,$(stack)
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_CONTAINER_TARGET,$(stack))))
 $(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_IMAGE_TARGET,$(stack))))
 
-PX4_ENABLED_INSTANCE_COUNT_CMD = ROBOTICS_EXPERIMENT_CONFIG_PATH='$(HYDRA_CONFIG_HOST_PATH)' uv run python -c 'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
-
 .PHONY: run-px4
 run-px4:
-	@count="$$( $(PX4_ENABLED_INSTANCE_COUNT_CMD) )"; \
-	if [ "$$count" -eq 0 ]; then \
-		echo "No PX4-enabled vehicles in Hydra config; skipping PX4 SITL."; \
-		exit 0; \
-	fi; \
-	i=0; \
-	while [ "$$i" -lt "$$count" ]; do \
-		kitty --title "PX4[$$i]" --hold $(MAKE) run-px4-instance PX4_INSTANCE="$$i" PX4_TOTAL_INSTANCES="$$count" & \
-		i=$$((i + 1)); \
-	done
+	@HYDRA_CONFIG_HOST_PATH='$(HYDRA_CONFIG_HOST_PATH)' \
+	MAKE_CMD='$(MAKE)' \
+	make/run_px4_persistent_containers.sh
 
 .PHONY: run-px4-instance
 run-px4-instance:
@@ -105,17 +81,11 @@ run-px4-instance:
 
 .PHONY: stop-px4
 stop-px4:
-	@containers="$$(docker ps -a --format '{{.Names}}' | grep -E '^$(PX4_CONTAINER_NAME)(\.[0-9]+)?$$' || true)"; \
-	if [ -n "$$containers" ]; then \
-		echo "$$containers" | xargs docker stop >/dev/null 2>&1 || true; \
-	fi
+	@make/px4_containers.sh stop '$(PX4_CONTAINER_NAME)'
 
 .PHONY: remove-px4-container
 remove-px4-container:
-	@containers="$$(docker ps -a --format '{{.Names}}' | grep -E '^$(PX4_CONTAINER_NAME)(\.[0-9]+)?$$' || true)"; \
-	if [ -n "$$containers" ]; then \
-		echo "$$containers" | xargs docker rm -f >/dev/null 2>&1 || true; \
-	fi
+	@make/px4_containers.sh remove '$(PX4_CONTAINER_NAME)'
 
 .PHONY: remove-px4-image
 remove-px4-image:

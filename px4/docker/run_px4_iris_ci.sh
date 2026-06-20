@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-px4_dir="${PX4_DIR:-/opt/PX4-Autopilot}"
 reset_helper="${PX4_RESET_HELPER:-/usr/local/lib/px4/reset_px4_state.sh}"
 common_helper="${PX4_COMMON_HELPER:-/usr/local/lib/px4/px4_iris_common.sh}"
 # PX4 instance index. 0 is the single-vehicle baseline. Each additional instance
