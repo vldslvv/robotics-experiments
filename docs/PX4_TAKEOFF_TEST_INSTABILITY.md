@@ -81,7 +81,7 @@ failsafe state`.
 
 ### Why the bootstrap form happens
 
-`make/run_px4_integration_test.sh:115-135` gates PX4 readiness on the docker-log
+`make/scripts/run_px4_integration_test.sh` gates PX4 readiness on the docker-log
 line `"Waiting for simulator to accept connection on TCP port 4560"`. That marks
 the TCP port as *open*, not the PX4 commander/HIL stack as ready to produce
 actuators. Crucially, PX4 blocks at that line and only boots commander/ekf2/
@@ -114,7 +114,7 @@ genuinely dead PX4 still trips it, just later.
 
 - **Targets:** `make/integration-tests.mk:124-130` (`test-integration-px4-takeoff`
   and `-instability`); both go through the `RUN_PX4_INTEGRATION_TEST` macro
-  (`:43-61`) -> `make/run_px4_integration_test.sh`.
+  (`:43-61`) -> `make/scripts/run_px4_integration_test.sh`.
 - **Concurrency:** `make/config.mk:38` `INTEGRATION_TEST_JOBS ?= 2`;
   `test-integration-all` fans out with `xargs -P` (`integration-tests.mk:64-92`).
   CLAUDE.md documents lowering this to avoid GPU/host starvation. (Note: CLAUDE.md
@@ -206,7 +206,7 @@ choice can be made later.
 
 ## Key files (for whoever implements)
 
-- `make/run_px4_integration_test.sh` (readiness gate, cleanup/pass-fail print).
+- `make/scripts/run_px4_integration_test.sh` (readiness gate, cleanup/pass-fail print).
 - `make/integration-tests.mk` (targets, macros, `test-integration-all` fan-out).
 - `make/config.mk` (filters, `INTEGRATION_TEST_JOBS`, `PX4_TEST_READY_TIMEOUT_S`).
 - `isaac/runtime/standalone/tests/_px4_takeoff_scenario.py` (assertions,

@@ -53,12 +53,12 @@ fact.
 - Add a host timing log path in both integration runners:
   - For `RUN_ISAAC_INTEGRATION_TEST` in `make/integration-tests.mk`, create
     `$$run_root/integration-timing.log`.
-  - For `make/run_px4_integration_test.sh`, create
+  - For `make/scripts/run_px4_integration_test.sh`, create
     `${ISAAC_RUN_ROOT}/../integration-timing.log` or an explicit
     `HOST_TIMING_LOG` environment variable from the Make target.
 - Introduce a shell helper that prints each `[integration-timing]` line to both
   stdout and the timing log.
-  - In `make/run_px4_integration_test.sh`, update `integration_timing()`.
+  - In `make/scripts/run_px4_integration_test.sh`, update `integration_timing()`.
   - In `RUN_ISAAC_INTEGRATION_TEST`, replace the inline `printf` timing helper
     with the same behavior inside the container command and around the host
     container stage.
@@ -82,7 +82,7 @@ fact.
 
 ### Test Plan
 
-- `bash -n make/run_px4_integration_test.sh`
+- `bash -n make/scripts/run_px4_integration_test.sh`
 - `make -n test-integration-isaac`
 - `make -n test-integration-drone-articulation`
 - `make -n test-integration-px4-takeoff`
@@ -385,7 +385,7 @@ iteration needs the full hover-quality window.
 
 - `uv run ruff check isaac/runtime/standalone/tests/ make/config.mk make/integration-tests.mk`
 - `uv run ruff format --check isaac/runtime/standalone/tests/`
-- `bash -n make/run_px4_integration_test.sh`
+- `bash -n make/scripts/run_px4_integration_test.sh`
 - `make -n test-integration-px4-takeoff-fast`
 - If Docker/GPU is available:
   - `make test-integration-px4-takeoff-fast`

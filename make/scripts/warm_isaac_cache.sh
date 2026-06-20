@@ -40,8 +40,29 @@ integration_timing() {
     printf "%s\n" "${line}" >>"${HOST_TIMING_LOG}" || true
 }
 
+make_run_root() {
+    printf "%s/%s.%s.%s" \
+        "${INTEGRATION_ROOT}" \
+        "${TEST_TARGET}" \
+        "$(date -u +%Y%m%dT%H%M%SZ)" \
+        "$$"
+}
+
+mkdir_colon_dirs() {
+    local dirs="$1"
+    local old_ifs="${IFS}"
+    local dir
+
+    IFS=:
+    for dir in ${dirs}; do
+        if [ -n "${dir}" ]; then
+            mkdir -p "${dir}"
+        fi
+    done
+    IFS="${old_ifs}"
+}
+
 for name in \
-    HOST_TIMING_LOG \
     ISAAC_PYTHON \
     ISAAC_TEST_ERROR_FILTER
 do
@@ -51,9 +72,11 @@ done
 : "${TEST_TARGET:=test-integration-warm-isaac-cache}"
 
 SCRIPT_START_MS="$(now_ms)"
-mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
 
 if [ "${WARM_ISAAC_CACHE_IN_CONTAINER:-0}" = "1" ]; then
+    require_env "HOST_TIMING_LOG"
+    mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
+
     cd /isaac-sim
     warm_log="/isaac-sim/.nvidia-omniverse/logs/test_integration_warm_isaac_cache.log"
     rm -f "${warm_log}"
@@ -82,16 +105,26 @@ if [ "${WARM_ISAAC_CACHE_IN_CONTAINER:-0}" = "1" ]; then
     fi
 else
     for name in \
-        CONTAINER_TIMING_LOG \
         ISAAC_DOCKER_ENV \
         ISAAC_DOCKER_VOLUMES \
+        ISAAC_HOST_CACHE_DIRS \
         ISAAC_IMAGE \
-        ISAAC_RUN_ROOT
+        ISAAC_PROJECT_DIR \
+        INTEGRATION_ROOT
     do
         require_env "${name}"
     done
 
+    run_root="$(make_run_root)"
+    ISAAC_RUN_ROOT="${run_root}/isaac"
+    HOST_TIMING_LOG="${run_root}/integration-timing.log"
+    CONTAINER_TIMING_LOG="${ISAAC_PROJECT_DIR}/.build/docker/integration/$(basename "${run_root}")/integration-timing.log"
+
+    mkdir -p "${ISAAC_RUN_ROOT}/logs" "${ISAAC_RUN_ROOT}/data" "${ISAAC_RUN_ROOT}/documents"
+    mkdir_colon_dirs "${ISAAC_HOST_CACHE_DIRS}"
     : >"${HOST_TIMING_LOG}"
+    echo "Integration artifacts: ${run_root}"
+
     : "${ISAAC_DOCKER_RUNTIME:=}"
     ISAAC_DOCKER_VOLUMES="${ISAAC_DOCKER_VOLUMES//\$\{ISAAC_RUN_ROOT\}/${ISAAC_RUN_ROOT}}"
 
@@ -110,7 +143,7 @@ else
         ${ISAAC_DOCKER_VOLUMES} \
         --entrypoint /bin/bash \
         "${ISAAC_IMAGE}" \
-        /isaac-sim/proj/make/warm_isaac_cache.sh; then
+        /isaac-sim/proj/make/scripts/warm_isaac_cache.sh; then
         integration_timing "isaac_cache_warmup_container" "${stage_start_ms}"
     else
         status=$?

@@ -223,7 +223,9 @@ the host. They are meant to be used in the Dockerized environment.
 - Keep Make recipes thin. If Makefile logic grows into a complex Bash script
   with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
   it into a separate shell script and let Make prepare variables and call that
-  script.
+  script. Avoid `define`/`eval` target templates when they require nested
+  Make/shell escaping such as `$$($(1)_VAR)`; prefer explicit targets with
+  ordinary recursive Make variables so command-line overrides stay dynamic.
 - `make test-integration` runs container-backed integration tests;
   `make test-integration-all` runs every target (Isaac, drone-articulation, and
   the two PX4 takeoff scenarios) with isolated transient containers and prints an

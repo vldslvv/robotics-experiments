@@ -2,8 +2,6 @@
 # Persistent container lifecycle
 ########################################
 
-CONTAINER_STACKS = isaac ros
-
 isaac_DISPLAY_NAME = Isaac
 isaac_CONTAINER_NAME = $(ISAAC_CONTAINER_NAME)
 isaac_IMAGE = $(ISAAC_IMAGE)
@@ -26,46 +24,54 @@ ros_DOCKER_ARGS = \
 	$(ROS_DOCKER_ENV) \
 	$(ROS_DOCKER_VOLUMES)
 
-define RUN_CONTAINER_TARGET
-.PHONY: run-$(1)
-run-$(1): $$($(1)_RUN_DEPS)
-	@$$(if $$($(1)_RUNTIME_DIRS),mkdir -p $$($(1)_RUNTIME_DIRS))
-	@make/run_persistent_container.sh \
-		"$$($(1)_DISPLAY_NAME)" \
-		"$$($(1)_CONTAINER_NAME)" \
-		"$$($(1)_IMAGE)" \
-		"$$($(1)_RECREATE_IF_ENV)" \
-		-- $$($(1)_DOCKER_ARGS)
-endef
+.PHONY: run-isaac
+run-isaac: $(isaac_RUN_DEPS)
+	@mkdir -p $(isaac_RUNTIME_DIRS)
+	@make/scripts/run_persistent_container.sh \
+		"$(isaac_DISPLAY_NAME)" \
+		"$(isaac_CONTAINER_NAME)" \
+		"$(isaac_IMAGE)" \
+		"$(isaac_RECREATE_IF_ENV)" \
+		-- $(isaac_DOCKER_ARGS)
 
-define STOP_CONTAINER_TARGET
-.PHONY: stop-$(1)
-stop-$(1):
-	@docker stop $$($(1)_CONTAINER_NAME) 2>/dev/null || true
-endef
+.PHONY: run-ros
+run-ros: $(ros_RUN_DEPS)
+	@make/scripts/run_persistent_container.sh \
+		"$(ros_DISPLAY_NAME)" \
+		"$(ros_CONTAINER_NAME)" \
+		"$(ros_IMAGE)" \
+		"$(ros_RECREATE_IF_ENV)" \
+		-- $(ros_DOCKER_ARGS)
 
-define REMOVE_CONTAINER_TARGET
-.PHONY: remove-$(1)-container
-remove-$(1)-container:
-	@docker rm -f $$($(1)_CONTAINER_NAME) 2>/dev/null || true
-endef
+.PHONY: stop-isaac
+stop-isaac:
+	@docker stop $(isaac_CONTAINER_NAME) 2>/dev/null || true
 
-define REMOVE_IMAGE_TARGET
-.PHONY: remove-$(1)-image
-remove-$(1)-image:
-	@docker rmi $$($(1)_IMAGE) 2>/dev/null || true
-endef
+.PHONY: stop-ros
+stop-ros:
+	@docker stop $(ros_CONTAINER_NAME) 2>/dev/null || true
 
-$(foreach stack,$(CONTAINER_STACKS),$(eval $(call RUN_CONTAINER_TARGET,$(stack))))
-$(foreach stack,$(CONTAINER_STACKS),$(eval $(call STOP_CONTAINER_TARGET,$(stack))))
-$(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_CONTAINER_TARGET,$(stack))))
-$(foreach stack,$(CONTAINER_STACKS),$(eval $(call REMOVE_IMAGE_TARGET,$(stack))))
+.PHONY: remove-isaac-container
+remove-isaac-container:
+	@docker rm -f $(isaac_CONTAINER_NAME) 2>/dev/null || true
+
+.PHONY: remove-ros-container
+remove-ros-container:
+	@docker rm -f $(ros_CONTAINER_NAME) 2>/dev/null || true
+
+.PHONY: remove-isaac-image
+remove-isaac-image:
+	@docker rmi $(isaac_IMAGE) 2>/dev/null || true
+
+.PHONY: remove-ros-image
+remove-ros-image:
+	@docker rmi $(ros_IMAGE) 2>/dev/null || true
 
 .PHONY: run-px4
 run-px4:
 	@HYDRA_CONFIG_HOST_PATH='$(HYDRA_CONFIG_HOST_PATH)' \
 	MAKE_CMD='$(MAKE)' \
-	make/run_px4_persistent_containers.sh
+	make/scripts/run_px4_persistent_containers.sh
 
 .PHONY: run-px4-instance
 run-px4-instance:
@@ -81,11 +87,11 @@ run-px4-instance:
 
 .PHONY: stop-px4
 stop-px4:
-	@make/px4_containers.sh stop '$(PX4_CONTAINER_NAME)'
+	@make/scripts/px4_containers.sh stop '$(PX4_CONTAINER_NAME)'
 
 .PHONY: remove-px4-container
 remove-px4-container:
-	@make/px4_containers.sh remove '$(PX4_CONTAINER_NAME)'
+	@make/scripts/px4_containers.sh remove '$(PX4_CONTAINER_NAME)'
 
 .PHONY: remove-px4-image
 remove-px4-image:

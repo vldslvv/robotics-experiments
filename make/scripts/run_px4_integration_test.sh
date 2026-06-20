@@ -48,28 +48,47 @@ integration_timing() {
     printf "%s\n" "${line}" >>"${HOST_TIMING_LOG}" || true
 }
 
+make_run_root() {
+    printf "%s/%s.%s.%s" \
+        "${INTEGRATION_ROOT}" \
+        "${TEST_TARGET}" \
+        "$(date -u +%Y%m%dT%H%M%SZ)" \
+        "$$"
+}
+
+mkdir_colon_dirs() {
+    local dirs="$1"
+    local old_ifs="${IFS}"
+    local dir
+
+    IFS=:
+    for dir in ${dirs}; do
+        if [ -n "${dir}" ]; then
+            mkdir -p "${dir}"
+        fi
+    done
+    IFS="${old_ifs}"
+}
+
 for name in \
     TEST_TARGET \
-    CONTAINER_TIMING_LOG \
-    HOST_ISAAC_LOG \
-    HOST_PX4_LOG \
-    HOST_TIMING_LOG \
+    HOST_ISAAC_LOG_BASENAME \
+    HOST_PX4_LOG_BASENAME \
+    INTEGRATION_ROOT \
     ISAAC_TEST_LOG \
     ISAAC_TEST_SCRIPT \
     ISAAC_DOCKER_ENV \
     ISAAC_DOCKER_VOLUMES \
+    ISAAC_HOST_CACHE_DIRS \
     ISAAC_IMAGE \
+    ISAAC_PROJECT_DIR \
     ISAAC_PYTHON \
-    ISAAC_RUN_ROOT \
     ISAAC_TEST_ERROR_FILTER \
     ISAAC_TEST_FAILURE_FILTER \
     ISAAC_TEST_LOG_FILTER \
-    PX4_EEPROM \
     PX4_IMAGE \
-    PX4_LOGS \
     PX4_ROOTFS \
     PX4_TEST_CONTAINER_NAME \
-    PX4_TEST_LOGS_DIR \
     PX4_TEST_READY_TIMEOUT_S \
     SCENE
 do
@@ -89,8 +108,27 @@ if [ "${PX4_TOTAL_INSTANCES}" -lt 1 ]; then
 fi
 
 SCRIPT_START_MS="$(now_ms)"
-mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
+run_root="$(make_run_root)"
+ISAAC_RUN_ROOT="${run_root}/isaac"
+PX4_RUN_ROOT="${run_root}/px4"
+HOST_TIMING_LOG="${run_root}/integration-timing.log"
+CONTAINER_TIMING_LOG="${ISAAC_PROJECT_DIR}/.build/docker/integration/$(basename "${run_root}")/integration-timing.log"
+HOST_ISAAC_LOG="${ISAAC_RUN_ROOT}/logs/${HOST_ISAAC_LOG_BASENAME}"
+HOST_PX4_LOG="${PX4_RUN_ROOT}/${HOST_PX4_LOG_BASENAME}"
+PX4_TEST_LOGS_DIR="${ISAAC_PROJECT_DIR}/.build/docker/integration/$(basename "${run_root}")/px4/logs"
+PX4_EEPROM="${PX4_RUN_ROOT}/eeprom"
+PX4_LOGS="${PX4_RUN_ROOT}/logs"
+
+mkdir -p \
+    "${ISAAC_RUN_ROOT}/logs" \
+    "${ISAAC_RUN_ROOT}/data" \
+    "${ISAAC_RUN_ROOT}/documents" \
+    "${PX4_RUN_ROOT}/logs" \
+    "${PX4_RUN_ROOT}/eeprom"
+mkdir_colon_dirs "${ISAAC_HOST_CACHE_DIRS}"
 : >"${HOST_TIMING_LOG}"
+echo "Integration artifacts: ${run_root}"
+
 ISAAC_DOCKER_VOLUMES="${ISAAC_DOCKER_VOLUMES//\$\{ISAAC_RUN_ROOT\}/${ISAAC_RUN_ROOT}}"
 
 # Container names and the primary container (whose network namespace Isaac and
@@ -254,39 +292,21 @@ if docker run --rm \
     ${ISAAC_DOCKER_RUNTIME} \
     ${ISAAC_DOCKER_ENV} \
     -e "HOST_TIMING_LOG=${CONTAINER_TIMING_LOG}" \
+    -e "ISAAC_PYTHON=${ISAAC_PYTHON}" \
+    -e "ISAAC_TEST_ERROR_FILTER=${ISAAC_TEST_ERROR_FILTER}" \
+    -e "ISAAC_TEST_FAILURE_FILTER=${ISAAC_TEST_FAILURE_FILTER}" \
+    -e "ISAAC_TEST_LOG=${ISAAC_TEST_LOG}" \
+    -e "ISAAC_TEST_LOG_FILTER=${ISAAC_TEST_LOG_FILTER}" \
+    -e "ISAAC_TEST_PIP_PACKAGES=hydra-core omegaconf pymavlink" \
+    -e "ISAAC_TEST_SCRIPT=${ISAAC_TEST_SCRIPT}" \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
+    -e "SCENE=${SCENE}" \
+    -e "TEST_TARGET=${TEST_TARGET}" \
     ${ISAAC_DOCKER_VOLUMES} \
     --entrypoint /bin/bash \
     "${ISAAC_IMAGE}" \
-    -lc "set -o pipefail && \
-        script_start_ms=\$(date +%s%3N); \
-        fmt_ms() { ms=\"\$1\"; printf \"%s.%03d\" \"\$((ms / 1000))\" \"\$((ms % 1000))\"; }; \
-        timing() { stage=\"\$1\"; start_ms=\"\$2\"; status=\"\${3:-ok}\"; end_ms=\$(date +%s%3N); line=\$(printf \"[integration-timing] target=%s stage=%s elapsed_s=%s total_s=%s status=%s\" \"${TEST_TARGET}\" \"\$stage\" \"\$(fmt_ms \"\$((end_ms - start_ms))\")\" \"\$(fmt_ms \"\$((end_ms - script_start_ms))\")\" \"\$status\"); printf \"%s\n\" \"\$line\"; printf \"%s\n\" \"\$line\" >>\"\$HOST_TIMING_LOG\" || true; }; \
-        cd /isaac-sim && \
-        rm -f \"${ISAAC_TEST_LOG}\" && \
-        stage_start_ms=\$(date +%s%3N) && \
-        { PIP_ROOT_USER_ACTION=ignore ${ISAAC_PYTHON} -m pip install \
-            --quiet --disable-pip-version-check hydra-core omegaconf pymavlink \
-            >>\"${ISAAC_TEST_LOG}\" 2>&1 || \
-            { grep -E \"${ISAAC_TEST_ERROR_FILTER}\" \
-                \"${ISAAC_TEST_LOG}\"; exit 1; }; } && \
-        timing pip_install \"\$stage_start_ms\" && \
-        stage_start_ms=\$(date +%s%3N) && \
-        if ${ISAAC_PYTHON} ${ISAAC_TEST_SCRIPT} --scene \"${SCENE}\" \
-            2>&1 | tee -a \"${ISAAC_TEST_LOG}\" | \
-                sed -u -E 's|\x1B\[[0-9;?]*[ -/]*[@-~]||g; s|\x1B[=>c]||g' | \
-                grep --line-buffered -E \"${ISAAC_TEST_LOG_FILTER}\"; then \
-            timing test_script \"\$stage_start_ms\"; \
-        else \
-            status=\$?; timing test_script \"\$stage_start_ms\" fail; exit \"\$status\"; \
-        fi && \
-        stage_start_ms=\$(date +%s%3N) && \
-        if ! grep -q \"${ISAAC_TEST_FAILURE_FILTER}\" \"${ISAAC_TEST_LOG}\"; then \
-            timing failure_scan \"\$stage_start_ms\"; \
-        else \
-            timing failure_scan \"\$stage_start_ms\" fail; exit 1; \
-        fi"; then
+    "${ISAAC_PROJECT_DIR}/make/scripts/run_isaac_test_in_container.sh"; then
     integration_timing "isaac_container" "${stage_start_ms}"
 else
     status=$?

@@ -24,7 +24,7 @@ if [ "${count}" -eq 0 ]; then
 fi
 
 # MAKE_CMD is provided by Make and may contain jobserver/flag arguments.
-# shellcheck disable=SC2206
+# shellcheck disable=SC2153,SC2206
 make_cmd=(${MAKE_CMD})
 
 i=0

@@ -3,9 +3,13 @@
 This is the architecture and rationale for the container-backed integration
 tests. `AGENTS.md` keeps the command entrypoints; the orchestration, caching,
 artifact-isolation, and timing details live here. The authoritative definitions
-are `make/integration-tests.mk`, `make/config.mk`, and
-`make/warm_isaac_cache.sh` -- if this doc disagrees with them, the makefiles win
-and this doc should be corrected.
+are `make/integration-tests.mk`, `make/config.mk`,
+`make/scripts/run_isaac_integration_test.sh`,
+`make/scripts/run_px4_integration_test.sh`,
+`make/scripts/run_isaac_test_in_container.sh`,
+`make/scripts/run_integration_suite.sh`, and
+`make/scripts/warm_isaac_cache.sh` -- if this doc disagrees with them, those
+files win and this doc should be corrected.
 
 The standalone Isaac test scripts these targets run live under
 `isaac/runtime/standalone/tests/`; see that directory's `README.md` for
@@ -33,21 +37,24 @@ scenario-specific notes.
 
 ## Concurrency
 
-`make test-integration-all` fans the targets out with
-`xargs -P "$(INTEGRATION_TEST_JOBS)"`. **`INTEGRATION_TEST_JOBS` defaults to `1`**
-(serial; `make/config.mk`). Raise it (for example `INTEGRATION_TEST_JOBS=3`) when
-the host can sustain more parallelism. Higher concurrency risks Isaac/GPU
-resource starvation and the host-load-dependent PX4 SITL startup actuator backlog
-that destabilizes takeoff, so increase it only on a host that can keep up.
+`make test-integration-all` delegates aggregation to
+`make/scripts/run_integration_suite.sh`, which fans the targets out with
+`xargs -P "${INTEGRATION_TEST_JOBS}"`. **`INTEGRATION_TEST_JOBS` defaults to
+`1`** (serial; `make/config.mk`). Raise it (for example
+`INTEGRATION_TEST_JOBS=3`) when the host can sustain more parallelism. Higher
+concurrency risks Isaac/GPU resource starvation and the host-load-dependent PX4
+SITL startup actuator backlog that destabilizes takeoff, so increase it only on
+a host that can keep up.
 
 ## Warm-cache pre-stage
 
 `make test-integration-all` depends on `test-integration-warm-isaac-cache`, which
-runs first via `make/warm_isaac_cache.sh`. It does a one-off `pip install` of the
-test deps and a headless `SimulationApp` start/stop inside the Isaac image. This
-makes cold or cleared shared-cache initialization single-writer, then lets the
-real test fan-out use warmed caches instead of each parallel target racing to
-initialize identical caches.
+runs first via `make/scripts/warm_isaac_cache.sh`. In host mode, that script
+creates the isolated run root and starts the Isaac container; in container mode,
+it does a one-off `pip install` of the test deps and a headless `SimulationApp`
+start/stop inside the Isaac image. This makes cold or cleared shared-cache
+initialization single-writer, then lets the real test fan-out use warmed caches
+instead of each parallel target racing to initialize identical caches.
 
 ## Shared cache vs isolated artifacts
 
@@ -58,9 +65,10 @@ cache initialization.
 
 Per-run logs, data, PX4 logs, and timing artifacts are isolated under
 `.build/docker/integration/<target>.<run-id>/`, where `<run-id>` is a UTC
-timestamp plus the shell PID (`$(1).$(date -u +%Y%m%dT%H%M%SZ).$$`), so parallel
-runs never share PX4 state or diagnostics. PX4 runs additionally get isolated
-`px4/logs` and `px4/eeprom` subdirectories and a per-run PX4 container name.
+timestamp plus the runner shell PID
+(`<target>.$(date -u +%Y%m%dT%H%M%SZ).$$`), so parallel runs never share PX4
+state or diagnostics. PX4 runs additionally get isolated `px4/logs` and
+`px4/eeprom` subdirectories and a per-run PX4 container name.
 
 ## Structured timing lines
 
@@ -96,9 +104,12 @@ from the active Hydra config.
 
 ## Multi-instance PX4
 
-`make/run_px4_integration_test.sh` starts one PX4 SITL container per PX4-enabled
-vehicle in the active Hydra config. Instance 0 owns the network namespace. Each
-additional instance `i` joins instance 0's namespace
+`make/scripts/run_px4_integration_test.sh` computes the per-run artifact/log
+paths, starts one PX4 SITL container per PX4-enabled vehicle in the active Hydra
+config, and delegates the Isaac-side test body to
+`make/scripts/run_isaac_test_in_container.sh` inside the Isaac container.
+Instance 0 owns the network namespace. Each additional instance `i` joins
+instance 0's namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so
 `run_px4_iris_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP
 `14550 + i`), and uses an isolated per-instance rootfs plus per-instance
