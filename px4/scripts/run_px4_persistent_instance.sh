@@ -36,7 +36,6 @@ if [ "${PX4_INSTANCE}" -ge "${PX4_TOTAL_INSTANCES}" ]; then
 fi
 
 container="${PX4_CONTAINER_NAME}.${PX4_INSTANCE}"
-primary_container="${PX4_CONTAINER_NAME}.0"
 
 if docker ps -a --format '{{.Names}}' | grep -qx "${container}"; then
     container_cmd="$(docker inspect --format '{{json .Config.Cmd}}' "${container}")"
@@ -53,16 +52,19 @@ log_mount="${PX4_LOGS}/${PX4_INSTANCE}"
 eeprom_mount="${PX4_EEPROM}/${PX4_INSTANCE}"
 rootfs_log="${PX4_ROOTFS}/log"
 rootfs_eeprom="${PX4_ROOTFS}/eeprom"
-net_args=()
 
-if [ "${PX4_INSTANCE}" -eq 0 ]; then
-    # PX4_DOCKER_RUNTIME is a Make-provided argument fragment.
-    # shellcheck disable=SC2206
-    net_args=(${PX4_DOCKER_RUNTIME})
-else
+# Every persistent PX4 instance runs on host networking (the same as Isaac), so
+# they share the host namespace and PX4 -i port-shifts each instance to a
+# distinct simulator TCP 4560 + i / GCS UDP 14550 + i. (The integration runner's
+# private shared-namespace "--network container:" model is specific to its
+# ephemeral, host-network-free Isaac container; do not reuse it here.)
+# PX4_DOCKER_RUNTIME is a Make-provided argument fragment.
+# shellcheck disable=SC2206
+net_args=(${PX4_DOCKER_RUNTIME})
+
+if [ "${PX4_INSTANCE}" -ne 0 ]; then
     rootfs_log="${PX4_ROOTFS}/${PX4_INSTANCE}/log"
     rootfs_eeprom="${PX4_ROOTFS}/${PX4_INSTANCE}/eeprom"
-    net_args=(--network "container:${primary_container}")
 fi
 
 mkdir -p "${log_mount}" "${eeprom_mount}"

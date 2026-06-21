@@ -111,12 +111,15 @@ the current contents and the intended home for that kind of code.
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` -- read
   it before changing bridge code. It is the single source for the four-part
   contract (`VehicleState` -> `ActuatorCommands` -> `RotorDynamics` plus the
-  `BridgeStatus` snapshot, the `LockstepSettings` object, the single-call
-  `exchange(state)` lockstep seam, and the `ArticulationIO.apply_dynamics` Isaac
+  `BridgeStatus` snapshot, the `LockstepSettings` object, the `send(state)` /
+  `poll()` lockstep seam with `exchange(state)` as the single-vehicle
+  send-then-poll convenience, and the `ArticulationIO.apply_dynamics` Isaac
   sink), the frame conventions, motor-index ordering, the lockstep algorithm, and
   the cadence/actuator-freshness guards. Load-bearing invariants you must not
   break (all detailed there): `HIL_SENSOR.time_usec` strictly increasing from sim
-  time; the `exchange()` send+blocking-recv is one indivisible tick; angular
+  time; a vehicle's `send` (sensors out, no block) strictly precedes its `poll`
+  (blocking recv), and the multi-vehicle coordinator runs all sends before all
+  polls; angular
   velocity is rotated world -> body-FLU before the FRD gyro conversion; sensor
   cadence must equal physics cadence (else disconnect "sensor cadence mismatch");
   prime-then-block startup plus newest-packet draining keep actuators fresh
@@ -132,13 +135,28 @@ the current contents and the intended home for that kind of code.
   id/endpoint/`prim_name`, bad `spawn_xy`, or colliding `debug_log_path` raise a
   `ValueError` at resolution time). The drone-spawner extension spawns each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
-  independent `BridgeHost`; the hosts tick serially in registration order on each
-  PhysX step (per-tick latency is the sum across vehicles -- accepted for v1).
+  independent `BridgeHost`, all driven by a single `BridgeHostGroup` that owns the
+  one physics-step subscription. Each PhysX step runs in two phases -- every
+  host's send leg (`send_phase`: sensors out to its PX4, no block) first, then
+  every host's poll leg (`recv_phase`: block for that PX4's actuator). The PX4
+  instances therefore compute concurrently, so per-tick latency is ~the max
+  blocking wait across vehicles (not the sum) and the per-vehicle lockstep is
+  decoupled: one stalled PX4 disconnects only its own vehicle instead of freezing
+  the others. The port exposes the seam as `send(state)` / `poll()`, with
+  `exchange(state)` kept as the single-vehicle send-then-poll convenience (a
+  1-host group is byte-for-byte the old behavior).
   Per-vehicle isolation: MAVLink simulator port is `connection_baseport +
   vehicle_id`, the USD prim is `<default_prim>/<drone.prim_name>`, and bridge
-  debug logs carry a `{vehicle}` token so they never collide. `EnvConfig.vehicles`
-  is annotated `List[Any]` for Hydra compose-time tolerance of partial entries;
-  the runtime value is `list[VehicleConfig]`.
+  debug logs carry a `{vehicle}` token so the filenames never collide. The token
+  alone is not enough: every bridge layer logs through the shared
+  `robotics_experiments.px4_bridge` package logger, so the `BridgeHost` wraps each
+  vehicle's construction/teardown and per-tick work in
+  `px4_bridge.vehicle_log_context(vehicle_id)`, and each per-vehicle file handler
+  carries a `VehicleLogFilter` (see `px4_bridge/_logging.py`). Without this a
+  multi-vehicle process merged every bridge's records into the last-constructed
+  vehicle's file. `EnvConfig.vehicles` is annotated `List[Any]` for Hydra
+  compose-time tolerance of partial entries; the runtime value is
+  `list[VehicleConfig]`.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
@@ -272,7 +290,14 @@ the host. They are meant to be used in the Dockerized environment.
   `vehicles` list and opens one terminal per PX4-enabled vehicle. Each
   persistent PX4 container attaches to a `px4` tmux session with the interactive
   PX4 console selected, so manual commands such as `commander arm` and
-  `commander takeoff` can be entered directly.
+  `commander takeoff` can be entered directly. Every persistent PX4 instance runs
+  on host networking (`--network=host`, like the Isaac container), so all
+  instances share the host namespace and the PX4 `-i` index keeps each one's
+  simulator TCP `4560 + i` / GCS UDP `14550 + i` ports distinct. The
+  shared-private-namespace `--network container:<primary>` model is specific to
+  the integration harness (where instance 0 owns a private namespace that the
+  other instances and the ephemeral Isaac container join); do not use it for the
+  host-networked persistent path.
 - Persistent and integration Make targets accept `HYDRA_CONFIG=<path>` to select
   a top-level Hydra experiment config for both host-side PX4 counting and Isaac
   runtime config composition, for example
@@ -339,6 +364,13 @@ the host. They are meant to be used in the Dockerized environment.
   documents.
 - After implementing a task, run `uv run pre-commit run --all-files` and fix any
   issues it reports before considering the task complete.
+- Do NOT ignore pre-existing issues. When a quality gate (`pre-commit`, lint,
+  type check, test) reports a failure -- even in a file the current task did not
+  touch, or one that predates it -- fix it along with the current task rather
+  than dismissing it as out of scope or a false positive. If a flagged line is
+  genuinely correct, silence it narrowly and on purpose (a scoped inline
+  suppression such as `# shellcheck disable=...` / `# noqa: <code>` with a brief
+  reason), so the gate stays green for the next change.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.

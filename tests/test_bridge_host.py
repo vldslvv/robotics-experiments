@@ -19,10 +19,18 @@ class _StageEventType(IntEnum):
 class _Physx:
     def __init__(self):
         self.callback = None
+        self.subscribe_count = 0
 
     def subscribe_physics_step_events(self, callback):
         self.callback = callback
+        self.subscribe_count += 1
         return SimpleNamespace(unsubscribe=lambda: None)
+
+
+def _step(host, dt):
+    """Drive one physics tick through the two-phase host API."""
+    host.send_phase(dt)
+    host.recv_phase()
 
 
 def _install_fake_isaac(monkeypatch):
@@ -76,6 +84,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     # SimClock is pure Python with no Isaac deps and the host's sim-time
     # behavior is exercised here, so the fake reuses the real implementation.
     # Import it before the module is replaced in sys.modules below.
+    from robotics_experiments.px4_bridge._logging import vehicle_log_context
     from robotics_experiments.px4_bridge.sim_clock import SimClock
 
     fake_px4_bridge = types.ModuleType("robotics_experiments.px4_bridge")
@@ -108,9 +117,12 @@ def _install_fake_px4_bridge(monkeypatch, calls):
         def stop(self):
             calls.append("bridge_stop")
 
-        def on_physics_step(self, dt, sim_time_us):
+        def send_sensors(self, dt, sim_time_us):
             self.step_times.append(sim_time_us)
-            calls.append(("step", dt, sim_time_us))
+            calls.append(("send", dt, sim_time_us))
+
+        def recv_and_apply(self):
+            calls.append("recv")
 
     def discover_px4_rotor_mapping(stage, articulation_path):
         calls.append(("discover", stage, articulation_path))
@@ -133,6 +145,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.LockstepSettings = LockstepSettings
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
     fake_px4_bridge.SimClock = SimClock
+    fake_px4_bridge.vehicle_log_context = vehicle_log_context
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
 
 
@@ -193,28 +206,31 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
 
     host = module.BridgeHost(articulation_path="/World/Drone", config=_config(), physics_hz=250.0)
 
+    # The host no longer self-subscribes; the group owns the subscription and
+    # drives the two-leg API. start() only sets up the clock here (settle > 0).
     host.start()
 
-    assert physx.callback is not None
+    assert physx.callback is None
     assert calls == []
 
-    physx.callback(0.004)
-    physx.callback(0.004)
+    _step(host, 0.004)
+    _step(host, 0.004)
 
     assert calls == []
 
-    physx.callback(0.004)
+    _step(host, 0.004)
 
     assert "bridge_start" in calls
-    assert not any(call[0] == "step" for call in calls if isinstance(call, tuple))
+    assert not any(call[0] == "send" for call in calls if isinstance(call, tuple))
 
-    physx.callback(0.004)
+    _step(host, 0.004)
 
-    assert ("step", 0.004, 4000) in calls
+    assert ("send", 0.004, 4000) in calls
+    assert "recv" in calls
 
 
 def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
-    physx = _install_fake_isaac(monkeypatch)
+    _install_fake_isaac(monkeypatch)
     calls = []
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
@@ -226,10 +242,11 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     )
 
     host.start()
-    physx.callback(0.004)
+    _step(host, 0.004)
 
     assert "bridge_start" in calls
-    assert ("step", 0.004, 4000) in calls
+    assert ("send", 0.004, 4000) in calls
+    assert "recv" in calls
 
 
 def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
@@ -298,3 +315,46 @@ def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):
     host0.stop()
     assert not host0.is_running
     assert host1.is_running
+
+
+def test_bridge_host_group_runs_all_sends_before_all_polls(monkeypatch):
+    physx = _install_fake_isaac(monkeypatch)
+    calls = []
+    _install_fake_px4_bridge(monkeypatch, calls)
+    module = _import_bridge_host(monkeypatch)
+
+    order: list[tuple[str, int]] = []
+
+    class _FakeHost:
+        def __init__(self, name):
+            self.name = name
+
+        def start(self):
+            order.append(("start", self.name))
+
+        def stop(self):
+            order.append(("stop", self.name))
+
+        def send_phase(self, dt):
+            order.append(("send", self.name))
+
+        def recv_phase(self):
+            order.append(("recv", self.name))
+
+    group = module.BridgeHostGroup([_FakeHost(0), _FakeHost(1)])
+    group.start()
+
+    # The group owns exactly one physics-step subscription for the whole fleet.
+    assert physx.subscribe_count == 1
+    assert physx.callback is not None
+    assert order == [("start", 0), ("start", 1)]
+
+    order.clear()
+    physx.callback(0.004)
+
+    # Every vehicle's send leg runs before any vehicle's blocking poll leg, so a
+    # single stalled PX4 cannot starve the others' sensor sends.
+    assert order == [("send", 0), ("send", 1), ("recv", 0), ("recv", 1)]
+
+    group.stop()
+    assert order[-2:] == [("stop", 0), ("stop", 1)]

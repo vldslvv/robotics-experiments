@@ -1,3 +1,4 @@
+import carb
 import omni.ext
 import omni.timeline
 import omni.usd
@@ -7,7 +8,7 @@ from omni.usd import StageEventType
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.drone import despawn_drone, spawn_drone
 
-from .bridge_host import BridgeHost
+from .bridge_host import BridgeHost, BridgeHostGroup
 
 __all__ = ["Extension"]
 
@@ -22,9 +23,12 @@ class Extension(omni.ext.IExt):
     Iterates the experiment config's ``vehicles`` list (the single spawn path;
     one vehicle = a one-element list): each vehicle is spawned at its own pose
     and, when its ``px4.enabled`` is true, gets its own independent
-    :class:`BridgeHost`. The hosts tick serially in registration order on each
-    PhysX step. Hosts are opt-in per vehicle so the lower bridge layers can be
-    staged independently before the full pipeline is wired.
+    :class:`BridgeHost`. The enabled hosts are driven by a single
+    :class:`BridgeHostGroup`, which owns the one physics-step subscription and
+    runs every host's send leg before every host's poll leg, so the PX4
+    instances compute concurrently and one stalled PX4 cannot freeze the others.
+    Hosts are opt-in per vehicle so the lower bridge layers can be staged
+    independently before the full pipeline is wired.
     """
 
     def on_startup(self, ext_id: str):
@@ -44,7 +48,10 @@ class Extension(omni.ext.IExt):
         self._timeline_event_sub = timeline_events.create_subscription_to_pop(
             self._on_timeline_event,
         )
-        self._bridge_hosts: list[BridgeHost] = []
+        # The group owns the single physics-step subscription. Empty and
+        # unsubscribed until PLAY builds the per-vehicle hosts; teardown stops it
+        # and resets it to an empty group, so it is never None.
+        self._bridge_group = BridgeHostGroup([])
         self._spawned_drones: list = []
 
     def on_shutdown(self):
@@ -90,24 +97,37 @@ class Extension(omni.ext.IExt):
         self._teardown_drone()
 
         env = _get_experiment_config()
+        summary = ", ".join(
+            f"id={v.id} prim={v.drone.prim_name} "
+            f"px4_enabled={v.px4.enabled} vehicle_id={v.px4.vehicle_id} "
+            f"endpoint={v.px4.connection_baseport + v.px4.vehicle_id} spawn_xy={tuple(v.spawn_xy)}"
+            for v in env.vehicles
+        )
+        carb.log_info(f"[DroneSpawner] spawning {len(env.vehicles)} vehicle(s): {summary}")
+        hosts: list[BridgeHost] = []
         for vehicle in env.vehicles:
             path = spawn_drone(self.stage, vehicle.drone, position=tuple(vehicle.spawn_xy), yaw=0.0)
             self._spawned_drones.append(vehicle.drone)
             if not vehicle.px4.enabled:
                 continue
-            host = BridgeHost(
-                articulation_path=path,
-                config=vehicle.px4,
-                physics_hz=env.sim.physics_hz,
+            hosts.append(
+                BridgeHost(
+                    articulation_path=path,
+                    config=vehicle.px4,
+                    physics_hz=env.sim.physics_hz,
+                )
             )
-            host.start()
-            self._bridge_hosts.append(host)
+        # One coordinator owns the single physics-step subscription and runs all
+        # sends before all polls, decoupling the per-vehicle lockstep. An empty
+        # hosts list (no px4-enabled vehicle) yields a group whose per-step
+        # callback simply iterates nothing.
+        self._bridge_group = BridgeHostGroup(hosts)
+        self._bridge_group.start()
 
     def _teardown_drone(self):
-        """Stop every bridge host and despawn every spawned vehicle."""
-        for host in self._bridge_hosts:
-            host.stop()
-        self._bridge_hosts = []
+        """Stop the bridge group and despawn every spawned vehicle."""
+        self._bridge_group.stop()
+        self._bridge_group = BridgeHostGroup([])
         for drone_cfg in self._spawned_drones:
             despawn_drone(self.stage, drone_cfg)
         self._spawned_drones = []

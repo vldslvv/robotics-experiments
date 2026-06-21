@@ -92,10 +92,17 @@ class _FakeFlightStack:
     def stop(self):
         self.stopped = True
 
-    def exchange(self, state: VehicleState) -> ActuatorCommands:
+    def send(self, state: VehicleState):
         self.states.append(state)
         self.sim_times.append(int(state.sim_time_us))
+        return None
+
+    def poll(self) -> ActuatorCommands:
         return ActuatorCommands(self.commands)
+
+    def exchange(self, state: VehicleState) -> ActuatorCommands:
+        result = self.send(state)
+        return self.poll() if result is None else result
 
 
 class _CapturingThrustModel:

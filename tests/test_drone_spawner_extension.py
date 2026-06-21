@@ -63,12 +63,31 @@ class _BridgeHost:
         self.stopped = True
 
 
+class _BridgeHostGroup:
+    """Fake coordinator: delegates start/stop to its hosts (one subscription)."""
+
+    def __init__(self, hosts):
+        self.hosts = list(hosts)
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+        for host in self.hosts:
+            host.start()
+
+    def stop(self):
+        self.stopped = True
+        for host in self.hosts:
+            host.stop()
+
+
 def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
     return SimpleNamespace(
         id=vehicle_id,
         spawn_xy=spawn_xy,
         drone=SimpleNamespace(prim_name=prim_name),
-        px4=SimpleNamespace(enabled=enabled, vehicle_id=vehicle_id),
+        px4=SimpleNamespace(enabled=enabled, vehicle_id=vehicle_id, connection_baseport=4560),
     )
 
 
@@ -87,6 +106,10 @@ class _Stage:
 
 
 def _install_fake_modules(monkeypatch, usd_context):
+    carb = types.ModuleType("carb")
+    carb.log_info = lambda *a, **k: None
+    carb.log_warn = lambda *a, **k: None
+    carb.log_error = lambda *a, **k: None
     omni = types.ModuleType("omni")
     omni.__path__ = []
     omni_ext = types.ModuleType("omni.ext")
@@ -114,8 +137,10 @@ def _install_fake_modules(monkeypatch, usd_context):
 
     fake_bridge_host = types.ModuleType("DroneSpawner_python.bridge_host")
     fake_bridge_host.BridgeHost = _BridgeHost
+    fake_bridge_host.BridgeHostGroup = _BridgeHostGroup
 
     modules = {
+        "carb": carb,
         "omni": omni,
         "omni.ext": omni_ext,
         "omni.timeline": omni_timeline,
@@ -224,13 +249,15 @@ def test_play_starts_one_bridge_per_enabled_vehicle(monkeypatch):
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
+    # All hosts are constructed first, then the group's single start() starts
+    # each in order (the group owns the one physics-step subscription).
     assert calls == [
         ("bridge_init", "/World/Drone", 0, 250.0),
-        ("bridge_start", 0),
         ("bridge_init", "/World/Drone1", 1, 250.0),
+        ("bridge_start", 0),
         ("bridge_start", 1),
     ]
-    assert len(extension._bridge_hosts) == 2
+    assert len(extension._bridge_group.hosts) == 2
 
     # STOP tears down both bridges and despawns both vehicles.
     despawned = []
@@ -241,7 +268,7 @@ def test_play_starts_one_bridge_per_enabled_vehicle(monkeypatch):
 
     assert ("bridge_stop", 0) in calls
     assert ("bridge_stop", 1) in calls
-    assert extension._bridge_hosts == []
+    assert extension._bridge_group.hosts == []
     assert despawned == ["Drone", "Drone1"]
 
 
@@ -276,7 +303,7 @@ def test_disabled_vehicle_spawns_without_a_bridge(monkeypatch):
 
     # Only the enabled vehicle gets a bridge; both vehicles were spawned.
     assert bridge_inits == [0]
-    assert len(extension._bridge_hosts) == 1
+    assert len(extension._bridge_group.hosts) == 1
     assert len(extension._spawned_drones) == 2
 
 
@@ -298,11 +325,11 @@ def test_shutdown_stops_bridges_and_despawns(monkeypatch):
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
-    extension._bridge_hosts = [BridgeHost(0)]
+    extension._bridge_group = module.BridgeHostGroup([BridgeHost(0)])
     extension._spawned_drones = [SimpleNamespace(prim_name="Drone")]
 
     extension.on_shutdown()
 
     assert calls == [("bridge_stop", 0), ("despawn", "Drone")]
-    assert extension._bridge_hosts == []
+    assert extension._bridge_group.hosts == []
     assert extension._spawned_drones == []

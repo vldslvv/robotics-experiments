@@ -21,6 +21,7 @@ from typing import Optional
 import numpy as np
 
 from . import frames
+from ._logging import VehicleLogFilter, vehicle_log_context
 from ._pegasus_sensors import _DEFAULT_SENSOR_RATE_HZ, _PegasusSensorSuite
 from .contract import ActuatorCommands, BridgeStatus, LockstepSettings
 from .flight_stack import AbstractFlightStackBridge
@@ -38,6 +39,7 @@ _HIL_SENSOR_BARO_UPDATED = 0b1101000000000
 _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
 _DEFAULT_DEBUG_LOG_PATH = "/tmp/robotics_experiments_px4_bridge.log"
 _FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
+_FILE_LOG_HANDLER_VEHICLE_ATTR = "_robotics_experiments_px4_bridge_vehicle_id"
 # Immutable shared default for the lockstep settings argument (a module-level
 # singleton keeps it out of the mutable-default lint while staying a plain
 # concrete default; the project value comes from the Hydra px4.lockstep group).
@@ -73,13 +75,19 @@ def _configure_file_logging(
     package_logger.setLevel(min(package_logger.level or level, level))
 
     resolved = path.resolve()
+    # Replace only this vehicle's prior handler (a re-Play of the same vehicle),
+    # not every file handler. Distinct vehicles must keep their own handlers so a
+    # multi-vehicle process writes each vehicle's records to its own file instead
+    # of the last-constructed vehicle stealing the single handler.
     for handler in list(package_logger.handlers):
-        if getattr(handler, _FILE_LOG_HANDLER_ATTR, None) is not None:
+        if getattr(handler, _FILE_LOG_HANDLER_VEHICLE_ATTR, None) == int(vehicle_id):
             package_logger.removeHandler(handler)
             handler.close()
 
     handler = logging.FileHandler(resolved, mode="w", encoding="utf-8")
     setattr(handler, _FILE_LOG_HANDLER_ATTR, str(resolved))
+    setattr(handler, _FILE_LOG_HANDLER_VEHICLE_ATTR, int(vehicle_id))
+    handler.addFilter(VehicleLogFilter(vehicle_id))
     handler.setLevel(level)
     handler.setFormatter(
         logging.Formatter(
@@ -219,6 +227,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         )
 
         self._is_connected: bool = False
+        # sim_time stashed by send() for the paired poll() blocking receive.
+        self._pending_poll_sim_time_us: int = 0
         self._last_gps_send_us: Optional[int] = None
         self._last_sensor_send_us: Optional[int] = None
         self._last_heartbeat_send_s: float = 0.0
@@ -230,33 +240,37 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._actuator_receive_count: int = 0
         self._last_actuator_receive_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
-        _LOGGER.info(
-            "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
-            "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
-            "bootstrap_prime_ticks=%d first_actuator_timeout_s=%.3f "
-            "max_sustained_actuator_lag_us=%s "
-            "physics_rate_hz=%s physics_tick_us=%d sensor_rate_hz=%.3f "
-            "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
-            "debug_log=%s sensor_debug_interval=%d",
-            connection_type,
-            connection_ip,
-            connection_baseport,
-            vehicle_id,
-            self._num_rotors,
-            self._lockstep_timeout_s,
-            self._first_heartbeat_timeout_s,
-            self._bootstrap_prime_ticks,
-            self._first_actuator_timeout_s,
-            self._max_sustained_actuator_lag_us,
-            physics_rate_hz,
-            self._physics_tick_us,
-            self._sensor_rate_hz,
-            self._gps_enabled,
-            gps_send_rate_hz,
-            self._sensor_noise_enabled,
-            self._debug_log_path,
-            self._sensor_debug_log_interval,
-        )
+        # Tag this record so it lands only in this vehicle's debug log. The
+        # endpoint port is the actual socket port (base + vehicle_id), not the
+        # shared base, so multi-vehicle logs show distinct 4560 / 4561 endpoints.
+        with vehicle_log_context(vehicle_id):
+            _LOGGER.info(
+                "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
+                "num_rotors=%d lockstep_timeout_s=%.3f first_heartbeat_timeout_s=%.3f "
+                "bootstrap_prime_ticks=%d first_actuator_timeout_s=%.3f "
+                "max_sustained_actuator_lag_us=%s "
+                "physics_rate_hz=%s physics_tick_us=%d sensor_rate_hz=%.3f "
+                "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
+                "debug_log=%s sensor_debug_interval=%d",
+                connection_type,
+                connection_ip,
+                connection_baseport + vehicle_id,
+                vehicle_id,
+                self._num_rotors,
+                self._lockstep_timeout_s,
+                self._first_heartbeat_timeout_s,
+                self._bootstrap_prime_ticks,
+                self._first_actuator_timeout_s,
+                self._max_sustained_actuator_lag_us,
+                physics_rate_hz,
+                self._physics_tick_us,
+                self._sensor_rate_hz,
+                self._gps_enabled,
+                gps_send_rate_hz,
+                self._sensor_noise_enabled,
+                self._debug_log_path,
+                self._sensor_debug_log_interval,
+            )
 
     # ---- Lifecycle ---------------------------------------------------------
 
@@ -270,6 +284,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             sensor_noise_enabled=self._sensor_noise_enabled,
             update_rate_hz=self._sensor_rate_hz,
         )
+        self._pending_poll_sim_time_us = 0
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
         self._last_heartbeat_send_s = 0.0
@@ -335,26 +350,23 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
     # ---- Per-tick ----------------------------------------------------------
 
-    def exchange(self, state: VehicleState) -> ActuatorCommands:
-        """Run one causal tick: send HIL_SENSOR (+GPS), then block for the actuator.
+    def send(self, state: VehicleState) -> ActuatorCommands | None:
+        """Send leg of one tick: HIL_SENSOR (+GPS) out, no blocking receive.
 
-        A tick is state(t) -> sensors(t) -> actuator(t): fill sensors from the
-        state, run the heartbeat handshake, send sensors/GPS, then block (with a
-        hard timeout) for PX4's paired HIL_ACTUATOR_CONTROLS. The send and the
-        blocking receive are one indivisible operation, so they cannot be
-        misordered. Returns the current rotor references; the last references on
-        a non-increasing timestamp (no send, no block), or zeros when
-        disconnected, still waiting on PX4's first heartbeat, or on an actuator
-        timeout.
+        Fills sensors from ``state``, runs the heartbeat handshake, and sends
+        sensors/GPS. Returns ``None`` once sensors were sent and a paired
+        actuator must be polled (the caller then calls :meth:`poll`). Returns a
+        concrete :class:`ActuatorCommands` for the no-block cases so ``poll`` is
+        skipped this tick: the last references on a non-increasing timestamp
+        (no send), or zeros when disconnected, still waiting on PX4's first
+        heartbeat, or on a sensor-cadence failure.
+
+        ``send`` strictly precedes its paired ``poll`` within a vehicle; see
+        :meth:`AbstractFlightStackBridge.exchange` for the single-vehicle
+        send-then-poll composition.
         """
-
-        def references() -> ActuatorCommands:
-            return ActuatorCommands(np.asarray(self._backend.input_reference(), dtype=np.float64))
-
-        zeros = ActuatorCommands(np.zeros(self._num_rotors, dtype=np.float64))
-
         if not self.is_connected:
-            return zeros
+            return self._zeros()
 
         sim_time_us = int(state.sim_time_us)
         if self._last_sensor_send_us is not None and sim_time_us <= self._last_sensor_send_us:
@@ -363,19 +375,35 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 sim_time_us,
                 self._last_sensor_send_us,
             )
-            return references()
+            return self._references()
 
         imu_refreshed = self._fill_sensor_data(state)
         now = time.time()
         if not self._heartbeat_phase(now):
-            return zeros
+            return self._zeros()
         if not self._sensor_phase(sim_time_us, imu_refreshed):
-            return zeros
-        if not self._actuator_phase(sim_time_us):
-            return zeros
-        return references()
+            return self._zeros()
+        self._pending_poll_sim_time_us = sim_time_us
+        return None
+
+    def poll(self) -> ActuatorCommands:
+        """Poll leg of one tick: block (with a hard timeout) for the actuator.
+
+        Only valid after a :meth:`send` returned ``None`` this tick (sensors
+        were sent and a paired actuator is owed). Returns the current rotor
+        references, or zeros on an actuator timeout.
+        """
+        if not self._actuator_phase(self._pending_poll_sim_time_us):
+            return self._zeros()
+        return self._references()
 
     # ---- Internals ---------------------------------------------------------
+
+    def _references(self) -> ActuatorCommands:
+        return ActuatorCommands(np.asarray(self._backend.input_reference(), dtype=np.float64))
+
+    def _zeros(self) -> ActuatorCommands:
+        return ActuatorCommands(np.zeros(self._num_rotors, dtype=np.float64))
 
     def _heartbeat_phase(self, now: float) -> bool:
         """Send the paced heartbeat and gate on PX4's first heartbeat.

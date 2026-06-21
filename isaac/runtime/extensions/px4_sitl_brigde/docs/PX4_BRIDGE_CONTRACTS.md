@@ -29,9 +29,14 @@ these silently corrupts the flight or the lockstep loop.
   bridge-facing `sim_time_us` is the accumulated time minus the settle offset, so
   it starts near zero on the first post-settle tick (Contract 1, *Construction
   checklist*).
-- **One indivisible exchange.** A tick is a single `port.exchange(state)`:
-  publish-then-block-recv cannot be split or reordered (Contract 1, *Public API
-  shape*).
+- **Send precedes poll; all sends precede all polls.** A tick is a send leg
+  (`port.send(state)`, sensors out, no block) then a poll leg (`port.poll()`,
+  block for the paired actuator). Within a vehicle the send strictly precedes its
+  poll. Across vehicles the coordinator runs every vehicle's send before any
+  vehicle's poll, so a stalled PX4 cannot starve another's sensor send.
+  `port.exchange(state)` is the single-vehicle convenience that composes
+  send-then-poll and stays byte-for-byte the old indivisible tick (Contract 1,
+  *Public API shape*).
 - **Non-finite state raises.** A NaN/Inf vehicle state is unrecoverable; the
   bridge logs it and raises rather than forwarding it into lockstep (Contract 1,
   *Failure semantics*).
@@ -154,9 +159,10 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 
 | Layer | Owns | Must not own |
 |-------|------|--------------|
-| `DroneSpawner_python.extension` | Timeline and stage event handling; spawn on PLAY; teardown on STOP, PAUSE, shutdown, or stage-open | PX4 sockets, MAVLink, thrust math |
+| `DroneSpawner_python.extension` | Timeline and stage event handling; spawn on PLAY; build per-vehicle hosts and wrap them in one `BridgeHostGroup`; teardown on STOP, PAUSE, shutdown, or stage-open | PX4 sockets, MAVLink, thrust math |
 | `robotics_experiments.drone.spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
-| `BridgeHost` | PX4 enable gate, physics-step subscription, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Drone USD authoring, MAVLink packet logic |
+| `BridgeHostGroup` | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
+| `BridgeHost` | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
 | `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
 | `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
 | `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
@@ -205,11 +211,15 @@ harmful.
                             perform PX4 handshake
         │
         ▼
-[Each bridge tick]        bridge.on_physics_step(dt, sim_time_us):
-                            - read resolved body state
-                            - port.exchange(state) (send sensors to PX4, then
-                              block for the paired actuator commands)
-                            - apply_dynamics to drone body at rotor markers
+[Each bridge tick]        bridge.on_physics_step(dt, sim_time_us)
+                          = send_sensors(dt, sim_time_us) + recv_and_apply():
+                            - send_sensors: read resolved body state;
+                              port.send(state) (sensors to PX4, no block)
+                            - recv_and_apply: port.poll() (block for the paired
+                              actuator commands); apply_dynamics to drone body at
+                              rotor markers
+                          (multi-vehicle: BridgeHostGroup runs all send_phase
+                           legs, then all recv_phase legs, across vehicles)
         │
         ▼
 [Stop / pause / teardown] BridgeHost.stop(), bridge.stop(), then despawn drone:
@@ -283,7 +293,9 @@ class LockstepSettings:
 class AbstractFlightStackBridge:
     def start(self) -> None: ...
     def stop(self) -> None: ...
-    def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send -> PX4, block, recv <- PX4
+    def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
+    def poll(self) -> ActuatorCommands: ...  # block, recv <- PX4 (only after send returned None)
+    def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send-then-poll; single-vehicle convenience
     @property
     def status(self) -> BridgeStatus: ...
     @property
@@ -324,12 +336,17 @@ class Px4Bridge:
     def is_armed(self) -> bool: ...
 ```
 
-**Lockstep ordering contract:** a tick is a single `exchange(state)` call. It
-sends `HIL_SENSOR` (advancing `time_usec`), then blocks for the paired
-`HIL_ACTUATOR_CONTROLS`, and returns the rotor references. The send and the
-blocking receive are one indivisible operation, so the causal lockstep order
-cannot be broken from the caller side — there is no way to receive before
-sending, or twice. `Px4Bridge.on_physics_step` is the canonical caller.
+**Lockstep ordering contract:** a tick decomposes into `send(state)` -- which
+sends `HIL_SENSOR` (advancing `time_usec`) without blocking and returns `None`
+when an actuator is owed -- and `poll()`, which blocks for the paired
+`HIL_ACTUATOR_CONTROLS` and returns the rotor references. Within a vehicle the
+send strictly precedes its poll. `exchange(state)` composes the two back into
+one send-then-poll call and is the single-vehicle convenience;
+`Px4Bridge.on_physics_step` (itself `send_sensors` then `recv_and_apply`) is the
+canonical single-vehicle caller. The multi-vehicle `BridgeHostGroup` instead
+calls every vehicle's send leg before any vehicle's poll leg, so the flight
+stacks compute concurrently and one stalled PX4 cannot freeze the others; the
+causal per-vehicle order (send before its own poll) is preserved.
 
 ---
 
@@ -350,9 +367,14 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
 list; see `docs/MULTI_VEHICLE_BRIDGE_PLAN.md`). The scene-owning extension then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
-simulator port `4560 + vehicle_id`, its own physics-step subscription, and its
-own `SimClock`. PhysX invokes their per-tick `exchange()` callbacks serially in
-registration order; the per-instance contract on this page is unchanged.
+simulator port `4560 + vehicle_id` and its own `SimClock`. A single
+`BridgeHostGroup` owns the one physics-step subscription for the whole fleet and
+drives the tick in two phases: every vehicle's send leg (sensors out, no block)
+runs first, then every vehicle's poll leg (block for each actuator). The PX4
+instances therefore compute concurrently, so per-tick latency is ~the max
+blocking wait rather than the sum, and a single stalled PX4 disconnects only its
+own vehicle instead of freezing the shared physics thread for the others. The
+per-instance contract on this page is unchanged.
 
 ### Connection lifecycle
 

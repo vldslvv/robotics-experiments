@@ -1,5 +1,6 @@
 """PX4 SITL to Isaac Sim bridge logic."""
 
+from ._logging import vehicle_log_context
 from .bridge import Px4Bridge
 from .contract import ActuatorCommands, BridgeStatus, LockstepSettings
 from .flight_stack import AbstractFlightStackBridge
@@ -34,4 +35,5 @@ __all__ = [
     "VehicleState",
     "discover_px4_rotor_mapping",
     "physics_tick_us",
+    "vehicle_log_context",
 ]

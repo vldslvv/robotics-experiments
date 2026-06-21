@@ -18,12 +18,12 @@ and tested independently:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
 from . import frames
-from .contract import BridgeStatus
+from .contract import ActuatorCommands, BridgeStatus
 from .flight_stack import AbstractFlightStackBridge
 from .simulator import ArticulationIO
 from .thrust_model import RotorDynamics, RotorThrustModel
@@ -79,6 +79,11 @@ class Px4Bridge:
         self._dynamics_debug_interval = 50
         self._max_tilt_angle_deg = max_tilt_angle_deg
         self._tilt_cutoff_count = 0
+        # Per-tick state stashed by send_sensors for the paired recv_and_apply.
+        self._pending_state: Any = None
+        self._pending_send_result: Optional[ActuatorCommands] = None
+        self._pending_force_cutoff: bool = False
+        self._pending_sim_time_us: int = 0
         if articulation_io is None:
             from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
@@ -105,7 +110,23 @@ class Px4Bridge:
     # ---- Per-tick ----------------------------------------------------------
 
     def on_physics_step(self, dt: float, sim_time_us: int) -> None:
-        """Per-physics-tick callback. Read state, exchange MAVLink, apply forces."""
+        """Per-physics-tick callback. Read state, exchange MAVLink, apply forces.
+
+        The single-vehicle composition of the two legs: :meth:`send_sensors`
+        publishes this tick's sensors, then :meth:`recv_and_apply` blocks for the
+        paired actuator and applies the resulting forces. A multi-vehicle
+        coordinator calls the two legs across vehicles instead, so all sends
+        precede all blocking polls.
+        """
+        self.send_sensors(dt, sim_time_us)
+        self.recv_and_apply()
+
+    def send_sensors(self, dt: float, sim_time_us: int) -> None:
+        """Send leg: read state and publish this tick's sensors to PX4 (no block).
+
+        Stashes the read state, the tilt force-cutoff decision, and the port's
+        send result on ``self`` for the paired :meth:`recv_and_apply`.
+        """
         if not self._io.is_initialized:
             self._io.initialize()
 
@@ -155,11 +176,27 @@ class Px4Bridge:
                     self._max_tilt_angle_deg,
                 )
 
-        # Lockstep exchange, using the real state, before gating applied forces:
-        # one causal tick sends sensors out to PX4 and blocks for the paired
-        # actuator commands.
-        commands = self._port.exchange(state)
-        if force_cutoff:
+        # Send leg, using the real state, before gating applied forces: publish
+        # this tick's sensors out to PX4. A None result means an actuator must
+        # be polled in recv_and_apply; a concrete result is the no-block case.
+        self._pending_send_result = self._port.send(state)
+        self._pending_state = state
+        self._pending_force_cutoff = force_cutoff
+        self._pending_sim_time_us = int(sim_time_us)
+
+    def recv_and_apply(self) -> None:
+        """Poll leg: block for the paired actuator and apply the resulting forces.
+
+        Consumes the state stashed by :meth:`send_sensors`. Tilt-gated ticks
+        apply zeros; otherwise the actuator commands run through the thrust model
+        and the resulting dynamics are applied to the articulation.
+        """
+        state = self._pending_state
+        sim_time_us = self._pending_sim_time_us
+        # Block for the paired actuator (or take the no-block result from send).
+        send_result = self._pending_send_result
+        commands = self._port.poll() if send_result is None else send_result
+        if self._pending_force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
                 RotorDynamics(

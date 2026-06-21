@@ -3,9 +3,10 @@
 The scenario is driven by the Hydra ``vehicles`` list: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
 instance (simulator port ``connection_baseport + vehicle_id``, GCS link
-``scenario.gcs_baseport + vehicle_id``). All bridges tick on the same PhysX
-steps (each ``BridgeHost`` self-subscribes), so one ``simulation_app.update()``
-advances every drone's lockstep exchange. The command flow runs each phase across
+``scenario.gcs_baseport + vehicle_id``). A single ``BridgeHostGroup`` owns the
+one physics-step subscription and drives every host in two phases (all sends,
+then all polls), so one ``simulation_app.update()`` advances every drone's
+lockstep with the PX4 instances computing concurrently. The command flow runs each phase across
 all drones over the shared advancing clock, and the flight-envelope gates are
 evaluated per drone against its own spawn position; every drone must pass.
 
@@ -197,8 +198,10 @@ def _advance_sim_time(
     start_us = _sim_time_us(drones)
     target_us = start_us + int(round(float(seconds) * 1_000_000))
     base = wall_timeout_s if wall_timeout_s is not None else max(10.0, seconds * 5.0)
-    # Two serial lockstep exchanges per tick (one per drone) ~double per-tick wall
-    # time, so scale the wall budget by the drone count. N=1 is unchanged.
+    # Per tick the coordinator sends to every PX4, then blocks for each actuator;
+    # the PX4s compute concurrently so per-tick wall time is ~the max wait, not
+    # the sum. Scale the wall budget by the drone count anyway as a safe upper
+    # bound (host contention can still serialize the polls). N=1 is unchanged.
     deadline = time.monotonic() + base * len(drones)
     while _sim_time_us(drones) < target_us:
         if time.monotonic() > deadline:
@@ -910,14 +913,19 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         drones = _build_drones(context, options, env)
     context.report(f"{options.test_name}: built {len(drones)} drone(s)")
 
+    from DroneSpawner_python.bridge_host import BridgeHostGroup
+
     timeline = omni.timeline.get_timeline_interface()
     clock = drones[0].host
+    # One coordinator owns the single physics-step subscription and runs every
+    # host's send leg before every host's poll leg, so the PX4 instances compute
+    # concurrently and one stalled PX4 disconnects only its own vehicle.
+    group = BridgeHostGroup([drone.host for drone in drones])
 
     try:
         context.report(f"{options.test_name}: starting {len(drones)} PX4 bridge host(s)")
         with timing.timed_stage("bridge_host_start", sim_clock=clock):
-            for drone in drones:
-                drone.host.start()
+            group.start()
             timeline.play()
 
         context.report(
@@ -1002,6 +1010,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         context.report(f"{options.test_name}: stopping timeline, bridge hosts, and drones")
         with timing.timed_stage("teardown", sim_clock=clock):
             timeline.stop()
+            group.stop()
             for drone in drones:
                 if drone.mav is not None:
                     try:
@@ -1009,7 +1018,6 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                     except Exception:
                         pass
                 drone.observer.shutdown()
-                drone.host.stop()
                 despawn_drone(context.stage, drone.vehicle.drone)
 
     with timing.timed_stage("bridge_log_validation"):

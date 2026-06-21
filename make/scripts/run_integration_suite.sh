@@ -25,7 +25,11 @@ results_file="${BUILD_ROOT}/integration-test-results.$$"
 : >"${results_file}"
 trap 'rm -f "${results_file}"' EXIT
 
-# shellcheck disable=SC2086
+# SC2086: intentional word-splitting of the space-separated target list.
+# SC2016: the single-quoted bash -c body is expanded by the inner bash (via the
+# positional args passed after it), not the outer shell -- single quotes are
+# correct here.
+# shellcheck disable=SC2086,SC2016
 printf "%s\n" ${INTEGRATION_TEST_TARGETS} | \
     xargs -P "${INTEGRATION_TEST_JOBS}" -I {} bash -c '
         target="$1"
