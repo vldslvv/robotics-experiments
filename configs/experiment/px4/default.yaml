@@ -21,8 +21,10 @@ linear_drag: [0.50, 0.30, 0.0]
 
 connection_type: tcpin
 connection_ip: localhost
+# Base port; the per-vehicle simulator port is connection_baseport + vehicle.id
+# (derived in config.load.resolve_fleet). There is no per-vehicle vehicle_id
+# knob: id is the single authored identity.
 connection_baseport: 4560
-vehicle_id: 0
 
 # Lockstep exchange tunables. physics_rate_hz is NOT here: it is injected from
 # sim.physics_hz (the single source of truth for the physics/sensor cadence).

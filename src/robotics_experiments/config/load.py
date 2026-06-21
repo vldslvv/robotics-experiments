@@ -7,9 +7,15 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
 from .schemas import EnvConfig, register_schemas
-from .types import DroneConfig, Px4BridgeConfig, VehicleConfig
+from .types import DroneConfig, Px4BridgeConfig, ResolvedVehicle
 
-__all__ = ["get_config", "get_enabled_px4_vehicle_count", "reset_config"]
+__all__ = [
+    "get_config",
+    "get_enabled_px4_vehicle_count",
+    "get_enabled_px4_instance_indices",
+    "resolve_fleet",
+    "reset_config",
+]
 
 _CACHED: Optional[EnvConfig] = None
 
@@ -29,11 +35,13 @@ def _resolve_config_path() -> Path:
     return path.resolve()
 
 
-def _validate_vehicles(vehicles: list[VehicleConfig]) -> None:
-    """Raise ``ValueError`` on any structurally invalid multi-vehicle config.
+def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
+    """Raise ``ValueError`` on any structurally invalid resolved fleet.
 
-    Invalid configuration must fail loudly at resolution time rather than
-    surface later as a port collision or an overwritten log.
+    Operates on the derived runtime fields (``mavlink_port`` / ``debug_log_path``)
+    so it never recomputes ``connection_baseport + id``. Invalid configuration
+    must fail loudly at resolution time rather than surface later as a port
+    collision or an overwritten log.
     """
     ids: set[int] = set()
     endpoints: set[tuple[str, str, int]] = set()
@@ -46,57 +54,63 @@ def _validate_vehicles(vehicles: list[VehicleConfig]) -> None:
             raise ValueError(f"duplicate vehicle id={v.id}")
         ids.add(v.id)
 
-        endpoint = (
-            v.px4.connection_type,
-            v.px4.connection_ip,
-            v.px4.connection_baseport + v.px4.vehicle_id,
-        )
+        endpoint = (v.px4.connection_type, v.px4.connection_ip, v.mavlink_port)
         if endpoint in endpoints:
             raise ValueError(f"duplicate vehicle MAVLink endpoint {endpoint} (vehicle id={v.id})")
         endpoints.add(endpoint)
 
-        if v.drone.prim_name in prim_names:
+        if v.prim_name in prim_names:
             raise ValueError(
-                f"duplicate vehicle drone.prim_name {v.drone.prim_name!r} (vehicle id={v.id})"
+                f"duplicate vehicle drone.prim_name {v.prim_name!r} (vehicle id={v.id})"
             )
-        prim_names.add(v.drone.prim_name)
+        prim_names.add(v.prim_name)
 
-        # Render only the {vehicle} token; date/time tokens stay literal. Two
-        # vehicles whose template lacks {vehicle} render identically and would
-        # overwrite each other's logs. Empty path disables logging (no collision).
-        if v.px4.debug_log_path:
-            rendered = v.px4.debug_log_path.replace("{vehicle}", str(v.px4.vehicle_id))
-            if rendered in log_paths:
+        # debug_log_path already has the {vehicle} token rendered to id; the
+        # date/time tokens stay literal here. Two vehicles whose template lacks
+        # {vehicle} render identically and would overwrite each other's logs.
+        # Empty path disables logging (no collision).
+        if v.debug_log_path:
+            if v.debug_log_path in log_paths:
                 raise ValueError(
                     f"colliding vehicle debug_log_path {v.px4.debug_log_path!r} "
                     f"(vehicle id={v.id}); add a {{vehicle}} token to disambiguate"
                 )
-            log_paths.add(rendered)
+            log_paths.add(v.debug_log_path)
 
 
-def _resolve_vehicles(cfg) -> list[VehicleConfig]:
-    """Build the typed, validated vehicle list from the composed config.
+def resolve_fleet(cfg) -> list[ResolvedVehicle]:
+    """Enrich the composed config's ``vehicles`` into a resolved fleet.
 
-    Each ``vehicles`` entry is a *partial* override; its ``drone`` / ``px4``
-    partials are merged over the structured global ``cfg.drone`` / ``cfg.px4``
-    (``OmegaConf.merge`` both fills defaults and rejects unknown keys).
+    The single enrichment step from authored Hydra data to a self-describing
+    runtime fleet. Each ``vehicles`` entry is a *partial* override; its
+    ``drone`` / ``px4`` partials are merged over the structured global
+    ``cfg.drone`` / ``cfg.px4`` (``OmegaConf.merge`` both fills defaults and
+    rejects unknown keys) into a pure resolved config, from which the derived
+    runtime fields (``mavlink_port``, ``px4_instance_index``, the rendered
+    ``debug_log_path``, ``prim_name``) are computed once. An empty list is a
+    valid empty fleet (0..N is handled uniformly).
     """
     raw = list(cfg.get("vehicles") or [])
-    if not raw:
-        raise ValueError("config 'vehicles' must contain at least one entry")
-    resolved: list[VehicleConfig] = []
+    resolved: list[ResolvedVehicle] = []
     for entry in raw:
         drone = OmegaConf.merge(cfg.drone, entry.get("drone", {}))
         px4 = OmegaConf.merge(cfg.px4, entry.get("px4", {}))
+        drone_cfg = cast(DroneConfig, OmegaConf.to_object(drone))
+        px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
+        vehicle_id = int(entry["id"])
         resolved.append(
-            VehicleConfig(
-                id=int(entry["id"]),
+            ResolvedVehicle(
+                id=vehicle_id,
                 spawn_xy=tuple(entry["spawn_xy"]),
-                drone=cast(DroneConfig, OmegaConf.to_object(drone)),
-                px4=cast(Px4BridgeConfig, OmegaConf.to_object(px4)),
+                drone=drone_cfg,
+                px4=px4_cfg,
+                mavlink_port=px4_cfg.connection_baseport + vehicle_id,
+                px4_instance_index=vehicle_id,
+                debug_log_path=px4_cfg.debug_log_path.replace("{vehicle}", str(vehicle_id)),
+                prim_name=drone_cfg.prim_name,
             )
         )
-    _validate_vehicles(resolved)
+    _validate_fleet(resolved)
     return resolved
 
 
@@ -124,9 +138,9 @@ def get_config() -> EnvConfig:
         cfg = compose(config_name=config_path.stem)
 
     # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
-    # them with the typed, validated list before caching/returning.
+    # them with the enriched, validated resolved fleet before caching/returning.
     env = cast(EnvConfig, OmegaConf.to_object(cfg))
-    env.vehicles = _resolve_vehicles(cfg)
+    env.vehicles = resolve_fleet(cfg)
     _CACHED = env
     return _CACHED
 
@@ -134,6 +148,17 @@ def get_config() -> EnvConfig:
 def get_enabled_px4_vehicle_count() -> int:
     """Return the number of resolved vehicles that need PX4 SITL containers."""
     return sum(1 for vehicle in get_config().vehicles if vehicle.px4.enabled)
+
+
+def get_enabled_px4_instance_indices() -> list[int]:
+    """Return the PX4 ``-i`` instance indices of the PX4-enabled vehicles.
+
+    The host-side launch scripts iterate these (the resolved
+    ``px4_instance_index``, in fleet order) instead of a blind ``0..count``
+    loop, so non-contiguous vehicle ids keep their derived MAVLink/PX4 port
+    offsets.
+    """
+    return [v.px4_instance_index for v in get_config().vehicles if v.px4.enabled]
 
 
 def reset_config() -> None:

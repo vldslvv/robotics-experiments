@@ -2,8 +2,8 @@
 
 The scenario is driven by the Hydra ``vehicles`` list: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
-instance (simulator port ``connection_baseport + vehicle_id``, GCS link
-``scenario.gcs_baseport + vehicle_id``). A single ``BridgeHostGroup`` owns the
+instance (the resolved simulator port ``mavlink_port = connection_baseport + id``,
+GCS link ``scenario.gcs_baseport + id``). A single ``BridgeHostGroup`` owns the
 one physics-step subscription and drives every host in two phases (all sends,
 then all polls), so one ``simulation_app.update()`` advances every drone's
 lockstep with the PX4 instances computing concurrently. The command flow runs each phase across
@@ -17,6 +17,7 @@ stays in code as a protocol constant.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 import sys
@@ -856,31 +857,33 @@ def _build_drones(
     scenario = env.scenario
     drones: list[_DroneRuntime] = []
     for vehicle in env.vehicles:
-        px4_config = vehicle.px4
+        # The optional transform mutates only the PX4 config (e.g. the negative
+        # test's rotor-mapping fault); rebuild the resolved vehicle around it so
+        # the host still reads the derived runtime fields (mavlink_port, id).
         if options.px4_config_transform is not None:
-            px4_config = options.px4_config_transform(px4_config)
+            vehicle = dataclasses.replace(vehicle, px4=options.px4_config_transform(vehicle.px4))
 
-        label = f"drone{vehicle.px4.vehicle_id}"
+        label = f"drone{vehicle.id}"
         context.report(f"[{label}] spawning configured drone at spawn_xy={tuple(vehicle.spawn_xy)}")
         spawn_drone(context.stage, vehicle.drone, position=tuple(vehicle.spawn_xy), yaw=0.0)
 
         articulation_path, rotor_paths = _resolve_drone_paths(
             context.stage,
             prim_name=vehicle.drone.prim_name,
-            articulation_path_override=px4_config.articulation_path,
+            articulation_path_override=vehicle.px4.articulation_path,
         )
         context.report(f"[{label}] articulation path {articulation_path} rotors {rotor_paths}")
 
         host = BridgeHost(
             articulation_path=articulation_path,
-            config=px4_config,
+            vehicle=vehicle,
             physics_hz=env.sim.physics_hz,
         )
         observer = IsaacArticulationIO(
             articulation_path=articulation_path,
             rotor_link_paths=rotor_paths,
         )
-        gcs_endpoint = f"udp:127.0.0.1:{scenario.gcs_baseport + vehicle.px4.vehicle_id}"
+        gcs_endpoint = f"udp:127.0.0.1:{scenario.gcs_baseport + vehicle.id}"
         drones.append(
             _DroneRuntime(
                 vehicle=vehicle,

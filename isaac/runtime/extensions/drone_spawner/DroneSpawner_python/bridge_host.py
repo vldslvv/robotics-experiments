@@ -19,7 +19,7 @@ from typing import Any
 import carb
 import omni.physx
 
-from robotics_experiments.config import Px4BridgeConfig
+from robotics_experiments.config import ResolvedVehicle
 
 from .global_variables import EXTENSION_TITLE
 
@@ -34,8 +34,13 @@ class BridgeHost:
     that ticks it, and tears everything down on stop.
     """
 
-    def __init__(self, *, articulation_path: str, config: Px4BridgeConfig, physics_hz: float):
-        self._cfg = config
+    def __init__(self, *, articulation_path: str, vehicle: ResolvedVehicle, physics_hz: float):
+        self._cfg = vehicle.px4
+        # Derived per-vehicle runtime values come straight from the resolved
+        # vehicle; nothing here recomputes connection_baseport + id.
+        self._vehicle_id = vehicle.id
+        self._mavlink_port = vehicle.mavlink_port
+        self._debug_log_path = vehicle.debug_log_path
         self._physics_hz = physics_hz
         self._articulation_path = articulation_path
         self._bridge: Any | None = None
@@ -54,21 +59,20 @@ class BridgeHost:
         # Per-vehicle log tag so the two BridgeHosts in a multi-drone scene are
         # distinguishable in the shared Isaac console.
         self._endpoint = (
-            f"{config.connection_type}:{config.connection_ip}:"
-            f"{config.connection_baseport + config.vehicle_id}"
+            f"{self._cfg.connection_type}:{self._cfg.connection_ip}:{self._mavlink_port}"
         )
-        self._tag = f"{_LOG_PREFIX} v{config.vehicle_id} {self._endpoint}"
+        self._tag = f"{_LOG_PREFIX} v{self._vehicle_id} {self._endpoint}"
         # Tick budget after which a started-but-never-connected bridge is loud:
         # the first PX4 heartbeat must arrive within first_heartbeat_timeout_s.
         self._first_connect_tick_budget = int(
-            config.lockstep.first_heartbeat_timeout_s * physics_hz
+            self._cfg.lockstep.first_heartbeat_timeout_s * physics_hz
         )
         self._disconnect_warned = False
         # The hosts tick serially on the single PhysX thread and each bridge tick
         # blocks on its PX4 lockstep recv, so a slow tick here stalls every other
         # vehicle's lockstep too. Warn when one tick blocks the shared thread for
         # a large fraction of the lockstep timeout (derived, not a new knob).
-        self._slow_tick_warn_s = 0.5 * float(config.lockstep.lockstep_timeout_s)
+        self._slow_tick_warn_s = 0.5 * float(self._cfg.lockstep.lockstep_timeout_s)
         self._max_tick_block_s = 0.0
 
     @property
@@ -137,7 +141,7 @@ class BridgeHost:
         # bridge so it lands only in this vehicle's debug log file, not the
         # last-constructed vehicle's. See px4_bridge._logging.
         self._log_ctx = vehicle_log_context
-        with vehicle_log_context(self._cfg.vehicle_id):
+        with vehicle_log_context(self._vehicle_id):
             self._build_bridge(
                 omni.usd,
                 LockstepSettings,
@@ -192,8 +196,8 @@ class BridgeHost:
             num_rotors=num_rotors,
             connection_type=self._cfg.connection_type,
             connection_ip=self._cfg.connection_ip,
-            connection_baseport=self._cfg.connection_baseport,
-            vehicle_id=self._cfg.vehicle_id,
+            port=self._mavlink_port,
+            vehicle_id=self._vehicle_id,
             input_offset=self._cfg.input_offset,
             input_scaling=self._cfg.input_scaling,
             zero_position_armed=self._cfg.zero_position_armed,
@@ -204,7 +208,7 @@ class BridgeHost:
             home_lat_deg=self._cfg.home_lat_deg,
             home_lon_deg=self._cfg.home_lon_deg,
             home_alt_m=self._cfg.home_alt_m,
-            debug_log_path=self._cfg.debug_log_path,
+            debug_log_path=self._debug_log_path,
             debug_log_level=self._cfg.debug_log_level,
             sensor_debug_log_interval=self._cfg.sensor_debug_log_interval,
         )
@@ -229,7 +233,7 @@ class BridgeHost:
             f"physics_rate_hz={self._physics_hz} "
             f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
             f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "
-            f"debug_log_path={self._cfg.debug_log_path}"
+            f"debug_log_path={self._debug_log_path}"
         )
         self._bridge = Px4Bridge(
             articulation_path=articulation_path,
@@ -252,7 +256,7 @@ class BridgeHost:
         """Tear down the bridge. The group owns and drops the subscription."""
         if self._bridge is not None:
             try:
-                with self._log_ctx(self._cfg.vehicle_id):
+                with self._log_ctx(self._vehicle_id):
                     self._bridge.stop()
             except Exception as exc:
                 carb.log_warn(f"[{self._tag}] bridge.stop() raised: {exc}")
@@ -306,7 +310,7 @@ class BridgeHost:
         # the diagnostic spans this vehicle's full send-then-poll contribution.
         self._block_start = time.monotonic()
         try:
-            with self._log_ctx(self._cfg.vehicle_id):
+            with self._log_ctx(self._vehicle_id):
                 self._bridge.send_sensors(dt, bridge_sim_time_us)
             self._sent_this_tick = True
         except Exception as exc:
@@ -329,7 +333,7 @@ class BridgeHost:
         tick = self._pending_tick
         bridge_sim_time_us = self._pending_bridge_sim_time_us
         try:
-            with self._log_ctx(self._cfg.vehicle_id):
+            with self._log_ctx(self._vehicle_id):
                 self._bridge.recv_and_apply()
         except Exception as exc:
             carb.log_warn(

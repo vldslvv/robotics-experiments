@@ -124,7 +124,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         num_rotors: int = 4,
         connection_type: str = "tcpin",
         connection_ip: str = "localhost",
-        connection_baseport: int = 4560,
+        port: int = 4560,
         vehicle_id: int = 0,
         input_offset: list[float] | None = None,
         input_scaling: list[float] | None = None,
@@ -140,7 +140,14 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         debug_log_level: str = "DEBUG",
         sensor_debug_log_interval: int = 50,
     ):
-        """Initialize the port. No socket is opened until :meth:`start`."""
+        """Initialize the port. No socket is opened until :meth:`start`.
+
+        ``port`` is the fully resolved simulator MAVLink TCP port (the caller
+        passes ``ResolvedVehicle.mavlink_port``); it is handed to the vendored
+        Pegasus backend as its ``connection_baseport`` with a zero ``vehicle_id``
+        offset, so no ``baseport + id`` arithmetic happens here. ``vehicle_id``
+        is the resolved vehicle ``id`` used only as the per-vehicle log identity.
+        """
         self._debug_log_path = _configure_file_logging(debug_log_path, debug_log_level, vehicle_id)
         self._sensor_debug_log_interval = max(1, int(sensor_debug_log_interval))
         self._num_rotors = int(num_rotors)
@@ -211,8 +218,11 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     "num_rotors": self._num_rotors,
                     "connection_type": connection_type,
                     "connection_ip": connection_ip,
-                    "connection_baseport": connection_baseport,
-                    "vehicle_id": vehicle_id,
+                    # The resolved per-vehicle port is passed straight through as
+                    # the backend's base with a zero offset (the bridge already
+                    # derived baseport + id into `port`).
+                    "connection_baseport": port,
+                    "vehicle_id": 0,
                     # The bridge never spawns PX4; PX4 SITL runs as a separate
                     # process (Docker: none_iris). Pin the vendored backend's
                     # autolaunch off (its own default is True) so it only
@@ -241,8 +251,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         self._last_actuator_receive_us: Optional[int] = None
         self._sensor_payload_debug_count: int = 0
         # Tag this record so it lands only in this vehicle's debug log. The
-        # endpoint port is the actual socket port (base + vehicle_id), not the
-        # shared base, so multi-vehicle logs show distinct 4560 / 4561 endpoints.
+        # endpoint port is the resolved per-vehicle socket port, so multi-vehicle
+        # logs show distinct 4560 / 4561 endpoints.
         with vehicle_log_context(vehicle_id):
             _LOGGER.info(
                 "PX4 MAVLink port constructed: endpoint=%s:%s:%d vehicle_id=%d "
@@ -254,7 +264,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                 "debug_log=%s sensor_debug_interval=%d",
                 connection_type,
                 connection_ip,
-                connection_baseport + vehicle_id,
+                port,
                 vehicle_id,
                 self._num_rotors,
                 self._lockstep_timeout_s,

@@ -173,7 +173,6 @@ def _config(**overrides):
         "connection_type": "tcpin",
         "connection_ip": "localhost",
         "connection_baseport": 4560,
-        "vehicle_id": 0,
         "lockstep": SimpleNamespace(
             lockstep_timeout_s=1.0,
             first_heartbeat_timeout_s=5.0,
@@ -198,13 +197,33 @@ def _config(**overrides):
     return SimpleNamespace(**values)
 
 
+def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_overrides):
+    """Build a ResolvedVehicle-shaped object around a PX4 config for BridgeHost.
+
+    The BridgeHost reads only ``id`` / ``px4`` / ``mavlink_port`` /
+    ``debug_log_path`` off the resolved vehicle; the rest mirror the production
+    shape for completeness. Derived fields follow ``id``.
+    """
+    px4 = _config(**px4_overrides)
+    return SimpleNamespace(
+        id=vehicle_id,
+        spawn_xy=spawn_xy,
+        drone=SimpleNamespace(prim_name=prim_name),
+        px4=px4,
+        mavlink_port=px4.connection_baseport + vehicle_id,
+        px4_instance_index=vehicle_id,
+        debug_log_path=px4.debug_log_path.replace("{vehicle}", str(vehicle_id)),
+        prim_name=prim_name,
+    )
+
+
 def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
     physx = _install_fake_isaac(monkeypatch)
     calls = []
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
 
-    host = module.BridgeHost(articulation_path="/World/Drone", config=_config(), physics_hz=250.0)
+    host = module.BridgeHost(articulation_path="/World/Drone", vehicle=_vehicle(), physics_hz=250.0)
 
     # The host no longer self-subscribes; the group owns the subscription and
     # drives the two-leg API. start() only sets up the clock here (settle > 0).
@@ -237,7 +256,7 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
 
     host = module.BridgeHost(
         articulation_path="/World/Drone",
-        config=_config(startup_settle_time_s=0.0),
+        vehicle=_vehicle(startup_settle_time_s=0.0),
         physics_hz=250.0,
     )
 
@@ -257,7 +276,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
 
     host = module.BridgeHost(
         articulation_path="/World/Drone",
-        config=_config(startup_settle_time_s=0.0),
+        vehicle=_vehicle(startup_settle_time_s=0.0),
         physics_hz=250.0,
     )
 
@@ -287,23 +306,23 @@ def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):
 
     host0 = module.BridgeHost(
         articulation_path="/World/Drone",
-        config=_config(startup_settle_time_s=0.0, vehicle_id=0),
+        vehicle=_vehicle(vehicle_id=0, startup_settle_time_s=0.0),
         physics_hz=250.0,
     )
     host1 = module.BridgeHost(
         articulation_path="/World/Drone1",
-        config=_config(startup_settle_time_s=0.0, vehicle_id=1),
+        vehicle=_vehicle(vehicle_id=1, startup_settle_time_s=0.0),
         physics_hz=250.0,
     )
 
     host0.start()
     host1.start()
 
-    # Each host constructs its own port with the same baseport but a distinct
-    # vehicle_id, so the simulator endpoints (baseport + vehicle_id) differ.
+    # Each host constructs its own port with the resolved per-vehicle
+    # mavlink_port (baseport + id), so the simulator endpoints differ.
     port_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "port"]
     assert len(port_calls) == 2
-    endpoints = [c[1]["connection_baseport"] + c[1]["vehicle_id"] for c in port_calls]
+    endpoints = [c[1]["port"] for c in port_calls]
     assert endpoints == [4560, 4561]
 
     # Each host targets its own articulation prim.

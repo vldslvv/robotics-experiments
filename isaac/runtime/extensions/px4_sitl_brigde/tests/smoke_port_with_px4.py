@@ -43,7 +43,7 @@ def main() -> int:
     p.add_argument("--num-rotors", type=int, default=4)
     p.add_argument("--connection-type", default="tcpin")
     p.add_argument("--connection-ip", default="localhost")
-    p.add_argument("--connection-baseport", type=int, default=4560)
+    p.add_argument("--port", type=int, default=4560)
     p.add_argument("--rate-hz", type=float, default=250.0)
     p.add_argument("--duration-s", type=float, default=30.0)
     p.add_argument("--lockstep-timeout-s", type=float, default=0.1)
@@ -53,13 +53,13 @@ def main() -> int:
         num_rotors=args.num_rotors,
         connection_type=args.connection_type,
         connection_ip=args.connection_ip,
-        connection_baseport=args.connection_baseport,
+        port=args.port,
         lockstep=LockstepSettings(lockstep_timeout_s=args.lockstep_timeout_s),
     )
     port.start()
     print(
         f"port started; waiting for PX4 to dial in on {args.connection_type}"
-        f":{args.connection_ip}:{args.connection_baseport}"
+        f":{args.connection_ip}:{args.port}"
     )
 
     period_s = 1.0 / args.rate_hz

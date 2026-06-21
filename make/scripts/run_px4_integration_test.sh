@@ -98,10 +98,16 @@ done
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
-PX4_TOTAL_INSTANCES="$(
+# Iterate the PX4-enabled vehicles' derived instance indices (PX4 -i / port
+# offset = vehicle id) rather than a blind 0..count loop, so non-contiguous ids
+# keep their derived ports.
+PX4_INSTANCE_INDICES="$(
     uv run python -c \
-        'from robotics_experiments.config import get_enabled_px4_vehicle_count; print(get_enabled_px4_vehicle_count())'
+        'from robotics_experiments.config import get_enabled_px4_instance_indices; print(" ".join(str(i) for i in get_enabled_px4_instance_indices()))'
 )"
+# shellcheck disable=SC2206
+PX4_INSTANCE_INDICES=(${PX4_INSTANCE_INDICES})
+PX4_TOTAL_INSTANCES="${#PX4_INSTANCE_INDICES[@]}"
 if [ "${PX4_TOTAL_INSTANCES}" -lt 1 ]; then
     echo "Active Hydra config has no PX4-enabled vehicles; PX4 integration requires at least one." >&2
     exit 2
@@ -238,26 +244,27 @@ mkdir -p "$(dirname "${HOST_ISAAC_LOG}")" "$(dirname "${HOST_PX4_LOG}")"
 rm -f "${HOST_ISAAC_LOG}" "${HOST_PX4_LOG}"
 integration_timing "prepare_logs" "${stage_start_ms}"
 
-# Start one PX4 SITL container per instance. Instance 0 owns the network
-# namespace; additional instances join it (--network container:) and run with a
-# distinct PX4 instance index so each listens on simulator TCP port 4560 + i and
-# GCS UDP 14550 + i. Per-instance log/eeprom mounts keep their state isolated.
+# Start one PX4 SITL container per resolved instance index. The first instance
+# owns the network namespace; additional instances join it (--network container:)
+# and run with their derived PX4 instance index so each listens on simulator TCP
+# port 4560 + i and GCS UDP 14550 + i. Per-instance log/eeprom mounts keep their
+# state isolated.
 stage_start_ms="$(now_ms)"
-for ((i = 0; i < PX4_TOTAL_INSTANCES; i++)); do
+for i in "${PX4_INSTANCE_INDICES[@]}"; do
     container="$(px4_container_name "${i}")"
     docker rm -f "${container}" >/dev/null 2>&1 || true
 
-    # Every instance (including 0) runs from its own per-instance rootfs subdir,
-    # so log/eeprom mounts are uniform (matching the persistent launcher and
-    # reset_px4_state.sh). Only the network topology is instance-0-specific:
-    # instance 0 owns the shared namespace; additional instances join it.
+    # Every instance runs from its own per-instance rootfs subdir, so log/eeprom
+    # mounts are uniform (matching the persistent launcher and
+    # reset_px4_state.sh). Only the network topology is special: the first
+    # instance owns the shared namespace; additional instances join it.
     net_args=()
     log_mount="${PX4_LOGS}/${i}"
     eeprom_mount="${PX4_EEPROM}/${i}"
     rootfs_log="${PX4_ROOTFS}/${i}/log"
     rootfs_eeprom="${PX4_ROOTFS}/${i}/eeprom"
     mkdir -p "${log_mount}" "${eeprom_mount}"
-    if [ "${i}" -eq 0 ]; then
+    if [ -z "${PRIMARY_PX4_CONTAINER}" ]; then
         PRIMARY_PX4_CONTAINER="${container}"
     else
         net_args=(--network "container:${PRIMARY_PX4_CONTAINER}")

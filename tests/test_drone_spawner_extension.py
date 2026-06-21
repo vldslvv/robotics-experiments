@@ -48,9 +48,9 @@ class _Timeline:
 class _BridgeHost:
     instances: list["_BridgeHost"] = []
 
-    def __init__(self, *, articulation_path, config, physics_hz):
+    def __init__(self, *, articulation_path, vehicle, physics_hz):
         self.articulation_path = articulation_path
-        self.config = config
+        self.vehicle = vehicle
         self.physics_hz = physics_hz
         self.started = False
         self.stopped = False
@@ -83,11 +83,16 @@ class _BridgeHostGroup:
 
 
 def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
+    """A ResolvedVehicle-shaped object: id is the identity, ports are derived."""
     return SimpleNamespace(
         id=vehicle_id,
         spawn_xy=spawn_xy,
         drone=SimpleNamespace(prim_name=prim_name),
-        px4=SimpleNamespace(enabled=enabled, vehicle_id=vehicle_id, connection_baseport=4560),
+        px4=SimpleNamespace(enabled=enabled, connection_baseport=4560),
+        mavlink_port=4560 + vehicle_id,
+        px4_instance_index=vehicle_id,
+        debug_log_path="",
+        prim_name=prim_name,
     )
 
 
@@ -233,15 +238,15 @@ def test_play_starts_one_bridge_per_enabled_vehicle(monkeypatch):
     monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, v1, physics_hz=250.0))
 
     class BridgeHost:
-        def __init__(self, *, articulation_path, config, physics_hz):
-            self.config = config
-            calls.append(("bridge_init", articulation_path, config.vehicle_id, physics_hz))
+        def __init__(self, *, articulation_path, vehicle, physics_hz):
+            self.vehicle = vehicle
+            calls.append(("bridge_init", articulation_path, vehicle.id, physics_hz))
 
         def start(self):
-            calls.append(("bridge_start", self.config.vehicle_id))
+            calls.append(("bridge_start", self.vehicle.id))
 
         def stop(self):
-            calls.append(("bridge_stop", self.config.vehicle_id))
+            calls.append(("bridge_stop", self.vehicle.id))
 
     monkeypatch.setattr(module, "BridgeHost", BridgeHost)
 
@@ -283,8 +288,8 @@ def test_disabled_vehicle_spawns_without_a_bridge(monkeypatch):
     bridge_inits = []
 
     class BridgeHost:
-        def __init__(self, *, articulation_path, config, physics_hz):
-            bridge_inits.append(config.vehicle_id)
+        def __init__(self, *, articulation_path, vehicle, physics_hz):
+            bridge_inits.append(vehicle.id)
 
         def start(self):
             pass
@@ -305,6 +310,28 @@ def test_disabled_vehicle_spawns_without_a_bridge(monkeypatch):
     assert bridge_inits == [0]
     assert len(extension._bridge_group.hosts) == 1
     assert len(extension._spawned_drones) == 2
+
+
+def test_play_with_empty_fleet_spawns_nothing(monkeypatch):
+    module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
+    spawned = []
+    monkeypatch.setattr(module, "despawn_drone", lambda stage, config=None: None)
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None, *, position=None, yaw=0.0: spawned.append(config),
+    )
+    # An empty fleet (0 vehicles) is valid: the extension spawns nothing and
+    # runs an empty bridge group without error.
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env())
+
+    extension = module.Extension()
+    extension.on_startup("drone_spawner")
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+
+    assert spawned == []
+    assert extension._bridge_group.hosts == []
+    assert extension._spawned_drones == []
 
 
 def test_shutdown_stops_bridges_and_despawns(monkeypatch):

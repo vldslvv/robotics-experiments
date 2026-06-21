@@ -9,23 +9,21 @@ defaults:
   - _self_
 
 # Multi-vehicle scaffolding. Each entry merges its drone/px4 over the global
-# drone/px4 defaults above. One entry = today's single-drone behavior. Add
-# entries (distinct id, vehicle_id, prim_name, spawn_xy) to add drones. An empty
-# (omitted) drone means "use the global drone defaults"; px4 here only pins the
-# per-vehicle vehicle_id (which selects the MAVLink port 4560 + vehicle_id).
+# drone/px4 defaults above. One entry = today's single-drone behavior; an empty
+# list is a valid empty fleet. Add entries (distinct id, prim_name, spawn_xy) to
+# add drones. id is the single authored identity: the MAVLink port
+# (4560 + id), the PX4 -i index, and the per-vehicle log token are all derived
+# from it. An omitted drone/px4 means "use the global defaults".
 vehicles:
   - id: 0
     spawn_xy: [0.0, 0.0]
-    px4: {vehicle_id: 0}
 
 # Two-vehicle example (commented). The second vehicle uses a different asset and
-# prim, its own MAVLink port (4560 + 1), and a separate spawn position:
+# prim, its own derived MAVLink port (4560 + id = 4561), and a separate spawn:
 #
 # vehicles:
 #   - id: 0
 #     spawn_xy: [0.0, 0.0]
-#     px4: {vehicle_id: 0}
 #   - id: 1
 #     spawn_xy: [2.0, 0.0]
 #     drone: {usd_path: /isaac-sim/proj/assets/other_drone.usda, prim_name: Drone1}
-#     px4: {vehicle_id: 1}

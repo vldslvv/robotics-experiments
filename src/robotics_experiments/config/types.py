@@ -11,6 +11,7 @@ __all__ = [
     "LockstepConfig",
     "Px4BridgeConfig",
     "VehicleConfig",
+    "ResolvedVehicle",
     "IsaacLabConfig",
     "ScenarioConfig",
     "EnvConfig",
@@ -221,9 +222,10 @@ class Px4BridgeConfig:
         linear_drag: Pegasus body-frame linear drag coefficients.
         connection_type: "tcpin" (bridge listens) or "tcpout".
         connection_ip: Address used by ``connection_type``.
-        connection_baseport: TCP port for the simulator MAVLink API.
-        vehicle_id: Added to ``connection_baseport`` when more than one
-            vehicle shares a host.
+        connection_baseport: Base TCP port for the simulator MAVLink API. The
+            resolved per-vehicle port is ``connection_baseport + vehicle.id``
+            (see :class:`ResolvedVehicle.mavlink_port`); this base is shared by
+            every vehicle and the per-vehicle offset is derived from ``id``.
         lockstep: Lockstep exchange tunables (timeouts, bootstrap priming,
             actuator-lag tripwire, heartbeat rate). See :class:`LockstepConfig`.
         startup_settle_time_s: Sim-time delay before opening the PX4
@@ -242,7 +244,7 @@ class Px4BridgeConfig:
         debug_log_path: Path template for persistent bridge diagnostics. Empty
             disables file logging. Supports ``{date}`` (``YYYY-MM-DD``),
             ``{time}`` (``HH_MM_SS``), ``{timestamp}`` (``YYYY-MM-DD/HH_MM_SS``),
-            and ``{vehicle}`` (the per-vehicle ``vehicle_id``) so bridge logs can
+            and ``{vehicle}`` (the per-vehicle ``id``) so bridge logs can
             be paired with PX4 ULog files without appending across runs and so
             multiple vehicles never overwrite each other's logs.
         debug_log_level: Python logging level name used by the bridge file log.
@@ -267,7 +269,6 @@ class Px4BridgeConfig:
     connection_type: str
     connection_ip: str
     connection_baseport: int
-    vehicle_id: int
     lockstep: LockstepConfig
     startup_settle_time_s: float
     gps_enabled: bool
@@ -286,12 +287,16 @@ class Px4BridgeConfig:
 class VehicleConfig:
     """One drone instance: its asset/spawn and its PX4 bridge config.
 
-    ``drone`` and ``px4`` are fully resolved (the global ``EnvConfig`` defaults
-    merged with the per-vehicle override). ``spawn_xy`` is the world X/Y; Z is
-    computed from asset bounds at spawn; yaw is 0.
+    The pure authored config object. ``drone`` and ``px4`` are fully resolved
+    (the global ``EnvConfig`` defaults merged with the per-vehicle override).
+    ``spawn_xy`` is the world X/Y; Z is computed from asset bounds at spawn; yaw
+    is 0. ``id`` is the sole authored identity: the MAVLink port, PX4 ``-i``
+    index, and per-vehicle log token are all derived from it (see
+    :class:`ResolvedVehicle`), never hand-set.
 
     Attributes:
-        id: Stable, unique vehicle identifier within the scene.
+        id: Stable, unique vehicle identifier within the scene; the single
+            source of every derived per-vehicle runtime value.
         spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
         drone: Fully resolved per-vehicle drone spawner configuration.
         px4: Fully resolved per-vehicle PX4 bridge configuration.
@@ -301,6 +306,42 @@ class VehicleConfig:
     spawn_xy: Tuple[float, float]
     drone: DroneConfig
     px4: Px4BridgeConfig
+
+
+@dataclass(frozen=True)
+class ResolvedVehicle:
+    """One fully resolved vehicle: pure config plus derived runtime fields.
+
+    Produced by the single enrichment step ``config.load.resolve_fleet`` from a
+    :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
+    the host-side PX4 launch) reads the derived fields here instead of
+    recomputing ``connection_baseport + id`` ad hoc. ``id`` is the sole identity
+    and drives every derived value.
+
+    Attributes:
+        id: Stable, unique vehicle identifier (the sole authored identity).
+        spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
+        drone: Fully resolved per-vehicle drone spawner configuration.
+        px4: Fully resolved per-vehicle PX4 bridge configuration.
+        mavlink_port: Simulator MAVLink TCP port for this vehicle, derived as
+            ``px4.connection_baseport + id``.
+        px4_instance_index: PX4 ``-i`` instance index, equal to ``id`` (so the
+            PX4-side port shift matches ``mavlink_port`` by construction).
+        debug_log_path: ``px4.debug_log_path`` with the ``{vehicle}`` token
+            rendered to ``id``; ``{date}`` / ``{time}`` tokens stay for runtime.
+        prim_name: ``drone.prim_name`` passthrough; the full USD ``prim_path``
+            stays runtime-derived from the live stage default prim in
+            ``spawn_drone`` and flows to the bridge as ``articulation_path``.
+    """
+
+    id: int
+    spawn_xy: Tuple[float, float]
+    drone: DroneConfig
+    px4: Px4BridgeConfig
+    mavlink_port: int
+    px4_instance_index: int
+    debug_log_path: str
+    prim_name: str
 
 
 @dataclass
@@ -336,8 +377,8 @@ class ScenarioConfig:
     Attributes:
         scene: USD scene to load. ``@``-prefixed paths are repository-relative.
             Used when the standalone runner is not given an explicit ``--scene``.
-        gcs_baseport: Base UDP port for the per-drone GCS MAVLink link; drone
-            ``vehicle_id`` is added (PX4 instance ``i`` broadcasts to
+        gcs_baseport: Base UDP port for the per-drone GCS MAVLink link; the
+            vehicle ``id`` is added (PX4 instance ``i`` broadcasts to
             ``gcs_baseport + i``).
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         ground_settle_s: Sim-time the drone settles on the ground before the
@@ -402,13 +443,14 @@ class EnvConfig:
             timeouts).
         vehicles: Multi-vehicle scaffolding. Each entry merges its ``drone`` /
             ``px4`` partial over the global ``drone`` / ``px4`` defaults above.
-            The list is the only spawn path (one vehicle = a one-element list).
+            The list is the only spawn path (one vehicle = a one-element list;
+            an empty list is a valid empty fleet).
 
             Typing note: the annotation is intentionally ``List[Any]`` so Hydra's
             structured-config validation accepts the *partial* YAML entries
-            during ``compose()``. The loader replaces the raw dicts with a typed,
-            validated ``list[VehicleConfig]`` (see
-            ``config.load._resolve_vehicles``), which is the public/runtime type.
+            during ``compose()``. The loader replaces the raw dicts with a
+            fully enriched, validated ``list[ResolvedVehicle]`` (see
+            ``config.load.resolve_fleet``), which is the public/runtime type.
     """
 
     sim: SimSettings

@@ -2,7 +2,7 @@
 
 This test runs the multi-vehicle takeoff loop against N independent PX4 SITL
 instances: it composes the ``multi_drone_takeoff`` Hydra config (two drones,
-distinct spawn positions, vehicle_id 0/1 -> simulator ports 4560/4561 and GCS
+distinct spawn positions, id 0/1 -> derived simulator ports 4560/4561 and GCS
 links 14550/14551), spawns every vehicle, starts one production PX4 bridge host
 per drone, commands arm and takeoff over each drone's own GCS MAVLink endpoint,
 and asserts that *every* drone climbs and holds a stable hover within its

@@ -81,7 +81,7 @@ topics `compare_logs.py` reads) into the airframe's SDLOG profile:
    - `px4/logs/<date>/HH_MM_SS_v<vehicle>_bridge.log`
 
    The bridge-log filename carries a `_v<vehicle>` segment (the per-vehicle
-   `vehicle_id`) after the `HH_MM_SS` stem so multiple vehicles in one scene never
+   `id`) after the `HH_MM_SS` stem so multiple vehicles in one scene never
    overwrite each other's logs. The `HH_MM_SS` stem stays first, so pairing by
    date directory + `HH_MM_SS` is unchanged; the single-vehicle default is
    `_v0_bridge.log`.

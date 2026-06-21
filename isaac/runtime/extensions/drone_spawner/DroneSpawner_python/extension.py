@@ -98,9 +98,9 @@ class Extension(omni.ext.IExt):
 
         env = _get_experiment_config()
         summary = ", ".join(
-            f"id={v.id} prim={v.drone.prim_name} "
-            f"px4_enabled={v.px4.enabled} vehicle_id={v.px4.vehicle_id} "
-            f"endpoint={v.px4.connection_baseport + v.px4.vehicle_id} spawn_xy={tuple(v.spawn_xy)}"
+            f"id={v.id} prim={v.prim_name} "
+            f"px4_enabled={v.px4.enabled} endpoint={v.mavlink_port} "
+            f"spawn_xy={tuple(v.spawn_xy)}"
             for v in env.vehicles
         )
         carb.log_info(f"[DroneSpawner] spawning {len(env.vehicles)} vehicle(s): {summary}")
@@ -113,7 +113,7 @@ class Extension(omni.ext.IExt):
             hosts.append(
                 BridgeHost(
                     articulation_path=path,
-                    config=vehicle.px4,
+                    vehicle=vehicle,
                     physics_hz=env.sim.physics_hz,
                 )
             )

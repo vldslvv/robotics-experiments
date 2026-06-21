@@ -125,17 +125,35 @@ the current contents and the intended home for that kind of code.
   prime-then-block startup plus newest-packet draining keep actuators fresh
   (backlog trips `max_sustained_actuator_lag_s`); safety gating zeros forces only,
   never the per-tick exchange; a non-finite vehicle state raises.
-- Multi-vehicle scenes are driven by a top-level `vehicles:` list (see
-  `docs/MULTI_VEHICLE_BRIDGE_PLAN.md`). It is the single source of truth and the
-  only spawn path: one vehicle = a one-element list (the default config ships
-  exactly that, reproducing the single-drone behavior). Each entry has an `id`, a
-  `spawn_xy`, and partial `drone`/`px4` overrides that the loader merges over the
-  global `drone`/`px4` defaults into fully resolved per-vehicle configs
-  (`config.load._resolve_vehicles`, validated by `_validate_vehicles` -- duplicate
-  id/endpoint/`prim_name`, bad `spawn_xy`, or colliding `debug_log_path` raise a
-  `ValueError` at resolution time). The drone-spawner extension spawns each
+- Multi-vehicle scenes are driven by a top-level `vehicles:` list. It is the
+  single source of truth and the only spawn path: one vehicle = a one-element
+  list (the default config ships exactly that, reproducing the single-drone
+  behavior), and an empty list `vehicles: []` is a valid empty fleet (0..N is
+  handled uniformly -- the extension spawns nothing, runs an empty
+  `BridgeHostGroup`, and `run-px4` starts zero containers). Each entry has an
+  `id`, a `spawn_xy`, and partial `drone`/`px4` overrides. `id` is the **sole
+  authored identity**: there is no `px4.vehicle_id` knob -- the MAVLink port, the
+  PX4 `-i` instance index, the per-vehicle log `{vehicle}` token, and the GCS
+  link offset are all *derived* from `id`. One pure enrichment step
+  (`config.load.resolve_fleet`) merges each entry's `drone`/`px4` partials over
+  the global `drone`/`px4` defaults (`OmegaConf.merge`) into a pure
+  `VehicleConfig`, then constructs an immutable `ResolvedVehicle` carrying that
+  config plus the derived runtime fields: `mavlink_port`
+  (`= px4.connection_baseport + id`), `px4_instance_index` (`= id`),
+  `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
+  stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
+  bridge host, the host-side PX4 launch) reads these derived fields instead of
+  recomputing `baseport + id`. `resolve_fleet` validates the resolved fleet
+  (`_validate_fleet` -- duplicate id/endpoint/`prim_name`, bad `spawn_xy`, or
+  colliding `debug_log_path` raise a `ValueError` at resolution time).
+  `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch
+  scripts read `get_enabled_px4_vehicle_count()` /
+  `get_enabled_px4_instance_indices()` (the latter is the launch loop's source of
+  `PX4_INSTANCE`, so non-contiguous ids keep their derived ports).
+  The drone-spawner extension spawns each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
-  independent `BridgeHost`, all driven by a single `BridgeHostGroup` that owns the
+  independent `BridgeHost` (constructed from the `ResolvedVehicle`), all driven by
+  a single `BridgeHostGroup` that owns the
   one physics-step subscription. Each PhysX step runs in two phases -- every
   host's send leg (`send_phase`: sensors out to its PX4, no block) first, then
   every host's poll leg (`recv_phase`: block for that PX4's actuator). The PX4
@@ -145,18 +163,20 @@ the current contents and the intended home for that kind of code.
   the others. The port exposes the seam as `send(state)` / `poll()`, with
   `exchange(state)` kept as the single-vehicle send-then-poll convenience (a
   1-host group is byte-for-byte the old behavior).
-  Per-vehicle isolation: MAVLink simulator port is `connection_baseport +
-  vehicle_id`, the USD prim is `<default_prim>/<drone.prim_name>`, and bridge
+  Per-vehicle isolation: the MAVLink simulator port is the resolved
+  `mavlink_port` (`Px4MavlinkPort` takes a single resolved `port`, handed to the
+  vendored Pegasus backend with a zero `vehicle_id` offset), the USD prim is
+  `<default_prim>/<drone.prim_name>`, and bridge
   debug logs carry a `{vehicle}` token so the filenames never collide. The token
   alone is not enough: every bridge layer logs through the shared
   `robotics_experiments.px4_bridge` package logger, so the `BridgeHost` wraps each
   vehicle's construction/teardown and per-tick work in
-  `px4_bridge.vehicle_log_context(vehicle_id)`, and each per-vehicle file handler
+  `px4_bridge.vehicle_log_context(id)`, and each per-vehicle file handler
   carries a `VehicleLogFilter` (see `px4_bridge/_logging.py`). Without this a
   multi-vehicle process merged every bridge's records into the last-constructed
   vehicle's file. `EnvConfig.vehicles` is annotated `List[Any]` for Hydra
   compose-time tolerance of partial entries; the runtime value is
-  `list[VehicleConfig]`.
+  `list[ResolvedVehicle]`.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under

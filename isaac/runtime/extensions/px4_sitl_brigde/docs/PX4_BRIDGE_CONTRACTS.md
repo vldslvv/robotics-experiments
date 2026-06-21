@@ -359,15 +359,21 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 | Property | Value |
 |----------|-------|
 | Transport | TCP |
-| Default port | `connection_baseport + vehicle_id` (4560 for vehicle 0) |
+| Default port | resolved `mavlink_port = connection_baseport + id` (4560 for vehicle id 0) |
 | Framing | Standard MAVLink v2 |
 | Connection direction | Configurable. `tcpin`: bridge listens, PX4 dials in (Pegasus default). `tcpout`: reverse. |
 | Connections per vehicle | 1 |
 
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
-list; see `docs/MULTI_VEHICLE_BRIDGE_PLAN.md`). The scene-owning extension then
+list). `id` is the sole authored identity; one pure enrichment step
+(`config.load.resolve_fleet`) derives each vehicle's `mavlink_port`
+(`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
+into an immutable `ResolvedVehicle`. The scene-owning extension then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
-simulator port `4560 + vehicle_id` and its own `SimClock`. A single
+simulator port (the resolved `mavlink_port = 4560 + id`) and its own `SimClock`.
+The `Px4MavlinkPort` takes that resolved `port` directly (handed to the vendored
+Pegasus backend with a zero `vehicle_id` offset), so no layer recomputes
+`baseport + id`. A single
 `BridgeHostGroup` owns the one physics-step subscription for the whole fleet and
 drives the tick in two phases: every vehicle's send leg (sensors out, no block)
 runs first, then every vehicle's poll leg (block for each actuator). The PX4
@@ -582,7 +588,7 @@ These are independent peer-level connections. The bridge owns 4560 only. The sta
 
 If using uXRCE-DDS instead of offboard MAVLink, that becomes a third connection (UDP 8888 by default), also independent of the bridge.
 
-**Per-instance ports (multi-vehicle).** PX4 instance index `i` shifts every port by `i`: the bridge-owned simulator API is `4560 + vehicle_id`, the offboard/GCS link is `14540 / 14550 + vehicle_id`, and uXRCE-DDS is `8888 + vehicle_id`. The bridge still owns only its own `4560 + vehicle_id`; the GCS/offboard ports are owned by PX4 and addressed by control/test code (the multi-drone integration test connects a separate GCS link to `14550 + vehicle_id` per drone, each resolving to that PX4 instance's system id).
+**Per-instance ports (multi-vehicle).** The PX4 instance index equals the vehicle `id` (`px4_instance_index = id`), and PX4 instance `i` shifts every port by `i`: the bridge-owned simulator API is `4560 + id` (the resolved `mavlink_port`), the offboard/GCS link is `14540 / 14550 + id`, and uXRCE-DDS is `8888 + id`. The bridge still owns only its own `mavlink_port`; the GCS/offboard ports are owned by PX4 and addressed by control/test code (the multi-drone integration test connects a separate GCS link to `14550 + id` per drone, each resolving to that PX4 instance's system id).
 
 ---
 
