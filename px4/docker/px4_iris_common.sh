@@ -48,18 +48,23 @@ configure_gcs_remote_port() {
 }
 
 launch_px4_iris() {
-  if [[ "${instance}" -eq 0 ]]; then
-    make px4_sitl_default none_iris
-  else
-    build_path="${px4_dir}/build/px4_sitl_default"
-    base_rootfs="${PX4_ROOTFS:-${build_path}/rootfs}"
-    instance_dir="${base_rootfs}/${instance}"
-    mkdir -p "${instance_dir}"
-    cd "${instance_dir}" || exit
-    export PX4_SIM_MODEL="none_iris"
-    "${build_path}/bin/px4" -i "${instance}" \
-      -d "${build_path}/etc" \
-      -s "${px4_dir}/ROMFS/px4fmu_common/init.d-posix/rcS" \
-      -t "${px4_dir}/test_data"
-  fi
+  # Every instance (including 0) launches the prebuilt binary the same way: an
+  # interactive pxh console (no -d, so manual `commander arm` / `commander
+  # takeoff` work), -i ${instance} for port-shifting (instance 0 keeps simulator
+  # TCP 4560 / GCS UDP 14550), from its own per-instance rootfs subdir so the
+  # dataman / parameters / eeprom / log state never collides between instances
+  # sharing the host network namespace. The none_iris airframe
+  # (SYS_AUTOSTART=10016) is selected via PX4_SIM_MODEL. There is intentionally no
+  # `instance == 0` special case here: a divergent instance-0 launch is exactly
+  # how additional instances silently lost their pxh console.
+  build_path="${px4_dir}/build/px4_sitl_default"
+  base_rootfs="${PX4_ROOTFS:-${build_path}/rootfs}"
+  instance_dir="${base_rootfs}/${instance}"
+  mkdir -p "${instance_dir}"
+  cd "${instance_dir}" || exit
+  export PX4_SIM_MODEL="none_iris"
+  "${build_path}/bin/px4" -i "${instance}" \
+    "${build_path}/etc" \
+    -s "${px4_dir}/ROMFS/px4fmu_common/init.d-posix/rcS" \
+    -t "${px4_dir}/test_data"
 }

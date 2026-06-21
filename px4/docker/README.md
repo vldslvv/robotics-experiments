@@ -4,16 +4,24 @@ Put PX4-specific Docker setup inputs here if the root `Dockerfile` needs separat
 
 ## Multi-instance launch (`PX4_INSTANCE`)
 
-Both PX4 launchers read `PX4_INSTANCE` (default `0`). Instance `0` is the
-single-vehicle baseline (`make px4_sitl_default none_iris`, simulator TCP port
-`4560`, GCS UDP `14550`). Each additional instance `i` launches the prebuilt PX4
-binary directly with `-i ${PX4_INSTANCE}`, which shifts every port by the index
-(simulator TCP `4560 + i`, GCS UDP `14550 + i`) and runs from a per-instance
-rootfs subdir. PX4 v1.14.3 shifts the GCS local UDP port for `-i` but leaves its
-remote GCS port at `14550`, so the launchers patch `px4-rc.mavlink` at container
-startup to set the GCS remote port to `14550 + PX4_INSTANCE`.
-`reset_px4_state.sh` clears `dataman` / `parameters*.bson` / `eeprom` under the
-per-instance rootfs so instances never share non-volatile state.
+Both PX4 launchers read `PX4_INSTANCE` (default `0`). **Every** instance
+(including `0`) is launched uniformly by `launch_px4_iris`: the prebuilt PX4
+binary run directly with `-i ${PX4_INSTANCE}` and an interactive `pxh>` console
+(no `-d`/daemon flag, so manual `commander arm` / `commander takeoff` work in
+every per-vehicle terminal), from its own per-instance rootfs subdir
+(`build/px4_sitl_default/rootfs/${PX4_INSTANCE}`). The `none_iris` airframe is
+selected via `PX4_SIM_MODEL`. `-i` shifts every port by the index, so instance
+`0` keeps simulator TCP `4560` / GCS UDP `14550` (the single-vehicle baseline)
+and instance `i` listens on simulator TCP `4560 + i` / GCS UDP `14550 + i`. There
+is intentionally no `instance == 0` special case in the launch, reset, or mount
+logic -- a divergent instance-0 launch (`make px4_sitl_default none_iris` with a
+console vs. additional instances started in daemon mode) is exactly how the extra
+instances silently lost their `pxh>` console. PX4 v1.14.3 shifts the GCS local
+UDP port for `-i` but leaves its remote GCS port at `14550`, so the launchers
+patch `px4-rc.mavlink` at container startup to set the GCS remote port to
+`14550 + PX4_INSTANCE`. `reset_px4_state.sh` clears `dataman` /
+`parameters*.bson` / `eeprom` under the per-instance rootfs so instances never
+share non-volatile state.
 
 The two workflows differ only in Docker networking:
 

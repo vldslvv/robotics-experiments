@@ -10,14 +10,11 @@ reset_px4_state() {
     return
   fi
 
-  # Instance 0 uses the base rootfs (unchanged single-vehicle behavior). Each
-  # additional PX4 instance runs from a per-instance rootfs subdir so its
-  # non-volatile state (dataman / parameters / eeprom) never collides with the
-  # other instances sharing the network namespace.
-  local rootfs="${base_rootfs}"
-  if [[ "${instance}" -ne 0 ]]; then
-    rootfs="${base_rootfs}/${instance}"
-  fi
+  # Every instance (including 0) runs from its own per-instance rootfs subdir so
+  # its non-volatile state (dataman / parameters / eeprom) never collides with
+  # the other instances sharing the network namespace. This matches the uniform
+  # per-instance launch in px4_iris_common.sh::launch_px4_iris.
+  local rootfs="${base_rootfs}/${instance}"
 
   mkdir -p "${rootfs}"
 

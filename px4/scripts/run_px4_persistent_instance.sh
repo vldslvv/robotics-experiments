@@ -48,10 +48,13 @@ if docker ps -a --format '{{.Names}}' | grep -qx "${container}"; then
     fi
 fi
 
+# Every instance (including 0) runs from its own per-instance rootfs subdir, so
+# its log/eeprom mounts are uniform: ${PX4_ROOTFS}/${PX4_INSTANCE}/{log,eeprom}.
+# This matches px4_iris_common.sh::launch_px4_iris and reset_px4_state.sh.
 log_mount="${PX4_LOGS}/${PX4_INSTANCE}"
 eeprom_mount="${PX4_EEPROM}/${PX4_INSTANCE}"
-rootfs_log="${PX4_ROOTFS}/log"
-rootfs_eeprom="${PX4_ROOTFS}/eeprom"
+rootfs_log="${PX4_ROOTFS}/${PX4_INSTANCE}/log"
+rootfs_eeprom="${PX4_ROOTFS}/${PX4_INSTANCE}/eeprom"
 
 # Every persistent PX4 instance runs on host networking (the same as Isaac), so
 # they share the host namespace and PX4 -i port-shifts each instance to a
@@ -61,11 +64,6 @@ rootfs_eeprom="${PX4_ROOTFS}/eeprom"
 # PX4_DOCKER_RUNTIME is a Make-provided argument fragment.
 # shellcheck disable=SC2206
 net_args=(${PX4_DOCKER_RUNTIME})
-
-if [ "${PX4_INSTANCE}" -ne 0 ]; then
-    rootfs_log="${PX4_ROOTFS}/${PX4_INSTANCE}/log"
-    rootfs_eeprom="${PX4_ROOTFS}/${PX4_INSTANCE}/eeprom"
-fi
 
 mkdir -p "${log_mount}" "${eeprom_mount}"
 

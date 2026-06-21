@@ -247,20 +247,20 @@ for ((i = 0; i < PX4_TOTAL_INSTANCES; i++)); do
     container="$(px4_container_name "${i}")"
     docker rm -f "${container}" >/dev/null 2>&1 || true
 
+    # Every instance (including 0) runs from its own per-instance rootfs subdir,
+    # so log/eeprom mounts are uniform (matching the persistent launcher and
+    # reset_px4_state.sh). Only the network topology is instance-0-specific:
+    # instance 0 owns the shared namespace; additional instances join it.
     net_args=()
-    log_mount="${PX4_LOGS}"
-    eeprom_mount="${PX4_EEPROM}"
-    rootfs_log="${PX4_ROOTFS}/log"
-    rootfs_eeprom="${PX4_ROOTFS}/eeprom"
+    log_mount="${PX4_LOGS}/${i}"
+    eeprom_mount="${PX4_EEPROM}/${i}"
+    rootfs_log="${PX4_ROOTFS}/${i}/log"
+    rootfs_eeprom="${PX4_ROOTFS}/${i}/eeprom"
+    mkdir -p "${log_mount}" "${eeprom_mount}"
     if [ "${i}" -eq 0 ]; then
         PRIMARY_PX4_CONTAINER="${container}"
     else
         net_args=(--network "container:${PRIMARY_PX4_CONTAINER}")
-        log_mount="${PX4_LOGS}/${i}"
-        eeprom_mount="${PX4_EEPROM}/${i}"
-        rootfs_log="${PX4_ROOTFS}/${i}/log"
-        rootfs_eeprom="${PX4_ROOTFS}/${i}/eeprom"
-        mkdir -p "${log_mount}" "${eeprom_mount}"
     fi
 
     echo "Starting temporary PX4 SITL container ${container} (instance ${i})..."
