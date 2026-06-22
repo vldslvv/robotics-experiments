@@ -22,11 +22,11 @@ from isaacsim import SimulationApp
 
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
 
-# Sentinel ``--scene`` value meaning "load the scene from the Hydra
-# ``scenario.scene`` config" rather than an explicit path. The integration
-# harness always injects ``--scene "$(SCENE)"``; a target that wants the
-# config-driven scene sets ``SCENE := @scenario``.
-SCENE_FROM_CONFIG = "@scenario"
+# Sentinel ``--scene`` value meaning "load the scene from the Hydra ``scene``
+# config" rather than an explicit path. The integration harness always injects
+# ``--scene "$(SCENE)"``; a target that wants the config-driven scene sets
+# ``SCENE := @config``.
+SCENE_FROM_CONFIG = "@config"
 
 __all__ = [
     "SceneTestContext",
@@ -143,14 +143,14 @@ def _parse_scene_args(description: str, default_scene: str | None) -> argparse.N
         help=(
             "USD scene path to load. Prefix with @ for a repository-relative "
             f"path. Pass {SCENE_FROM_CONFIG!r} (or omit) to load the scene from "
-            "the Hydra scenario.scene config."
+            "the Hydra scene config."
         ),
     )
     return parser.parse_args()
 
 
 def _resolve_scene_from_config(test_name: str) -> str:
-    """Return ``scenario.scene`` from the composed Hydra config.
+    """Return the experiment ``scene`` from the composed Hydra config.
 
     Used when no explicit ``--scene`` is given (or the sentinel is passed). The
     config composes without Isaac, so this is safe before ``SimulationApp``
@@ -159,8 +159,8 @@ def _resolve_scene_from_config(test_name: str) -> str:
     from robotics_experiments.config import get_config, reset_config
 
     reset_config()
-    scene = get_config().scenario.scene
-    report(f"{test_name}: scene from scenario.scene config: {scene}")
+    scene = get_config().scene
+    report(f"{test_name}: scene from scene config: {scene}")
     return scene
 
 
@@ -180,7 +180,7 @@ def run_scene_test(
         default_scene: Default USD scene path when ``--scene`` is not passed.
             ``@`` prefixes are resolved relative to the repository root. When
             ``None`` (or when ``--scene`` is the :data:`SCENE_FROM_CONFIG`
-            sentinel), the scene is read from the Hydra ``scenario.scene`` config.
+            sentinel), the scene is read from the Hydra ``scene`` config.
     """
     args = _parse_scene_args(description, default_scene)
     scene = args.scene

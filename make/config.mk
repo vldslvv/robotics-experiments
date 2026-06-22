@@ -39,7 +39,7 @@ INTEGRATION_LOG_TAIL_LINES ?= 120
 INTEGRATION_ROOT ?= $(BUILD_ROOT)/integration
 INTEGRATION_TEST_JOBS ?= 1
 SCENE                ?= @isaac/assets/TestScenes/MinimalIntegration.usda
-HYDRA_CONFIG         ?= configs/experiment/config.yaml
+HYDRA_CONFIG         ?= configs/config.yaml
 
 # Host paths for persistence
 ISAAC_HOME             = $(CURDIR)/isaac

@@ -19,7 +19,7 @@ __all__ = [
 
 _CACHED: Optional[EnvConfig] = None
 
-_DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs" / "experiment"
+_DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
 _DEFAULT_CONFIG_NAME = "config"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
@@ -87,7 +87,7 @@ def resolve_fleet(cfg) -> list[ResolvedVehicle]:
     ``cfg.drone`` / ``cfg.px4`` (``OmegaConf.merge`` both fills defaults and
     rejects unknown keys) into a pure resolved config, from which the derived
     runtime fields (``mavlink_port``, ``px4_instance_index``, the
-    ``scenario.gcs_baseport + id`` GCS port, the rendered ``debug_log_path``,
+    ``px4.gcs_baseport + id`` GCS port, the rendered ``debug_log_path``,
     ``prim_name``) are computed once. An empty list is a valid empty fleet
     (0..N is handled uniformly).
     """
@@ -107,7 +107,7 @@ def resolve_fleet(cfg) -> list[ResolvedVehicle]:
                 px4=px4_cfg,
                 mavlink_port=px4_cfg.connection_baseport + vehicle_id,
                 px4_instance_index=vehicle_id,
-                gcs_port=cfg.scenario.gcs_baseport + vehicle_id,
+                gcs_port=px4_cfg.gcs_baseport + vehicle_id,
                 debug_log_path=px4_cfg.debug_log_path.replace("{vehicle}", str(vehicle_id)),
                 prim_name=drone_cfg.prim_name,
             )

@@ -148,7 +148,7 @@ the current contents and the intended home for that kind of code.
   `VehicleConfig`, then constructs an immutable `ResolvedVehicle` carrying that
   config plus the derived runtime fields: `mavlink_port`
   (`= px4.connection_baseport + id`), `px4_instance_index` (`= id`),
-  `gcs_port` (`= scenario.gcs_baseport + id`, the per-drone GCS MAVLink link
+  `gcs_port` (`= px4.gcs_baseport + id`, the per-drone GCS MAVLink link
   used by control/test code; the bridge itself does not use it),
   `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
   stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
@@ -295,7 +295,8 @@ the host. They are meant to be used in the Dockerized environment.
   a test-local PX4 rotor mapping fault and passes only when the stability
   envelope detects the resulting instability.
 - `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
-  scenario from the active Hydra config: it starts one PX4 SITL container per
+  scenario from the `integration_test_multi_drone_takeoff` experiment (the target
+  sets `HYDRA_CONFIG` itself): it starts one PX4 SITL container per
   resolved `vehicles` entry whose `px4.enabled` is true, in one shared network
   namespace (instance 0 owns it; instance `i>0` joins via
   `--network container:` and runs PX4 `-i i` so it listens on simulator TCP
@@ -316,13 +317,28 @@ the host. They are meant to be used in the Dockerized environment.
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
   start pxh shell"); keep the launch interactive (`-d` omitted) so every
   per-vehicle terminal accepts commands.
-- Standalone scenario tunables live in the Hydra `scenario` group
-  (`ScenarioConfig`): the scene (`scenario.scene`), the takeoff target, the
-  command-flow timeouts, and the flight-envelope gates. The standalone runner's
-  `--scene` is optional and overrides it; the multi-drone target passes the
-  `@scenario` sentinel so the scene comes from config. Persistent and
-  integration experiment variants are selected with the `HYDRA_CONFIG` Make
-  variable; the default runtime config is `configs/experiment/config.yaml`.
+- Every top-level config is an *experiment* (sibling of `config.yaml`), loaded
+  identically; there is no system distinction between a runtime experiment and a
+  test experiment. Each experiment sets a top-level `scene` (the USD stage;
+  `@`-prefixed is repo-relative). The standalone integration-test harness
+  tunables (command-flow timeouts, takeoff target, flight-envelope gates) live in
+  the Hydra `integration_test` group (`IntegrationTestConfig`), which is
+  **optional** on `EnvConfig`: it is composed only by the `integration_test_*`
+  experiments and is `None` in the default runtime experiment. The GCS link
+  baseport is in the `px4` group (`px4.gcs_baseport`), not the test config, so
+  runtime never reads a test field. The standalone runner's `--scene` is optional
+  and overrides the experiment scene; the multi-drone target passes the `@config`
+  sentinel so the scene comes from the experiment `scene`. Experiment variants
+  are selected with the `HYDRA_CONFIG` Make variable. The top-level entry
+  configs are independent and live directly under `configs/` (the default
+  runtime config is `configs/config.yaml`, and the integration tests are
+  `configs/integration_test_takeoff.yaml` (one drone) and
+  `configs/integration_test_multi_drone_takeoff.yaml` (two drones)); the
+  composable group building blocks they select (`sim`, `drone`, `switches`,
+  `px4`, `isaac_lab`, `integration_test`) live under `configs/experiment/` and
+  are referenced as `experiment/<group>@<group>`. The persistent runtime
+  entrypoint `isaac/runtime/standalone/runapp_custom.sh` reads its stage from the
+  experiment `scene` too.
 
 ### PX4
 - `make run-px4` derives the number of PX4 SITL containers from the active Hydra
@@ -340,7 +356,7 @@ the host. They are meant to be used in the Dockerized environment.
 - Persistent and integration Make targets accept `HYDRA_CONFIG=<path>` to select
   a top-level Hydra experiment config for both host-side PX4 counting and Isaac
   runtime config composition, for example
-  `make run-all HYDRA_CONFIG=configs/experiment/multi_drone_takeoff.yaml`.
+  `make run-all HYDRA_CONFIG=configs/integration_test_multi_drone_takeoff.yaml`.
 
 ### Flight log analysis and PX4 bridge debugging
 - `flight_analysis/README.md` is the single source for the repeatable flight-log

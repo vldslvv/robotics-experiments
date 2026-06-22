@@ -97,10 +97,10 @@ interactions. Override with
 `SCENE=@isaac/assets/LightSwitchWarehouse/Warehouse.usd` when a manual warehouse
 run is needed.
 
-`--scene` can also be the sentinel `@scenario`, which makes the standalone runner
-read the scene from the Hydra `scenario.scene` config instead of a path. The
-multi-drone target sets `SCENE=@scenario` so its scene and scenario tunables come
-from the active Hydra config.
+`--scene` can also be the sentinel `@config`, which makes the standalone runner
+read the scene from the experiment's top-level `scene` config instead of a path.
+The multi-drone target sets `SCENE=@config` so its scene and integration-test
+tunables come from the active Hydra experiment.
 
 ## Multi-instance PX4
 

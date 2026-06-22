@@ -1,0 +1,11 @@
+defaults:
+  - config
+  - experiment/integration_test@integration_test: takeoff
+  - _self_
+
+# Single-drone PX4 arm/takeoff/hover integration-test experiment. Inherits the
+# runtime config.yaml (sim/drone/switches/px4/isaac_lab + its 1-vehicle fleet)
+# and adds the integration_test harness group (command-flow timeouts, takeoff
+# target, flight-envelope gates). Only the scene differs from the runtime
+# default: the minimal integration stage instead of the warehouse.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"

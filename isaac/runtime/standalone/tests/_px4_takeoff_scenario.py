@@ -3,7 +3,7 @@
 The scenario is driven by the Hydra ``vehicles`` list: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
 instance (the resolved simulator port ``mavlink_port = connection_baseport + id``,
-GCS link the resolved ``vehicle.gcs_port = scenario.gcs_baseport + id``). A single
+GCS link the resolved ``vehicle.gcs_port = px4.gcs_baseport + id``). A single
 ``BridgeHostGroup`` owns the
 one physics-step subscription and drives every host in two phases (all sends,
 then all polls), so one ``simulation_app.update()`` advances every drone's
@@ -11,9 +11,10 @@ lockstep with the PX4 instances computing concurrently. The command flow runs ea
 all drones over the shared advancing clock, and the flight-envelope gates are
 evaluated per drone against its own spawn position; every drone must pass.
 
-Scene, takeoff target, command-flow timeouts, and the envelope gates come from
-the Hydra ``scenario`` group (``ScenarioConfig``); only the PX4 force-arm magic
-stays in code as a protocol constant.
+The scene comes from the top-level ``scene`` config; the takeoff target,
+command-flow timeouts, and the envelope gates come from the Hydra
+``integration_test`` group (``IntegrationTestConfig``); only the PX4 force-arm
+magic stays in code as a protocol constant.
 """
 
 from __future__ import annotations
@@ -906,7 +907,16 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     timing = TimingReporter(options.test_name, emit=context.report)
 
     env = get_config()
-    scenario = env.scenario
+    # The integration-test harness config (timeouts, takeoff target, envelope
+    # gates). Populated because this runs under an integration_test_* experiment;
+    # the local name stays `scenario` as it is the live test-scenario object.
+    scenario = env.integration_test
+    if scenario is None:
+        raise ValueError(
+            f"{options.test_name}: no integration_test config composed; run this "
+            "scenario under an integration_test_* experiment "
+            "(ROBOTICS_EXPERIMENT_CONFIG_PATH / HYDRA_CONFIG)"
+        )
 
     context.report(f"{options.test_name}: applying configured simulation settings")
     with timing.timed_stage("apply_settings"):

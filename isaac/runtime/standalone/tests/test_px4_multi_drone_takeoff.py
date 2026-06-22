@@ -1,13 +1,14 @@
 """Standalone Isaac/PX4 dual-drone takeoff scenario.
 
 This test runs the multi-vehicle takeoff loop against N independent PX4 SITL
-instances: it composes the ``multi_drone_takeoff`` Hydra config (two drones,
-distinct spawn positions, id 0/1 -> derived simulator ports 4560/4561 and GCS
-links 14550/14551), spawns every vehicle, starts one production PX4 bridge host
-per drone, commands arm and takeoff over each drone's own GCS MAVLink endpoint,
-and asserts that *every* drone climbs and holds a stable hover within its
-configured envelope. The scene and all scenario tunables come from the Hydra
-``scenario`` group.
+instances: it composes the ``integration_test_multi_drone_takeoff`` Hydra
+experiment (two drones, distinct spawn positions, id 0/1 -> derived simulator
+ports 4560/4561 and GCS links 14550/14551), spawns every vehicle, starts one
+production PX4 bridge host per drone, commands arm and takeoff over each drone's
+own GCS MAVLink endpoint, and asserts that *every* drone climbs and holds a
+stable hover within its configured envelope. The scene comes from the top-level
+``scene`` config and the takeoff tunables from the Hydra ``integration_test``
+group.
 
 Run through the host Make target so the N PX4 SITL containers and logs are owned
 outside Isaac:
@@ -27,8 +28,8 @@ PX4_CONTAINER_LOG_NAME = "test_px4_multi_drone_takeoff_px4.log"
 
 
 def main() -> None:
-    # default_scene omitted: the scene is read from the Hydra scenario.scene
-    # config (the make target passes SCENE=@scenario as the sentinel).
+    # default_scene omitted: the scene is read from the Hydra scene config
+    # (the make target passes SCENE=@config as the sentinel).
     run_scene_test(
         test_name=TEST_NAME,
         test_body=lambda context: run_px4_takeoff_scenario(

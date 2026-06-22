@@ -1,12 +1,19 @@
 defaults:
   - base_env
-  - sim: default
-  - drone: default
-  - switches: default
-  - px4: default
-  - isaac_lab: default
-  - scenario: default
+  # Group building blocks live under the experiment/ subdir; @<pkg> maps each
+  # back onto its EnvConfig package (e.g. experiment/sim -> cfg.sim).
+  - experiment/sim@sim: default
+  - experiment/drone@drone: default
+  - experiment/switches@switches: default
+  - experiment/px4@px4: default
+  - experiment/isaac_lab@isaac_lab: default
   - _self_
+
+# Scene loaded for this experiment. Every experiment (test or not) sets a scene;
+# '@' is repo-relative. This default runtime experiment carries no
+# integration_test harness group (EnvConfig.integration_test stays None) -- the
+# integration_test_* experiments add it.
+scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 # Multi-vehicle scaffolding. Each entry merges its drone/px4 over the global
 # drone/px4 defaults above. One entry = today's single-drone behavior; an empty

@@ -25,6 +25,12 @@ connection_ip: localhost
 # (derived in config.load.resolve_fleet). There is no per-vehicle vehicle_id
 # knob: id is the single authored identity.
 connection_baseport: 4560
+# Base UDP port for the per-vehicle GCS MAVLink link; the resolved per-vehicle
+# port is gcs_baseport + vehicle.id (derived in config.load.resolve_fleet onto
+# ResolvedVehicle.gcs_port), parallel to connection_baseport. Used by
+# control/test code (the standalone takeoff GCS endpoint); the bridge does not
+# use it.
+gcs_baseport: 14550
 
 # Lockstep exchange tunables. physics_rate_hz is NOT here: it is injected from
 # sim.physics_hz (the single source of truth for the physics/sensor cadence).

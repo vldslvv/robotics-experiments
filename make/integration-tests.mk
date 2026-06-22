@@ -75,6 +75,7 @@ PX4_INTEGRATION_COMMON_ENV = \
     ROBOTICS_EXPERIMENT_CONFIG_PATH='$(HYDRA_CONFIG_HOST_PATH)'
 
 .PHONY: test-integration-px4-takeoff
+test-integration-px4-takeoff: HYDRA_CONFIG = configs/integration_test_takeoff.yaml
 test-integration-px4-takeoff:
 	@TEST_TARGET='test-integration-px4-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_stability.log' \
@@ -86,6 +87,7 @@ test-integration-px4-takeoff:
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 .PHONY: test-integration-px4-takeoff-instability
+test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/integration_test_takeoff.yaml
 test-integration-px4-takeoff-instability:
 	@TEST_TARGET='test-integration-px4-takeoff-instability' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_instability_detection.log' \
@@ -97,10 +99,12 @@ test-integration-px4-takeoff-instability:
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 # Multi-drone takeoff. Starts one PX4 SITL instance per PX4-enabled vehicle in
-# the active Hydra config, uses the scenario.scene config via the @scenario
-# sentinel, and requires every drone to hold its takeoff/hover envelope.
+# the integration_test_multi_drone_takeoff experiment, uses its scene config via
+# the @config sentinel, and requires every drone to hold its takeoff/hover
+# envelope.
 .PHONY: test-integration-px4-multi-drone-takeoff
-test-integration-px4-multi-drone-takeoff: SCENE = @scenario
+test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/integration_test_multi_drone_takeoff.yaml
+test-integration-px4-multi-drone-takeoff: SCENE = @config
 test-integration-px4-multi-drone-takeoff:
 	@TEST_TARGET='test-integration-px4-multi-drone-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_multi_drone_takeoff.log' \

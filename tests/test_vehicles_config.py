@@ -21,7 +21,6 @@ def _composed_cfg(vehicles):
         {
             "drone": OmegaConf.structured(env.drone),
             "px4": OmegaConf.structured(env.px4),
-            "scenario": OmegaConf.structured(env.scenario),
             "vehicles": vehicles,
         }
     )

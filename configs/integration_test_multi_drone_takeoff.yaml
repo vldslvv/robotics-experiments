@@ -1,18 +1,13 @@
 defaults:
-  - base_env
-  - sim: default
-  - drone: default
-  - switches: default
-  - px4: default
-  - isaac_lab: default
-  - scenario: default
+  - integration_test_takeoff
   - _self_
 
-# Dual-PX4 multi-drone takeoff config. To use it for persistent runtime, pass
-# HYDRA_CONFIG=configs/experiment/multi_drone_takeoff.yaml to the Make target.
+# Dual-PX4 multi-drone takeoff integration-test experiment. Inherits the
+# single-drone integration_test_takeoff experiment (scene + integration_test
+# gates) and overrides only the vehicles list below.
 #
 # Two drones, each bound to its own PX4 SITL instance: id 0/1 -> derived
-# simulator ports 4560/4561, GCS links scenario.gcs_baseport + id (14550/14551).
+# simulator ports 4560/4561, GCS links px4.gcs_baseport + id (14550/14551).
 # id is the single identity; the ports and the per-vehicle {vehicle} log token
 # are all derived from it. Distinct prim_name avoids prim collisions; the px4
 # default debug_log_path carries the {vehicle} token so the two bridge logs

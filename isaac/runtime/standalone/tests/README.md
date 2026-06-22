@@ -16,12 +16,16 @@ navigation through obstacles. Use `SCENE=@isaac/assets/LightSwitchWarehouse/Ware
 on a Make invocation, or pass `--scene` to a standalone script, when manually
 running against the warehouse.
 
-`--scene` is optional. When omitted, or when passed the sentinel `@scenario`,
-the scene is read from the Hydra `scenario.scene` config (see `ScenarioConfig`).
-The takeoff scenario's tunables - takeoff target, command-flow timeouts, and the
-flight-envelope gates - also come from the `scenario` Hydra group rather than
-being hardcoded; `configs/experiment/scenario/default.yaml` holds the baseline
-values.
+`--scene` is optional. When omitted, or when passed the sentinel `@config`, the
+scene is read from the experiment's top-level `scene` config. The takeoff
+scenario's tunables - takeoff target, command-flow timeouts, and the
+flight-envelope gates - come from the optional `integration_test` Hydra group
+(see `IntegrationTestConfig`) rather than being hardcoded;
+`configs/experiment/integration_test/takeoff.yaml` holds the baseline values.
+These tunables are only composed by the `integration_test_*` experiments
+(`configs/integration_test_takeoff.yaml`,
+`configs/integration_test_multi_drone_takeoff.yaml`), not the default runtime
+`configs/config.yaml`.
 
 PX4-backed scenario tests should be run from their host Make targets so Docker
 lifecycle, mounted EEPROM state, and persisted `px4/logs` diagnostics stay
@@ -36,11 +40,12 @@ settle, then holds 5 seconds of hover with no more than 0.35 m of height range
 and no more than 0.35 m/s vertical speed in magnitude.
 
 `make test-integration-px4-multi-drone-takeoff` runs the same command flow for
-two drones at once (the `multi_drone_takeoff` Hydra config). The shared scenario
+two drones at once (the `integration_test_multi_drone_takeoff` Hydra
+experiment). The shared scenario
 in `_px4_takeoff_scenario.py` is driven by the `vehicles` list: one entry is the
 single-vehicle baseline, N entries drive N drones, each bound to its own PX4 SITL
 instance (the resolved simulator port `4560 + id`, GCS link the resolved
-`vehicle.gcs_port = scenario.gcs_baseport + id`). All bridges tick on the same PhysX steps,
+`vehicle.gcs_port = px4.gcs_baseport + id`). All bridges tick on the same PhysX steps,
 so one `simulation_app.update()` advances every drone's lockstep exchange; each
 phase runs across all drones over the shared clock, and the envelope gates are
 evaluated per drone (drone-id-tagged) against its own spawn position - every

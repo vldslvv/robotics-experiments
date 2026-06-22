@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 __all__ = [
     "SimSettings",
@@ -13,7 +13,7 @@ __all__ = [
     "VehicleConfig",
     "ResolvedVehicle",
     "IsaacLabConfig",
-    "ScenarioConfig",
+    "IntegrationTestConfig",
     "EnvConfig",
 ]
 
@@ -226,6 +226,11 @@ class Px4BridgeConfig:
             resolved per-vehicle port is ``connection_baseport + vehicle.id``
             (see :class:`ResolvedVehicle.mavlink_port`); this base is shared by
             every vehicle and the per-vehicle offset is derived from ``id``.
+        gcs_baseport: Base UDP port for the per-drone GCS MAVLink link. The
+            resolved per-vehicle port is ``gcs_baseport + vehicle.id`` (see
+            :class:`ResolvedVehicle.gcs_port`), parallel to
+            ``connection_baseport``. Used by control/test code (the standalone
+            takeoff scenario's GCS endpoint); the bridge itself does not use it.
         lockstep: Lockstep exchange tunables (timeouts, bootstrap priming,
             actuator-lag tripwire, heartbeat rate). See :class:`LockstepConfig`.
         startup_settle_time_s: Sim-time delay before opening the PX4
@@ -272,6 +277,7 @@ class Px4BridgeConfig:
     connection_type: str
     connection_ip: str
     connection_baseport: int
+    gcs_baseport: int
     lockstep: LockstepConfig
     startup_settle_time_s: float
     gps_enabled: bool
@@ -332,7 +338,7 @@ class ResolvedVehicle:
         px4_instance_index: PX4 ``-i`` instance index, equal to ``id`` (so the
             PX4-side port shift matches ``mavlink_port`` by construction).
         gcs_port: Per-drone GCS MAVLink link UDP port, derived as
-            ``scenario.gcs_baseport + id``. Used by control/test code (the
+            ``px4.gcs_baseport + id``. Used by control/test code (the
             standalone takeoff scenario's GCS endpoint); the bridge itself does
             not use it. Folding it here keeps ``ResolvedVehicle`` the single home
             for every port the project derives from ``id``.
@@ -375,23 +381,21 @@ class IsaacLabConfig:
 
 
 @dataclass
-class ScenarioConfig:
-    """Tunables for the standalone PX4 takeoff/hover integration scenario.
+class IntegrationTestConfig:
+    """Tunables for the standalone PX4 takeoff/hover integration test.
 
-    Single source of truth for the integration test's scene, command-flow
-    timeouts, takeoff target, and the flight-envelope gates the scenario asserts
-    (previously module-level constants in the standalone test). The same scenario
-    drives one drone (single-vehicle baseline) or N drones (multi-vehicle
-    takeoff); each gate is evaluated per drone against its own spawn position.
+    Single source of truth for the integration test's command-flow timeouts,
+    takeoff target, and the flight-envelope gates the test asserts (previously
+    module-level constants in the standalone test). This is test-harness config:
+    it is composed only by the ``integration_test_*`` experiments and is ``None``
+    in the default runtime experiment (see :attr:`EnvConfig.integration_test`).
+    The same test drives one drone (single-vehicle baseline) or N drones
+    (multi-vehicle takeoff); each gate is evaluated per drone against its own
+    spawn position. The scene is not here -- it is a top-level per-experiment
+    field (:attr:`EnvConfig.scene`); the GCS link baseport lives in the ``px4``
+    group (:attr:`Px4BridgeConfig.gcs_baseport`).
 
     Attributes:
-        scene: USD scene to load. ``@``-prefixed paths are repository-relative.
-            Used when the standalone runner is not given an explicit ``--scene``.
-        gcs_baseport: Base UDP port for the per-drone GCS MAVLink link; the
-            vehicle ``id`` is added (PX4 instance ``i`` broadcasts to
-            ``gcs_baseport + i``). The resolved per-vehicle value lives on
-            :class:`ResolvedVehicle.gcs_port`; consumers read that instead of
-            recomputing ``gcs_baseport + id``.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         ground_settle_s: Sim-time the drone settles on the ground before the
             command flow starts.
@@ -418,8 +422,6 @@ class ScenarioConfig:
         max_angular_speed_rad_s: Continuous angular-speed divergence gate.
     """
 
-    scene: str
-    gcs_baseport: int
     gcs_heartbeat_period_s: float
     ground_settle_s: float
     heartbeat_timeout_s: float
@@ -451,8 +453,9 @@ class EnvConfig:
         switches: Light-switch spawner configuration.
         px4: PX4 SITL bridge configuration.
         isaac_lab: Isaac Lab workflow configuration.
-        scenario: Standalone integration-scenario tunables (scene, envelopes,
-            timeouts).
+        scene: USD scene to load for this experiment. ``@``-prefixed paths are
+            repository-relative. Every experiment (test or not) sets a scene;
+            the standalone runner uses it when not given an explicit ``--scene``.
         vehicles: Multi-vehicle scaffolding. Each entry merges its ``drone`` /
             ``px4`` partial over the global ``drone`` / ``px4`` defaults above.
             The list is the only spawn path (one vehicle = a one-element list;
@@ -463,6 +466,13 @@ class EnvConfig:
             during ``compose()``. The loader replaces the raw dicts with a
             fully enriched, validated ``list[ResolvedVehicle]`` (see
             ``config.load.resolve_fleet``), which is the public/runtime type.
+        integration_test: Standalone integration-test harness tunables
+            (command-flow timeouts, takeoff target, flight-envelope gates).
+            ``None`` for the default runtime experiment; populated only by the
+            ``integration_test_*`` experiments that compose the
+            ``integration_test`` group. The ``None`` value is the genuinely
+            distinct state "this experiment carries no test harness", not a
+            routine optional.
     """
 
     sim: SimSettings
@@ -470,5 +480,6 @@ class EnvConfig:
     switches: LightSwitchConfig
     px4: Px4BridgeConfig
     isaac_lab: IsaacLabConfig
-    scenario: ScenarioConfig
+    scene: str
     vehicles: List[Any]
+    integration_test: Optional[IntegrationTestConfig] = None
