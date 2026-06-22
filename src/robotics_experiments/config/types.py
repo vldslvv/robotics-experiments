@@ -331,6 +331,11 @@ class ResolvedVehicle:
             ``px4.connection_baseport + id``.
         px4_instance_index: PX4 ``-i`` instance index, equal to ``id`` (so the
             PX4-side port shift matches ``mavlink_port`` by construction).
+        gcs_port: Per-drone GCS MAVLink link UDP port, derived as
+            ``scenario.gcs_baseport + id``. Used by control/test code (the
+            standalone takeoff scenario's GCS endpoint); the bridge itself does
+            not use it. Folding it here keeps ``ResolvedVehicle`` the single home
+            for every port the project derives from ``id``.
         debug_log_path: ``px4.debug_log_path`` with the ``{vehicle}`` token
             rendered to ``id``; ``{date}`` / ``{time}`` tokens stay for runtime.
         prim_name: ``drone.prim_name`` passthrough; the full USD ``prim_path``
@@ -344,6 +349,7 @@ class ResolvedVehicle:
     px4: Px4BridgeConfig
     mavlink_port: int
     px4_instance_index: int
+    gcs_port: int
     debug_log_path: str
     prim_name: str
 
@@ -383,7 +389,9 @@ class ScenarioConfig:
             Used when the standalone runner is not given an explicit ``--scene``.
         gcs_baseport: Base UDP port for the per-drone GCS MAVLink link; the
             vehicle ``id`` is added (PX4 instance ``i`` broadcasts to
-            ``gcs_baseport + i``).
+            ``gcs_baseport + i``). The resolved per-vehicle value lives on
+            :class:`ResolvedVehicle.gcs_port`; consumers read that instead of
+            recomputing ``gcs_baseport + id``.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         ground_settle_s: Sim-time the drone settles on the ground before the
             command flow starts.

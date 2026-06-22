@@ -172,6 +172,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     assert [vehicle.id for vehicle in config.vehicles] == [0, 1]
     assert [vehicle.drone.prim_name for vehicle in config.vehicles] == ["Drone0", "Drone1"]
     assert [vehicle.mavlink_port for vehicle in config.vehicles] == [4560, 4561]
+    assert [vehicle.gcs_port for vehicle in config.vehicles] == [14550, 14551]
     assert get_enabled_px4_vehicle_count() == 2
     assert get_enabled_px4_instance_indices() == [0, 1]
     reset_config()

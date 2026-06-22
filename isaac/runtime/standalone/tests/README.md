@@ -39,8 +39,8 @@ and no more than 0.35 m/s vertical speed in magnitude.
 two drones at once (the `multi_drone_takeoff` Hydra config). The shared scenario
 in `_px4_takeoff_scenario.py` is driven by the `vehicles` list: one entry is the
 single-vehicle baseline, N entries drive N drones, each bound to its own PX4 SITL
-instance (the resolved simulator port `4560 + id`, GCS link
-`scenario.gcs_baseport + id`). All bridges tick on the same PhysX steps,
+instance (the resolved simulator port `4560 + id`, GCS link the resolved
+`vehicle.gcs_port = scenario.gcs_baseport + id`). All bridges tick on the same PhysX steps,
 so one `simulation_app.update()` advances every drone's lockstep exchange; each
 phase runs across all drones over the shared clock, and the envelope gates are
 evaluated per drone (drone-id-tagged) against its own spawn position - every

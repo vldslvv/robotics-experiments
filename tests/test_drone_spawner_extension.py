@@ -91,6 +91,7 @@ def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
         px4=SimpleNamespace(enabled=enabled, connection_baseport=4560),
         mavlink_port=4560 + vehicle_id,
         px4_instance_index=vehicle_id,
+        gcs_port=14550 + vehicle_id,
         debug_log_path="",
         prim_name=prim_name,
     )

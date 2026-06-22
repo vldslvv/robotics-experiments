@@ -148,10 +148,12 @@ the current contents and the intended home for that kind of code.
   `VehicleConfig`, then constructs an immutable `ResolvedVehicle` carrying that
   config plus the derived runtime fields: `mavlink_port`
   (`= px4.connection_baseport + id`), `px4_instance_index` (`= id`),
+  `gcs_port` (`= scenario.gcs_baseport + id`, the per-drone GCS MAVLink link
+  used by control/test code; the bridge itself does not use it),
   `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
   stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
-  bridge host, the host-side PX4 launch) reads these derived fields instead of
-  recomputing `baseport + id`. `resolve_fleet` validates the resolved fleet
+  bridge host, the host-side PX4 launch, the standalone scenario's GCS endpoint)
+  reads these derived fields instead of recomputing `baseport + id`. `resolve_fleet` validates the resolved fleet
   (`_validate_fleet` -- duplicate id/endpoint/`prim_name`, bad `spawn_xy`, or
   colliding `debug_log_path` raise a `ValueError` at resolution time).
   `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch

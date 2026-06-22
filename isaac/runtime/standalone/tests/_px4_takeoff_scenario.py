@@ -3,7 +3,8 @@
 The scenario is driven by the Hydra ``vehicles`` list: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
 instance (the resolved simulator port ``mavlink_port = connection_baseport + id``,
-GCS link ``scenario.gcs_baseport + id``). A single ``BridgeHostGroup`` owns the
+GCS link the resolved ``vehicle.gcs_port = scenario.gcs_baseport + id``). A single
+``BridgeHostGroup`` owns the
 one physics-step subscription and drives every host in two phases (all sends,
 then all polls), so one ``simulation_app.update()`` advances every drone's
 lockstep with the PX4 instances computing concurrently. The command flow runs each phase across
@@ -854,7 +855,6 @@ def _build_drones(
     from robotics_experiments.drone import spawn_drone
     from robotics_experiments.px4_bridge import IsaacArticulationIO
 
-    scenario = env.scenario
     drones: list[_DroneRuntime] = []
     for vehicle in env.vehicles:
         # The optional transform mutates only the PX4 config (e.g. the negative
@@ -883,7 +883,7 @@ def _build_drones(
             articulation_path=articulation_path,
             rotor_link_paths=rotor_paths,
         )
-        gcs_endpoint = f"udp:127.0.0.1:{scenario.gcs_baseport + vehicle.id}"
+        gcs_endpoint = f"udp:127.0.0.1:{vehicle.gcs_port}"
         drones.append(
             _DroneRuntime(
                 vehicle=vehicle,
