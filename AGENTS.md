@@ -404,6 +404,23 @@ the host. They are meant to be used in the Dockerized environment.
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
   start pxh shell"); keep the launch interactive (`-d` omitted) so every
   per-vehicle terminal accepts commands.
+- The persistent Isaac container (`make run-isaac` / `make run-all`) is named
+  `vv-isaac-sim-custom` (`ISAAC_CONTAINER_NAME`) and is **retained after it
+  exits**, so the quickest way to inspect the last manual run is
+  `docker logs vv-isaac-sim-custom`. That console stream is also the **only**
+  place the shell-level scene-resolution step in `runapp_custom.sh` (the
+  `get_config().scene` subprocess that picks the stage) reports its errors -- they
+  never reach the Kit log file, so a blank stage with no `open_stage` exec is
+  diagnosed here, not in the structured log. Kit's own log is written **inside the
+  container** at
+  `/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/<ver>/kit_<timestamp>.log`
+  (container `HOME` is `/root`); it is **not** on the host, because the
+  `isaac/isaac-sim/logs` host mount maps to `/isaac-sim/.nvidia-omniverse/logs`, a
+  different path than `/root/...`. Copy it out with
+  `docker cp 'vv-isaac-sim-custom:/root/.nvidia-omniverse/logs/Kit/' <dest>` when
+  you need the structured Kit log rather than the console stream. (The
+  `isaac/isaac-sim/logs/test_*.log` files there are integration-test output, which
+  redirects explicitly; manual runs do not land there.)
 - Every top-level config is an *experiment* (sibling of `config.yaml`), loaded
   identically; there is no system distinction between a runtime experiment and a
   test experiment. Each experiment sets a top-level `scene` (the USD stage;

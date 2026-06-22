@@ -179,9 +179,19 @@ ENV LC_ALL=en_US.UTF-8
 
 WORKDIR /isaac-sim
 
+# Install hydra/omegaconf and their full runtime closure into the kit python's
+# OWN site-packages. --ignore-installed is load-bearing: Isaac bundles several of
+# these deps (PyYAML, packaging, antlr4) only on the kit-app augmented sys.path
+# (omni.pip.compute pip_prebundle), so a plain install sees them already
+# satisfied and skips them -- leaving the bare /isaac-sim/kit/python/bin/python3
+# interpreter that runapp_custom.sh uses to resolve get_config().scene unable to
+# import them. That failure silently empties SCENE_PATH and launches Isaac with
+# no stage. Forcing the whole closure in keeps the standalone interpreter
+# self-sufficient.
 RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \
     --no-cache-dir \
     --disable-pip-version-check \
+    --ignore-installed \
     "hydra-core>=1.3" \
     "omegaconf>=2.3"
 
