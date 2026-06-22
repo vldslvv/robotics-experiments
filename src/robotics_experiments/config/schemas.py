@@ -10,6 +10,7 @@ from .types import (
     LightSwitchStatePublisherConfig,
     Px4BridgeConfig,
     RosQosConfig,
+    RoutineConfig,
     SimSettings,
     VehicleConfig,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "LightSwitchConfig",
     "Px4BridgeConfig",
     "VehicleConfig",
+    "RoutineConfig",
     "IntegrationTestConfig",
     "EnvConfig",
     "IsaacLabConfig",
@@ -48,6 +50,7 @@ def register_schemas() -> None:
     cs.store(group="experiment/switches", name="base_switches", node=LightSwitchConfig)
     cs.store(group="experiment/px4", name="base_px4", node=Px4BridgeConfig)
     cs.store(group="experiment/isaac_lab", name="base_isaac_lab", node=IsaacLabConfig)
+    cs.store(group="experiment/routine", name="base_routine", node=RoutineConfig)
     cs.store(
         group="experiment/integration_test",
         name="base_integration_test",

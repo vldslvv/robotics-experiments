@@ -9,6 +9,7 @@ from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.drone import despawn_drone, spawn_drone
 
 from .bridge_host import BridgeHost, BridgeHostGroup
+from .control_driver import FleetControlDriver
 
 __all__ = ["Extension"]
 
@@ -53,6 +54,9 @@ class Extension(omni.ext.IExt):
         # and resets it to an empty group, so it is never None.
         self._bridge_group = BridgeHostGroup([])
         self._spawned_drones: list = []
+        # The high-level routine driver, built on PLAY only when the config
+        # routine is non-empty (see _setup_drone). None means manual operation.
+        self._control_driver: FleetControlDriver | None = None
 
     def on_shutdown(self):
         """Release subscriptions and clear any runtime drone state.
@@ -105,18 +109,24 @@ class Extension(omni.ext.IExt):
         )
         carb.log_info(f"[DroneSpawner] spawning {len(env.vehicles)} vehicle(s): {summary}")
         hosts: list[BridgeHost] = []
+        # (vehicle, host, articulation_path) per px4-enabled vehicle, handed to the
+        # high-level control driver so it can open each drone's GCS link and read
+        # its kinematic state without recomputing any derived field.
+        control_entries: list[tuple] = []
         for vehicle in env.vehicles:
             path = spawn_drone(self.stage, vehicle.drone, position=tuple(vehicle.spawn_xy), yaw=0.0)
             self._spawned_drones.append(vehicle.drone)
             if not vehicle.px4.enabled:
                 continue
-            hosts.append(
-                BridgeHost(
-                    articulation_path=path,
-                    vehicle=vehicle,
-                    physics_hz=env.sim.physics_hz,
-                )
+            host = BridgeHost(
+                articulation_path=path,
+                vehicle=vehicle,
+                physics_hz=env.sim.physics_hz,
             )
+            hosts.append(host)
+            # The observer reads the same body the bridge actuates (honoring any
+            # px4.articulation_path override), so it never samples a stale frame.
+            control_entries.append((vehicle, host, vehicle.px4.articulation_path or path))
         # One coordinator owns the single physics-step subscription and runs all
         # sends before all polls, decoupling the per-vehicle lockstep. An empty
         # hosts list (no px4-enabled vehicle) yields a group whose per-step
@@ -124,8 +134,20 @@ class Extension(omni.ext.IExt):
         self._bridge_group = BridgeHostGroup(hosts)
         self._bridge_group.start()
 
+        # Routine config is the single source of truth: a non-empty steps list
+        # builds the control driver (off a separate app-update tick, never the
+        # bridge's physics legs); an empty list means manual operation.
+        if env.routine.steps:
+            self._control_driver = FleetControlDriver.from_vehicles(
+                control_entries, routine_cfg=env.routine
+            )
+            self._control_driver.start()
+
     def _teardown_drone(self):
-        """Stop the bridge group and despawn every spawned vehicle."""
+        """Stop the control driver and bridge group, then despawn every vehicle."""
+        if self._control_driver is not None:
+            self._control_driver.stop()
+            self._control_driver = None
         self._bridge_group.stop()
         self._bridge_group = BridgeHostGroup([])
         for drone_cfg in self._spawned_drones:

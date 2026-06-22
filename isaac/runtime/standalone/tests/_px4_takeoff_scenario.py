@@ -13,8 +13,17 @@ evaluated per drone against its own spawn position; every drone must pass.
 
 The scene comes from the top-level ``scene`` config; the takeoff target,
 command-flow timeouts, and the envelope gates come from the Hydra
-``integration_test`` group (``IntegrationTestConfig``); only the PX4 force-arm
-magic stays in code as a protocol constant.
+``integration_test`` group (``IntegrationTestConfig``).
+
+The high-level commanding (arm -> takeoff) is delegated to the pure command
+layer in ``robotics_experiments.commanding``: each drone gets a
+``VehicleRoutine`` driven by a ``VehicleCommander`` over a ``MavlinkCommandPort``
+(the GCS link), and a ``FleetCommander`` with the ``STEP_SYNCHRONIZED`` policy
+reproduces the arm-all-then-takeoff-all fleet barrier. This module keeps only its
+assertion responsibilities (the continuous gates and the hover envelope), the
+sim-stepping, and the bridge-connectivity checks; it never hand-rolls MAVLink.
+The command port talks the GCS link only - never the bridge's simulator MAVLink
+lockstep - by design.
 """
 
 from __future__ import annotations
@@ -24,10 +33,9 @@ import math
 import os
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable
 
 import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
@@ -38,12 +46,6 @@ __all__ = [
     "Px4TakeoffScenarioOptions",
     "run_px4_takeoff_scenario",
 ]
-
-# PX4 force-arm magic value (MAV_CMD_COMPONENT_ARM_DISARM param2); a PX4 protocol
-# constant, not a tunable, so it stays in code rather than the scenario config.
-_PX4_FORCE_ARM_MAGIC = 21196
-
-_CommandAckStatus = Literal["accepted", "temporarily_rejected"]
 
 
 @dataclass
@@ -71,7 +73,8 @@ class _DroneRuntime:
     observer: Any
     label: str
     gcs_endpoint: str
-    mav: Any | None = None
+    port: Any | None = None
+    commander: Any | None = None
     start_position: np.ndarray | None = None
 
 
@@ -157,6 +160,15 @@ def _bridge_debug_log_path(host) -> Path | None:
     return Path(path) if path else None
 
 
+def _bridge_status(host):
+    """Read the bridge lockstep snapshot for the routine observation.
+
+    Called only after the command flow asserts each bridge is connected, so the
+    host has a live bridge here.
+    """
+    return host._bridge.status
+
+
 def _raise_instability(message: str) -> None:
     raise ExpectedInstabilityDetected(message)
 
@@ -233,138 +245,51 @@ def _wait_for_bridge_heartbeat(
     raise AssertionError(f"[{drone.label}] PX4 bridge did not receive PX4 heartbeat before timeout")
 
 
-def _connect_gcs(context: SceneTestContext, drone: _DroneRuntime):
-    from pymavlink import mavutil
+def _pump_and_poll_all(drones: list[_DroneRuntime]) -> dict[str, Any]:
+    """Pump each drone's GCS heartbeat and drain its feedback, returning latest acks.
 
-    context.report(f"[{drone.label}] opening GCS MAVLink endpoint {drone.gcs_endpoint}")
-    mav = mavutil.mavlink_connection(drone.gcs_endpoint, source_system=255)
-    mav._last_sent_gcs_heartbeat_s = 0.0
-    return mav
-
-
-def _send_gcs_heartbeat(mav, period_s: float, *, force: bool = False) -> None:
-    from pymavlink import mavutil
-
-    now_s = time.monotonic()
-    last_s = float(getattr(mav, "_last_sent_gcs_heartbeat_s", 0.0))
-    if not force and now_s - last_s < period_s:
-        return
-    mav.mav.heartbeat_send(
-        mavutil.mavlink.MAV_TYPE_GCS,
-        mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-        0,
-        0,
-        mavutil.mavlink.MAV_STATE_ACTIVE,
-    )
-    mav._last_sent_gcs_heartbeat_s = now_s
-
-
-def _pump_all_gcs(drones: list[_DroneRuntime], period_s: float) -> None:
+    Keeps every drone's GCS link alive each tick and returns the most recent
+    ``CommandAck`` per drone (``None`` when none arrived this tick), which the
+    routine driver folds into each ``RoutineObservation``.
+    """
+    acks: dict[str, Any] = {}
     for drone in drones:
-        if drone.mav is not None:
-            _send_gcs_heartbeat(drone.mav, period_s)
+        drone.port.pump_heartbeat()
+        acks[drone.label] = drone.port.poll_feedback()
+    return acks
 
 
-def _drain_mavlink(mav) -> list[Any]:
-    messages: list[Any] = []
-    while True:
-        msg = mav.recv_match(blocking=False)
-        if msg is None:
-            return messages
-        messages.append(msg)
+def _raise_if_failsafe(drones: list[_DroneRuntime], *, phase: str) -> None:
+    for drone in drones:
+        if drone.port.failsafe:
+            _raise_failsafe(
+                f"[{drone.label}] PX4 entered failsafe state {phase}: "
+                f"system_status={drone.port.failsafe_system_status}"
+            )
 
 
-def _wait_for_gcs_heartbeat(
+def _wait_for_gcs_handshake(
     context: SceneTestContext,
     drones: list[_DroneRuntime],
     drone: _DroneRuntime,
-    scenario,
     *,
     timeout_s: float,
 ) -> None:
-    context.report(f"[{drone.label}] waiting up to {timeout_s:.1f}s for GCS heartbeat")
+    context.report(f"[{drone.label}] waiting up to {timeout_s:.1f}s for GCS handshake")
     deadline = time.monotonic() + timeout_s * len(drones)
-    _send_gcs_heartbeat(drone.mav, scenario.gcs_heartbeat_period_s, force=True)
+    drone.port.pump_heartbeat(force=True)
     while time.monotonic() < deadline:
-        _send_gcs_heartbeat(drone.mav, scenario.gcs_heartbeat_period_s)
         _advance_once(context, drones)
-        for msg in _drain_mavlink(drone.mav):
-            if msg.get_type() == "HEARTBEAT":
-                drone.mav.target_system = msg.get_srcSystem()
-                drone.mav.target_component = msg.get_srcComponent()
-                context.report(
-                    f"[{drone.label}] GCS received heartbeat from "
-                    f"system={msg.get_srcSystem()} component={msg.get_srcComponent()}"
-                )
-                return
+        _pump_and_poll_all(drones)
+        if drone.port.is_handshaked:
+            context.report(f"[{drone.label}] GCS handshake complete; learned PX4 target system")
+            return
     raise AssertionError(f"[{drone.label}] PX4 heartbeat was not received on {drone.gcs_endpoint}")
-
-
-def _message_indicates_failsafe(msg) -> bool:
-    from pymavlink import mavutil
-
-    if msg.get_type() != "HEARTBEAT":
-        return False
-    status = int(getattr(msg, "system_status", 0))
-    failsafe_states = {
-        mavutil.mavlink.MAV_STATE_CRITICAL,
-        mavutil.mavlink.MAV_STATE_EMERGENCY,
-        mavutil.mavlink.MAV_STATE_FLIGHT_TERMINATION,
-    }
-    return status in failsafe_states
-
-
-def _assert_command_ack(
-    context: SceneTestContext,
-    drones: list[_DroneRuntime],
-    drone: _DroneRuntime,
-    scenario,
-    *,
-    command: int,
-    label: str,
-    deadline_s: float,
-    accepted_statustext: tuple[str, ...] = (),
-) -> _CommandAckStatus:
-    from pymavlink import mavutil
-
-    accepted = {
-        mavutil.mavlink.MAV_RESULT_ACCEPTED,
-        getattr(mavutil.mavlink, "MAV_RESULT_IN_PROGRESS", 5),
-    }
-    while time.monotonic() < deadline_s:
-        _pump_all_gcs(drones, scenario.gcs_heartbeat_period_s)
-        _advance_once(context, drones)
-        for msg in _drain_mavlink(drone.mav):
-            if _message_indicates_failsafe(msg):
-                _raise_failsafe(
-                    f"[{drone.label}] PX4 entered failsafe state while waiting for "
-                    f"{label} ACK: system_status={int(msg.system_status)}"
-                )
-            if msg.get_type() == "STATUSTEXT":
-                text = str(getattr(msg, "text", ""))
-                context.report(f"[{drone.label}] PX4 STATUSTEXT while waiting for {label}: {text}")
-                if any(marker in text for marker in accepted_statustext):
-                    context.report(f"[{drone.label}] PX4 accepted {label} command")
-                    return "accepted"
-            if msg.get_type() != "COMMAND_ACK" or int(msg.command) != int(command):
-                continue
-            result = int(msg.result)
-            if result not in accepted:
-                if result == mavutil.mavlink.MAV_RESULT_TEMPORARILY_REJECTED:
-                    context.report(f"[{drone.label}] PX4 temporarily rejected {label}; retrying")
-                    return "temporarily_rejected"
-                raise AssertionError(
-                    f"[{drone.label}] PX4 rejected {label}: COMMAND_ACK result={result}"
-                )
-            context.report(f"[{drone.label}] PX4 accepted {label} command")
-            return "accepted"
-    raise AssertionError(f"[{drone.label}] Timed out waiting for PX4 COMMAND_ACK for {label}")
 
 
 def _settle_px4_prearm(
     context: SceneTestContext,
     drones: list[_DroneRuntime],
-    scenario,
     *,
     seconds: float,
 ) -> None:
@@ -378,177 +303,28 @@ def _settle_px4_prearm(
             raise AssertionError(
                 f"Timed out settling PX4 before arm: target={seconds:.2f}s actual={actual_s:.2f}s"
             )
-        _pump_all_gcs(drones, scenario.gcs_heartbeat_period_s)
         _advance_once(context, drones)
-        for drone in drones:
-            for msg in _drain_mavlink(drone.mav):
-                if _message_indicates_failsafe(msg):
-                    _raise_failsafe(
-                        f"[{drone.label}] PX4 entered failsafe state while settling before arm: "
-                        f"system_status={int(msg.system_status)}"
-                    )
-                if msg.get_type() == "STATUSTEXT":
-                    context.report(
-                        f"[{drone.label}] PX4 STATUSTEXT while settling before arm: "
-                        f"{getattr(msg, 'text', '')}"
-                    )
-
-
-def _send_command_with_retries(
-    context: SceneTestContext,
-    drones: list[_DroneRuntime],
-    drone: _DroneRuntime,
-    scenario,
-    *,
-    command: int,
-    label: str,
-    send: Callable[[], None],
-    accepted_statustext: tuple[str, ...] = (),
-) -> None:
-    deadline_s = time.monotonic() + scenario.command_ack_timeout_s * len(drones)
-    while time.monotonic() < deadline_s:
-        send()
-        status = _assert_command_ack(
-            context,
-            drones,
-            drone,
-            scenario,
-            command=command,
-            label=label,
-            deadline_s=deadline_s,
-            accepted_statustext=accepted_statustext,
-        )
-        if status == "accepted":
-            return
-        if time.monotonic() < deadline_s:
-            _advance_sim_time(context, drones, seconds=0.25, wall_timeout_s=3.0)
-    raise AssertionError(f"[{drone.label}] Timed out waiting for PX4 COMMAND_ACK for {label}")
-
-
-def _send_arm(
-    context: SceneTestContext,
-    drones: list[_DroneRuntime],
-    drone: _DroneRuntime,
-    scenario,
-) -> None:
-    from pymavlink import mavutil
-
-    command = mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM
-    mav = drone.mav
-
-    def send() -> None:
-        context.report(f"[{drone.label}] sending MAVLink force-arm command")
-        mav.mav.command_long_send(
-            mav.target_system,
-            mav.target_component,
-            command,
-            0,
-            1,
-            _PX4_FORCE_ARM_MAGIC,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
-
-    _send_command_with_retries(
-        context,
-        drones,
-        drone,
-        scenario,
-        command=command,
-        label="arm",
-        send=send,
-        accepted_statustext=("Armed by external command",),
-    )
-
-
-def _send_takeoff(
-    context: SceneTestContext,
-    drones: list[_DroneRuntime],
-    drone: _DroneRuntime,
-    scenario,
-    *,
-    climb_m: float,
-    target: _TakeoffTarget,
-) -> None:
-    from pymavlink import mavutil
-
-    command = mavutil.mavlink.MAV_CMD_NAV_TAKEOFF
-    mav = drone.mav
-
-    def send() -> None:
-        context.report(
-            f"[{drone.label}] sending MAVLink takeoff command for {climb_m:.1f}m climb "
-            f"to lat={target.latitude_deg:.7f} lon={target.longitude_deg:.7f} "
-            f"absolute altitude {target.absolute_altitude_m:.1f}m"
-        )
-        mav.mav.command_long_send(
-            mav.target_system,
-            mav.target_component,
-            command,
-            0,
-            0,
-            0,
-            0,
-            math.nan,
-            float(target.latitude_deg),
-            float(target.longitude_deg),
-            float(target.absolute_altitude_m),
-        )
-
-    _send_command_with_retries(
-        context, drones, drone, scenario, command=command, label="takeoff", send=send
-    )
-
-
-def _telemetry_takeoff_position(msg) -> tuple[float, float, float] | None:
-    msg_type = msg.get_type()
-    if msg_type in {"GLOBAL_POSITION_INT", "GPS_RAW_INT"}:
-        lat_e7 = getattr(msg, "lat", None)
-        lon_e7 = getattr(msg, "lon", None)
-        alt_mm = getattr(msg, "alt", None)
-    else:
-        return None
-    if lat_e7 is None or lon_e7 is None or alt_mm is None:
-        return None
-    latitude_deg = float(lat_e7) / 10_000_000.0
-    longitude_deg = float(lon_e7) / 10_000_000.0
-    alt_m = float(alt_mm) / 1000.0
-    if not all(math.isfinite(v) for v in (latitude_deg, longitude_deg, alt_m)):
-        return None
-    if abs(latitude_deg) < 1e-7 and abs(longitude_deg) < 1e-7:
-        return None
-    return latitude_deg, longitude_deg, alt_m
+        _pump_and_poll_all(drones)
+        _raise_if_failsafe(drones, phase="while settling before arm")
 
 
 def _wait_for_takeoff_target(
     context: SceneTestContext,
     drones: list[_DroneRuntime],
     drone: _DroneRuntime,
-    scenario,
     *,
     climb_m: float,
     timeout_s: float,
 ) -> _TakeoffTarget:
     context.report(f"[{drone.label}] waiting up to {timeout_s:.1f}s for PX4 takeoff telemetry")
     deadline = time.monotonic() + timeout_s * len(drones)
-    latest_position: tuple[float, float, float] | None = None
     while time.monotonic() < deadline:
-        _send_gcs_heartbeat(drone.mav, scenario.gcs_heartbeat_period_s)
         _advance_once(context, drones)
-        for msg in _drain_mavlink(drone.mav):
-            if _message_indicates_failsafe(msg):
-                _raise_failsafe(
-                    f"[{drone.label}] PX4 entered failsafe state while waiting for altitude "
-                    f"telemetry: system_status={int(msg.system_status)}"
-                )
-            position = _telemetry_takeoff_position(msg)
-            if position is not None:
-                latest_position = position
-        if latest_position is not None:
-            latitude_deg, longitude_deg, altitude_m = latest_position
+        _pump_and_poll_all(drones)
+        _raise_if_failsafe(drones, phase="while waiting for altitude telemetry")
+        position = drone.port.latest_global_position
+        if position is not None:
+            latitude_deg, longitude_deg, altitude_m = position
             target_altitude_m = altitude_m + climb_m
             context.report(
                 f"[{drone.label}] PX4 takeoff telemetry lat={latitude_deg:.7f} "
@@ -563,6 +339,93 @@ def _wait_for_takeoff_target(
     raise AssertionError(
         f"[{drone.label}] PX4 takeoff telemetry was not received before takeoff command"
     )
+
+
+def _build_routine(scenario, target: _TakeoffTarget):
+    """Build the per-drone ``arm -> takeoff`` routine from the test config.
+
+    Both steps complete on their ``COMMAND_ACK`` (the climb and hover are
+    asserted afterwards by the envelope observer, preserving the original order:
+    arm-ack, takeoff-ack, post-takeoff hook, then hover observation). Both retry
+    on a transient PX4 ``TEMPORARILY_REJECTED`` ack, matching the prior behavior.
+    """
+    from robotics_experiments.commanding import (
+        RoutineStep,
+        VehicleRoutine,
+        ack_accepted,
+        arm,
+        takeoff,
+    )
+    from robotics_experiments.commanding.commands import (
+        MAV_CMD_COMPONENT_ARM_DISARM,
+        MAV_CMD_NAV_TAKEOFF,
+    )
+
+    arm_step = RoutineStep(
+        command=arm(),
+        is_complete=ack_accepted(MAV_CMD_COMPONENT_ARM_DISARM),
+        label="arm",
+        timeout_s=scenario.command_ack_timeout_s,
+        retry_on_temporarily_rejected=True,
+    )
+    takeoff_step = RoutineStep(
+        command=takeoff(target.latitude_deg, target.longitude_deg, target.absolute_altitude_m),
+        is_complete=ack_accepted(MAV_CMD_NAV_TAKEOFF),
+        label="takeoff",
+        timeout_s=scenario.command_ack_timeout_s,
+        retry_on_temporarily_rejected=True,
+    )
+    return VehicleRoutine(steps=(arm_step, takeoff_step))
+
+
+def _routine_observation(drone: _DroneRuntime, sim_time_us: int, last_ack):
+    from robotics_experiments.commanding import RoutineObservation
+
+    vehicle_state = drone.observer.read_state(sim_time_us=sim_time_us)
+    return RoutineObservation(
+        vehicle_state=vehicle_state,
+        bridge_status=_bridge_status(drone.host),
+        last_ack=last_ack,
+        failsafe=drone.port.failsafe,
+        sim_time_us=sim_time_us,
+    )
+
+
+def _drive_routine_to_done(
+    context: SceneTestContext,
+    drones: list[_DroneRuntime],
+    fleet,
+    scenario,
+) -> None:
+    """Tick physics and step the fleet commander until every routine reports DONE.
+
+    Each tick advances PhysX once (asserting every bridge stays connected),
+    pumps/drains every GCS link, builds a ``RoutineObservation`` per drone, and
+    steps the ``FleetCommander``; a ``FAIL`` decision or a PX4 failsafe aborts.
+    The per-step timeouts inside ``decide`` are sim-time; this wall-clock budget
+    is the backstop for a sim that ticks but never completes the routine.
+    """
+    from robotics_experiments.commanding import DecisionKind
+
+    context.report(f"driving arm/takeoff command routine for {len(drones)} drone(s)")
+    deadline_s = time.monotonic() + (
+        scenario.command_ack_timeout_s + scenario.heartbeat_timeout_s
+    ) * 4.0 * len(drones)
+    while not fleet.is_done:
+        if time.monotonic() > deadline_s:
+            raise AssertionError("Timed out driving the arm/takeoff command routine to completion")
+        _advance_once(context, drones)
+        acks = _pump_and_poll_all(drones)
+        _raise_if_failsafe(drones, phase="during the command routine")
+        sim_time_us = _sim_time_us(drones)
+        observations = {
+            drone.label: _routine_observation(drone, sim_time_us, acks[drone.label])
+            for drone in drones
+        }
+        decisions = fleet.step(observations)
+        for label, decision in decisions.items():
+            if decision.kind is DecisionKind.FAIL:
+                raise AssertionError(f"[{label}] command routine failed: {decision.reason}")
 
 
 def _sample_state(articulation_io, sim_time_us: int) -> _FlightSample:
@@ -790,17 +653,17 @@ def _observe_all(
 
     while not all(obs.done for obs in observations.values()):
         _advance_once(context, drones)
-        _pump_all_gcs(drones, scenario.gcs_heartbeat_period_s)
+        _pump_and_poll_all(drones)
         sim_time_us = _sim_time_us(drones)
 
         for drone in drones:
             obs = observations[drone.label]
             if obs.done:
                 continue
-            failsafe_status: int | None = None
-            for msg in _drain_mavlink(drone.mav):
-                if _message_indicates_failsafe(msg):
-                    failsafe_status = int(msg.system_status)
+            # Failsafe is bucketed after the per-tick envelope gates inside
+            # _update_drone_observation, so a fault-induced divergence is caught
+            # by the envelope first; pass the current system_status through.
+            failsafe_status = drone.port.failsafe_system_status if drone.port.failsafe else None
             _update_drone_observation(
                 context,
                 drone,
@@ -900,6 +763,12 @@ def _build_drones(
 def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions") -> None:
     import omni.timeline
 
+    from robotics_experiments.commanding import (
+        ExecutionPolicy,
+        FleetCommander,
+        MavlinkCommandPort,
+        VehicleCommander,
+    )
     from robotics_experiments.config import get_config
     from robotics_experiments.drone import despawn_drone
     from robotics_experiments.simulation import apply_settings
@@ -978,38 +847,43 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
 
         with timing.timed_stage("gcs_connect", sim_clock=clock):
             for drone in drones:
-                drone.mav = _connect_gcs(context, drone)
-        with timing.timed_stage("gcs_heartbeat_wait", sim_clock=clock):
+                drone.port = MavlinkCommandPort(
+                    gcs_endpoint=drone.gcs_endpoint,
+                    heartbeat_period_s=scenario.gcs_heartbeat_period_s,
+                    label=drone.label,
+                )
+                drone.port.connect()
+        with timing.timed_stage("gcs_handshake_wait", sim_clock=clock):
             for drone in drones:
-                _wait_for_gcs_heartbeat(
-                    context, drones, drone, scenario, timeout_s=scenario.heartbeat_timeout_s
+                _wait_for_gcs_handshake(
+                    context, drones, drone, timeout_s=scenario.heartbeat_timeout_s
                 )
 
         with timing.timed_stage("px4_prearm_settle", sim_clock=clock):
-            _settle_px4_prearm(context, drones, scenario, seconds=scenario.prearm_settle_s)
+            _settle_px4_prearm(context, drones, seconds=scenario.prearm_settle_s)
 
-        with timing.timed_stage("arm_command_ack", sim_clock=clock):
+        with timing.timed_stage("build_routines", sim_clock=clock):
+            commanders = []
             for drone in drones:
-                _send_arm(context, drones, drone, scenario)
-
-        with timing.timed_stage("takeoff_command_ack", sim_clock=clock):
-            for drone in drones:
-                takeoff_target = _wait_for_takeoff_target(
+                # GPS telemetry flows continuously once the estimator has settled
+                # (above), so the takeoff target is fetched here, before arming,
+                # and baked into each drone's routine command.
+                target = _wait_for_takeoff_target(
                     context,
                     drones,
                     drone,
-                    scenario,
                     climb_m=scenario.takeoff_altitude_m,
                     timeout_s=scenario.heartbeat_timeout_s,
                 )
-                _send_takeoff(
-                    context,
-                    drones,
-                    drone,
-                    scenario,
-                    climb_m=scenario.takeoff_altitude_m,
-                    target=takeoff_target,
-                )
+                routine = _build_routine(scenario, target)
+                drone.commander = VehicleCommander(routine, drone.port, label=drone.label)
+                commanders.append(drone.commander)
+            # STEP_SYNCHRONIZED barrier reproduces the arm-all-then-takeoff-all
+            # fleet flow: no drone sends takeoff until every drone is armed.
+            fleet = FleetCommander(commanders, policy=ExecutionPolicy.STEP_SYNCHRONIZED)
+
+        with timing.timed_stage("command_routine", sim_clock=clock):
+            _drive_routine_to_done(context, drones, fleet, scenario)
 
         if options.post_takeoff_hook is not None:
             with timing.timed_stage("post_takeoff_hook", sim_clock=clock):
@@ -1025,11 +899,8 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
             timeline.stop()
             group.stop()
             for drone in drones:
-                if drone.mav is not None:
-                    try:
-                        drone.mav.close()
-                    except Exception:
-                        pass
+                if drone.port is not None:
+                    drone.port.disconnect()
                 drone.observer.shutdown()
                 despawn_drone(context.stage, drone.vehicle.drone)
 

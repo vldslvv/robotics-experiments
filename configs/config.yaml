@@ -7,6 +7,7 @@ defaults:
   - experiment/switches@switches: default
   - experiment/px4@px4: default
   - experiment/isaac_lab@isaac_lab: default
+  - experiment/routine@routine: default
   - _self_
 
 # Scene loaded for this experiment. Every experiment (test or not) sets a scene;

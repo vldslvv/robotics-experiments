@@ -13,6 +13,7 @@ __all__ = [
     "VehicleConfig",
     "ResolvedVehicle",
     "IsaacLabConfig",
+    "RoutineConfig",
     "IntegrationTestConfig",
     "EnvConfig",
 ]
@@ -444,6 +445,52 @@ class IntegrationTestConfig:
 
 
 @dataclass
+class RoutineConfig:
+    """High-level flight routine executed by the live ``drone_spawner`` extension.
+
+    The single source of truth for whether and what the live runtime flies. It is
+    composed into every experiment (always present on :class:`EnvConfig`, unlike
+    the optional ``integration_test`` harness group), and the rule is simply:
+    a **non-empty** ``steps`` list makes the extension build a control driver that
+    arms/takes-off the fleet on Play, while an **empty** ``steps`` list means
+    purely manual operation (no driver is constructed). There is no separate
+    enable flag -- ``steps`` is the switch.
+
+    This is the *control* layer's config, parallel to the bridge's ``px4`` group:
+    the GCS link baseport lives in the ``px4`` group
+    (:attr:`Px4BridgeConfig.gcs_baseport`); the per-vehicle ``gcs_port`` the driver
+    talks is derived from it (see :class:`ResolvedVehicle`).
+
+    Attributes:
+        steps: Ordered step descriptors authored in YAML, each a mapping with a
+            ``kind`` (``arm`` or ``takeoff``; ``takeoff`` carries ``climb_m``).
+            Empty means manual (no routine driver). Typed ``List[Any]`` so Hydra's
+            structured-config validation accepts the partial per-step mappings
+            during ``compose()`` (the same escape hatch as ``vehicles``); the
+            driver maps them to a pure ``VehicleRoutine`` via
+            ``commanding.build_vehicle_routine``.
+        gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
+        command_ack_timeout_s: Sim-time budget for each routine step's COMMAND_ACK.
+        bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
+            to connect before the routine starts.
+        handshake_timeout_s: Wall-clock deadline to learn the PX4 target system on
+            every GCS link.
+        prearm_settle_s: Sim-time the PX4 estimator is allowed to settle before
+            arming.
+        takeoff_target_timeout_s: Wall-clock deadline to receive each drone's
+            global-position telemetry (the takeoff target) before commanding.
+    """
+
+    steps: List[Any]
+    gcs_heartbeat_period_s: float
+    command_ack_timeout_s: float
+    bridge_heartbeat_timeout_s: float
+    handshake_timeout_s: float
+    prearm_settle_s: float
+    takeoff_target_timeout_s: float
+
+
+@dataclass
 class EnvConfig:
     """Composite experiment config consumed by the Isaac Sim extensions.
 
@@ -466,6 +513,11 @@ class EnvConfig:
             during ``compose()``. The loader replaces the raw dicts with a
             fully enriched, validated ``list[ResolvedVehicle]`` (see
             ``config.load.resolve_fleet``), which is the public/runtime type.
+        routine: High-level flight routine for the live ``drone_spawner``
+            extension (see :class:`RoutineConfig`). Always present; an empty
+            ``routine.steps`` means manual operation, a non-empty list makes the
+            runtime arm/take-off the fleet on Play. This is the runtime
+            counterpart of the test-only ``integration_test`` group.
         integration_test: Standalone integration-test harness tunables
             (command-flow timeouts, takeoff target, flight-envelope gates).
             ``None`` for the default runtime experiment; populated only by the
@@ -482,4 +534,5 @@ class EnvConfig:
     isaac_lab: IsaacLabConfig
     scene: str
     vehicles: List[Any]
+    routine: RoutineConfig
     integration_test: Optional[IntegrationTestConfig] = None

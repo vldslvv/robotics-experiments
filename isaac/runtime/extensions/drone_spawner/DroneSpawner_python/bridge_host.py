@@ -80,6 +80,30 @@ class BridgeHost:
         return self._bridge is not None
 
     @property
+    def is_connected(self) -> bool:
+        """Whether the bridge has a live PX4 lockstep connection.
+
+        ``False`` before :meth:`start` or while the bridge is still settling.
+        Read by the control driver to gate the routine on a connected bridge.
+        """
+        return self._bridge is not None and bool(self._bridge.is_connected)
+
+    @property
+    def status(self) -> Any:
+        """The bridge lockstep status snapshot (``BridgeStatus``).
+
+        The control driver folds this into each ``RoutineObservation`` so the
+        pure command layer never reaches into the bridge. Only valid once the
+        host is running.
+
+        Raises:
+            RuntimeError: if read before the bridge is constructed.
+        """
+        if self._bridge is None:
+            raise RuntimeError(f"[{self._tag}] bridge status read before the bridge started")
+        return self._bridge.status
+
+    @property
     def sim_time_us(self) -> int:
         """Total accumulated sim time in microseconds since the clock started.
 

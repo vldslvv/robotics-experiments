@@ -56,6 +56,37 @@ def test_px4_bridge_orchestrator_import_without_isaac():
     importlib.import_module("robotics_experiments.px4_bridge.bridge")
 
 
+def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
+    # The command layer is a core domain leaf: importing it (including the
+    # concrete MavlinkCommandPort) must not pull in Isaac or pymavlink, which
+    # the port imports only inside its methods.
+    saved_modules = dict(sys.modules)
+    try:
+        _drop_modules("carb", "pxr", "isaacsim", "pymavlink", "robotics_experiments.commanding")
+        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim", "pymavlink"})
+        monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
+
+        commanding = importlib.import_module("robotics_experiments.commanding")
+        # Constructing the MavlinkCommandPort must not import pymavlink either;
+        # only connect()/send() do, inside their bodies.
+        commanding.MavlinkCommandPort(gcs_endpoint="udp:127.0.0.1:14550", heartbeat_period_s=1.0)
+        # The config-driven routine builder is pure too (it is what the live
+        # extension driver calls), so it must build a routine with Isaac and
+        # pymavlink blocked.
+        routine = commanding.build_vehicle_routine(
+            [{"kind": "arm"}, {"kind": "takeoff", "climb_m": 1.0}],
+            target_latitude_deg=47.0,
+            target_longitude_deg=8.0,
+            target_altitude_m=488.0,
+            command_ack_timeout_s=10.0,
+        )
+        assert [s.label for s in routine.steps] == ["arm", "takeoff"]
+        assert "pymavlink" not in sys.modules
+    finally:
+        sys.modules.clear()
+        sys.modules.update(saved_modules)
+
+
 def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     _drop_modules(
         "hydra",

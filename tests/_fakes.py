@@ -344,6 +344,70 @@ def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
     return port.exchange(state).controls
 
 
+class FakeCommandPort:
+    """Records sent commands; an :class:`AbstractCommandPort` for routine tests.
+
+    The pure ``decide`` / ``FleetCommander`` tests drive the command layer with
+    synthetic ``RoutineObservation``s (acks injected directly), so this fake only
+    needs to capture the ``MavlinkCommand``s emitted on ``SEND``. Heartbeat and
+    feedback calls are counted but inert.
+    """
+
+    def __init__(self):
+        self.sent = []
+        self.connected = False
+        self.heartbeats = 0
+        self.feedback_polls = 0
+
+    def connect(self):
+        self.connected = True
+
+    def disconnect(self):
+        self.connected = False
+
+    def pump_heartbeat(self, *, force=False):
+        self.heartbeats += 1
+
+    def send(self, command):
+        self.sent.append(command)
+
+    def poll_feedback(self):
+        self.feedback_polls += 1
+        return None
+
+
+def make_routine_observation(
+    *,
+    sim_time_us=0,
+    position_enu=(0.0, 0.0, 0.0),
+    is_armed=False,
+    last_ack=None,
+    failsafe=False,
+):
+    """Build a synthetic ``RoutineObservation`` for the pure command-layer tests."""
+    from robotics_experiments.commanding.observation import RoutineObservation
+
+    vehicle_state = VehicleState.hover_at(position_enu=position_enu, sim_time_us=sim_time_us)
+    bridge_status = BridgeStatus(
+        is_connected=True,
+        is_armed=is_armed,
+        first_heartbeat_received=True,
+        sensor_send_count=0,
+        actuator_receive_count=0,
+        last_sensor_send_us=None,
+        last_actuator_receive_us=None,
+        actuator_lag_us=None,
+        last_disconnect_reason=None,
+    )
+    return RoutineObservation(
+        vehicle_state=vehicle_state,
+        bridge_status=bridge_status,
+        last_ack=last_ack,
+        failsafe=failsafe,
+        sim_time_us=int(sim_time_us),
+    )
+
+
 def _quat_pitch_deg(angle_deg: float) -> np.ndarray:
     """Return a [w, x, y, z] quaternion for a pitch rotation of angle_deg."""
     half = math.radians(angle_deg) / 2.0

@@ -188,6 +188,93 @@ the current contents and the intended home for that kind of code.
   compose-time tolerance of partial entries; the runtime value is
   `list[ResolvedVehicle]`.
 
+## Commanding (high-level command / routine layer)
+- `src/robotics_experiments/commanding/` is the high-level control layer: the
+  pure-function counterpart to the PX4 bridge contract. It is a domain leaf on
+  the core import path -- every module imports neither Isaac nor pymavlink at
+  module scope (the concrete `MavlinkCommandPort` imports `pymavlink` only inside
+  its methods), so `import robotics_experiments` succeeds with both absent, and
+  `commanding/__init__.py` is re-export-only. The full reference is
+  `docs/COMMAND_ROUTINE_CONTRACT.md`; read it before changing this layer.
+- The contract mirrors the bridge part-for-part: `RoutineObservation` (pure
+  input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
+  `failsafe` / `sim_time_us`) -> `decide(routine, state, observation)` (the pure
+  stepper, analogue of `commands_to_dynamics`) -> `RoutineDecision`
+  (`SEND`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output) across the
+  `AbstractCommandPort` seam (analogue of `AbstractFlightStackBridge`), with
+  `VehicleCommander` / `FleetCommander` as the orchestrators (analogue of
+  `BridgeHost` / `BridgeHostGroup`). `MavlinkCommand` is a thin `command_long`
+  wrapper (a `MAV_CMD_*` id + seven params); `MAV_CMD_*` / `MAV_RESULT_*` /
+  `PX4_FORCE_ARM_MAGIC` are named int constants so the pure modules never import
+  pymavlink. `tests/test_commanding_routine.py` is the pure regression guard
+  (the `decide` transitions + the `FleetCommander` barrier, over a fake
+  `AbstractCommandPort` and synthetic observations in `tests/_fakes.py`), and
+  `tests/test_core_imports.py` asserts the subpackage imports with
+  Isaac/pymavlink absent.
+- Pure stepper rule: `decide` and every completion predicate
+  (`armed()`, `ack_accepted(command_id)`, `climbed_at_least(...)`) are pure
+  functions -- no sockets, no pymavlink, no Isaac, unit-testable with plain
+  dataclasses. The only side effect in the layer is the port
+  (`send` / `connect` / `pump_heartbeat` / `poll_feedback`); `VehicleCommander`
+  runs the pure `decide` and then performs the single `SEND` side effect, keeping
+  decision and I/O separated. Step `timeout_s` is measured in **sim time**
+  (`observation.sim_time_us`) so the stepper stays pure; the driver pairs it with
+  a wall-clock backstop. `FleetCommander`'s `STEP_SYNCHRONIZED` policy is the
+  fleet barrier (no vehicle advances to step N+1 until every vehicle completed
+  step N), reproducing arm-all-then-takeoff-all.
+- `gcs_port` is control, not bridge: the `MavlinkCommandPort` talks the per-drone
+  GCS link (`ResolvedVehicle.gcs_port`) only and never touches the bridge's
+  simulator MAVLink port or its sensor/actuator lockstep -- the symmetric half of
+  the bridge contract's rule that the bridge never touches `gcs_port`. The
+  commander is stepped from the control driver (today the standalone scenario run
+  loop), never from the bridge's physics send/recv legs.
+- Where the executor lives: there are two drivers over the **same** pure core and
+  `AbstractCommandPort` seam -- only the driver differs.
+  - Standalone takeoff scenario
+    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking,
+    staged script that builds a per-drone `VehicleRoutine = [arm, takeoff]` (both
+    steps complete on their `COMMAND_ACK`, both retry on a transient PX4
+    `TEMPORARILY_REJECTED`), a `FleetCommander(STEP_SYNCHRONIZED)`, and drives it
+    to `DONE`; the climb/hover envelope gates and `post_takeoff_hook` stay in the
+    scenario, fired after the routine completes (preserving the arm-ack ->
+    takeoff-ack -> hook -> hover order). It no longer hand-rolls any MAVLink.
+  - Live `drone_spawner` extension
+    (`isaac/runtime/extensions/drone_spawner/DroneSpawner_python/control_driver.py`,
+    `FleetControlDriver`): the runtime path for `make run-all` / `make run-isaac`.
+    Same pure core, but re-expressed as a **non-blocking, tick-driven phase
+    machine** (`WAIT_BRIDGE -> CONNECT_GCS -> HANDSHAKE -> PREARM_SETTLE ->
+    FETCH_TARGET -> BUILD -> DRIVE -> DONE`) stepped from the **Kit app-update
+    event stream** -- a control tick separate from the bridge's physics-step
+    subscription, never the bridge's send/recv legs. It reads each drone's state
+    through a state-only `IsaacArticulationIO` (no rotor paths) and the bridge
+    snapshot through the new public `BridgeHost.status` property, talks each
+    drone's GCS link via `MavlinkCommandPort`, and runs the same
+    `FleetCommander(STEP_SYNCHRONIZED)` barrier. On a `FAIL` decision, a PX4
+    failsafe, or a phase timeout it **logs a warning and stops the routine**
+    (never raises into the sim -- runtime is recoverable, unlike the test which
+    asserts); after `DONE` it idles, keeping the GCS link warm so PX4-console
+    control returns to the user. The extension builds it in `_setup_drone` (after
+    `BridgeHostGroup.start()`) and stops it in `_teardown_drone`.
+- The routine is config-driven and the config is the single source of truth: the
+  Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`, unlike
+  the optional test-only `integration_test` group) carries `steps` plus the
+  control-flow tunables (`gcs_heartbeat_period_s`, `command_ack_timeout_s`,
+  `bridge_heartbeat_timeout_s`, `handshake_timeout_s`, `prearm_settle_s`,
+  `takeoff_target_timeout_s`). `routine.steps` is the on/off switch: a **non-empty**
+  list (authored as `{kind: arm}` / `{kind: takeoff, climb_m: ...}` mappings) makes
+  the extension build the `FleetControlDriver` on Play; an **empty** list (the
+  default `configs/experiment/routine/default.yaml`) means purely manual operation
+  (no driver). There is no separate enable flag. The pure
+  `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s)`
+  maps the descriptors + a per-drone takeoff target into a `VehicleRoutine`
+  (unknown `kind` or a `takeoff` missing `climb_m` raises `ValueError`); it stays
+  on the core import path and is the shared seam for the eventual standalone/live
+  merge. `configs/runtime_arm_takeoff.yaml` is the example experiment that
+  overrides `routine.steps` to `[arm, takeoff]` for a headless
+  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml` demo. The GCS link
+  baseport still lives in the `px4` group (`px4.gcs_baseport`); the per-drone
+  `gcs_port` the driver talks is derived from it.
+
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
   `isaac/runtime/extensions/px4_sitl_brigde/pegasus/` is a vendored, stripped,
@@ -335,10 +422,14 @@ the host. They are meant to be used in the Dockerized environment.
   `configs/integration_test_takeoff.yaml` (one drone) and
   `configs/integration_test_multi_drone_takeoff.yaml` (two drones)); the
   composable group building blocks they select (`sim`, `drone`, `switches`,
-  `px4`, `isaac_lab`, `integration_test`) live under `configs/experiment/` and
-  are referenced as `experiment/<group>@<group>`. The persistent runtime
-  entrypoint `isaac/runtime/standalone/runapp_custom.sh` reads its stage from the
-  experiment `scene` too.
+  `px4`, `isaac_lab`, `routine`, `integration_test`) live under
+  `configs/experiment/` and are referenced as `experiment/<group>@<group>`. The
+  `routine` group is composed by `configs/config.yaml` itself (so every
+  experiment that inherits `config` carries it; `EnvConfig.routine` is never
+  `None`), and `routine.steps` is empty by default -- see the Commanding section
+  for the live-routine switch. The persistent runtime entrypoint
+  `isaac/runtime/standalone/runapp_custom.sh` reads its stage from the experiment
+  `scene` too.
 
 ### PX4
 - `make run-px4` derives the number of PX4 SITL containers from the active Hydra

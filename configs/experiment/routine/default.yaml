@@ -1,0 +1,25 @@
+defaults:
+  - base_routine
+
+# High-level flight routine for the live drone_spawner extension. `steps` is the
+# single source of truth and the on/off switch: an empty list (the default) means
+# purely manual operation -- the extension builds no control driver and you fly
+# each drone from its PX4 console. Add steps to make `make run-all` /
+# `make run-isaac` arm and take off the fleet on Play, e.g.:
+#
+#   steps:
+#     - kind: arm
+#     - kind: takeoff
+#       climb_m: 1.5
+#
+# The same `arm -> takeoff` flow the integration test drives, but executed
+# headless from the live extension over each drone's derived gcs_port.
+steps: []
+
+# Control-link and command-flow tunables (used only when steps is non-empty).
+gcs_heartbeat_period_s: 0.5
+command_ack_timeout_s: 10.0
+bridge_heartbeat_timeout_s: 12.0
+handshake_timeout_s: 12.0
+prearm_settle_s: 10.0
+takeoff_target_timeout_s: 30.0

@@ -1,7 +1,15 @@
 # High-level command / routine scaffolding (`VehicleRoutine`)
 
-> Status: PLANNED, not yet implemented. This is a design/implementation doc to be
-> executed in a later pass.
+> Status: IMPLEMENTED. The `robotics_experiments.commanding` package, the
+> standalone-scenario refactor, and the tests below are in place; the short
+> contract reference lives at `docs/COMMAND_ROUTINE_CONTRACT.md`. This document is
+> retained as the design rationale. The extension-workflow follow-up (driving the
+> command layer from the live `drone_spawner` extension via the `FleetControlDriver`
+> tick machine, the `routine` config group, and `build_vehicle_routine`) is also
+> IMPLEMENTED -- see `docs/COMMAND_ROUTINE_CONTRACT.md` "Where the executor lives".
+> What remains deferred: merging the standalone scenario onto the shared
+> `build_vehicle_routine`/driver, a headless extension-path integration target,
+> and per-vehicle routine overrides.
 
 ## Context
 
@@ -40,18 +48,25 @@ a ROS toggle publisher. Only the **commanding** half is greenfield.
    routine, **and refactor** `_px4_takeoff_scenario.py` to consume it (preserving
    `post_takeoff_hook`, the envelope gates, and multi-drone barrier behavior).
 
-> **Deferred but required follow-up -- the extension workflow must be supported
-> later.** This first pass deliberately drives the command layer only from the
-> standalone scenario runner. The pure core (`commanding/`) is designed to be
-> reused unchanged by the live `drone_spawner` extension so that
-> `make run-isaac` can autonomously execute a routine headless. A subsequent pass
-> must wire a per-vehicle commander into the extension lifecycle: construct a
-> `VehicleCommander` alongside each `BridgeHost` (it reads `ResolvedVehicle.gcs_port`,
-> stays out of the bridge), step it from the timeline / a dedicated control
-> subscription -- NOT from the bridge's physics send/recv legs, since the bridge
-> contract forbids it touching `gcs_port` -- and surface routine selection through
-> config. Keep the standalone path and the extension path sharing the same pure
-> `decide(...)` core and `AbstractCommandPort` seam; only the driver differs.
+> **Extension workflow follow-up -- IMPLEMENTED.** The pure core (`commanding/`)
+> is now reused by the live `drone_spawner` extension so `make run-all` /
+> `make run-isaac` execute a routine headless. The
+> `FleetControlDriver` (extension `control_driver.py`) is a non-blocking,
+> tick-driven phase machine stepped from the Kit app-update event stream (a
+> control tick separate from the bridge's physics legs); it reads each
+> `ResolvedVehicle.gcs_port` via `MavlinkCommandPort`, the bridge snapshot via the
+> public `BridgeHost.status`, and runs the same
+> `FleetCommander(STEP_SYNCHRONIZED)`. Routine selection/tunables live in the new
+> non-test `routine` Hydra group (`RoutineConfig`, always composed onto
+> `EnvConfig`), with `routine.steps` as the single source of truth (non-empty ->
+> the extension builds the driver on Play; empty -> manual). The pure
+> `commanding.build_vehicle_routine` maps the config descriptors to a
+> `VehicleRoutine`. On failure/failsafe/timeout the runtime driver logs a warning
+> and stops (never raises), unlike the asserting test. The standalone and
+> extension paths share the same `decide(...)` core and `AbstractCommandPort`
+> seam; only the driver differs. Still deferred: merging the standalone scenario
+> onto `build_vehicle_routine`/a shared driver, a headless extension-path
+> integration target, and per-vehicle routine overrides.
 
 ## Design: a command contract parallel to the bridge
 
@@ -72,7 +87,7 @@ orchestrator + lifecycle. The command layer mirrors it part-for-part:
 A domain leaf in the existing `config -> domain -> Isaac extensions` layering.
 `import robotics_experiments` must still succeed with Isaac **and** pymavlink
 absent: keep `pymavlink` imports function-scoped (the current pattern in
-`_px4_takeoff_scenario.py:236`), and keep `commanding/__init__.py` re-export-only
+`_px4_takeoff_scenario.py:237`), and keep `commanding/__init__.py` re-export-only
 of the pure types. Each public symbol goes in module `__all__`.
 
 - **`commands.py`** -- thin MAVLink command wrappers, pure data (no pymavlink
@@ -82,8 +97,9 @@ of the pure types. Each public symbol goes in module `__all__`.
     (7), `label: str`.
   - Named constants `MAV_CMD_COMPONENT_ARM_DISARM = 400`,
     `MAV_CMD_NAV_TAKEOFF = 22`, `MAV_CMD_DO_REPOSITION = 192`,
-    `MAV_CMD_NAV_LAND = 21`, and `PX4_FORCE_ARM_MAGIC = 21196.0` (lifted from
-    `_px4_takeoff_scenario.py:41`).
+    `MAV_CMD_NAV_LAND = 21`, and `PX4_FORCE_ARM_MAGIC = 21196` (lifted from
+    `_px4_takeoff_scenario.py:44`, an int passed as the float `command_long`
+    param2).
   - Pure constructors: `arm()`, `takeoff(lat, lon, abs_alt, climb)`,
     `set_altitude(...)` / `reposition(lat, lon, alt)`, `land()`.
 - **`observation.py`** -- `RoutineObservation` (frozen): `vehicle_state:
@@ -114,7 +130,7 @@ of the pure types. Each public symbol goes in module `__all__`.
     `from pymavlink import mavutil`. Absorbs `_connect_gcs`,
     `_send_gcs_heartbeat`, `command_long_send`, `_drain_mavlink`, and the
     `COMMAND_ACK` / failsafe / statustext parsing currently inline in
-    `_px4_takeoff_scenario.py:235-360,427-502`.
+    `_px4_takeoff_scenario.py:236-360,428-502`.
 - **`commander.py`** -- orchestrators:
   - `VehicleCommander` wires one `VehicleRoutine` + one `AbstractCommandPort` +
     holds `RoutineState`. `step(observation) -> RoutineDecision`: runs `decide`,
@@ -145,7 +161,8 @@ its **commanding** responsibilities to the new layer:
   until the routine reports `DONE`, while still ticking physics with
   `_advance_once` and asserting bridge connectivity.
 - Preserve `Px4TakeoffScenarioOptions.post_takeoff_hook`
-  (`_px4_takeoff_scenario.py:1063`): fire it when the takeoff step completes,
+  (`_px4_takeoff_scenario.py:1073`, fired at `:1014-1016`): fire it when the
+  takeoff step completes,
   before the hover-observation window -- unchanged contract for the instability
   negative test.
 - The arm/takeoff retry-on-`TEMPORARILY_REJECTED` and the "Armed by external
@@ -155,10 +172,14 @@ its **commanding** responsibilities to the new layer:
 ### Config
 
 Per the user, do not touch `configs/` in this pass. Source all routine tunables
-from the **existing** `IntegrationTestConfig` fields; do not invent new YAML knobs now.
-(Note for later: genuinely new routine tunables -- and routine selection for the
-extension workflow -- get bare-annotation fields in `config/types.py` + Hydra
-YAML per the project's single-source-of-truth rule.)
+from the **existing** `IntegrationTestConfig` fields (`EnvConfig.integration_test`),
+which is valid here because the standalone takeoff scenario runs under the
+`integration_test_*` experiments that compose that group. Do not invent new YAML
+knobs now. (Note for later: `integration_test` is `None` in the default runtime
+experiment, so the deferred extension path needs its own non-test config source;
+genuinely new routine tunables -- and routine selection -- get bare-annotation
+fields in `config/types.py` + Hydra YAML per the project's
+single-source-of-truth rule.)
 
 ## Files
 
@@ -187,7 +208,8 @@ Modify:
 
 Reuse (do not reinvent): `VehicleState`
 (`px4_bridge/vehicle_state.py`), `BridgeStatus` (`px4_bridge/contract.py`),
-`ResolvedVehicle.gcs_port` (`config/types.py:352`), the observer/state sampling
+`ResolvedVehicle.gcs_port` (`config/types.py:358`, derived as
+`px4.gcs_baseport + id` in `config/load.py:110`), the observer/state sampling
 and gate helpers already in `_px4_takeoff_scenario.py`, and the
 `AbstractFlightStackBridge` send/poll seam as the structural template
 (`px4_bridge/flight_stack.py`).

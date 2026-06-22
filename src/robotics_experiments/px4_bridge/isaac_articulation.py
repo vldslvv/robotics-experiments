@@ -462,8 +462,9 @@ class IsaacArticulationIO:
                 f"got {omega.shape}"
             )
         delta_deg = self._rotor_spin_signs * np.degrees(omega) * self._rotor_spin_visual_scale * dt
-        self._rotor_angle_deg = np.mod(self._rotor_angle_deg + delta_deg, 360.0)
-        for op, angle in zip(self._rotor_spin_ops, self._rotor_angle_deg, strict=False):
+        rotor_angle_deg = np.mod(self._rotor_angle_deg + delta_deg, 360.0)
+        self._rotor_angle_deg = rotor_angle_deg
+        for op, angle in zip(self._rotor_spin_ops, rotor_angle_deg, strict=False):
             op.Set(float(angle))
 
     def _apply_body_effect(

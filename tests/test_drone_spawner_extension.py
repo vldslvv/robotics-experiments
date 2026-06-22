@@ -88,7 +88,7 @@ def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
         id=vehicle_id,
         spawn_xy=spawn_xy,
         drone=SimpleNamespace(prim_name=prim_name),
-        px4=SimpleNamespace(enabled=enabled, connection_baseport=4560),
+        px4=SimpleNamespace(enabled=enabled, connection_baseport=4560, articulation_path=None),
         mavlink_port=4560 + vehicle_id,
         px4_instance_index=vehicle_id,
         gcs_port=14550 + vehicle_id,
@@ -97,8 +97,14 @@ def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
     )
 
 
-def _env(*vehicles, physics_hz=250.0):
-    return SimpleNamespace(sim=SimpleNamespace(physics_hz=physics_hz), vehicles=list(vehicles))
+def _env(*vehicles, physics_hz=250.0, routine_steps=()):
+    # routine.steps is the live-routine switch: empty (the default here) means the
+    # extension builds no control driver, matching manual operation.
+    return SimpleNamespace(
+        sim=SimpleNamespace(physics_hz=physics_hz),
+        vehicles=list(vehicles),
+        routine=SimpleNamespace(steps=list(routine_steps)),
+    )
 
 
 class _DefaultPrim:
@@ -333,6 +339,89 @@ def test_play_with_empty_fleet_spawns_nothing(monkeypatch):
     assert spawned == []
     assert extension._bridge_group.hosts == []
     assert extension._spawned_drones == []
+
+
+def _spawn_and_bridge_stubs(monkeypatch, module):
+    monkeypatch.setattr(module, "despawn_drone", lambda stage, config=None: None)
+    monkeypatch.setattr(
+        module,
+        "spawn_drone",
+        lambda stage, config=None, *, position=None, yaw=0.0: f"/World/{config.prim_name}",
+    )
+    monkeypatch.setattr(
+        module,
+        "BridgeHost",
+        lambda **kw: SimpleNamespace(start=lambda: None, stop=lambda: None, vehicle=kw["vehicle"]),
+    )
+
+
+def test_play_builds_control_driver_when_routine_non_empty(monkeypatch):
+    module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
+    _spawn_and_bridge_stubs(monkeypatch, module)
+
+    built = {}
+
+    class _FakeDriver:
+        def __init__(self):
+            self.started = False
+            self.stopped = False
+
+        @classmethod
+        def from_vehicles(cls, entries, *, routine_cfg):
+            inst = cls()
+            built.update(entries=entries, routine_cfg=routine_cfg, inst=inst)
+            return inst
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+    monkeypatch.setattr(module, "FleetControlDriver", _FakeDriver)
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
+    monkeypatch.setattr(
+        module, "_get_experiment_config", lambda: _env(v0, routine_steps=[{"kind": "arm"}])
+    )
+
+    extension = module.Extension()
+    extension.on_startup("drone_spawner")
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+
+    # A non-empty routine builds and starts the driver from one entry per
+    # px4-enabled vehicle: (vehicle, host, articulation_path).
+    assert built["inst"].started is True
+    assert built["routine_cfg"].steps == [{"kind": "arm"}]
+    assert len(built["entries"]) == 1
+    vehicle, _host, articulation_path = built["entries"][0]
+    assert vehicle.id == 0
+    assert articulation_path == "/World/Drone"
+    assert extension._control_driver is built["inst"]
+
+    # STOP stops the driver and clears it.
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.STOP)))
+    assert built["inst"].stopped is True
+    assert extension._control_driver is None
+
+
+def test_play_with_empty_routine_builds_no_control_driver(monkeypatch):
+    module, _usd_context = _import_extension(monkeypatch, stage=_Stage())
+    _spawn_and_bridge_stubs(monkeypatch, module)
+
+    def _should_not_build(*args, **kwargs):
+        raise AssertionError("control driver must not be built for an empty routine")
+
+    monkeypatch.setattr(
+        module, "FleetControlDriver", SimpleNamespace(from_vehicles=_should_not_build)
+    )
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, routine_steps=()))
+
+    extension = module.Extension()
+    extension.on_startup("drone_spawner")
+    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+
+    assert extension._control_driver is None
 
 
 def test_shutdown_stops_bridges_and_despawns(monkeypatch):
