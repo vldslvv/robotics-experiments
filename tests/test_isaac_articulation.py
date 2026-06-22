@@ -293,6 +293,7 @@ def test_apply_dynamics_applies_rotor_forces_then_body_torque_and_drag():
             forces_n=np.array([4.0], dtype=np.float64),
             body_torque_n_m=np.array([0.0, 0.0, 0.5], dtype=np.float64),
             body_drag_n=np.array([-0.2, 0.0, 0.0], dtype=np.float64),
+            rotor_omega_rad_s=np.array([700.0], dtype=np.float64),
         )
     )
 
@@ -310,6 +311,49 @@ def test_apply_dynamics_applies_rotor_forces_then_body_torque_and_drag():
     drag_call = body.calls[2]
     assert drag_call["is_global"] is False
     np.testing.assert_allclose(drag_call["forces"], [[-0.2, 0.0, 0.0]], atol=1e-12)
+
+
+class _FakeRotateZOp:
+    def __init__(self):
+        self.value = 0.0
+
+    def Set(self, value):  # noqa: N802 - mirrors the USD xformOp API
+        self.value = float(value)
+
+
+def test_update_rotor_spin_accumulates_signed_angle_and_wraps():
+    # Two rotors with opposite spin directions, driven for two ticks. The visual
+    # angle accumulates by sign * degrees(omega) * visual_scale * dt and wraps to
+    # [0, 360). CCW (+1) advances positive; CW (-1) wraps to just under 360.
+    io = IsaacArticulationIO(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m0", "m1"],
+        rotor_spin_visual_scale=0.5,
+    )
+    ops = [_FakeRotateZOp(), _FakeRotateZOp()]
+    io._rotor_spin_ops = ops
+    io._rotor_spin_signs = np.array([1.0, -1.0], dtype=np.float64)
+    io._rotor_angle_deg = np.zeros(2, dtype=np.float64)
+
+    omega = np.array([4.0, 4.0], dtype=np.float64)
+    step_deg = math.degrees(4.0) * 0.5 * 0.25  # visual_scale=0.5, dt=0.25
+
+    io.update_rotor_spin(omega, dt=0.25)
+    np.testing.assert_allclose(ops[0].value, step_deg)
+    np.testing.assert_allclose(ops[1].value, (-step_deg) % 360.0)
+
+    io.update_rotor_spin(omega, dt=0.25)
+    np.testing.assert_allclose(ops[0].value, (2.0 * step_deg) % 360.0)
+    np.testing.assert_allclose(ops[1].value, (-2.0 * step_deg) % 360.0)
+    # CW rotor sits just below a full turn (negative angle wrapped into range).
+    assert ops[1].value > 180.0
+
+
+def test_update_rotor_spin_noop_before_initialize():
+    # No spin handles acquired yet (initialize not run): the seam is a silent
+    # no-op rather than raising, so a pre-init tick cannot crash the sim.
+    io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=["m0"])
+    io.update_rotor_spin(np.array([500.0], dtype=np.float64), dt=0.004)
 
 
 def test_initialize_runs_root_body_diagnostics_before_rotor_resolution(monkeypatch):

@@ -254,6 +254,9 @@ class Px4BridgeConfig:
             drone's body-Z axis and world-Z. When exceeded, the bridge zeros
             all rotor forces to prevent inverted thrust after a crash. Set to
             zero or a negative value to disable.
+        rotor_spin_visual_scale: Cosmetic-only factor that scales the real
+            per-rotor angular velocity into a non-aliasing on-screen rotor-spin
+            rate. Visual only - it never affects forces or the PX4 lockstep.
     """
 
     enabled: bool
@@ -281,6 +284,7 @@ class Px4BridgeConfig:
     debug_log_level: str
     sensor_debug_log_interval: int
     max_tilt_angle_deg: float
+    rotor_spin_visual_scale: float
 
 
 @dataclass

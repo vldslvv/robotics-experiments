@@ -241,6 +241,7 @@ class BridgeHost:
             thrust_model=thrust_model,
             port=port,
             max_tilt_angle_deg=self._cfg.max_tilt_angle_deg,
+            rotor_spin_visual_scale=self._cfg.rotor_spin_visual_scale,
         )
 
         try:

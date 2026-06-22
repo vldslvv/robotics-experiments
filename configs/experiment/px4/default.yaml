@@ -96,3 +96,8 @@ sensor_debug_log_interval: 50
 # to prevent inverted thrust after a crash. Set to 0 or a negative value to
 # disable.
 max_tilt_angle_deg: 60.0
+
+# Cosmetic-only scale from real per-rotor angular velocity (up to ~1100 rad/s)
+# to an on-screen rotor-spin rate that does not alias. Visual only - never
+# affects forces or the PX4 lockstep.
+rotor_spin_visual_scale: 0.03

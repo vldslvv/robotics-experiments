@@ -124,7 +124,15 @@ the current contents and the intended home for that kind of code.
   cadence must equal physics cadence (else disconnect "sensor cadence mismatch");
   prime-then-block startup plus newest-packet draining keep actuators fresh
   (backlog trips `max_sustained_actuator_lag_s`); safety gating zeros forces only,
-  never the per-tick exchange; a non-finite vehicle state raises.
+  never the per-tick exchange; a non-finite vehicle state raises. Visual rotor
+  spin is the one explicitly non-load-bearing addition: `RotorDynamics` carries an
+  additive `rotor_omega_rad_s` (the clipped per-rotor omega the thrust model
+  already computes) and `IsaacArticulationIO.update_rotor_spin(rotor_omega_rad_s,
+  dt)` is a cosmetic-only seam called from `recv_and_apply` after the unchanged
+  `apply_dynamics` (with `dt` stashed by `send_sensors`). It only writes a
+  `RotateZ` xformOp on each rotor marker (scaled by `px4.rotor_spin_visual_scale`)
+  and must never re-enter forces, the body, or the lockstep -- keep
+  `commands_to_dynamics` pure and `apply_dynamics` the sole physics sink.
 - Multi-vehicle scenes are driven by a top-level `vehicles:` list. It is the
   single source of truth and the only spawn path: one vehicle = a one-element
   list (the default config ships exactly that, reproducing the single-drone

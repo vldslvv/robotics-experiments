@@ -45,6 +45,7 @@ class Px4Bridge:
         port: AbstractFlightStackBridge,
         articulation_io: Optional[ArticulationIO] = None,
         max_tilt_angle_deg: float = 180.0,
+        rotor_spin_visual_scale: float = 0.03,
     ):
         """Build the bridge. No sockets or articulation handles are touched here.
 
@@ -62,6 +63,10 @@ class Px4Bridge:
                 MAVLink sensor/actuator exchange every tick, so PX4 lockstep is
                 preserved. Defaults to ``180.0`` - the maximum possible tilt, so
                 the cutoff never fires (disabled) unless a smaller limit is set.
+            rotor_spin_visual_scale: Cosmetic-only factor that slows the real
+                per-rotor angular velocity to a non-aliasing on-screen spin rate.
+                Passed to the default :class:`IsaacArticulationIO`; ignored when
+                ``articulation_io`` is injected.
         """
         if thrust_model.num_rotors != port.num_rotors:
             raise ValueError(
@@ -84,6 +89,7 @@ class Px4Bridge:
         self._pending_send_result: Optional[ActuatorCommands] = None
         self._pending_force_cutoff: bool = False
         self._pending_sim_time_us: int = 0
+        self._pending_dt: float = 0.0
         if articulation_io is None:
             from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
@@ -92,6 +98,7 @@ class Px4Bridge:
             articulation_io = IsaacArticulationIO(
                 articulation_path=articulation_path,
                 rotor_link_paths=rotor_link_paths,
+                rotor_spin_visual_scale=rotor_spin_visual_scale,
             )
         self._io = articulation_io
 
@@ -182,6 +189,7 @@ class Px4Bridge:
         self._pending_send_result = self._port.send(state)
         self._pending_state = state
         self._pending_force_cutoff = force_cutoff
+        self._pending_dt = float(dt)
         self._pending_sim_time_us = int(sim_time_us)
 
     def recv_and_apply(self) -> None:
@@ -189,13 +197,25 @@ class Px4Bridge:
 
         Consumes the state stashed by :meth:`send_sensors`. Tilt-gated ticks
         apply zeros; otherwise the actuator commands run through the thrust model
-        and the resulting dynamics are applied to the articulation.
+        and the resulting dynamics are applied to the articulation. The cosmetic
+        rotor spin always follows the real per-rotor omega, even on a tilt-gated
+        tick where forces are zeroed.
         """
         state = self._pending_state
         sim_time_us = self._pending_sim_time_us
         # Block for the paired actuator (or take the no-block result from send).
         send_result = self._pending_send_result
         commands = self._port.poll() if send_result is None else send_result
+
+        body_velocity_flu = frames.body_velocity_flu_from_state(state)
+        dynamics = self._thrust_model.commands_to_dynamics(
+            commands,
+            linear_body_velocity_flu=body_velocity_flu,
+        )
+        # Visual spin is bound to the commanded omega regardless of force gating;
+        # it is cosmetic and never feeds back into physics or the lockstep.
+        self._io.update_rotor_spin(dynamics.rotor_omega_rad_s, self._pending_dt)
+
         if self._pending_force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
@@ -203,15 +223,11 @@ class Px4Bridge:
                     forces_n=zero,
                     body_torque_n_m=np.zeros(3, dtype=np.float64),
                     body_drag_n=np.zeros(3, dtype=np.float64),
+                    rotor_omega_rad_s=dynamics.rotor_omega_rad_s,
                 )
             )
             return
 
-        body_velocity_flu = frames.body_velocity_flu_from_state(state)
-        dynamics = self._thrust_model.commands_to_dynamics(
-            commands,
-            linear_body_velocity_flu=body_velocity_flu,
-        )
         self._tick_count += 1
         if self._tick_count <= 10 or self._tick_count % self._dynamics_debug_interval == 0:
             _LOGGER.debug(

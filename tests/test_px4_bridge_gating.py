@@ -8,7 +8,11 @@ from _fakes import (
     _quat_yaw_deg,
 )
 
-from robotics_experiments.px4_bridge import LinearThrustModel, Px4Bridge
+from robotics_experiments.px4_bridge import (
+    LinearThrustModel,
+    PegasusQuadraticThrustModel,
+    Px4Bridge,
+)
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 
@@ -226,3 +230,53 @@ def test_bridge_tilt_cutoff_disabled_by_default():
 
     assert len(io.applied_forces) == 1
     assert bridge._tilt_cutoff_count == 0
+
+
+def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
+    state = VehicleState.hover_at(sim_time_us=0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([100.0, 500.0, 1100.0, 1500.0])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
+        port=port,
+        articulation_io=io,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    # The cosmetic spin seam is fed the clipped per-rotor omega and the tick dt.
+    assert len(io.spin_updates) == 1
+    omega, dt = io.spin_updates[0]
+    np.testing.assert_allclose(omega, np.clip([100.0, 500.0, 1100.0, 1500.0], 0.0, 1100.0))
+    assert dt == pytest.approx(0.004)
+
+
+def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
+    # Forces are gated to zero on a tilt cutoff, but the rotors keep spinning at
+    # the real commanded omega: visual spin is decoupled from the force gate.
+    state = VehicleState.hover_at(sim_time_us=0)
+    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([700.0, 700.0, 700.0, 700.0])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
+        port=port,
+        articulation_io=io,
+        max_tilt_angle_deg=60.0,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    assert bridge._tilt_cutoff_count == 1
+    assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
+    assert len(io.spin_updates) == 1
+    omega, _dt = io.spin_updates[0]
+    np.testing.assert_allclose(omega, [700.0, 700.0, 700.0, 700.0])

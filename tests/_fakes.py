@@ -29,6 +29,8 @@ class _FakeArticulationIO:
         self.shutdown_called = False
         self.applied_forces: list[np.ndarray] = []
         self.applied_dynamics: list[RotorDynamics] = []
+        # (rotor_omega_rad_s, dt) pairs recorded from the cosmetic spin seam.
+        self.spin_updates: list[tuple[np.ndarray, float]] = []
 
     @property
     def is_initialized(self):
@@ -47,6 +49,9 @@ class _FakeArticulationIO:
     def apply_dynamics(self, dynamics: RotorDynamics):
         self.applied_dynamics.append(dynamics)
         self.applied_forces.append(np.asarray(dynamics.forces_n, dtype=np.float64))
+
+    def update_rotor_spin(self, rotor_omega_rad_s, dt):
+        self.spin_updates.append((np.asarray(rotor_omega_rad_s, dtype=np.float64), float(dt)))
 
 
 class _FakeFlightStack:
@@ -126,6 +131,7 @@ class _CapturingThrustModel:
             forces_n=np.zeros(self._num_rotors, dtype=np.float64),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),
+            rotor_omega_rad_s=np.zeros(self._num_rotors, dtype=np.float64),
         )
 
 

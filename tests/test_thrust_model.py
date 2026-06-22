@@ -62,6 +62,19 @@ def test_pegasus_quadratic_model_matches_reaction_torque_formula(commands):
     np.testing.assert_allclose(dynamics.body_drag_n, [-1.0, 0.9, 0.0])
 
 
+def test_pegasus_quadratic_model_reports_clipped_omega():
+    model = PegasusQuadraticThrustModel(num_rotors=4)
+
+    commands = np.array([-50.0, 500.0, 1100.0, 1500.0])
+    dynamics = model.commands_to_dynamics(ActuatorCommands(commands))
+
+    # rotor_omega_rad_s is the clipped angular-velocity reference used to produce
+    # forces, ordered by motor index, and drives only the cosmetic spin.
+    expected_omega = np.clip(commands, 0.0, 1100.0)
+    np.testing.assert_allclose(dynamics.rotor_omega_rad_s, expected_omega)
+    np.testing.assert_allclose(dynamics.forces_n, 8.54858e-6 * np.square(expected_omega))
+
+
 def test_pegasus_quadratic_model_drag_opposes_body_velocity():
     model = PegasusQuadraticThrustModel(num_rotors=4)
 

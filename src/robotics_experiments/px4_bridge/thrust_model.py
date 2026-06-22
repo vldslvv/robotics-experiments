@@ -39,11 +39,18 @@ class RotorDynamics:
     All vectors use the Isaac/Pegasus body-FLU convention. ``forces_n`` is
     ordered by PX4 motor index and applied at each rotor marker. The body
     vectors are applied at the vehicle body origin.
+
+    ``rotor_omega_rad_s`` is the per-rotor angular velocity (rad/s) used to
+    produce ``forces_n``, ordered by PX4 motor index like ``forces_n``. It is an
+    additive, cosmetic-only output: the bridge feeds it to the visual rotor-spin
+    seam and it never re-enters the physics sink or the MAVLink lockstep. Models
+    that only report force set it to zeros.
     """
 
     forces_n: np.ndarray
     body_torque_n_m: np.ndarray
     body_drag_n: np.ndarray
+    rotor_omega_rad_s: np.ndarray
 
 
 class RotorThrustModel(ABC):
@@ -77,6 +84,7 @@ class RotorThrustModel(ABC):
             forces_n=self.commands_to_forces(commands),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),
+            rotor_omega_rad_s=np.zeros(self.num_rotors, dtype=np.float64),
         )
 
 
@@ -199,4 +207,5 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
             forces_n=forces,
             body_torque_n_m=np.array([0.0, 0.0, rolling_moment], dtype=np.float64),
             body_drag_n=drag,
+            rotor_omega_rad_s=omega,
         )

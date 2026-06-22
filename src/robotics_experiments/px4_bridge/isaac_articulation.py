@@ -48,6 +48,7 @@ class IsaacArticulationIO:
         articulation_path: str,
         rotor_link_paths: Sequence[str],
         root_body_pose_diagnostics: RootBodyPoseDiagnosticParams | None = None,
+        rotor_spin_visual_scale: float = 0.03,
     ):
         self._articulation_path = str(articulation_path)
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
@@ -56,12 +57,20 @@ class IsaacArticulationIO:
             if root_body_pose_diagnostics is not None
             else RootBodyPoseDiagnosticParams()
         )
+        self._rotor_spin_visual_scale = float(rotor_spin_visual_scale)
 
         self._articulation: Any | None = None
         self._body: Any | None = None
         self._body_path: str | None = None
         self._rotor_positions_body: Optional[np.ndarray] = None
         self._force_apply_count: int = 0
+        # Cosmetic rotor-spin state, populated in initialize(): one RotateZ
+        # xformOp handle per rotor marker, the per-rotor accumulated visual angle
+        # in degrees, and the per-rotor spin-direction sign (+1 CCW / -1 CW). This
+        # is visual-only and never feeds back into physics or the lockstep.
+        self._rotor_spin_ops: List[Any] = []
+        self._rotor_angle_deg: Optional[np.ndarray] = None
+        self._rotor_spin_signs: Optional[np.ndarray] = None
 
     @property
     def num_rotors(self) -> int:
@@ -121,6 +130,40 @@ class IsaacArticulationIO:
         )
 
         self._rotor_positions_body = self._resolve_rotor_positions_body(stage, body_path)
+        self._resolve_rotor_spin_ops(stage)
+
+    def _resolve_rotor_spin_ops(self, stage) -> None:
+        """Acquire the cosmetic RotateZ xformOp authored on each rotor marker.
+
+        The drone asset builder authors a RotateZ op on every rotor marker, so
+        this requires it and raises when it is missing. Reads ``drone:spinDir``
+        to set the per-rotor sign, matching :mod:`rotor_discovery` (CW -> -1,
+        CCW -> +1). This only touches visual transforms and never the physics
+        body.
+        """
+        from pxr import UsdGeom
+
+        ops: List[Any] = []
+        signs: List[float] = []
+        for path in self._rotor_link_paths:
+            rotor_prim = stage.GetPrimAtPath(path)
+            xformable = UsdGeom.Xformable(rotor_prim)
+            spin_op = None
+            for op in xformable.GetOrderedXformOps():
+                if op.GetOpType() == UsdGeom.XformOp.TypeRotateZ:
+                    spin_op = op
+                    break
+            if spin_op is None:
+                raise RuntimeError(f"Rotor marker prim is missing its RotateZ spin op: {path}")
+            ops.append(spin_op)
+
+            spin_attr = rotor_prim.GetAttribute("drone:spinDir")
+            spin_dir = spin_attr.Get() if spin_attr and spin_attr.HasValue() else None
+            signs.append(-1.0 if spin_dir == "CW" else 1.0)
+
+        self._rotor_spin_ops = ops
+        self._rotor_spin_signs = np.asarray(signs, dtype=np.float64)
+        self._rotor_angle_deg = np.zeros(len(ops), dtype=np.float64)
 
     def _resolve_body_path(self, stage) -> str:
         from pxr import UsdPhysics
@@ -184,6 +227,9 @@ class IsaacArticulationIO:
         self._body_path = None
         self._rotor_positions_body = None
         self._force_apply_count = 0
+        self._rotor_spin_ops = []
+        self._rotor_angle_deg = None
+        self._rotor_spin_signs = None
 
     # ---- Per-tick I/O ------------------------------------------------------
 
@@ -397,6 +443,28 @@ class IsaacArticulationIO:
         self.apply_forces(dynamics.forces_n)
         self.apply_body_torque(dynamics.body_torque_n_m)
         self.apply_body_force(dynamics.body_drag_n)
+
+    def update_rotor_spin(self, rotor_omega_rad_s: np.ndarray, dt: float) -> None:
+        """Advance the cosmetic rotor spin from per-rotor angular velocity.
+
+        Visual-only: integrates each rotor's authored RotateZ op by
+        ``sign * degrees(omega) * visual_scale * dt`` and writes it back. The
+        ``visual_scale`` factor slows the real (up to ~1100 rad/s) spin to a
+        non-aliasing on-screen rate. This never touches forces, the body, or the
+        MAVLink lockstep, so it cannot perturb flight dynamics.
+        """
+        if self._rotor_angle_deg is None or self._rotor_spin_signs is None:
+            return
+        omega = np.asarray(rotor_omega_rad_s, dtype=np.float64)
+        if omega.shape != (len(self._rotor_spin_ops),):
+            raise ValueError(
+                f"update_rotor_spin expected shape ({len(self._rotor_spin_ops)},), "
+                f"got {omega.shape}"
+            )
+        delta_deg = self._rotor_spin_signs * np.degrees(omega) * self._rotor_spin_visual_scale * dt
+        self._rotor_angle_deg = np.mod(self._rotor_angle_deg + delta_deg, 360.0)
+        for op, angle in zip(self._rotor_spin_ops, self._rotor_angle_deg, strict=False):
+            op.Set(float(angle))
 
     def _apply_body_effect(
         self,

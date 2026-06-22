@@ -106,10 +106,19 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             thrust_model,
             port,
             max_tilt_angle_deg=180.0,
+            rotor_spin_visual_scale=0.03,
         ):
             self.is_connected = True
             self.step_times = []
-            calls.append(("bridge", articulation_path, rotor_link_paths, max_tilt_angle_deg))
+            calls.append(
+                (
+                    "bridge",
+                    articulation_path,
+                    rotor_link_paths,
+                    max_tilt_angle_deg,
+                    rotor_spin_visual_scale,
+                )
+            )
 
         def start(self):
             calls.append("bridge_start")
@@ -192,6 +201,7 @@ def _config(**overrides):
         "debug_log_level": "DEBUG",
         "sensor_debug_log_interval": 50,
         "max_tilt_angle_deg": 60.0,
+        "rotor_spin_visual_scale": 0.03,
     }
     values.update(overrides)
     return SimpleNamespace(**values)

@@ -8,7 +8,7 @@ pytest.importorskip("hydra")
 pytest.importorskip("omegaconf")
 pytest.importorskip("pxr")
 
-from pxr import Usd  # noqa: E402
+from pxr import Usd, UsdGeom  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUILDER_PATH = _REPO_ROOT / "isaac/runtime/standalone/build_copter_usd_standalone.py"
@@ -103,3 +103,22 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
         assert prim.GetAttribute("drone:rotorMarker").Get() is True
         assert prim.GetAttribute("drone:px4MotorIndex").Get() == px4_index
         assert prim.GetAttribute("drone:spinDir").Get() == spin_dir
+
+        # The marker is an Xform carrying a cosmetic RotateZ spin op (initial 0,
+        # ordered after the translate) plus the propeller visual (hub + blades).
+        assert prim.IsA(UsdGeom.Xform)
+        xformable = UsdGeom.Xformable(prim)
+        op_order = [op.GetOpName() for op in xformable.GetOrderedXformOps()]
+        assert "xformOp:translate" in op_order
+        rotate_ops = [
+            op
+            for op in xformable.GetOrderedXformOps()
+            if op.GetOpType() == UsdGeom.XformOp.TypeRotateZ
+        ]
+        assert len(rotate_ops) == 1
+        assert op_order.index("xformOp:translate") < op_order.index(rotate_ops[0].GetOpName())
+        assert rotate_ops[0].Get() == 0.0
+
+        assert stage.GetPrimAtPath(f"{path}/hub").IsA(UsdGeom.Cylinder)
+        blades = [child for child in prim.GetChildren() if child.GetName().startswith("blade_")]
+        assert len(blades) == 2  # num_blades from the quad config

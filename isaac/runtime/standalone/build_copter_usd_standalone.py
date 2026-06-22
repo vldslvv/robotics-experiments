@@ -94,6 +94,7 @@ class Motor:
     propeller: CylinderPart  # disc above the motor
     spin_dir: str  # "CCW" | "CW"
     px4_motor_index: int
+    prop_num_blades: int  # cosmetic blade count for the propeller visual
 
 
 @dataclass
@@ -195,6 +196,7 @@ def _motor(data: dict[str, Any], label: str) -> Motor:
         propeller=_cylinder(data["propeller"], f"{label}.propeller"),
         spin_dir=str(data["spin_dir"]),
         px4_motor_index=int(data["px4_motor_index"]),
+        prop_num_blades=int(data["propeller"]["num_blades"]),
     )
 
 
@@ -295,6 +297,38 @@ def _author_capsule(stage: Usd.Stage, prim_path: str, part: CapsulePart) -> UsdG
     return cap
 
 
+def _author_propeller_visual(stage: Usd.Stage, prop_path: str, motor: Motor) -> None:
+    """Author the cosmetic propeller geometry under the rotor marker Xform.
+
+    A small central hub cylinder plus ``prop_num_blades`` thin blade boxes fanned
+    evenly about Z. All geometry is collision-free and visual only; it derives
+    its dimensions from the propeller radius/height (no extra geometry knobs) and
+    spins as a unit because it is parented under the marker's RotateZ op.
+    """
+    prop_part = motor.propeller
+    num_blades = int(motor.prop_num_blades)
+    if num_blades < 1:
+        raise ValueError(f"propeller num_blades must be >= 1, got {num_blades} for {motor.name}")
+
+    hub = UsdGeom.Cylinder.Define(stage, f"{prop_path}/hub")
+    hub.CreateRadiusAttr(prop_part.radius * 0.12)
+    hub.CreateHeightAttr(prop_part.height)
+
+    blade_length = prop_part.radius
+    blade_width = prop_part.radius * 0.14
+    for blade_idx in range(num_blades):
+        angle_deg = blade_idx * (360.0 / num_blades)
+        blade = UsdGeom.Xform.Define(stage, f"{prop_path}/blade_{blade_idx + 1}")
+        # Order [rotateZ, translate]: the blade box is offset along +X so its
+        # inner end meets the hub, then the whole blade is rotated about Z to its
+        # slot in the fan.
+        blade.AddRotateZOp().Set(angle_deg)
+        blade.AddTranslateOp().Set(Gf.Vec3d(blade_length * 0.5, 0.0, 0.0))
+        geom = UsdGeom.Cube.Define(stage, f"{prop_path}/blade_{blade_idx + 1}/geom")
+        geom.CreateSizeAttr(1.0)
+        geom.AddScaleOp().Set(Gf.Vec3f(blade_length, blade_width, prop_part.height))
+
+
 def _author_motor(stage: Usd.Stage, parent_path: str, idx: int, motor: Motor) -> None:
     grp_path = f"{parent_path}/motor_{idx+1}"
     UsdGeom.Xform.Define(stage, grp_path)
@@ -327,23 +361,29 @@ def _author_motor(stage: Usd.Stage, parent_path: str, idx: int, motor: Motor) ->
     esc_geom.CreateSizeAttr(1.0)
     esc_geom.AddScaleOp().Set(Gf.Vec3f(*esc_part.size))
 
-    # Propeller: position is local to the motor.
+    # Propeller: position is local to the motor. The marker is an Xform (keeping
+    # the prop prim's path, PX4 marker attributes, translate, and mass) so it can
+    # carry both the rotor-spin RotateZ op and the child propeller visual (a hub
+    # plus fanned-out blades). rotor_discovery and the bridge read the marker's
+    # translation, which the RotateZ op leaves unchanged.
     prop_part = motor.propeller
     prop_world_pos = (
         motor.position[0] + prop_part.position[0],
         motor.position[1] + prop_part.position[1],
         motor.position[2] + prop_part.position[2],
     )
-    prop = UsdGeom.Cylinder.Define(stage, f"{grp_path}/prop")
-    prop.CreateRadiusAttr(prop_part.radius)
-    prop.CreateHeightAttr(prop_part.height)
+    prop = UsdGeom.Xform.Define(stage, f"{grp_path}/prop")
     _apply_pose(prop, prop_world_pos, prop_part.rotation_deg)
+    # Cosmetic spin op, authored after the translate so spinning never disturbs
+    # the marker position. The runtime drives this op every physics tick.
+    prop.AddRotateZOp().Set(0.0)
     prop.GetPrim().CreateAttribute("drone:rotorMarker", Sdf.ValueTypeNames.Bool).Set(True)
     prop.GetPrim().CreateAttribute("drone:px4MotorIndex", Sdf.ValueTypeNames.Int).Set(
         motor.px4_motor_index
     )
     prop.GetPrim().CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(motor.spin_dir)
     _set_mass(prop.GetPrim(), prop_part.mass)
+    _author_propeller_visual(stage, f"{grp_path}/prop", motor)
 
 
 def build_drone_usd(

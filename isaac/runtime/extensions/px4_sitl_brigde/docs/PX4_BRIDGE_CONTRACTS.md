@@ -217,7 +217,8 @@ harmful.
                               port.send(state) (sensors to PX4, no block)
                             - recv_and_apply: port.poll() (block for the paired
                               actuator commands); apply_dynamics to drone body at
-                              rotor markers
+                              rotor markers; then update_rotor_spin (cosmetic-only
+                              visual rotor spin, never feeds back into physics)
                           (multi-vehicle: BridgeHostGroup runs all send_phase
                            legs, then all recv_phase legs, across vehicles)
         │
@@ -274,6 +275,7 @@ class ActuatorCommands:    # flight stack -> bridge each tick (port output, thru
 @dataclass(frozen=True)
 class RotorDynamics:       # thrust model -> Isaac each tick
     forces_n; body_torque_n_m; body_drag_n
+    rotor_omega_rad_s      # per-rotor angular velocity (rad/s); additive, cosmetic-only (drives visual spin), never re-enters physics or lockstep
 
 @dataclass(frozen=True)
 class BridgeStatus:        # read-only runtime snapshot for consumers
@@ -308,7 +310,8 @@ class AbstractFlightStackBridge:
 # The Isaac seam: read state in, apply a full rotor-model result out.
 class ArticulationIO(Protocol):
     def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
-    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac (physics sink)
+    def update_rotor_spin(self, rotor_omega_rad_s, dt) -> None: ...  # cosmetic-only visual rotor spin; never touches forces/lockstep
     # plus initialize / shutdown / is_initialized / num_rotors
 
 # The orchestrator ties the four pieces into a per-tick pipeline.
@@ -322,6 +325,7 @@ class Px4Bridge:
         port: AbstractFlightStackBridge,
         articulation_io: ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
         max_tilt_angle_deg: float = 180.0,              # zeros forces past this tilt; 180 = disabled
+        rotor_spin_visual_scale: float = 0.03,          # cosmetic-only spin scale; passed to the default IsaacArticulationIO
     ): ...
 
     def start(self) -> None: ...
@@ -347,6 +351,20 @@ canonical single-vehicle caller. The multi-vehicle `BridgeHostGroup` instead
 calls every vehicle's send leg before any vehicle's poll leg, so the flight
 stacks compute concurrently and one stalled PX4 cannot freeze the others; the
 causal per-vehicle order (send before its own poll) is preserved.
+
+**Cosmetic rotor spin (separate seam):** the visual spinning of the propellers
+is *not* part of the four-part contract above and must never feed back into it.
+`commands_to_dynamics` stays pure -- it only adds the `rotor_omega_rad_s` field
+(built from the omega it already computes) -- and `apply_dynamics` stays the
+unchanged physics sink. The spin lives in its own cosmetic-only seam,
+`ArticulationIO.update_rotor_spin(rotor_omega_rad_s, dt)`, called from
+`recv_and_apply` *after* `apply_dynamics`. Because `recv_and_apply` takes no
+`dt`, `send_sensors` stashes the tick `dt` for it. The seam only integrates a
+`RotateZ` xformOp on each rotor marker prim (visual scale `rotor_spin_visual_scale`
+slows the real ~1100 rad/s omega to a non-aliasing on-screen rate); it never
+applies forces, mutates the body, or participates in the MAVLink lockstep. It
+runs even on a tilt-cutoff tick (forces zeroed, rotors still visibly spinning at
+the real commanded omega).
 
 ---
 
@@ -654,9 +672,11 @@ Isaac articulation
         ▼
    Thrust model
         │
-        │ RotorDynamics (per-rotor forces, body reaction torque, body drag)
+        │ RotorDynamics (per-rotor forces, body reaction torque, body drag,
+        │                plus cosmetic rotor_omega_rad_s)
         ▼
-Isaac articulation (apply rotor forces and body effects)
+Isaac articulation (apply_dynamics: rotor forces and body effects;
+                    then update_rotor_spin: cosmetic visual spin only)
 ```
 
 ### Owned by the bridge
