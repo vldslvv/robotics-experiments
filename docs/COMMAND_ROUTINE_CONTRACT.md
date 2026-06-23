@@ -25,14 +25,29 @@ module scope, so `import robotics_experiments` succeeds with both absent.
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
   int constants; `CommandAck.from_result` derives `accepted`.
-- **`routine.py`** -- the pure plan and stepper. `RoutineStep` (a command, a
-  completion predicate `Callable[[RoutineObservation], bool]`, a sim-time
-  `timeout_s`, and `retry_on_temporarily_rejected`), `VehicleRoutine` (ordered
-  steps), `RoutineState` (cursor/sent/baseline/step-start), and `RoutineDecision`
-  (`SEND` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`). `decide(routine, state,
-  observation) -> (state, decision)` is the contract centerpiece: no sockets, no
-  pymavlink, no Isaac. Predicate helpers: `armed()`, `ack_accepted(command_id)`,
-  `climbed_at_least(min_climb_m, baseline_altitude_m=...)`.
+- **`routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
+  command -- `None` for a verification-only step such as `hover`; a completion
+  predicate `StepPredicate = Callable[[RoutineObservation, baseline], bool]`; a
+  sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
+  sustained-completion window; and a tuple of continuous `invariants`),
+  `VehicleRoutine` (ordered steps), `RoutineState`
+  (cursor/sent/baseline/step-start/`hold_since_us`), and `RoutineDecision`
+  (`SEND` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`, the `FAIL` carrying a
+  `failure_kind`). `decide(routine, state, observation) -> (state, decision)` is
+  the contract centerpiece: no sockets, no pymavlink, no Isaac. It checks the
+  step `invariants` first (a breach -> `FAIL(ENVELOPE)`), then completion (held
+  for `hold_s` -> `ADVANCE`), then ack-rejection/timeout (-> `FAIL(COMMAND)`).
+  Completion predicate helpers: `armed()`, `ack_accepted(command_id)`,
+  `climbed_at_least(min_climb_m)` (relative to the captured baseline),
+  `hovering_stable(...)`. Invariant gate helpers (each returns a breach message
+  or `None`): `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
+  `angular_speed_below`. `EnvelopeGates` bundles the gate thresholds wired onto
+  the flight steps.
+
+  `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
+  bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
+  reacts in kind: a strict driver maps `ENVELOPE` to its instability error and
+  `COMMAND` to a plain assertion; a forgiving driver logs either and stops.
 - **`port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
   `pump_heartbeat`, `send`, `poll_feedback`) and the PX4 `MavlinkCommandPort`,
   whose `pymavlink` import is function-scoped. The port absorbs the GCS-link
@@ -71,15 +86,23 @@ physics send/recv legs.
 ## Where the executor lives: two drivers, one pure core
 
 There are two drivers over the same `decide(...)` core and `AbstractCommandPort`
-seam; only the driver differs.
+seam, and both build the **same** routine from `routine.steps` via
+`build_vehicle_routine` (the verification lives in the routine, not the driver);
+only the reaction to a `FAIL` differs.
 
 **Standalone takeoff scenario**
 (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking, staged
-script that builds a per-drone `VehicleRoutine = [arm, takeoff]`, a
-`FleetCommander(STEP_SYNCHRONIZED)` over `MavlinkCommandPort`s, and drives it to
-`DONE` while ticking physics and asserting bridge connectivity; the climb/hover
-envelope and `post_takeoff_hook` stay in the scenario, fired after the routine
-completes.
+script that builds a per-drone routine from `routine.steps`
+(`[arm, takeoff, hover]`), a `FleetCommander(STEP_SYNCHRONIZED)` over
+`MavlinkCommandPort`s, and drives it to `DONE` while ticking physics and asserting
+bridge connectivity. The flight verification (climb, sustained hover, and the
+continuous envelope invariants) is inside the routine, so the driver only adds
+the generic infra checks and the **strict-vs-forgiving** reaction: `--strict`
+(the integration test) raises `ExpectedInstabilityDetected` on a
+`FailureKind.ENVELOPE` breach and `AssertionError` otherwise; without it a regular
+run logs and stops, like the live extension. The `post_takeoff_hook` (used by the
+negative test to inject a fault) fires once the tick the takeoff step completes,
+so the hover step's envelope then catches the resulting instability.
 
 **Live `drone_spawner` extension**
 (`isaac/runtime/extensions/drone_spawner/DroneSpawner_python/control_driver.py`,
@@ -100,19 +123,33 @@ bridge group starts) and stops it in `_teardown_drone`.
 
 **Config is the single source of truth.** The Hydra `routine` group
 (`RoutineConfig`, always composed onto `EnvConfig`) carries `steps` plus the
-control-flow tunables. `routine.steps` is the on/off switch: a non-empty list of
-`{kind: arm}` / `{kind: takeoff, climb_m: ...}` mappings makes the extension build
-the driver on Play; an empty list (the default) means manual operation. The pure
-`build_vehicle_routine(steps, *, target_latitude_deg, target_longitude_deg,
-target_altitude_m, command_ack_timeout_s)` maps the descriptors plus a per-drone
-takeoff target into a `VehicleRoutine` (unknown `kind` or a `takeoff` missing
-`climb_m` raises `ValueError`); it is pure (no Isaac/pymavlink) and is the shared
-seam for the eventual standalone/live merge. `configs/runtime_arm_takeoff.yaml`
-demos the headless routine via `make run-all HYDRA_CONFIG=...`. The GCS link
-baseport stays in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port`
-is derived from it.
+control-flow tunables **and the flight-envelope gates** (`max_*` / `hover_max_*`,
+the takeoff target/timeout, and the hover settle). There is no separate
+`integration_test` group: the integration test is just this routine driven with
+`--strict`. `routine.steps` is the on/off switch: a non-empty list of
+`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` / `{kind: hover, hold_s}`
+mappings makes a driver fly the routine; an empty list (the default) means manual
+operation. The pure `build_vehicle_routine(steps, *, target_latitude_deg,
+target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
+takeoff_timeout_s, hover_settle_s)` maps the descriptors plus a per-drone takeoff
+target into a `VehicleRoutine` (unknown `kind`, or a `takeoff`/`hover` missing a
+required field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the
+shared seam both drivers use. The takeoff step completes on a real climb
+(`climbed_at_least(min_climb_m)`) and the hover step on `hovering_stable(...)` held
+for `hold_s`, with the gates as continuous invariants on both.
+`configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
+`configs/runtime_arm_takeoff.yaml` demos it headless via
+`make run-all HYDRA_CONFIG=...`, and `configs/integration_test_takeoff.yaml`
+selects the same routine and only changes the scene. The GCS link baseport stays
+in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port` is derived from
+it.
 
-**Still deferred:** merging the standalone scenario onto `build_vehicle_routine` /
-a shared driver so the integration-test routine and the live routine become one,
-a headless extension-path integration target, and per-vehicle routine overrides
-(today `routine` is fleet-global).
+> Hover modeling note: the historical windowed *range* gates (min/max climb and
+> horizontal range over a sampling window) are now expressed as **sustained
+> instantaneous-rate** bounds (`hover_max_abs_vertical_speed_m_s` /
+> `hover_max_abs_horizontal_speed_m_s`) held continuously for the hover step's
+> `hold_s` -- the "hover stable for N seconds" model.
+
+**Still deferred:** extracting the duplicated pre-routine phase sequence (wait
+bridge -> handshake -> settle -> fetch target) into a shared helper, and
+per-vehicle routine overrides (today `routine` is fleet-global).

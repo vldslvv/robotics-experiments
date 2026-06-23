@@ -380,14 +380,28 @@ def make_routine_observation(
     *,
     sim_time_us=0,
     position_enu=(0.0, 0.0, 0.0),
+    linear_velocity_enu=(0.0, 0.0, 0.0),
+    angular_velocity_flu=(0.0, 0.0, 0.0),
+    tilt_deg=0.0,
     is_armed=False,
     last_ack=None,
     failsafe=False,
 ):
-    """Build a synthetic ``RoutineObservation`` for the pure command-layer tests."""
+    """Build a synthetic ``RoutineObservation`` for the pure command-layer tests.
+
+    ``tilt_deg`` tilts the body via a pitch rotation; ``linear_velocity_enu`` and
+    ``angular_velocity_flu`` drive the flight-envelope gates and the hover-stable
+    completion predicate.
+    """
     from robotics_experiments.commanding.observation import RoutineObservation
 
-    vehicle_state = VehicleState.hover_at(position_enu=position_enu, sim_time_us=sim_time_us)
+    vehicle_state = VehicleState(
+        position_enu=np.asarray(position_enu, dtype=np.float64),
+        orientation_flu_enu_wxyz=_quat_pitch_deg(tilt_deg),
+        linear_velocity_enu=np.asarray(linear_velocity_enu, dtype=np.float64),
+        angular_velocity_flu=np.asarray(angular_velocity_flu, dtype=np.float64),
+        sim_time_us=int(sim_time_us),
+    )
     bridge_status = BridgeStatus(
         is_connected=True,
         is_armed=is_armed,

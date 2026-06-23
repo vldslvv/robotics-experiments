@@ -11,9 +11,9 @@ defaults:
   - _self_
 
 # Scene loaded for this experiment. Every experiment (test or not) sets a scene;
-# '@' is repo-relative. This default runtime experiment carries no
-# integration_test harness group (EnvConfig.integration_test stays None) -- the
-# integration_test_* experiments add it.
+# '@' is repo-relative. This default runtime experiment ships an empty
+# routine.steps (manual operation); the takeoff experiments select the `takeoff`
+# routine variant and only differ in scene/fleet.
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 # Multi-vehicle scaffolding. Each entry merges its drone/px4 over the global

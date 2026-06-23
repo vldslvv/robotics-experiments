@@ -67,6 +67,7 @@ class SceneTestContext:
     scene_path: Path
     simulation_app: SimulationApp
     report: Callable[[str], None]
+    strict: bool = False
 
     def report_vehicle_state(self, label: str, state_or_sample: Any) -> None:
         """Emit a standardized drone state vector log line."""
@@ -146,6 +147,16 @@ def _parse_scene_args(description: str, default_scene: str | None) -> argparse.N
             "the Hydra scene config."
         ),
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Run as an integration test: assert on a flight-envelope breach or "
+            "any routine failure (non-zero exit). Without it the run is forgiving "
+            "(a breach is logged and the routine is stopped), like the live "
+            "extension."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -184,6 +195,7 @@ def run_scene_test(
     """
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
+    strict = bool(args.strict)
     if scene in (None, SCENE_FROM_CONFIG):
         scene = _resolve_scene_from_config(test_name)
     scene_path = _resolve_scene_path(scene)
@@ -235,6 +247,7 @@ def run_scene_test(
                 scene_path=scene_path,
                 simulation_app=simulation_app,
                 report=report,
+                strict=strict,
             )
         )
         timing.report_stage("test_body", stage_start_s)

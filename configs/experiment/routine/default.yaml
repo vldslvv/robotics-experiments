@@ -1,19 +1,14 @@
 defaults:
   - base_routine
 
-# High-level flight routine for the live drone_spawner extension. `steps` is the
-# single source of truth and the on/off switch: an empty list (the default) means
-# purely manual operation -- the extension builds no control driver and you fly
-# each drone from its PX4 console. Add steps to make `make run-all` /
-# `make run-isaac` arm and take off the fleet on Play, e.g.:
-#
-#   steps:
-#     - kind: arm
-#     - kind: takeoff
-#       climb_m: 1.5
-#
-# The same `arm -> takeoff` flow the integration test drives, but executed
-# headless from the live extension over each drone's derived gcs_port.
+# High-level flight routine flown in every workflow. `steps` is the single source
+# of truth and the on/off switch: an empty list (the default) means purely manual
+# operation -- no control driver is built and you fly each drone from its PX4
+# console. A non-empty `steps` (see the `takeoff` routine variant) makes the live
+# extension (`make run-all`), a regular standalone run, and the strict standalone
+# integration test all arm/take-off/verify the fleet over each drone's derived
+# gcs_port; only the reaction to a flight-envelope breach differs (strict raises,
+# forgiving logs and stops).
 steps: []
 
 # Control-link and command-flow tunables (used only when steps is non-empty).
@@ -23,3 +18,18 @@ bridge_heartbeat_timeout_s: 12.0
 handshake_timeout_s: 12.0
 prearm_settle_s: 10.0
 takeoff_target_timeout_s: 30.0
+ground_settle_s: 1.5
+takeoff_timeout_s: 30.0
+hover_settle_s: 2.0
+
+# Flight-envelope gates wired onto the takeoff/hover steps (commanding.EnvelopeGates).
+# The continuous max_* gates fail the routine when breached; the hover_max_* bounds
+# define a "stable hover" for the hover step's hold window. Horizontal gates sized
+# from recent passing runs with generous headroom.
+max_tilt_deg: 35.0
+max_lateral_drift_m: 2.0
+max_vertical_speed_m_s: 8.0
+max_downward_speed_m_s: -4.0
+max_angular_speed_rad_s: 8.0
+hover_max_abs_vertical_speed_m_s: 0.35
+hover_max_abs_horizontal_speed_m_s: 0.30

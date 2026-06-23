@@ -83,6 +83,7 @@ test-integration-px4-takeoff:
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_TAKEOFF_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-takeoff' \
+	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
@@ -95,6 +96,7 @@ test-integration-px4-takeoff-instability:
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_TAKEOFF_INSTABILITY_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_INSTABILITY_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-takeoff-instability' \
+	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
@@ -112,6 +114,7 @@ test-integration-px4-multi-drone-takeoff:
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_MULTI_DRONE_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_MULTI_DRONE_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-multi-drone-takeoff' \
+	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 

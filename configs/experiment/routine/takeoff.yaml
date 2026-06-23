@@ -1,0 +1,22 @@
+defaults:
+  - default
+
+# Arm -> takeoff -> stable-hover routine with built-in flight-envelope
+# verification. This is the single definition of the takeoff flight, shared by
+# every workflow: the live extension flies it forgivingly (`make run-all`), a
+# regular standalone run logs any breach, and the strict standalone integration
+# test asserts it (raising on a flight-envelope breach). Inherits all
+# control-link timeouts and envelope gates from the default routine; overrides
+# only the steps.
+#
+# - takeoff: command climb_m above the current GPS altitude, complete once the
+#   vehicle has actually climbed min_climb_m above its spawn baseline.
+# - hover: send nothing; complete once a stable hover (bounded vertical/horizontal
+#   speed) is held continuously for hold_s seconds.
+steps:
+  - kind: arm
+  - kind: takeoff
+    climb_m: 2.5
+    min_climb_m: 1.5
+  - kind: hover
+    hold_s: 5.0

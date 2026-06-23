@@ -72,19 +72,26 @@ class VehicleCommander:
         if not self.is_done and self._state.sent:
             step = self._routine.steps[self._state.cursor]
             ack = observation.last_ack
-            if ack is not None and ack.accepted and ack.command_id == step.command.command_id:
+            if (
+                ack is not None
+                and ack.accepted
+                and step.command is not None
+                and ack.command_id == step.command.command_id
+            ):
                 self._accepted_ack = ack
         if observation.last_ack is None and self._accepted_ack is not None:
             return replace(observation, last_ack=self._accepted_ack)
         return observation
 
     def is_current_step_complete(self, observation: RoutineObservation) -> bool:
-        """Whether the active step's completion predicate is satisfied.
+        """Whether the active step is ready to advance (barrier readiness).
 
         Used by :class:`FleetCommander` to evaluate the barrier without
         advancing (and without re-sending). A not-yet-sent step is never
-        "complete". Consults the accepted-ack latch so the answer is stable
-        across ticks.
+        "complete"; a step with a ``hold_s`` window is ready only once its
+        completion predicate has held for that window (read from the latched
+        :class:`RoutineState`). Consults the accepted-ack latch so the answer is
+        stable across ticks.
         """
         if self.is_done:
             return True
@@ -92,7 +99,14 @@ class VehicleCommander:
             return False
         observation = self._effective_observation(observation)
         step = self._routine.steps[self._state.cursor]
-        return bool(step.is_complete(observation))
+        if not step.is_complete(observation, self._state.baseline_position_enu):
+            return False
+        if step.hold_s <= 0.0:
+            return True
+        hold_since_us = self._state.hold_since_us
+        if hold_since_us is None:
+            return False
+        return int(observation.sim_time_us) - hold_since_us >= step.hold_s * 1_000_000
 
     def step(
         self, observation: RoutineObservation, *, allow_advance: bool = True

@@ -59,6 +59,13 @@ do
 done
 
 : "${ISAAC_TEST_PIP_PACKAGES:=hydra-core omegaconf}"
+# STRICT=1 runs the scenario as an asserting integration test (--strict); unset
+# or empty runs it forgiving (a flight-envelope breach is logged, not fatal).
+: "${STRICT:=}"
+strict_args=()
+if [ -n "${STRICT}" ]; then
+    strict_args+=("--strict")
+fi
 
 SCRIPT_START_MS="$(now_ms)"
 cd /isaac-sim
@@ -77,7 +84,7 @@ else
 fi
 
 stage_start_ms="$(now_ms)"
-if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" \
+if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" "${strict_args[@]}" \
     2>&1 | tee -a "${ISAAC_TEST_LOG}" | terminal_control_filter | \
         grep --line-buffered -E "${ISAAC_TEST_LOG_FILTER}"; then
     integration_timing "test_script" "${stage_start_ms}"

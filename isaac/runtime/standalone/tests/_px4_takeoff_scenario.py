@@ -1,35 +1,34 @@
-"""Shared standalone Isaac/PX4 takeoff scenario helpers (single- or multi-drone).
+"""Shared standalone Isaac/PX4 takeoff scenario driver (single- or multi-drone).
 
 The scenario is driven by the Hydra ``vehicles`` list: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
 instance (the resolved simulator port ``mavlink_port = connection_baseport + id``,
 GCS link the resolved ``vehicle.gcs_port = px4.gcs_baseport + id``). A single
-``BridgeHostGroup`` owns the
-one physics-step subscription and drives every host in two phases (all sends,
-then all polls), so one ``simulation_app.update()`` advances every drone's
-lockstep with the PX4 instances computing concurrently. The command flow runs each phase across
-all drones over the shared advancing clock, and the flight-envelope gates are
-evaluated per drone against its own spawn position; every drone must pass.
+``BridgeHostGroup`` owns the one physics-step subscription and drives every host
+in two phases (all sends, then all polls), so one ``simulation_app.update()``
+advances every drone's lockstep with the PX4 instances computing concurrently.
 
-The scene comes from the top-level ``scene`` config; the takeoff target,
-command-flow timeouts, and the envelope gates come from the Hydra
-``integration_test`` group (``IntegrationTestConfig``).
-
-The high-level commanding (arm -> takeoff) is delegated to the pure command
-layer in ``robotics_experiments.commanding``: each drone gets a
-``VehicleRoutine`` driven by a ``VehicleCommander`` over a ``MavlinkCommandPort``
-(the GCS link), and a ``FleetCommander`` with the ``STEP_SYNCHRONIZED`` policy
-reproduces the arm-all-then-takeoff-all fleet barrier. This module keeps only its
-assertion responsibilities (the continuous gates and the hover envelope), the
-sim-stepping, and the bridge-connectivity checks; it never hand-rolls MAVLink.
-The command port talks the GCS link only - never the bridge's simulator MAVLink
-lockstep - by design.
+This module is one of the two drivers over the shared pure command core
+(``robotics_experiments.commanding``); the other is the live extension's
+``FleetControlDriver``. Both build the *same* routine from ``routine.steps`` via
+``build_vehicle_routine`` and drive it with a ``FleetCommander`` under the
+``STEP_SYNCHRONIZED`` barrier. The flight verification is the routine's own job:
+the takeoff step completes on a real climb, the hover step on a sustained stable
+hover, and the configured flight-envelope gates (tilt / drift / vertical+angular
+speed) are continuous invariants on those steps. This driver only adds the
+generic standalone/infra checks (bridge connectivity, the heartbeat/handshake/
+telemetry handshakes, the pre-arm start-tilt check, and the bridge-log scan) and
+the strict-vs-forgiving reaction: in **strict** mode (the integration test, set
+by ``--strict``) a flight-envelope breach raises ``ExpectedInstabilityDetected``
+and any other routine ``FAIL`` raises ``AssertionError``; in **forgiving** mode (a
+regular standalone run) a breach is logged and the routine is stopped, like the
+live extension. The command port talks the GCS link only - never the bridge's
+simulator MAVLink lockstep - by design.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import math
 import os
 import sys
 import time
@@ -48,6 +47,32 @@ __all__ = [
 ]
 
 
+class ExpectedInstabilityDetected(AssertionError):
+    """Raised (strict mode) when the routine fails on a flight-envelope breach."""
+
+
+class Px4FailsafeDetected(AssertionError):
+    """Raised (strict mode) when PX4 SITL enters a failsafe state.
+
+    A failsafe heartbeat (system_status critical / emergency / flight
+    termination) is a PX4-internal estimator/EKF event, not a flight-envelope
+    breach, and is host-load-dependent and rerun-worthy. It is deliberately NOT
+    a subclass of :class:`ExpectedInstabilityDetected`, so it never counts as an
+    envelope-detected instability: the negative takeoff test must only pass when
+    the stability envelope catches the injected fault, never on a failsafe flake.
+    """
+
+
+class _ScenarioStopped(Exception):
+    """Forgiving-mode stop: a routine FAIL or failsafe that must not fail a run.
+
+    Raised in forgiving mode (a regular standalone run, ``--strict`` absent) to
+    unwind to the scenario top, which logs it and tears down cleanly - the
+    runtime counterpart of the live extension logging a warning and stopping the
+    routine. Never raised in strict mode (the integration test asserts instead).
+    """
+
+
 @dataclass
 class _FlightSample:
     sim_time_us: int
@@ -61,7 +86,7 @@ class _FlightSample:
 class _TakeoffTarget:
     latitude_deg: float
     longitude_deg: float
-    absolute_altitude_m: float
+    altitude_m: float
 
 
 @dataclass
@@ -76,28 +101,6 @@ class _DroneRuntime:
     port: Any | None = None
     commander: Any | None = None
     start_position: np.ndarray | None = None
-
-
-@dataclass
-class _DroneObservation:
-    """Per-drone accumulator for the shared takeoff/hover observation loop."""
-
-    start_position: np.ndarray
-    highest_altitude_m: float
-    hover_settle_end_us: int | None = None
-    hover_end_us: int | None = None
-    sample_count: int = 0
-    hover_sample_count: int = 0
-    max_hover_abs_vertical_speed_m_s: float = 0.0
-    min_hover_climb_m: float = math.inf
-    max_hover_climb_m: float = -math.inf
-    max_hover_abs_horizontal_speed_m_s: float = 0.0
-    min_hover_x_m: float = math.inf
-    max_hover_x_m: float = -math.inf
-    min_hover_y_m: float = math.inf
-    max_hover_y_m: float = -math.inf
-    latest_sample: _FlightSample | None = None
-    done: bool = False
 
 
 def _extension_root() -> Path:
@@ -259,13 +262,22 @@ def _pump_and_poll_all(drones: list[_DroneRuntime]) -> dict[str, Any]:
     return acks
 
 
-def _raise_if_failsafe(drones: list[_DroneRuntime], *, phase: str) -> None:
+def _handle_failsafe(
+    context: SceneTestContext, drones: list[_DroneRuntime], *, phase: str, strict: bool
+) -> None:
+    """React to any drone's PX4 failsafe: strict raises, forgiving stops the run."""
     for drone in drones:
-        if drone.port.failsafe:
-            _raise_failsafe(
+        if drone.port is not None and drone.port.failsafe:
+            message = (
                 f"[{drone.label}] PX4 entered failsafe state {phase}: "
                 f"system_status={drone.port.failsafe_system_status}"
             )
+            if strict:
+                _raise_failsafe(message)
+            context.report(
+                f"WARNING: {message}; stopping routine (manual control remains available)"
+            )
+            raise _ScenarioStopped(message)
 
 
 def _wait_for_gcs_handshake(
@@ -292,6 +304,7 @@ def _settle_px4_prearm(
     drones: list[_DroneRuntime],
     *,
     seconds: float,
+    strict: bool,
 ) -> None:
     context.report(f"settling PX4 estimators before arm for {seconds:.1f}s")
     start_us = _sim_time_us(drones)
@@ -305,7 +318,7 @@ def _settle_px4_prearm(
             )
         _advance_once(context, drones)
         _pump_and_poll_all(drones)
-        _raise_if_failsafe(drones, phase="while settling before arm")
+        _handle_failsafe(context, drones, phase="while settling before arm", strict=strict)
 
 
 def _wait_for_takeoff_target(
@@ -313,69 +326,68 @@ def _wait_for_takeoff_target(
     drones: list[_DroneRuntime],
     drone: _DroneRuntime,
     *,
-    climb_m: float,
     timeout_s: float,
+    strict: bool,
 ) -> _TakeoffTarget:
     context.report(f"[{drone.label}] waiting up to {timeout_s:.1f}s for PX4 takeoff telemetry")
     deadline = time.monotonic() + timeout_s * len(drones)
     while time.monotonic() < deadline:
         _advance_once(context, drones)
         _pump_and_poll_all(drones)
-        _raise_if_failsafe(drones, phase="while waiting for altitude telemetry")
+        _handle_failsafe(
+            context, drones, phase="while waiting for altitude telemetry", strict=strict
+        )
         position = drone.port.latest_global_position
         if position is not None:
             latitude_deg, longitude_deg, altitude_m = position
-            target_altitude_m = altitude_m + climb_m
             context.report(
                 f"[{drone.label}] PX4 takeoff telemetry lat={latitude_deg:.7f} "
-                f"lon={longitude_deg:.7f} altitude={altitude_m:.1f}m; "
-                f"target_altitude={target_altitude_m:.1f}m"
+                f"lon={longitude_deg:.7f} altitude={altitude_m:.1f}m"
             )
             return _TakeoffTarget(
                 latitude_deg=latitude_deg,
                 longitude_deg=longitude_deg,
-                absolute_altitude_m=target_altitude_m,
+                altitude_m=altitude_m,
             )
     raise AssertionError(
         f"[{drone.label}] PX4 takeoff telemetry was not received before takeoff command"
     )
 
 
+def _envelope_gates(scenario):
+    """Build the routine's flight-envelope gates from the routine config."""
+    from robotics_experiments.commanding import EnvelopeGates
+
+    return EnvelopeGates(
+        max_tilt_deg=scenario.max_tilt_deg,
+        max_lateral_drift_m=scenario.max_lateral_drift_m,
+        max_vertical_speed_m_s=scenario.max_vertical_speed_m_s,
+        max_downward_speed_m_s=scenario.max_downward_speed_m_s,
+        max_angular_speed_rad_s=scenario.max_angular_speed_rad_s,
+        hover_max_abs_vertical_speed_m_s=scenario.hover_max_abs_vertical_speed_m_s,
+        hover_max_abs_horizontal_speed_m_s=scenario.hover_max_abs_horizontal_speed_m_s,
+    )
+
+
 def _build_routine(scenario, target: _TakeoffTarget):
-    """Build the per-drone ``arm -> takeoff`` routine from the test config.
+    """Build the per-drone routine from ``routine.steps`` and the takeoff target.
 
-    Both steps complete on their ``COMMAND_ACK`` (the climb and hover are
-    asserted afterwards by the envelope observer, preserving the original order:
-    arm-ack, takeoff-ack, post-takeoff hook, then hover observation). Both retry
-    on a transient PX4 ``TEMPORARILY_REJECTED`` ack, matching the prior behavior.
+    Identical to the live extension's path: the same ``build_vehicle_routine``
+    seam wires the configured flight-envelope gates onto the takeoff/hover steps,
+    so the routine verifies the flight in both drivers.
     """
-    from robotics_experiments.commanding import (
-        RoutineStep,
-        VehicleRoutine,
-        ack_accepted,
-        arm,
-        takeoff,
-    )
-    from robotics_experiments.commanding.commands import (
-        MAV_CMD_COMPONENT_ARM_DISARM,
-        MAV_CMD_NAV_TAKEOFF,
-    )
+    from robotics_experiments.commanding import build_vehicle_routine
 
-    arm_step = RoutineStep(
-        command=arm(),
-        is_complete=ack_accepted(MAV_CMD_COMPONENT_ARM_DISARM),
-        label="arm",
-        timeout_s=scenario.command_ack_timeout_s,
-        retry_on_temporarily_rejected=True,
+    return build_vehicle_routine(
+        scenario.steps,
+        target_latitude_deg=target.latitude_deg,
+        target_longitude_deg=target.longitude_deg,
+        target_altitude_m=target.altitude_m,
+        command_ack_timeout_s=scenario.command_ack_timeout_s,
+        gates=_envelope_gates(scenario),
+        takeoff_timeout_s=scenario.takeoff_timeout_s,
+        hover_settle_s=scenario.hover_settle_s,
     )
-    takeoff_step = RoutineStep(
-        command=takeoff(target.latitude_deg, target.longitude_deg, target.absolute_altitude_m),
-        is_complete=ack_accepted(MAV_CMD_NAV_TAKEOFF),
-        label="takeoff",
-        timeout_s=scenario.command_ack_timeout_s,
-        retry_on_temporarily_rejected=True,
-    )
-    return VehicleRoutine(steps=(arm_step, takeoff_step))
 
 
 def _routine_observation(drone: _DroneRuntime, sim_time_us: int, last_ack):
@@ -391,32 +403,50 @@ def _routine_observation(drone: _DroneRuntime, sim_time_us: int, last_ack):
     )
 
 
-def _drive_routine_to_done(
+def _takeoff_step_index(scenario) -> int | None:
+    for index, descriptor in enumerate(scenario.steps):
+        if descriptor.get("kind") == "takeoff":
+            return index
+    return None
+
+
+def _drive_routine(
     context: SceneTestContext,
     drones: list[_DroneRuntime],
     fleet,
     scenario,
+    *,
+    strict: bool,
+    post_takeoff_hook: "Callable[[SceneTestContext, Any], None] | None",
+    takeoff_step_index: int | None,
 ) -> None:
     """Tick physics and step the fleet commander until every routine reports DONE.
 
     Each tick advances PhysX once (asserting every bridge stays connected),
     pumps/drains every GCS link, builds a ``RoutineObservation`` per drone, and
-    steps the ``FleetCommander``; a ``FAIL`` decision or a PX4 failsafe aborts.
-    The per-step timeouts inside ``decide`` are sim-time; this wall-clock budget
-    is the backstop for a sim that ticks but never completes the routine.
+    steps the ``FleetCommander``. The routine itself verifies the flight (climb,
+    sustained hover, and the continuous envelope invariants); a ``FAIL`` is
+    handled here by mode: strict raises (``ExpectedInstabilityDetected`` for a
+    flight-envelope breach, ``AssertionError`` otherwise), forgiving logs and
+    stops. The per-step timeouts inside ``decide`` are sim-time; this wall-clock
+    budget is the backstop for a sim that ticks but never completes the routine.
+    The optional ``post_takeoff_hook`` fires once, the tick the takeoff step
+    completes (used by the negative test to inject a post-takeoff fault that the
+    hover step's envelope must then catch).
     """
-    from robotics_experiments.commanding import DecisionKind
+    from robotics_experiments.commanding import DecisionKind, FailureKind
 
-    context.report(f"driving arm/takeoff command routine for {len(drones)} drone(s)")
+    context.report(f"driving the routine for {len(drones)} drone(s)")
     deadline_s = time.monotonic() + (
-        scenario.command_ack_timeout_s + scenario.heartbeat_timeout_s
+        scenario.takeoff_timeout_s + scenario.command_ack_timeout_s + scenario.handshake_timeout_s
     ) * 4.0 * len(drones)
+    hook_fired = post_takeoff_hook is None or takeoff_step_index is None
     while not fleet.is_done:
         if time.monotonic() > deadline_s:
-            raise AssertionError("Timed out driving the arm/takeoff command routine to completion")
+            raise AssertionError("Timed out driving the routine to completion")
         _advance_once(context, drones)
         acks = _pump_and_poll_all(drones)
-        _raise_if_failsafe(drones, phase="during the command routine")
+        _handle_failsafe(context, drones, phase="during the routine", strict=strict)
         sim_time_us = _sim_time_us(drones)
         observations = {
             drone.label: _routine_observation(drone, sim_time_us, acks[drone.label])
@@ -425,7 +455,19 @@ def _drive_routine_to_done(
         decisions = fleet.step(observations)
         for label, decision in decisions.items():
             if decision.kind is DecisionKind.FAIL:
-                raise AssertionError(f"[{label}] command routine failed: {decision.reason}")
+                message = f"[{label}] routine failed: {decision.reason}"
+                if strict:
+                    if decision.failure_kind is FailureKind.ENVELOPE:
+                        _raise_instability(message)
+                    raise AssertionError(message)
+                context.report(
+                    f"WARNING: {message}; stopping routine (manual control remains available)"
+                )
+                raise _ScenarioStopped(message)
+        if not hook_fired and drones[0].commander.current_step_index > takeoff_step_index:
+            assert post_takeoff_hook is not None
+            post_takeoff_hook(context, drones[0].host)
+            hook_fired = True
 
 
 def _sample_state(articulation_io, sim_time_us: int) -> _FlightSample:
@@ -439,246 +481,6 @@ def _sample_state(articulation_io, sim_time_us: int) -> _FlightSample:
         angular_velocity_flu=np.asarray(state.angular_velocity_flu, dtype=np.float64),
         tilt_deg=float(frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)),
     )
-
-
-def _check_continuous_gates(
-    drone: _DroneRuntime,
-    scenario,
-    sample: _FlightSample,
-    *,
-    lateral_drift_m: float,
-    vertical_velocity_m_s: float,
-    angular_speed_rad_s: float,
-) -> None:
-    label = drone.label
-    if sample.tilt_deg > scenario.max_tilt_deg:
-        _raise_instability(
-            f"[{label}] Drone tilt exceeded limit: tilt={sample.tilt_deg:.1f}deg "
-            f"limit={scenario.max_tilt_deg:.1f}deg"
-        )
-    if lateral_drift_m > scenario.max_lateral_drift_m:
-        _raise_instability(
-            f"[{label}] Drone lateral drift exceeded limit: drift={lateral_drift_m:.2f}m "
-            f"limit={scenario.max_lateral_drift_m:.2f}m {format_vehicle_state_vectors(sample)}"
-        )
-    if vertical_velocity_m_s > scenario.max_vertical_speed_m_s:
-        _raise_instability(
-            f"[{label}] Drone vertical velocity diverged upward: "
-            f"vz={vertical_velocity_m_s:.2f}m/s {format_vehicle_state_vectors(sample)}"
-        )
-    if vertical_velocity_m_s < scenario.max_downward_speed_m_s:
-        _raise_instability(
-            f"[{label}] Drone vertical velocity diverged downward: "
-            f"vz={vertical_velocity_m_s:.2f}m/s {format_vehicle_state_vectors(sample)}"
-        )
-    if angular_speed_rad_s > scenario.max_angular_speed_rad_s:
-        _raise_instability(
-            f"[{label}] Drone angular velocity diverged: |omega|={angular_speed_rad_s:.2f}rad/s"
-        )
-
-
-def _update_drone_observation(
-    context: SceneTestContext,
-    drone: _DroneRuntime,
-    obs: _DroneObservation,
-    scenario,
-    *,
-    sim_time_us: int,
-    failsafe_status: int | None,
-) -> None:
-    start_position = obs.start_position
-    sample = _sample_state(drone.observer, sim_time_us)
-    obs.latest_sample = sample
-    obs.sample_count += 1
-    obs.highest_altitude_m = max(obs.highest_altitude_m, float(sample.position_enu[2]))
-
-    climb_m = float(sample.position_enu[2]) - float(start_position[2])
-    lateral_drift_m = float(np.linalg.norm(sample.position_enu[:2] - start_position[:2]))
-    vertical_velocity_m_s = float(sample.linear_velocity_enu[2])
-    angular_speed_rad_s = float(np.linalg.norm(sample.angular_velocity_flu))
-
-    _check_continuous_gates(
-        drone,
-        scenario,
-        sample,
-        lateral_drift_m=lateral_drift_m,
-        vertical_velocity_m_s=vertical_velocity_m_s,
-        angular_speed_rad_s=angular_speed_rad_s,
-    )
-
-    # Failsafe is evaluated only after the per-tick envelope gates above, so a
-    # severe fault-induced divergence is attributed to the envelope; a failsafe
-    # seen inside the envelope is the distinct, rerun-worthy Px4FailsafeDetected.
-    if failsafe_status is not None:
-        _raise_failsafe(
-            f"[{drone.label}] PX4 entered failsafe state during takeoff: "
-            f"system_status={failsafe_status}"
-        )
-
-    if obs.hover_settle_end_us is None and climb_m >= scenario.min_takeoff_climb_m:
-        obs.hover_settle_end_us = sim_time_us + int(round(scenario.hover_settle_s * 1_000_000))
-        obs.hover_end_us = obs.hover_settle_end_us + int(
-            round(scenario.hover_observation_s * 1_000_000)
-        )
-        context.report(
-            f"[{drone.label}] reached takeoff altitude envelope: climb={climb_m:.2f}m "
-            f"required={scenario.min_takeoff_climb_m:.2f}m; "
-            f"{format_vehicle_state_vectors(sample)} "
-            f"settling hover for {scenario.hover_settle_s:.1f}s"
-        )
-
-    if obs.hover_settle_end_us is not None and sim_time_us >= obs.hover_settle_end_us:
-        obs.hover_sample_count += 1
-        obs.max_hover_abs_vertical_speed_m_s = max(
-            obs.max_hover_abs_vertical_speed_m_s, abs(vertical_velocity_m_s)
-        )
-        obs.min_hover_climb_m = min(obs.min_hover_climb_m, climb_m)
-        obs.max_hover_climb_m = max(obs.max_hover_climb_m, climb_m)
-        horizontal_speed_m_s = float(np.linalg.norm(sample.linear_velocity_enu[:2]))
-        obs.max_hover_abs_horizontal_speed_m_s = max(
-            obs.max_hover_abs_horizontal_speed_m_s, horizontal_speed_m_s
-        )
-        obs.min_hover_x_m = min(obs.min_hover_x_m, float(sample.position_enu[0]))
-        obs.max_hover_x_m = max(obs.max_hover_x_m, float(sample.position_enu[0]))
-        obs.min_hover_y_m = min(obs.min_hover_y_m, float(sample.position_enu[1]))
-        obs.max_hover_y_m = max(obs.max_hover_y_m, float(sample.position_enu[1]))
-
-    if obs.sample_count == 1 or obs.sample_count % 250 == 0:
-        context.report(
-            f"[{drone.label}] sample t={sim_time_us * 1e-6:.2f}s "
-            f"z={sample.position_enu[2]:.2f}m vz={vertical_velocity_m_s:.2f}m/s "
-            f"{format_vehicle_state_vectors(sample)} tilt={sample.tilt_deg:.1f}deg "
-            f"drift={lateral_drift_m:.2f}m"
-        )
-
-
-def _assert_drone_hover_envelope(
-    context: SceneTestContext,
-    drone: _DroneRuntime,
-    obs: _DroneObservation,
-    scenario,
-) -> None:
-    label = drone.label
-    sample_text = (
-        f" {format_vehicle_state_vectors(obs.latest_sample)}"
-        if obs.latest_sample is not None
-        else ""
-    )
-
-    climb_m = obs.highest_altitude_m - float(obs.start_position[2])
-    if climb_m < scenario.min_takeoff_climb_m:
-        _raise_instability(
-            f"[{label}] Drone altitude did not increase enough: climb={climb_m:.2f}m "
-            f"required={scenario.min_takeoff_climb_m:.2f}m{sample_text}"
-        )
-
-    if obs.hover_sample_count <= 0:
-        _raise_instability(
-            f"[{label}] Drone reached takeoff altitude but no hover samples were collected"
-        )
-
-    hover_altitude_range_m = obs.max_hover_climb_m - obs.min_hover_climb_m
-    if hover_altitude_range_m > scenario.hover_max_altitude_range_m:
-        _raise_instability(
-            f"[{label}] Drone did not hold hover height: climb_range={hover_altitude_range_m:.2f}m "
-            f"limit={scenario.hover_max_altitude_range_m:.2f}m "
-            f"min_climb={obs.min_hover_climb_m:.2f}m max_climb={obs.max_hover_climb_m:.2f}m"
-            f"{sample_text}"
-        )
-    if obs.max_hover_abs_vertical_speed_m_s > scenario.hover_max_abs_vertical_speed_m_s:
-        _raise_instability(
-            f"[{label}] Drone vertical speed did not settle during hover: "
-            f"max_abs_vz={obs.max_hover_abs_vertical_speed_m_s:.2f}m/s "
-            f"limit={scenario.hover_max_abs_vertical_speed_m_s:.2f}m/s{sample_text}"
-        )
-
-    hover_horizontal_range_m = math.hypot(
-        obs.max_hover_x_m - obs.min_hover_x_m, obs.max_hover_y_m - obs.min_hover_y_m
-    )
-    if hover_horizontal_range_m > scenario.hover_max_horizontal_range_m:
-        _raise_instability(
-            f"[{label}] Drone did not hold hover position: "
-            f"horizontal_range={hover_horizontal_range_m:.2f}m "
-            f"limit={scenario.hover_max_horizontal_range_m:.2f}m{sample_text}"
-        )
-    if obs.max_hover_abs_horizontal_speed_m_s > scenario.hover_max_abs_horizontal_speed_m_s:
-        _raise_instability(
-            f"[{label}] Drone horizontal speed did not settle during hover: "
-            f"max_horizontal_speed={obs.max_hover_abs_horizontal_speed_m_s:.2f}m/s "
-            f"limit={scenario.hover_max_abs_horizontal_speed_m_s:.2f}m/s{sample_text}"
-        )
-
-    final_sample_text = (
-        f"{format_vehicle_state_vectors(obs.latest_sample)} "
-        if obs.latest_sample is not None
-        else ""
-    )
-    context.report(
-        f"[{label}] observed stable takeoff and hover: {final_sample_text}"
-        f"max_climb={climb_m:.2f}m "
-        f"hover_climb_range={obs.min_hover_climb_m:.2f}-{obs.max_hover_climb_m:.2f}m "
-        f"max_hover_abs_vz={obs.max_hover_abs_vertical_speed_m_s:.2f}m/s "
-        f"hover_horizontal_range={hover_horizontal_range_m:.2f}m "
-        f"max_hover_horizontal_speed={obs.max_hover_abs_horizontal_speed_m_s:.2f}m/s "
-        f"samples={obs.sample_count} hover_samples={obs.hover_sample_count}"
-    )
-
-
-def _observe_all(
-    context: SceneTestContext,
-    drones: list[_DroneRuntime],
-    scenario,
-) -> None:
-    """Observe all drones' takeoff/hover over one shared advancing clock.
-
-    Each tick advances PhysX once (ticking every bridge), samples every drone,
-    applies the per-drone continuous gates immediately (drone-id tagged), and
-    accumulates per-drone hover stats. The loop runs until every drone has
-    completed its hover window or missed the takeoff deadline; final per-drone
-    envelope assertions then require all drones to pass.
-    """
-    context.report(
-        f"observing takeoff for up to {scenario.takeoff_timeout_s:.1f}s "
-        f"until each drone climbs >= {scenario.min_takeoff_climb_m:.2f}m"
-    )
-    start_us = _sim_time_us(drones)
-    takeoff_deadline_us = start_us + int(round(scenario.takeoff_timeout_s * 1_000_000))
-    observations = {
-        drone.label: _DroneObservation(
-            start_position=drone.start_position.copy(),
-            highest_altitude_m=float(drone.start_position[2]),
-        )
-        for drone in drones
-    }
-
-    while not all(obs.done for obs in observations.values()):
-        _advance_once(context, drones)
-        _pump_and_poll_all(drones)
-        sim_time_us = _sim_time_us(drones)
-
-        for drone in drones:
-            obs = observations[drone.label]
-            if obs.done:
-                continue
-            # Failsafe is bucketed after the per-tick envelope gates inside
-            # _update_drone_observation, so a fault-induced divergence is caught
-            # by the envelope first; pass the current system_status through.
-            failsafe_status = drone.port.failsafe_system_status if drone.port.failsafe else None
-            _update_drone_observation(
-                context,
-                drone,
-                obs,
-                scenario,
-                sim_time_us=sim_time_us,
-                failsafe_status=failsafe_status,
-            )
-            if obs.hover_end_us is not None and sim_time_us >= obs.hover_end_us:
-                obs.done = True
-            elif obs.hover_settle_end_us is None and sim_time_us >= takeoff_deadline_us:
-                obs.done = True
-
-    for drone in drones:
-        _assert_drone_hover_envelope(context, drone, observations[drone.label], scenario)
 
 
 def _assert_bridge_log_clean(path: Path | None, label: str) -> None:
@@ -773,20 +575,22 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     from robotics_experiments.drone import despawn_drone
     from robotics_experiments.simulation import apply_settings
 
+    strict = context.strict
     timing = TimingReporter(options.test_name, emit=context.report)
 
     env = get_config()
-    # The integration-test harness config (timeouts, takeoff target, envelope
-    # gates). Populated because this runs under an integration_test_* experiment;
-    # the local name stays `scenario` as it is the live test-scenario object.
-    scenario = env.integration_test
-    if scenario is None:
+    # The routine config (control-flow timeouts, takeoff target tunables, and the
+    # flight-envelope gates). The local name stays `scenario` as it parameterizes
+    # this live scenario; the routine carries its own verification.
+    scenario = env.routine
+    if not scenario.steps:
         raise ValueError(
-            f"{options.test_name}: no integration_test config composed; run this "
-            "scenario under an integration_test_* experiment "
-            "(ROBOTICS_EXPERIMENT_CONFIG_PATH / HYDRA_CONFIG)"
+            f"{options.test_name}: routine.steps is empty; this scenario needs a non-empty "
+            "routine (run it under a takeoff experiment, e.g. "
+            "configs/integration_test_takeoff.yaml)"
         )
 
+    context.report(f"{options.test_name}: running in {'strict' if strict else 'forgiving'} mode")
     context.report(f"{options.test_name}: applying configured simulation settings")
     with timing.timed_stage("apply_settings"):
         apply_settings(context.stage)
@@ -804,6 +608,8 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     # concurrently and one stalled PX4 disconnects only its own vehicle.
     group = BridgeHostGroup([drone.host for drone in drones])
 
+    bridge_logs: list[tuple[str, Path | None]] = []
+    stopped: _ScenarioStopped | None = None
     try:
         context.report(f"{options.test_name}: starting {len(drones)} PX4 bridge host(s)")
         with timing.timed_stage("bridge_host_start", sim_clock=clock):
@@ -821,7 +627,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         with timing.timed_stage("bridge_heartbeat_wait", sim_clock=clock):
             for drone in drones:
                 _wait_for_bridge_heartbeat(
-                    context, drones, drone, timeout_s=scenario.heartbeat_timeout_s
+                    context, drones, drone, timeout_s=scenario.bridge_heartbeat_timeout_s
                 )
 
         for drone in drones:
@@ -856,11 +662,11 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
         with timing.timed_stage("gcs_handshake_wait", sim_clock=clock):
             for drone in drones:
                 _wait_for_gcs_handshake(
-                    context, drones, drone, timeout_s=scenario.heartbeat_timeout_s
+                    context, drones, drone, timeout_s=scenario.handshake_timeout_s
                 )
 
         with timing.timed_stage("px4_prearm_settle", sim_clock=clock):
-            _settle_px4_prearm(context, drones, seconds=scenario.prearm_settle_s)
+            _settle_px4_prearm(context, drones, seconds=scenario.prearm_settle_s, strict=strict)
 
         with timing.timed_stage("build_routines", sim_clock=clock):
             commanders = []
@@ -872,27 +678,30 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                     context,
                     drones,
                     drone,
-                    climb_m=scenario.takeoff_altitude_m,
-                    timeout_s=scenario.heartbeat_timeout_s,
+                    timeout_s=scenario.takeoff_target_timeout_s,
+                    strict=strict,
                 )
                 routine = _build_routine(scenario, target)
                 drone.commander = VehicleCommander(routine, drone.port, label=drone.label)
                 commanders.append(drone.commander)
             # STEP_SYNCHRONIZED barrier reproduces the arm-all-then-takeoff-all
-            # fleet flow: no drone sends takeoff until every drone is armed.
+            # fleet flow: no drone advances a step until every drone completes it.
             fleet = FleetCommander(commanders, policy=ExecutionPolicy.STEP_SYNCHRONIZED)
 
-        with timing.timed_stage("command_routine", sim_clock=clock):
-            _drive_routine_to_done(context, drones, fleet, scenario)
-
-        if options.post_takeoff_hook is not None:
-            with timing.timed_stage("post_takeoff_hook", sim_clock=clock):
-                options.post_takeoff_hook(context, drones[0].host)
-
-        with timing.timed_stage("takeoff_hover_observation", sim_clock=clock):
-            _observe_all(context, drones, scenario)
+        with timing.timed_stage("drive_routine", sim_clock=clock):
+            _drive_routine(
+                context,
+                drones,
+                fleet,
+                scenario,
+                strict=strict,
+                post_takeoff_hook=options.post_takeoff_hook,
+                takeoff_step_index=_takeoff_step_index(scenario),
+            )
 
         bridge_logs = [(drone.label, _bridge_debug_log_path(drone.host)) for drone in drones]
+    except _ScenarioStopped as exc:
+        stopped = exc
     finally:
         context.report(f"{options.test_name}: stopping timeline, bridge hosts, and drones")
         with timing.timed_stage("teardown", sim_clock=clock):
@@ -904,29 +713,21 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 drone.observer.shutdown()
                 despawn_drone(context.stage, drone.vehicle.drone)
 
-    with timing.timed_stage("bridge_log_validation"):
-        for label, path in bridge_logs:
-            _assert_bridge_log_clean(path, label)
+    if stopped is not None:
+        timing.report_stage("scenario_total", timing.total_start())
+        context.report(f"{options.test_name}: routine stopped before completion: {stopped}")
+        return
+
+    # Bridge-log scan is a strict-only assertion (the integration test's last
+    # check that the bridge stayed healthy and clean across the flight).
+    if strict:
+        with timing.timed_stage("bridge_log_validation"):
+            for label, path in bridge_logs:
+                _assert_bridge_log_clean(path, label)
     timing.report_stage("scenario_total", timing.total_start())
     context.report(
-        f"{options.test_name}: verified arm/takeoff stability envelope for {len(drones)} drone(s)"
+        f"{options.test_name}: verified arm/takeoff/hover routine for {len(drones)} drone(s)"
     )
-
-
-class ExpectedInstabilityDetected(AssertionError):
-    """Raised when the scenario reaches command flow and detects instability."""
-
-
-class Px4FailsafeDetected(AssertionError):
-    """Raised when PX4 SITL enters a failsafe state.
-
-    A failsafe heartbeat (system_status critical / emergency / flight
-    termination) is a PX4-internal estimator/EKF event, not a flight-envelope
-    breach, and is host-load-dependent and rerun-worthy. It is deliberately NOT
-    a subclass of :class:`ExpectedInstabilityDetected`, so it never counts as an
-    envelope-detected instability: the negative takeoff test must only pass when
-    the stability envelope catches the injected fault, never on a failsafe flake.
-    """
 
 
 @dataclass(frozen=True)
@@ -935,7 +736,8 @@ class Px4TakeoffScenarioOptions:
 
     ``px4_config_transform`` is applied to every vehicle's PX4 config (e.g. the
     negative test injects a rotor-mapping fault); ``post_takeoff_hook`` is called
-    once with the first drone's bridge host (single-vehicle fault-injection only).
+    once with the first drone's bridge host the tick the takeoff step completes
+    (single-vehicle fault-injection only).
     """
 
     test_name: str

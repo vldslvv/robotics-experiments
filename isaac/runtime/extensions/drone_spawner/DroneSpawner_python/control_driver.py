@@ -34,6 +34,7 @@ import carb
 
 from robotics_experiments.commanding import (
     DecisionKind,
+    EnvelopeGates,
     ExecutionPolicy,
     FleetCommander,
     MavlinkCommandPort,
@@ -174,9 +175,17 @@ class FleetControlDriver:
         elif phase is _Phase.FETCH_TARGET:
             self._phase_deadline_s = time.monotonic() + self._cfg.takeoff_target_timeout_s * n
         elif phase is _Phase.DRIVE:
+            # The routine now climbs (takeoff_timeout_s) and holds a hover; budget
+            # for those plus the per-command ack/handshake slack, times a margin.
             self._phase_deadline_s = (
                 time.monotonic()
-                + (self._cfg.command_ack_timeout_s + self._cfg.handshake_timeout_s) * 4.0 * n
+                + (
+                    self._cfg.takeoff_timeout_s
+                    + self._cfg.command_ack_timeout_s
+                    + self._cfg.handshake_timeout_s
+                )
+                * 4.0
+                * n
             )
         else:
             self._phase_deadline_s = 0.0
@@ -273,6 +282,15 @@ class FleetControlDriver:
             self._enter(_Phase.BUILD)
 
     def _tick_build(self) -> None:
+        gates = EnvelopeGates(
+            max_tilt_deg=self._cfg.max_tilt_deg,
+            max_lateral_drift_m=self._cfg.max_lateral_drift_m,
+            max_vertical_speed_m_s=self._cfg.max_vertical_speed_m_s,
+            max_downward_speed_m_s=self._cfg.max_downward_speed_m_s,
+            max_angular_speed_rad_s=self._cfg.max_angular_speed_rad_s,
+            hover_max_abs_vertical_speed_m_s=self._cfg.hover_max_abs_vertical_speed_m_s,
+            hover_max_abs_horizontal_speed_m_s=self._cfg.hover_max_abs_horizontal_speed_m_s,
+        )
         commanders: list[VehicleCommander] = []
         for member in self._members:
             assert member.target is not None and member.port is not None
@@ -283,6 +301,9 @@ class FleetControlDriver:
                 target_longitude_deg=longitude_deg,
                 target_altitude_m=altitude_m,
                 command_ack_timeout_s=self._cfg.command_ack_timeout_s,
+                gates=gates,
+                takeoff_timeout_s=self._cfg.takeoff_timeout_s,
+                hover_settle_s=self._cfg.hover_settle_s,
             )
             member.commander = VehicleCommander(routine, member.port, label=member.label)
             commanders.append(member.commander)

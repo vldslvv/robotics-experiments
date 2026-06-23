@@ -1,16 +1,14 @@
 defaults:
   - config
+  - override experiment/routine@routine: takeoff
   - _self_
 
-# Runtime demonstration experiment: the live drone_spawner extension flies an
-# arm -> takeoff routine headless on Play, without any integration-test harness.
-# Inherits the default runtime config.yaml (sim/drone/switches/px4/isaac_lab/
-# routine + its 1-vehicle fleet) and overrides only routine.steps so the control
-# driver is built (an empty routine.steps, as in config.yaml, stays manual).
+# Runtime demonstration experiment: fly the shared arm -> takeoff -> hover
+# routine (with flight-envelope verification) headless on the live drone_spawner
+# extension. Inherits the default runtime config.yaml (sim/drone/switches/px4/
+# isaac_lab + its 1-vehicle fleet and warehouse scene) and selects the `takeoff`
+# routine variant. The same routine the integration test asserts in strict mode;
+# here it runs forgivingly (a breach logs and stops the routine, leaving manual
+# control available).
 #
 # Run with: make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml
-routine:
-  steps:
-    - kind: arm
-    - kind: takeoff
-      climb_m: 1.5

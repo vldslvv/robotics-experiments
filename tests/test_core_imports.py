@@ -73,14 +73,30 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         # The config-driven routine builder is pure too (it is what the live
         # extension driver calls), so it must build a routine with Isaac and
         # pymavlink blocked.
+        gates = commanding.EnvelopeGates(
+            max_tilt_deg=35.0,
+            max_lateral_drift_m=2.0,
+            max_vertical_speed_m_s=8.0,
+            max_downward_speed_m_s=-4.0,
+            max_angular_speed_rad_s=8.0,
+            hover_max_abs_vertical_speed_m_s=0.35,
+            hover_max_abs_horizontal_speed_m_s=0.30,
+        )
         routine = commanding.build_vehicle_routine(
-            [{"kind": "arm"}, {"kind": "takeoff", "climb_m": 1.0}],
+            [
+                {"kind": "arm"},
+                {"kind": "takeoff", "climb_m": 1.0, "min_climb_m": 0.8},
+                {"kind": "hover", "hold_s": 2.0},
+            ],
             target_latitude_deg=47.0,
             target_longitude_deg=8.0,
             target_altitude_m=488.0,
             command_ack_timeout_s=10.0,
+            gates=gates,
+            takeoff_timeout_s=30.0,
+            hover_settle_s=2.0,
         )
-        assert [s.label for s in routine.steps] == ["arm", "takeoff"]
+        assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
         assert "pymavlink" not in sys.modules
     finally:
         sys.modules.clear()

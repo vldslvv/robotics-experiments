@@ -309,6 +309,7 @@ if docker run --rm \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \
     -e "SCENE=${SCENE}" \
+    -e "STRICT=${STRICT:-}" \
     -e "TEST_TARGET=${TEST_TARGET}" \
     ${ISAAC_DOCKER_VOLUMES} \
     --entrypoint /bin/bash \

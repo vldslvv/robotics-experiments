@@ -2,9 +2,9 @@ defaults:
   - integration_test_takeoff
   - _self_
 
-# Dual-PX4 multi-drone takeoff integration-test experiment. Inherits the
-# single-drone integration_test_takeoff experiment (scene + integration_test
-# gates) and overrides only the vehicles list below.
+# Dual-PX4 multi-drone takeoff experiment. Inherits the single-drone
+# integration_test_takeoff experiment (scene + the shared `takeoff` routine with
+# its flight-envelope gates) and overrides only the vehicles list below.
 #
 # Two drones, each bound to its own PX4 SITL instance: id 0/1 -> derived
 # simulator ports 4560/4561, GCS links px4.gcs_baseport + id (14550/14551).

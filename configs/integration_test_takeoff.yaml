@@ -1,11 +1,12 @@
 defaults:
   - config
-  - experiment/integration_test@integration_test: takeoff
+  - override experiment/routine@routine: takeoff
   - _self_
 
-# Single-drone PX4 arm/takeoff/hover integration-test experiment. Inherits the
-# runtime config.yaml (sim/drone/switches/px4/isaac_lab + its 1-vehicle fleet)
-# and adds the integration_test harness group (command-flow timeouts, takeoff
-# target, flight-envelope gates). Only the scene differs from the runtime
-# default: the minimal integration stage instead of the warehouse.
+# Single-drone PX4 arm/takeoff/hover experiment. Identical in shape to the
+# runtime config: it selects the same `takeoff` routine (steps + flight-envelope
+# gates) and only overrides the scene to the minimal integration stage. There is
+# no separate test-harness config -- "integration test" just means running this
+# config standalone in strict mode (the make target passes --strict), so a
+# flight-envelope breach fails the process; `make run-all` runs it forgivingly.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"

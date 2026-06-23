@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 __all__ = [
     "SimSettings",
@@ -14,7 +14,6 @@ __all__ = [
     "ResolvedVehicle",
     "IsaacLabConfig",
     "RoutineConfig",
-    "IntegrationTestConfig",
     "EnvConfig",
 ]
 
@@ -382,79 +381,25 @@ class IsaacLabConfig:
 
 
 @dataclass
-class IntegrationTestConfig:
-    """Tunables for the standalone PX4 takeoff/hover integration test.
-
-    Single source of truth for the integration test's command-flow timeouts,
-    takeoff target, and the flight-envelope gates the test asserts (previously
-    module-level constants in the standalone test). This is test-harness config:
-    it is composed only by the ``integration_test_*`` experiments and is ``None``
-    in the default runtime experiment (see :attr:`EnvConfig.integration_test`).
-    The same test drives one drone (single-vehicle baseline) or N drones
-    (multi-vehicle takeoff); each gate is evaluated per drone against its own
-    spawn position. The scene is not here -- it is a top-level per-experiment
-    field (:attr:`EnvConfig.scene`); the GCS link baseport lives in the ``px4``
-    group (:attr:`Px4BridgeConfig.gcs_baseport`).
-
-    Attributes:
-        gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
-        ground_settle_s: Sim-time the drone settles on the ground before the
-            command flow starts.
-        heartbeat_timeout_s: Wall-clock deadline for each handshake wait (bridge
-            heartbeat, GCS heartbeat, takeoff telemetry).
-        prearm_settle_s: Sim-time the PX4 estimator is allowed to settle before
-            arming.
-        command_ack_timeout_s: Wall-clock deadline for a MAVLink COMMAND_ACK.
-        takeoff_altitude_m: Climb commanded in MAV_CMD_NAV_TAKEOFF.
-        min_takeoff_climb_m: Minimum climb (m) that counts as airborne before the
-            hover envelope is evaluated.
-        takeoff_timeout_s: Sim-time budget to reach ``min_takeoff_climb_m``.
-        hover_settle_s: Sim-time after reaching altitude before hover sampling.
-        hover_observation_s: Sim-time the hover envelope is sampled.
-        hover_max_altitude_range_m: Max allowed spread of hover climb height.
-        hover_max_abs_vertical_speed_m_s: Max allowed hover vertical speed.
-        hover_max_horizontal_range_m: Max allowed hover horizontal bbox diagonal.
-        hover_max_abs_horizontal_speed_m_s: Max allowed hover horizontal speed.
-        max_tilt_deg: Continuous tilt gate during takeoff.
-        max_lateral_drift_m: Continuous lateral-drift gate during takeoff.
-        max_vertical_speed_m_s: Continuous upward-speed divergence gate.
-        max_downward_speed_m_s: Continuous downward-speed divergence gate
-            (negative).
-        max_angular_speed_rad_s: Continuous angular-speed divergence gate.
-    """
-
-    gcs_heartbeat_period_s: float
-    ground_settle_s: float
-    heartbeat_timeout_s: float
-    prearm_settle_s: float
-    command_ack_timeout_s: float
-    takeoff_altitude_m: float
-    min_takeoff_climb_m: float
-    takeoff_timeout_s: float
-    hover_settle_s: float
-    hover_observation_s: float
-    hover_max_altitude_range_m: float
-    hover_max_abs_vertical_speed_m_s: float
-    hover_max_horizontal_range_m: float
-    hover_max_abs_horizontal_speed_m_s: float
-    max_tilt_deg: float
-    max_lateral_drift_m: float
-    max_vertical_speed_m_s: float
-    max_downward_speed_m_s: float
-    max_angular_speed_rad_s: float
-
-
-@dataclass
 class RoutineConfig:
-    """High-level flight routine executed by the live ``drone_spawner`` extension.
+    """High-level flight routine flown in every workflow over the GCS link.
 
-    The single source of truth for whether and what the live runtime flies. It is
-    composed into every experiment (always present on :class:`EnvConfig`, unlike
-    the optional ``integration_test`` harness group), and the rule is simply:
-    a **non-empty** ``steps`` list makes the extension build a control driver that
-    arms/takes-off the fleet on Play, while an **empty** ``steps`` list means
-    purely manual operation (no driver is constructed). There is no separate
-    enable flag -- ``steps`` is the switch.
+    The single source of truth for whether and what is flown, and how a good
+    flight is verified. It is composed into every experiment (always present on
+    :class:`EnvConfig`), and the rule is simply: a **non-empty** ``steps`` list
+    makes a control driver arm/take-off/verify the fleet, while an **empty**
+    ``steps`` list means purely manual operation (no driver is constructed).
+    There is no separate enable flag -- ``steps`` is the switch.
+
+    The *same* routine runs in the live extension (``make run-all``), a regular
+    standalone run, and the strict standalone integration test; only the driver's
+    reaction to a flight-envelope breach differs (the strict integration test
+    raises, the forgiving live/regular run logs and stops). The verification is
+    the routine's own job: a takeoff step completes on a real climb and a hover
+    step on a sustained stable hover, and the ``max_*`` / ``hover_max_*`` gates
+    below are wired (via ``commanding.EnvelopeGates`` /
+    ``commanding.build_vehicle_routine``) onto the flight steps as continuous
+    invariants whose breach fails the routine.
 
     This is the *control* layer's config, parallel to the bridge's ``px4`` group:
     the GCS link baseport lives in the ``px4`` group
@@ -463,14 +408,14 @@ class RoutineConfig:
 
     Attributes:
         steps: Ordered step descriptors authored in YAML, each a mapping with a
-            ``kind`` (``arm`` or ``takeoff``; ``takeoff`` carries ``climb_m``).
-            Empty means manual (no routine driver). Typed ``List[Any]`` so Hydra's
-            structured-config validation accepts the partial per-step mappings
-            during ``compose()`` (the same escape hatch as ``vehicles``); the
-            driver maps them to a pure ``VehicleRoutine`` via
-            ``commanding.build_vehicle_routine``.
+            ``kind`` (``arm``; ``takeoff`` carrying ``climb_m`` + ``min_climb_m``;
+            ``hover`` carrying ``hold_s``). Empty means manual (no routine
+            driver). Typed ``List[Any]`` so Hydra's structured-config validation
+            accepts the partial per-step mappings during ``compose()`` (the same
+            escape hatch as ``vehicles``); the driver maps them to a pure
+            ``VehicleRoutine`` via ``commanding.build_vehicle_routine``.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
-        command_ack_timeout_s: Sim-time budget for each routine step's COMMAND_ACK.
+        command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
             to connect before the routine starts.
         handshake_timeout_s: Wall-clock deadline to learn the PX4 target system on
@@ -479,6 +424,21 @@ class RoutineConfig:
             arming.
         takeoff_target_timeout_s: Wall-clock deadline to receive each drone's
             global-position telemetry (the takeoff target) before commanding.
+        ground_settle_s: Sim-time the drone settles on the ground before the
+            command flow starts (used by the standalone driver).
+        takeoff_timeout_s: Sim-time budget for the takeoff step to climb to its
+            ``min_climb_m``.
+        hover_settle_s: Sim-time a hover step is allowed to stabilize before its
+            ``hold_s`` window must be sustained (the hover step timeout is
+            ``hover_settle_s + hold_s``).
+        max_tilt_deg: Continuous tilt gate on the flight steps.
+        max_lateral_drift_m: Continuous lateral-drift gate (from the baseline).
+        max_vertical_speed_m_s: Continuous upward-speed divergence gate.
+        max_downward_speed_m_s: Continuous downward-speed divergence gate
+            (negative).
+        max_angular_speed_rad_s: Continuous angular-speed divergence gate.
+        hover_max_abs_vertical_speed_m_s: Hover-completion vertical-speed bound.
+        hover_max_abs_horizontal_speed_m_s: Hover-completion horizontal-speed bound.
     """
 
     steps: List[Any]
@@ -488,6 +448,16 @@ class RoutineConfig:
     handshake_timeout_s: float
     prearm_settle_s: float
     takeoff_target_timeout_s: float
+    ground_settle_s: float
+    takeoff_timeout_s: float
+    hover_settle_s: float
+    max_tilt_deg: float
+    max_lateral_drift_m: float
+    max_vertical_speed_m_s: float
+    max_downward_speed_m_s: float
+    max_angular_speed_rad_s: float
+    hover_max_abs_vertical_speed_m_s: float
+    hover_max_abs_horizontal_speed_m_s: float
 
 
 @dataclass
@@ -513,18 +483,11 @@ class EnvConfig:
             during ``compose()``. The loader replaces the raw dicts with a
             fully enriched, validated ``list[ResolvedVehicle]`` (see
             ``config.load.resolve_fleet``), which is the public/runtime type.
-        routine: High-level flight routine for the live ``drone_spawner``
-            extension (see :class:`RoutineConfig`). Always present; an empty
-            ``routine.steps`` means manual operation, a non-empty list makes the
-            runtime arm/take-off the fleet on Play. This is the runtime
-            counterpart of the test-only ``integration_test`` group.
-        integration_test: Standalone integration-test harness tunables
-            (command-flow timeouts, takeoff target, flight-envelope gates).
-            ``None`` for the default runtime experiment; populated only by the
-            ``integration_test_*`` experiments that compose the
-            ``integration_test`` group. The ``None`` value is the genuinely
-            distinct state "this experiment carries no test harness", not a
-            routine optional.
+        routine: High-level flight routine plus its verification gates (see
+            :class:`RoutineConfig`). Always present; an empty ``routine.steps``
+            means manual operation, a non-empty list makes every workflow
+            arm/take-off/verify the fleet. The integration test is just this
+            routine driven in strict mode.
     """
 
     sim: SimSettings
@@ -535,4 +498,3 @@ class EnvConfig:
     scene: str
     vehicles: List[Any]
     routine: RoutineConfig
-    integration_test: Optional[IntegrationTestConfig] = None

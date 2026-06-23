@@ -228,52 +228,89 @@ the current contents and the intended home for that kind of code.
   the bridge contract's rule that the bridge never touches `gcs_port`. The
   commander is stepped from the control driver (today the standalone scenario run
   loop), never from the bridge's physics send/recv legs.
+- The routine carries its own verification, so a step's completion can require a
+  physical state and a step can carry continuous flight-envelope gates. A
+  `RoutineStep` has an **optional** `command` (`None` = a verification-only step
+  like `hover`), a completion predicate `StepPredicate(observation, baseline)`, a
+  sim-time `timeout_s`, an optional `hold_s` (the predicate must hold continuously
+  for this long before advancing -- "hover stable for N seconds"), and a tuple of
+  `invariants` (continuous gates). `decide` checks `invariants` first (a breach ->
+  `FAIL(FailureKind.ENVELOPE)`), then completion+hold (-> `ADVANCE`), then
+  ack-rejection/timeout (-> `FAIL(FailureKind.COMMAND)`). Completion helpers:
+  `armed`, `ack_accepted`, `climbed_at_least(min_climb_m)` (vs the captured
+  baseline), `hovering_stable(...)`; invariant helpers (breach message or `None`):
+  `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
+  `angular_speed_below`; `EnvelopeGates` bundles the thresholds.
 - Where the executor lives: there are two drivers over the **same** pure core and
-  `AbstractCommandPort` seam -- only the driver differs.
+  `AbstractCommandPort` seam, and both build the **same** routine from
+  `routine.steps` via `build_vehicle_routine` (the verification is in the routine,
+  not the driver) -- only the reaction to a `FAIL` differs.
   - Standalone takeoff scenario
     (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking,
-    staged script that builds a per-drone `VehicleRoutine = [arm, takeoff]` (both
-    steps complete on their `COMMAND_ACK`, both retry on a transient PX4
-    `TEMPORARILY_REJECTED`), a `FleetCommander(STEP_SYNCHRONIZED)`, and drives it
-    to `DONE`; the climb/hover envelope gates and `post_takeoff_hook` stay in the
-    scenario, fired after the routine completes (preserving the arm-ack ->
-    takeoff-ack -> hook -> hover order). It no longer hand-rolls any MAVLink.
+    staged script that builds a per-drone routine from `routine.steps`
+    (`[arm, takeoff, hover]`), a `FleetCommander(STEP_SYNCHRONIZED)`, and drives it
+    to `DONE`. The flight verification (climb, sustained hover, the continuous
+    envelope invariants) lives in the routine; the scenario adds only the generic
+    infra checks (bridge connectivity, the heartbeat/handshake/telemetry
+    handshakes, the pre-arm start-tilt check, the bridge-log scan) and the
+    **strict-vs-forgiving** reaction. With `--strict` (the integration test, set by
+    `STRICT=1` in the Make target) a `FailureKind.ENVELOPE` breach raises
+    `ExpectedInstabilityDetected` and any other `FAIL` raises `AssertionError`;
+    without it a regular run logs and stops, like the live extension. A PX4
+    failsafe stays a separate `Px4FailsafeDetected` (strict) so the negative test
+    only passes on an envelope breach, never a failsafe flake. The
+    `post_takeoff_hook` (negative-test fault injection) fires the tick the takeoff
+    step completes, so the hover step's envelope catches the instability. It
+    hand-rolls no MAVLink.
   - Live `drone_spawner` extension
     (`isaac/runtime/extensions/drone_spawner/DroneSpawner_python/control_driver.py`,
     `FleetControlDriver`): the runtime path for `make run-all` / `make run-isaac`.
-    Same pure core, but re-expressed as a **non-blocking, tick-driven phase
-    machine** (`WAIT_BRIDGE -> CONNECT_GCS -> HANDSHAKE -> PREARM_SETTLE ->
-    FETCH_TARGET -> BUILD -> DRIVE -> DONE`) stepped from the **Kit app-update
-    event stream** -- a control tick separate from the bridge's physics-step
-    subscription, never the bridge's send/recv legs. It reads each drone's state
-    through a state-only `IsaacArticulationIO` (no rotor paths) and the bridge
-    snapshot through the new public `BridgeHost.status` property, talks each
+    Same pure core and the same routine, re-expressed as a **non-blocking,
+    tick-driven phase machine** (`WAIT_BRIDGE -> CONNECT_GCS -> HANDSHAKE ->
+    PREARM_SETTLE -> FETCH_TARGET -> BUILD -> DRIVE -> DONE`) stepped from the
+    **Kit app-update event stream** -- a control tick separate from the bridge's
+    physics-step subscription, never the bridge's send/recv legs. It reads each
+    drone's state through a state-only `IsaacArticulationIO` (no rotor paths) and
+    the bridge snapshot through the public `BridgeHost.status` property, talks each
     drone's GCS link via `MavlinkCommandPort`, and runs the same
-    `FleetCommander(STEP_SYNCHRONIZED)` barrier. On a `FAIL` decision, a PX4
-    failsafe, or a phase timeout it **logs a warning and stops the routine**
-    (never raises into the sim -- runtime is recoverable, unlike the test which
-    asserts); after `DONE` it idles, keeping the GCS link warm so PX4-console
-    control returns to the user. The extension builds it in `_setup_drone` (after
-    `BridgeHostGroup.start()`) and stops it in `_teardown_drone`.
+    `FleetCommander(STEP_SYNCHRONIZED)` barrier. It is always **forgiving**: on a
+    `FAIL` decision (envelope or command), a PX4 failsafe, or a phase timeout it
+    **logs a warning and stops the routine** (never raises into the sim -- runtime
+    is recoverable); after `DONE` it idles, keeping the GCS link warm so
+    PX4-console control returns to the user. The extension builds it in
+    `_setup_drone` (after `BridgeHostGroup.start()`) and stops it in
+    `_teardown_drone`.
 - The routine is config-driven and the config is the single source of truth: the
-  Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`, unlike
-  the optional test-only `integration_test` group) carries `steps` plus the
-  control-flow tunables (`gcs_heartbeat_period_s`, `command_ack_timeout_s`,
-  `bridge_heartbeat_timeout_s`, `handshake_timeout_s`, `prearm_settle_s`,
-  `takeoff_target_timeout_s`). `routine.steps` is the on/off switch: a **non-empty**
-  list (authored as `{kind: arm}` / `{kind: takeoff, climb_m: ...}` mappings) makes
-  the extension build the `FleetControlDriver` on Play; an **empty** list (the
-  default `configs/experiment/routine/default.yaml`) means purely manual operation
-  (no driver). There is no separate enable flag. The pure
-  `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s)`
-  maps the descriptors + a per-drone takeoff target into a `VehicleRoutine`
-  (unknown `kind` or a `takeoff` missing `climb_m` raises `ValueError`); it stays
-  on the core import path and is the shared seam for the eventual standalone/live
-  merge. `configs/runtime_arm_takeoff.yaml` is the example experiment that
-  overrides `routine.steps` to `[arm, takeoff]` for a headless
-  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml` demo. The GCS link
-  baseport still lives in the `px4` group (`px4.gcs_baseport`); the per-drone
-  `gcs_port` the driver talks is derived from it.
+  Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`)
+  carries `steps`, the control-flow tunables (`gcs_heartbeat_period_s`,
+  `command_ack_timeout_s`, `bridge_heartbeat_timeout_s`, `handshake_timeout_s`,
+  `prearm_settle_s`, `takeoff_target_timeout_s`, `ground_settle_s`,
+  `takeoff_timeout_s`, `hover_settle_s`), **and the flight-envelope gates**
+  (`max_tilt_deg`, `max_lateral_drift_m`, `max_vertical_speed_m_s`,
+  `max_downward_speed_m_s`, `max_angular_speed_rad_s`,
+  `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`). There
+  is **no** separate `integration_test` group: the integration test is just the
+  routine driven with `--strict`. `routine.steps` is the on/off switch: a
+  **non-empty** list (authored as `{kind: arm}` / `{kind: takeoff, climb_m,
+  min_climb_m}` / `{kind: hover, hold_s}` mappings) makes a driver fly the routine
+  on Play; an **empty** list (the default `configs/experiment/routine/default.yaml`)
+  means purely manual operation (no driver). There is no separate enable flag. The
+  pure `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s,
+  gates, takeoff_timeout_s, hover_settle_s)` maps the descriptors + a per-drone
+  takeoff target into a `VehicleRoutine` (unknown `kind`, or a `takeoff`/`hover`
+  missing a required field, raises `ValueError`); it stays on the core import path
+  and is the shared seam both drivers use. The takeoff step completes on a real
+  climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained
+  `hovering_stable(...)`, with the gates as continuous invariants on both (the
+  historical windowed min/max-range hover gates are now sustained
+  instantaneous-rate bounds held for `hold_s`).
+  `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
+  `configs/runtime_arm_takeoff.yaml` runs it headless via
+  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml`, and the
+  `integration_test_*` configs select the same routine and differ only in
+  scene/fleet. The GCS link baseport still lives in the `px4` group
+  (`px4.gcs_baseport`); the per-drone `gcs_port` the driver talks is derived from
+  it.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
@@ -423,30 +460,33 @@ the host. They are meant to be used in the Dockerized environment.
   redirects explicitly; manual runs do not land there.)
 - Every top-level config is an *experiment* (sibling of `config.yaml`), loaded
   identically; there is no system distinction between a runtime experiment and a
-  test experiment. Each experiment sets a top-level `scene` (the USD stage;
-  `@`-prefixed is repo-relative). The standalone integration-test harness
-  tunables (command-flow timeouts, takeoff target, flight-envelope gates) live in
-  the Hydra `integration_test` group (`IntegrationTestConfig`), which is
-  **optional** on `EnvConfig`: it is composed only by the `integration_test_*`
-  experiments and is `None` in the default runtime experiment. The GCS link
-  baseport is in the `px4` group (`px4.gcs_baseport`), not the test config, so
-  runtime never reads a test field. The standalone runner's `--scene` is optional
-  and overrides the experiment scene; the multi-drone target passes the `@config`
-  sentinel so the scene comes from the experiment `scene`. Experiment variants
-  are selected with the `HYDRA_CONFIG` Make variable. The top-level entry
-  configs are independent and live directly under `configs/` (the default
-  runtime config is `configs/config.yaml`, and the integration tests are
-  `configs/integration_test_takeoff.yaml` (one drone) and
-  `configs/integration_test_multi_drone_takeoff.yaml` (two drones)); the
+  test experiment, and **every** experiment is uniformly runnable both through the
+  standalone workflow and the extension workflow (`make run-all`). Each experiment
+  sets a top-level `scene` (the USD stage; `@`-prefixed is repo-relative). The
+  flight routine *and its verification* (command-flow timeouts, takeoff target,
+  flight-envelope gates) live in the Hydra `routine` group (`RoutineConfig`,
+  always composed onto `EnvConfig`); there is **no** separate `integration_test`
+  group -- the integration test is just a routine experiment driven in strict mode
+  (the standalone runner's `--strict`, set by `STRICT=1` in the Make target). The
+  GCS link baseport is in the `px4` group (`px4.gcs_baseport`). The standalone
+  runner's `--scene` is optional and overrides the experiment scene; the
+  multi-drone target passes the `@config` sentinel so the scene comes from the
+  experiment `scene`. Experiment variants are selected with the `HYDRA_CONFIG`
+  Make variable. The top-level entry configs are independent and live directly
+  under `configs/` (the default runtime config is `configs/config.yaml`, the
+  shared-routine demo is `configs/runtime_arm_takeoff.yaml`, and the takeoff
+  experiments are `configs/integration_test_takeoff.yaml` (one drone) and
+  `configs/integration_test_multi_drone_takeoff.yaml` (two drones) -- all three
+  select the same `routine` `takeoff` variant and differ only in scene/fleet); the
   composable group building blocks they select (`sim`, `drone`, `switches`,
-  `px4`, `isaac_lab`, `routine`, `integration_test`) live under
-  `configs/experiment/` and are referenced as `experiment/<group>@<group>`. The
-  `routine` group is composed by `configs/config.yaml` itself (so every
-  experiment that inherits `config` carries it; `EnvConfig.routine` is never
-  `None`), and `routine.steps` is empty by default -- see the Commanding section
-  for the live-routine switch. The persistent runtime entrypoint
-  `isaac/runtime/standalone/runapp_custom.sh` reads its stage from the experiment
-  `scene` too.
+  `px4`, `isaac_lab`, `routine`) live under `configs/experiment/` and are
+  referenced as `experiment/<group>@<group>`. The `routine` group is composed by
+  `configs/config.yaml` itself (so every experiment that inherits `config` carries
+  it; `EnvConfig.routine` is never `None`), and `routine.steps` is empty by default
+  (manual operation) -- see the Commanding section for the routine switch and the
+  `takeoff` variant (`configs/experiment/routine/takeoff.yaml`). The persistent
+  runtime entrypoint `isaac/runtime/standalone/runapp_custom.sh` reads its stage
+  from the experiment `scene` too.
 
 ### PX4
 - `make run-px4` derives the number of PX4 SITL containers from the active Hydra

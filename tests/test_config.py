@@ -81,15 +81,17 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.isaac_lab.drone_hover_num_envs == expected_isaac_lab.drone_hover_num_envs
     assert config.isaac_lab.drone_hover_env_spacing == expected_isaac_lab.drone_hover_env_spacing
     assert config.isaac_lab.drone_hover_action_scale == expected_isaac_lab.drone_hover_action_scale
-    # The default runtime experiment carries no integration-test harness; the
-    # GCS link baseport lives in the px4 group and the scene is top-level.
-    assert config.integration_test is None
+    # The default runtime experiment ships an empty (manual) routine and its
+    # flight-envelope gates; the GCS link baseport lives in the px4 group.
+    expected_routine = _group_defaults("routine")
+    assert config.routine.steps == []
+    assert config.routine.max_tilt_deg == expected_routine.max_tilt_deg
     assert config.px4.gcs_baseport == 14550
     assert config.scene.endswith("/Warehouse.usd")
     reset_config()
 
 
-def test_integration_test_experiment_composes_gates_and_scene(monkeypatch):
+def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, reset_config
@@ -101,16 +103,22 @@ def test_integration_test_experiment_composes_gates_and_scene(monkeypatch):
     reset_config()
 
     config = get_config()
-    expected_gates = _group_defaults("integration_test", "takeoff")
+    # The takeoff routine variant overrides only steps; the gates come from the
+    # default routine it inherits.
+    expected_steps = _group_defaults("routine", "takeoff")
+    expected_gates = _group_defaults("routine")
 
     assert config.scene.endswith("/MinimalIntegration.usda")
-    assert config.integration_test is not None
-    assert config.integration_test.takeoff_altitude_m == expected_gates.takeoff_altitude_m
-    assert config.integration_test.min_takeoff_climb_m == expected_gates.min_takeoff_climb_m
-    assert config.integration_test.max_downward_speed_m_s == expected_gates.max_downward_speed_m_s
+    assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
+    assert [step["kind"] for step in expected_steps.steps] == ["arm", "takeoff", "hover"]
+    takeoff_step = config.routine.steps[1]
+    assert takeoff_step["climb_m"] == 2.5
+    assert takeoff_step["min_climb_m"] == 1.5
+    assert config.routine.steps[2]["hold_s"] == 5.0
+    assert config.routine.max_downward_speed_m_s == expected_gates.max_downward_speed_m_s
     assert (
-        config.integration_test.hover_max_horizontal_range_m
-        == expected_gates.hover_max_horizontal_range_m
+        config.routine.hover_max_abs_horizontal_speed_m_s
+        == expected_gates.hover_max_abs_horizontal_speed_m_s
     )
     # Single-drone fleet inherited from config.yaml.
     assert [vehicle.id for vehicle in config.vehicles] == [0]
@@ -197,7 +205,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     assert [vehicle.mavlink_port for vehicle in config.vehicles] == [4560, 4561]
     # gcs_port is derived from px4.gcs_baseport + id.
     assert [vehicle.gcs_port for vehicle in config.vehicles] == [14550, 14551]
-    assert config.integration_test is not None
+    assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
     assert get_enabled_px4_vehicle_count() == 2
     assert get_enabled_px4_instance_indices() == [0, 1]
     reset_config()

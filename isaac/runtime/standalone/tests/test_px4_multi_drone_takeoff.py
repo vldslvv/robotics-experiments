@@ -7,8 +7,8 @@ ports 4560/4561 and GCS links 14550/14551), spawns every vehicle, starts one
 production PX4 bridge host per drone, commands arm and takeoff over each drone's
 own GCS MAVLink endpoint, and asserts that *every* drone climbs and holds a
 stable hover within its configured envelope. The scene comes from the top-level
-``scene`` config and the takeoff tunables from the Hydra ``integration_test``
-group.
+``scene`` config and the routine (steps + flight-envelope gates) from the Hydra
+``routine`` group; ``--strict`` (set by the Make target) makes a breach fail.
 
 Run through the host Make target so the N PX4 SITL containers and logs are owned
 outside Isaac:
