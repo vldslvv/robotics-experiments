@@ -125,6 +125,50 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     reset_config()
 
 
+def test_resolve_fleet_merges_per_vehicle_routine_override():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config.load import resolve_fleet
+
+    reset_config()
+    env = get_config()  # default config: global routine.steps is empty (manual)
+    cfg = OmegaConf.create(
+        {
+            "drone": env.drone,
+            "px4": env.px4,
+            "routine": env.routine,
+            "vehicles": [
+                # Drone 0 inherits the (empty) global routine -> manual.
+                {"id": 0, "spawn_xy": [0.0, 0.0], "drone": {"prim_name": "Drone0"}},
+                # Drone 1 overrides only steps and one gate -> flies its own routine.
+                {
+                    "id": 1,
+                    "spawn_xy": [4.0, 0.0],
+                    "drone": {"prim_name": "Drone1"},
+                    "routine": {
+                        "steps": [
+                            {"kind": "arm"},
+                            {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
+                        ],
+                        "max_tilt_deg": 20.0,
+                    },
+                },
+            ],
+        }
+    )
+
+    fleet = resolve_fleet(cfg)
+    assert fleet[0].routine.steps == []  # inherited empty global -> manual
+    assert [s["kind"] for s in fleet[1].routine.steps] == ["arm", "takeoff"]
+    # The per-vehicle override changed only the named keys; the rest inherits.
+    assert fleet[1].routine.max_tilt_deg == 20.0
+    assert fleet[0].routine.max_tilt_deg == env.routine.max_tilt_deg
+    reset_config()
+
+
 def test_resolve_section_returns_provided_untouched():
     from robotics_experiments.config._resolve import resolve_section
 

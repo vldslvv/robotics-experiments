@@ -97,6 +97,9 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
             hover_settle_s=2.0,
         )
         assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
+        # The per-drone routine driver is pure too (its phase machine imports no
+        # carb/omni/pymavlink); it must be importable with the deps blocked.
+        assert hasattr(commanding, "RoutineDriver")
         assert "pymavlink" not in sys.modules
     finally:
         sys.modules.clear()

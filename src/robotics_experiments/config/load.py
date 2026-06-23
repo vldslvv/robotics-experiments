@@ -7,7 +7,7 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
 from .schemas import EnvConfig, register_schemas
-from .types import DroneConfig, Px4BridgeConfig, ResolvedVehicle
+from .types import DroneConfig, Px4BridgeConfig, ResolvedVehicle, RoutineConfig
 
 __all__ = [
     "get_config",
@@ -96,8 +96,10 @@ def resolve_fleet(cfg) -> list[ResolvedVehicle]:
     for entry in raw:
         drone = OmegaConf.merge(cfg.drone, entry.get("drone", {}))
         px4 = OmegaConf.merge(cfg.px4, entry.get("px4", {}))
+        routine = OmegaConf.merge(cfg.routine, entry.get("routine", {}))
         drone_cfg = cast(DroneConfig, OmegaConf.to_object(drone))
         px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
+        routine_cfg = cast(RoutineConfig, OmegaConf.to_object(routine))
         vehicle_id = int(entry["id"])
         resolved.append(
             ResolvedVehicle(
@@ -105,6 +107,7 @@ def resolve_fleet(cfg) -> list[ResolvedVehicle]:
                 spawn_xy=tuple(entry["spawn_xy"]),
                 drone=drone_cfg,
                 px4=px4_cfg,
+                routine=routine_cfg,
                 mavlink_port=px4_cfg.connection_baseport + vehicle_id,
                 px4_instance_index=vehicle_id,
                 gcs_port=px4_cfg.gcs_baseport + vehicle_id,

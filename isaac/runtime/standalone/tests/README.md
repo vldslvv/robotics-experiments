@@ -54,6 +54,7 @@ one entry is the single-vehicle baseline, N entries drive N drones, each bound t
 its own PX4 SITL instance (the resolved simulator port `4560 + id`, GCS link the
 resolved `vehicle.gcs_port = px4.gcs_baseport + id`). All bridges tick on the same
 PhysX steps, so one `simulation_app.update()` advances every drone's lockstep
-exchange; the `STEP_SYNCHRONIZED` barrier keeps the fleet in step and each drone's
-routine gates are evaluated against its own spawn baseline - every drone must
+exchange; each drone runs its own independent `RoutineDriver` (one driver per
+drone, no fleet barrier) and its routine gates are evaluated against its own spawn
+baseline - every drone must
 pass.

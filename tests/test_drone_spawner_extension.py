@@ -82,13 +82,18 @@ class _BridgeHostGroup:
             host.stop()
 
 
-def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
-    """A ResolvedVehicle-shaped object: id is the identity, ports are derived."""
+def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled, routine_steps=()):
+    """A ResolvedVehicle-shaped object: id is the identity, ports are derived.
+
+    ``routine.steps`` is now per-drone (the live-routine switch): a non-empty list
+    makes the extension build a RoutineDriver for this drone, empty = manual.
+    """
     return SimpleNamespace(
         id=vehicle_id,
         spawn_xy=spawn_xy,
         drone=SimpleNamespace(prim_name=prim_name),
         px4=SimpleNamespace(enabled=enabled, connection_baseport=4560, articulation_path=None),
+        routine=SimpleNamespace(steps=list(routine_steps)),
         mavlink_port=4560 + vehicle_id,
         px4_instance_index=vehicle_id,
         gcs_port=14550 + vehicle_id,
@@ -97,13 +102,11 @@ def _vehicle(vehicle_id, prim_name, spawn_xy, *, enabled):
     )
 
 
-def _env(*vehicles, physics_hz=250.0, routine_steps=()):
-    # routine.steps is the live-routine switch: empty (the default here) means the
-    # extension builds no control driver, matching manual operation.
+def _env(*vehicles, physics_hz=250.0):
     return SimpleNamespace(
         sim=SimpleNamespace(physics_hz=physics_hz),
         vehicles=list(vehicles),
-        routine=SimpleNamespace(steps=list(routine_steps)),
+        routine=SimpleNamespace(steps=[]),
     )
 
 
@@ -367,9 +370,9 @@ def test_play_builds_control_driver_when_routine_non_empty(monkeypatch):
             self.stopped = False
 
         @classmethod
-        def from_vehicles(cls, entries, *, routine_cfg):
+        def from_vehicles(cls, entries):
             inst = cls()
-            built.update(entries=entries, routine_cfg=routine_cfg, inst=inst)
+            built.update(entries=entries, inst=inst)
             return inst
 
         def start(self):
@@ -379,19 +382,16 @@ def test_play_builds_control_driver_when_routine_non_empty(monkeypatch):
             self.stopped = True
 
     monkeypatch.setattr(module, "FleetControlDriver", _FakeDriver)
-    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
-    monkeypatch.setattr(
-        module, "_get_experiment_config", lambda: _env(v0, routine_steps=[{"kind": "arm"}])
-    )
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True, routine_steps=[{"kind": "arm"}])
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0))
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
-    # A non-empty routine builds and starts the driver from one entry per
-    # px4-enabled vehicle: (vehicle, host, articulation_path).
+    # A drone with a non-empty routine builds and starts the driver from one entry
+    # per px4-enabled vehicle: (vehicle, host, articulation_path).
     assert built["inst"].started is True
-    assert built["routine_cfg"].steps == [{"kind": "arm"}]
     assert len(built["entries"]) == 1
     vehicle, _host, articulation_path = built["entries"][0]
     assert vehicle.id == 0
@@ -414,8 +414,8 @@ def test_play_with_empty_routine_builds_no_control_driver(monkeypatch):
     monkeypatch.setattr(
         module, "FleetControlDriver", SimpleNamespace(from_vehicles=_should_not_build)
     )
-    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)
-    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0, routine_steps=()))
+    v0 = _vehicle(0, "Drone", (0.0, 0.0), enabled=True)  # empty routine -> manual
+    monkeypatch.setattr(module, "_get_experiment_config", lambda: _env(v0))
 
     extension = module.Extension()
     extension.on_startup("drone_spawner")

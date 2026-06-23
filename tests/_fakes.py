@@ -345,12 +345,12 @@ def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
 
 
 class FakeCommandPort:
-    """Records sent commands; an :class:`AbstractCommandPort` for routine tests.
+    """An :class:`AbstractCommandPort` for the pure command-layer / driver tests.
 
-    The pure ``decide`` / ``FleetCommander`` tests drive the command layer with
-    synthetic ``RoutineObservation``s (acks injected directly), so this fake only
-    needs to capture the ``MavlinkCommand``s emitted on ``SEND``. Heartbeat and
-    feedback calls are counted but inert.
+    Captures the ``MavlinkCommand``s emitted on ``SEND`` and lets a test script
+    the control-feedback the driver reads through the seam: queue acks via
+    :attr:`feedback`, and set :attr:`handshaked` / :attr:`failsafe_flag` /
+    :attr:`global_position`. Heartbeat/connect calls are counted but inert.
     """
 
     def __init__(self):
@@ -358,6 +358,12 @@ class FakeCommandPort:
         self.connected = False
         self.heartbeats = 0
         self.feedback_polls = 0
+        # Scriptable feedback for the driver tests.
+        self.feedback = []  # acks popped (FIFO) by poll_feedback
+        self.handshaked = False
+        self.failsafe_flag = False
+        self.system_status = 0
+        self.global_position = None
 
     def connect(self):
         self.connected = True
@@ -373,7 +379,23 @@ class FakeCommandPort:
 
     def poll_feedback(self):
         self.feedback_polls += 1
-        return None
+        return self.feedback.pop(0) if self.feedback else None
+
+    @property
+    def is_handshaked(self):
+        return self.handshaked
+
+    @property
+    def failsafe(self):
+        return self.failsafe_flag
+
+    @property
+    def failsafe_system_status(self):
+        return self.system_status
+
+    @property
+    def latest_global_position(self):
+        return self.global_position
 
 
 def make_routine_observation(
@@ -420,6 +442,48 @@ def make_routine_observation(
         failsafe=failsafe,
         sim_time_us=int(sim_time_us),
     )
+
+
+class FakeDriverEnvironment:
+    """A scriptable :class:`DriverEnvironment` for the per-drone RoutineDriver tests.
+
+    The test sets :attr:`connected`, :attr:`sim_us`, and :attr:`observation`
+    (the kinematic snapshot the driver reads each tick); ``read_observation``
+    re-stamps it with the current sim time and the drained ack. Failures and
+    completed-step labels are captured; ``raise_on_failure`` makes ``on_failure``
+    raise (the strict reaction) so a test can assert the breach propagates.
+    """
+
+    def __init__(self, *, raise_on_failure=False):
+        self.connected = False
+        self.sim_us = 0
+        self.observation = make_routine_observation()
+        self.logs = []
+        self.failures = []
+        self.advanced_steps = []
+        self.raise_on_failure = raise_on_failure
+
+    def is_bridge_connected(self) -> bool:
+        return self.connected
+
+    def sim_time_us(self) -> int:
+        return self.sim_us
+
+    def read_observation(self, *, sim_time_us, last_ack):
+        import dataclasses
+
+        return dataclasses.replace(self.observation, sim_time_us=sim_time_us, last_ack=last_ack)
+
+    def log(self, message: str) -> None:
+        self.logs.append(message)
+
+    def on_failure(self, kind, message: str) -> None:
+        self.failures.append((kind, message))
+        if self.raise_on_failure:
+            raise AssertionError(f"{kind}: {message}")
+
+    def on_step_advanced(self, step_label: str) -> None:
+        self.advanced_steps.append(step_label)
 
 
 def _quat_pitch_deg(angle_deg: float) -> np.ndarray:

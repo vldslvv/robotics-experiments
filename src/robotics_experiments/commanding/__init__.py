@@ -13,7 +13,7 @@ imports ``pymavlink`` only inside its methods), so ``import robotics_experiments
 succeeds with Isaac and pymavlink absent.
 """
 
-from .commander import ExecutionPolicy, FleetCommander, VehicleCommander
+from .commander import VehicleCommander
 from .commands import (
     MavlinkCommand,
     arm,
@@ -21,6 +21,7 @@ from .commands import (
     reposition,
     takeoff,
 )
+from .driver import DriverEnvironment, DriverParams, DriverPhase, RoutineDriver
 from .observation import CommandAck, RoutineObservation
 from .port import AbstractCommandPort, MavlinkCommandPort
 from .routine import (
@@ -47,13 +48,15 @@ __all__ = [
     "AbstractCommandPort",
     "CommandAck",
     "DecisionKind",
+    "DriverEnvironment",
+    "DriverParams",
+    "DriverPhase",
     "EnvelopeGates",
-    "ExecutionPolicy",
     "FailureKind",
-    "FleetCommander",
     "MavlinkCommand",
     "MavlinkCommandPort",
     "RoutineDecision",
+    "RoutineDriver",
     "RoutineObservation",
     "RoutineState",
     "RoutineStep",

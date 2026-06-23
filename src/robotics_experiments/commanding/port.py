@@ -63,6 +63,26 @@ class AbstractCommandPort(ABC):
     def poll_feedback(self) -> Optional[CommandAck]:
         """Drain inbound MAVLink and return the most recent ack this tick."""
 
+    @property
+    @abstractmethod
+    def is_handshaked(self) -> bool:
+        """Whether the target system/component has been learned from a heartbeat."""
+
+    @property
+    @abstractmethod
+    def failsafe(self) -> bool:
+        """Whether the last drained heartbeat reported a failsafe system status."""
+
+    @property
+    @abstractmethod
+    def failsafe_system_status(self) -> int:
+        """The last heartbeat ``system_status`` value (for failsafe diagnostics)."""
+
+    @property
+    @abstractmethod
+    def latest_global_position(self) -> Optional[tuple[float, float, float]]:
+        """Latest ``(latitude_deg, longitude_deg, altitude_m)`` telemetry, or ``None``."""
+
 
 class MavlinkCommandPort(AbstractCommandPort):
     """PX4 command port over a GCS MAVLink (UDP) endpoint.

@@ -134,13 +134,13 @@ class Extension(omni.ext.IExt):
         self._bridge_group = BridgeHostGroup(hosts)
         self._bridge_group.start()
 
-        # Routine config is the single source of truth: a non-empty steps list
-        # builds the control driver (off a separate app-update tick, never the
-        # bridge's physics legs); an empty list means manual operation.
-        if env.routine.steps:
-            self._control_driver = FleetControlDriver.from_vehicles(
-                control_entries, routine_cfg=env.routine
-            )
+        # Routine config is the single source of truth, now per drone: each
+        # vehicle whose resolved routine.steps is non-empty gets its own
+        # RoutineDriver (off a separate app-update tick, never the bridge's
+        # physics legs); a drone with empty steps stays manual. Build the runner
+        # only when at least one drone has a routine to fly.
+        if any(vehicle.routine.steps for vehicle in env.vehicles):
+            self._control_driver = FleetControlDriver.from_vehicles(control_entries)
             self._control_driver.start()
 
     def _teardown_drone(self):

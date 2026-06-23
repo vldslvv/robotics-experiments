@@ -21,6 +21,7 @@ def _composed_cfg(vehicles):
         {
             "drone": OmegaConf.structured(env.drone),
             "px4": OmegaConf.structured(env.px4),
+            "routine": OmegaConf.structured(env.routine),
             "vehicles": vehicles,
         }
     )
@@ -33,6 +34,15 @@ def _base_defaults():
     env = get_config()
     reset_config()
     return env.drone, env.px4
+
+
+def _base_routine():
+    from robotics_experiments.config import get_config, reset_config
+
+    reset_config()
+    env = get_config()
+    reset_config()
+    return env.routine
 
 
 def _resolved_vehicle(
@@ -65,6 +75,7 @@ def _resolved_vehicle(
         spawn_xy=spawn_xy,
         drone=drone,
         px4=px4,
+        routine=_base_routine(),
         mavlink_port=port,
         px4_instance_index=vehicle_id,
         gcs_port=gcs_port if gcs_port is not None else 14550 + vehicle_id,

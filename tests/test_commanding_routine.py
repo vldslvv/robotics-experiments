@@ -1,9 +1,11 @@
-"""Pure command-layer tests: the ``decide`` stepper and the fleet barrier.
+"""Pure command-layer tests: the ``decide`` stepper, predicates, and gates.
 
 These exercise the contract centerpiece without Docker, Isaac, or pymavlink:
-``decide`` is driven through arm -> takeoff -> done with synthetic
-``RoutineObservation``s, and ``FleetCommander``'s ``STEP_SYNCHRONIZED`` barrier
-is checked with a fake :class:`AbstractCommandPort`.
+``decide`` is driven through arm -> takeoff -> hover with synthetic
+``RoutineObservation``s (invariant breaches, hold windows, ``build_vehicle_routine``)
+plus a single-drone :class:`VehicleCommander` over a fake
+:class:`AbstractCommandPort`. The per-drone driver itself is covered by
+``test_commanding_driver.py``.
 """
 
 import math
@@ -14,9 +16,7 @@ from _fakes import FakeCommandPort, make_routine_observation
 from robotics_experiments.commanding import (
     DecisionKind,
     EnvelopeGates,
-    ExecutionPolicy,
     FailureKind,
-    FleetCommander,
     RoutineState,
     RoutineStep,
     VehicleCommander,
@@ -165,77 +165,31 @@ def test_armed_predicate_reads_bridge_status():
     assert predicate(make_routine_observation(is_armed=True), None) is True
 
 
-def _make_commander(label, routine):
+def test_vehicle_commander_sends_then_advances_to_done():
+    # One commander drives one routine over one port: SEND on entry, ADVANCE on
+    # the accepted ack, DONE past the last step. Drones are independent (no fleet).
     port = FakeCommandPort()
-    return VehicleCommander(routine, port, label=label), port
+    commander = VehicleCommander(_arm_takeoff_routine(), port, label="d0")
 
-
-def test_fleet_step_synchronized_barrier_holds_fast_drone():
-    routine_fast = _arm_takeoff_routine()
-    routine_slow = _arm_takeoff_routine()
-    fast, fast_port = _make_commander("fast", routine_fast)
-    slow, slow_port = _make_commander("slow", routine_slow)
-    fleet = FleetCommander([fast, slow], policy=ExecutionPolicy.STEP_SYNCHRONIZED)
+    decision = commander.step(make_routine_observation(sim_time_us=0))
+    assert decision.kind is DecisionKind.SEND
+    assert [c.label for c in port.sent] == ["arm"]
+    assert commander.current_step_index == 0
 
     arm_ack = CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)
+    decision = commander.step(make_routine_observation(sim_time_us=10_000, last_ack=arm_ack))
+    assert decision.kind is DecisionKind.ADVANCE
+    assert commander.current_step_index == 1
 
-    def obs(armed_ack=None):
-        return make_routine_observation(sim_time_us=0, last_ack=armed_ack)
-
-    # Tick 1: both send arm.
-    decisions = fleet.step({"fast": obs(), "slow": obs()})
-    assert decisions["fast"].kind is DecisionKind.SEND
-    assert decisions["slow"].kind is DecisionKind.SEND
-
-    # Tick 2: fast is armed but slow is not -> the barrier holds fast at WAIT,
-    # so it must not advance to the takeoff step ahead of slow.
-    decisions = fleet.step({"fast": obs(arm_ack), "slow": obs()})
-    assert decisions["fast"].kind is DecisionKind.WAIT
-    assert decisions["slow"].kind is DecisionKind.WAIT
-    assert fast.current_step_index == 0
-    assert slow.current_step_index == 0
-
-    # Tick 3: now slow is armed too -> both advance to the takeoff step together.
-    decisions = fleet.step({"fast": obs(arm_ack), "slow": obs(arm_ack)})
-    assert decisions["fast"].kind is DecisionKind.ADVANCE
-    assert decisions["slow"].kind is DecisionKind.ADVANCE
-    assert fast.current_step_index == 1
-    assert slow.current_step_index == 1
-
-    # Each port saw exactly the arm command once (no double-send from the hold).
-    assert [c.label for c in fast_port.sent] == ["arm"]
-    assert [c.label for c in slow_port.sent] == ["arm"]
-
-
-def test_fleet_barrier_latches_acks_arriving_on_different_ticks():
-    # The realistic case: each drone's accepted ack arrives on its own tick and
-    # is NOT re-presented afterwards. Without latching the accepted ack, the
-    # fast drone would revert to not-complete once its ack tick passes and the barrier
-    # would deadlock; with latching, both advance once the slow drone's ack
-    # finally arrives.
-    fast, _ = _make_commander("fast", _arm_takeoff_routine())
-    slow, _ = _make_commander("slow", _arm_takeoff_routine())
-    fleet = FleetCommander([fast, slow], policy=ExecutionPolicy.STEP_SYNCHRONIZED)
-    arm_ack = CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)
-
-    fleet.step({"fast": make_routine_observation(), "slow": make_routine_observation()})
-
-    # Fast's ack arrives this tick only; it must be held at the barrier.
-    decisions = fleet.step(
-        {"fast": make_routine_observation(last_ack=arm_ack), "slow": make_routine_observation()}
+    # Takeoff sends, then completes on the captured climb.
+    commander.step(make_routine_observation(sim_time_us=20_000))
+    assert [c.label for c in port.sent] == ["arm", "takeoff"]
+    decision = commander.step(
+        make_routine_observation(sim_time_us=30_000, position_enu=(0.0, 0.0, 1.5))
     )
-    assert decisions["fast"].kind is DecisionKind.WAIT
-    assert fast.current_step_index == 0
-
-    # No ack for fast this tick (it already passed); slow's ack arrives now.
-    # The latch keeps fast complete, so both advance together.
-    decisions = fleet.step(
-        {"fast": make_routine_observation(), "slow": make_routine_observation(last_ack=arm_ack)}
-    )
-    assert decisions["fast"].kind is DecisionKind.ADVANCE
-    assert decisions["slow"].kind is DecisionKind.ADVANCE
-    assert fast.current_step_index == 1
-    assert slow.current_step_index == 1
+    assert decision.kind is DecisionKind.ADVANCE
+    assert commander.is_done
+    assert commander.step(make_routine_observation(sim_time_us=40_000)).kind is DecisionKind.DONE
 
 
 def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0):
@@ -394,24 +348,3 @@ def test_decide_hover_step_holds_before_advancing():
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=3_500_000))
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 1
-
-
-def test_fleet_independent_advances_freely():
-    fast, _ = _make_commander("fast", _arm_takeoff_routine())
-    slow, _ = _make_commander("slow", _arm_takeoff_routine())
-    fleet = FleetCommander([fast, slow], policy=ExecutionPolicy.INDEPENDENT)
-
-    arm_ack = CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)
-    fleet.step({"fast": make_routine_observation(), "slow": make_routine_observation()})
-
-    # Fast gets its ack while slow does not; under INDEPENDENT fast advances.
-    decisions = fleet.step(
-        {
-            "fast": make_routine_observation(last_ack=arm_ack),
-            "slow": make_routine_observation(),
-        }
-    )
-    assert decisions["fast"].kind is DecisionKind.ADVANCE
-    assert decisions["slow"].kind is DecisionKind.WAIT
-    assert fast.current_step_index == 1
-    assert slow.current_step_index == 0

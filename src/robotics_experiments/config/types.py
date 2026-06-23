@@ -310,12 +310,16 @@ class VehicleConfig:
         spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
         drone: Fully resolved per-vehicle drone spawner configuration.
         px4: Fully resolved per-vehicle PX4 bridge configuration.
+        routine: Fully resolved per-vehicle flight routine (the global
+            ``routine`` with this vehicle's partial merged over it). A non-empty
+            ``routine.steps`` makes this drone fly; empty means manual.
     """
 
     id: int
     spawn_xy: Tuple[float, float]
     drone: DroneConfig
     px4: Px4BridgeConfig
+    routine: "RoutineConfig"
 
 
 @dataclass(frozen=True)
@@ -333,6 +337,8 @@ class ResolvedVehicle:
         spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
         drone: Fully resolved per-vehicle drone spawner configuration.
         px4: Fully resolved per-vehicle PX4 bridge configuration.
+        routine: Fully resolved per-vehicle flight routine; a non-empty
+            ``routine.steps`` makes this drone fly its routine, empty = manual.
         mavlink_port: Simulator MAVLink TCP port for this vehicle, derived as
             ``px4.connection_baseport + id``.
         px4_instance_index: PX4 ``-i`` instance index, equal to ``id`` (so the
@@ -353,6 +359,7 @@ class ResolvedVehicle:
     spawn_xy: Tuple[float, float]
     drone: DroneConfig
     px4: Px4BridgeConfig
+    routine: "RoutineConfig"
     mavlink_port: int
     px4_instance_index: int
     gcs_port: int

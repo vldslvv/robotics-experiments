@@ -202,15 +202,17 @@ the current contents and the intended home for that kind of code.
   stepper, analogue of `commands_to_dynamics`) -> `RoutineDecision`
   (`SEND`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output) across the
   `AbstractCommandPort` seam (analogue of `AbstractFlightStackBridge`), with
-  `VehicleCommander` / `FleetCommander` as the orchestrators (analogue of
-  `BridgeHost` / `BridgeHostGroup`). `MavlinkCommand` is a thin `command_long`
+  `VehicleCommander` and the pure per-drone `RoutineDriver` as the orchestrators
+  (analogue of `BridgeHost`). The command layer is **per drone** like the bridge:
+  one commander + one driver per drone, no fleet object, drones independent
+  (cross-drone sync is deferred). `MavlinkCommand` is a thin `command_long`
   wrapper (a `MAV_CMD_*` id + seven params); `MAV_CMD_*` / `MAV_RESULT_*` /
   `PX4_FORCE_ARM_MAGIC` are named int constants so the pure modules never import
-  pymavlink. `tests/test_commanding_routine.py` is the pure regression guard
-  (the `decide` transitions + the `FleetCommander` barrier, over a fake
-  `AbstractCommandPort` and synthetic observations in `tests/_fakes.py`), and
-  `tests/test_core_imports.py` asserts the subpackage imports with
-  Isaac/pymavlink absent.
+  pymavlink. `tests/test_commanding_routine.py` (the `decide` transitions + a
+  `VehicleCommander`) and `tests/test_commanding_driver.py` (the `RoutineDriver`
+  phase machine over fake seams) are the pure regression guards, over the fakes in
+  `tests/_fakes.py`; `tests/test_core_imports.py` asserts the subpackage (incl.
+  `RoutineDriver`) imports with Isaac/pymavlink absent.
 - Pure stepper rule: `decide` and every completion predicate
   (`armed()`, `ack_accepted(command_id)`, `climbed_at_least(...)`) are pure
   functions -- no sockets, no pymavlink, no Isaac, unit-testable with plain
@@ -219,9 +221,7 @@ the current contents and the intended home for that kind of code.
   runs the pure `decide` and then performs the single `SEND` side effect, keeping
   decision and I/O separated. Step `timeout_s` is measured in **sim time**
   (`observation.sim_time_us`) so the stepper stays pure; the driver pairs it with
-  a wall-clock backstop. `FleetCommander`'s `STEP_SYNCHRONIZED` policy is the
-  fleet barrier (no vehicle advances to step N+1 until every vehicle completed
-  step N), reproducing arm-all-then-takeoff-all.
+  a wall-clock backstop.
 - `gcs_port` is control, not bridge: the `MavlinkCommandPort` talks the per-drone
   GCS link (`ResolvedVehicle.gcs_port`) only and never touches the bridge's
   simulator MAVLink port or its sensor/actuator lockstep -- the symmetric half of
@@ -241,45 +241,45 @@ the current contents and the intended home for that kind of code.
   baseline), `hovering_stable(...)`; invariant helpers (breach message or `None`):
   `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
   `angular_speed_below`; `EnvelopeGates` bundles the thresholds.
-- Where the executor lives: there are two drivers over the **same** pure core and
-  `AbstractCommandPort` seam, and both build the **same** routine from
-  `routine.steps` via `build_vehicle_routine` (the verification is in the routine,
-  not the driver) -- only the reaction to a `FAIL` differs.
-  - Standalone takeoff scenario
-    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking,
-    staged script that builds a per-drone routine from `routine.steps`
-    (`[arm, takeoff, hover]`), a `FleetCommander(STEP_SYNCHRONIZED)`, and drives it
-    to `DONE`. The flight verification (climb, sustained hover, the continuous
-    envelope invariants) lives in the routine; the scenario adds only the generic
-    infra checks (bridge connectivity, the heartbeat/handshake/telemetry
-    handshakes, the pre-arm start-tilt check, the bridge-log scan) and the
-    **strict-vs-forgiving** reaction. With `--strict` (the integration test, set by
-    `STRICT=1` in the Make target) a `FailureKind.ENVELOPE` breach raises
-    `ExpectedInstabilityDetected` and any other `FAIL` raises `AssertionError`;
-    without it a regular run logs and stops, like the live extension. A PX4
-    failsafe stays a separate `Px4FailsafeDetected` (strict) so the negative test
-    only passes on an envelope breach, never a failsafe flake. The
-    `post_takeoff_hook` (negative-test fault injection) fires the tick the takeoff
-    step completes, so the hover step's envelope catches the instability. It
-    hand-rolls no MAVLink.
+- Where the executor lives: the pure per-drone `RoutineDriver`
+  (`commanding/driver.py`) is the single executor -- a tick-driven phase machine
+  (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET -> BUILD
+  -> DRIVE -> DONE`) over one drone's routine, one `AbstractCommandPort`, and a
+  `DriverEnvironment` seam (bridge connectivity, sim time, observation assembly,
+  `log`, `on_failure`, `on_step_advanced`; wall-clock backstop via an injectable
+  `monotonic`). It imports no Isaac/pymavlink and is unit-tested with fakes
+  (`tests/test_commanding_driver.py`). Each workflow is a **thin Isaac adapter**
+  that builds one driver per flying drone (only where the resolved
+  `routine.steps` is non-empty), wires the env, and ticks the drivers; the phase
+  machine and flight verification live in the driver/routine, so the adapters
+  differ only in tick source and the env's `on_failure` reaction.
   - Live `drone_spawner` extension
-    (`isaac/runtime/extensions/drone_spawner/DroneSpawner_python/control_driver.py`,
-    `FleetControlDriver`): the runtime path for `make run-all` / `make run-isaac`.
-    Same pure core and the same routine, re-expressed as a **non-blocking,
-    tick-driven phase machine** (`WAIT_BRIDGE -> CONNECT_GCS -> HANDSHAKE ->
-    PREARM_SETTLE -> FETCH_TARGET -> BUILD -> DRIVE -> DONE`) stepped from the
-    **Kit app-update event stream** -- a control tick separate from the bridge's
-    physics-step subscription, never the bridge's send/recv legs. It reads each
-    drone's state through a state-only `IsaacArticulationIO` (no rotor paths) and
-    the bridge snapshot through the public `BridgeHost.status` property, talks each
-    drone's GCS link via `MavlinkCommandPort`, and runs the same
-    `FleetCommander(STEP_SYNCHRONIZED)` barrier. It is always **forgiving**: on a
-    `FAIL` decision (envelope or command), a PX4 failsafe, or a phase timeout it
-    **logs a warning and stops the routine** (never raises into the sim -- runtime
-    is recoverable); after `DONE` it idles, keeping the GCS link warm so
-    PX4-console control returns to the user. The extension builds it in
-    `_setup_drone` (after `BridgeHostGroup.start()`) and stops it in
+    (`drone_spawner/DroneSpawner_python/control_driver.py`, `FleetControlDriver` +
+    `_LiveDriverEnv`): the runtime path for `make run-all` / `make run-isaac`. It
+    ticks each drone's `RoutineDriver` from one **Kit app-update** subscription
+    (separate from the bridge's physics-step subscription, never its send/recv
+    legs), reading state through a state-only `IsaacArticulationIO` and
+    `BridgeHost.status` over each drone's `MavlinkCommandPort`. Always
+    **forgiving**: `on_failure` (a `FAIL`, a PX4 failsafe, or a phase timeout)
+    logs a warning and that drone's driver idles (never raises into the sim);
+    after `DONE` it keeps the GCS link warm so PX4-console control returns. Built
+    in `_setup_drone` (after `BridgeHostGroup.start()`), stopped in
     `_teardown_drone`.
+  - Standalone scenario
+    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py` +
+    `_StandaloneDriverEnv`): a blocking runner that spawns the fleet, starts the
+    bridge group, does the runner-level infra checks (ground settle, bridge first
+    heartbeat, the pre-arm start-tilt check), builds one `RoutineDriver` per flying
+    drone, and ticks them in a `while not all(is_done): simulation_app.update();
+    for d: d.tick()` loop, then runs the strict bridge-log scan. The env is
+    **strict** under `--strict` (the integration test, set by `STRICT=1` in the
+    Make target): `on_failure` raises `ExpectedInstabilityDetected` for a
+    `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe (so the
+    negative test passes only on an envelope breach, never a failsafe flake), and
+    `AssertionError` otherwise; without `--strict` it logs and the driver idles,
+    like the live path. The `post_takeoff_hook` (negative-test fault injection) is
+    wired to `on_step_advanced` and fires when the takeoff step completes, so the
+    hover step's envelope catches the instability. It hand-rolls no MAVLink.
 - The routine is config-driven and the config is the single source of truth: the
   Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`)
   carries `steps`, the control-flow tunables (`gcs_heartbeat_period_s`,
@@ -290,16 +290,20 @@ the current contents and the intended home for that kind of code.
   `max_downward_speed_m_s`, `max_angular_speed_rad_s`,
   `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`). There
   is **no** separate `integration_test` group: the integration test is just the
-  routine driven with `--strict`. `routine.steps` is the on/off switch: a
-  **non-empty** list (authored as `{kind: arm}` / `{kind: takeoff, climb_m,
-  min_climb_m}` / `{kind: hover, hold_s}` mappings) makes a driver fly the routine
-  on Play; an **empty** list (the default `configs/experiment/routine/default.yaml`)
-  means purely manual operation (no driver). There is no separate enable flag. The
-  pure `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s,
+  routine driven with `--strict`. The routine is **per vehicle**: each
+  `vehicles[]` entry may carry a `routine` partial, merged over the global
+  `routine` exactly like `drone`/`px4` in `config.load.resolve_fleet` (the resolved
+  `RoutineConfig` lands on `ResolvedVehicle.routine`). `routine.steps` is the
+  **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
+  (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
+  `{kind: hover, hold_s}` mappings) gets its own `RoutineDriver`; an **empty** list
+  (the default `configs/experiment/routine/default.yaml`) means that drone is
+  manual. Mixed fleets are allowed. There is no separate enable flag. The pure
+  `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s,
   gates, takeoff_timeout_s, hover_settle_s)` maps the descriptors + a per-drone
   takeoff target into a `VehicleRoutine` (unknown `kind`, or a `takeoff`/`hover`
   missing a required field, raises `ValueError`); it stays on the core import path
-  and is the shared seam both drivers use. The takeoff step completes on a real
+  and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver. The takeoff step completes on a real
   climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained
   `hovering_stable(...)`, with the gates as continuous invariants on both (the
   historical windowed min/max-range hover gates are now sustained
