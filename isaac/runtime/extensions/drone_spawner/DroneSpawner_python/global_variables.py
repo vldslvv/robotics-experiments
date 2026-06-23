@@ -1,4 +1,0 @@
-EXTENSION_TITLE = "DroneSpawner"
-EXTENSION_DESCRIPTION = "Sets up drone dynamically"
-
-__all__ = ["EXTENSION_TITLE", "EXTENSION_DESCRIPTION"]

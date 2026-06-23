@@ -95,42 +95,49 @@ commander/driver is a separate control layer by design; it is ticked from the
 adapter's control loop (the standalone blocking loop or the live Kit app-update
 subscription), never from the bridge's physics send/recv legs.
 
-## Where the executor lives: one per-drone driver, two thin adapters
+## Where the executor lives: one orchestrator, two thin shells
 
-The pure `RoutineDriver` is the single executor; each workflow is a thin Isaac
-adapter that constructs one driver per drone (only for drones whose resolved
-`routine.steps` is non-empty), provides the `DriverEnvironment` seam, and ticks
-the drivers. The phase machine and the flight verification live in the
-driver/routine; the adapters differ only in their tick source and their
-`on_failure` reaction.
+The pure `RoutineDriver` is the single executor, and the host-agnostic
+`robotics_experiments.runtime.FleetOrchestrator` is the single place that *builds*
+one driver per flying drone (only for drones whose resolved `routine.steps` is
+non-empty). The orchestrator owns the whole runtime pipeline (open scene -> apply
+settings -> spawn fleet -> start the lockstep bridge group -> `build_drivers` ->
+teardown); a thin per-host **shell** drives it, supplying only what differs: the
+tick source and the failure reaction. The reaction is injected as a `make_env`
+callable that builds the generic `FleetDriverEnv` (the `DriverEnvironment` seam,
+in `runtime/orchestrator.py`) per flying drone -- it reads connectivity/sim-time
+from the drone's `BridgeHost`, state from a state-only `IsaacArticulationIO`, and
+the bridge snapshot via `BridgeHost.status`, over each drone's
+`MavlinkCommandPort`, and forwards `log` / `on_failure` / `on_step_advanced` to
+the shell's callables. The phase machine and flight verification live in the
+driver/routine; the shells differ only in tick source and reaction.
 
-**Live `drone_spawner` extension**
-(`isaac/runtime/extensions/drone_spawner/DroneSpawner_python/control_driver.py`,
-`FleetControlDriver` + `_LiveDriverEnv`): the runtime path for `make run-all` /
-`make run-isaac`. It builds a `RoutineDriver` per flying drone and ticks them all
-from one **Kit app-update** subscription -- a control tick separate from the
-bridge's physics-step subscription, never the bridge's send/recv legs. The env
-reads state from a state-only `IsaacArticulationIO` (`read_state`, no rotor
-paths) and the bridge snapshot via `BridgeHost.status`, over each drone's
-`MavlinkCommandPort`. It is **forgiving**: `on_failure` (a `FAIL`, a PX4 failsafe,
-or a phase timeout) logs a warning and the driver idles (it never raises into the
-sim); after `DONE` the driver keeps the GCS link warm so PX4-console control
-returns to the user. The extension builds the runner in `_setup_drone` (after the
-bridge group starts) and stops it in `_teardown_drone`.
+**Live `experiment_runtime` extension**
+(`isaac/runtime/extensions/experiment_runtime/ExperimentRuntime_python/extension.py`):
+the runtime path for `make run-all` / `make run-isaac`. On timeline PLAY it has
+the orchestrator spawn the fleet, start the bridge group, and build the drivers,
+then ticks every flying drone's driver from one **Kit app-update** subscription --
+a control tick separate from the bridge's physics-step subscription, never the
+bridge's send/recv legs. Its `make_env` is **forgiving**: `on_failure` (a `FAIL`,
+a PX4 failsafe, or a phase timeout) logs a warning and the driver idles (it never
+raises into the sim); after `DONE` the driver keeps the GCS link warm so
+PX4-console control returns to the user. STOP/PAUSE and shutdown drop the tick and
+tear down.
 
 **Standalone scenario**
-(`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py` + `_StandaloneDriverEnv`):
-a blocking runner that spawns the fleet, starts the bridge group, does the
-runner-level infra checks (ground settle, bridge first-heartbeat, the pre-arm
-start-tilt check), builds one `RoutineDriver` per flying drone, and ticks them all
-in a `while not all(is_done): simulation_app.update(); for d: d.tick()` loop, then
-runs the strict bridge-log scan. The env is **strict** under `--strict` (the
-integration test): `on_failure` raises `ExpectedInstabilityDetected` for a
+(`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`):
+a blocking runner that drives the same orchestrator phases, adds the
+**integration-test-only** checks the orchestrator does not own (ground settle,
+bridge first-heartbeat, the pre-arm start-tilt check), and ticks every flying
+driver in a `while not orchestrator.all_done: simulation_app.update(); for d:
+d.tick()` loop (raw ticks so a strict exception propagates), then runs the strict
+bridge-log scan. Its `make_env` is **strict** under `--strict` (the integration
+test): `on_failure` raises `ExpectedInstabilityDetected` for a
 `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe, and
 `AssertionError` otherwise; without `--strict` it logs and the driver idles, like
 the live path. The `post_takeoff_hook` (negative-test fault injection) is wired to
-the env's `on_step_advanced` and fires when the takeoff step completes, so the
-hover step's envelope catches the resulting instability.
+the first drone's `on_step_advanced` and fires when the takeoff step completes, so
+the hover step's envelope catches the resulting instability.
 
 **Config is the single source of truth, per drone.** The Hydra `routine` group
 (`RoutineConfig`, always composed onto `EnvConfig`) carries `steps` plus the

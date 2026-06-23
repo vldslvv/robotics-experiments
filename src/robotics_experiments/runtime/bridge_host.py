@@ -1,14 +1,19 @@
-"""PX4 bridge wiring owned by the drone-spawner host.
+"""PX4 bridge wiring owned by the fleet runtime.
 
-Per the contract, the scene-owning extension is the one that constructs the
-``Px4Bridge`` and registers a physics-step callback. The bridge itself owns
-no scene state. Keeping this wiring out of the bridge extension also keeps
-the bridge extension single-responsibility.
+The :class:`~robotics_experiments.runtime.orchestrator.FleetOrchestrator`
+constructs each :class:`Px4Bridge` (through a ``BridgeHost``) and the single
+fleet-wide physics-step subscription (through :class:`BridgeHostGroup`). The
+bridge itself owns no scene state; keeping this wiring out of the bridge keeps
+the bridge single-responsibility.
 
 The host is opt-in: when the experiment config has ``px4.enabled = false``
 (the default), no bridge is built and no callbacks are registered. This lets
 the bridge layers be tested in stages (port alone, articulation_io alone,
 full bridge) by flipping the flag.
+
+Isaac-coupled domain leaf: this module imports ``carb``/``omni.physx`` at module
+scope, so it stays off the core import path behind the lazy package
+``__init__`` (see ``robotics_experiments.runtime``).
 """
 
 from __future__ import annotations
@@ -21,17 +26,15 @@ import omni.physx
 
 from robotics_experiments.config import ResolvedVehicle
 
-from .global_variables import EXTENSION_TITLE
-
-_LOG_PREFIX = f"{EXTENSION_TITLE}.BridgeHost"
+_LOG_PREFIX = "FleetRuntime.BridgeHost"
 
 
 class BridgeHost:
     """Lifecycle owner for a single ``Px4Bridge`` instance.
 
-    Constructed once per Play session by the drone-spawner extension. Builds
-    the bridge from the supplied config, registers a physics-step callback
-    that ticks it, and tears everything down on stop.
+    Constructed once per Play session by the fleet orchestrator. Builds the
+    bridge from the supplied config, registers a physics-step callback that
+    ticks it, and tears everything down on stop.
     """
 
     def __init__(self, *, articulation_path: str, vehicle: ResolvedVehicle, physics_hz: float):
@@ -399,8 +402,8 @@ class BridgeHostGroup:
     drops from the sum of the per-vehicle blocking waits to ~their max. A
     one-host group is exactly the old send-then-poll-per-tick behavior.
 
-    Lives in the extension package because it uses ``omni.physx`` and so must
-    stay off the core import path.
+    Uses ``omni.physx`` and so must stay off the core import path (it lives
+    behind the lazy ``robotics_experiments.runtime`` package ``__init__``).
     """
 
     def __init__(self, hosts: list[BridgeHost]):

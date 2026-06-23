@@ -62,7 +62,7 @@ the resulting forces through Isaac I/O.
 The bridge does NOT:
 
 - Own the drone USD or any scene primitive.
-- Register physics step callbacks (the scene-owning extension calls into the bridge).
+- Register physics step callbacks (the fleet runtime's `BridgeHostGroup` calls into the bridge).
 - Discover or author rotor metadata; that is handled before bridge construction.
 - Publish ROS 2 topics.
 - Run navigation, RL policy, or state machine logic.
@@ -159,10 +159,10 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 
 | Layer | Owns | Must not own |
 |-------|------|--------------|
-| `DroneSpawner_python.extension` | Timeline and stage event handling; spawn on PLAY; build per-vehicle hosts and wrap them in one `BridgeHostGroup`; teardown on STOP, PAUSE, shutdown, or stage-open | PX4 sockets, MAVLink, thrust math |
+| `robotics_experiments.runtime.FleetOrchestrator` | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine drivers, teardown. Driven by a thin per-host shell (the live `experiment_runtime` Kit extension or the standalone runner) | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
 | `robotics_experiments.drone.spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
-| `BridgeHostGroup` | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
-| `BridgeHost` | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
+| `BridgeHostGroup` (`robotics_experiments.runtime.bridge_host`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
+| `BridgeHost` (`robotics_experiments.runtime.bridge_host`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
 | `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
 | `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
 | `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
@@ -195,7 +195,9 @@ harmful.
 ### Lifecycle
 
 ```
-[Extension startup]       register timeline/stage subscriptions only
+[Shell startup]           FleetOrchestrator.open_scene(); register timeline/stage
+                            subscriptions (live) or run the phases in sequence
+                            (standalone)
         │
         ▼
 [Play pressed]            spawn runtime drone USD; construct BridgeHost only
@@ -252,8 +254,8 @@ the first non-finite tick. The breadcrumb design lives in the comment block in
 succeeds or surfaces a clean error the surrounding system can interpret — a flag
 flip for recoverable failures (disconnect, timeout), or a raised exception for
 unrecoverable state (non-finite vehicle state). The bridge itself does not
-swallow the latter; `BridgeHost._on_physics_step` contains the raise so one bad
-tick does not crash the simulator loop.
+swallow the latter; `BridgeHost`'s per-tick `send_phase` / `recv_phase` try/except
+contains the raise so one bad tick does not crash the simulator loop.
 
 ### Public API shape
 
@@ -386,7 +388,7 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 list). `id` is the sole authored identity; one pure enrichment step
 (`config.load.resolve_fleet`) derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
-into an immutable `ResolvedVehicle`. The scene-owning extension then
+into an immutable `ResolvedVehicle`. The fleet runtime (`FleetOrchestrator`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
 simulator port (the resolved `mavlink_port = 4560 + id`) and its own `SimClock`.
 The `Px4MavlinkPort` takes that resolved `port` directly (handed to the vendored

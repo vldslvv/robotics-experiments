@@ -29,6 +29,7 @@ def main() -> None:
     run_scene_test(
         test_name=TEST_NAME,
         default_scene=DEFAULT_SCENE,
+        manage_stage=False,
         test_body=lambda context: run_px4_takeoff_scenario(
             context,
             Px4TakeoffScenarioOptions(

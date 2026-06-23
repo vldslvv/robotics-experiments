@@ -19,6 +19,11 @@ Do not introduce new tooling unless explicitly requested.
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
+- `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: the
+  `FleetOrchestrator` (the one runtime pipeline) and the PX4 `BridgeHost` /
+  `BridgeHostGroup` lockstep wiring. Isaac-coupled domain leaf (lazy package
+  `__init__`, off the core import path); driven by the thin per-host shells
+  (the live `experiment_runtime` extension and the standalone runner).
 - `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
 - `isaac/docker/` -> Isaac Sim Docker build/init inputs.
 - `isaac/runtime/extensions/` -> Isaac Kit extension workflow.
@@ -77,9 +82,15 @@ the current contents and the intended home for that kind of code.
   for Isaac/Kit context objects unless their lifetime must be retained, and store
   direct feature state in private attributes such as `self._stage` instead of
   broad handles such as `self._usd_context`.
-- Use `drone_spawner` as the extension pattern: wire Isaac/Kit events separately
-  from meaningful actions, and let setup/teardown actions own related prim and
-  bridge lifecycle together.
+- Use `experiment_runtime` as the extension pattern: a thin Kit shell that wires
+  Isaac/Kit events to the host-agnostic `robotics_experiments.runtime.FleetOrchestrator`
+  and owns no flight/scene logic itself. Cross-component runtime composition
+  belongs in the orchestrator (`src/robotics_experiments/runtime/`), a layer above
+  the extensions; an extension stays single-responsibility (event wiring) and a
+  component extension stays scene/bridge-agnostic. The orchestrator owns the whole
+  pipeline (open scene -> apply settings -> spawn fleet -> start the lockstep
+  bridge group -> build per-drone routine drivers -> teardown); the shell only
+  chooses the tick source and the failure reaction (the injected `make_env`).
 - `robotics_experiments_core` exposes the shared `src/robotics_experiments`
   package to Isaac Sim extensions. Extension code that needs the core package
   should depend on `robotics_experiments_core` instead of manipulating
@@ -160,7 +171,8 @@ the current contents and the intended home for that kind of code.
   scripts read `get_enabled_px4_vehicle_count()` /
   `get_enabled_px4_instance_indices()` (the latter is the launch loop's source of
   `PX4_INSTANCE`, so non-contiguous ids keep their derived ports).
-  The drone-spawner extension spawns each
+  The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
+  each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
   independent `BridgeHost` (constructed from the `ResolvedVehicle`), all driven by
   a single `BridgeHostGroup` that owns the
@@ -248,38 +260,42 @@ the current contents and the intended home for that kind of code.
   `DriverEnvironment` seam (bridge connectivity, sim time, observation assembly,
   `log`, `on_failure`, `on_step_advanced`; wall-clock backstop via an injectable
   `monotonic`). It imports no Isaac/pymavlink and is unit-tested with fakes
-  (`tests/test_commanding_driver.py`). Each workflow is a **thin Isaac adapter**
-  that builds one driver per flying drone (only where the resolved
-  `routine.steps` is non-empty), wires the env, and ticks the drivers; the phase
-  machine and flight verification live in the driver/routine, so the adapters
-  differ only in tick source and the env's `on_failure` reaction.
-  - Live `drone_spawner` extension
-    (`drone_spawner/DroneSpawner_python/control_driver.py`, `FleetControlDriver` +
-    `_LiveDriverEnv`): the runtime path for `make run-all` / `make run-isaac`. It
-    ticks each drone's `RoutineDriver` from one **Kit app-update** subscription
-    (separate from the bridge's physics-step subscription, never its send/recv
-    legs), reading state through a state-only `IsaacArticulationIO` and
-    `BridgeHost.status` over each drone's `MavlinkCommandPort`. Always
-    **forgiving**: `on_failure` (a `FAIL`, a PX4 failsafe, or a phase timeout)
-    logs a warning and that drone's driver idles (never raises into the sim);
-    after `DONE` it keeps the GCS link warm so PX4-console control returns. Built
-    in `_setup_drone` (after `BridgeHostGroup.start()`), stopped in
-    `_teardown_drone`.
+  (`tests/test_commanding_driver.py`). The host-agnostic
+  `robotics_experiments.runtime.FleetOrchestrator` is the single place that
+  *builds* one driver per flying drone (only where the resolved `routine.steps`
+  is non-empty) via the generic `FleetDriverEnv` seam (built per drone from an
+  injected `make_env`); each workflow is a **thin shell** that drives the
+  orchestrator phases and ticks the drivers. The phase machine and flight
+  verification live in the driver/routine, so the shells differ only in tick
+  source and the env's `on_failure` reaction.
+  - Live `experiment_runtime` extension
+    (`experiment_runtime/ExperimentRuntime_python/extension.py`): the runtime path
+    for `make run-all` / `make run-isaac`. On PLAY it has the orchestrator spawn +
+    start the bridge group + `build_drivers`, then ticks each drone's
+    `RoutineDriver` from one **Kit app-update** subscription (separate from the
+    bridge's physics-step subscription, never its send/recv legs), reading state
+    through a state-only `IsaacArticulationIO` and `BridgeHost.status` over each
+    drone's `MavlinkCommandPort`. Always **forgiving**: `on_failure` (a `FAIL`, a
+    PX4 failsafe, or a phase timeout) logs a warning and that drone's driver idles
+    (never raises into the sim); after `DONE` it keeps the GCS link warm so
+    PX4-console control returns. STOP/PAUSE and shutdown drop the tick and tear
+    down.
   - Standalone scenario
-    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py` +
-    `_StandaloneDriverEnv`): a blocking runner that spawns the fleet, starts the
-    bridge group, does the runner-level infra checks (ground settle, bridge first
-    heartbeat, the pre-arm start-tilt check), builds one `RoutineDriver` per flying
-    drone, and ticks them in a `while not all(is_done): simulation_app.update();
-    for d: d.tick()` loop, then runs the strict bridge-log scan. The env is
-    **strict** under `--strict` (the integration test, set by `STRICT=1` in the
-    Make target): `on_failure` raises `ExpectedInstabilityDetected` for a
+    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking runner
+    that drives the same orchestrator phases, adds the integration-test-only infra
+    checks the orchestrator does not own (ground settle, bridge first heartbeat,
+    the pre-arm start-tilt check), builds the drivers, and ticks them in a
+    `while not orchestrator.all_done: simulation_app.update(); for d: d.tick()`
+    loop, then runs the strict bridge-log scan. Its `make_env` is **strict** under
+    `--strict` (the integration test, set by `STRICT=1` in the Make target):
+    `on_failure` raises `ExpectedInstabilityDetected` for a
     `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe (so the
     negative test passes only on an envelope breach, never a failsafe flake), and
     `AssertionError` otherwise; without `--strict` it logs and the driver idles,
     like the live path. The `post_takeoff_hook` (negative-test fault injection) is
-    wired to `on_step_advanced` and fires when the takeoff step completes, so the
-    hover step's envelope catches the instability. It hand-rolls no MAVLink.
+    wired to the first drone's `on_step_advanced` and fires when the takeoff step
+    completes, so the hover step's envelope catches the instability. It hand-rolls
+    no MAVLink.
 - The routine is config-driven and the config is the single source of truth: the
   Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`)
   carries `steps`, the control-flow tunables (`gcs_heartbeat_period_s`,

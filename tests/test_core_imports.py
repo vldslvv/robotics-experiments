@@ -36,15 +36,20 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         importlib.import_module("robotics_experiments.drone")
         importlib.import_module("robotics_experiments.simulation")
         importlib.import_module("robotics_experiments.px4_bridge")
+        # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
+        # must import without carb/omni present.
+        importlib.import_module("robotics_experiments.runtime")
 
         # The Isaac-only leaf modules must stay off the core import path: the lazy
         # package __init__ shields (drone/environment __getattr__, simulation
-        # re-export) must not eager-import them.
+        # re-export, runtime __getattr__) must not eager-import them.
         for leaf in (
             "robotics_experiments.drone.spawn",
             "robotics_experiments.environment.stage",
             "robotics_experiments.environment.step",
             "robotics_experiments.simulation._isaac_settings",
+            "robotics_experiments.runtime.bridge_host",
+            "robotics_experiments.runtime.orchestrator",
         ):
             assert leaf not in sys.modules
     finally:
@@ -135,12 +140,12 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
         raise AssertionError("Expected lazy get_config access to require hydra")
 
 
-def test_sim_settings_manifest_exposes_extension_module():
+def test_experiment_runtime_manifest_exposes_extension_module():
     manifest_path = (
         Path(__file__).resolve().parents[1]
-        / "isaac/runtime/extensions/sim_settings/config/extension.toml"
+        / "isaac/runtime/extensions/experiment_runtime/config/extension.toml"
     )
     manifest = tomllib.loads(manifest_path.read_text())
     module_names = {module["name"] for module in manifest["python"]["module"]}
 
-    assert module_names == {"SimSettings_python"}
+    assert module_names == {"ExperimentRuntime_python"}

@@ -32,6 +32,7 @@ def main() -> None:
     # (the make target passes SCENE=@config as the sentinel).
     run_scene_test(
         test_name=TEST_NAME,
+        manage_stage=False,
         test_body=lambda context: run_px4_takeoff_scenario(
             context,
             Px4TakeoffScenarioOptions(

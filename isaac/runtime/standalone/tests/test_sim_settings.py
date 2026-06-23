@@ -1,9 +1,10 @@
-"""Standalone Isaac Sim test for the sim_settings extension logic.
+"""Standalone Isaac Sim test for the ``apply_settings`` simulation API.
 
 This test uses the real standalone Isaac workflow and Hydra-loaded project
 config. The shared runtime loads a real USD scene, then this module calls the
 production ``robotics_experiments.simulation.apply_settings(stage)`` API with
-no manually constructed settings object.
+no manually constructed settings object (the same API the live
+``experiment_runtime`` orchestrator and this scenario both use).
 
 Run inside the Isaac Sim container:
     /isaac-sim/python.sh \

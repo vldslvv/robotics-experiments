@@ -37,10 +37,11 @@ the layer that owns the behavior being changed.
 - The private Isaac backend owns USD/carb/PhysX mutation: finding or creating
   the physics scene, validating gravity and positive rates, applying PhysX
   attributes, setting the Kit render-rate limit, and logging the applied values.
-- The `sim_settings` extension subscribes to stage-open events, resolves
-  `SimSettings` through its `sim_config` adapter, and delegates to the core
-  `apply_settings(stage, settings)` API. It does not load scenes or duplicate
-  USD mutation logic.
+- The fleet runtime owns settings application: the live `experiment_runtime`
+  shell calls `FleetOrchestrator.apply_settings()` on stage-open (and the
+  standalone runner calls it after opening the scene), which delegates to the
+  core `apply_settings(stage, settings)` API. (This replaced the former
+  standalone `sim_settings` extension.) It does not duplicate USD mutation logic.
 - The standalone test starts a real headless Isaac workflow, opens a real USD
   scene, calls the production core API, and verifies physics scene attributes
   plus Kit run-loop settings.

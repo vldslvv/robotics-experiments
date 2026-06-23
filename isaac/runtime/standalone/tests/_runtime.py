@@ -61,12 +61,20 @@ def format_vehicle_state_vectors(state_or_sample: Any) -> str:
 
 @dataclass(frozen=True)
 class SceneTestContext:
-    """Context passed to extension-specific standalone test bodies."""
+    """Context passed to extension-specific standalone test bodies.
 
-    stage: object
-    scene_path: Path
+    ``stage``/``scene_path`` are populated for the default harness-managed-stage
+    tests. When ``run_scene_test`` is called with ``manage_stage=False`` (the
+    fleet scenario, where the ``FleetOrchestrator`` owns scene-open), they are
+    ``None`` and ``scene_override`` carries the requested ``--scene`` (``None``
+    means "use the experiment ``scene`` config").
+    """
+
     simulation_app: SimulationApp
     report: Callable[[str], None]
+    stage: object | None = None
+    scene_path: Path | None = None
+    scene_override: str | None = None
     strict: bool = False
 
     def report_vehicle_state(self, label: str, state_or_sample: Any) -> None:
@@ -181,6 +189,7 @@ def run_scene_test(
     test_body: Callable[[SceneTestContext], None],
     description: str,
     default_scene: str | None = None,
+    manage_stage: bool = True,
 ) -> None:
     """Run a standalone Isaac scene test against Hydra-backed project config.
 
@@ -192,17 +201,29 @@ def run_scene_test(
             ``@`` prefixes are resolved relative to the repository root. When
             ``None`` (or when ``--scene`` is the :data:`SCENE_FROM_CONFIG`
             sentinel), the scene is read from the Hydra ``scene`` config.
+        manage_stage: When ``True`` (default) the harness resolves and opens the
+            stage and passes it on the context (the non-fleet scene tests). When
+            ``False`` the fleet scenario's :class:`FleetOrchestrator` owns
+            scene-open: the harness only starts the ``SimulationApp`` and resets
+            the config, and passes the requested ``--scene`` as
+            ``context.scene_override`` (``None`` => use the experiment config).
     """
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
     strict = bool(args.strict)
-    if scene in (None, SCENE_FROM_CONFIG):
-        scene = _resolve_scene_from_config(test_name)
-    scene_path = _resolve_scene_path(scene)
-    report(f"{test_name}: scene argument: {scene}")
-    report(f"{test_name}: resolved scene path: {scene_path}")
-    if not scene_path.exists():
-        raise FileNotFoundError(f"Scene does not exist: {scene_path}")
+    scene_override: str | None = None
+    scene_path: Path | None = None
+    if manage_stage:
+        if scene in (None, SCENE_FROM_CONFIG):
+            scene = _resolve_scene_from_config(test_name)
+        scene_path = _resolve_scene_path(scene)
+        report(f"{test_name}: scene argument: {scene}")
+        report(f"{test_name}: resolved scene path: {scene_path}")
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene does not exist: {scene_path}")
+    else:
+        scene_override = None if scene in (None, SCENE_FROM_CONFIG) else scene
+        report(f"{test_name}: scene override: {scene_override or '(from experiment config)'}")
 
     simulation_app = None
     error: BaseException | None = None
@@ -227,24 +248,28 @@ def run_scene_test(
         reset_config()
         timing.report_stage("hydra_reset", stage_start_s)
 
-        stage_start_s = timing.start()
-        report(f"{test_name}: getting USD context")
-        usd_context = omni.usd.get_context()
-        report(f"{test_name}: opening stage")
-        if not usd_context.open_stage(str(scene_path)):
-            raise RuntimeError(f"Failed to open stage: {scene_path}")
+        stage: object | None = None
+        if manage_stage:
+            assert scene_path is not None
+            stage_start_s = timing.start()
+            report(f"{test_name}: getting USD context")
+            usd_context = omni.usd.get_context()
+            report(f"{test_name}: opening stage")
+            if not usd_context.open_stage(str(scene_path)):
+                raise RuntimeError(f"Failed to open stage: {scene_path}")
 
-        simulation_app.update()
-        stage = usd_context.get_stage()
-        if stage is None:
-            raise RuntimeError(f"Stage did not load: {scene_path}")
-        timing.report_stage("stage_open", stage_start_s)
+            simulation_app.update()
+            stage = usd_context.get_stage()
+            if stage is None:
+                raise RuntimeError(f"Stage did not load: {scene_path}")
+            timing.report_stage("stage_open", stage_start_s)
 
         stage_start_s = timing.start()
         test_body(
             SceneTestContext(
                 stage=stage,
                 scene_path=scene_path,
+                scene_override=scene_override,
                 simulation_app=simulation_app,
                 report=report,
                 strict=strict,

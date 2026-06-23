@@ -2,7 +2,6 @@ import importlib
 import sys
 import types
 from enum import IntEnum
-from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -159,12 +158,14 @@ def _install_fake_px4_bridge(monkeypatch, calls):
 
 
 def _import_bridge_host(monkeypatch):
+    # Re-import fresh each test so the module binds this test's fake px4_bridge /
+    # Isaac modules installed in sys.modules above.
     for name in list(sys.modules):
-        if name == "DroneSpawner_python" or name.startswith("DroneSpawner_python."):
+        if name == "robotics_experiments.runtime" or name.startswith(
+            "robotics_experiments.runtime."
+        ):
             sys.modules.pop(name, None)
-    extension_root = Path(__file__).resolve().parents[1] / "isaac/runtime/extensions/drone_spawner"
-    monkeypatch.syspath_prepend(str(extension_root))
-    return importlib.import_module("DroneSpawner_python.bridge_host")
+    return importlib.import_module("robotics_experiments.runtime.bridge_host")
 
 
 def _config(**overrides):

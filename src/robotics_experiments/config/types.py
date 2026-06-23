@@ -20,7 +20,7 @@ __all__ = [
 
 @dataclass
 class SimSettings:
-    """Simulation settings applied by the sim_settings extension.
+    """Simulation settings applied by the fleet orchestrator's ``apply_settings``.
 
     Attributes:
         physics_hz: PhysX steps per second.
