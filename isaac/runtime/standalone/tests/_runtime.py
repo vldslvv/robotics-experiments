@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,6 +144,24 @@ def _resolve_scene_path(scene: str) -> Path:
     return Path(scene).expanduser().resolve()
 
 
+def _resolve_repo_path(path: str | Path) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = _repo_root() / resolved
+    return resolved.resolve()
+
+
+def _prepend_python_paths(paths: Iterable[str | Path]) -> None:
+    for path in paths:
+        resolved = _resolve_repo_path(path)
+        if not resolved.exists():
+            raise FileNotFoundError(f"Python path does not exist: {resolved}")
+        path_text = str(resolved)
+        if path_text not in sys.path:
+            sys.path.insert(0, path_text)
+            report(f"added Python path: {path_text}")
+
+
 def _parse_scene_args(description: str, default_scene: str | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -190,6 +208,7 @@ def run_scene_test(
     description: str,
     default_scene: str | None = None,
     manage_stage: bool = True,
+    extra_python_paths: Iterable[str | Path] = (),
 ) -> None:
     """Run a standalone Isaac scene test against Hydra-backed project config.
 
@@ -207,7 +226,12 @@ def run_scene_test(
             scene-open: the harness only starts the ``SimulationApp`` and resets
             the config, and passes the requested ``--scene`` as
             ``context.scene_override`` (``None`` => use the experiment config).
+        extra_python_paths: Repo-relative or absolute paths to prepend to
+            ``sys.path`` for this standalone process. PX4 scenarios use this to
+            mirror Kit extension module discovery for vendored Pegasus.
     """
+    _prepend_python_paths(extra_python_paths)
+
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
     strict = bool(args.strict)

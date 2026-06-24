@@ -125,6 +125,32 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     reset_config()
 
 
+def test_two_drone_forward_land_config_composes(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_two_drone_forward_land.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+    assert config.routine.steps == []
+    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
+        (0, (0.0, -2.0), "Drone0"),
+        (1, (0.0, 2.0), "Drone1"),
+    ]
+    assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
+        ["arm", "takeoff", "hover", "forward", "land"],
+        ["arm", "takeoff", "hover", "forward", "land"],
+    ]
+    assert config.vehicles[0].routine.steps[3]["distance_m"] == 1.0
+    assert config.vehicles[1].routine.steps[3]["distance_m"] == 2.0
+    reset_config()
+
+
 def test_resolve_fleet_merges_per_vehicle_routine_override():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")

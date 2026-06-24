@@ -21,6 +21,7 @@ __all__ = [
     "MAV_CMD_DO_REPOSITION",
     "MAV_CMD_NAV_LAND",
     "MAV_CMD_NAV_TAKEOFF",
+    "MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
     "PX4_FORCE_ARM_MAGIC",
     "MavlinkCommand",
     "arm",
@@ -35,6 +36,10 @@ MAV_CMD_NAV_LAND = 21
 MAV_CMD_NAV_TAKEOFF = 22
 MAV_CMD_DO_REPOSITION = 192
 MAV_CMD_COMPONENT_ARM_DISARM = 400
+
+# MAV_DO_REPOSITION_FLAGS_CHANGE_MODE asks PX4 to enter the mode needed to
+# execute MAV_CMD_DO_REPOSITION instead of denying it while in the wrong mode.
+MAV_DO_REPOSITION_FLAGS_CHANGE_MODE = 1
 
 # PX4 force-arm magic value, passed as the ``MAV_CMD_COMPONENT_ARM_DISARM``
 # param2 float to bypass pre-arm checks. A PX4 protocol constant, not a tunable.
@@ -102,14 +107,15 @@ def reposition(latitude_deg: float, longitude_deg: float, altitude_m: float) -> 
     """Reposition to a geographic point and altitude (``MAV_CMD_DO_REPOSITION``).
 
     Forward-looking scaffolding for navigate-to-point / set-altitude routines:
-    param1=-1 keeps the default ground speed, param4 yaw is ``NaN`` (unchanged),
-    and param5/6/7 are the target lat/lon/altitude.
+    param1=-1 keeps the default ground speed, param2 asks PX4 to switch into the
+    mode needed to execute the reposition, param4 yaw is ``NaN`` (unchanged), and
+    param5/6/7 are the target lat/lon/altitude.
     """
     return MavlinkCommand(
         command_id=MAV_CMD_DO_REPOSITION,
         params=(
             -1.0,
-            0.0,
+            float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE),
             0.0,
             math.nan,
             float(latitude_deg),

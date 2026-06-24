@@ -23,6 +23,7 @@ from _runtime import run_scene_test
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_stability"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_stability_px4.log"
+PX4_BRIDGE_EXTENSION_PATH = "isaac/runtime/extensions/px4_sitl_brigde"
 
 
 def main() -> None:
@@ -30,6 +31,7 @@ def main() -> None:
         test_name=TEST_NAME,
         default_scene=DEFAULT_SCENE,
         manage_stage=False,
+        extra_python_paths=[PX4_BRIDGE_EXTENSION_PATH],
         test_body=lambda context: run_px4_takeoff_scenario(
             context,
             Px4TakeoffScenarioOptions(

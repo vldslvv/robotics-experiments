@@ -66,9 +66,10 @@ layering this design removed.
 - **Reaction lives in `make_env`, not the orchestrator.** Strict (raise) vs
   forgiving (log and idle) is entirely the injected `make_env`'s `on_failure`. The
   orchestrator never branches on it.
-- **Spawn is gated on PLAY (live).** The live shell opens the scene and applies
-  settings at startup but spawns the fleet only on timeline PLAY, so the persisted
-  stage is not mutated with drones until the user presses Play.
+- **Spawn is gated on PLAY (live).** The live shell opens the scene after Kit
+  reports the app is ready and applies settings on the stage `OPENED` event, but
+  spawns the fleet only on timeline PLAY, so the persisted stage is not mutated
+  with drones until the user presses Play.
 - **Isaac-coupled leaf, off the core import path.** `orchestrator.py` and
   `bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
   `__init__` is lazy so `import robotics_experiments.runtime` succeeds with Isaac
@@ -136,12 +137,13 @@ between strict and forgiving runs.
 ## The two shells
 
 **Live (`experiment_runtime` Kit extension).** `on_startup` builds the
-orchestrator and calls `open_scene`; on the `OPENED` event it `adopt_current_stage`
-+ `apply_settings`. On timeline PLAY it `spawn_fleet` + `start_bridges` +
-(if any drone flies) `build_drivers` with a **forgiving** `make_env`, then ticks
-every flying driver from one Kit app-update subscription (guarded per driver so one
-bug neither stops the others nor spams Kit). STOP/PAUSE and `on_shutdown` drop the
-tick and `teardown`.
+orchestrator and subscribes to Kit events. An app-update callback waits until
+`IApp.is_app_ready()` and then calls `open_scene` once; on the `OPENED` event it
+`adopt_current_stage` + `apply_settings`. On timeline PLAY it `spawn_fleet` +
+`start_bridges` + (if any drone flies) `build_drivers` with a **forgiving**
+`make_env`, then ticks every flying driver from one Kit app-update subscription
+(guarded per driver so one bug neither stops the others nor spams Kit).
+STOP/PAUSE and `on_shutdown` drop the tick and `teardown`.
 
 **Standalone (`_px4_takeoff_scenario.py`).** A blocking runner that calls the same
 phases in sequence, interleaving the integration-test-only checks between them,
@@ -154,6 +156,9 @@ runs the strict bridge-log scan. `--strict` selects the strict reaction.
 
 ```
 [Shell builds FleetOrchestrator(get_config())]
+        |
+        v
+live app update / standalone sequence
         |
         v
 open_scene() --> (host pumps / OPENED) --> adopt_current_stage() --> apply_settings()

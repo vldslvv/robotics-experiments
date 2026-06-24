@@ -3,14 +3,14 @@
 This is the runtime path for ``make run-all`` / ``make run-isaac``. The extension
 owns no flight logic: it builds a
 :class:`~robotics_experiments.runtime.FleetOrchestrator` and wires Kit events to
-its phases. The orchestrator owns scene-open and sim settings (so the live boot no
-longer relies on Kit's ``--exec open_stage.py`` or a separate ``sim_settings``
+its phases. The orchestrator owns scene-open and sim settings (so the live boot
+does not rely on Kit's ``--exec open_stage.py`` or a separate ``sim_settings``
 extension):
 
-- ``on_startup`` opens the configured scene and subscribes to stage + timeline
-  events. The stage is adopted and settings applied on the ``OPENED`` event, once
-  the stage has finished loading (``lightswitch_spawner`` reacts to the same
-  event).
+- ``on_startup`` subscribes to stage + timeline events and arms an app-update
+  callback that opens the configured scene once Kit reports the app is ready. The
+  stage is adopted and settings applied on the ``OPENED`` event, once the stage
+  has finished loading (``lightswitch_spawner`` reacts to the same event).
 - Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group, and
   -- if any drone has a routine -- builds one ``RoutineDriver`` per flying drone
   and ticks them from a separate Kit app-update subscription (never the bridge's
@@ -48,13 +48,15 @@ class Extension(omni.ext.IExt):
     """Kit lifecycle wiring around the shared :class:`FleetOrchestrator`."""
 
     def on_startup(self, ext_id: str):
-        """Build the orchestrator, open the scene, and subscribe to Kit events.
+        """Build the orchestrator and subscribe to Kit events.
 
         Args:
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         carb.log_info(f"{_LOG_PREFIX} starting")
         self._orchestrator = FleetOrchestrator(_get_experiment_config())
+        self._scene_opened = False
+        self._scene_open_sub: Any = None
         self._update_sub: Any = None
 
         usd_context = omni.usd.get_context()
@@ -67,13 +69,26 @@ class Extension(omni.ext.IExt):
         self._timeline_event_sub = timeline_events.create_subscription_to_pop(
             self._on_timeline_event, name="experiment_runtime_timeline"
         )
-        # Orchestrator owns scene-open: fire it now; adopt the stage and apply
-        # settings on the OPENED event, once it has finished loading.
+        app = omni.kit.app.get_app()
+        self._scene_open_sub = app.get_update_event_stream().create_subscription_to_pop(
+            self._open_scene_when_ready, name="experiment_runtime_open_scene"
+        )
+
+    def _open_scene_when_ready(self, event):
+        """Open the configured scene once Kit reports the app is ready."""
+        if self._scene_opened:
+            return
+        app = omni.kit.app.get_app()
+        if not app.is_app_ready():
+            return
+        self._scene_opened = True
+        self._scene_open_sub = None
         self._orchestrator.open_scene()
         carb.log_info(f"{_LOG_PREFIX} running. Press Play to fly the configured routine.")
 
     def on_shutdown(self):
         """Drop subscriptions and tear the fleet down."""
+        self._scene_open_sub = None
         self._stop_control()
         self._stage_event_sub = None
         self._timeline_event_sub = None

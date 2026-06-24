@@ -52,9 +52,13 @@ class _Timeline:
 class _App:
     def __init__(self):
         self.updates = _EventStream()
+        self.ready = False
 
     def get_update_event_stream(self):
         return self.updates
+
+    def is_app_ready(self):
+        return self.ready
 
 
 class _FakeOrchestrator:
@@ -177,19 +181,44 @@ def _started_extension(monkeypatch):
     return module, extension, orch, usd_context, timeline, app
 
 
-def test_startup_opens_scene_and_subscribes(monkeypatch):
-    _module, _extension, orch, usd_context, timeline, _app = _started_extension(monkeypatch)
+def _fire_deferred_scene_open(extension):
+    extension._open_scene_when_ready(SimpleNamespace())
 
-    # The orchestrator is built and the scene opened; the stage is not adopted yet
-    # (that waits for the OPENED event).
-    assert orch.calls == ["open_scene"]
+
+def test_startup_defers_scene_open_and_subscribes(monkeypatch):
+    _module, extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
+
+    # The orchestrator is built and Kit streams are subscribed immediately, but
+    # scene-open is deferred until Kit reports app readiness.
+    assert orch.calls == []
     assert orch.stage is None
     assert usd_context.stage_events.callbacks  # subscribed to stage events
     assert timeline.events.callbacks  # subscribed to timeline events
+    assert app.updates.callbacks == [extension._open_scene_when_ready]
+    assert extension._scene_open_sub is not None
+
+
+def test_deferred_scene_open_waits_for_app_ready(monkeypatch):
+    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+
+    _fire_deferred_scene_open(extension)
+
+    assert orch.calls == []
+    assert extension._scene_open_sub is not None
+
+    app.ready = True
+
+    _fire_deferred_scene_open(extension)
+    _fire_deferred_scene_open(extension)
+
+    assert orch.calls == ["open_scene"]
+    assert extension._scene_open_sub is None
 
 
 def test_opened_adopts_stage_and_applies_settings(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, _app = _started_extension(monkeypatch)
+    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_deferred_scene_open(extension)
 
     extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
 
@@ -200,6 +229,8 @@ def test_opened_adopts_stage_and_applies_settings(monkeypatch):
 
 def test_play_spawns_and_builds_drivers_when_routine_present(monkeypatch):
     _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_deferred_scene_open(extension)
     extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
     orch._drones = [_drone_with_steps([{"kind": "arm"}])]
 
@@ -213,18 +244,22 @@ def test_play_spawns_and_builds_drivers_when_routine_present(monkeypatch):
 
 def test_play_without_routine_builds_no_drivers(monkeypatch):
     _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_deferred_scene_open(extension)
     extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
     orch._drones = [_drone_with_steps([])]  # manual drone -> no driver
 
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
 
     assert "build_drivers" not in orch.calls
-    assert app.updates.callbacks == []
+    assert app.updates.callbacks == [extension._open_scene_when_ready]
     assert extension._update_sub is None
 
 
 def test_stop_drops_control_and_tears_down(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, _app = _started_extension(monkeypatch)
+    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_deferred_scene_open(extension)
     extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
     orch._drones = [_drone_with_steps([{"kind": "arm"}])]
     extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))

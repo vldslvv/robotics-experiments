@@ -25,6 +25,7 @@ from robotics_experiments.px4_bridge import ActuatorCommands
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_instability_detection"
 PX4_CONTAINER_LOG_NAME = "test_px4_takeoff_instability_px4.log"
+PX4_BRIDGE_EXTENSION_PATH = "isaac/runtime/extensions/px4_sitl_brigde"
 FAULTED_ROTOR_INDEX = 0
 FAULTED_ROTOR_COMMAND_SCALE = 0.0
 FAULT_BODY_TORQUE_BIAS_N_M = np.array([4.0, 0.0, 0.0], dtype=np.float64)
@@ -127,6 +128,7 @@ def main() -> None:
         test_name=TEST_NAME,
         default_scene=DEFAULT_SCENE,
         manage_stage=False,
+        extra_python_paths=[PX4_BRIDGE_EXTENSION_PATH],
         test_body=_run_test,
         description=__doc__ or "",
     )

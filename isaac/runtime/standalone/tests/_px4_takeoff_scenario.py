@@ -325,7 +325,8 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
 
     with timing.timed_stage("spawn_drones"):
         orchestrator.spawn_fleet()
-    context.report(f"{options.test_name}: built {len(orchestrator.drones)} drone(s)")
+    drone_count = len(orchestrator.drones)
+    context.report(f"{options.test_name}: built {drone_count} drone(s)")
     if not orchestrator.bridged:
         raise AssertionError(f"{options.test_name}: no px4-enabled vehicle to drive")
 
@@ -409,7 +410,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
     timing.report_stage("scenario_total", timing.total_start())
     context.report(
         f"{options.test_name}: verified arm/takeoff/hover routine for "
-        f"{len(orchestrator.drones)} drone(s)"
+        f"{drone_count} drone(s)"
     )
 
 

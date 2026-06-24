@@ -26,14 +26,20 @@ from robotics_experiments.commanding import (
     armed,
     build_vehicle_routine,
     climbed_at_least,
+    cross_track_drift_below,
     decide,
+    disarmed,
     hovering_stable,
+    moved_forward_at_least,
     takeoff,
     tilt_below,
 )
 from robotics_experiments.commanding.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_REPOSITION,
+    MAV_CMD_NAV_LAND,
     MAV_CMD_NAV_TAKEOFF,
+    MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
 )
 from robotics_experiments.commanding.observation import (
     MAV_RESULT_TEMPORARILY_REJECTED,
@@ -243,13 +249,40 @@ def test_build_vehicle_routine_arm_takeoff_hover():
     assert hover_step.invariants
 
 
+def test_build_vehicle_routine_forward_and_land():
+    routine = _build(
+        [
+            {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
+            {"kind": "forward", "distance_m": 1.0, "timeout_s": 20.0},
+            {"kind": "land", "timeout_s": 30.0},
+        ],
+        target_altitude_m=488.0,
+    )
+    assert [s.label for s in routine.steps] == ["takeoff", "forward", "land"]
+    forward_step = routine.steps[1]
+    assert forward_step.command.command_id == MAV_CMD_DO_REPOSITION
+    assert forward_step.command.params[1] == pytest.approx(
+        float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE)
+    )
+    assert forward_step.command.params[4] == pytest.approx(47.0)
+    assert forward_step.command.params[5] > 8.0
+    # Forward holds the last commanded flight altitude from the takeoff step.
+    assert forward_step.command.params[6] == pytest.approx(490.0)
+    assert forward_step.timeout_s == pytest.approx(20.0)
+    assert forward_step.invariants
+
+    land_step = routine.steps[2]
+    assert land_step.command.command_id == MAV_CMD_NAV_LAND
+    assert land_step.timeout_s == pytest.approx(30.0)
+
+
 def test_build_vehicle_routine_empty_steps_is_empty_routine():
     assert _build([]).steps == ()
 
 
 def test_build_vehicle_routine_rejects_unknown_kind():
     with pytest.raises(ValueError, match="unknown kind"):
-        _build([{"kind": "land"}])
+        _build([{"kind": "orbit"}])
 
 
 def test_build_vehicle_routine_rejects_takeoff_without_climb():
@@ -267,10 +300,66 @@ def test_build_vehicle_routine_rejects_hover_without_hold():
         _build([{"kind": "hover"}])
 
 
+def test_build_vehicle_routine_rejects_forward_without_distance():
+    with pytest.raises(ValueError, match="distance_m"):
+        _build([{"kind": "forward", "timeout_s": 20.0}])
+
+
+def test_build_vehicle_routine_rejects_forward_without_timeout():
+    with pytest.raises(ValueError, match="timeout_s"):
+        _build([{"kind": "forward", "distance_m": 1.0}])
+
+
+def test_build_vehicle_routine_rejects_land_without_timeout():
+    with pytest.raises(ValueError, match="timeout_s"):
+        _build([{"kind": "land"}])
+
+
 def test_build_vehicle_routine_takeoff_yaw_param_is_nan():
     # takeoff() leaves yaw (param4) NaN to hold current heading.
     routine = _build([{"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0}])
     assert math.isnan(routine.steps[0].command.params[3])
+
+
+def test_moved_forward_at_least_uses_world_x_displacement_from_baseline():
+    predicate = moved_forward_at_least(1.0)
+    baseline = make_routine_observation(position_enu=(2.0, 3.0, 0.0)).vehicle_state.position_enu
+    assert predicate(make_routine_observation(position_enu=(2.9, 3.0, 1.0)), baseline) is False
+    assert predicate(make_routine_observation(position_enu=(3.0, 3.0, 1.0)), baseline) is True
+
+
+def test_forward_invariant_allows_commanded_x_displacement():
+    routine = _build(
+        [
+            {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
+            {"kind": "forward", "distance_m": 2.0, "timeout_s": 20.0},
+        ]
+    )
+    forward_step = routine.steps[1]
+    baseline = make_routine_observation(position_enu=(0.0, 2.0, 0.0)).vehicle_state.position_enu
+    observation = make_routine_observation(position_enu=(2.0, 1.84, 2.0))
+
+    assert [invariant(observation, baseline) for invariant in forward_step.invariants] == [
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
+def test_cross_track_drift_gate_limits_sideways_drift():
+    gate = cross_track_drift_below(2.0)
+    baseline = make_routine_observation(position_enu=(0.0, 2.0, 0.0)).vehicle_state.position_enu
+    assert gate(make_routine_observation(position_enu=(10.0, 3.99, 2.0)), baseline) is None
+    breach = gate(make_routine_observation(position_enu=(1.0, 4.01, 2.0)), baseline)
+    assert breach is not None
+    assert "cross-track drift" in breach
+
+
+def test_disarmed_predicate_waits_for_bridge_disarm_status():
+    predicate = disarmed()
+    assert predicate(make_routine_observation(is_armed=True), None) is False
+    assert predicate(make_routine_observation(is_armed=False), None) is True
 
 
 def test_decide_invariant_breach_fails_with_envelope_kind():

@@ -1,0 +1,49 @@
+defaults:
+  - config
+  - _self_
+
+# Runtime demonstration experiment: two PX4-backed drones each define their own
+# routine: arm, take off, move forward along world +X/east, then land. Drone 0
+# flies 1 m; drone 1 flies 2 m.
+#
+# Run with: make run-all HYDRA_CONFIG=configs/runtime_two_drone_forward_land.yaml
+
+routine:
+  steps: []
+
+# Spawned 4 m apart on Y so their +X forward tracks are parallel and do not
+# intersect. Distinct prim names avoid USD prim collisions; id derives the PX4
+# instance, MAVLink simulator port, and GCS port.
+vehicles:
+  - id: 0
+    spawn_xy: [0.0, -2.0]
+    drone: {prim_name: Drone0}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.0
+          min_climb_m: 1.2
+        - kind: hover
+          hold_s: 2.0
+        - kind: forward
+          distance_m: 1.0
+          timeout_s: 20.0
+        - kind: land
+          timeout_s: 30.0
+  - id: 1
+    spawn_xy: [0.0, 2.0]
+    drone: {prim_name: Drone1}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.0
+          min_climb_m: 1.2
+        - kind: hover
+          hold_s: 2.0
+        - kind: forward
+          distance_m: 2.0
+          timeout_s: 20.0
+        - kind: land
+          timeout_s: 30.0

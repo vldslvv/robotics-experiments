@@ -43,10 +43,11 @@ are independent (cross-drone synchronization is deliberately deferred).
   for `hold_s` -> `ADVANCE`), then ack-rejection/timeout (-> `FAIL(COMMAND)`).
   Completion predicate helpers: `armed()`, `ack_accepted(command_id)`,
   `climbed_at_least(min_climb_m)` (relative to the captured baseline),
-  `hovering_stable(...)`. Invariant gate helpers (each returns a breach message
-  or `None`): `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
-  `angular_speed_below`. `EnvelopeGates` bundles the gate thresholds wired onto
-  the flight steps.
+  `hovering_stable(...)`, `moved_forward_at_least(distance_m)`, and
+  `disarmed()`. Invariant gate helpers (each returns a breach message or
+  `None`): `tilt_below`, `lateral_drift_below`, `cross_track_drift_below`,
+  `vertical_speed_within`, `angular_speed_below`. `EnvelopeGates` bundles the
+  gate thresholds wired onto the flight steps.
 
   `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
@@ -149,16 +150,22 @@ the takeoff target/timeout, and the hover settle). There is no separate
 `config.load.resolve_fleet` (the resolved `RoutineConfig` lands on
 `ResolvedVehicle.routine`). `routine.steps` is the per-drone on/off switch: a
 drone whose resolved `steps` is non-empty
-(`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` / `{kind: hover, hold_s}`)
+(`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
+`{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
+`{kind: land, timeout_s}`)
 gets a `RoutineDriver`; empty (the global default) means manual. Mixed fleets are
 allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s)` maps the descriptors plus a per-drone takeoff
-target into a `VehicleRoutine` (unknown `kind`, or a `takeoff`/`hover` missing a
-required field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the
-shared seam both drivers use. The takeoff step completes on a real climb
-(`climbed_at_least(min_climb_m)`) and the hover step on `hovering_stable(...)` held
-for `hold_s`, with the gates as continuous invariants on both.
+target into a `VehicleRoutine` (unknown `kind`, or any step missing a required
+field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the shared
+seam both drivers use. The takeoff step completes on a real climb
+(`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
+for `hold_s`, the forward step on observed world +X/east displacement, and the
+land step once PX4 disarms. Flight gates are continuous invariants on takeoff,
+hover, and forward. Takeoff/hover use the lateral-drift threshold as radial
+horizontal excursion from the baseline; forward uses it as cross-track drift so
+the commanded +X/east displacement itself does not breach the envelope.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
 `configs/runtime_arm_takeoff.yaml` demos it headless via
 `make run-all HYDRA_CONFIG=...`, and `configs/integration_test_takeoff.yaml`

@@ -28,6 +28,7 @@ wall-clock guard to catch a fully stalled simulation.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -41,6 +42,8 @@ from .commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     MavlinkCommand,
     arm,
+    land,
+    reposition,
     takeoff,
 )
 from .observation import MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
@@ -60,11 +63,16 @@ __all__ = [
     "armed",
     "build_vehicle_routine",
     "climbed_at_least",
+    "cross_track_drift_below",
+    "disarmed",
     "hovering_stable",
     "lateral_drift_below",
+    "moved_forward_at_least",
     "tilt_below",
     "vertical_speed_within",
 ]
+
+_EARTH_RADIUS_M = 6_378_137.0
 
 # A completion predicate reads the observation plus the routine's captured
 # baseline position (ENU, set on the first SEND); baseline is ``None`` only
@@ -365,6 +373,27 @@ def hovering_stable(
     return predicate
 
 
+def moved_forward_at_least(distance_m: float) -> StepPredicate:
+    """Predicate: the vehicle moved at least ``distance_m`` along world +X/east."""
+
+    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+        if baseline is None:
+            return False
+        position = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        return float(position[0] - baseline[0]) >= distance_m
+
+    return predicate
+
+
+def disarmed() -> StepPredicate:
+    """Predicate: PX4 no longer commands armed rotor references."""
+
+    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+        return not bool(observation.bridge_status.is_armed)
+
+    return predicate
+
+
 # ---- Continuous flight-envelope invariant gates ----------------------------
 
 
@@ -390,6 +419,21 @@ def lateral_drift_below(max_lateral_drift_m: float) -> Invariant:
         drift = float(np.hypot(float(position[0] - baseline[0]), float(position[1] - baseline[1])))
         if drift > max_lateral_drift_m:
             return f"lateral drift {drift:.2f}m exceeds limit {max_lateral_drift_m:.2f}m"
+        return None
+
+    return gate
+
+
+def cross_track_drift_below(max_cross_track_m: float) -> Invariant:
+    """Gate: world Y/north drift from the baseline stays within ``max_cross_track_m``."""
+
+    def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
+        if baseline is None:
+            return None
+        position = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        drift = abs(float(position[1] - baseline[1]))
+        if drift > max_cross_track_m:
+            return f"cross-track drift {drift:.2f}m exceeds limit {max_cross_track_m:.2f}m"
         return None
 
     return gate
@@ -460,6 +504,24 @@ def _flight_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
     )
 
 
+def _forward_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
+    return (
+        tilt_below(gates.max_tilt_deg),
+        cross_track_drift_below(gates.max_lateral_drift_m),
+        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
+        angular_speed_below(gates.max_angular_speed_rad_s),
+    )
+
+
+def _offset_lat_lon(
+    latitude_deg: float, longitude_deg: float, *, east_m: float, north_m: float
+) -> tuple[float, float]:
+    lat_rad = math.radians(float(latitude_deg))
+    dlat_deg = (float(north_m) / _EARTH_RADIUS_M) * (180.0 / math.pi)
+    dlon_deg = (float(east_m) / (_EARTH_RADIUS_M * math.cos(lat_rad))) * (180.0 / math.pi)
+    return float(latitude_deg) + dlat_deg, float(longitude_deg) + dlon_deg
+
+
 def build_vehicle_routine(
     steps: Sequence[Mapping[str, Any]],
     *,
@@ -491,6 +553,11 @@ def build_vehicle_routine(
     - ``hover`` (requires ``hold_s``): sends nothing and completes once a stable
       hover is held for ``hold_s`` seconds; ``timeout_s`` is
       ``hover_settle_s + hold_s``; flight gates apply.
+    - ``forward`` (requires ``distance_m`` and ``timeout_s``): repositions
+      ``distance_m`` along world +X/east and completes once that displacement is
+      observed from the routine baseline; flight gates apply.
+    - ``land`` (requires ``timeout_s``): commands a landing at the current
+      position and completes once PX4 disarms.
 
     An empty ``steps`` yields an empty routine (the manual case). Pure: no Isaac,
     no pymavlink, no sockets.
@@ -500,7 +567,9 @@ def build_vehicle_routine(
             (invalid configuration must not pass silently).
     """
     flight_invariants = _flight_invariants(gates)
+    forward_invariants = _forward_invariants(gates)
     built: list[RoutineStep] = []
+    commanded_altitude_m = float(target_altitude_m)
     for index, descriptor in enumerate(steps):
         kind = descriptor.get("kind")
         if kind == "arm":
@@ -521,6 +590,7 @@ def build_vehicle_routine(
                     f"routine step {index} (takeoff) is missing required 'min_climb_m'"
                 )
             absolute_altitude_m = float(target_altitude_m) + float(descriptor["climb_m"])
+            commanded_altitude_m = absolute_altitude_m
             built.append(
                 RoutineStep(
                     command=takeoff(target_latitude_deg, target_longitude_deg, absolute_altitude_m),
@@ -546,6 +616,44 @@ def build_vehicle_routine(
                     timeout_s=float(hover_settle_s) + hold_s,
                     hold_s=hold_s,
                     invariants=flight_invariants,
+                )
+            )
+        elif kind == "forward":
+            if "distance_m" not in descriptor:
+                raise ValueError(f"routine step {index} (forward) is missing required 'distance_m'")
+            if "timeout_s" not in descriptor:
+                raise ValueError(f"routine step {index} (forward) is missing required 'timeout_s'")
+            distance_m = float(descriptor["distance_m"])
+            target_latitude_deg, target_longitude_deg = _offset_lat_lon(
+                target_latitude_deg,
+                target_longitude_deg,
+                east_m=distance_m,
+                north_m=0.0,
+            )
+            built.append(
+                RoutineStep(
+                    command=reposition(
+                        target_latitude_deg,
+                        target_longitude_deg,
+                        commanded_altitude_m,
+                    ),
+                    is_complete=moved_forward_at_least(distance_m),
+                    label="forward",
+                    timeout_s=float(descriptor["timeout_s"]),
+                    retry_on_temporarily_rejected=True,
+                    invariants=forward_invariants,
+                )
+            )
+        elif kind == "land":
+            if "timeout_s" not in descriptor:
+                raise ValueError(f"routine step {index} (land) is missing required 'timeout_s'")
+            built.append(
+                RoutineStep(
+                    command=land(),
+                    is_complete=disarmed(),
+                    label="land",
+                    timeout_s=float(descriptor["timeout_s"]),
+                    retry_on_temporarily_rejected=True,
                 )
             )
         else:

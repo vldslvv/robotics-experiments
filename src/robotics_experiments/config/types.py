@@ -416,11 +416,13 @@ class RoutineConfig:
     Attributes:
         steps: Ordered step descriptors authored in YAML, each a mapping with a
             ``kind`` (``arm``; ``takeoff`` carrying ``climb_m`` + ``min_climb_m``;
-            ``hover`` carrying ``hold_s``). Empty means manual (no routine
-            driver). Typed ``List[Any]`` so Hydra's structured-config validation
-            accepts the partial per-step mappings during ``compose()`` (the same
-            escape hatch as ``vehicles``); the driver maps them to a pure
-            ``VehicleRoutine`` via ``commanding.build_vehicle_routine``.
+            ``hover`` carrying ``hold_s``; ``forward`` carrying ``distance_m`` +
+            ``timeout_s``; ``land`` carrying ``timeout_s``). Empty means manual
+            (no routine driver). Typed ``List[Any]`` so Hydra's
+            structured-config validation accepts the partial per-step mappings
+            during ``compose()`` (the same escape hatch as ``vehicles``); the
+            driver maps them to a pure ``VehicleRoutine`` via
+            ``commanding.build_vehicle_routine``.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
@@ -439,7 +441,9 @@ class RoutineConfig:
             ``hold_s`` window must be sustained (the hover step timeout is
             ``hover_settle_s + hold_s``).
         max_tilt_deg: Continuous tilt gate on the flight steps.
-        max_lateral_drift_m: Continuous lateral-drift gate (from the baseline).
+        max_lateral_drift_m: Continuous lateral-drift gate. Takeoff/hover treat
+            it as radial horizontal excursion from the baseline; forward treats
+            it as cross-track drift so commanded +X/east motion is allowed.
         max_vertical_speed_m_s: Continuous upward-speed divergence gate.
         max_downward_speed_m_s: Continuous downward-speed divergence gate
             (negative).

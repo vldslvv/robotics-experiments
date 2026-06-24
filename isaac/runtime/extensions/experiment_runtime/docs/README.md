@@ -5,10 +5,12 @@ builds the host-agnostic
 `robotics_experiments.runtime.FleetOrchestrator` and wires Kit events to its
 phases.
 
-- `on_startup`: build the orchestrator from the active experiment config and open
-  the configured `scene` (the orchestrator owns scene-open, so the live boot no
-  longer uses Kit's `--exec open_stage.py` or a separate `sim_settings`
-  extension). The stage is adopted and sim settings applied on the `OPENED` event.
+- `on_startup`: build the orchestrator from the active experiment config and
+  subscribe to Kit events. An app-update callback opens the configured `scene`
+  once `IApp.is_app_ready()` is true (the orchestrator owns scene-open, so the
+  live boot does not use Kit's `--exec open_stage.py` or a separate
+  `sim_settings` extension). The stage is adopted and sim settings applied on the
+  `OPENED` event.
 - Timeline `PLAY`: spawn the fleet, start the PX4 lockstep bridge group, and -- if
   any drone's resolved `routine.steps` is non-empty -- build one `RoutineDriver`
   per flying drone and tick them from a separate app-update subscription.
