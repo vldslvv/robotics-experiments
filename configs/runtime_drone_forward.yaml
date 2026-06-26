@@ -1,6 +1,5 @@
 defaults:
   - config
-  - override experiment/routine@routine: takeoff
   - _self_
 
 # Runtime demonstration experiment: fly the shared arm -> takeoff -> hover
@@ -12,3 +11,24 @@ defaults:
 # control available).
 #
 # Run with: make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml
+
+routine:
+  steps: []
+
+vehicles:
+  - id: 0
+    spawn_xy: [0.0, -2.0]
+    drone: {prim_name: Drone0}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.0
+          min_climb_m: 1.2
+        - kind: hover
+          hold_s: 2.0
+        - kind: forward
+          distance_m: 5.0
+          timeout_s: 20.0
+        - kind: land
+          timeout_s: 30.0
