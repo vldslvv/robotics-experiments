@@ -218,10 +218,15 @@ def test_resolve_section_falls_back_to_named_section():
     reset_config()
 
 
-def test_enabled_px4_vehicle_count_matches_active_config():
+def test_enabled_px4_helpers_match_active_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, get_enabled_px4_vehicle_count, reset_config
+    from robotics_experiments.config import (
+        get_config,
+        get_enabled_px4_instance_indices,
+        get_enabled_px4_vehicle_count,
+        reset_config,
+    )
 
     reset_config()
 
@@ -230,22 +235,6 @@ def test_enabled_px4_vehicle_count_matches_active_config():
     assert get_enabled_px4_vehicle_count() == sum(
         1 for vehicle in config.vehicles if vehicle.px4.enabled
     )
-    reset_config()
-
-
-def test_enabled_px4_instance_indices_match_active_config():
-    pytest.importorskip("hydra")
-    pytest.importorskip("omegaconf")
-    from robotics_experiments.config import (
-        get_config,
-        get_enabled_px4_instance_indices,
-        reset_config,
-    )
-
-    reset_config()
-
-    config = get_config()
-
     assert get_enabled_px4_instance_indices() == [
         vehicle.px4_instance_index for vehicle in config.vehicles if vehicle.px4.enabled
     ]
@@ -255,12 +244,7 @@ def test_enabled_px4_instance_indices_match_active_config():
 def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import (
-        get_config,
-        get_enabled_px4_instance_indices,
-        get_enabled_px4_vehicle_count,
-        reset_config,
-    )
+    from robotics_experiments.config import get_config, reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -276,6 +260,4 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     # gcs_port is derived from px4.gcs_baseport + id.
     assert [vehicle.gcs_port for vehicle in config.vehicles] == [14550, 14551]
     assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
-    assert get_enabled_px4_vehicle_count() == 2
-    assert get_enabled_px4_instance_indices() == [0, 1]
     reset_config()

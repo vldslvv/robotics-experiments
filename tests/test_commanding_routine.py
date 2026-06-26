@@ -162,6 +162,7 @@ def test_decide_fails_on_timeout():
     # arm step timeout_s is 5.0s; 6s of sim time with no ack -> FAIL.
     _, decision = decide(routine, state, make_routine_observation(sim_time_us=6_000_000))
     assert decision.kind is DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.COMMAND
     assert "timed out" in decision.reason
 
 
@@ -383,15 +384,6 @@ def test_decide_invariant_breach_fails_with_envelope_kind():
     assert decision.kind is DecisionKind.FAIL
     assert decision.failure_kind is FailureKind.ENVELOPE
     assert "tilt" in decision.reason
-
-
-def test_decide_timeout_fails_with_command_kind():
-    routine = _arm_takeoff_routine()
-    state = RoutineState.initial()
-    state, _ = decide(routine, state, make_routine_observation(sim_time_us=0))
-    _, decision = decide(routine, state, make_routine_observation(sim_time_us=6_000_000))
-    assert decision.kind is DecisionKind.FAIL
-    assert decision.failure_kind is FailureKind.COMMAND
 
 
 def test_decide_hover_step_holds_before_advancing():

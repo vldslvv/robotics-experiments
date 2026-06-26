@@ -235,47 +235,44 @@ def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
     assert first_baro["absolute_pressure"] != second_baro["absolute_pressure"]
 
 
-def test_mavlink_port_imu_fresh_every_tick_at_matched_rate(monkeypatch):
+@pytest.mark.parametrize(
+    ("physics_rate_hz", "timestamps", "expected_tick_us"),
+    [
+        pytest.param(250.0, (100_000, 104_000, 108_000), 4000, id="matched_250hz"),
+        pytest.param(
+            333.0,
+            (100_000, 103_003, 106_006, 109_009),
+            3003,
+            id="333hz_float_boundary",
+        ),
+    ],
+)
+def test_mavlink_port_imu_fresh_every_tick_at_physics_rate(
+    monkeypatch, physics_rate_hz, timestamps, expected_tick_us
+):
+    # The 333 Hz case is a regression for a float-boundary skip: the naive
+    # 1/rate period is a ULP above the integer-us tick, so the IMU would refresh
+    # only every other tick unless the period is pinned to the integer-us tick.
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(
-        num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=250.0), sensor_noise_enabled=False
+        num_rotors=4,
+        lockstep=LockstepSettings(physics_rate_hz=physics_rate_hz),
+        sensor_noise_enabled=False,
     )
     backend = port._backend
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
 
+    assert port._physics_tick_us == expected_tick_us
+
     port.start()
-    # 4000 us steps == the 250 Hz physics tick.
-    for sim_time_us in (100_000, 104_000, 108_000):
+    for sim_time_us in timestamps:
         lockstep_exchange(port, VehicleState.hover_at(sim_time_us=sim_time_us))
 
-    assert len(backend.imu_updates) == 3
+    assert len(backend.imu_updates) == len(timestamps)
     assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
     assert port.is_connected is True
     assert port._last_disconnect_reason is None
-
-
-def test_mavlink_port_imu_fresh_every_tick_at_non_250_rate(monkeypatch):
-    # Regression for the float-boundary skip: at 333 Hz the naive 1/rate period
-    # is a ULP above the integer-us tick, so the IMU would refresh only every
-    # other tick. Pinning the period to the integer-us tick fixes it.
-    _install_fake_pegasus(monkeypatch)
-    port = Px4MavlinkPort(
-        num_rotors=4, lockstep=LockstepSettings(physics_rate_hz=333.0), sensor_noise_enabled=False
-    )
-    backend = port._backend
-    backend._connection = _FakeConnection()
-    backend._enable_lockstep = False
-
-    assert port._physics_tick_us == 3003
-
-    port.start()
-    for sim_time_us in (100_000, 103_003, 106_006, 109_009):
-        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=sim_time_us))
-
-    assert len(backend.imu_updates) == 4
-    assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
-    assert port.is_connected is True
 
 
 def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypatch):
