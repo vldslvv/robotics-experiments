@@ -15,32 +15,32 @@ center_plate:
 arms:
   - name: Arm 1
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [0.1375, 0.0, 0.0]
     rotation_deg: [0.0, 90.0, 0.0]
   - name: Arm 2
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [0.06875, 0.11907849302036031, 0.0]
     rotation_deg: [0.0, 90.0, 60.0]
   - name: Arm 3
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [-0.06875, 0.11907849302036031, 0.0]
     rotation_deg: [0.0, 90.0, 120.0]
   - name: Arm 4
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [-0.1375, 0.0, 0.0]
     rotation_deg: [0.0, 90.0, 180.0]
   - name: Arm 5
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [-0.06875, -0.11907849302036027, 0.0]
     rotation_deg: [0.0, 90.0, -120.0]
   - name: Arm 6
     radius: 0.01
-    height: 0.495
+    height: 0.255
     position: [0.06875, -0.11907849302036035, 0.0]
     rotation_deg: [0.0, 90.0, -60.0]
 
@@ -223,9 +223,19 @@ wiring:
   position: [0.0, 0.0, 0.0]
   mass: 0.120
 
-pusher_pad:
-  name: Spring-loaded pusher pad
-  radius: 0.015
-  height: 0.008
-  position: [0.13, 0.0, 0.01]
-  mass: 0.040
+# Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
+# false to build this airframe without the pusher (the geometry/drive below stay
+# defined for an easy re-enable). The pad is a sibling rigid body linked to the
+# body by a spring-damper prismatic joint (`pusher_joint`).
+pusher:
+  enabled: true
+  pad:
+    name: Spring-loaded pusher pad
+    radius: 0.015
+    height: 0.008
+    position: [0.13, 0.0, 0.01]
+    mass: 0.040
+  drive:
+    travel: 0.015
+    stiffness: 800.0
+    damping: 40.0

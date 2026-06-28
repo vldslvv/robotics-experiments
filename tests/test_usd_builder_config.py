@@ -8,7 +8,7 @@ pytest.importorskip("hydra")
 pytest.importorskip("omegaconf")
 pytest.importorskip("pxr")
 
-from pxr import Usd, UsdGeom  # noqa: E402
+from pxr import Usd, UsdGeom, UsdPhysics  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _BUILDER_PATH = _REPO_ROOT / "isaac/runtime/standalone/build_copter_usd_standalone.py"
@@ -25,7 +25,9 @@ def test_usd_builder_default_hydra_config_loads_quadcopter():
     config = builder.load_builder_config(config_dir=_CONFIG_DIR)
 
     assert config.output_dir == "isaac/assets/LightSwitchWarehouse"
-    assert config.pusher_drive.travel == 0.015
+    assert config.drone.pusher is not None
+    assert config.drone.pusher.enabled is True
+    assert config.drone.pusher.drive.travel == 0.015
     assert config.drone.name == "quadcopter_500mm"
     assert config.drone.output_filename == "quadcopter_500mm.usda"
 
@@ -55,13 +57,13 @@ def test_usd_builder_positional_cli_shorthand_maps_to_hydra_override():
     builder = _load_builder_module()
     args = argparse.Namespace(
         config_name="hexacopter_s550",
-        overrides=["pusher_drive.stiffness=900.0"],
+        overrides=["drone.pusher.drive.stiffness=900.0"],
         output_dir="/tmp/usd-out",
     )
 
     assert builder._hydra_overrides_from_args(args) == [
         "drone=hexacopter_s550",
-        "pusher_drive.stiffness=900.0",
+        "drone.pusher.drive.stiffness=900.0",
         "output_dir=/tmp/usd-out",
     ]
 
@@ -87,7 +89,6 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
     stage_path = builder.build_drone_usd(
         config.drone,
         output_dir=config.output_dir,
-        pusher_drive=config.pusher_drive,
     )
     stage = Usd.Stage.Open(stage_path)
 
@@ -122,3 +123,50 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
         assert stage.GetPrimAtPath(f"{path}/hub").IsA(UsdGeom.Cylinder)
         blades = [child for child in prim.GetChildren() if child.GetName().startswith("blade_")]
         assert len(blades) == 2  # num_blades from the quad config
+
+
+def test_usd_builder_default_quad_has_pusher(tmp_path):
+    builder = _load_builder_module()
+    config = builder.load_builder_config(
+        config_dir=_CONFIG_DIR,
+        overrides=[f"output_dir={tmp_path}"],
+    )
+
+    stage_path = builder.build_drone_usd(config.drone, output_dir=config.output_dir)
+    stage = Usd.Stage.Open(stage_path)
+
+    # Pad rigid body + its collision geom exist under the pusher group.
+    pad = stage.GetPrimAtPath("/quadcopter/pusher/pad")
+    assert pad.IsValid()
+    assert pad.HasAPI(UsdPhysics.RigidBodyAPI)
+    assert stage.GetPrimAtPath("/quadcopter/pusher/pad/geom").IsA(UsdGeom.Cylinder)
+
+    # Prismatic spring-damper joint with travel from drone.pusher.drive.travel.
+    joint_prim = stage.GetPrimAtPath("/quadcopter/pusher_joint")
+    assert joint_prim.IsValid()
+    joint = UsdPhysics.PrismaticJoint(joint_prim)
+    assert joint.GetAxisAttr().Get() == "X"
+    assert joint.GetUpperLimitAttr().Get() == pytest.approx(config.drone.pusher.drive.travel)
+
+
+def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
+    builder = _load_builder_module()
+    config = builder.load_builder_config(
+        config_dir=_CONFIG_DIR,
+        overrides=[f"output_dir={tmp_path}", "drone.pusher.enabled=false"],
+    )
+    assert config.drone.pusher.enabled is False
+
+    stage_path = builder.build_drone_usd(config.drone, output_dir=config.output_dir)
+    stage = Usd.Stage.Open(stage_path)
+
+    # No pusher subtree is authored when disabled.
+    assert not stage.GetPrimAtPath("/quadcopter/pusher_joint").IsValid()
+    assert not stage.GetPrimAtPath("/quadcopter/pusher").IsValid()
+
+    # The rest of the airframe is intact (rotor markers still present).
+    for path in (
+        "/quadcopter/body/propulsion/motor_4/prop",
+        "/quadcopter/body/propulsion/motor_1/prop",
+    ):
+        assert stage.GetPrimAtPath(path).GetAttribute("drone:rotorMarker").Get() is True

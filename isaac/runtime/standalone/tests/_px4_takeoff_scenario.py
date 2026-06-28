@@ -409,8 +409,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 _assert_bridge_log_clean(path, label)
     timing.report_stage("scenario_total", timing.total_start())
     context.report(
-        f"{options.test_name}: verified arm/takeoff/hover routine for "
-        f"{drone_count} drone(s)"
+        f"{options.test_name}: verified arm/takeoff/hover routine for " f"{drone_count} drone(s)"
     )
 
 

@@ -48,9 +48,7 @@ def test_mavlink_port_drains_actuator_backlog_to_newest(monkeypatch):
     # Focused unit coverage for the extracted _drain_actuator_backlog helper:
     # a synthetic backlog of two actuator packets must be fully consumed and the
     # newest one applied, so the bridge never flies on a stale queued command.
-    helper_port = Px4MavlinkPort(
-        num_rotors=4, lockstep=LockstepSettings(lockstep_timeout_s=1.0)
-    )
+    helper_port = Px4MavlinkPort(num_rotors=4, lockstep=LockstepSettings(lockstep_timeout_s=1.0))
     helper_backend = helper_port._backend
     older_msg = types.SimpleNamespace(
         id=93,

@@ -53,7 +53,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs" / "usd_builder"
 #   lidar           -> top surface of the center plate
 #   battery         -> body root
 #   wiring          -> body root
-#   pusher_pad      -> body root
+#   pusher.pad      -> body root
 
 
 @dataclass
@@ -128,8 +128,10 @@ class DroneConfig:
     battery: BoxPart
     wiring: BoxPart
 
-    # Pusher (None == no pusher mechanism on this airframe).
-    pusher_pad: CylinderPart | None = None
+    # Pusher (None == no pusher mechanism authored for this airframe). When
+    # present, `enabled` is the per-drone on/off switch: a disabled pusher keeps
+    # its geometry/drive config but is not authored into the USD.
+    pusher: PusherConfig | None = None
 
 
 @dataclass
@@ -140,9 +142,15 @@ class PusherDriveConfig:
 
 
 @dataclass
+class PusherConfig:
+    enabled: bool
+    pad: CylinderPart
+    drive: PusherDriveConfig
+
+
+@dataclass
 class BuilderConfig:
     output_dir: str
-    pusher_drive: PusherDriveConfig
     drone: DroneConfig
 
 
@@ -200,8 +208,22 @@ def _motor(data: dict[str, Any], label: str) -> Motor:
     )
 
 
+def _pusher_config(data: dict[str, Any] | None) -> PusherConfig | None:
+    if data is None:
+        return None
+    drive = data["drive"]
+    return PusherConfig(
+        enabled=bool(data["enabled"]),
+        pad=_cylinder(data["pad"], "drone.pusher.pad"),
+        drive=PusherDriveConfig(
+            travel=float(drive["travel"]),
+            stiffness=float(drive["stiffness"]),
+            damping=float(drive["damping"]),
+        ),
+    )
+
+
 def _drone_config(data: dict[str, Any]) -> DroneConfig:
-    pusher_pad = data.get("pusher_pad")
     return DroneConfig(
         name=str(data["name"]),
         output_filename=str(data["output_filename"]),
@@ -219,19 +241,13 @@ def _drone_config(data: dict[str, Any]) -> DroneConfig:
         lidar=_cylinder(data["lidar"], "drone.lidar"),
         battery=_box(data["battery"], "drone.battery"),
         wiring=_box(data["wiring"], "drone.wiring"),
-        pusher_pad=None if pusher_pad is None else _cylinder(pusher_pad, "drone.pusher_pad"),
+        pusher=_pusher_config(data.get("pusher")),
     )
 
 
 def _builder_config(data: dict[str, Any]) -> BuilderConfig:
-    pusher_drive = data["pusher_drive"]
     return BuilderConfig(
         output_dir=str(data["output_dir"]),
-        pusher_drive=PusherDriveConfig(
-            travel=float(pusher_drive["travel"]),
-            stiffness=float(pusher_drive["stiffness"]),
-            damping=float(pusher_drive["damping"]),
-        ),
         drone=_drone_config(data["drone"]),
     )
 
@@ -390,7 +406,6 @@ def build_drone_usd(
     cfg: DroneConfig,
     *,
     output_dir: str = ASSETS_DIR,
-    pusher_drive: PusherDriveConfig,
 ) -> str:
     stage_path = os.path.join(output_dir, cfg.output_filename)
     wrapper_path = f"/{cfg.prim_name}"
@@ -456,9 +471,12 @@ def build_drone_usd(
     _author_box(stage, f"{power_path}/battery", cfg.battery)
     _author_box(stage, f"{power_path}/wiring", cfg.wiring)
 
-    # Pusher (sibling rigid body + prismatic joint).
-    if cfg.pusher_pad is not None:
-        pad = cfg.pusher_pad
+    # Pusher (sibling rigid body + prismatic joint). Authored only when the
+    # airframe defines a pusher and it is enabled, so a single config parameter
+    # (drone.pusher.enabled) builds the drone with or without it.
+    if cfg.pusher is not None and cfg.pusher.enabled:
+        pad = cfg.pusher.pad
+        pusher_drive = cfg.pusher.drive
         pusher_grp = f"{wrapper_path}/pusher"
         UsdGeom.Xform.Define(stage, pusher_grp)
         pad_path = f"{pusher_grp}/pad"
@@ -549,6 +567,5 @@ if __name__ == "__main__":
     path = build_drone_usd(
         config.drone,
         output_dir=config.output_dir,
-        pusher_drive=config.pusher_drive,
     )
     print(f"Saved: {path}")

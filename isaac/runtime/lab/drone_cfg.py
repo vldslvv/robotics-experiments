@@ -62,6 +62,12 @@ ASSETS_DIR = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse"
 # Mirrored from the same file's pusher constants. Keep in sync if you retune
 # the USD defaults; cfg values here override the USD at spawn time, so this is
 # the authoritative source for RL training.
+#
+# These assume the variant was built with the pusher enabled
+# (drone.pusher.enabled=true, the default). A pusher-less variant built with
+# drone.pusher.enabled=false has no `pusher_joint` in its USD, so the
+# `pusher` actuator below and the pusher_joint init_state entries must be
+# dropped for that variant or Isaac Lab will fail to match the joint.
 _PUSHER_STIFFNESS = 800.0
 _PUSHER_DAMPING = 40.0
 _PUSHER_EFFORT_LIMIT = 50.0  # N — rough cap for the prismatic pusher motor
