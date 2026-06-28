@@ -67,12 +67,30 @@ def _install_fake_isaac_modules(monkeypatch, *, min_z=-0.06, empty_bound=False):
         def RemovePrim(self, path):
             self.prims.pop(path, None)
 
+    class _Matrix4d:
+        def __init__(self, translation):
+            self._translation = translation
+
+        def ExtractTranslation(self):
+            return _Vec3d(*self._translation)
+
     class _Xformable:
         def __init__(self, prim):
             self.prim = prim
 
         def ClearXformOpOrder(self):
             self.prim.xform_ops.clear()
+
+        def ComputeLocalToWorldTransform(self, time_code):
+            # Compose the authored translate ops into the prim's world transform,
+            # the way real UsdGeom.Xformable does. Origin world position depends
+            # only on translation (a rotate/scale of the origin is the origin),
+            # so reading translation back is the public observable for placement.
+            translation = (0.0, 0.0, 0.0)
+            for op_name, attr in self.prim.xform_ops:
+                if op_name == "translate" and attr.value is not None:
+                    translation = tuple(attr.value)
+            return _Matrix4d(translation)
 
         def AddTranslateOp(self):
             attr = _Attribute()
@@ -222,12 +240,13 @@ def _config(**overrides):
     return SimpleNamespace(**values)
 
 
-def _last_translate(stage):
+def _world_position(stage):
+    """Read the drone's world position via the public USD transform API."""
+    from pxr import Usd, UsdGeom
+
     drone = stage.GetPrimAtPath("/World/Drone")
-    for op_name, attr in reversed(drone.xform_ops):
-        if op_name == "translate":
-            return tuple(attr.value)
-    raise AssertionError("translate op was not authored")
+    transform = UsdGeom.Xformable(drone).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    return tuple(transform.ExtractTranslation())
 
 
 def test_stationary_spawn_computes_z_from_composed_bounds(monkeypatch):
@@ -235,7 +254,7 @@ def test_stationary_spawn_computes_z_from_composed_bounds(monkeypatch):
 
     module.spawn_drone(stage, _config())
 
-    assert _last_translate(stage) == pytest.approx((1.0, 2.0, 0.07))
+    assert _world_position(stage) == pytest.approx((1.0, 2.0, 0.07))
 
 
 def test_stationary_spawn_uses_fallback_when_bounds_are_invalid(monkeypatch):
@@ -243,7 +262,7 @@ def test_stationary_spawn_uses_fallback_when_bounds_are_invalid(monkeypatch):
 
     module.spawn_drone(stage, _config(stationary_spawn_z_fallback=0.123))
 
-    assert _last_translate(stage) == (1.0, 2.0, 0.123)
+    assert _world_position(stage) == (1.0, 2.0, 0.123)
     assert any("using fallback z=0.123" in message for _level, message in carb.logs)
 
 
@@ -253,4 +272,4 @@ def test_volume_spawn_keeps_randomized_z_when_stationary_disabled(monkeypatch):
 
     module.spawn_drone(stage, _config(spawn_stationary=False))
 
-    assert _last_translate(stage) == (1.0, 2.0, 3.5)
+    assert _world_position(stage) == (1.0, 2.0, 3.5)
