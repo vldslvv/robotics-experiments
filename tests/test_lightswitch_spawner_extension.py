@@ -77,11 +77,17 @@ class _Publisher:
 
 
 class _Node:
+    # Test-local fake. ``instances`` exposes the node(s) the extension created so
+    # a test can observe the ROS publisher (and its published messages) without
+    # reading the extension's private ``_ros_node`` handle. Both lists are reset
+    # per test by ``_import_extension``.
+    instances: list["_Node"] = []
     destroyed: list["_Node"] = []
 
     def __init__(self, name):
         self.name = name
         self.publishers = []
+        _Node.instances.append(self)
 
     def get_logger(self):
         return SimpleNamespace(info=lambda message: None)
@@ -129,14 +135,14 @@ def _publisher_config(topic="/light_switches/state", qos=None):
     return SimpleNamespace(topic=topic, qos=qos)
 
 
-def _install_fake_modules(monkeypatch, usd_context, app, publisher_config):
+def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_config):
     omni = types.ModuleType("omni")
     omni.__path__ = []
     omni_ext = types.ModuleType("omni.ext")
     omni_ext.IExt = object
     omni_timeline = types.ModuleType("omni.timeline")
     omni_timeline.TimelineEventType = _TimelineEventType
-    omni_timeline.get_timeline_interface = lambda: _Timeline()
+    omni_timeline.get_timeline_interface = lambda: timeline
     omni_usd = types.ModuleType("omni.usd")
     omni_usd.StageEventType = _StageEventType
     omni_usd.get_context = lambda: usd_context
@@ -234,36 +240,59 @@ def _import_extension(monkeypatch, stage=None, publisher_config=None):
         if name == "LightSwitch_python" or name.startswith("LightSwitch_python."):
             sys.modules.pop(name, None)
 
+    _Node.instances = []
+    _Node.destroyed = []
     if stage is None:
         stage = object()
     usd_context = _UsdContext(stage)
+    timeline = _Timeline()
     app = _App()
     if publisher_config is None:
         publisher_config = _publisher_config()
-    _install_fake_modules(monkeypatch, usd_context, app, publisher_config)
+    _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_config)
     extension_root = (
         Path(__file__).resolve().parents[1] / "isaac/runtime/extensions/lightswitch_spawner"
     )
     monkeypatch.syspath_prepend(str(extension_root))
     module = importlib.import_module("LightSwitch_python.extension")
-    return module, usd_context, app
+    return module, usd_context, timeline, app
+
+
+def _fire_timeline(timeline, event_type):
+    for callback, _name in timeline.events.callbacks:
+        callback(SimpleNamespace(type=int(event_type)))
+
+
+def _fire_stage_opened(usd_context):
+    for callback, _name in usd_context.stage_events.callbacks:
+        callback(SimpleNamespace(type=int(_StageEventType.OPENED)))
+
+
+def _fire_update(app):
+    for callback, _name in app.events.callbacks:
+        callback(SimpleNamespace())
+
+
+def _created_node():
+    """The ROS node the extension constructed (the latest, if reconstructed)."""
+    return _Node.instances[-1]
 
 
 def test_startup_subscribes_without_spawning(monkeypatch):
-    module, usd_context, app = _import_extension(monkeypatch)
+    module, usd_context, timeline, app = _import_extension(monkeypatch)
     calls = []
     monkeypatch.setattr(module, "spawn_switches", lambda stage: calls.append(("spawn", stage)))
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
 
+    # Startup subscribes to all three Kit streams but spawns nothing until play,
+    # and creates the ROS node with its state publisher.
     assert calls == []
-    assert extension._stage is usd_context.stage
     assert len(usd_context.stage_events.callbacks) == 1
+    assert len(timeline.events.callbacks) == 1
     assert len(app.events.callbacks) == 1
-    assert extension._ros_node.publishers
-    assert not extension._switches_spawned
-    assert not extension._simulation_running
+    assert _created_node().publishers
 
 
 def test_play_spawns_validates_and_uses_startup_publisher(monkeypatch):
@@ -277,7 +306,7 @@ def test_play_spawns_validates_and_uses_startup_publisher(monkeypatch):
             history="keep_all",
         ),
     )
-    module, _usd_context, _app = _import_extension(
+    module, _usd_context, timeline, _app = _import_extension(
         monkeypatch,
         stage=stage,
         publisher_config=publisher_config,
@@ -302,20 +331,19 @@ def test_play_spawns_validates_and_uses_startup_publisher(monkeypatch):
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    startup_publishers = list(extension._ros_node.publishers)
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    startup_node = _created_node()
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
+    # Play clears the stage, spawns, and validates -- in that order -- using the
+    # play stage and the switches spawn returned (so the state flows to validate).
     assert calls == [
         ("despawn", stage, []),
         ("spawn", stage),
         ("validate", stage, switches),
     ]
-    assert extension._switch_state == switches
-    assert extension._switches_spawned
-    assert extension._simulation_running
-    assert not extension._articulations_ready
-    assert extension._ros_node.publishers == startup_publishers
-    _msg_type, topic, qos, _publisher = extension._ros_node.publishers[0]
+    # Play reuses the startup node/publisher; no second node is constructed.
+    assert _Node.instances == [startup_node]
+    _msg_type, topic, qos, _publisher = startup_node.publishers[0]
     assert topic == "/custom_switch_state"
     assert qos.depth == 7
     assert qos.durability == "volatile"
@@ -325,12 +353,12 @@ def test_play_spawns_validates_and_uses_startup_publisher(monkeypatch):
 
 def test_play_uses_default_hydra_publisher_settings(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    module, _usd_context, _timeline, _app = _import_extension(monkeypatch, stage=stage)
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
 
-    _msg_type, topic, qos, _publisher = extension._ros_node.publishers[0]
+    _msg_type, topic, qos, _publisher = _created_node().publishers[0]
     assert topic == "/light_switches/state"
     assert qos.depth == 1
     assert qos.durability == "transient_local"
@@ -340,7 +368,7 @@ def test_play_uses_default_hydra_publisher_settings(monkeypatch):
 
 def test_validation_failure_tears_down_partial_runtime_state(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
     switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
     calls = []
 
@@ -350,22 +378,27 @@ def test_validation_failure_tears_down_partial_runtime_state(monkeypatch):
     monkeypatch.setattr(module, "despawn_switches", despawn)
     monkeypatch.setattr(module, "spawn_switches", lambda stage: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stage, state: False)
+    monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
+    monkeypatch.setattr(
+        module, "step_switches", lambda stage, state, on_toggle=None: calls.append("step")
+    )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
+    # A failed validation despawns the just-spawned switches (the second despawn).
     assert calls == [("despawn", []), ("despawn", switches)]
-    assert extension._switch_state == []
-    assert not extension._switches_spawned
-    assert not extension._simulation_running
-    assert not extension._articulations_ready
-    assert extension._ros_node.publishers
+    # The loop is left idle: subsequent updates neither init nor step.
+    _fire_update(app)
+    assert calls == [("despawn", []), ("despawn", switches)]
+    # The ROS node survives the failed start.
+    assert _created_node().publishers
 
 
 def test_repeated_play_does_not_double_spawn(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    module, _usd_context, timeline, _app = _import_extension(monkeypatch, stage=stage)
     switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
     calls = []
 
@@ -380,118 +413,117 @@ def test_repeated_play_does_not_double_spawn(monkeypatch):
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
+    # The second play does not re-spawn: spawn/validate run exactly once.
     assert calls == ["despawn", "spawn", "validate"]
-    assert extension._switch_state == switches
-    assert extension._switches_spawned
-    assert extension._simulation_running
 
 
 def test_pause_keeps_switch_state_and_articulations(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
+    switches = ["switch"]
     calls = []
 
-    def despawn(stage, state):
-        calls.append((stage, list(state)))
-
-    monkeypatch.setattr(module, "despawn_switches", despawn)
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    extension._switch_state = ["switch"]
-    extension._switches_spawned = True
-    extension._simulation_running = True
-    extension._articulations_ready = True
-
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PAUSE)))
-
-    assert calls == []
-    assert extension._switch_state == ["switch"]
-    assert extension._switches_spawned
-    assert not extension._simulation_running
-    assert extension._articulations_ready
-
-
-def test_play_after_pause_resumes_without_reinitializing(monkeypatch):
-    stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
-    calls = []
+    monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
+    monkeypatch.setattr(module, "spawn_switches", lambda stage: switches)
+    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
     monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
     monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda stage, state, on_toggle=None: calls.append("step"),
+        module, "step_switches", lambda stage, state, on_toggle=None: calls.append("step")
     )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    extension._switch_state = ["switch"]
-    extension._switches_spawned = True
-    extension._simulation_running = False
-    extension._articulations_ready = True
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    _fire_update(app)  # init articulations
+    _fire_update(app)  # step (running)
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
-    extension._on_update(SimpleNamespace())
+    # The play teardown despawns once, then articulations init, then a step runs.
+    assert calls == ["despawn", "init", "step"]
 
-    assert calls == ["step"]
-    assert extension._simulation_running
-    assert extension._articulations_ready
+    _fire_timeline(timeline, _TimelineEventType.PAUSE)
+    _fire_update(app)  # paused: no further step
+
+    # Pause keeps state (no despawn) and halts per-frame stepping.
+    assert calls == ["despawn", "init", "step"]
+
+
+def test_play_after_pause_resumes_without_reinitializing(monkeypatch):
+    stage = object()
+    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
+    switches = ["switch"]
+    calls = []
+
+    monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
+    monkeypatch.setattr(module, "spawn_switches", lambda stage: switches)
+    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
+    monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
+    monkeypatch.setattr(
+        module, "step_switches", lambda stage, state, on_toggle=None: calls.append("step")
+    )
+
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    _fire_update(app)  # init articulations
+    _fire_update(app)  # step
+    _fire_timeline(timeline, _TimelineEventType.PAUSE)
+
+    _fire_timeline(timeline, _TimelineEventType.PLAY)  # resume
+    _fire_update(app)  # steps immediately, no re-spawn and no re-init
+
+    # Only one despawn (no re-spawn) and one init (no re-initialize); stepping
+    # resumes directly.
+    assert calls == ["despawn", "init", "step", "step"]
 
 
 def test_stop_stage_open_and_shutdown_teardown(monkeypatch):
     stage = object()
-    module, usd_context, _app = _import_extension(monkeypatch, stage=stage)
-    calls = []
+    module, usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
+    switches = ["switch"]
+    despawns = []
 
-    def despawn(stage, state):
-        calls.append((stage, list(state)))
-
-    monkeypatch.setattr(module, "despawn_switches", despawn)
+    monkeypatch.setattr(
+        module, "despawn_switches", lambda stg, state: despawns.append((stg, list(state)))
+    )
+    monkeypatch.setattr(module, "spawn_switches", lambda stg: switches)
+    monkeypatch.setattr(module, "validate_switches", lambda stg, state: True)
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    extension._switch_state = ["switch"]
-    extension._switches_spawned = True
-    extension._simulation_running = True
-    extension._articulations_ready = True
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.STOP)))
+    # STOP despawns the spawned switches with the play stage.
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    _fire_timeline(timeline, _TimelineEventType.STOP)
+    assert despawns[-1] == (stage, ["switch"])
 
-    assert calls == [(stage, ["switch"])]
-    assert extension._switch_state == []
-    assert not extension._switches_spawned
-    assert not extension._simulation_running
-    assert not extension._articulations_ready
-
+    # A new stage opening re-targets the stage and tears down again: the despawn
+    # carries the new stage (observable proof the stage handle was adopted).
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
     usd_context.stage = "new-stage"
-    extension._switch_state = ["new-switch"]
-    extension._switches_spawned = True
-    extension._simulation_running = True
-    extension._articulations_ready = True
-    extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
+    _fire_stage_opened(usd_context)
+    assert despawns[-1] == ("new-stage", ["switch"])
 
-    assert extension._stage == "new-stage"
-    assert calls[-1] == ("new-stage", ["new-switch"])
-    assert extension._switch_state == []
-    assert not extension._switches_spawned
-    assert not extension._simulation_running
-    assert not extension._articulations_ready
-
-    extension._switch_state = ["shutdown-switch"]
-    extension._switches_spawned = True
+    # Shutdown tears down on that adopted stage and destroys the ROS node; a
+    # second shutdown is idempotent (no raise).
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    node = _created_node()
     extension.on_shutdown()
-
-    assert calls[-1] == ("new-stage", ["shutdown-switch"])
-    assert extension._ros_node is None
+    assert despawns[-1] == ("new-stage", ["switch"])
+    assert node in _Node.destroyed
+    extension.on_shutdown()
 
 
 def test_update_spins_ros_initializes_then_steps(monkeypatch):
     stage = object()
-    module, _usd_context, _app = _import_extension(monkeypatch, stage=stage)
+    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
+    switches = ["switch"]
     calls = []
+
+    monkeypatch.setattr(module, "spawn_switches", lambda stg: switches)
+    monkeypatch.setattr(module, "validate_switches", lambda stg, state: True)
 
     def init_articulations(state):
         calls.append(("init", list(state)))
@@ -501,34 +533,45 @@ def test_update_spins_ros_initializes_then_steps(monkeypatch):
     monkeypatch.setattr(
         module,
         "step_switches",
-        lambda stage, state, on_toggle=None: calls.append(("step", stage, list(state), on_toggle)),
+        lambda stg, state, on_toggle=None: calls.append(("step", stg, list(state), on_toggle)),
     )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    extension._switch_state = ["switch"]
-    extension._switches_spawned = True
-    extension._simulation_running = True
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
-    extension._on_update(SimpleNamespace())
-    extension._on_update(SimpleNamespace())
+    _fire_update(app)  # first running tick initializes articulations
+    _fire_update(app)  # next tick steps
 
     assert calls[0] == ("init", ["switch"])
-    assert calls[1] == ("step", stage, ["switch"], extension._publish_toggle)
-    assert sys.modules["rclpy"].spin_calls == [
-        (extension._ros_node, 0),
-        (extension._ros_node, 0),
-    ]
+    _step_label, step_stage, step_state, on_toggle = calls[1]
+    assert (_step_label, step_stage, step_state) == ("step", stage, ["switch"])
+    # The step's on_toggle is the publisher callback: invoking it publishes.
+    on_toggle(2, True)
+    assert _created_node().publishers[0][3].messages[-1].data == [2.0, 1.0]
+    # Each update tick spun the ROS node once.
+    node = _created_node()
+    assert sys.modules["rclpy"].spin_calls == [(node, 0), (node, 0)]
 
 
 def test_publish_toggle_sends_float_array(monkeypatch):
-    module, _usd_context, _app = _import_extension(monkeypatch)
+    module, _usd_context, timeline, app = _import_extension(monkeypatch)
+    switches = ["switch"]
+    monkeypatch.setattr(module, "spawn_switches", lambda stage: switches)
+    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
+    monkeypatch.setattr(module, "init_articulations", lambda state: True)
+    # A real switch toggle flows through step_switches' on_toggle to the publisher.
+    monkeypatch.setattr(
+        module, "step_switches", lambda stage, state, on_toggle=None: on_toggle(2, True)
+    )
+
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
-    publisher = extension._ros_node.publishers[0][3]
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    _fire_update(app)  # init articulations
+    _fire_update(app)  # step -> on_toggle -> publish
 
-    extension._publish_toggle(2, True)
-
+    publisher = _created_node().publishers[0][3]
     assert len(publisher.messages) == 1
     assert publisher.messages[0].data == [2.0, 1.0]
 
@@ -543,7 +586,7 @@ def test_publish_toggle_sends_float_array(monkeypatch):
     ],
 )
 def test_invalid_qos_config_raises(monkeypatch, qos, message):
-    module, _usd_context, _app = _import_extension(
+    module, _usd_context, _timeline, _app = _import_extension(
         monkeypatch,
         publisher_config=_publisher_config(qos=qos),
     )
