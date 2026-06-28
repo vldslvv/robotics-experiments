@@ -46,6 +46,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: vulture
+        name: vulture unused production code
+        entry: uv run --extra dev vulture --config pyproject.toml
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # Keep uv.lock in sync with pyproject.toml. The official uv-lock hook
   # regenerates the lockfile and fails if that changes anything, so the lock
   # can't silently drift (reinforces the `uv lock --check` hard rule). It

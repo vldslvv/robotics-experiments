@@ -52,6 +52,6 @@ class VehicleLogFilter(logging.Filter):
         super().__init__()
         self._vehicle_id = int(vehicle_id)
 
-    def filter(self, record: logging.LogRecord) -> bool:
+    def filter(self, _record: logging.LogRecord) -> bool:
         current = _CURRENT_VEHICLE_ID.get()
         return current is None or current == self._vehicle_id
