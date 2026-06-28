@@ -112,9 +112,9 @@ def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
     assert len(backend._connection.recv_calls) == 2
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
     assert port.is_connected is True
-    assert port._last_disconnect_reason is None
-    assert port._sensor_send_count == 1
-    assert port._actuator_receive_count == 1
+    assert port.status.last_disconnect_reason is None
+    assert port.status.sensor_send_count == 1
+    assert port.status.actuator_receive_count == 1
 
 
 def test_mavlink_port_send_pushes_sensors_without_blocking_then_poll_returns_actuator(monkeypatch):
@@ -139,17 +139,17 @@ def test_mavlink_port_send_pushes_sensors_without_blocking_then_poll_returns_act
 
     assert result is None
     assert [args[0] for args in connection.hil_sensor_sends] == [100_000]
-    assert port._sensor_send_count == 1
+    assert port.status.sensor_send_count == 1
     assert connection.recv_calls == []
-    assert port._actuator_receive_count == 0
+    assert port.status.actuator_receive_count == 0
 
     # The poll leg performs the blocking recv and returns the paired actuator.
     commands = port.poll().controls
 
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
-    assert port._actuator_receive_count == 1
+    assert port.status.actuator_receive_count == 1
     assert port.is_connected is True
-    assert port._last_disconnect_reason is None
+    assert port.status.last_disconnect_reason is None
 
 
 def test_mavlink_port_send_returns_zeros_without_poll_when_disconnected(monkeypatch):
@@ -162,7 +162,7 @@ def test_mavlink_port_send_returns_zeros_without_poll_when_disconnected(monkeypa
 
     assert result is not None
     assert np.allclose(result.controls, np.zeros(4))
-    assert port._sensor_send_count == 0
+    assert port.status.sensor_send_count == 0
 
 
 def test_mavlink_port_send_returns_references_without_poll_on_non_increasing_time(monkeypatch):
@@ -188,7 +188,7 @@ def test_mavlink_port_send_returns_references_without_poll_on_non_increasing_tim
 
     assert result is not None
     assert np.allclose(result.controls, [200.0, 300.0, 400.0, 500.0])
-    assert port._sensor_send_count == 1
+    assert port.status.sensor_send_count == 1
 
 
 def test_mavlink_port_status_snapshots_lockstep_state(monkeypatch):
@@ -261,7 +261,7 @@ def test_mavlink_port_first_heartbeat_timeout_marks_disconnected(monkeypatch):
     assert backend.first_heartbeat_waits == 1
     assert port.is_connected is False
     assert backend.stopped is True
-    assert port._last_disconnect_reason == "first heartbeat timeout"
+    assert port.status.last_disconnect_reason == "first heartbeat timeout"
 
 
 def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
@@ -286,9 +286,9 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
     assert port.is_connected is True
     assert backend.stopped is False
     assert backend._connection is connection
-    assert port._actuator_receive_count == 1
+    assert port.status.actuator_receive_count == 1
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
-    assert port._last_disconnect_reason is None
+    assert port.status.last_disconnect_reason is None
 
 
 def test_mavlink_port_lockstep_sends_current_sensor_before_wait(monkeypatch):
@@ -313,7 +313,7 @@ def test_mavlink_port_lockstep_sends_current_sensor_before_wait(monkeypatch):
     assert connection.events[1][0:2] == ("recv_match", True)
     assert connection.events[1][2] <= 1.0
     assert connection.events[1][2] > 0.0
-    assert port._last_actuator_receive_us == 100_000
+    assert port.status.last_actuator_receive_us == 100_000
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
     assert port.is_connected is True
 
@@ -332,10 +332,10 @@ def test_mavlink_port_does_not_wait_before_first_lockstep_actuator(monkeypatch):
     assert np.allclose(commands, np.zeros(4))
     assert port.is_connected is True
     assert backend.stopped is False
-    assert port._actuator_receive_count == 0
-    assert port._last_actuator_receive_us is None
+    assert port.status.actuator_receive_count == 0
+    assert port.status.last_actuator_receive_us is None
     assert connection.recv_calls == [(False, 0.0)]
-    assert port._last_disconnect_reason is None
+    assert port.status.last_disconnect_reason is None
 
 
 def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
@@ -354,4 +354,4 @@ def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
     assert backend.stopped is True
     assert backend._connection is None
     assert len(connection.recv_calls) == 1
-    assert port._last_disconnect_reason == "actuator polling timed out after 0.000 seconds"
+    assert port.status.last_disconnect_reason == "actuator polling timed out after 0.000 seconds"
