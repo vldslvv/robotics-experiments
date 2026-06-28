@@ -31,9 +31,11 @@ class _FakeConn:
 
 
 def _port_with(messages):
-    port = MavlinkCommandPort(gcs_endpoint="udp:127.0.0.1:14550", heartbeat_period_s=1.0)
-    port._mav = _FakeConn(messages)
-    return port
+    return MavlinkCommandPort(
+        gcs_endpoint="udp:127.0.0.1:14550",
+        heartbeat_period_s=1.0,
+        connection=_FakeConn(messages),
+    )
 
 
 def test_active_heartbeat_is_not_failsafe_and_handshakes():

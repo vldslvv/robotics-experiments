@@ -73,7 +73,7 @@ public attribute).
 
 - [x] 1. `test_fleet_orchestrator.py`
 - [x] 2. `test_isaac_lab_workflow.py`
-- [ ] 3. `test_commanding_port.py`
+- [x] 3. `test_commanding_port.py`
 - [ ] 4. `test_commanding_routine.py`
 - [ ] 5. `test_drone_spawn.py`
 - [ ] 6. `test_experiment_runtime_extension.py`

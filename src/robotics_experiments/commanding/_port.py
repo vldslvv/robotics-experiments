@@ -94,13 +94,24 @@ class MavlinkCommandPort(_AbstractCommandPort):
     failsafe, accept the _arm statustext, and surface the latest global position.
     """
 
-    def __init__(self, *, gcs_endpoint: str, heartbeat_period_s: float, label: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        gcs_endpoint: str,
+        heartbeat_period_s: float,
+        label: str = "",
+        connection: Any = None,
+    ) -> None:
         """Build the port. No socket is opened until :meth:`connect`.
 
         Args:
             gcs_endpoint: pymavlink connection string, e.g. ``udp:127.0.0.1:14550``.
             heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
             label: Short vehicle tag for log messages.
+            connection: Optional pre-built MAVLink connection (a ``mavutil``
+                connection or test double). When provided, :meth:`connect` adopts
+                it instead of dialing pymavlink -- an injectable seam so feedback
+                parsing can be exercised without opening a socket.
         """
         self._gcs_endpoint = gcs_endpoint
         self._heartbeat_period_s = float(heartbeat_period_s)
@@ -108,7 +119,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
         # Typed Any (not Optional): None before connect(), a live mavutil
         # connection after; keeping it Any avoids Optional-member churn on every
         # access of the function-scoped pymavlink object.
-        self._mav: Any = None
+        self._mav: Any = connection
         self._last_heartbeat_sent_s = 0.0
         self._target_known = False
         self._failsafe = False
@@ -136,10 +147,11 @@ class MavlinkCommandPort(_AbstractCommandPort):
         return self._latest_global_position
 
     def connect(self) -> None:
-        from pymavlink import mavutil
+        if self._mav is None:
+            from pymavlink import mavutil
 
-        _LOGGER.info("[%s] opening GCS MAVLink endpoint %s", self._label, self._gcs_endpoint)
-        self._mav = mavutil.mavlink_connection(self._gcs_endpoint, source_system=255)
+            _LOGGER.info("[%s] opening GCS MAVLink endpoint %s", self._label, self._gcs_endpoint)
+            self._mav = mavutil.mavlink_connection(self._gcs_endpoint, source_system=255)
         self._last_heartbeat_sent_s = 0.0
 
     def disconnect(self) -> None:
