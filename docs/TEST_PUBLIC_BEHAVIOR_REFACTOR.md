@@ -79,7 +79,7 @@ public attribute).
 - [x] 6. `test_experiment_runtime_extension.py`
 - [x] 7. `test_px4_bridge_gating.py`
 - [x] 8. `test_px4_bridge_sensors.py`
-- [ ] 9. `test_px4_bridge_actuator.py`
+- [x] 9. `test_px4_bridge_actuator.py`
 - [ ] 10. `test_px4_bridge_lockstep.py`
 - [ ] 11. `test_lightswitch_spawner_extension.py`
 - [ ] 12. Audit the already-clean files
