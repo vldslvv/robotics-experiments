@@ -1,6 +1,7 @@
+import functools
 import os
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
@@ -16,8 +17,6 @@ __all__ = [
     "resolve_fleet",
     "reset_config",
 ]
-
-_CACHED: Optional[EnvConfig] = None
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
 _DEFAULT_CONFIG_NAME = "config"
@@ -119,6 +118,7 @@ def resolve_fleet(cfg) -> list[ResolvedVehicle]:
     return resolved
 
 
+@functools.cache
 def get_config() -> EnvConfig:
     """Return the process-wide composed :class:`EnvConfig`, loading once.
 
@@ -130,10 +130,6 @@ def get_config() -> EnvConfig:
     Returns:
         The composed ``EnvConfig`` instance.
     """
-    global _CACHED
-    if _CACHED is not None:
-        return _CACHED
-
     register_schemas()
 
     if GlobalHydra.instance().is_initialized():
@@ -146,8 +142,7 @@ def get_config() -> EnvConfig:
     # them with the enriched, validated resolved fleet before caching/returning.
     env = cast(EnvConfig, OmegaConf.to_object(cfg))
     env.vehicles = resolve_fleet(cfg)
-    _CACHED = env
-    return _CACHED
+    return env
 
 
 def get_enabled_px4_vehicle_count() -> int:
@@ -172,5 +167,4 @@ def reset_config() -> None:
     Intended for tests and for interactive reload workflows; production
     extensions should not need to call this.
     """
-    global _CACHED
-    _CACHED = None
+    get_config.cache_clear()
