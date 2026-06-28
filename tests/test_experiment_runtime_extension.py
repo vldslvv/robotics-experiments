@@ -24,13 +24,35 @@ class _StageEventType(IntEnum):
     OPENED = 1
 
 
+class _Subscription:
+    """Fake Kit subscription handle modelling RAII unsubscribe.
+
+    Kit keeps a subscription alive only while the returned handle is held;
+    releasing it (the extension sets its ``self._..._sub`` attribute to ``None``)
+    unsubscribes. Mirroring that here makes ``stream.callbacks`` the observable
+    for "is this subscription still armed" without reading the extension's
+    private subscription attributes.
+    """
+
+    def __init__(self, stream, callback):
+        self._stream = stream
+        self._callback = callback
+
+    def unsubscribe(self):
+        if self._callback in self._stream.callbacks:
+            self._stream.callbacks.remove(self._callback)
+
+    def __del__(self):
+        self.unsubscribe()
+
+
 class _EventStream:
     def __init__(self):
         self.callbacks = []
 
     def create_subscription_to_pop(self, callback, name=None):
         self.callbacks.append(callback)
-        return SimpleNamespace(unsubscribe=lambda: None)
+        return _Subscription(self, callback)
 
 
 class _UsdContext:
@@ -70,7 +92,9 @@ class _FakeOrchestrator:
         self.env = env
         self.stage = None
         self.calls: list[str] = []
-        self._drones: list = []
+        # Public on the real orchestrator (a read-only property there); a plain
+        # attribute here so a test can configure the fleet without private access.
+        self.drones: list = []
         type(self).last.append(self)
 
     def open_scene(self, scene_override=None):
@@ -94,10 +118,6 @@ class _FakeOrchestrator:
 
     def teardown(self):
         self.calls.append("teardown")
-
-    @property
-    def drones(self):
-        return self._drones
 
     @property
     def flying(self):
@@ -181,12 +201,26 @@ def _started_extension(monkeypatch):
     return module, extension, orch, usd_context, timeline, app
 
 
-def _fire_deferred_scene_open(extension):
-    extension._open_scene_when_ready(SimpleNamespace())
+def _fire_app_update(app):
+    """Drive one Kit app-update tick by firing every registered update callback."""
+    for callback in list(app.updates.callbacks):
+        callback(SimpleNamespace())
+
+
+def _fire_stage_opened(usd_context):
+    event = SimpleNamespace(type=int(_StageEventType.OPENED))
+    for callback in list(usd_context.stage_events.callbacks):
+        callback(event)
+
+
+def _fire_timeline(timeline, event_type):
+    event = SimpleNamespace(type=int(event_type))
+    for callback in list(timeline.events.callbacks):
+        callback(event)
 
 
 def test_startup_defers_scene_open_and_subscribes(monkeypatch):
-    _module, extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
 
     # The orchestrator is built and Kit streams are subscribed immediately, but
     # scene-open is deferred until Kit reports app readiness.
@@ -194,33 +228,34 @@ def test_startup_defers_scene_open_and_subscribes(monkeypatch):
     assert orch.stage is None
     assert usd_context.stage_events.callbacks  # subscribed to stage events
     assert timeline.events.callbacks  # subscribed to timeline events
-    assert app.updates.callbacks == [extension._open_scene_when_ready]
-    assert extension._scene_open_sub is not None
+    assert app.updates.callbacks  # deferred scene-open armed on app-update
 
 
 def test_deferred_scene_open_waits_for_app_ready(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
 
-    _fire_deferred_scene_open(extension)
+    _fire_app_update(app)
 
+    # App not ready yet: scene stays closed and the deferred callback is still armed.
     assert orch.calls == []
-    assert extension._scene_open_sub is not None
+    assert app.updates.callbacks
 
     app.ready = True
 
-    _fire_deferred_scene_open(extension)
-    _fire_deferred_scene_open(extension)
+    _fire_app_update(app)
+    _fire_app_update(app)
 
+    # Scene opens exactly once and the one-shot deferred callback releases itself.
     assert orch.calls == ["open_scene"]
-    assert extension._scene_open_sub is None
+    assert app.updates.callbacks == []
 
 
 def test_opened_adopts_stage_and_applies_settings(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, usd_context, _timeline, app = _started_extension(monkeypatch)
     app.ready = True
-    _fire_deferred_scene_open(extension)
+    _fire_app_update(app)
 
-    extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
+    _fire_stage_opened(usd_context)
 
     # A new stage tears down any running fleet, then adopts + applies settings.
     assert orch.calls == ["open_scene", "teardown", "adopt_current_stage", "apply_settings"]
@@ -228,46 +263,48 @@ def test_opened_adopts_stage_and_applies_settings(monkeypatch):
 
 
 def test_play_spawns_and_builds_drivers_when_routine_present(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
     app.ready = True
-    _fire_deferred_scene_open(extension)
-    extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
-    orch._drones = [_drone_with_steps([{"kind": "arm"}])]
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    orch.drones = [_drone_with_steps([{"kind": "arm"}])]
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
     assert orch.calls[-4:] == ["teardown", "spawn_fleet", "start_bridges", "build_drivers"]
-    # A control tick subscription is armed.
+    # A control tick subscription is armed (the one-shot scene-open already
+    # released, so the lone remaining update callback is the control tick).
     assert app.updates.callbacks
-    assert extension._update_sub is not None
 
 
 def test_play_without_routine_builds_no_drivers(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
     app.ready = True
-    _fire_deferred_scene_open(extension)
-    extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
-    orch._drones = [_drone_with_steps([])]  # manual drone -> no driver
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    orch.drones = [_drone_with_steps([])]  # manual drone -> no driver
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
 
     assert "build_drivers" not in orch.calls
-    assert app.updates.callbacks == [extension._open_scene_when_ready]
-    assert extension._update_sub is None
+    # No control tick is armed (and the one-shot scene-open already released).
+    assert app.updates.callbacks == []
 
 
 def test_stop_drops_control_and_tears_down(monkeypatch):
-    _module, extension, orch, _usd_context, _timeline, app = _started_extension(monkeypatch)
+    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
     app.ready = True
-    _fire_deferred_scene_open(extension)
-    extension._on_stage_event(SimpleNamespace(type=int(_StageEventType.OPENED)))
-    orch._drones = [_drone_with_steps([{"kind": "arm"}])]
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.PLAY)))
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    orch.drones = [_drone_with_steps([{"kind": "arm"}])]
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+    assert app.updates.callbacks  # control tick armed by PLAY
 
-    extension._on_timeline_event(SimpleNamespace(type=int(_TimelineEventType.STOP)))
+    _fire_timeline(timeline, _TimelineEventType.STOP)
 
     assert orch.calls[-1] == "teardown"
-    assert extension._update_sub is None
+    # STOP releases the control tick subscription.
+    assert app.updates.callbacks == []
 
 
 def test_shutdown_tears_down(monkeypatch):
