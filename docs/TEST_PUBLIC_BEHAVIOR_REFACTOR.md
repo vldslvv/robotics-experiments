@@ -82,7 +82,7 @@ public attribute).
 - [x] 9. `test_px4_bridge_actuator.py`
 - [x] 10. `test_px4_bridge_lockstep.py`
 - [x] 11. `test_lightswitch_spawner_extension.py`
-- [ ] 12. Audit the already-clean files
+- [x] 12. Audit the already-clean files
 - [ ] 13. Capstone: enable Ruff `SLF001`
 
 ---
