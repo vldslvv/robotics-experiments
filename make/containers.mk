@@ -27,7 +27,8 @@ ros_DOCKER_ARGS = \
 .PHONY: run-isaac
 run-isaac: $(isaac_RUN_DEPS)
 	@mkdir -p $(isaac_RUNTIME_DIRS)
-	@make/scripts/run_persistent_container.sh \
+	@EXPECTED_CMD="$(ISAAC_CONTAINER_CMD)" \
+	make/scripts/run_persistent_container.sh \
 		"$(isaac_DISPLAY_NAME)" \
 		"$(isaac_CONTAINER_NAME)" \
 		"$(isaac_IMAGE)" \
@@ -121,6 +122,13 @@ destroy: stop remove-containers remove-images
 
 .PHONY: run-all
 run-all: run
+
+# Like run-all, but auto-launches the custom Isaac runtime in the Isaac
+# container (ISAAC_AUTORUN=1). The override is on the command line so it
+# propagates to the kitty-spawned `$(MAKE) run-isaac` sub-make.
+.PHONY: run-all-autorun
+run-all-autorun:
+	@$(MAKE) run-all ISAAC_AUTORUN=1
 
 .PHONY: stop-all
 stop-all: stop

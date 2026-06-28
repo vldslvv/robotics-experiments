@@ -22,6 +22,7 @@ help:
 		'  make run-ros               Start or attach the ROS 2 container' \
 		'  make run-px4               Start or attach the PX4 SITL container' \
 		'  make run                   Start Isaac, ROS 2, and PX4 in terminals' \
+		'  make run-all-autorun       Like run-all, auto-launching the Isaac runtime' \
 		'' \
 		'  make stop                  Stop persistent containers' \
 		'  make remove-containers     Remove persistent containers' \

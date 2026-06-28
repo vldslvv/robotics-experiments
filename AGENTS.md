@@ -385,7 +385,17 @@ the host. They are meant to be used in the Dockerized environment.
 ### Docker
 - `make build` builds Isaac Sim, ROS 2, and PX4 images.
 - `make destroy` stops/removes containers and removes built images.
-- `make run-isaac` starts the Isaac Sim container.
+- `make run-isaac` starts the Isaac Sim container. By default
+  (`ISAAC_AUTORUN=0`) it lands in the manual two-pane tmux shell. Pass
+  `ISAAC_AUTORUN=1` (on `run-isaac` or `run-all`) to override the container's
+  tmux CMD so the first pane auto-launches the custom runtime
+  (`isaac/runtime/standalone/runapp_custom.sh`) and then drops to a login shell,
+  leaving the second pane a plain shell. `make run-all-autorun` is the
+  convenience target for that (it is `run-all` with `ISAAC_AUTORUN=1`, propagated
+  to the kitty-spawned `run-isaac` sub-make). The selected startup command is
+  passed to `run_persistent_container.sh` as `EXPECTED_CMD`, which recreates the
+  persistent container when the desired command changes (so toggling the flag
+  takes effect on an already-created container).
 - `make run-ros` starts the ROS 2 container.
 - `make run-px4` starts one PX4 SITL container per PX4-enabled vehicle.
 - `make stop` stops persistent containers without removing them.

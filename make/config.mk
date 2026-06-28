@@ -16,6 +16,23 @@ ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
+
+# Auto-launch of the custom Isaac runtime (runapp_custom.sh) on container start.
+# ISAAC_AUTORUN=0 (default) keeps the manual two-pane shell; ISAAC_AUTORUN=1
+# overrides the container tmux CMD so the first pane runs the runtime then drops
+# to a login shell (the second pane stays a plain shell). The `run-all-autorun`
+# target is the convenience entry that sets ISAAC_AUTORUN=1. The selected command
+# is passed to run_persistent_container.sh as EXPECTED_CMD and is also used to
+# recreate the persistent container when the desired startup command changes (so
+# toggling the flag takes effect).
+# The CMD strings are the container's tmux session description (passed to the
+# image ENTRYPOINT `tmux "$@"`). They are eval-parsed by the script, so the tmux
+# command separators are escaped (`\;`) to survive eval as literal arguments.
+ISAAC_AUTORUN       ?= 0
+ISAAC_RUNAPP         = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/runapp_custom.sh
+ISAAC_MANUAL_CMD     = new-session /usr/bin/zsh -l \; split-window -h /usr/bin/zsh -l \; attach
+ISAAC_AUTORUN_CMD    = new-session /usr/bin/zsh -lc '$(ISAAC_RUNAPP); exec /usr/bin/zsh -l' \; split-window -h /usr/bin/zsh -l \; attach
+ISAAC_CONTAINER_CMD  = $(if $(filter 1,$(ISAAC_AUTORUN)),$(ISAAC_AUTORUN_CMD),$(ISAAC_MANUAL_CMD))
 HYDRA_CONFIG_HOST_PATH      = $(abspath $(HYDRA_CONFIG))
 HYDRA_CONFIG_CONTAINER_PATH = $(if $(filter $(CURDIR)/%,$(HYDRA_CONFIG_HOST_PATH)),$(patsubst $(CURDIR)%,$(ISAAC_PROJECT_DIR)%,$(HYDRA_CONFIG_HOST_PATH)),$(HYDRA_CONFIG_HOST_PATH))
 ISAAC_PYTHON         = /isaac-sim/python.sh
