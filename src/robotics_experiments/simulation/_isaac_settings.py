@@ -9,10 +9,10 @@ the package without loading simulator-only modules.
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
-from robotics_experiments.config._resolve import resolve_section
-from robotics_experiments.config.types import SimSettings
+from robotics_experiments.config._resolve import _resolve_section
+from robotics_experiments.config._types import SimSettings
 
-__all__ = ["apply_isaac_settings"]
+__all__: list[str] = []
 
 
 def _get_or_create_physics_scene(stage: Usd.Stage) -> UsdPhysics.Scene:
@@ -91,7 +91,7 @@ def _apply_render_rate(rendering_hz: float) -> None:
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
 
 
-def apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
+def _apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
     """Apply gravity, PhysX, and render-rate settings to a stage.
 
     Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
@@ -103,7 +103,7 @@ def apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) 
         settings: Simulation settings to apply; when ``None``, resolved via
             :func:`.config.get_config` at call time.
     """
-    settings = resolve_section("sim", settings)
+    settings = _resolve_section("sim", settings)
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
     _apply_physx(scene, settings.physics_hz, settings.solver_type)

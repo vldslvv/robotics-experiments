@@ -10,7 +10,7 @@ subscription, outside this module; callers share this stage-level API.
 
 from __future__ import annotations
 
-from robotics_experiments.config.types import SimSettings
+from robotics_experiments.config._types import SimSettings
 
 __all__ = ["apply_settings"]
 
@@ -22,8 +22,6 @@ def apply_settings(stage, settings: SimSettings | None = None) -> None:
     stage. Standalone scripts may create a ``SimulationApp`` and open a scene;
     Kit extensions may receive the stage from ``omni.usd`` events.
     """
-    from robotics_experiments.simulation._isaac_settings import (
-        apply_isaac_settings,
-    )
+    from robotics_experiments.simulation._isaac_settings import _apply_isaac_settings
 
-    apply_isaac_settings(stage, settings)
+    _apply_isaac_settings(stage, settings)

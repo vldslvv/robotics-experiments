@@ -24,7 +24,7 @@ abstraction anywhere** in the codebase.
 We want to lay scaffolding for future autonomy (navigate-to-point, set-altitude,
 and ultimately the **switch-pressing task**) as a **pure-function contract**, in
 the same spirit as the PX4 bridge contract (`VehicleState -> ActuatorCommands ->
-RotorDynamics` with a swappable sink) and the `resolve_fleet -> ResolvedVehicle`
+RotorDynamics` with a swappable sink) and the `_resolve_fleet -> ResolvedVehicle`
 config enrichment. The idea: a drone (or a scene) is handed a **command plan /
 routine** -- a pure data + pure-stepper description of what to do -- and a thin
 side-effecting executor turns the plan's decisions into MAVLink over the

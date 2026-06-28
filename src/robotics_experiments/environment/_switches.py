@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["SwitchState", "apply_button_sample"]
+__all__ = ["SwitchState"]
 
 
 @dataclass
@@ -17,7 +17,7 @@ class SwitchState:
     last_button_state: bool = False
 
 
-def apply_button_sample(
+def _apply_button_sample(
     switch: SwitchState,
     *,
     button_position: float,

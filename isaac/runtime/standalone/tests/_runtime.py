@@ -193,7 +193,8 @@ def _resolve_scene_from_config(test_name: str) -> str:
     config composes without Isaac, so this is safe before ``SimulationApp``
     starts; the test body later resets and recomposes the cache.
     """
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
     scene = get_config().scene
@@ -267,7 +268,7 @@ def run_scene_test(
 
         stage_start_s = timing.start()
         report(f"{test_name}: resetting Hydra config cache")
-        from robotics_experiments.config import reset_config
+        from robotics_experiments.config._load import _reset_config as reset_config
 
         reset_config()
         timing.report_stage("hydra_reset", stage_start_s)

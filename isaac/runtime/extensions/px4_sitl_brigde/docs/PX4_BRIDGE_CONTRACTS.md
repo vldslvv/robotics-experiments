@@ -160,7 +160,7 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 | Layer | Owns | Must not own |
 |-------|------|--------------|
 | `robotics_experiments.runtime.FleetOrchestrator` | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine drivers, teardown. Driven by a thin per-host shell (the live `experiment_runtime` Kit extension or the standalone runner) | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
-| `robotics_experiments.drone.spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
+| `robotics_experiments.drone._spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
 | `BridgeHostGroup` (`robotics_experiments.runtime._bridge_host`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
 | `BridgeHost` (`robotics_experiments.runtime._bridge_host`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
 | `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
@@ -386,7 +386,7 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
 list). `id` is the sole authored identity; one pure enrichment step
-(`config.load.resolve_fleet`) derives each vehicle's `mavlink_port`
+(`config._load._resolve_fleet`) derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
 into an immutable `ResolvedVehicle`. The fleet runtime (`FleetOrchestrator`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own

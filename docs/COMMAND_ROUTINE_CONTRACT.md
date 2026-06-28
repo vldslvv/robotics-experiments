@@ -154,7 +154,7 @@ the takeoff target/timeout, and the hover settle). There is no separate
 `integration_test` group: the integration test is just this routine driven with
 `--strict`. The routine is **per vehicle**: each `vehicles[]` entry may carry a
 `routine` partial, merged over the global `routine` exactly like `drone`/`px4` in
-`config.load.resolve_fleet` (the resolved `RoutineConfig` lands on
+`config._load._resolve_fleet` (the resolved `RoutineConfig` lands on
 `ResolvedVehicle.routine`). `routine.steps` is the per-drone on/off switch: a
 drone whose resolved `steps` is non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /

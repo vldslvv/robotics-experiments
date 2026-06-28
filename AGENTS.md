@@ -160,8 +160,8 @@ the current contents and the intended home for that kind of code.
   `id`, a `spawn_xy`, and partial `drone`/`px4` overrides. `id` is the **sole
   authored identity**: there is no `px4.vehicle_id` knob -- the MAVLink port, the
   PX4 `-i` instance index, the per-vehicle log `{vehicle}` token, and the GCS
-  link offset are all *derived* from `id`. One pure enrichment step
-  (`config.load.resolve_fleet`) merges each entry's `drone`/`px4` partials over
+  link offset are all *derived* from `id`. One private enrichment step
+  (`config._load._resolve_fleet`) merges each entry's `drone`/`px4` partials over
   the global `drone`/`px4` defaults (`OmegaConf.merge`) into a pure
   `VehicleConfig`, then constructs an immutable `ResolvedVehicle` carrying that
   config plus the derived runtime fields: `mavlink_port`
@@ -171,12 +171,11 @@ the current contents and the intended home for that kind of code.
   `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
   stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
   bridge host, the host-side PX4 launch, the standalone scenario's GCS endpoint)
-  reads these derived fields instead of recomputing `baseport + id`. `resolve_fleet` validates the resolved fleet
+  reads these derived fields instead of recomputing `baseport + id`. `_resolve_fleet` validates the resolved fleet
   (`_validate_fleet` -- duplicate id/endpoint/`prim_name`, bad `spawn_xy`, or
   colliding `debug_log_path` raise a `ValueError` at resolution time).
   `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch
-  scripts read `get_enabled_px4_vehicle_count()` /
-  `get_enabled_px4_instance_indices()` (the latter is the launch loop's source of
+  scripts read `get_enabled_px4_instance_indices()` (the launch loop's source of
   `PX4_INSTANCE`, so non-contiguous ids keep their derived ports).
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
   each
@@ -319,7 +318,7 @@ the current contents and the intended home for that kind of code.
   is **no** separate `integration_test` group: the integration test is just the
   routine driven with `--strict`. The routine is **per vehicle**: each
   `vehicles[]` entry may carry a `routine` partial, merged over the global
-  `routine` exactly like `drone`/`px4` in `config.load.resolve_fleet` (the resolved
+  `routine` exactly like `drone`/`px4` in `config._load._resolve_fleet` (the resolved
   `RoutineConfig` lands on `ResolvedVehicle.routine`). `routine.steps` is the
   **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
   (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /

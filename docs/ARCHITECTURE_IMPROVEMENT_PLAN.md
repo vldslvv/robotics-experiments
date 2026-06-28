@@ -200,7 +200,7 @@ repeats in four modules: `drone/spawn.py`, `environment/stage.py:185-188`,
 **Files.** New `src/robotics_experiments/config/_resolve.py`; the four call sites.
 
 **Outline.**
-1. Add `resolve_section(name: str, provided)` that returns `provided` if not
+1. Add `_resolve_section(name: str, provided)` that returns `provided` if not
    `None`, else `getattr(get_config(), name)` with the `get_config` import kept
    inside the function (preserves laziness).
 2. Replace each inline fallback with a call to it.
@@ -209,7 +209,7 @@ repeats in four modules: `drone/spawn.py`, `environment/stage.py:185-188`,
 
 **Acceptance.** The fallback-resolve pattern is defined once.
 
-**Status.** DONE. `resolve_section(name, provided)` lives in
+**Status.** DONE. `_resolve_section(name, provided)` lives in
 `src/robotics_experiments/config/_resolve.py` (generic over the section type,
 `get_config` import kept inside the function). Applied to all five call sites:
 `drone/spawn.py` (spawn + despawn), `environment/stage.py`,

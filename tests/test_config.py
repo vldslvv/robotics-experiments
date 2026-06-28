@@ -16,7 +16,9 @@ def _group_defaults(group_name, file_stem="default"):
 def test_default_config_loads_from_root_experiment_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import EnvConfig, get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._types import EnvConfig
 
     reset_config()
 
@@ -94,7 +96,8 @@ def test_default_config_loads_from_root_experiment_config():
 def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -128,7 +131,8 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
 def test_two_drone_forward_land_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -156,8 +160,9 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
     pytest.importorskip("omegaconf")
     from omegaconf import OmegaConf
 
-    from robotics_experiments.config import get_config, reset_config
-    from robotics_experiments.config.load import resolve_fleet
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
 
     reset_config()
     env = get_config()  # default config: global routine.steps is empty (manual)
@@ -196,7 +201,7 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
 
 
 def test_resolve_section_returns_provided_untouched():
-    from robotics_experiments.config._resolve import resolve_section
+    from robotics_experiments.config._resolve import _resolve_section as resolve_section
 
     sentinel = object()
     # A provided value must be returned as-is without composing the config.
@@ -206,8 +211,9 @@ def test_resolve_section_returns_provided_untouched():
 def test_resolve_section_falls_back_to_named_section():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
-    from robotics_experiments.config._resolve import resolve_section
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._resolve import _resolve_section as resolve_section
 
     reset_config()
     config = get_config()
@@ -224,17 +230,13 @@ def test_enabled_px4_helpers_match_active_config():
     from robotics_experiments.config import (
         get_config,
         get_enabled_px4_instance_indices,
-        get_enabled_px4_vehicle_count,
-        reset_config,
     )
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
 
     config = get_config()
 
-    assert get_enabled_px4_vehicle_count() == sum(
-        1 for vehicle in config.vehicles if vehicle.px4.enabled
-    )
     assert get_enabled_px4_instance_indices() == [
         vehicle.px4_instance_index for vehicle in config.vehicles if vehicle.px4.enabled
     ]
@@ -244,7 +246,8 @@ def test_enabled_px4_helpers_match_active_config():
 def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",

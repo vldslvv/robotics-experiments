@@ -12,7 +12,8 @@ def _composed_cfg(vehicles):
     """
     from omegaconf import OmegaConf
 
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
     env = get_config()
@@ -28,7 +29,8 @@ def _composed_cfg(vehicles):
 
 
 def _base_defaults():
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
     env = get_config()
@@ -37,7 +39,8 @@ def _base_defaults():
 
 
 def _base_routine():
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
     env = get_config()
@@ -87,7 +90,7 @@ def _resolved_vehicle(
 def test_resolve_fleet_merges_partial_over_globals_and_derives_fields():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import resolve_fleet
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
 
     cfg = _composed_cfg(
         [
@@ -130,7 +133,7 @@ def test_resolve_fleet_merges_partial_over_globals_and_derives_fields():
 def test_resolve_fleet_accepts_empty_list():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import resolve_fleet
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
 
     assert resolve_fleet(_composed_cfg([])) == []
 
@@ -138,7 +141,7 @@ def test_resolve_fleet_accepts_empty_list():
 def test_resolve_fleet_supports_non_contiguous_ids():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import resolve_fleet
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
 
     cfg = _composed_cfg(
         [
@@ -171,7 +174,7 @@ def _two_vehicles(**v1_overrides):
 def test_validate_fleet_accepts_distinct_vehicles():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     _validate_fleet(_two_vehicles())
 
@@ -179,7 +182,7 @@ def test_validate_fleet_accepts_distinct_vehicles():
 def test_validate_fleet_rejects_duplicate_id():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     with pytest.raises(ValueError, match="duplicate vehicle id"):
         _validate_fleet(_two_vehicles(id=0))
@@ -188,7 +191,7 @@ def test_validate_fleet_rejects_duplicate_id():
 def test_validate_fleet_rejects_duplicate_endpoint():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     # Same derived MAVLink port as vehicle 0 (e.g. a per-vehicle baseport
     # override) on a distinct id.
@@ -199,7 +202,7 @@ def test_validate_fleet_rejects_duplicate_endpoint():
 def test_validate_fleet_rejects_duplicate_prim_name():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     with pytest.raises(ValueError, match="duplicate vehicle drone.prim_name"):
         _validate_fleet(_two_vehicles(prim_name="Drone0"))
@@ -208,7 +211,7 @@ def test_validate_fleet_rejects_duplicate_prim_name():
 def test_validate_fleet_rejects_bad_spawn_xy():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     with pytest.raises(ValueError, match="spawn_xy must have length 2"):
         _validate_fleet(_two_vehicles(spawn_xy=(1.0, 2.0, 3.0)))
@@ -217,7 +220,7 @@ def test_validate_fleet_rejects_bad_spawn_xy():
 def test_validate_fleet_rejects_colliding_log_path():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config.load import _validate_fleet
+    from robotics_experiments.config._load import _validate_fleet
 
     fixed = "/tmp/shared_bridge.log"  # no {vehicle} token -> collides
     vehicles = [
@@ -231,7 +234,8 @@ def test_validate_fleet_rejects_colliding_log_path():
 def test_default_config_composes_to_one_vehicle_equal_to_globals():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, reset_config
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
 
     reset_config()
     env = get_config()

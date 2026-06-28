@@ -326,7 +326,7 @@ class VehicleConfig:
 class ResolvedVehicle:
     """One fully resolved vehicle: pure config plus derived runtime fields.
 
-    Produced by the single enrichment step ``config.load.resolve_fleet`` from a
+    Produced by the single enrichment step ``config._load._resolve_fleet`` from a
     :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
     the host-side PX4 launch) reads the derived fields here instead of
     recomputing ``connection_baseport + id`` ad hoc. ``id`` is the sole identity
@@ -492,7 +492,7 @@ class EnvConfig:
             structured-config validation accepts the *partial* YAML entries
             during ``compose()``. The loader replaces the raw dicts with a
             fully enriched, validated ``list[ResolvedVehicle]`` (see
-            ``config.load.resolve_fleet``), which is the public/runtime type.
+            ``config._load._resolve_fleet``), which is the public/runtime type.
         routine: High-level flight routine plus its verification gates (see
             :class:`RoutineConfig`). Always present; an empty ``routine.steps``
             means manual operation, a non-empty list makes every workflow

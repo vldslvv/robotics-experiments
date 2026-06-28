@@ -44,9 +44,9 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         # package __init__ shields (drone/environment __getattr__, simulation
         # re-export, runtime __getattr__) must not eager-import them.
         for leaf in (
-            "robotics_experiments.drone.spawn",
-            "robotics_experiments.environment.stage",
-            "robotics_experiments.environment.step",
+            "robotics_experiments.drone._spawn",
+            "robotics_experiments.environment._stage",
+            "robotics_experiments.environment._step",
             "robotics_experiments.simulation._isaac_settings",
             "robotics_experiments.runtime._bridge_host",
             "robotics_experiments.runtime.orchestrator",
@@ -124,12 +124,12 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
     config = importlib.import_module("robotics_experiments.config")
-    assert config.SimSettings.__name__ == "SimSettings"
-    # VehicleConfig is a plain dataclass over DroneConfig/Px4BridgeConfig; it
-    # must not drag Isaac (or Hydra) onto the core import path.
-    types_module = importlib.import_module("robotics_experiments.config.types")
-    assert types_module.VehicleConfig.__name__ == "VehicleConfig"
-    assert config.VehicleConfig is types_module.VehicleConfig
+    assert config.__all__ == [
+        "ResolvedVehicle",
+        "get_enabled_px4_instance_indices",
+        "get_config",
+    ]
+    assert config.ResolvedVehicle.__name__ == "ResolvedVehicle"
 
     simulation = importlib.import_module("robotics_experiments.simulation")
     assert simulation.__all__ == ["apply_settings"]

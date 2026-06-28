@@ -7,15 +7,12 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-from .schemas import EnvConfig, register_schemas
-from .types import DroneConfig, Px4BridgeConfig, ResolvedVehicle, RoutineConfig
+from ._schemas import _register_schemas
+from ._types import DroneConfig, EnvConfig, Px4BridgeConfig, ResolvedVehicle, RoutineConfig
 
 __all__ = [
     "get_config",
-    "get_enabled_px4_vehicle_count",
     "get_enabled_px4_instance_indices",
-    "resolve_fleet",
-    "reset_config",
 ]
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
@@ -77,7 +74,7 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
             log_paths.add(v.debug_log_path)
 
 
-def resolve_fleet(cfg) -> list[ResolvedVehicle]:
+def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
     """Enrich the composed config's ``vehicles`` into a resolved fleet.
 
     The single enrichment step from authored Hydra data to a self-describing
@@ -130,7 +127,7 @@ def get_config() -> EnvConfig:
     Returns:
         The composed ``EnvConfig`` instance.
     """
-    register_schemas()
+    _register_schemas()
 
     if GlobalHydra.instance().is_initialized():
         GlobalHydra.instance().clear()
@@ -141,13 +138,8 @@ def get_config() -> EnvConfig:
     # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
     # them with the enriched, validated resolved fleet before caching/returning.
     env = cast(EnvConfig, OmegaConf.to_object(cfg))
-    env.vehicles = resolve_fleet(cfg)
+    env.vehicles = _resolve_fleet(cfg)
     return env
-
-
-def get_enabled_px4_vehicle_count() -> int:
-    """Return the number of resolved vehicles that need PX4 SITL containers."""
-    return sum(1 for vehicle in get_config().vehicles if vehicle.px4.enabled)
 
 
 def get_enabled_px4_instance_indices() -> list[int]:
@@ -161,7 +153,7 @@ def get_enabled_px4_instance_indices() -> list[int]:
     return [v.px4_instance_index for v in get_config().vehicles if v.px4.enabled]
 
 
-def reset_config() -> None:
+def _reset_config() -> None:
     """Drop the cached config so the next :func:`get_config` recomposes.
 
     Intended for tests and for interactive reload workflows; production

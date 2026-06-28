@@ -1,36 +1,19 @@
 from hydra.core.config_store import ConfigStore
 
-from .types import (
-    BoundingBox,
+from ._types import (
     DroneConfig,
     EnvConfig,
     IsaacLabConfig,
     LightSwitchConfig,
-    LightSwitchStatePublisherConfig,
     Px4BridgeConfig,
-    RosQosConfig,
     RoutineConfig,
     SimSettings,
-    VehicleConfig,
 )
 
-__all__ = [
-    "SimSettings",
-    "DroneConfig",
-    "BoundingBox",
-    "RosQosConfig",
-    "LightSwitchStatePublisherConfig",
-    "LightSwitchConfig",
-    "Px4BridgeConfig",
-    "VehicleConfig",
-    "RoutineConfig",
-    "EnvConfig",
-    "IsaacLabConfig",
-    "register_schemas",
-]
+__all__: list[str] = []
 
 
-def register_schemas() -> None:
+def _register_schemas() -> None:
     """Register the structured-config schemas with Hydra's ``ConfigStore``.
 
     Idempotent: safe to call on every config composition. The group schemas

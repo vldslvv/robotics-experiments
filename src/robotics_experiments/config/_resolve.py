@@ -1,11 +1,11 @@
 from typing import TypeVar
 
-__all__ = ["resolve_section"]
+__all__: list[str] = []
 
 _T = TypeVar("_T")
 
 
-def resolve_section(name: str, provided: _T | None) -> _T:
+def _resolve_section(name: str, provided: _T | None) -> _T:
     """Return ``provided`` if set, else the named section of the composed config.
 
     Collapses the repeated ``if x is None: x = get_config().<section>`` fallback

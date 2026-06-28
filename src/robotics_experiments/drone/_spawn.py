@@ -17,8 +17,8 @@ import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
-from robotics_experiments.config._resolve import resolve_section
-from robotics_experiments.config.types import DroneConfig
+from robotics_experiments.config._resolve import _resolve_section
+from robotics_experiments.config._types import DroneConfig
 
 __all__ = ["spawn_drone", "despawn_drone"]
 
@@ -207,7 +207,7 @@ def spawn_drone(
     Returns:
         The drone prim path (``<parent>/<config.prim_name>``).
     """
-    config = resolve_section("drone", config)
+    config = _resolve_section("drone", config)
     parent = _resolve_parent(stage)
 
     drone_path = f"{parent}/{config.prim_name}"
@@ -253,7 +253,7 @@ def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     """
     if stage is None:
         return
-    config = resolve_section("drone", config)
+    config = _resolve_section("drone", config)
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     drone_path = f"{parent}/{config.prim_name}"
