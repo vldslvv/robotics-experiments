@@ -423,6 +423,19 @@ the host. They are meant to be used in the Dockerized environment.
   unit tests are split by concern across `tests/test_px4_bridge_sensors.py`,
   `tests/test_px4_bridge_lockstep.py`, `tests/test_px4_bridge_actuator.py`, and
   `tests/test_px4_bridge_gating.py` (there is no single `test_px4_bridge.py`).
+- Tests assert on **public behavior**, not internals: prefer public properties,
+  return values, raised errors, and recorded contract seams (constructor kwargs a
+  collaborator received, commands sent to a port, forces/dynamics applied to an
+  articulation IO) over reading a unit's private state or asserting on a
+  mock/interaction-log when a public observable exists. External private-member
+  access is lint-enforced off via Ruff `SLF001` (in `[tool.ruff.lint] select`).
+  The only allowed exceptions are the `per-file-ignores` in `pyproject.toml`,
+  each justified inline: production seams against vendored Pegasus / Isaac Lab
+  privates, fixture injection into the vendored backend, focused private-helper
+  unit tests over import-gated modules, and deliberate corruption/fault
+  injection. Do not add new external private access; if one is genuinely
+  unavoidable, add a narrow `# noqa: SLF001` with a reason or a justified
+  `per-file-ignores` entry.
 - pre-commit is the local quality gate; there is no CI pipeline (local-only for
   now). Install it once with `uv run pre-commit install` and run it with
   `uv run pre-commit run --all-files`. The mirror hooks (ruff, mypy) only see
