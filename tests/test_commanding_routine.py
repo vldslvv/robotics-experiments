@@ -330,22 +330,34 @@ def test_moved_forward_at_least_uses_world_x_displacement_from_baseline():
 
 
 def test_forward_invariant_allows_commanded_x_displacement():
+    # Drive the forward step through _decide: a large commanded x displacement
+    # (with cross-track y drift inside the gate) must NOT trip the envelope. If
+    # the cross-track gate wrongly measured total horizontal displacement this
+    # would FAIL; instead the step advances on the completed forward distance.
     routine = _build(
         [
             {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
             {"kind": "forward", "distance_m": 2.0, "timeout_s": 20.0},
         ]
     )
-    forward_step = routine.steps[1]
-    baseline = make_routine_observation(position_enu=(0.0, 2.0, 0.0)).vehicle_state.position_enu
-    observation = make_routine_observation(position_enu=(2.0, 1.84, 2.0))
+    forward_routine = _VehicleRoutine(steps=(routine.steps[1],))
+    state = _RoutineState.initial()
 
-    assert [invariant(observation, baseline) for invariant in forward_step.invariants] == [
-        None,
-        None,
-        None,
-        None,
-    ]
+    # Entry tick captures the baseline at the pre-forward position and SENDs.
+    state, decision = _decide(
+        forward_routine,
+        state,
+        make_routine_observation(sim_time_us=0, position_enu=(0.0, 2.0, 0.0)),
+    )
+    assert decision.kind is _DecisionKind.SEND
+
+    # The commanded x displacement (and small cross-track drift) passes the gates.
+    _, decision = _decide(
+        forward_routine,
+        state,
+        make_routine_observation(sim_time_us=10_000, position_enu=(2.0, 1.84, 2.0)),
+    )
+    assert decision.kind is not _DecisionKind.FAIL
 
 
 def test_cross_track_drift_gate_limits_sideways_drift():
