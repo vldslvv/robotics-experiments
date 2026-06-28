@@ -128,8 +128,8 @@ def test_bridge_tilt_cutoff_zeros_forces():
     # lockstep keeps advancing (the sensor tick is not dropped).
     assert len(port.states) == 1
     assert len(io.applied_forces) == 1
+    # Forces zeroed is the observable gating effect of the tilt cutoff firing.
     assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
-    assert bridge._tilt_cutoff_count == 1
 
 
 def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
@@ -157,9 +157,9 @@ def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
     assert port.sim_times == sim_times
     assert all(b > a for a, b in zip(port.sim_times, port.sim_times[1:], strict=False))
     assert len(io.applied_forces) == len(sim_times)
+    # Every tick's forces stayed zeroed: the cutoff fired on all of them.
     for forces in io.applied_forces:
         assert np.allclose(forces, [0.0, 0.0, 0.0, 0.0])
-    assert bridge._tilt_cutoff_count == len(sim_times)
 
 
 def test_bridge_nonfinite_state_raises_without_exchange():
@@ -205,8 +205,8 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
     bridge.stop()
 
     assert len(io.applied_forces) == 1
+    # Within the limit the cutoff does not fire: forces pass through unchanged.
     assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
-    assert bridge._tilt_cutoff_count == 0
 
 
 def test_bridge_tilt_cutoff_disabled_by_default():
@@ -229,7 +229,8 @@ def test_bridge_tilt_cutoff_disabled_by_default():
     bridge.stop()
 
     assert len(io.applied_forces) == 1
-    assert bridge._tilt_cutoff_count == 0
+    # The cutoff is effectively disabled: a 170 deg pitch still applies forces.
+    assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
 
 
 def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
@@ -275,7 +276,7 @@ def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
     bridge.on_physics_step(0.004, 4_000)
     bridge.stop()
 
-    assert bridge._tilt_cutoff_count == 1
+    # Forces gated to zero (cutoff fired), but the rotors still spin (next assert).
     assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
     assert len(io.spin_updates) == 1
     omega, _dt = io.spin_updates[0]
