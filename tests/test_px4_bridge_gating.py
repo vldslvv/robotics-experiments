@@ -9,10 +9,10 @@ from _fakes import (
 )
 
 from robotics_experiments.px4_bridge import (
-    LinearThrustModel,
     PegasusQuadraticThrustModel,
     Px4Bridge,
 )
+from robotics_experiments.px4_bridge.thrust_model import _LinearThrustModel
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 
@@ -23,7 +23,7 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
     )
@@ -72,7 +72,7 @@ def test_px4_bridge_validates_rotor_count_against_port():
         Px4Bridge(
             articulation_path="/World/Drone",
             rotor_link_paths=["m1", "m2", "m3"],
-            thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+            thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
             port=_FakeFlightStack([0.0, 0.0, 0.0, 0.0]),
             articulation_io=_FakeArticulationIO(VehicleState.hover_at()),
         )
@@ -114,7 +114,7 @@ def test_bridge_tilt_cutoff_zeros_forces():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
         max_tilt_angle_deg=60.0,
@@ -140,7 +140,7 @@ def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
         max_tilt_angle_deg=60.0,
@@ -170,7 +170,7 @@ def test_bridge_nonfinite_state_raises_without_exchange():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
         max_tilt_angle_deg=60.0,
@@ -194,7 +194,7 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
         max_tilt_angle_deg=60.0,
@@ -219,7 +219,7 @@ def test_bridge_tilt_cutoff_disabled_by_default():
     bridge = Px4Bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
         port=port,
         articulation_io=io,
     )

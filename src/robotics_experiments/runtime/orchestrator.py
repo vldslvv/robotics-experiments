@@ -20,7 +20,7 @@ bridge-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan) live i
 the standalone shell and read the per-drone :class:`DroneRuntimeHandle`s.
 
 Isaac-coupled domain leaf: imports ``carb``/``omni`` (here and via
-``bridge_host``) at module scope, so it stays off the core import path behind the
+``_bridge_host``) at module scope, so it stays off the core import path behind the
 lazy ``robotics_experiments.runtime`` package ``__init__``.
 """
 
@@ -41,8 +41,8 @@ from robotics_experiments.commanding import (
     RoutineObservation,
 )
 
+from ._bridge_host import BridgeHost, BridgeHostGroup
 from ._scene import resolve_scene_path
-from .bridge_host import BridgeHost, BridgeHostGroup
 
 __all__ = ["DroneRuntimeHandle", "FleetDriverEnv", "FleetOrchestrator"]
 

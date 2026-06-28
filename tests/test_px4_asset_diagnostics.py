@@ -6,7 +6,7 @@ import types
 import numpy as np
 import pytest
 
-from robotics_experiments.px4_bridge.asset_diagnostics import (
+from robotics_experiments.px4_bridge._asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
     RootBodyPoseDiagnostics,
     compute_root_body_pose_diagnostics,

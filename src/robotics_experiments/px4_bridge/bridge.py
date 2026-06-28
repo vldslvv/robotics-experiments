@@ -8,7 +8,7 @@ apply the resulting actuator commands as forces.
 The class composes three injected collaborators so each layer can be staged
 and tested independently:
 
-- ``articulation_io``: reads ``VehicleState``, applies a ``RotorDynamics`` via
+- ``articulation_io``: reads ``VehicleState``, applies rotor dynamics via
   ``apply_dynamics`` (rotor forces at markers plus body torque and drag).
 - ``port``: ``exchange`` pumps state out and pulls actuator commands back in
   lockstep, as one indivisible tick (MAVLink in prod, fake in tests).
@@ -23,10 +23,10 @@ from typing import Any, Optional
 import numpy as np
 
 from . import frames
+from ._flight_stack import AbstractFlightStackBridge
+from ._simulator import ArticulationIO
 from .contract import ActuatorCommands, BridgeStatus
-from .flight_stack import AbstractFlightStackBridge
-from .simulator import ArticulationIO
-from .thrust_model import RotorDynamics, RotorThrustModel
+from .thrust_model import _RotorDynamics, _RotorThrustModel
 
 __all__ = ["Px4Bridge"]
 
@@ -41,7 +41,7 @@ class Px4Bridge:
         *,
         articulation_path: str,
         rotor_link_paths,
-        thrust_model: RotorThrustModel,
+        thrust_model: _RotorThrustModel,
         port: AbstractFlightStackBridge,
         articulation_io: Optional[ArticulationIO] = None,
         max_tilt_angle_deg: float = 180.0,
@@ -219,7 +219,7 @@ class Px4Bridge:
         if self._pending_force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
-                RotorDynamics(
+                _RotorDynamics(
                     forces_n=zero,
                     body_torque_n_m=np.zeros(3, dtype=np.float64),
                     body_drag_n=np.zeros(3, dtype=np.float64),

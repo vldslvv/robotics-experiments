@@ -30,10 +30,10 @@ from ._commander import _VehicleCommander
 from ._observation import CommandAck, RoutineObservation
 from ._port import _AbstractCommandPort
 from ._routine import (
+    _build_vehicle_routine,
     _DecisionKind,
     _EnvelopeGates,
     _VehicleRoutine,
-    _build_vehicle_routine,
 )
 
 __all__ = ["DriverEnvironment", "DriverParams", "_DriverPhase", "RoutineDriver"]

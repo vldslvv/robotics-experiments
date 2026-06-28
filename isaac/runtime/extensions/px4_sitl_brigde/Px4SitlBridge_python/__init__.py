@@ -29,33 +29,23 @@ except ModuleNotFoundError as exc:
     if exc.name not in ("omni", "carb"):
         raise
 
-# Re-export the core bridge API directly; this package is a thin shim that lets
-# Kit import the extension while consumers use ``robotics_experiments.px4_bridge``.
-# ``frames`` is re-exported as a module attribute for the smoke tests; it is not
-# part of the public ``__all__`` surface.
+# Re-export the narrowed core bridge API directly; this package is a thin shim
+# that lets Kit import the extension while consumers use
+# ``robotics_experiments.px4_bridge``.
 from robotics_experiments.px4_bridge import (  # noqa: F401
-    AbstractFlightStackBridge,
-    ActuatorCommands,
-    BridgeStatus,
-    LinearThrustModel,
+    IsaacArticulationIO,
     LockstepSettings,
     PegasusQuadraticThrustModel,
     Px4Bridge,
     Px4MavlinkPort,
-    RotorThrustModel,
-    VehicleState,
-    frames,
+    discover_px4_rotor_mapping,
 )
 
 __all__ = [
-    "AbstractFlightStackBridge",
-    "ActuatorCommands",
-    "BridgeStatus",
-    "LinearThrustModel",
+    "IsaacArticulationIO",
     "LockstepSettings",
     "PegasusQuadraticThrustModel",
     "Px4Bridge",
     "Px4MavlinkPort",
-    "RotorThrustModel",
-    "VehicleState",
+    "discover_px4_rotor_mapping",
 ]

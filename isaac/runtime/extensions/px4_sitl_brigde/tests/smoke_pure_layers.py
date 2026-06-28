@@ -9,7 +9,7 @@ Exercises:
   - ``VehicleState.hover_at`` constructs without error
   - ``frames.magnetometer_body_flu`` returns the expected FLU vector
   - ``frames.synth_gps_from_enu`` shifts lat/lon by the right sign
-  - ``LinearThrustModel`` clips and scales as advertised
+  - the private linear thrust scaffold clips and scales as advertised
 
 Prints PASS/FAIL per assertion. Exit status is 0 only when every check passes.
 """
@@ -25,12 +25,10 @@ import numpy as np
 EXT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXT_ROOT))
 
-from Px4SitlBridge_python import (  # noqa: E402
-    ActuatorCommands,
-    LinearThrustModel,
-    VehicleState,
-    frames,
-)
+from robotics_experiments.px4_bridge import frames  # noqa: E402
+from robotics_experiments.px4_bridge.contract import ActuatorCommands  # noqa: E402
+from robotics_experiments.px4_bridge.thrust_model import _LinearThrustModel  # noqa: E402
+from robotics_experiments.px4_bridge.vehicle_state import VehicleState  # noqa: E402
 
 _failed = 0
 
@@ -70,7 +68,7 @@ def main() -> int:
         abs(gps["altitude"] - (frames.DEFAULT_HOME_ALT_M + 1.0)) < 1e-6,
     )
 
-    model = LinearThrustModel(num_rotors=4, max_force_n=8.0)
+    model = _LinearThrustModel(num_rotors=4, max_force_n=8.0)
     forces = model.commands_to_forces(ActuatorCommands(np.array([0.0, 0.5, 1.0, 1.5])))
     _check(
         "linear thrust model clips above 1.0",

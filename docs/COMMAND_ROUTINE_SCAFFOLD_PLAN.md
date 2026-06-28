@@ -212,7 +212,7 @@ Reuse (do not reinvent): `VehicleState`
 `px4.gcs_baseport + id` in `config/load.py:110`), the observer/state sampling
 and gate helpers already in `_px4_takeoff_scenario.py`, and the
 `AbstractFlightStackBridge` send/poll seam as the structural template
-(`px4_bridge/flight_stack.py`).
+(`px4_bridge/_flight_stack.py`).
 
 ## Verification
 

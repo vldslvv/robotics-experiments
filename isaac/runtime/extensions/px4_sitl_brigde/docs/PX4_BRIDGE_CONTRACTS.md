@@ -161,8 +161,8 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 |-------|------|--------------|
 | `robotics_experiments.runtime.FleetOrchestrator` | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine drivers, teardown. Driven by a thin per-host shell (the live `experiment_runtime` Kit extension or the standalone runner) | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
 | `robotics_experiments.drone.spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
-| `BridgeHostGroup` (`robotics_experiments.runtime.bridge_host`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
-| `BridgeHost` (`robotics_experiments.runtime.bridge_host`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
+| `BridgeHostGroup` (`robotics_experiments.runtime._bridge_host`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
+| `BridgeHost` (`robotics_experiments.runtime._bridge_host`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
 | `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
 | `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
 | `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
@@ -534,7 +534,7 @@ implemented in `src/robotics_experiments/px4_bridge/mavlink.py`.
 of truth for both the Isaac physics rate and the PX4 sensor rate; the host plumbs
 it into the port as `LockstepSettings.physics_rate_hz` (there is no separate
 sensor-rate knob to drift). The integer-microsecond tick is derived in exactly
-one place -- `physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
+one place -- `physics_tick_us(physics_hz)` in `px4_bridge/_sim_clock.py`, shared by
 the port and by `SimClock`. The port pins the Pegasus sensor `update_period` to
 that integer-microsecond tick (rate `1e6 / tick_us`), not `1/physics_rate_hz`, so
 the `update_at_rate` gate fires on every physics step at any rate;

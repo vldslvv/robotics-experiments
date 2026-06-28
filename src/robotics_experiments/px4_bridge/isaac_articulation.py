@@ -15,11 +15,11 @@ from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.asset_diagnostics import (
+from robotics_experiments.px4_bridge._asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
     validate_root_body_pose,
 )
-from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
+from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 from . import frames
@@ -433,7 +433,7 @@ class IsaacArticulationIO:
         """Apply a body-frame torque at the drone body origin."""
         self._apply_body_effect(force_n=None, torque_n_m=torque_n_m)
 
-    def apply_dynamics(self, dynamics: RotorDynamics) -> None:
+    def apply_dynamics(self, dynamics: _RotorDynamics) -> None:
         """Apply a full rotor-model result to the drone - the single sink to Isaac.
 
         Per-rotor thrust is applied at each marker; the body reaction torque and

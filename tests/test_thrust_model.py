@@ -3,13 +3,13 @@ import pytest
 
 from robotics_experiments.px4_bridge.contract import ActuatorCommands
 from robotics_experiments.px4_bridge.thrust_model import (
-    LinearThrustModel,
     PegasusQuadraticThrustModel,
+    _LinearThrustModel,
 )
 
 
 def test_linear_thrust_model_clips_and_scales_commands():
-    model = LinearThrustModel(num_rotors=4, max_force_n=8.0)
+    model = _LinearThrustModel(num_rotors=4, max_force_n=8.0)
 
     forces = model.commands_to_forces(ActuatorCommands(np.array([-1.0, 0.25, 1.0, 2.0])))
 
@@ -17,7 +17,7 @@ def test_linear_thrust_model_clips_and_scales_commands():
 
 
 def test_linear_thrust_model_rejects_wrong_shape():
-    model = LinearThrustModel(num_rotors=4, max_force_n=8.0)
+    model = _LinearThrustModel(num_rotors=4, max_force_n=8.0)
 
     with pytest.raises(ValueError):
         model.commands_to_forces(ActuatorCommands(np.array([0.0, 1.0])))

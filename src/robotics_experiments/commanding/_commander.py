@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ._observation import RoutineObservation
 from ._port import _AbstractCommandPort
-from ._routine import _DecisionKind, _RoutineDecision, _RoutineState, _VehicleRoutine, _decide
+from ._routine import _decide, _DecisionKind, _RoutineDecision, _RoutineState, _VehicleRoutine
 
 __all__ = ["_VehicleCommander"]
 

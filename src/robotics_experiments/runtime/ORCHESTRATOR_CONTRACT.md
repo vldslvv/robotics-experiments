@@ -71,7 +71,7 @@ layering this design removed.
   spawns the fleet only on timeline PLAY, so the persisted stage is not mutated
   with drones until the user presses Play.
 - **Isaac-coupled leaf, off the core import path.** `orchestrator.py` and
-  `bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
+  `_bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
   `__init__` is lazy so `import robotics_experiments.runtime` succeeds with Isaac
   absent. `tests/test_core_imports.py` is the regression guard.
 

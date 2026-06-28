@@ -432,6 +432,9 @@ the host. They are meant to be used in the Dockerized environment.
   per-tool tunables (`.hadolint.yaml`, `.codespellrc`, `.yamllint.yaml`,
   `.taplo.toml`) live in `.pre-commit-config.yaml` and those dotfiles at the repo
   root.
+- For large-scope changes, especially public API, module-name, or runtime
+  behavior changes, run `uv run pytest`, `make test-integration-all`, and
+  `uv run pre-commit run --all-files` before completion.
 - Keep Make recipes thin. If Makefile logic grows into a complex Bash script
   with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
   it into a separate shell script and let Make prepare variables and call that

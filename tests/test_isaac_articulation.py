@@ -5,9 +5,9 @@ import types
 import numpy as np
 
 import robotics_experiments.px4_bridge.isaac_articulation as isaac_articulation_module
-from robotics_experiments.px4_bridge.asset_diagnostics import RootBodyPoseDiagnosticParams
+from robotics_experiments.px4_bridge._asset_diagnostics import RootBodyPoseDiagnosticParams
 from robotics_experiments.px4_bridge.isaac_articulation import IsaacArticulationIO
-from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
+from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
 
 
 class _FakeRigidBody:
@@ -289,7 +289,7 @@ def test_apply_dynamics_applies_rotor_forces_then_body_torque_and_drag():
     io._rotor_positions_body = np.array([[1.0, 0.0, 0.0]], dtype=np.float64)
 
     io.apply_dynamics(
-        RotorDynamics(
+        _RotorDynamics(
             forces_n=np.array([4.0], dtype=np.float64),
             body_torque_n_m=np.array([0.0, 0.0, 0.5], dtype=np.float64),
             body_drag_n=np.array([-0.2, 0.0, 0.0], dtype=np.float64),

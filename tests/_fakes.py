@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
-from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
+from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE = 129
@@ -28,7 +28,7 @@ class _FakeArticulationIO:
         self.initialized = False
         self.shutdown_called = False
         self.applied_forces: list[np.ndarray] = []
-        self.applied_dynamics: list[RotorDynamics] = []
+        self.applied_dynamics: list[_RotorDynamics] = []
         # (rotor_omega_rad_s, dt) pairs recorded from the cosmetic spin seam.
         self.spin_updates: list[tuple[np.ndarray, float]] = []
 
@@ -46,7 +46,7 @@ class _FakeArticulationIO:
         self.state.sim_time_us = sim_time_us
         return self.state
 
-    def apply_dynamics(self, dynamics: RotorDynamics):
+    def apply_dynamics(self, dynamics: _RotorDynamics):
         self.applied_dynamics.append(dynamics)
         self.applied_forces.append(np.asarray(dynamics.forces_n, dtype=np.float64))
 
@@ -127,7 +127,7 @@ class _CapturingThrustModel:
             linear_body_velocity_flu,
             dtype=np.float64,
         )
-        return RotorDynamics(
+        return _RotorDynamics(
             forces_n=np.zeros(self._num_rotors, dtype=np.float64),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),

@@ -48,7 +48,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "robotics_experiments.environment.stage",
             "robotics_experiments.environment.step",
             "robotics_experiments.simulation._isaac_settings",
-            "robotics_experiments.runtime.bridge_host",
+            "robotics_experiments.runtime._bridge_host",
             "robotics_experiments.runtime.orchestrator",
         ):
             assert leaf not in sys.modules

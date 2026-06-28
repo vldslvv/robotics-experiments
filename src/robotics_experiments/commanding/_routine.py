@@ -40,9 +40,9 @@ from robotics_experiments.px4_bridge.frames import tilt_angle_deg
 
 from ._commands import (
     _MAV_CMD_COMPONENT_ARM_DISARM,
-    _MavlinkCommand,
     _arm,
     _land,
+    _MavlinkCommand,
     _reposition,
     _takeoff,
 )
@@ -593,7 +593,9 @@ def _build_vehicle_routine(
             commanded_altitude_m = absolute_altitude_m
             built.append(
                 _RoutineStep(
-                    command=_takeoff(target_latitude_deg, target_longitude_deg, absolute_altitude_m),
+                    command=_takeoff(
+                        target_latitude_deg, target_longitude_deg, absolute_altitude_m
+                    ),
                     is_complete=_climbed_at_least(float(descriptor["min_climb_m"])),
                     label="takeoff",
                     timeout_s=takeoff_timeout_s,

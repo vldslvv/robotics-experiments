@@ -34,8 +34,9 @@ sys.path.insert(0, str(EXT_ROOT))
 from Px4SitlBridge_python import (  # noqa: E402
     LockstepSettings,
     Px4MavlinkPort,
-    VehicleState,
 )
+
+from robotics_experiments.px4_bridge.vehicle_state import VehicleState  # noqa: E402
 
 
 def main() -> int:
