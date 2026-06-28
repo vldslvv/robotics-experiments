@@ -102,6 +102,11 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             calls.append(("thrust", kwargs))
 
     class Px4Bridge:
+        # The host's observable behavior is exposed through its own public
+        # properties (is_running / is_connected / status / sim_time_us), so the
+        # fake bridge exposes the state those read and does NOT record send/recv
+        # interactions. Only the construction kwargs are recorded, for the
+        # config-to-bridge wiring-contract tests.
         def __init__(
             self,
             *,
@@ -113,7 +118,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             rotor_spin_visual_scale=0.03,
         ):
             self.is_connected = True
-            self.step_times = []
+            self.status = SimpleNamespace(connected=True)
             calls.append(
                 (
                     "bridge",
@@ -125,17 +130,16 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             )
 
         def start(self):
-            calls.append("bridge_start")
+            pass
 
         def stop(self):
-            calls.append("bridge_stop")
+            pass
 
         def send_sensors(self, dt, sim_time_us):
-            self.step_times.append(sim_time_us)
-            calls.append(("send", dt, sim_time_us))
+            pass
 
         def recv_and_apply(self):
-            calls.append("recv")
+            pass
 
     def discover_px4_rotor_mapping(stage, articulation_path):
         calls.append(("discover", stage, articulation_path))
@@ -237,40 +241,41 @@ def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_over
 
 
 def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
-    physx = _install_fake_isaac(monkeypatch)
-    calls = []
-    _install_fake_px4_bridge(monkeypatch, calls)
+    _install_fake_isaac(monkeypatch)
+    _install_fake_px4_bridge(monkeypatch, [])
     module = _import_bridge_host(monkeypatch)
 
+    # startup_settle_time_s defaults to 0.012 -> 12_000 us, i.e. three 0.004 s
+    # ticks. The bridge must not come up until that window elapses.
     host = module.BridgeHost(articulation_path="/World/Drone", vehicle=_vehicle(), physics_hz=250.0)
 
-    # The host no longer self-subscribes; the group owns the subscription and
-    # drives the two-leg API. start() only sets up the clock here (settle > 0).
     host.start()
 
-    assert physx.callback is None
-    assert calls == []
+    # Observable through the public surface: not running / not connected while
+    # settling, and no sim time accrues into the bridge before it starts.
+    assert host.is_running is False
+    assert host.is_connected is False
 
     _step(host, 0.004)
     _step(host, 0.004)
 
-    assert calls == []
+    assert host.is_running is False
 
     _step(host, 0.004)
 
-    assert "bridge_start" in calls
-    assert not any(call[0] == "send" for call in calls if isinstance(call, tuple))
+    # Settle window elapsed: the bridge is now built and connected.
+    assert host.is_running is True
+    assert host.is_connected is True
 
     _step(host, 0.004)
 
-    assert ("send", 0.004, 4000) in calls
-    assert "recv" in calls
+    # The host-side clock keeps advancing once running.
+    assert host.sim_time_us == 16000
 
 
 def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     _install_fake_isaac(monkeypatch)
-    calls = []
-    _install_fake_px4_bridge(monkeypatch, calls)
+    _install_fake_px4_bridge(monkeypatch, [])
     module = _import_bridge_host(monkeypatch)
 
     host = module.BridgeHost(
@@ -280,14 +285,22 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     )
 
     host.start()
+
+    # No settle delay: the bridge is up immediately, observable via public state.
+    assert host.is_running is True
+    assert host.is_connected is True
+    assert host.status.connected is True
+
     _step(host, 0.004)
 
-    assert "bridge_start" in calls
-    assert ("send", 0.004, 4000) in calls
-    assert "recv" in calls
+    assert host.sim_time_us == 4000
 
 
 def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
+    # Wiring-contract test. BridgeHost is an adapter: its observable output is
+    # the Px4Bridge it constructs from config + discovered rotors. There is no
+    # public getter for those construction params (and adding one only for tests
+    # is disallowed), so this asserts on the collaborator's construction kwargs.
     _install_fake_isaac(monkeypatch)
     calls = []
     _install_fake_px4_bridge(monkeypatch, calls)

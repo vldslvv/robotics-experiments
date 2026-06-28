@@ -29,10 +29,16 @@ class _FakeBridgeHost:
 
 
 class _FakeBridgeHostGroup:
+    # Test-local fake: tracks the most recently constructed group so a test can
+    # observe teardown's stop() without reaching into the orchestrator's private
+    # ``_group`` handle.
+    last: "_FakeBridgeHostGroup | None" = None
+
     def __init__(self, hosts):
         self.hosts = list(hosts)
         self.started = False
         self.stopped = False
+        _FakeBridgeHostGroup.last = self
 
     def start(self):
         self.started = True
@@ -172,7 +178,7 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
     assert [h.label for h in orch.bridged] == ["drone0"]
     assert orch.drones[1].host is None and orch.drones[1].observer is None
     assert rec.spawned == [("Drone", (0.0, 0.0)), ("Drone1", (2.0, 0.0))]
-    assert len(orch._group.hosts) == 1
+    assert len(orch.bridged) == 1
 
 
 def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
@@ -236,7 +242,7 @@ def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
     orch.stage = object()
     orch.spawn_fleet()
     orch.build_drivers(lambda handle: object())
-    group = orch._group
+    group = _FakeBridgeHostGroup.last
     port = orch.drones[0].port
     observer = orch.drones[0].observer
 
