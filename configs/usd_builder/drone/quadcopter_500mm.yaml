@@ -12,117 +12,54 @@ center_plate:
   position: [0.0, 0.0, 0.0]
   mass: 0.350
 
-arms:
-  - name: Arm 1
+# Geometry of one arm, authored once and shared by every arm. All positions are
+# in the arm-local frame: +X points outboard along the boom, and the per-arm
+# heading lives on the arm placement (azimuth_deg) below. The ESC therefore needs
+# no rotation -- its long (X) axis is already along the boom -- and the motor/prop
+# sit at the boom tip (radial = boom.length).
+arm_geometry:
+  boom:
+    name: S500-class carbon-fiber boom
     radius: 0.008
-    height: 0.3375533905932738
-    position: [0.125, 0.125, 0.0]
-    rotation_deg: [0.0, 90.0, 45.0]
-  - name: Arm 2
-    radius: 0.008
-    height: 0.3375533905932738
-    position: [-0.125, 0.125, 0.0]
-    rotation_deg: [0.0, 90.0, 135.0]
-  - name: Arm 3
-    radius: 0.008
-    height: 0.3375533905932738
-    position: [-0.125, -0.125, 0.0]
-    rotation_deg: [0.0, 90.0, -135.0]
-  - name: Arm 4
-    radius: 0.008
-    height: 0.3375533905932738
-    position: [0.125, -0.125, 0.0]
-    rotation_deg: [0.0, 90.0, -45.0]
+    length: 0.3535533905932738
+  motor:
+    name: X2212-class brushless motor
+    radius: 0.015
+    height: 0.03
+    position: [0.3535533905932738, 0.0, 0.02]
+    mass: 0.057
+  esc:
+    name: BLHeli_S 20A ESC
+    size: [0.025, 0.015, 0.004]
+    position: [0.21213203435596426, 0.0, 0.005]
+    mass: 0.007
+  propeller:
+    name: 9045 propeller
+    radius: 0.1143
+    height: 0.002
+    position: [0.3535533905932738, 0.0, 0.04]
+    mass: 0.008
+    num_blades: 2
 
-motors:
+# One placement per physical arm: the sole heading source (azimuth_deg) plus the
+# motor identity (spin direction and PX4 motor index). Generic Quad X order.
+arms:
   - name: M1 FR CCW
-    position: [0.25, 0.25, 0.02]
+    azimuth_deg: 45.0
     spin_dir: CCW
     px4_motor_index: 2
-    motor:
-      name: X2212-class brushless motor
-      radius: 0.015
-      height: 0.03
-      position: [0.0, 0.0, 0.0]
-      mass: 0.057
-    esc:
-      name: BLHeli_S 20A ESC
-      size: [0.025, 0.015, 0.004]
-      position: [-0.1, -0.1, -0.015]
-      mass: 0.007
-    propeller:
-      name: 9045 propeller
-      radius: 0.1143
-      height: 0.002
-      position: [0.0, 0.0, 0.02]
-      mass: 0.008
-      num_blades: 2
   - name: M2 FL CW
-    position: [-0.25, 0.25, 0.02]
+    azimuth_deg: 135.0
     spin_dir: CW
     px4_motor_index: 1
-    motor:
-      name: X2212-class brushless motor
-      radius: 0.015
-      height: 0.03
-      position: [0.0, 0.0, 0.0]
-      mass: 0.057
-    esc:
-      name: BLHeli_S 20A ESC
-      size: [0.025, 0.015, 0.004]
-      position: [0.1, -0.1, -0.015]
-      mass: 0.007
-    propeller:
-      name: 9045 propeller
-      radius: 0.1143
-      height: 0.002
-      position: [0.0, 0.0, 0.02]
-      mass: 0.008
-      num_blades: 2
   - name: M3 RL CCW
-    position: [-0.25, -0.25, 0.02]
+    azimuth_deg: -135.0
     spin_dir: CCW
     px4_motor_index: 3
-    motor:
-      name: X2212-class brushless motor
-      radius: 0.015
-      height: 0.03
-      position: [0.0, 0.0, 0.0]
-      mass: 0.057
-    esc:
-      name: BLHeli_S 20A ESC
-      size: [0.025, 0.015, 0.004]
-      position: [0.1, 0.1, -0.015]
-      mass: 0.007
-    propeller:
-      name: 9045 propeller
-      radius: 0.1143
-      height: 0.002
-      position: [0.0, 0.0, 0.02]
-      mass: 0.008
-      num_blades: 2
   - name: M4 RR CW
-    position: [0.25, -0.25, 0.02]
+    azimuth_deg: -45.0
     spin_dir: CW
     px4_motor_index: 0
-    motor:
-      name: X2212-class brushless motor
-      radius: 0.015
-      height: 0.03
-      position: [0.0, 0.0, 0.0]
-      mass: 0.057
-    esc:
-      name: BLHeli_S 20A ESC
-      size: [0.025, 0.015, 0.004]
-      position: [-0.1, 0.1, -0.015]
-      mass: 0.007
-    propeller:
-      name: 9045 propeller
-      radius: 0.1143
-      height: 0.002
-      position: [0.0, 0.0, 0.02]
-      mass: 0.008
-      num_blades: 2
 
 pixhawk:
   name: Pixhawk 6C

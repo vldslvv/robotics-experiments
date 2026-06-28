@@ -36,10 +36,16 @@ def Xform "hexacopter" (
                     uniform token[] xformOpOrder = ["xformOp:scale"]
                 }
             }
+        }
 
-            def Xform "arms"
+        def Xform "arms"
+        {
+            def Xform "arm_1"
             {
-                def Capsule "arm_1" (
+                float3 xformOp:rotateXYZ = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
                     apiSchemas = ["PhysicsCollisionAPI"]
                 )
                 {
@@ -50,67 +56,6 @@ def Xform "hexacopter" (
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
                 }
 
-                def Capsule "arm_2" (
-                    apiSchemas = ["PhysicsCollisionAPI"]
-                )
-                {
-                    double height = 0.255
-                    double radius = 0.01
-                    float3 xformOp:rotateXYZ = (0, 90, 60)
-                    double3 xformOp:translate = (0.06875, 0.1190784930203603, 0)
-                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-                }
-
-                def Capsule "arm_3" (
-                    apiSchemas = ["PhysicsCollisionAPI"]
-                )
-                {
-                    double height = 0.255
-                    double radius = 0.01
-                    float3 xformOp:rotateXYZ = (0, 90, 120)
-                    double3 xformOp:translate = (-0.06875, 0.1190784930203603, 0)
-                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-                }
-
-                def Capsule "arm_4" (
-                    apiSchemas = ["PhysicsCollisionAPI"]
-                )
-                {
-                    double height = 0.255
-                    double radius = 0.01
-                    float3 xformOp:rotateXYZ = (0, 90, 180)
-                    double3 xformOp:translate = (-0.1375, 0, 0)
-                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-                }
-
-                def Capsule "arm_5" (
-                    apiSchemas = ["PhysicsCollisionAPI"]
-                )
-                {
-                    double height = 0.255
-                    double radius = 0.01
-                    float3 xformOp:rotateXYZ = (0, 90, -120)
-                    double3 xformOp:translate = (-0.06875, -0.11907849302036028, 0)
-                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-                }
-
-                def Capsule "arm_6" (
-                    apiSchemas = ["PhysicsCollisionAPI"]
-                )
-                {
-                    double height = 0.255
-                    double radius = 0.01
-                    float3 xformOp:rotateXYZ = (0, 90, -60)
-                    double3 xformOp:translate = (0.06875, -0.11907849302036035, 0)
-                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
-                }
-            }
-        }
-
-        def Xform "propulsion"
-        {
-            def Xform "motor_1"
-            {
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -127,7 +72,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (0.165, 0, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -186,8 +131,22 @@ def Xform "hexacopter" (
                 }
             }
 
-            def Xform "motor_2"
+            def Xform "arm_2"
             {
+                float3 xformOp:rotateXYZ = (0, 0, 60)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.255
+                    double radius = 0.01
+                    float3 xformOp:rotateXYZ = (0, 90, 0)
+                    double3 xformOp:translate = (0.1375, 0, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+                }
+
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -195,7 +154,7 @@ def Xform "hexacopter" (
                     double height = 0.035
                     float physics:mass = 0.057
                     double radius = 0.018
-                    double3 xformOp:translate = (0.13750000000000004, 0.2381569860407206, 0.02)
+                    double3 xformOp:translate = (0.275, 0, 0.02)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -204,7 +163,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (0.08250000000000002, 0.14289419162443234, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -224,7 +183,7 @@ def Xform "hexacopter" (
                     custom string drone:spinDir = "CW"
                     float physics:mass = 0.008
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.13750000000000004, 0.2381569860407206, 0.04)
+                    double3 xformOp:translate = (0.275, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
@@ -263,8 +222,22 @@ def Xform "hexacopter" (
                 }
             }
 
-            def Xform "motor_3"
+            def Xform "arm_3"
             {
+                float3 xformOp:rotateXYZ = (0, 0, 120)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.255
+                    double radius = 0.01
+                    float3 xformOp:rotateXYZ = (0, 90, 0)
+                    double3 xformOp:translate = (0.1375, 0, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+                }
+
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -272,7 +245,7 @@ def Xform "hexacopter" (
                     double height = 0.035
                     float physics:mass = 0.057
                     double radius = 0.018
-                    double3 xformOp:translate = (-0.13749999999999996, 0.23815698604072064, 0.02)
+                    double3 xformOp:translate = (0.275, 0, 0.02)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -281,7 +254,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (-0.08249999999999996, 0.14289419162443237, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -301,7 +274,7 @@ def Xform "hexacopter" (
                     custom string drone:spinDir = "CCW"
                     float physics:mass = 0.008
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (-0.13749999999999996, 0.23815698604072064, 0.04)
+                    double3 xformOp:translate = (0.275, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
@@ -340,8 +313,22 @@ def Xform "hexacopter" (
                 }
             }
 
-            def Xform "motor_4"
+            def Xform "arm_4"
             {
+                float3 xformOp:rotateXYZ = (0, 0, 180)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.255
+                    double radius = 0.01
+                    float3 xformOp:rotateXYZ = (0, 90, 0)
+                    double3 xformOp:translate = (0.1375, 0, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+                }
+
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -349,7 +336,7 @@ def Xform "hexacopter" (
                     double height = 0.035
                     float physics:mass = 0.057
                     double radius = 0.018
-                    double3 xformOp:translate = (-0.275, 0, 0.02)
+                    double3 xformOp:translate = (0.275, 0, 0.02)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -358,7 +345,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (-0.165, 0, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -378,7 +365,7 @@ def Xform "hexacopter" (
                     custom string drone:spinDir = "CW"
                     float physics:mass = 0.008
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (-0.275, 0, 0.04)
+                    double3 xformOp:translate = (0.275, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
@@ -417,8 +404,22 @@ def Xform "hexacopter" (
                 }
             }
 
-            def Xform "motor_5"
+            def Xform "arm_5"
             {
+                float3 xformOp:rotateXYZ = (0, 0, -120)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.255
+                    double radius = 0.01
+                    float3 xformOp:rotateXYZ = (0, 90, 0)
+                    double3 xformOp:translate = (0.1375, 0, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+                }
+
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -426,7 +427,7 @@ def Xform "hexacopter" (
                     double height = 0.035
                     float physics:mass = 0.057
                     double radius = 0.018
-                    double3 xformOp:translate = (-0.13750000000000012, -0.23815698604072055, 0.02)
+                    double3 xformOp:translate = (0.275, 0, 0.02)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -435,7 +436,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (-0.08250000000000007, -0.14289419162443234, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -455,7 +456,7 @@ def Xform "hexacopter" (
                     custom string drone:spinDir = "CCW"
                     float physics:mass = 0.008
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (-0.13750000000000012, -0.23815698604072055, 0.04)
+                    double3 xformOp:translate = (0.275, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
@@ -494,8 +495,22 @@ def Xform "hexacopter" (
                 }
             }
 
-            def Xform "motor_6"
+            def Xform "arm_6"
             {
+                float3 xformOp:rotateXYZ = (0, 0, -60)
+                uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+
+                def Capsule "boom" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.255
+                    double radius = 0.01
+                    float3 xformOp:rotateXYZ = (0, 90, 0)
+                    double3 xformOp:translate = (0.1375, 0, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+                }
+
                 def Cylinder "motor" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
@@ -503,7 +518,7 @@ def Xform "hexacopter" (
                     double height = 0.035
                     float physics:mass = 0.057
                     double radius = 0.018
-                    double3 xformOp:translate = (0.13750000000000004, -0.2381569860407206, 0.02)
+                    double3 xformOp:translate = (0.275, 0, 0.02)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -512,7 +527,7 @@ def Xform "hexacopter" (
                 )
                 {
                     float physics:mass = 0.007
-                    double3 xformOp:translate = (0.08250000000000002, -0.14289419162443234, 0.005000000000000001)
+                    double3 xformOp:translate = (0.165, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
@@ -532,7 +547,7 @@ def Xform "hexacopter" (
                     custom string drone:spinDir = "CW"
                     float physics:mass = 0.008
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.13750000000000004, -0.2381569860407206, 0.04)
+                    double3 xformOp:translate = (0.275, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"

@@ -42,15 +42,15 @@ def test_usd_builder_hydra_override_loads_hexacopter():
 
     assert config.drone.name == "hexacopter_s550"
     assert config.drone.prim_name == "hexacopter"
-    assert len(config.drone.motors) == 6
+    assert len(config.drone.arms) == 6
 
 
 def test_usd_builder_quad_px4_motor_metadata_matches_generic_quad_x_order():
     builder = _load_builder_module()
     config = builder.load_builder_config(config_dir=_CONFIG_DIR)
 
-    assert [motor.px4_motor_index for motor in config.drone.motors] == [2, 1, 3, 0]
-    assert [motor.spin_dir for motor in config.drone.motors] == ["CCW", "CW", "CCW", "CW"]
+    assert [arm.px4_motor_index for arm in config.drone.arms] == [2, 1, 3, 0]
+    assert [arm.spin_dir for arm in config.drone.arms] == ["CCW", "CW", "CCW", "CW"]
 
 
 def test_usd_builder_positional_cli_shorthand_maps_to_hydra_override():
@@ -93,11 +93,13 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
     stage = Usd.Stage.Open(stage_path)
 
     assert stage.GetDefaultPrim().GetName() == "quadcopter"
+    # arm_i carries the placement authored at config index i-1; the PX4 motor
+    # index is a marker attribute, independent of the arm number.
     expected = {
-        "/quadcopter/body/propulsion/motor_4/prop": (0, "CW"),
-        "/quadcopter/body/propulsion/motor_2/prop": (1, "CW"),
-        "/quadcopter/body/propulsion/motor_1/prop": (2, "CCW"),
-        "/quadcopter/body/propulsion/motor_3/prop": (3, "CCW"),
+        "/quadcopter/body/arms/arm_4/prop": (0, "CW"),
+        "/quadcopter/body/arms/arm_2/prop": (1, "CW"),
+        "/quadcopter/body/arms/arm_1/prop": (2, "CCW"),
+        "/quadcopter/body/arms/arm_3/prop": (3, "CCW"),
     }
     for path, (px4_index, spin_dir) in expected.items():
         prim = stage.GetPrimAtPath(path)
@@ -166,7 +168,38 @@ def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
 
     # The rest of the airframe is intact (rotor markers still present).
     for path in (
-        "/quadcopter/body/propulsion/motor_4/prop",
-        "/quadcopter/body/propulsion/motor_1/prop",
+        "/quadcopter/body/arms/arm_4/prop",
+        "/quadcopter/body/arms/arm_1/prop",
     ):
         assert stage.GetPrimAtPath(path).GetAttribute("drone:rotorMarker").Get() is True
+
+
+def test_usd_builder_esc_parallel_to_arm(tmp_path):
+    builder = _load_builder_module()
+    config = builder.load_builder_config(
+        config_dir=_CONFIG_DIR,
+        overrides=[f"output_dir={tmp_path}"],
+    )
+
+    stage_path = builder.build_drone_usd(config.drone, output_dir=config.output_dir)
+    stage = Usd.Stage.Open(stage_path)
+
+    from pxr import Gf  # noqa: PLC0415
+
+    def _world_dir(path, local):
+        m = UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(
+            Usd.TimeCode.Default()
+        )
+        origin = m.Transform(Gf.Vec3d(0, 0, 0))
+        tip = m.Transform(Gf.Vec3d(*local))
+        return Gf.Vec3d(tip[0] - origin[0], tip[1] - origin[1], tip[2] - origin[2]).GetNormalized()
+
+    # Each ESC's long axis (local X) must be parallel to its boom (capsule long
+    # axis = local Z), with the azimuth inherited from the shared arm Xform.
+    for i in range(1, len(config.drone.arms) + 1):
+        boom_dir = _world_dir(f"/quadcopter/body/arms/arm_{i}/boom", (0, 0, 1))
+        esc_dir = _world_dir(f"/quadcopter/body/arms/arm_{i}/esc", (1, 0, 0))
+        # Parallel as a line (sign-agnostic): |dot| == 1.
+        assert abs(boom_dir[0] * esc_dir[0] + boom_dir[1] * esc_dir[1]) == pytest.approx(
+            1.0, abs=1e-9
+        )

@@ -76,25 +76,37 @@ class CylinderPart:
 
 
 @dataclass
-class CapsulePart:
-    # Massless geometry (mass folded into the frame), so no `mass` field.
+class BoomPart:
+    # The arm tube. Massless geometry (mass folded into the frame), so no `mass`
+    # field. `length` is the tip-to-tip radial reach of the boom (origin to motor);
+    # the builder lays it down along the arm's local +X and derives the capsule's
+    # cylinder height from it.
     name: str
     radius: float
-    height: float
-    position: tuple[float, float, float]
-    rotation_deg: tuple[float, float, float]
+    length: float
 
 
 @dataclass
-class Motor:
-    name: str
-    position: tuple[float, float, float]  # motor origin, relative to body root
-    motor: CylinderPart  # the brushless can
-    esc: BoxPart  # ESC riding next to this motor
+class ArmGeometry:
+    # Geometry of one arm, authored once and shared by every arm of the airframe.
+    # Every position is in the arm-local frame, where +X points outboard along the
+    # boom; the per-arm azimuth lives on the arm Xform (see ArmPlacement), so the
+    # ESC needs no rotation to lie parallel to the boom.
+    boom: BoomPart
+    motor: CylinderPart  # the brushless can, at the boom tip
+    esc: BoxPart  # ESC riding on the boom
     propeller: CylinderPart  # disc above the motor
+    prop_num_blades: int  # cosmetic blade count for the propeller visual
+
+
+@dataclass
+class ArmPlacement:
+    # One physical arm: where the shared ArmGeometry is mounted and which motor it
+    # carries. `azimuth_deg` is the sole source of the arm's heading.
+    name: str
+    azimuth_deg: float
     spin_dir: str  # "CCW" | "CW"
     px4_motor_index: int
-    prop_num_blades: int  # cosmetic blade count for the propeller visual
 
 
 @dataclass
@@ -110,10 +122,10 @@ class DroneConfig:
 
     # Frame
     center_plate: BoxPart
-    arms: list[CapsulePart]
 
-    # Propulsion (each Motor bundles its own ESC + propeller).
-    motors: list[Motor]
+    # Propulsion: one shared arm geometry plus a placement per physical arm.
+    arm_geometry: ArmGeometry
+    arms: list[ArmPlacement]
 
     # Avionics
     pixhawk: BoxPart
@@ -185,26 +197,31 @@ def _cylinder(data: dict[str, Any], label: str) -> CylinderPart:
     )
 
 
-def _capsule(data: dict[str, Any], label: str) -> CapsulePart:
-    return CapsulePart(
+def _boom(data: dict[str, Any], label: str) -> BoomPart:
+    return BoomPart(
         name=str(data["name"]),
         radius=float(data["radius"]),
-        height=float(data["height"]),
-        position=_as_tuple3(data["position"], f"{label}.position"),
-        rotation_deg=_as_tuple3(data["rotation_deg"], f"{label}.rotation_deg"),
+        length=float(data["length"]),
     )
 
 
-def _motor(data: dict[str, Any], label: str) -> Motor:
-    return Motor(
-        name=str(data["name"]),
-        position=_as_tuple3(data["position"], f"{label}.position"),
+def _arm_geometry(data: dict[str, Any], label: str) -> ArmGeometry:
+    propeller = data["propeller"]
+    return ArmGeometry(
+        boom=_boom(data["boom"], f"{label}.boom"),
         motor=_cylinder(data["motor"], f"{label}.motor"),
         esc=_box(data["esc"], f"{label}.esc"),
-        propeller=_cylinder(data["propeller"], f"{label}.propeller"),
+        propeller=_cylinder(propeller, f"{label}.propeller"),
+        prop_num_blades=int(propeller["num_blades"]),
+    )
+
+
+def _arm_placement(data: dict[str, Any], label: str) -> ArmPlacement:
+    return ArmPlacement(
+        name=str(data["name"]),
+        azimuth_deg=float(data["azimuth_deg"]),
         spin_dir=str(data["spin_dir"]),
         px4_motor_index=int(data["px4_motor_index"]),
-        prop_num_blades=int(data["propeller"]["num_blades"]),
     )
 
 
@@ -232,8 +249,8 @@ def _drone_config(data: dict[str, Any]) -> DroneConfig:
         diagonal_inertia=_as_tuple3(data["diagonal_inertia"], "drone.diagonal_inertia"),
         center_of_mass=_as_tuple3(data["center_of_mass"], "drone.center_of_mass"),
         center_plate=_box(data["center_plate"], "drone.center_plate"),
-        arms=[_capsule(arm, f"drone.arms[{i}]") for i, arm in enumerate(data["arms"])],
-        motors=[_motor(motor, f"drone.motors[{i}]") for i, motor in enumerate(data["motors"])],
+        arm_geometry=_arm_geometry(data["arm_geometry"], "drone.arm_geometry"),
+        arms=[_arm_placement(arm, f"drone.arms[{i}]") for i, arm in enumerate(data["arms"])],
         pixhawk=_box(data["pixhawk"], "drone.pixhawk"),
         jetson=_box(data["jetson"], "drone.jetson"),
         realsense=_box(data["realsense"], "drone.realsense"),
@@ -304,27 +321,20 @@ def _author_cylinder(stage: Usd.Stage, prim_path: str, part: CylinderPart) -> Us
     return cyl
 
 
-def _author_capsule(stage: Usd.Stage, prim_path: str, part: CapsulePart) -> UsdGeom.Capsule:
-    cap = UsdGeom.Capsule.Define(stage, prim_path)
-    cap.CreateRadiusAttr(part.radius)
-    cap.CreateHeightAttr(part.height)
-    _apply_pose(cap, part.position, part.rotation_deg)
-    UsdPhysics.CollisionAPI.Apply(cap.GetPrim())
-    return cap
-
-
-def _author_propeller_visual(stage: Usd.Stage, prop_path: str, motor: Motor) -> None:
+def _author_propeller_visual(
+    stage: Usd.Stage, prop_path: str, prop_part: CylinderPart, num_blades: int
+) -> None:
     """Author the cosmetic propeller geometry under the rotor marker Xform.
 
-    A small central hub cylinder plus ``prop_num_blades`` thin blade boxes fanned
+    A small central hub cylinder plus ``num_blades`` thin blade boxes fanned
     evenly about Z. All geometry is collision-free and visual only; it derives
     its dimensions from the propeller radius/height (no extra geometry knobs) and
     spins as a unit because it is parented under the marker's RotateZ op.
     """
-    prop_part = motor.propeller
-    num_blades = int(motor.prop_num_blades)
     if num_blades < 1:
-        raise ValueError(f"propeller num_blades must be >= 1, got {num_blades} for {motor.name}")
+        raise ValueError(
+            f"propeller num_blades must be >= 1, got {num_blades} for {prop_part.name}"
+        )
 
     hub = UsdGeom.Cylinder.Define(stage, f"{prop_path}/hub")
     hub.CreateRadiusAttr(prop_part.radius * 0.12)
@@ -345,61 +355,56 @@ def _author_propeller_visual(stage: Usd.Stage, prop_path: str, motor: Motor) -> 
         geom.AddScaleOp().Set(Gf.Vec3f(blade_length, blade_width, prop_part.height))
 
 
-def _author_motor(stage: Usd.Stage, parent_path: str, idx: int, motor: Motor) -> None:
-    grp_path = f"{parent_path}/motor_{idx+1}"
-    UsdGeom.Xform.Define(stage, grp_path)
+def _author_arm(
+    stage: Usd.Stage,
+    arms_root: str,
+    idx: int,
+    geom: ArmGeometry,
+    placement: ArmPlacement,
+) -> None:
+    """Author one arm assembly under its own azimuth Xform.
 
-    # The motor cylinder sits at the motor origin (body-relative).
-    motor_part = motor.motor
-    motor_world_pos = (
-        motor.position[0] + motor_part.position[0],
-        motor.position[1] + motor_part.position[1],
-        motor.position[2] + motor_part.position[2],
-    )
-    motor_geom = UsdGeom.Cylinder.Define(stage, f"{grp_path}/motor")
-    motor_geom.CreateRadiusAttr(motor_part.radius)
-    motor_geom.CreateHeightAttr(motor_part.height)
-    _apply_pose(motor_geom, motor_world_pos, motor_part.rotation_deg)
-    _set_mass(motor_geom.GetPrim(), motor_part.mass)
+    Everything below ``arm_{i}`` is expressed in the arm-local frame (+X outboard
+    along the boom). The per-arm heading lives only on the ``arm_{i}`` Xform, so
+    the boom, motor, ESC, and propeller all inherit it -- the ESC is parallel to
+    the boom by construction and the motor sits at the boom tip.
+    """
+    arm_path = f"{arms_root}/arm_{idx+1}"
+    arm = UsdGeom.Xform.Define(stage, arm_path)
+    UsdGeom.XformCommonAPI(arm).SetRotate(Gf.Vec3f(0.0, 0.0, placement.azimuth_deg))
 
-    # ESC: position is local to the motor, so add to motor.position.
-    esc_part = motor.esc
-    esc_world_pos = (
-        motor.position[0] + esc_part.position[0],
-        motor.position[1] + esc_part.position[1],
-        motor.position[2] + esc_part.position[2],
-    )
-    esc_path = f"{grp_path}/esc"
-    esc_xform = UsdGeom.Xform.Define(stage, esc_path)
-    _apply_pose(esc_xform, esc_world_pos, esc_part.rotation_deg)
-    _set_mass(esc_xform.GetPrim(), esc_part.mass)
-    esc_geom = UsdGeom.Cube.Define(stage, f"{esc_path}/geom")
-    esc_geom.CreateSizeAttr(1.0)
-    esc_geom.AddScaleOp().Set(Gf.Vec3f(*esc_part.size))
+    # Boom: laid along local +X, centered at length/2. A capsule's long axis is
+    # local Z, so rotate 90 about Y; the cylinder height excludes the two caps so
+    # the rounded tips span exactly origin -> motor.
+    boom = geom.boom
+    cap = UsdGeom.Capsule.Define(stage, f"{arm_path}/boom")
+    cap.CreateRadiusAttr(boom.radius)
+    cap.CreateHeightAttr(boom.length - 2 * boom.radius)
+    _apply_pose(cap, (boom.length / 2.0, 0.0, 0.0), (0.0, 90.0, 0.0))
+    UsdPhysics.CollisionAPI.Apply(cap.GetPrim())
 
-    # Propeller: position is local to the motor. The marker is an Xform (keeping
-    # the prop prim's path, PX4 marker attributes, translate, and mass) so it can
-    # carry both the rotor-spin RotateZ op and the child propeller visual (a hub
-    # plus fanned-out blades). rotor_discovery and the bridge read the marker's
-    # translation, which the RotateZ op leaves unchanged.
-    prop_part = motor.propeller
-    prop_world_pos = (
-        motor.position[0] + prop_part.position[0],
-        motor.position[1] + prop_part.position[1],
-        motor.position[2] + prop_part.position[2],
-    )
-    prop = UsdGeom.Xform.Define(stage, f"{grp_path}/prop")
-    _apply_pose(prop, prop_world_pos, prop_part.rotation_deg)
-    # Cosmetic spin op, authored after the translate so spinning never disturbs
-    # the marker position. The runtime drives this op every physics tick.
+    # Motor can at the boom tip; ESC riding flat on the boom (its local X is the
+    # boom direction, so no rotation is needed -- the arm azimuth orients it).
+    _author_cylinder(stage, f"{arm_path}/motor", geom.motor)
+    _author_box(stage, f"{arm_path}/esc", geom.esc)
+
+    # Propeller marker. The Xform keeps the prop path, PX4 marker attributes (from
+    # the placement), translation, mass, the cosmetic RotateZ spin op (driven each
+    # physics tick), and the hub/blade visual. rotor_discovery and the bridge read
+    # the marker's translation, which the RotateZ op leaves unchanged.
+    prop_part = geom.propeller
+    prop = UsdGeom.Xform.Define(stage, f"{arm_path}/prop")
+    _apply_pose(prop, prop_part.position, prop_part.rotation_deg)
     prop.AddRotateZOp().Set(0.0)
     prop.GetPrim().CreateAttribute("drone:rotorMarker", Sdf.ValueTypeNames.Bool).Set(True)
     prop.GetPrim().CreateAttribute("drone:px4MotorIndex", Sdf.ValueTypeNames.Int).Set(
-        motor.px4_motor_index
+        placement.px4_motor_index
     )
-    prop.GetPrim().CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(motor.spin_dir)
+    prop.GetPrim().CreateAttribute("drone:spinDir", Sdf.ValueTypeNames.String).Set(
+        placement.spin_dir
+    )
     _set_mass(prop.GetPrim(), prop_part.mass)
-    _author_propeller_visual(stage, f"{grp_path}/prop", motor)
+    _author_propeller_visual(stage, f"{arm_path}/prop", prop_part, geom.prop_num_blades)
 
 
 def build_drone_usd(
@@ -431,22 +436,19 @@ def build_drone_usd(
     mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(*cfg.diagonal_inertia))
     mass_api.CreateCenterOfMassAttr(Gf.Vec3f(*cfg.center_of_mass))
 
-    # Frame: center plate (collidable) + arms (collidable, massless).
+    # Frame: center plate (collidable). The arm booms live under the per-arm
+    # assemblies below, not here.
     frame_path = f"{root_path}/frame"
     UsdGeom.Xform.Define(stage, frame_path)
     plate = _author_box(stage, f"{frame_path}/center_plate", cfg.center_plate)
     UsdPhysics.CollisionAPI.Apply(plate.GetPrim())
 
-    arms_path = f"{frame_path}/arms"
+    # Arms: one shared geometry placed per arm under its own azimuth Xform. Each
+    # assembly carries its boom, motor, ESC, and propeller marker.
+    arms_path = f"{root_path}/arms"
     UsdGeom.Xform.Define(stage, arms_path)
-    for i, arm in enumerate(cfg.arms):
-        _author_capsule(stage, f"{arms_path}/arm_{i+1}", arm)
-
-    # Propulsion.
-    prop_path = f"{root_path}/propulsion"
-    UsdGeom.Xform.Define(stage, prop_path)
-    for i, motor in enumerate(cfg.motors):
-        _author_motor(stage, prop_path, i, motor)
+    for i, placement in enumerate(cfg.arms):
+        _author_arm(stage, arms_path, i, cfg.arm_geometry, placement)
 
     # Avionics.
     avionics_path = f"{root_path}/avionics"
