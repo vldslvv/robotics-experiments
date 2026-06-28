@@ -22,7 +22,7 @@ ground_settle_s: 1.5
 takeoff_timeout_s: 30.0
 hover_settle_s: 2.0
 
-# Flight-envelope gates wired onto the takeoff/hover steps (commanding.EnvelopeGates).
+# Flight-envelope gates wired onto the takeoff/hover steps (private envelope-gate adapter).
 # The continuous max_* gates fail the routine when breached; the hover_max_* bounds
 # define a "stable hover" for the hover step's hold window. Horizontal gates sized
 # from recent passing runs with generous headroom.

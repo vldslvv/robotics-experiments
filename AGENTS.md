@@ -43,6 +43,13 @@ the current contents and the intended home for that kind of code.
 ## Python API organization
 - Public top-level functions, classes, and intentional constants in Python modules must be
   listed in module-level `__all__`.
+- Keep public API minimal. Public exports are for production consumers outside
+  the module or package boundary; tests alone do not justify public API. If a
+  top-level symbol is only used by tests or internal implementation, make it
+  private. If a whole module is only used internally, prefer an
+  underscore-prefixed module name. Keep `__all__` limited to the intended
+  production API rather than exporting helpers, scaffolding, constants, or seams
+  for test convenience.
 - Keep private top-level helper functions before public top-level APIs when possible, so
   declarations read from implementation helpers into public entrypoints.
 - Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
@@ -206,7 +213,11 @@ the current contents and the intended home for that kind of code.
   the core import path -- every module imports neither Isaac nor pymavlink at
   module scope (the concrete `MavlinkCommandPort` imports `pymavlink` only inside
   its methods), so `import robotics_experiments` succeeds with both absent, and
-  `commanding/__init__.py` is re-export-only. The full reference is
+  `commanding/__init__.py` is re-export-only. Its public package API is the
+  production runtime surface (`RoutineDriver`, `DriverParams`,
+  `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
+  and `FailureKind`); pure stepper/building internals live in underscore modules
+  and are tested directly as private implementation. The full reference is
   `docs/COMMAND_ROUTINE_CONTRACT.md`; read it before changing this layer.
 - The contract mirrors the bridge part-for-part: `RoutineObservation` (pure
   input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
@@ -254,7 +265,7 @@ the current contents and the intended home for that kind of code.
   `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
   `angular_speed_below`; `EnvelopeGates` bundles the thresholds.
 - Where the executor lives: the pure per-drone `RoutineDriver`
-  (`commanding/driver.py`) is the single executor -- a tick-driven phase machine
+  (`commanding/_driver.py`) is the single executor -- a tick-driven phase machine
   (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET -> BUILD
   -> DRIVE -> DONE`) over one drone's routine, one `AbstractCommandPort`, and a
   `DriverEnvironment` seam (bridge connectivity, sim time, observation assembly,
@@ -314,10 +325,9 @@ the current contents and the intended home for that kind of code.
   (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
   `{kind: hover, hold_s}` mappings) gets its own `RoutineDriver`; an **empty** list
   (the default `configs/experiment/routine/default.yaml`) means that drone is
-  manual. Mixed fleets are allowed. There is no separate enable flag. The pure
-  `commanding.build_vehicle_routine(steps, *, target_*, command_ack_timeout_s,
-  gates, takeoff_timeout_s, hover_settle_s)` maps the descriptors + a per-drone
-  takeoff target into a `VehicleRoutine` (unknown `kind`, or a `takeoff`/`hover`
+  manual. Mixed fleets are allowed. There is no separate enable flag. The private
+  pure routine builder maps the descriptors + a per-drone takeoff target into the
+  routine object the driver executes (unknown `kind`, or a `takeoff`/`hover`
   missing a required field, raises `ValueError`); it stays on the core import path
   and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver. The takeoff step completes on a real
   climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained

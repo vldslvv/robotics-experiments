@@ -10,15 +10,15 @@ from _fakes import FakeCommandPort, FakeDriverEnvironment, make_routine_observat
 
 from robotics_experiments.commanding import (
     DriverParams,
-    DriverPhase,
-    EnvelopeGates,
     FailureKind,
     RoutineDriver,
 )
-from robotics_experiments.commanding.commands import MAV_CMD_COMPONENT_ARM_DISARM
-from robotics_experiments.commanding.observation import CommandAck
+from robotics_experiments.commanding._commands import _MAV_CMD_COMPONENT_ARM_DISARM
+from robotics_experiments.commanding._driver import _DriverPhase
+from robotics_experiments.commanding._observation import CommandAck
+from robotics_experiments.commanding._routine import _EnvelopeGates
 
-_GATES = EnvelopeGates(
+_GATES = _EnvelopeGates(
     max_tilt_deg=35.0,
     max_lateral_drift_m=2.0,
     max_vertical_speed_m_s=8.0,
@@ -63,40 +63,40 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
 
     # WAIT_BRIDGE: holds until the bridge connects.
     driver.tick()
-    assert driver.phase is DriverPhase.WAIT_BRIDGE
+    assert driver.phase is _DriverPhase.WAIT_BRIDGE
     env.connected = True
     driver.tick()
-    assert driver.phase is DriverPhase.CONNECT
+    assert driver.phase is _DriverPhase.CONNECT
 
     # CONNECT opens the port; HANDSHAKE holds until the port handshakes.
     driver.tick()
-    assert driver.phase is DriverPhase.HANDSHAKE
+    assert driver.phase is _DriverPhase.HANDSHAKE
     assert port.connected
     driver.tick()
-    assert driver.phase is DriverPhase.HANDSHAKE
+    assert driver.phase is _DriverPhase.HANDSHAKE
     port.handshaked = True
     driver.tick()
-    assert driver.phase is DriverPhase.PREARM_SETTLE
+    assert driver.phase is _DriverPhase.PREARM_SETTLE
 
     # PREARM_SETTLE clears immediately (prearm_settle_s=0); FETCH_TARGET holds
     # until a global position is available.
     driver.tick()
-    assert driver.phase is DriverPhase.FETCH_TARGET
+    assert driver.phase is _DriverPhase.FETCH_TARGET
     driver.tick()
-    assert driver.phase is DriverPhase.FETCH_TARGET
+    assert driver.phase is _DriverPhase.FETCH_TARGET
     port.global_position = (47.0, 8.0, 488.0)
     driver.tick()
-    assert driver.phase is DriverPhase.BUILD
+    assert driver.phase is _DriverPhase.BUILD
 
     # BUILD assembles the routine/commander; then DRIVE.
     driver.tick()
-    assert driver.phase is DriverPhase.DRIVE
+    assert driver.phase is _DriverPhase.DRIVE
 
-    # DRIVE: arm SEND, then the arm ack advances to the takeoff step.
+    # DRIVE: _arm SEND, then the _arm ack advances to the _takeoff step.
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.0))
     driver.tick()
     assert [c.label for c in port.sent] == ["arm"]
-    port.feedback = [CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)]
+    port.feedback = [CommandAck.from_result(_MAV_CMD_COMPONENT_ARM_DISARM, 0)]
     driver.tick()
     assert env.advanced_steps == ["arm"]
 
@@ -104,7 +104,7 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
     driver.tick()
     assert [c.label for c in port.sent] == ["arm", "takeoff"]
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.2))
-    driver.tick()  # not climbed enough -> still takeoff
+    driver.tick()  # not climbed enough -> still _takeoff
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
     driver.tick()
     assert env.advanced_steps == ["arm", "takeoff"]
@@ -124,25 +124,25 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
 
 
 def _drive_to_takeoff(driver, port, env):
-    """Advance a fresh driver to the takeoff SEND in the DRIVE phase."""
+    """Advance a fresh driver to the _takeoff SEND in the DRIVE phase."""
     env.connected = True
     port.handshaked = True
     port.global_position = (47.0, 8.0, 488.0)
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.0))
     for _ in range(20):
         driver.tick()
-        if driver.phase is DriverPhase.DRIVE and any(c.label == "arm" for c in port.sent):
+        if driver.phase is _DriverPhase.DRIVE and any(c.label == "arm" for c in port.sent):
             break
-    # advance the arm step
-    port.feedback = [CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)]
+    # advance the _arm step
+    port.feedback = [CommandAck.from_result(_MAV_CMD_COMPONENT_ARM_DISARM, 0)]
     driver.tick()
-    driver.tick()  # takeoff SEND
+    driver.tick()  # _takeoff SEND
 
 
 def test_routine_driver_envelope_breach_fails():
     driver, port, env = _make_driver()[:3]
     _drive_to_takeoff(driver, port, env)
-    # A hard tilt during the takeoff step is an ENVELOPE breach.
+    # A hard tilt during the _takeoff step is an ENVELOPE breach.
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.5), tilt_deg=50.0)
     driver.tick()
     assert driver.is_done

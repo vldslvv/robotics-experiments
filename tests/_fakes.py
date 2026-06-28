@@ -345,9 +345,9 @@ def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
 
 
 class FakeCommandPort:
-    """An :class:`AbstractCommandPort` for the pure command-layer / driver tests.
+    """An :class:`_AbstractCommandPort` for the pure command-layer / driver tests.
 
-    Captures the ``MavlinkCommand``s emitted on ``SEND`` and lets a test script
+    Captures the ``_MavlinkCommand``s emitted on ``SEND`` and lets a test script
     the control-feedback the driver reads through the seam: queue acks via
     :attr:`feedback`, and set :attr:`handshaked` / :attr:`failsafe_flag` /
     :attr:`global_position`. Heartbeat/connect calls are counted but inert.
@@ -415,7 +415,7 @@ def make_routine_observation(
     ``angular_velocity_flu`` drive the flight-envelope gates and the hover-stable
     completion predicate.
     """
-    from robotics_experiments.commanding.observation import RoutineObservation
+    from robotics_experiments.commanding._observation import RoutineObservation
 
     vehicle_state = VehicleState(
         position_enu=np.asarray(position_enu, dtype=np.float64),

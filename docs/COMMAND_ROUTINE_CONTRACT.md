@@ -7,6 +7,13 @@ an observation into a decision across a swappable MAVLink port. It is a domain
 leaf on the core import path: every module imports neither Isaac nor pymavlink at
 module scope, so `import robotics_experiments` succeeds with both absent.
 
+`robotics_experiments.commanding` intentionally re-exports only the production
+runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
+`RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, and `FailureKind`).
+The pure stepper, command constructors, routine builder, and lower-level seams
+live in underscore-prefixed modules and are private implementation, even where
+unit tests import them directly as white-box regression guards.
+
 ## The four-part contract
 
 | Bridge | Command layer |
@@ -21,15 +28,15 @@ Like the bridge, the command layer is **per drone**: one `VehicleCommander` and
 one `RoutineDriver` drive one drone's routine. There is no fleet object - drones
 are independent (cross-drone synchronization is deliberately deferred).
 
-- **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
+- **`_commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
   params, a label) plus pure constructors (`arm`, `takeoff`, `reposition`,
   `land`). `MAV_CMD_*` numbers and `PX4_FORCE_ARM_MAGIC` are named int constants
   so the module never imports pymavlink.
-- **`observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
+- **`_observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
   int constants; `CommandAck.from_result` derives `accepted`.
-- **`routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
+- **`_routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
   command -- `None` for a verification-only step such as `hover`; a completion
   predicate `StepPredicate = Callable[[RoutineObservation, baseline], bool]`; a
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
@@ -53,17 +60,17 @@ are independent (cross-drone synchronization is deliberately deferred).
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
   reacts in kind: a strict driver maps `ENVELOPE` to its instability error and
   `COMMAND` to a plain assertion; a forgiving driver logs either and stops.
-- **`port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
+- **`_port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
   `pump_heartbeat`, `send`, `poll_feedback`) and the PX4 `MavlinkCommandPort`,
   whose `pymavlink` import is function-scoped. The port absorbs the GCS-link
   concerns (connect, throttled heartbeat, `command_long` send, draining
   `COMMAND_ACK` / `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes
   `is_handshaked`, `failsafe`, `failsafe_system_status`, and
   `latest_global_position`.
-- **`commander.py`** -- `VehicleCommander` (one routine + one port + the
+- **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
   `RoutineState`: runs `decide` and performs the single `port.send` side effect).
   One commander drives one drone; there is no fleet object or barrier.
-- **`driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
+- **`_driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
   `AbstractCommandPort` and a `DriverEnvironment` (the injected seam: bridge

@@ -1,18 +1,18 @@
 """The pure command plan and its stepper - the command-layer contract centerpiece.
 
-A :class:`VehicleRoutine` is an ordered tuple of :class:`RoutineStep`s; each step
-carries one optional :class:`MavlinkCommand`, a pure completion predicate over a
+A :class:`_VehicleRoutine` is an ordered tuple of :class:`_RoutineStep`s; each step
+carries one optional :class:`_MavlinkCommand`, a pure completion predicate over a
 :class:`RoutineObservation` (and the routine's captured baseline position), an
-optional sustained-hold window, and continuous invariant gates. :func:`decide` is
+optional sustained-hold window, and continuous invariant gates. :func:`_decide` is
 the pure transform at the heart of the layer - the command-layer analogue of the
 thrust model's ``commands_to_dynamics``: given the routine, the current
-:class:`RoutineState`, and an observation, it returns the next state and a
-:class:`RoutineDecision` (``SEND`` / ``WAIT`` / ``ADVANCE`` / ``DONE`` /
+:class:`_RoutineState`, and an observation, it returns the next state and a
+:class:`_RoutineDecision` (``SEND`` / ``WAIT`` / ``ADVANCE`` / ``DONE`` /
 ``FAIL``). No sockets, no pymavlink, no Isaac - it is unit-testable with plain
-dataclasses, and the side-effecting :class:`VehicleCommander` (see
-``commander.py``) is the only thing that turns a ``SEND`` decision into MAVLink.
+dataclasses, and the side-effecting :class:`_VehicleCommander` (see
+``_commander.py``) is the only thing that turns a ``SEND`` decision into MAVLink.
 
-The same routine verifies a takeoff in every workflow: a step's completion
+The same routine verifies a _takeoff in every workflow: a step's completion
 predicate can require a physical state (climbed at least N metres, hovering
 stable for N seconds), and its ``invariants`` are continuous flight-envelope
 gates (tilt / drift / vertical+angular speed) whose breach fails the routine with
@@ -38,38 +38,38 @@ import numpy as np
 
 from robotics_experiments.px4_bridge.frames import tilt_angle_deg
 
-from .commands import (
-    MAV_CMD_COMPONENT_ARM_DISARM,
-    MavlinkCommand,
-    arm,
-    land,
-    reposition,
-    takeoff,
+from ._commands import (
+    _MAV_CMD_COMPONENT_ARM_DISARM,
+    _MavlinkCommand,
+    _arm,
+    _land,
+    _reposition,
+    _takeoff,
 )
-from .observation import MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
+from ._observation import _MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
 
 __all__ = [
-    "DecisionKind",
-    "EnvelopeGates",
+    "_DecisionKind",
+    "_EnvelopeGates",
     "FailureKind",
-    "Invariant",
-    "RoutineDecision",
-    "RoutineState",
-    "RoutineStep",
-    "StepPredicate",
-    "VehicleRoutine",
-    "ack_accepted",
-    "angular_speed_below",
-    "armed",
-    "build_vehicle_routine",
-    "climbed_at_least",
-    "cross_track_drift_below",
-    "disarmed",
-    "hovering_stable",
-    "lateral_drift_below",
-    "moved_forward_at_least",
-    "tilt_below",
-    "vertical_speed_within",
+    "_Invariant",
+    "_RoutineDecision",
+    "_RoutineState",
+    "_RoutineStep",
+    "_StepPredicate",
+    "_VehicleRoutine",
+    "_ack_accepted",
+    "_angular_speed_below",
+    "_armed",
+    "_build_vehicle_routine",
+    "_climbed_at_least",
+    "_cross_track_drift_below",
+    "_disarmed",
+    "_hovering_stable",
+    "_lateral_drift_below",
+    "_moved_forward_at_least",
+    "_tilt_below",
+    "_vertical_speed_within",
 ]
 
 _EARTH_RADIUS_M = 6_378_137.0
@@ -78,12 +78,12 @@ _EARTH_RADIUS_M = 6_378_137.0
 # baseline position (ENU, set on the first SEND); baseline is ``None`` only
 # before any step has been sent. An invariant gate returns a breach message when
 # the continuous flight envelope is violated, or ``None`` when it holds.
-StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
-Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
+_StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
+_Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 
 
-class DecisionKind(Enum):
-    """The kind of a :class:`RoutineDecision`."""
+class _DecisionKind(Enum):
+    """The kind of a :class:`_RoutineDecision`."""
 
     SEND = auto()
     WAIT = auto()
@@ -106,47 +106,47 @@ class FailureKind(Enum):
 
 
 @dataclass(frozen=True)
-class RoutineDecision:
-    """The pure output of :func:`decide` for one tick.
+class _RoutineDecision:
+    """The pure output of :func:`_decide` for one tick.
 
     Exactly one ``kind``; ``command`` is set only for ``SEND``; ``reason`` and
     ``failure_kind`` only for ``FAIL``. Build instances through the classmethods.
     """
 
-    kind: DecisionKind
-    command: Optional[MavlinkCommand] = None
+    kind: _DecisionKind
+    command: Optional[_MavlinkCommand] = None
     reason: Optional[str] = None
     failure_kind: Optional[FailureKind] = None
 
     @classmethod
-    def send(cls, command: MavlinkCommand) -> "RoutineDecision":
-        return cls(DecisionKind.SEND, command=command)
+    def send(cls, command: _MavlinkCommand) -> "_RoutineDecision":
+        return cls(_DecisionKind.SEND, command=command)
 
     @classmethod
-    def wait(cls) -> "RoutineDecision":
-        return cls(DecisionKind.WAIT)
+    def wait(cls) -> "_RoutineDecision":
+        return cls(_DecisionKind.WAIT)
 
     @classmethod
-    def advance(cls) -> "RoutineDecision":
-        return cls(DecisionKind.ADVANCE)
+    def advance(cls) -> "_RoutineDecision":
+        return cls(_DecisionKind.ADVANCE)
 
     @classmethod
-    def done(cls) -> "RoutineDecision":
-        return cls(DecisionKind.DONE)
+    def done(cls) -> "_RoutineDecision":
+        return cls(_DecisionKind.DONE)
 
     @classmethod
     def fail(
         cls, reason: str, *, failure_kind: FailureKind = FailureKind.COMMAND
-    ) -> "RoutineDecision":
-        return cls(DecisionKind.FAIL, reason=reason, failure_kind=failure_kind)
+    ) -> "_RoutineDecision":
+        return cls(_DecisionKind.FAIL, reason=reason, failure_kind=failure_kind)
 
 
 @dataclass(frozen=True)
-class RoutineStep:
+class _RoutineStep:
     """One step of a routine: a command, its completion predicate, and gates.
 
     Attributes:
-        command: The :class:`MavlinkCommand` sent when the step begins, or
+        command: The :class:`_MavlinkCommand` sent when the step begins, or
             ``None`` for a verification-only step (e.g. ``hover``) that sends
             nothing and only waits on its completion predicate and invariants.
         is_complete: Pure predicate over a :class:`RoutineObservation` and the
@@ -156,9 +156,9 @@ class RoutineStep:
         timeout_s: Sim-time budget for the step; on exceed the routine fails with
             ``FailureKind.COMMAND``.
         retry_on_temporarily_rejected: When ``True``, a
-            ``MAV_RESULT_TEMPORARILY_REJECTED`` ack for this command re-sends it
+            ``_MAV_RESULT_TEMPORARILY_REJECTED`` ack for this command re-sends it
             instead of failing (PX4 returns this transiently before it is ready
-            to arm). When ``False``, any non-accepted ack fails the routine.
+            to _arm). When ``False``, any non-accepted ack fails the routine.
         hold_s: Sim-time the completion predicate must hold *continuously* before
             the step advances (0 = instantaneous, the default). This expresses
             "hover stable for N seconds" as a step completion condition.
@@ -167,25 +167,25 @@ class RoutineStep:
             ``FailureKind.ENVELOPE``.
     """
 
-    command: Optional[MavlinkCommand]
-    is_complete: StepPredicate
+    command: Optional[_MavlinkCommand]
+    is_complete: _StepPredicate
     label: str
     timeout_s: float
     retry_on_temporarily_rejected: bool = False
     hold_s: float = 0.0
-    invariants: tuple[Invariant, ...] = ()
+    invariants: tuple[_Invariant, ...] = ()
 
 
 @dataclass(frozen=True)
-class VehicleRoutine:
-    """An ordered, immutable plan of :class:`RoutineStep`s for one vehicle."""
+class _VehicleRoutine:
+    """An ordered, immutable plan of :class:`_RoutineStep`s for one vehicle."""
 
-    steps: tuple[RoutineStep, ...]
+    steps: tuple[_RoutineStep, ...]
 
 
 @dataclass(frozen=True)
-class RoutineState:
-    """Immutable progress marker threaded through :func:`decide`.
+class _RoutineState:
+    """Immutable progress marker threaded through :func:`_decide`.
 
     Attributes:
         cursor: Index of the active step; ``>= len(steps)`` means the routine is
@@ -199,7 +199,7 @@ class RoutineState:
             timeout. ``None`` before the step begins.
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
-            ``False`` again. Used to enforce ``RoutineStep.hold_s``.
+            ``False`` again. Used to enforce ``_RoutineStep.hold_s``.
     """
 
     cursor: int = 0
@@ -209,19 +209,19 @@ class RoutineState:
     hold_since_us: Optional[int] = None
 
     @classmethod
-    def initial(cls) -> "RoutineState":
+    def initial(cls) -> "_RoutineState":
         return cls()
 
 
-def decide(
-    routine: VehicleRoutine,
-    state: RoutineState,
+def _decide(
+    routine: _VehicleRoutine,
+    state: _RoutineState,
     observation: RoutineObservation,
-) -> tuple[RoutineState, RoutineDecision]:
+) -> tuple[_RoutineState, _RoutineDecision]:
     """Pure routine stepper: map (routine, state, observation) to (state, decision).
 
-    Returns the next :class:`RoutineState` together with the
-    :class:`RoutineDecision` for this tick. The decision is purely a function of
+    Returns the next :class:`_RoutineState` together with the
+    :class:`_RoutineDecision` for this tick. The decision is purely a function of
     the inputs; the only state mutation is the returned new state. Semantics:
 
     - cursor past the last step -> ``DONE``.
@@ -237,7 +237,7 @@ def decide(
     """
     steps = routine.steps
     if state.cursor >= len(steps):
-        return state, RoutineDecision.done()
+        return state, _RoutineDecision.done()
 
     step = steps[state.cursor]
 
@@ -253,15 +253,15 @@ def decide(
             hold_since_us=None,
         )
         if step.command is None:
-            return new_state, RoutineDecision.wait()
-        return new_state, RoutineDecision.send(step.command)
+            return new_state, _RoutineDecision.wait()
+        return new_state, _RoutineDecision.send(step.command)
 
     # Continuous flight-envelope gates: a breach fails the routine as an
     # envelope event, distinct from a command rejection or a timeout.
     for invariant in step.invariants:
         breach = invariant(observation, state.baseline_position_enu)
         if breach is not None:
-            return state, RoutineDecision.fail(
+            return state, _RoutineDecision.fail(
                 f"step {step.label!r} flight envelope breached: {breach}",
                 failure_kind=FailureKind.ENVELOPE,
             )
@@ -271,7 +271,7 @@ def decide(
             new_state = replace(
                 state, cursor=state.cursor + 1, sent=False, step_started_us=None, hold_since_us=None
             )
-            return new_state, RoutineDecision.advance()
+            return new_state, _RoutineDecision.advance()
         hold_since_us = state.hold_since_us
         if hold_since_us is None:
             hold_since_us = int(observation.sim_time_us)
@@ -279,7 +279,7 @@ def decide(
             new_state = replace(
                 state, cursor=state.cursor + 1, sent=False, step_started_us=None, hold_since_us=None
             )
-            return new_state, RoutineDecision.advance()
+            return new_state, _RoutineDecision.advance()
         # Still accumulating the hold window; remember when it started.
         state = replace(state, hold_since_us=hold_since_us)
     elif state.hold_since_us is not None:
@@ -293,12 +293,12 @@ def decide(
         and ack.command_id == step.command.command_id
         and not ack.accepted
     ):
-        if step.retry_on_temporarily_rejected and ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
+        if step.retry_on_temporarily_rejected and ack.result == _MAV_RESULT_TEMPORARILY_REJECTED:
             # Re-send the same command; PX4 returned a transient rejection. Keep
             # the step timer running so a vehicle that never becomes armable
             # still fails on the step timeout below.
-            return state, RoutineDecision.send(step.command)
-        return state, RoutineDecision.fail(
+            return state, _RoutineDecision.send(step.command)
+        return state, _RoutineDecision.fail(
             f"step {step.label!r} rejected: command={step.command.command_id} result={ack.result}",
             failure_kind=FailureKind.COMMAND,
         )
@@ -307,20 +307,20 @@ def decide(
     assert step_started_us is not None  # set on the entry tick, before sent=True
     elapsed_us = int(observation.sim_time_us) - step_started_us
     if elapsed_us > step.timeout_s * 1_000_000:
-        return state, RoutineDecision.fail(
+        return state, _RoutineDecision.fail(
             f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
             f"(sim elapsed {elapsed_us * 1e-6:.1f}s)",
             failure_kind=FailureKind.COMMAND,
         )
 
-    return state, RoutineDecision.wait()
+    return state, _RoutineDecision.wait()
 
 
 # ---- Pure completion predicates over (RoutineObservation, baseline) ---------
 
 
-def armed() -> StepPredicate:
-    """Predicate: PX4 currently commands nonzero rotor references (is armed)."""
+def _armed() -> _StepPredicate:
+    """Predicate: PX4 currently commands nonzero rotor references (is _armed)."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
         return bool(observation.bridge_status.is_armed)
@@ -328,7 +328,7 @@ def armed() -> StepPredicate:
     return predicate
 
 
-def ack_accepted(command_id: int) -> StepPredicate:
+def _ack_accepted(command_id: int) -> _StepPredicate:
     """Predicate: the last ack this tick accepted ``command_id``."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -338,7 +338,7 @@ def ack_accepted(command_id: int) -> StepPredicate:
     return predicate
 
 
-def climbed_at_least(min_climb_m: float) -> StepPredicate:
+def _climbed_at_least(min_climb_m: float) -> _StepPredicate:
     """Predicate: the vehicle climbed at least ``min_climb_m`` above the baseline.
 
     The baseline is the routine's captured start position (its ground altitude),
@@ -354,13 +354,13 @@ def climbed_at_least(min_climb_m: float) -> StepPredicate:
     return predicate
 
 
-def hovering_stable(
+def _hovering_stable(
     *, max_abs_vertical_speed_m_s: float, max_abs_horizontal_speed_m_s: float
-) -> StepPredicate:
+) -> _StepPredicate:
     """Predicate: the vehicle's translational speeds are within hover bounds.
 
     Combined with a step ``hold_s`` this expresses "held a stable hover for N
-    seconds". Reached only after the takeoff step has already verified the climb,
+    seconds". Reached only after the _takeoff step has already verified the climb,
     so a grounded (also slow) vehicle never gets here.
     """
 
@@ -373,7 +373,7 @@ def hovering_stable(
     return predicate
 
 
-def moved_forward_at_least(distance_m: float) -> StepPredicate:
+def _moved_forward_at_least(distance_m: float) -> _StepPredicate:
     """Predicate: the vehicle moved at least ``distance_m`` along world +X/east."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -385,8 +385,8 @@ def moved_forward_at_least(distance_m: float) -> StepPredicate:
     return predicate
 
 
-def disarmed() -> StepPredicate:
-    """Predicate: PX4 no longer commands armed rotor references."""
+def _disarmed() -> _StepPredicate:
+    """Predicate: PX4 no longer commands _armed rotor references."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
         return not bool(observation.bridge_status.is_armed)
@@ -397,7 +397,7 @@ def disarmed() -> StepPredicate:
 # ---- Continuous flight-envelope invariant gates ----------------------------
 
 
-def tilt_below(max_tilt_deg: float) -> Invariant:
+def _tilt_below(max_tilt_deg: float) -> _Invariant:
     """Gate: body tilt from upright stays at or below ``max_tilt_deg``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -409,7 +409,7 @@ def tilt_below(max_tilt_deg: float) -> Invariant:
     return gate
 
 
-def lateral_drift_below(max_lateral_drift_m: float) -> Invariant:
+def _lateral_drift_below(max_lateral_drift_m: float) -> _Invariant:
     """Gate: horizontal distance from the baseline stays within ``max_lateral_drift_m``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -424,7 +424,7 @@ def lateral_drift_below(max_lateral_drift_m: float) -> Invariant:
     return gate
 
 
-def cross_track_drift_below(max_cross_track_m: float) -> Invariant:
+def _cross_track_drift_below(max_cross_track_m: float) -> _Invariant:
     """Gate: world Y/north drift from the baseline stays within ``max_cross_track_m``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -439,7 +439,7 @@ def cross_track_drift_below(max_cross_track_m: float) -> Invariant:
     return gate
 
 
-def vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> Invariant:
+def _vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> _Invariant:
     """Gate: vertical speed stays within (``max_down_m_s``, ``max_up_m_s``).
 
     ``max_up_m_s`` is the positive upward limit; ``max_down_m_s`` is the negative
@@ -457,7 +457,7 @@ def vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> Invariant:
     return gate
 
 
-def angular_speed_below(max_angular_speed_rad_s: float) -> Invariant:
+def _angular_speed_below(max_angular_speed_rad_s: float) -> _Invariant:
     """Gate: body angular-speed magnitude stays within ``max_angular_speed_rad_s``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -477,13 +477,13 @@ def angular_speed_below(max_angular_speed_rad_s: float) -> Invariant:
 
 
 @dataclass(frozen=True)
-class EnvelopeGates:
+class _EnvelopeGates:
     """Flight-envelope thresholds wired onto a routine's flight steps.
 
-    The continuous gates (``max_*``) become per-step :class:`Invariant`s on the
-    takeoff and hover steps; the two ``hover_*`` thresholds parameterize the
-    hover step's :func:`hovering_stable` completion predicate. Built by a driver
-    from the ``routine`` config and handed to :func:`build_vehicle_routine`.
+    The continuous gates (``max_*``) become per-step :class:`_Invariant`s on the
+    _takeoff and hover steps; the two ``hover_*`` thresholds parameterize the
+    hover step's :func:`_hovering_stable` completion predicate. Built by a driver
+    from the ``routine`` config and handed to :func:`_build_vehicle_routine`.
     """
 
     max_tilt_deg: float
@@ -495,21 +495,21 @@ class EnvelopeGates:
     hover_max_abs_horizontal_speed_m_s: float
 
 
-def _flight_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
+def _flight_invariants(gates: _EnvelopeGates) -> tuple[_Invariant, ...]:
     return (
-        tilt_below(gates.max_tilt_deg),
-        lateral_drift_below(gates.max_lateral_drift_m),
-        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
-        angular_speed_below(gates.max_angular_speed_rad_s),
+        _tilt_below(gates.max_tilt_deg),
+        _lateral_drift_below(gates.max_lateral_drift_m),
+        _vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
+        _angular_speed_below(gates.max_angular_speed_rad_s),
     )
 
 
-def _forward_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
+def _forward_invariants(gates: _EnvelopeGates) -> tuple[_Invariant, ...]:
     return (
-        tilt_below(gates.max_tilt_deg),
-        cross_track_drift_below(gates.max_lateral_drift_m),
-        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
-        angular_speed_below(gates.max_angular_speed_rad_s),
+        _tilt_below(gates.max_tilt_deg),
+        _cross_track_drift_below(gates.max_lateral_drift_m),
+        _vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
+        _angular_speed_below(gates.max_angular_speed_rad_s),
     )
 
 
@@ -522,31 +522,31 @@ def _offset_lat_lon(
     return float(latitude_deg) + dlat_deg, float(longitude_deg) + dlon_deg
 
 
-def build_vehicle_routine(
+def _build_vehicle_routine(
     steps: Sequence[Mapping[str, Any]],
     *,
     target_latitude_deg: float,
     target_longitude_deg: float,
     target_altitude_m: float,
     command_ack_timeout_s: float,
-    gates: EnvelopeGates,
+    gates: _EnvelopeGates,
     takeoff_timeout_s: float,
     hover_settle_s: float,
-) -> VehicleRoutine:
-    """Build a :class:`VehicleRoutine` from authored step descriptors and a target.
+) -> _VehicleRoutine:
+    """Build a :class:`_VehicleRoutine` from authored step descriptors and a target.
 
     The single pure mapping from the ``routine.steps`` config (a list of
     ``{kind: ...}`` mappings) to the immutable routine the commander executes,
     shared by every driver (the live extension and the standalone scenario).
-    ``target_*`` is the per-drone takeoff target: the drone's current reported
-    geographic position and altitude, to which a ``takeoff`` step adds its
+    ``target_*`` is the per-drone _takeoff target: the drone's current reported
+    geographic position and altitude, to which a ``_takeoff`` step adds its
     ``climb_m``. ``gates`` are the flight-envelope thresholds wired onto the
-    takeoff and hover steps so the routine verifies the flight in every workflow.
+    _takeoff and hover steps so the routine verifies the flight in every workflow.
 
     Step kinds:
-    - ``arm``: completes on the arm ``COMMAND_ACK``; retries on a transient PX4
+    - ``_arm``: completes on the _arm ``COMMAND_ACK``; retries on a transient PX4
       ``TEMPORARILY_REJECTED``.
-    - ``takeoff`` (requires ``climb_m`` and ``min_climb_m``): commands takeoff to
+    - ``_takeoff`` (requires ``climb_m`` and ``min_climb_m``): commands _takeoff to
       ``target_altitude_m + climb_m`` and completes once the vehicle has actually
       climbed ``min_climb_m`` above its baseline; ``timeout_s`` is
       ``takeoff_timeout_s``; flight gates apply.
@@ -556,7 +556,7 @@ def build_vehicle_routine(
     - ``forward`` (requires ``distance_m`` and ``timeout_s``): repositions
       ``distance_m`` along world +X/east and completes once that displacement is
       observed from the routine baseline; flight gates apply.
-    - ``land`` (requires ``timeout_s``): commands a landing at the current
+    - ``_land`` (requires ``timeout_s``): commands a landing at the current
       position and completes once PX4 disarms.
 
     An empty ``steps`` yields an empty routine (the manual case). Pure: no Isaac,
@@ -568,15 +568,15 @@ def build_vehicle_routine(
     """
     flight_invariants = _flight_invariants(gates)
     forward_invariants = _forward_invariants(gates)
-    built: list[RoutineStep] = []
+    built: list[_RoutineStep] = []
     commanded_altitude_m = float(target_altitude_m)
     for index, descriptor in enumerate(steps):
         kind = descriptor.get("kind")
         if kind == "arm":
             built.append(
-                RoutineStep(
-                    command=arm(),
-                    is_complete=ack_accepted(MAV_CMD_COMPONENT_ARM_DISARM),
+                _RoutineStep(
+                    command=_arm(),
+                    is_complete=_ack_accepted(_MAV_CMD_COMPONENT_ARM_DISARM),
                     label="arm",
                     timeout_s=command_ack_timeout_s,
                     retry_on_temporarily_rejected=True,
@@ -592,9 +592,9 @@ def build_vehicle_routine(
             absolute_altitude_m = float(target_altitude_m) + float(descriptor["climb_m"])
             commanded_altitude_m = absolute_altitude_m
             built.append(
-                RoutineStep(
-                    command=takeoff(target_latitude_deg, target_longitude_deg, absolute_altitude_m),
-                    is_complete=climbed_at_least(float(descriptor["min_climb_m"])),
+                _RoutineStep(
+                    command=_takeoff(target_latitude_deg, target_longitude_deg, absolute_altitude_m),
+                    is_complete=_climbed_at_least(float(descriptor["min_climb_m"])),
                     label="takeoff",
                     timeout_s=takeoff_timeout_s,
                     retry_on_temporarily_rejected=True,
@@ -606,9 +606,9 @@ def build_vehicle_routine(
                 raise ValueError(f"routine step {index} (hover) is missing required 'hold_s'")
             hold_s = float(descriptor["hold_s"])
             built.append(
-                RoutineStep(
+                _RoutineStep(
                     command=None,
-                    is_complete=hovering_stable(
+                    is_complete=_hovering_stable(
                         max_abs_vertical_speed_m_s=gates.hover_max_abs_vertical_speed_m_s,
                         max_abs_horizontal_speed_m_s=gates.hover_max_abs_horizontal_speed_m_s,
                     ),
@@ -631,13 +631,13 @@ def build_vehicle_routine(
                 north_m=0.0,
             )
             built.append(
-                RoutineStep(
-                    command=reposition(
+                _RoutineStep(
+                    command=_reposition(
                         target_latitude_deg,
                         target_longitude_deg,
                         commanded_altitude_m,
                     ),
-                    is_complete=moved_forward_at_least(distance_m),
+                    is_complete=_moved_forward_at_least(distance_m),
                     label="forward",
                     timeout_s=float(descriptor["timeout_s"]),
                     retry_on_temporarily_rejected=True,
@@ -648,9 +648,9 @@ def build_vehicle_routine(
             if "timeout_s" not in descriptor:
                 raise ValueError(f"routine step {index} (land) is missing required 'timeout_s'")
             built.append(
-                RoutineStep(
-                    command=land(),
-                    is_complete=disarmed(),
+                _RoutineStep(
+                    command=_land(),
+                    is_complete=_disarmed(),
                     label="land",
                     timeout_s=float(descriptor["timeout_s"]),
                     retry_on_temporarily_rejected=True,
@@ -658,4 +658,4 @@ def build_vehicle_routine(
             )
         else:
             raise ValueError(f"routine step {index} has unknown kind {kind!r}")
-    return VehicleRoutine(steps=tuple(built))
+    return _VehicleRoutine(steps=tuple(built))

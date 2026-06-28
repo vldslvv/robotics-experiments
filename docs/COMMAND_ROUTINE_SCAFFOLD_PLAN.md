@@ -60,7 +60,7 @@ a ROS toggle publisher. Only the **commanding** half is greenfield.
 > non-test `routine` Hydra group (`RoutineConfig`, always composed onto
 > `EnvConfig`), with `routine.steps` as the single source of truth (non-empty ->
 > the extension builds the driver on Play; empty -> manual). The pure
-> `commanding.build_vehicle_routine` maps the config descriptors to a
+> `private routine builder` maps the config descriptors to a
 > `VehicleRoutine`. On failure/failsafe/timeout the runtime driver logs a warning
 > and stops (never raises), unlike the asserting test. The standalone and
 > extension paths share the same `decide(...)` core and `AbstractCommandPort`
@@ -90,7 +90,7 @@ absent: keep `pymavlink` imports function-scoped (the current pattern in
 `_px4_takeoff_scenario.py:237`), and keep `commanding/__init__.py` re-export-only
 of the pure types. Each public symbol goes in module `__all__`.
 
-- **`commands.py`** -- thin MAVLink command wrappers, pure data (no pymavlink
+- **`_commands.py`** -- thin MAVLink command wrappers, pure data (no pymavlink
   import; MAV_CMD numbers as named int constants so the module stays
   dependency-free):
   - `MavlinkCommand` (frozen): `command_id: int`, `params: tuple[float, ...]`
@@ -102,12 +102,12 @@ of the pure types. Each public symbol goes in module `__all__`.
     param2).
   - Pure constructors: `arm()`, `takeoff(lat, lon, abs_alt, climb)`,
     `set_altitude(...)` / `reposition(lat, lon, alt)`, `land()`.
-- **`observation.py`** -- `RoutineObservation` (frozen): `vehicle_state:
+- **`_observation.py`** -- `RoutineObservation` (frozen): `vehicle_state:
   VehicleState`, `bridge_status: BridgeStatus`, `last_ack: CommandAck | None`,
   `failsafe: bool`, `sim_time_us: int`. Plus a small `CommandAck` (frozen:
   `command_id`, `result`, `accepted: bool`). Pure; reuses the bridge's existing
   pure `VehicleState` / `BridgeStatus`.
-- **`routine.py`** -- the pure plan + stepper:
+- **`_routine.py`** -- the pure plan + stepper:
   - `RoutineStep` (frozen): `command: MavlinkCommand`,
     `is_complete: Callable[[RoutineObservation], bool]`, `label: str`,
     `timeout_s: float`, optional `retry_on_temporarily_rejected: bool`.
@@ -121,7 +121,7 @@ of the pure types. Each public symbol goes in module `__all__`.
     unit-testable with plain dataclasses. This is the contract centerpiece.
   - Predicate helpers (pure, over `RoutineObservation`): `armed()`,
     `climbed_at_least(min_climb_m)`, `ack_accepted()`.
-- **`port.py`** -- the side-effecting seam (mirrors
+- **`_port.py`** -- the side-effecting seam (mirrors
   `AbstractFlightStackBridge`):
   - `AbstractCommandPort` (ABC): `connect()`, `pump_heartbeat()`,
     `send(command: MavlinkCommand)`, `poll_feedback() -> CommandAck | None`,
@@ -131,7 +131,7 @@ of the pure types. Each public symbol goes in module `__all__`.
     `_send_gcs_heartbeat`, `command_long_send`, `_drain_mavlink`, and the
     `COMMAND_ACK` / failsafe / statustext parsing currently inline in
     `_px4_takeoff_scenario.py:236-360,428-502`.
-- **`commander.py`** -- orchestrators:
+- **`_commander.py`** -- orchestrators:
   - `VehicleCommander` wires one `VehicleRoutine` + one `AbstractCommandPort` +
     holds `RoutineState`. `step(observation) -> RoutineDecision`: runs `decide`,
     and on `SEND` calls `port.send(...)`; tracks completion. Pure decision,
@@ -185,11 +185,11 @@ single-source-of-truth rule.)
 
 Create:
 - `src/robotics_experiments/commanding/__init__.py` (lazy, re-export-only)
-- `src/robotics_experiments/commanding/commands.py`
-- `src/robotics_experiments/commanding/observation.py`
-- `src/robotics_experiments/commanding/routine.py`
-- `src/robotics_experiments/commanding/port.py`
-- `src/robotics_experiments/commanding/commander.py`
+- `src/robotics_experiments/commanding/_commands.py`
+- `src/robotics_experiments/commanding/_observation.py`
+- `src/robotics_experiments/commanding/_routine.py`
+- `src/robotics_experiments/commanding/_port.py`
+- `src/robotics_experiments/commanding/_commander.py`
 - `tests/test_commanding_routine.py` (pure `decide` + `FleetCommander` barrier,
   with a fake `AbstractCommandPort` -- add the fake to `tests/_fakes.py`)
 - `docs/COMMAND_ROUTINE_CONTRACT.md` (short contract reference once implemented:

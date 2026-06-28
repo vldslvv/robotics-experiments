@@ -404,9 +404,8 @@ class RoutineConfig:
     raises, the forgiving live/regular run logs and stops). The verification is
     the routine's own job: a takeoff step completes on a real climb and a hover
     step on a sustained stable hover, and the ``max_*`` / ``hover_max_*`` gates
-    below are wired (via ``commanding.EnvelopeGates`` /
-    ``commanding.build_vehicle_routine``) onto the flight steps as continuous
-    invariants whose breach fails the routine.
+    below are wired by the command driver's private routine builder onto the
+    flight steps as continuous invariants whose breach fails the routine.
 
     This is the *control* layer's config, parallel to the bridge's ``px4`` group:
     the GCS link baseport lives in the ``px4`` group
@@ -421,8 +420,8 @@ class RoutineConfig:
             (no routine driver). Typed ``List[Any]`` so Hydra's
             structured-config validation accepts the partial per-step mappings
             during ``compose()`` (the same escape hatch as ``vehicles``); the
-            driver maps them to a pure ``VehicleRoutine`` via
-            ``commanding.build_vehicle_routine``.
+            driver maps them to a pure routine object through private
+            command-layer implementation.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
