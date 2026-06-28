@@ -70,13 +70,11 @@ def _ensure_guide_cube(stage: Usd.Stage, parent: str, config: DroneConfig) -> No
     UsdGeom.Imageable(cube).CreatePurposeAttr(UsdGeom.Tokens.guide)
 
 
-def _random_pose(config: DroneConfig, *, include_z: bool = True):
+def _random_pose(config: DroneConfig):
     """Sample a uniform random pose inside the configured spawn volume.
 
     Args:
         config: Provides the spawn volume center and half-extents.
-        include_z: When false, use ``0`` for Z. This is used before dynamic
-            stationary placement computes the correct ground-resting height.
 
     Returns:
         Tuple ``((x, y, z), yaw)`` where the position is in world units and
@@ -86,7 +84,7 @@ def _random_pose(config: DroneConfig, *, include_z: bool = True):
     hx, hy, hz = config.spawn_volume_half_extents
     x = cx + random.uniform(-hx, hx)
     y = cy + random.uniform(-hy, hy)
-    z = cz + random.uniform(-hz, hz) if include_z else 0.0
+    z = cz + random.uniform(-hz, hz)
     yaw = random.uniform(-math.pi, math.pi)
     return (x, y, z), yaw
 
@@ -217,27 +215,27 @@ def spawn_drone(
         add_reference_to_stage(config.usd_path, drone_path)
 
     if position is not None:
-        xy_yaw = ((float(position[0]), float(position[1]), 0.0), float(yaw))
+        pos = (float(position[0]), float(position[1]), 0.0)
+        yaw = float(yaw)
     else:
         _ensure_guide_cube(stage, parent, config)
-        xy_yaw = None
+        pos, yaw = _random_pose(config)
 
     if config.spawn_stationary:
-        sampled_pos, yaw = xy_yaw if xy_yaw is not None else _random_pose(config, include_z=False)
-        _apply_pose(stage, drone_path, sampled_pos, yaw)
-        pos = (
-            sampled_pos[0],
-            sampled_pos[1],
-            _computed_stationary_z(stage, drone_path, config),
-        )
+        # Place X/Y/yaw with Z=0 so the world bound gives a root-relative lower
+        # Z, then resolve the ground-resting height and place at the final pose.
+        x, y, _ = pos
+        _apply_pose(stage, drone_path, (x, y, 0.0), yaw)
+        pos = (x, y, _computed_stationary_z(stage, drone_path, config))
+
+        # Reposition with updated Z pos
+        _apply_pose(stage, drone_path, pos, yaw)
+        _clear_rigid_body_velocities(stage, drone_path)
         mode = "stationary"
     else:
-        pos, yaw = xy_yaw if xy_yaw is not None else _random_pose(config)
+        _apply_pose(stage, drone_path, pos, yaw)
         mode = "volume"
 
-    _apply_pose(stage, drone_path, pos, yaw)
-    if config.spawn_stationary:
-        _clear_rigid_body_velocities(stage, drone_path)
     carb.log_info(f"[DroneSpawner] Spawned mode={mode} at pos={pos} yaw={math.degrees(yaw):.1f}deg")
     return drone_path
 
