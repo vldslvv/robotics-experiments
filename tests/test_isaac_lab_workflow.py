@@ -35,6 +35,7 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
 
 def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
     import robotics_experiments.workflows.isaac_lab._registration as registration
+    from robotics_experiments.workflows.isaac_lab._registration import _DRONE_HOVER_TASK_ID
 
     fake_gym = types.ModuleType("gymnasium")
     fake_gym.registry = {}
@@ -53,7 +54,7 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
     assert registration.register_isaac_lab_tasks() is True
     assert registration.register_isaac_lab_tasks() is True
 
-    spec = fake_gym.registry[registration._DRONE_HOVER_TASK_ID]
+    spec = fake_gym.registry[_DRONE_HOVER_TASK_ID]
     assert spec == {
         "entry_point": (
             "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnv"

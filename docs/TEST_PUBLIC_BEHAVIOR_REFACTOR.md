@@ -72,7 +72,7 @@ public attribute).
 ## Progress checklist
 
 - [x] 1. `test_fleet_orchestrator.py`
-- [ ] 2. `test_isaac_lab_workflow.py`
+- [x] 2. `test_isaac_lab_workflow.py`
 - [ ] 3. `test_commanding_port.py`
 - [ ] 4. `test_commanding_routine.py`
 - [ ] 5. `test_drone_spawn.py`
