@@ -127,6 +127,8 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
         150_000,
         300_000,
     ]
+    # The public status agrees with the HIL_SENSOR wiring seam on the send count.
+    assert port.status.sensor_send_count == 3
     assert backend.gps_times == [100_000, 300_000]
     assert len(backend.imu_updates) == 3
     assert len(backend.mag_updates) == 3
@@ -209,8 +211,17 @@ def test_mavlink_port_barometer_altitude_sign_with_noise_disabled(monkeypatch):
 def test_mavlink_port_defaults_to_pegasus_sensor_noise(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4)
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
 
-    assert port._sensor_noise_enabled is True
+    port.start()
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
+
+    # Default sensor noise is on: the at-rest IMU acceleration is perturbed off
+    # the exact noiseless gravity vector that the noise-disabled tests assert.
+    imu = backend.imu_updates[0]
+    assert not np.allclose(imu["linear_acceleration"], [0.0, 0.0, -9.80665], atol=1e-9)
 
 
 def test_mavlink_port_pegasus_mag_and_baro_are_not_bit_stale(monkeypatch):
@@ -263,16 +274,18 @@ def test_mavlink_port_imu_fresh_every_tick_at_physics_rate(
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
 
-    assert port._physics_tick_us == expected_tick_us
-
     port.start()
     for sim_time_us in timestamps:
         lockstep_exchange(port, VehicleState.hover_at(sim_time_us=sim_time_us))
 
+    # The integer-us tick pinning is observable as cadence: the IMU refreshes on
+    # EVERY tick (one update per timestamp, fresh bits set), with no every-other
+    # skip at the 333 Hz float boundary, and the link stays connected.
     assert len(backend.imu_updates) == len(timestamps)
     assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
+    assert port.status.sensor_send_count == len(timestamps)
     assert port.is_connected is True
-    assert port._last_disconnect_reason is None
+    assert port.status.last_disconnect_reason is None
 
 
 def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypatch):
@@ -294,9 +307,10 @@ def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypat
     assert np.allclose(commands, np.zeros(4))
     assert port.is_connected is False
     assert backend.stopped is True
-    assert "sensor cadence mismatch" in port._last_disconnect_reason
+    assert "sensor cadence mismatch" in port.status.last_disconnect_reason
     # Only the first (fresh) tick was sent before the guard tripped.
     assert [args[0] for args in connection.hil_sensor_sends] == [100_000]
+    assert port.status.sensor_send_count == 1
 
 
 def test_mavlink_port_requires_positive_physics_rate(monkeypatch):
