@@ -8,13 +8,21 @@ __all__ = ["SwitchState"]
 
 @dataclass
 class SwitchState:
-    """Runtime state for a single spawned light switch."""
+    """Runtime state for a single spawned light switch.
+
+    ``press_steps`` counts how many consecutive samples the button has stayed at
+    or above the press threshold, and ``toggle_latched`` records that the current
+    sustained press has already produced its single toggle. Together they drive
+    the N-step confirmation window (see :func:`_apply_button_sample`); both reset
+    when the button releases.
+    """
 
     prim_path: str
     lamp_prim_path: str = ""
     articulation: Any | None = field(default=None, repr=False)
     state: bool = False
-    last_button_state: bool = False
+    press_steps: int = 0
+    toggle_latched: bool = False
 
 
 def _apply_button_sample(
@@ -22,15 +30,26 @@ def _apply_button_sample(
     *,
     button_position: float,
     press_threshold: float,
+    confirm_steps: int,
 ) -> bool:
     """Update one switch from a button position sample.
 
-    Returns ``True`` only when the sample is a rising-edge press that toggled
-    the switch state.
+    Implements the light-state latch: a press toggles the switch only once it
+    has stayed at or above ``press_threshold`` for
+    ``confirm_steps`` consecutive samples. A rapid tap that releases before the
+    window completes does not count; a sustained press toggles exactly once and
+    will not re-toggle until the button is released and pressed again.
+
+    Returns ``True`` only on the sample that confirms (and applies) the toggle.
     """
-    button_pressed = button_position >= press_threshold
-    toggled = button_pressed and not switch.last_button_state
-    if toggled:
+    if button_position < press_threshold:
+        switch.press_steps = 0
+        switch.toggle_latched = False
+        return False
+
+    switch.press_steps += 1
+    if switch.press_steps >= confirm_steps and not switch.toggle_latched:
         switch.state = not switch.state
-    switch.last_button_state = button_pressed
-    return toggled
+        switch.toggle_latched = True
+        return True
+    return False

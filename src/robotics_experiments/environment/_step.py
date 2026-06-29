@@ -93,17 +93,18 @@ def step_switches(
     on_toggle: Callable[[int, bool], None] | None = None,
     config: LightSwitchConfig | None = None,
 ) -> None:
-    """Detect rising-edge button presses and toggle the paired lamps.
+    """Detect confirmed button presses and toggle the paired lamps.
 
-    Reads the first DOF of each articulation; when it crosses the configured
-    press threshold upward, the switch's ``state`` flips, the lamp is updated
-    on stage, and ``on_toggle`` is invoked with the switch index and new
+    Reads the first DOF of each articulation; once it has stayed at or above the
+    configured press threshold for ``press_confirm_steps`` consecutive steps (the
+    light-state latch), the switch's ``state`` flips, the lamp is
+    updated on stage, and ``on_toggle`` is invoked with the switch index and new
     state.
 
     Args:
         stage: USD stage to mutate for lamp visuals.
-        switch_state: Per-switch state entries; ``state`` and
-            ``last_button_state`` are updated in place.
+        switch_state: Per-switch state entries; ``state``, ``press_steps``, and
+            ``toggle_latched`` are updated in place.
         on_toggle: Optional callback receiving ``(index, new_state)`` on every
             successful toggle.
         config: Spawner configuration; when ``None``, resolved via
@@ -121,6 +122,7 @@ def step_switches(
             sw,
             button_position=float(button_pos),
             press_threshold=config.press_threshold,
+            confirm_steps=config.press_confirm_steps,
         ):
             _set_lamp(stage, sw.lamp_prim_path, sw.state, config.lamp_on_intensity)
             if on_toggle is not None:

@@ -123,6 +123,8 @@ class LightSwitchConfig:
         lamp_usd_path: Absolute path to the lamp USD asset.
         num_switches: Number of switch/lamp pairs to spawn.
         press_threshold: Joint position above which the button is treated as pressed.
+        press_confirm_steps: Consecutive steps the button must stay pressed before
+            a toggle is confirmed (the light-state latch / confirmation window).
         min_spawn_dist: Minimum pairwise distance between spawned switches, in meters.
         max_spawn_retries: Retry budget per position before accepting overlap.
         lamp_on_intensity: ``SphereLight`` intensity applied when the lamp is on.
@@ -134,6 +136,7 @@ class LightSwitchConfig:
     lamp_usd_path: str
     num_switches: int
     press_threshold: float
+    press_confirm_steps: int
     min_spawn_dist: float
     max_spawn_retries: int
     lamp_on_intensity: float
