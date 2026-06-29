@@ -1,0 +1,89 @@
+defaults:
+  - config
+  - _self_
+
+# Runtime demonstration experiment: two PX4-backed drones take off, fly one
+# shared XY circle as phase-offset `goto` waypoints, then land. The two routines
+# are independent, so the drones use a small altitude separation instead of
+# relying on cross-drone synchronization for clearance.
+#
+# Coordinates are world ENU metres (x=east, y=north, z=up). The shared circle is
+# centered at the world origin with a 2 m radius; drone 0 starts from the south
+# point and drone 1 starts from the north point.
+#
+# Run with: make run-all HYDRA_CONFIG=configs/runtime_two_drone_circle_land.yaml
+
+routine:
+  steps: []
+
+vehicles:
+  - id: 0
+    spawn_xy: [0.0, -2.0]
+    drone: {prim_name: Drone0}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.5
+          min_climb_m: 1.5
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 2.0
+          y: 0.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: 0.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: -2.0
+          y: 0.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: 0.0
+          y: -2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: land
+          timeout_s: 30.0
+  - id: 1
+    spawn_xy: [0.0, 2.0]
+    drone: {prim_name: Drone1}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 3.0
+          min_climb_m: 2.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: -2.0
+          y: 0.0
+          z: 3.0
+          timeout_s: 25.0
+        - kind: goto
+          x: 0.0
+          y: -2.0
+          z: 3.0
+          timeout_s: 25.0
+        - kind: goto
+          x: 2.0
+          y: 0.0
+          z: 3.0
+          timeout_s: 25.0
+        - kind: goto
+          x: 0.0
+          y: 2.0
+          z: 3.0
+          timeout_s: 25.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: land
+          timeout_s: 30.0

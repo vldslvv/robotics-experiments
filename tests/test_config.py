@@ -155,6 +155,81 @@ def test_two_drone_forward_land_config_composes(monkeypatch):
     reset_config()
 
 
+def test_two_drone_circle_land_config_composes(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_two_drone_circle_land.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+    assert config.routine.steps == []
+    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
+        (0, (0.0, -2.0), "Drone0"),
+        (1, (0.0, 2.0), "Drone1"),
+    ]
+    assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
+        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
+        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
+    ]
+    assert [
+        (step["x"], step["y"], step["z"]) for step in config.vehicles[0].routine.steps[3:7]
+    ] == [
+        (2.0, 0.0, 2.5),
+        (0.0, 2.0, 2.5),
+        (-2.0, 0.0, 2.5),
+        (0.0, -2.0, 2.5),
+    ]
+    assert [
+        (step["x"], step["y"], step["z"]) for step in config.vehicles[1].routine.steps[3:7]
+    ] == [
+        (-2.0, 0.0, 3.0),
+        (0.0, -2.0, 3.0),
+        (2.0, 0.0, 3.0),
+        (0.0, 2.0, 3.0),
+    ]
+    reset_config()
+
+
+def test_two_hexacopter_circle_land_config_composes(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_two_hexacopter_circle_land.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+    assert config.routine.steps == []
+    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
+        (0, (0.0, -2.0), "Hexacopter0"),
+        (1, (0.0, 2.0), "Hexacopter1"),
+    ]
+    for vehicle in config.vehicles:
+        assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
+        assert len(vehicle.px4.input_offset) == 6
+        assert len(vehicle.px4.input_scaling) == 6
+        assert len(vehicle.px4.zero_position_armed) == 6
+        assert len(vehicle.px4.rotor_constant) == 6
+        assert len(vehicle.px4.rolling_moment_coefficient) == 6
+        assert len(vehicle.px4.min_rotor_velocity) == 6
+        assert len(vehicle.px4.max_rotor_velocity) == 6
+    assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
+        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
+        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
+    ]
+    reset_config()
+
+
 def test_resolve_fleet_merges_per_vehicle_routine_override():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
