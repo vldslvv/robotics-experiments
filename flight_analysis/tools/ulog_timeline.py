@@ -70,6 +70,19 @@ def _print_commands(ulog: ULog) -> None:
         print("vehicle_command_ack: missing")
 
 
+def _count_indexed_fields(data, prefix: str) -> int:
+    """Count the contiguous ``prefix[0]``, ``prefix[1]``, ... fields present.
+
+    PX4 sizes ``actuator_motors.control`` / ``actuator_outputs.output`` by the
+    airframe rotor count, so this keeps the timeline correct for a quad (4) and a
+    hexa (6) alike instead of hard-coding four columns.
+    """
+    count = 0
+    while f"{prefix}[{count}]" in data:
+        count += 1
+    return count
+
+
 def _print_timeline(ulog: ULog, sample_seconds: list[float]) -> None:
     att = _dataset(ulog, "vehicle_attitude")
     attitude_sp = _dataset(ulog, "vehicle_attitude_setpoint")
@@ -109,8 +122,10 @@ def _print_timeline(ulog: ULog, sample_seconds: list[float]) -> None:
 
         attitude = _euler_deg([_value(att, f"q[{j}]", ia) for j in range(4)])
         setpoint = _euler_deg([_value(attitude_sp, f"q_d[{j}]", isp) for j in range(4)])
-        motor_values = [_value(motors, f"control[{j}]", im) for j in range(4)]
-        output_values = [_value(outputs, f"output[{j}]", io) for j in range(4)]
+        num_motor_controls = _count_indexed_fields(motors, "control")
+        num_outputs = _count_indexed_fields(outputs, "output")
+        motor_values = [_value(motors, f"control[{j}]", im) for j in range(num_motor_controls)]
+        output_values = [_value(outputs, f"output[{j}]", io) for j in range(num_outputs)]
         print(
             f"{seconds:5.2f} "
             f"{attitude[0]:6.1f},{attitude[1]:6.1f},{attitude[2]:6.1f} "

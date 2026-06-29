@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -59,6 +61,59 @@ def _valid_quad_markers():
             "position": (-0.25, -0.25, 0.04),
         },
     ]
+
+
+def _valid_hexa_markers():
+    # hexacopter_s550 asset: arm at azimuth 60*index deg (FLU), R = 0.275 m,
+    # spin alternating CCW/CW from index 0.
+    r = 0.275
+    specs = [
+        (0, 0.0, "CCW"),
+        (1, 60.0, "CW"),
+        (2, 120.0, "CCW"),
+        (3, 180.0, "CW"),
+        (4, -120.0, "CCW"),
+        (5, -60.0, "CW"),
+    ]
+    return [
+        {
+            "path": f"/World/Drone/body/propulsion/motor_{index}/prop",
+            "index": index,
+            "spin": spin,
+            "position": (
+                r * math.cos(math.radians(az)),
+                r * math.sin(math.radians(az)),
+                0.04,
+            ),
+        }
+        for index, az, spin in specs
+    ]
+
+
+def test_valid_hexa_metadata_returns_px4_order_and_rot_dir():
+    stage = _make_stage(reversed(_valid_hexa_markers()))
+
+    mapping = discover_px4_rotor_mapping(stage, "/World/Drone")
+
+    assert mapping.num_rotors == 6
+    assert mapping.rotor_link_paths == [
+        f"/World/Drone/body/propulsion/motor_{index}/prop" for index in range(6)
+    ]
+    assert mapping.rot_dir == [1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+
+
+def test_six_rotor_wrong_heading_order_fails():
+    markers = _valid_hexa_markers()
+    # Swap index 1 and index 2 positions so the per-index headings no longer
+    # match the canonical 60*index clocking.
+    markers[1], markers[2] = (
+        {**markers[1], "position": markers[2]["position"]},
+        {**markers[2], "position": markers[1]["position"]},
+    )
+    stage = _make_stage(markers)
+
+    with pytest.raises(RuntimeError, match="Generic Hexarotor X marker order mismatch"):
+        discover_px4_rotor_mapping(stage, "/World/Drone")
 
 
 def test_valid_quad_metadata_returns_px4_order_and_rot_dir():

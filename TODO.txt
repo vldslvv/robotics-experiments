@@ -32,3 +32,5 @@ Octocopter coax → 12001
 3DR Iris quad   → 10016
 
 The failsafe on hexes seems to not work -- totally wild flying
+
+Verify that new repo clone works from scratch
