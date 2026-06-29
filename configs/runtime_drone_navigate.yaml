@@ -1,0 +1,47 @@
+defaults:
+  - config
+  - _self_
+
+# Runtime demonstration experiment: fly an absolute-waypoint navigation routine
+# headless on the live runtime extension. Inherits the default runtime
+# config.yaml (sim/drone/switches/px4/isaac_lab + its 1-vehicle fleet and
+# warehouse scene). After takeoff the drone streams OFFBOARD position setpoints to
+# each absolute world-ENU `goto` waypoint (yawing toward the leg), holds a stable
+# hover, then lands. Runs forgivingly here (a flight-envelope breach logs and
+# stops the routine, leaving manual control available).
+#
+# Coordinates are world ENU metres (x=east, y=north, z=up). The waypoints below
+# stay in open space near the spawn; raise `goto` `timeout_s` if PX4's cruise
+# speed makes a leg slow.
+#
+# Run with: make run-all HYDRA_CONFIG=configs/runtime_drone_navigate.yaml
+
+routine:
+  steps: []
+
+vehicles:
+  - id: 0
+    spawn_xy: [0.0, -2.0]
+    drone: {prim_name: Drone0}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.5
+          min_climb_m: 1.5
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: 3.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: land
+          timeout_s: 30.0

@@ -30,8 +30,10 @@ are independent (cross-drone synchronization is deliberately deferred).
 
 - **`_commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
   params, a label) plus pure constructors (`arm`, `takeoff`, `reposition`,
-  `land`). `MAV_CMD_*` numbers and `PX4_FORCE_ARM_MAGIC` are named int constants
-  so the module never imports pymavlink.
+  `land`, `set_offboard_mode`). Also `PositionSetpoint` (frozen: a geodetic
+  lat/lon/alt + NED yaw), the wire payload for a streamed OFFBOARD setpoint.
+  `MAV_CMD_*` numbers, the PX4 offboard main-mode id, and `PX4_FORCE_ARM_MAGIC`
+  are named int constants so the module never imports pymavlink.
 - **`_observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
@@ -42,34 +44,51 @@ are independent (cross-drone synchronization is deliberately deferred).
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
   sustained-completion window; and a tuple of continuous `invariants`),
   `VehicleRoutine` (ordered steps), `RoutineState`
-  (cursor/sent/baseline/step-start/`hold_since_us`), and `RoutineDecision`
-  (`SEND` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`, the `FAIL` carrying a
+  (cursor/sent/baseline/step-start/`hold_since_us` plus the streaming counters
+  `setpoints_streamed`/`offboard_requested`), and `RoutineDecision`
+  (`SEND` / `STREAM` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`; `SEND` carries a
+  `command`, `STREAM` carries a `PositionSetpoint`, `FAIL` carries a
   `failure_kind`). `decide(routine, state, observation) -> (state, decision)` is
   the contract centerpiece: no sockets, no pymavlink, no Isaac. It checks the
   step `invariants` first (a breach -> `FAIL(ENVELOPE)`), then completion (held
   for `hold_s` -> `ADVANCE`), then ack-rejection/timeout (-> `FAIL(COMMAND)`).
   Completion predicate helpers: `armed()`, `ack_accepted(command_id)`,
   `climbed_at_least(min_climb_m)` (relative to the captured baseline),
-  `hovering_stable(...)`, `moved_forward_at_least(distance_m)`, and
-  `disarmed()`. Invariant gate helpers (each returns a breach message or
-  `None`): `tilt_below`, `lateral_drift_below`, `cross_track_drift_below`,
+  `hovering_stable(...)`, `moved_forward_at_least(distance_m)`,
+  `reached_world_position(x, y, z, tol)` (the first **absolute** world-frame
+  predicate), `heading_aligned(...)`, and `disarmed()`. Invariant gate helpers
+  (each returns a breach message or `None`): `tilt_below`, `lateral_drift_below`,
+  `cross_track_drift_below`, `cross_track_to_segment_below` (perpendicular
+  deviation from the baseline->target path, direction-agnostic),
   `vertical_speed_within`, `angular_speed_below`. `EnvelopeGates` bundles the
   gate thresholds wired onto the flight steps.
+
+  A **streaming step** (the `goto` kind, carrying a `StreamingSpec`) is the one
+  step whose `decide` emits `STREAM` rather than a single `SEND`: it primes
+  `prime_ticks` OFFBOARD setpoints, sends the one-shot offboard-mode command, then
+  streams the setpoint every tick until the waypoint is reached or the step times
+  out. The streamed target is the absolute world-ENU waypoint converted to a
+  geodetic setpoint via `px4_bridge.frames.synth_gps_from_enu` against the `px4`
+  home anchor -- frame-consistent **by construction** with the GPS the bridge
+  feeds PX4, so flying the setpoint lands the drone at the world-ENU waypoint
+  (using the global frame avoids the EKF local-NED origin ambiguity). Verification
+  uses absolute Isaac world-ENU ground truth, independent of PX4's EKF.
 
   `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
   reacts in kind: a strict driver maps `ENVELOPE` to its instability error and
   `COMMAND` to a plain assertion; a forgiving driver logs either and stops.
 - **`_port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
-  `pump_heartbeat`, `send`, `poll_feedback`) and the PX4 `MavlinkCommandPort`,
-  whose `pymavlink` import is function-scoped. The port absorbs the GCS-link
-  concerns (connect, throttled heartbeat, `command_long` send, draining
-  `COMMAND_ACK` / `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes
-  `is_handshaked`, `failsafe`, `failsafe_system_status`, and
-  `latest_global_position`.
+  `pump_heartbeat`, `send`, `send_setpoint`, `poll_feedback`) and the PX4
+  `MavlinkCommandPort`, whose `pymavlink` import is function-scoped. The port
+  absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
+  send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
+  `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes `is_handshaked`,
+  `failsafe`, `failsafe_system_status`, and `latest_global_position`.
 - **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
-  `RoutineState`: runs `decide` and performs the single `port.send` side effect).
-  One commander drives one drone; there is no fleet object or barrier.
+  `RoutineState`: runs `decide` and performs the single side effect -- `port.send`
+  on `SEND`, `port.send_setpoint` on `STREAM`). One commander drives one drone;
+  there is no fleet object or barrier.
 - **`_driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
@@ -86,12 +105,13 @@ are independent (cross-drone synchronization is deliberately deferred).
 
 `decide` and every predicate are pure functions of `(routine, state,
 observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
-pymavlink). The only side effect in the layer is `AbstractCommandPort.send`
-(MAVLink out) and the port's connect/heartbeat/drain. `VehicleCommander.step`
-runs the pure `decide`, then performs the one `SEND` side effect, keeping the
-decision and the I/O cleanly separated. Step timeouts are measured in **sim
-time** (`observation.sim_time_us`) so the stepper stays pure; the driver pairs
-that with its own wall-clock backstop for a fully stalled sim.
+pymavlink). The only side effects in the layer are `AbstractCommandPort.send` and
+`send_setpoint` (MAVLink out) and the port's connect/heartbeat/drain.
+`VehicleCommander.step` runs the pure `decide`, then performs the one side effect
+(`SEND` -> `send`, `STREAM` -> `send_setpoint`), keeping the decision and the I/O
+cleanly separated. Step timeouts are measured in **sim time**
+(`observation.sim_time_us`) so the stepper stays pure; the driver pairs that with
+its own wall-clock backstop for a fully stalled sim.
 
 ## `gcs_port` is control, not bridge
 
@@ -159,24 +179,36 @@ the takeoff target/timeout, and the hover settle). There is no separate
 drone whose resolved `steps` is non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
+`{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
 `{kind: land, timeout_s}`)
 gets a `RoutineDriver`; empty (the global default) means manual. Mixed fleets are
 allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
-takeoff_timeout_s, hover_settle_s)` maps the descriptors plus a per-drone takeoff
+takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
+goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
+goto_offboard_prime_ticks)` maps the descriptors plus a per-drone takeoff
 target into a `VehicleRoutine` (unknown `kind`, or any step missing a required
 field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the shared
 seam both drivers use. The takeoff step completes on a real climb
 (`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
-for `hold_s`, the forward step on observed world +X/east displacement, and the
-land step once PX4 disarms. Flight gates are continuous invariants on takeoff,
-hover, and forward. Takeoff/hover use the lateral-drift threshold as radial
-horizontal excursion from the baseline; forward uses it as cross-track drift so
-the commanded +X/east displacement itself does not breach the envelope.
+for `hold_s`, the forward step on observed world +X/east displacement, the `goto`
+step on `reached_world_position(...)` (absolute world ENU) plus heading
+alignment, and the land step once PX4 disarms. Flight gates are continuous
+invariants on takeoff, hover, forward, and goto. Takeoff/hover use the
+lateral-drift threshold as radial horizontal excursion from the baseline; forward
+uses it as cross-track drift so the commanded +X/east displacement itself does not
+breach the envelope; goto uses a direction-agnostic cross-track-to-path gate
+(`goto_cross_track_m`) so an arbitrary-heading leg is allowed while a sideways
+excursion off the planned path still trips. The home anchor the `goto` builder
+needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
+(`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by the orchestrator
+into `DriverParams.from_routine_config`.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
 `configs/runtime_arm_takeoff.yaml` demos it headless via
-`make run-all HYDRA_CONFIG=...`, and `configs/integration_test_takeoff.yaml`
-selects the same routine and only changes the scene. The GCS link baseport stays
+`make run-all HYDRA_CONFIG=...`, `configs/runtime_drone_navigate.yaml` demos an
+absolute-waypoint `goto` routine the same way, and
+`configs/integration_test_takeoff.yaml` selects the takeoff routine and only
+changes the scene. The GCS link baseport stays
 in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port` is derived from
 it.
 

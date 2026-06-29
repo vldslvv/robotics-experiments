@@ -26,6 +26,12 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional, Protocol
 
+from robotics_experiments.px4_bridge.frames import (
+    DEFAULT_HOME_ALT_M,
+    DEFAULT_HOME_LAT_DEG,
+    DEFAULT_HOME_LON_DEG,
+)
+
 from ._commander import _VehicleCommander
 from ._observation import CommandAck, RoutineObservation
 from ._port import _AbstractCommandPort
@@ -72,14 +78,32 @@ class DriverParams:
     takeoff_target_timeout_s: float
     takeoff_timeout_s: float
     hover_settle_s: float
+    goto_position_tol_m: float
+    goto_heading_tol_deg: float
+    goto_cross_track_m: float
+    goto_offboard_prime_ticks: int
+    # The home geographic anchor (from the ``px4`` group) the ``goto`` builder
+    # converts world-ENU waypoints against; defaulted to the bridge's frame
+    # default so direct constructions and non-navigating routines need not set it.
+    home_lat_deg: float = DEFAULT_HOME_LAT_DEG
+    home_lon_deg: float = DEFAULT_HOME_LON_DEG
+    home_alt_m: float = DEFAULT_HOME_ALT_M
 
     @classmethod
-    def from_routine_config(cls, rc: Any) -> "DriverParams":
+    def from_routine_config(
+        cls,
+        rc: Any,
+        *,
+        home_lat_deg: float = DEFAULT_HOME_LAT_DEG,
+        home_lon_deg: float = DEFAULT_HOME_LON_DEG,
+        home_alt_m: float = DEFAULT_HOME_ALT_M,
+    ) -> "DriverParams":
         """Build from a ``RoutineConfig``-shaped object (duck-typed, no config import).
 
         Reads the routine config's fields by name so the pure ``commanding`` layer
         never imports ``config``; both Isaac-side adapters call this with a
-        per-vehicle ``ResolvedVehicle.routine``.
+        per-vehicle ``ResolvedVehicle.routine``. The home anchor comes from the
+        per-vehicle ``px4`` group (passed by the orchestrator), not the routine.
         """
         return cls(
             steps=rc.steps,
@@ -99,6 +123,13 @@ class DriverParams:
             takeoff_target_timeout_s=rc.takeoff_target_timeout_s,
             takeoff_timeout_s=rc.takeoff_timeout_s,
             hover_settle_s=rc.hover_settle_s,
+            goto_position_tol_m=rc.goto_position_tol_m,
+            goto_heading_tol_deg=rc.goto_heading_tol_deg,
+            goto_cross_track_m=rc.goto_cross_track_m,
+            goto_offboard_prime_ticks=rc.goto_offboard_prime_ticks,
+            home_lat_deg=home_lat_deg,
+            home_lon_deg=home_lon_deg,
+            home_alt_m=home_alt_m,
         )
 
 
@@ -248,6 +279,13 @@ class RoutineDriver:
             gates=self._params.gates,
             takeoff_timeout_s=self._params.takeoff_timeout_s,
             hover_settle_s=self._params.hover_settle_s,
+            home_lat_deg=self._params.home_lat_deg,
+            home_lon_deg=self._params.home_lon_deg,
+            home_alt_m=self._params.home_alt_m,
+            goto_position_tol_m=self._params.goto_position_tol_m,
+            goto_heading_tol_deg=self._params.goto_heading_tol_deg,
+            goto_cross_track_m=self._params.goto_cross_track_m,
+            goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
         )
         self._commander = _VehicleCommander(self._routine, self._port, label=self._label)
         self._prev_cursor = 0
@@ -288,10 +326,17 @@ class RoutineDriver:
         elif phase is _DriverPhase.FETCH_TARGET:
             self._deadline_s = self._monotonic() + params.takeoff_target_timeout_s
         elif phase is _DriverPhase.DRIVE:
+            # Wall-clock backstop generous enough for the whole routine: the sum
+            # of every step's sim-time budget (goto/forward legs can be long) plus
+            # the handshake/ack slack, with a safety multiplier.
+            routine_budget_s = (
+                sum(step.timeout_s for step in self._routine.steps) if self._routine else 0.0
+            )
             self._deadline_s = (
                 self._monotonic()
                 + (
-                    params.takeoff_timeout_s
+                    routine_budget_s
+                    + params.takeoff_timeout_s
                     + params.command_ack_timeout_s
                     + params.handshake_timeout_s
                 )

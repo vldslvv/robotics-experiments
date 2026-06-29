@@ -355,6 +355,7 @@ class FakeCommandPort:
 
     def __init__(self):
         self.sent = []
+        self.setpoints = []  # _PositionSetpoints emitted on STREAM
         self.connected = False
         self.heartbeats = 0
         self.feedback_polls = 0
@@ -376,6 +377,9 @@ class FakeCommandPort:
 
     def send(self, command):
         self.sent.append(command)
+
+    def send_setpoint(self, setpoint):
+        self.setpoints.append(setpoint)
 
     def poll_feedback(self):
         self.feedback_polls += 1
@@ -405,21 +409,24 @@ def make_routine_observation(
     linear_velocity_enu=(0.0, 0.0, 0.0),
     angular_velocity_flu=(0.0, 0.0, 0.0),
     tilt_deg=0.0,
+    yaw_deg=0.0,
     is_armed=False,
     last_ack=None,
     failsafe=False,
 ):
     """Build a synthetic ``RoutineObservation`` for the pure command-layer tests.
 
-    ``tilt_deg`` tilts the body via a pitch rotation; ``linear_velocity_enu`` and
-    ``angular_velocity_flu`` drive the flight-envelope gates and the hover-stable
-    completion predicate.
+    ``tilt_deg`` tilts the body via a pitch rotation (for the tilt gate);
+    ``yaw_deg`` yaws it about world-up (for the heading-alignment predicate) --
+    pass one or the other. ``linear_velocity_enu`` and ``angular_velocity_flu``
+    drive the flight-envelope gates and the hover-stable completion predicate.
     """
     from robotics_experiments.commanding._observation import RoutineObservation
 
+    orientation = _quat_yaw_deg(yaw_deg) if yaw_deg else _quat_pitch_deg(tilt_deg)
     vehicle_state = VehicleState(
         position_enu=np.asarray(position_enu, dtype=np.float64),
-        orientation_flu_enu_wxyz=_quat_pitch_deg(tilt_deg),
+        orientation_flu_enu_wxyz=orientation,
         linear_velocity_enu=np.asarray(linear_velocity_enu, dtype=np.float64),
         angular_velocity_flu=np.asarray(angular_velocity_flu, dtype=np.float64),
         sim_time_us=int(sim_time_us),

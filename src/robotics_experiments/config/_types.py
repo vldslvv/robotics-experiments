@@ -419,7 +419,9 @@ class RoutineConfig:
         steps: Ordered step descriptors authored in YAML, each a mapping with a
             ``kind`` (``arm``; ``takeoff`` carrying ``climb_m`` + ``min_climb_m``;
             ``hover`` carrying ``hold_s``; ``forward`` carrying ``distance_m`` +
-            ``timeout_s``; ``land`` carrying ``timeout_s``). Empty means manual
+            ``timeout_s``; ``goto`` carrying absolute world-ENU ``x`` + ``y`` +
+            ``z`` + ``timeout_s`` and optional ``position_tol_m`` /
+            ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty means manual
             (no routine driver). Typed ``List[Any]`` so Hydra's
             structured-config validation accepts the partial per-step mappings
             during ``compose()`` (the same escape hatch as ``vehicles``); the
@@ -452,6 +454,15 @@ class RoutineConfig:
         max_angular_speed_rad_s: Continuous angular-speed divergence gate.
         hover_max_abs_vertical_speed_m_s: Hover-completion vertical-speed bound.
         hover_max_abs_horizontal_speed_m_s: Hover-completion horizontal-speed bound.
+        goto_position_tol_m: Default radius within which a ``goto`` waypoint counts
+            as reached (a per-step ``position_tol_m`` overrides it).
+        goto_heading_tol_deg: Default heading tolerance for a ``goto`` to count as
+            aligned with the leg direction (a per-step ``heading_tol_deg``
+            overrides it).
+        goto_cross_track_m: Continuous gate on a ``goto`` leg: maximum perpendicular
+            deviation from the straight baseline->waypoint path.
+        goto_offboard_prime_ticks: Number of OFFBOARD setpoints streamed before the
+            mode is engaged (PX4 rejects OFFBOARD until a setpoint stream flows).
     """
 
     steps: List[Any]
@@ -471,6 +482,10 @@ class RoutineConfig:
     max_angular_speed_rad_s: float
     hover_max_abs_vertical_speed_m_s: float
     hover_max_abs_horizontal_speed_m_s: float
+    goto_position_tol_m: float
+    goto_heading_tol_deg: float
+    goto_cross_track_m: float
+    goto_offboard_prime_ticks: int
 
 
 @dataclass

@@ -41,10 +41,17 @@ class _VehicleCommander:
         return self._state.cursor
 
     def step(self, observation: RoutineObservation) -> _RoutineDecision:
-        """Run one tick: _decide, commit the new state, and perform the SEND side effect."""
+        """Run one tick: _decide, commit the new state, perform the side effect.
+
+        The only side effects are ``SEND`` (a ``command_long``) and ``STREAM`` (an
+        OFFBOARD position setpoint); every other decision is pure progress.
+        """
         new_state, decision = _decide(self._routine, self._state, observation)
         self._state = new_state
         if decision.kind is _DecisionKind.SEND:
             assert decision.command is not None
             self._port.send(decision.command)
+        elif decision.kind is _DecisionKind.STREAM:
+            assert decision.setpoint is not None
+            self._port.send_setpoint(decision.setpoint)
         return decision

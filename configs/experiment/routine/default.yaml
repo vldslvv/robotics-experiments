@@ -33,3 +33,11 @@ max_downward_speed_m_s: -4.0
 max_angular_speed_rad_s: 8.0
 hover_max_abs_vertical_speed_m_s: 0.35
 hover_max_abs_horizontal_speed_m_s: 0.30
+
+# Navigation (`goto`) tunables: how close/aligned counts as reached, the
+# cross-track gate on the planned path, and how many OFFBOARD setpoints to stream
+# before engaging the mode (PX4 rejects OFFBOARD until a stream is flowing).
+goto_position_tol_m: 0.5
+goto_heading_tol_deg: 25.0
+goto_cross_track_m: 2.0
+goto_offboard_prime_ticks: 30

@@ -20,12 +20,23 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from ._commands import _MavlinkCommand
+from ._commands import _MavlinkCommand, _PositionSetpoint
 from ._observation import CommandAck
 
 __all__ = ["_AbstractCommandPort", "MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
+
+# SET_POSITION_TARGET type mask: use position + yaw, ignore velocity (bits 3-5),
+# acceleration/force (bits 6-9), and yaw-rate (bit 11). A NaN setpoint yaw adds
+# the yaw-ignore bit (bit 10) so PX4 holds the current heading.
+_POSITION_TARGET_TYPEMASK_POS_YAW = 0b1011_1111_1000
+_POSITION_TARGET_TYPEMASK_YAW_IGNORE = 0b0100_0000_0000
+
+# MAV_FRAME_GLOBAL_INT (geodetic lat/lon e7 + AMSL altitude); a MAVLink protocol
+# constant named here so streaming a setpoint does not need a pymavlink import for
+# the frame id (the same pattern as the MAV_CMD ids in _commands.py).
+_MAV_FRAME_GLOBAL_INT = 5
 
 # PX4 emits this statustext when an external force-_arm succeeds without a
 # COMMAND_ACK; treat it as an acceptance of the _arm command. PX4-specific
@@ -58,6 +69,10 @@ class _AbstractCommandPort(ABC):
 
     @abstractmethod
     def send(self, command: _MavlinkCommand) -> None: ...
+
+    @abstractmethod
+    def send_setpoint(self, setpoint: _PositionSetpoint) -> None:
+        """Stream one OFFBOARD position-plus-yaw setpoint to the flight stack."""
 
     @abstractmethod
     def poll_feedback(self) -> Optional[CommandAck]:
@@ -190,6 +205,38 @@ class MavlinkCommandPort(_AbstractCommandPort):
             command.command_id,
             0,
             *command.params,
+        )
+
+    def send_setpoint(self, setpoint: _PositionSetpoint) -> None:
+        import math
+
+        if not self._target_known:
+            raise RuntimeError(
+                f"[{self._label}] cannot stream a setpoint: GCS link has not "
+                "learned the PX4 target system yet (no heartbeat handshake)"
+            )
+        type_mask = _POSITION_TARGET_TYPEMASK_POS_YAW
+        yaw = setpoint.yaw_rad
+        if not math.isfinite(yaw):
+            type_mask |= _POSITION_TARGET_TYPEMASK_YAW_IGNORE
+            yaw = 0.0
+        self._mav.mav.set_position_target_global_int_send(
+            0,  # time_boot_ms (unused by PX4)
+            self._mav.target_system,
+            self._mav.target_component,
+            _MAV_FRAME_GLOBAL_INT,
+            type_mask,
+            int(round(setpoint.latitude_deg * 1e7)),
+            int(round(setpoint.longitude_deg * 1e7)),
+            float(setpoint.altitude_m),
+            0.0,
+            0.0,
+            0.0,  # velocity (ignored)
+            0.0,
+            0.0,
+            0.0,  # acceleration (ignored)
+            float(yaw),
+            0.0,  # yaw_rate (ignored)
         )
 
     def poll_feedback(self) -> Optional[CommandAck]:

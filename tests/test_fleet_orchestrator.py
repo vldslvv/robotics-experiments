@@ -121,7 +121,9 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setattr(module, "BridgeHostGroup", _FakeBridgeHostGroup)
     monkeypatch.setattr(module, "MavlinkCommandPort", _FakePort)
     monkeypatch.setattr(module, "RoutineDriver", _FakeDriver)
-    monkeypatch.setattr(module, "DriverParams", SimpleNamespace(from_routine_config=lambda rc: rc))
+    monkeypatch.setattr(
+        module, "DriverParams", SimpleNamespace(from_routine_config=lambda rc, **_kwargs: rc)
+    )
 
     spawned: list = []
     despawned: list = []
@@ -148,7 +150,13 @@ def _vehicle(vid, prim, xy, *, enabled, steps=()):
         prim_name=prim,
         spawn_xy=xy,
         drone=SimpleNamespace(prim_name=prim),
-        px4=SimpleNamespace(enabled=enabled, articulation_path=None),
+        px4=SimpleNamespace(
+            enabled=enabled,
+            articulation_path=None,
+            home_lat_deg=47.3977,
+            home_lon_deg=8.5456,
+            home_alt_m=488.0,
+        ),
         routine=SimpleNamespace(steps=list(steps), gcs_heartbeat_period_s=1.0),
         gcs_port=14550 + vid,
         mavlink_port=4560 + vid,

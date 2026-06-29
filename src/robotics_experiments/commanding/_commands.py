@@ -19,14 +19,18 @@ from dataclasses import dataclass
 __all__ = [
     "_MAV_CMD_COMPONENT_ARM_DISARM",
     "_MAV_CMD_DO_REPOSITION",
+    "_MAV_CMD_DO_SET_MODE",
     "_MAV_CMD_NAV_LAND",
     "_MAV_CMD_NAV_TAKEOFF",
     "_MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
+    "_PX4_CUSTOM_MAIN_MODE_OFFBOARD",
     "_PX4_FORCE_ARM_MAGIC",
     "_MavlinkCommand",
+    "_PositionSetpoint",
     "_arm",
     "_land",
     "_reposition",
+    "_set_offboard_mode",
     "_takeoff",
 ]
 
@@ -35,11 +39,18 @@ __all__ = [
 _MAV_CMD_NAV_LAND = 21
 _MAV_CMD_NAV_TAKEOFF = 22
 _MAV_CMD_DO_REPOSITION = 192
+_MAV_CMD_DO_SET_MODE = 176
 _MAV_CMD_COMPONENT_ARM_DISARM = 400
 
 # _MAV_DO_REPOSITION_FLAGS_CHANGE_MODE asks PX4 to enter the mode needed to
 # execute _MAV_CMD_DO_REPOSITION instead of denying it while in the wrong mode.
 _MAV_DO_REPOSITION_FLAGS_CHANGE_MODE = 1
+
+# _MAV_CMD_DO_SET_MODE base-mode flag: the custom (autopilot-specific) mode in
+# param2/param3 is active. PX4's main mode for offboard control is 6; both are
+# PX4/MAVLink protocol constants, not tunables.
+_MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1
+_PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6
 
 # PX4 force-_arm magic value, passed as the ``_MAV_CMD_COMPONENT_ARM_DISARM``
 # param2 float to bypass pre-_arm checks. A PX4 protocol constant, not a tunable.
@@ -137,3 +148,48 @@ def _land() -> _MavlinkCommand:
         params=(0.0, 0.0, 0.0, math.nan, 0.0, 0.0, 0.0),
         label="land",
     )
+
+
+def _set_offboard_mode() -> _MavlinkCommand:
+    """Switch PX4 into OFFBOARD flight mode (``_MAV_CMD_DO_SET_MODE``).
+
+    param1 is the base-mode flag marking the custom mode active; param2 is PX4's
+    custom main mode (OFFBOARD); param3 (custom sub mode) is unused. PX4 only
+    accepts OFFBOARD once a setpoint stream is already flowing, so a ``goto`` step
+    primes setpoints before this is sent (see ``_routine._decide``).
+    """
+    return _MavlinkCommand(
+        command_id=_MAV_CMD_DO_SET_MODE,
+        params=(
+            float(_MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+            float(_PX4_CUSTOM_MAIN_MODE_OFFBOARD),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
+        label="set_offboard_mode",
+    )
+
+
+@dataclass(frozen=True)
+class _PositionSetpoint:
+    """One streamed OFFBOARD position-plus-yaw setpoint (a wire payload).
+
+    A geodetic target the side-effecting port serializes to a
+    ``SET_POSITION_TARGET_GLOBAL_INT``. Carried here (next to
+    :class:`_MavlinkCommand`) as a pure, dependency-free data object so both the
+    pure stepper and the port reference it without importing each other.
+
+    Attributes:
+        latitude_deg, longitude_deg: Target geographic position.
+        altitude_m: Target AMSL altitude (the ``MAV_FRAME_GLOBAL_INT`` frame).
+        yaw_rad: Target heading in NED (0 = north, +clockwise); ``NaN`` means
+            hold the current heading (the port sets the yaw-ignore type mask).
+    """
+
+    latitude_deg: float
+    longitude_deg: float
+    altitude_m: float
+    yaw_rad: float

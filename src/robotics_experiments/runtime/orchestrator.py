@@ -264,7 +264,12 @@ class FleetOrchestrator:
                 label=handle.label,
             )
             handle.driver = RoutineDriver(
-                DriverParams.from_routine_config(handle.vehicle.routine),
+                DriverParams.from_routine_config(
+                    handle.vehicle.routine,
+                    home_lat_deg=handle.vehicle.px4.home_lat_deg,
+                    home_lon_deg=handle.vehicle.px4.home_lon_deg,
+                    home_alt_m=handle.vehicle.px4.home_alt_m,
+                ),
                 handle.port,
                 make_env(handle),
                 label=handle.label,

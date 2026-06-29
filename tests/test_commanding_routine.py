@@ -10,6 +10,7 @@ plus a single-drone :class:`_VehicleCommander` over a fake
 
 import math
 
+import numpy as np
 import pytest
 from _fakes import FakeCommandPort, make_routine_observation
 
@@ -18,6 +19,7 @@ from robotics_experiments.commanding._commander import _VehicleCommander
 from robotics_experiments.commanding._commands import (
     _MAV_CMD_COMPONENT_ARM_DISARM,
     _MAV_CMD_DO_REPOSITION,
+    _MAV_CMD_DO_SET_MODE,
     _MAV_CMD_NAV_LAND,
     _MAV_CMD_NAV_TAKEOFF,
     _MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
@@ -34,12 +36,15 @@ from robotics_experiments.commanding._routine import (
     _build_vehicle_routine,
     _climbed_at_least,
     _cross_track_drift_below,
+    _cross_track_to_segment_below,
     _decide,
     _DecisionKind,
     _disarmed,
     _EnvelopeGates,
+    _heading_aligned,
     _hovering_stable,
     _moved_forward_at_least,
+    _reached_world_position,
     _RoutineState,
     _RoutineStep,
     _tilt_below,
@@ -209,6 +214,13 @@ def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0):
         gates=_GATES,
         takeoff_timeout_s=30.0,
         hover_settle_s=2.0,
+        home_lat_deg=47.0,
+        home_lon_deg=8.0,
+        home_alt_m=488.0,
+        goto_position_tol_m=0.5,
+        goto_heading_tol_deg=25.0,
+        goto_cross_track_m=2.0,
+        goto_offboard_prime_ticks=3,
     )
 
 
@@ -314,6 +326,149 @@ def test_build_vehicle_routine_rejects_forward_without_timeout():
 def test_build_vehicle_routine_rejects_land_without_timeout():
     with pytest.raises(ValueError, match="timeout_s"):
         _build([{"kind": "land"}])
+
+
+# ---- goto (OFFBOARD navigation) --------------------------------------------
+
+
+def _goto_routine(**overrides):
+    descriptor = {"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0}
+    descriptor.update(overrides)
+    return _build([descriptor])
+
+
+def _far(sim_time_us):
+    # On the baseline->target (x-axis) path, far from the (3, 0, 2) waypoint.
+    return make_routine_observation(sim_time_us=sim_time_us, position_enu=(0.0, 0.0, 2.0))
+
+
+def test_decide_goto_primes_then_engages_offboard_then_reaches():
+    routine = _goto_routine()  # _build uses goto_offboard_prime_ticks=3
+    state = _RoutineState.initial()
+
+    # Entry tick streams the first (priming) setpoint, facing the leg direction:
+    # NED yaw = atan2(east=3, north=0) = pi/2.
+    state, decision = _decide(routine, state, _far(0))
+    assert decision.kind is _DecisionKind.STREAM
+    assert decision.setpoint is not None
+    assert decision.setpoint.yaw_rad == pytest.approx(math.pi / 2.0)
+    assert state.setpoints_streamed == 1
+
+    # Two more priming setpoints (no command yet).
+    state, decision = _decide(routine, state, _far(1))
+    assert decision.kind is _DecisionKind.STREAM
+    state, decision = _decide(routine, state, _far(2))
+    assert decision.kind is _DecisionKind.STREAM
+    assert state.setpoints_streamed == 3
+
+    # Primed: engage OFFBOARD once.
+    state, decision = _decide(routine, state, _far(3))
+    assert decision.kind is _DecisionKind.SEND
+    assert decision.command.command_id == _MAV_CMD_DO_SET_MODE
+    assert state.offboard_requested is True
+
+    # Then back to streaming until the waypoint is reached.
+    state, decision = _decide(routine, state, _far(4))
+    assert decision.kind is _DecisionKind.STREAM
+
+    # Reached and heading-aligned (facing +east) -> ADVANCE (then DONE).
+    reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    state, decision = _decide(routine, state, reached)
+    assert decision.kind is _DecisionKind.ADVANCE
+    state, decision = _decide(routine, state, reached)
+    assert decision.kind is _DecisionKind.DONE
+
+
+def test_decide_goto_holds_streaming_until_heading_aligned():
+    routine = _goto_routine()
+    state = _RoutineState.initial()
+    for t in range(6):  # prime + engage offboard + steady stream
+        state, _decision = _decide(routine, state, _far(t))
+    # At the waypoint but yawed 90 deg off the leg direction: not yet complete.
+    misaligned = make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=90.0)
+    state, decision = _decide(routine, state, misaligned)
+    assert decision.kind is _DecisionKind.STREAM
+
+
+def test_decide_goto_cross_track_breach_fails_envelope():
+    routine = _goto_routine()
+    state = _RoutineState.initial()
+    state, _decision = _decide(routine, state, _far(0))  # entry: baseline captured
+    # 3 m off the straight x-axis path exceeds goto_cross_track_m=2.0.
+    off_path = make_routine_observation(sim_time_us=1, position_enu=(1.0, 3.0, 2.0))
+    state, decision = _decide(routine, state, off_path)
+    assert decision.kind is _DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.ENVELOPE
+
+
+def test_decide_goto_times_out_as_command_failure():
+    routine = _goto_routine()  # timeout_s=20.0
+    state = _RoutineState.initial()
+    for t in range(5):  # reach the steady streaming branch
+        state, _decision = _decide(routine, state, _far(t))
+    state, decision = _decide(routine, state, _far(21_000_000))
+    assert decision.kind is _DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.COMMAND
+
+
+def test_reached_world_position_within_tolerance():
+    predicate = _reached_world_position(3.0, 0.0, 2.0, 0.5)
+    assert predicate(make_routine_observation(position_enu=(3.3, 0.0, 2.0)), None) is True
+    assert predicate(make_routine_observation(position_enu=(4.0, 0.0, 2.0)), None) is False
+
+
+def test_heading_aligned_faces_target_direction():
+    predicate = _heading_aligned(3.0, 0.0, 20.0)
+    baseline = np.zeros(3, dtype=np.float64)
+    assert predicate(make_routine_observation(yaw_deg=0.0), baseline) is True
+    assert predicate(make_routine_observation(yaw_deg=90.0), baseline) is False
+
+
+def test_heading_aligned_trivial_for_near_vertical_leg():
+    # Horizontal baseline->target distance below the heading threshold: any yaw is fine.
+    predicate = _heading_aligned(0.05, 0.0, 5.0)
+    assert predicate(make_routine_observation(yaw_deg=90.0), np.zeros(3, dtype=np.float64)) is True
+
+
+def test_cross_track_to_segment_below_measures_perpendicular_distance():
+    gate = _cross_track_to_segment_below(3.0, 0.0, 2.0)
+    baseline = np.zeros(3, dtype=np.float64)
+    # 1 m off the x-axis path -> within limit.
+    assert gate(make_routine_observation(position_enu=(1.5, 1.0, 2.0)), baseline) is None
+    # 3 m off -> breach (along-track progress does not matter).
+    assert gate(make_routine_observation(position_enu=(1.5, 3.0, 2.0)), baseline) is not None
+
+
+def test_build_vehicle_routine_goto():
+    routine = _build(
+        [
+            {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
+            {"kind": "goto", "x": 3.0, "y": 1.0, "z": 2.5, "timeout_s": 25.0},
+        ]
+    )
+    goto_step = routine.steps[1]
+    assert goto_step.label.startswith("goto")
+    # A streaming step engages OFFBOARD via DO_SET_MODE and carries its spec.
+    assert goto_step.command.command_id == _MAV_CMD_DO_SET_MODE
+    assert goto_step.streaming is not None
+    assert goto_step.streaming.target_enu == (3.0, 1.0, 2.5)
+    assert goto_step.streaming.prime_ticks == 3
+    # The geodetic target offsets the home anchor (47, 8, 488); altitude = home + up.
+    assert goto_step.streaming.latitude_deg == pytest.approx(47.0, abs=1e-2)
+    assert goto_step.streaming.longitude_deg != pytest.approx(8.0)
+    assert goto_step.streaming.altitude_m == pytest.approx(490.5)
+    assert goto_step.timeout_s == pytest.approx(25.0)
+    assert goto_step.invariants
+
+
+def test_build_vehicle_routine_rejects_goto_without_coordinate():
+    with pytest.raises(ValueError, match="'x'"):
+        _build([{"kind": "goto", "y": 0.0, "z": 1.0, "timeout_s": 10.0}])
+
+
+def test_build_vehicle_routine_rejects_goto_without_timeout():
+    with pytest.raises(ValueError, match="timeout_s"):
+        _build([{"kind": "goto", "x": 1.0, "y": 0.0, "z": 1.0}])
 
 
 def test_build_vehicle_routine_takeoff_yaw_param_is_nan():

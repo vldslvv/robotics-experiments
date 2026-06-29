@@ -40,6 +40,10 @@ def _params(steps):
         takeoff_target_timeout_s=30.0,
         takeoff_timeout_s=30.0,
         hover_settle_s=2.0,
+        goto_position_tol_m=0.5,
+        goto_heading_tol_deg=25.0,
+        goto_cross_track_m=2.0,
+        goto_offboard_prime_ticks=3,
     )
 
 
@@ -180,3 +184,36 @@ def test_routine_driver_strict_env_raises_on_failure():
         assert "ENVELOPE" in str(exc)
     else:  # pragma: no cover - the strict env must raise
         raise AssertionError("strict env did not raise on an envelope breach")
+
+
+_GOTO_STEPS = [{"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0}]
+
+
+def test_routine_driver_goto_streams_setpoints_and_engages_offboard():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    driver = RoutineDriver(_params(_GOTO_STEPS), port, env, label="d0", monotonic=lambda: 0.0)
+
+    env.connected = True
+    port.handshaked = True
+    port.global_position = (47.0, 8.0, 488.0)
+    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
+    for _ in range(20):
+        driver.tick()
+        if driver.phase is _DriverPhase.DRIVE:
+            break
+    assert driver.phase is _DriverPhase.DRIVE
+
+    # prime_ticks=3: setpoints stream, then a single OFFBOARD-mode command, then
+    # the stream continues -- the driver routes STREAM to port.send_setpoint.
+    for _ in range(6):
+        driver.tick()
+    assert len(port.setpoints) >= 3
+    assert [c.label for c in port.sent] == ["set_offboard_mode"]
+
+    # Reach the waypoint facing the leg direction (+east) -> routine completes.
+    env.observation = make_routine_observation(position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    driver.tick()
+    assert env.advanced_steps == ["goto[3.0,0.0,2.0]"]
+    assert driver.is_done
+    assert env.failures == []

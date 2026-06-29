@@ -36,14 +36,20 @@ from typing import Any, Optional
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.frames import tilt_angle_deg
+from robotics_experiments.px4_bridge.frames import (
+    rotate_vector_wxyz,
+    synth_gps_from_enu,
+    tilt_angle_deg,
+)
 
 from ._commands import (
     _MAV_CMD_COMPONENT_ARM_DISARM,
     _arm,
     _land,
     _MavlinkCommand,
+    _PositionSetpoint,
     _reposition,
+    _set_offboard_mode,
     _takeoff,
 )
 from ._observation import _MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
@@ -57,6 +63,7 @@ __all__ = [
     "_RoutineState",
     "_RoutineStep",
     "_StepPredicate",
+    "_StreamingSpec",
     "_VehicleRoutine",
     "_ack_accepted",
     "_angular_speed_below",
@@ -64,15 +71,23 @@ __all__ = [
     "_build_vehicle_routine",
     "_climbed_at_least",
     "_cross_track_drift_below",
+    "_cross_track_to_segment_below",
     "_disarmed",
+    "_heading_aligned",
     "_hovering_stable",
     "_lateral_drift_below",
     "_moved_forward_at_least",
+    "_reached_world_position",
     "_tilt_below",
     "_vertical_speed_within",
 ]
 
 _EARTH_RADIUS_M = 6_378_137.0
+
+# Below this horizontal baseline->target distance a ``goto`` leg has no
+# meaningful heading (a near-vertical move): the setpoint holds heading (yaw NaN)
+# and the heading-alignment predicate passes trivially.
+_GOTO_MIN_HEADING_DIST_M = 0.25
 
 # A completion predicate reads the observation plus the routine's captured
 # baseline position (ENU, set on the first SEND); baseline is ``None`` only
@@ -86,6 +101,7 @@ class _DecisionKind(Enum):
     """The kind of a :class:`_RoutineDecision`."""
 
     SEND = auto()
+    STREAM = auto()
     WAIT = auto()
     ADVANCE = auto()
     DONE = auto()
@@ -109,18 +125,24 @@ class FailureKind(Enum):
 class _RoutineDecision:
     """The pure output of :func:`_decide` for one tick.
 
-    Exactly one ``kind``; ``command`` is set only for ``SEND``; ``reason`` and
-    ``failure_kind`` only for ``FAIL``. Build instances through the classmethods.
+    Exactly one ``kind``; ``command`` is set only for ``SEND``; ``setpoint`` only
+    for ``STREAM``; ``reason`` and ``failure_kind`` only for ``FAIL``. Build
+    instances through the classmethods.
     """
 
     kind: _DecisionKind
     command: Optional[_MavlinkCommand] = None
+    setpoint: Optional[_PositionSetpoint] = None
     reason: Optional[str] = None
     failure_kind: Optional[FailureKind] = None
 
     @classmethod
     def send(cls, command: _MavlinkCommand) -> "_RoutineDecision":
         return cls(_DecisionKind.SEND, command=command)
+
+    @classmethod
+    def stream(cls, setpoint: _PositionSetpoint) -> "_RoutineDecision":
+        return cls(_DecisionKind.STREAM, setpoint=setpoint)
 
     @classmethod
     def wait(cls) -> "_RoutineDecision":
@@ -165,6 +187,11 @@ class _RoutineStep:
         invariants: Continuous flight-envelope gates evaluated every tick the
             step is active; the first breach fails the routine with
             ``FailureKind.ENVELOPE``.
+        streaming: When set, this is a streamed OFFBOARD step (a ``goto``): the
+            stepper primes setpoints, sends ``command`` once to engage offboard,
+            then streams the spec's setpoint every tick until completion. When
+            ``None`` (every other kind) the step uses the send-once-then-verify
+            flow.
     """
 
     command: Optional[_MavlinkCommand]
@@ -174,6 +201,30 @@ class _RoutineStep:
     retry_on_temporarily_rejected: bool = False
     hold_s: float = 0.0
     invariants: tuple[_Invariant, ...] = ()
+    streaming: Optional["_StreamingSpec"] = None
+
+
+@dataclass(frozen=True)
+class _StreamingSpec:
+    """The streamed-setpoint target for an OFFBOARD ``goto`` step.
+
+    Attributes:
+        target_enu: The absolute world-ENU waypoint ``(east, north, up)`` in
+            metres, used to compute the per-tick heading and (with the captured
+            baseline) the cross-track gate.
+        latitude_deg, longitude_deg, altitude_m: The same waypoint precomputed
+            (by :func:`_build_vehicle_routine` via ``synth_gps_from_enu``) as the
+            geodetic target the port streams, kept consistent by construction with
+            the bridge's synthesized GPS.
+        prime_ticks: How many setpoints to stream before engaging OFFBOARD (PX4
+            rejects the mode until a setpoint stream is already flowing).
+    """
+
+    target_enu: tuple[float, float, float]
+    latitude_deg: float
+    longitude_deg: float
+    altitude_m: float
+    prime_ticks: int
 
 
 @dataclass(frozen=True)
@@ -200,6 +251,11 @@ class _RoutineState:
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
             ``False`` again. Used to enforce ``_RoutineStep.hold_s``.
+        setpoints_streamed: Number of OFFBOARD setpoints streamed for the active
+            streaming step so far (the priming counter); 0 for a non-streaming
+            step.
+        offboard_requested: Whether the one-shot OFFBOARD-mode command has been
+            sent for the active streaming step.
     """
 
     cursor: int = 0
@@ -207,6 +263,8 @@ class _RoutineState:
     baseline_position_enu: Optional[np.ndarray] = None
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
+    setpoints_streamed: int = 0
+    offboard_requested: bool = False
 
     @classmethod
     def initial(cls) -> "_RoutineState":
@@ -251,7 +309,15 @@ def _decide(
             baseline_position_enu=baseline,
             step_started_us=int(observation.sim_time_us),
             hold_since_us=None,
+            setpoints_streamed=0,
+            offboard_requested=False,
         )
+        if step.streaming is not None:
+            # Streaming step: begin priming the OFFBOARD setpoint stream
+            # immediately; the mode command is sent later (see below).
+            return replace(new_state, setpoints_streamed=1), _RoutineDecision.stream(
+                _setpoint_for(step.streaming, baseline)
+            )
         if step.command is None:
             return new_state, _RoutineDecision.wait()
         return new_state, _RoutineDecision.send(step.command)
@@ -285,6 +351,29 @@ def _decide(
     elif state.hold_since_us is not None:
         # The completion condition broke before the hold window elapsed; restart it.
         state = replace(state, hold_since_us=None)
+
+    # Streaming (OFFBOARD goto) lifecycle: prime the setpoint stream, engage
+    # OFFBOARD once, then keep streaming until completion or timeout. Handled
+    # before the generic ack/timeout tail so the one-shot mode command is not
+    # treated as a rejected step command.
+    if step.streaming is not None:
+        spec = step.streaming
+        if state.setpoints_streamed < spec.prime_ticks:
+            return replace(
+                state, setpoints_streamed=state.setpoints_streamed + 1
+            ), _RoutineDecision.stream(_setpoint_for(spec, state.baseline_position_enu))
+        if not state.offboard_requested:
+            assert step.command is not None  # a streaming step always carries the mode command
+            return replace(state, offboard_requested=True), _RoutineDecision.send(step.command)
+        step_started_us = state.step_started_us
+        assert step_started_us is not None  # set on the entry tick, before sent=True
+        if int(observation.sim_time_us) - step_started_us > step.timeout_s * 1_000_000:
+            return state, _RoutineDecision.fail(
+                f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
+                "(did not reach the waypoint)",
+                failure_kind=FailureKind.COMMAND,
+            )
+        return state, _RoutineDecision.stream(_setpoint_for(spec, state.baseline_position_enu))
 
     ack = observation.last_ack
     if (
@@ -394,6 +483,79 @@ def _disarmed() -> _StepPredicate:
     return predicate
 
 
+def _reached_world_position(x_m: float, y_m: float, z_m: float, tol_m: float) -> _StepPredicate:
+    """Predicate: the vehicle is within ``tol_m`` (3D) of absolute world ENU ``(x, y, z)``.
+
+    The first *absolute* world-frame completion predicate: it compares the
+    observed world position directly to the target, not a baseline-relative
+    displacement.
+    """
+    target = np.array([x_m, y_m, z_m], dtype=np.float64)
+
+    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+        position = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        return float(np.linalg.norm(position - target)) <= tol_m
+
+    return predicate
+
+
+def _heading_aligned(x_m: float, y_m: float, tol_deg: float) -> _StepPredicate:
+    """Predicate: the body faces the baseline->target heading within ``tol_deg``.
+
+    Trivially satisfied for a near-vertical leg (horizontal baseline->target
+    distance below :data:`_GOTO_MIN_HEADING_DIST_M`), where heading is undefined.
+    """
+
+    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+        if baseline is None:
+            return True
+        de = x_m - float(baseline[0])
+        dn = y_m - float(baseline[1])
+        if math.hypot(de, dn) < _GOTO_MIN_HEADING_DIST_M:
+            return True
+        target_heading = math.atan2(dn, de)  # ENU, CCW from +east
+        forward_enu = rotate_vector_wxyz(
+            observation.vehicle_state.orientation_flu_enu_wxyz,
+            np.array([1.0, 0.0, 0.0], dtype=np.float64),
+        )
+        observed = math.atan2(float(forward_enu[1]), float(forward_enu[0]))
+        diff = abs((observed - target_heading + math.pi) % (2.0 * math.pi) - math.pi)
+        return math.degrees(diff) <= tol_deg
+
+    return predicate
+
+
+def _and_predicates(*predicates: _StepPredicate) -> _StepPredicate:
+    """Combine completion predicates: complete only when every one is satisfied."""
+
+    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+        return all(p(observation, baseline) for p in predicates)
+
+    return predicate
+
+
+def _setpoint_for(spec: "_StreamingSpec", baseline: Optional[np.ndarray]) -> _PositionSetpoint:
+    """Build the streamed setpoint: the fixed geodetic target plus a live heading.
+
+    Yaw faces the baseline->target direction (constant per leg); a near-vertical
+    leg (or no baseline yet) holds heading via ``NaN``.
+    """
+    east, north, _up = spec.target_enu
+    yaw_rad = math.nan
+    if baseline is not None:
+        de = east - float(baseline[0])
+        dn = north - float(baseline[1])
+        if math.hypot(de, dn) >= _GOTO_MIN_HEADING_DIST_M:
+            # NED yaw: 0 = north, positive clockwise toward east.
+            yaw_rad = math.atan2(de, dn)
+    return _PositionSetpoint(
+        latitude_deg=spec.latitude_deg,
+        longitude_deg=spec.longitude_deg,
+        altitude_m=spec.altitude_m,
+        yaw_rad=yaw_rad,
+    )
+
+
 # ---- Continuous flight-envelope invariant gates ----------------------------
 
 
@@ -434,6 +596,35 @@ def _cross_track_drift_below(max_cross_track_m: float) -> _Invariant:
         drift = abs(float(position[1] - baseline[1]))
         if drift > max_cross_track_m:
             return f"cross-track drift {drift:.2f}m exceeds limit {max_cross_track_m:.2f}m"
+        return None
+
+    return gate
+
+
+def _cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: float) -> _Invariant:
+    """Gate: horizontal distance from the baseline->target line stays within ``max_m``.
+
+    The direction-agnostic generalization of :func:`_cross_track_drift_below`: it
+    measures perpendicular deviation from the straight planned path (baseline to
+    the absolute target), so along-track progress in any heading is free while a
+    sideways excursion off the path trips the envelope.
+    """
+    target = np.array([target_x_m, target_y_m], dtype=np.float64)
+
+    def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
+        if baseline is None:
+            return None
+        position = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        a = np.array([float(baseline[0]), float(baseline[1])], dtype=np.float64)
+        p = position[:2]
+        ab = target - a
+        ab_len = float(np.linalg.norm(ab))
+        if ab_len < 1e-6:
+            cross = float(np.linalg.norm(p - a))
+        else:
+            cross = abs(float(np.cross(ab, p - a))) / ab_len
+        if cross > max_m:
+            return f"cross-track {cross:.2f}m exceeds limit {max_m:.2f}m"
         return None
 
     return gate
@@ -513,6 +704,17 @@ def _forward_invariants(gates: _EnvelopeGates) -> tuple[_Invariant, ...]:
     )
 
 
+def _goto_invariants(
+    gates: _EnvelopeGates, target_x_m: float, target_y_m: float, cross_track_m: float
+) -> tuple[_Invariant, ...]:
+    return (
+        _tilt_below(gates.max_tilt_deg),
+        _cross_track_to_segment_below(target_x_m, target_y_m, cross_track_m),
+        _vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
+        _angular_speed_below(gates.max_angular_speed_rad_s),
+    )
+
+
 def _offset_lat_lon(
     latitude_deg: float, longitude_deg: float, *, east_m: float, north_m: float
 ) -> tuple[float, float]:
@@ -532,6 +734,13 @@ def _build_vehicle_routine(
     gates: _EnvelopeGates,
     takeoff_timeout_s: float,
     hover_settle_s: float,
+    home_lat_deg: float,
+    home_lon_deg: float,
+    home_alt_m: float,
+    goto_position_tol_m: float,
+    goto_heading_tol_deg: float,
+    goto_cross_track_m: float,
+    goto_offboard_prime_ticks: int,
 ) -> _VehicleRoutine:
     """Build a :class:`_VehicleRoutine` from authored step descriptors and a target.
 
@@ -556,6 +765,13 @@ def _build_vehicle_routine(
     - ``forward`` (requires ``distance_m`` and ``timeout_s``): repositions
       ``distance_m`` along world +X/east and completes once that displacement is
       observed from the routine baseline; flight gates apply.
+    - ``goto`` (requires ``x``, ``y``, ``z`` and ``timeout_s``; optional
+      ``position_tol_m`` / ``heading_tol_deg``): streams OFFBOARD position
+      setpoints toward the absolute world-ENU waypoint (converted to a geodetic
+      target via ``synth_gps_from_enu`` against ``home_*``, frame-consistent with
+      the bridge's synthesized GPS), yawing toward the leg direction; completes
+      once within ``goto_position_tol_m`` of the waypoint and heading-aligned. A
+      cross-track-to-path gate plus tilt / vertical / angular gates apply.
     - ``_land`` (requires ``timeout_s``): commands a landing at the current
       position and completes once PX4 disarms.
 
@@ -644,6 +860,42 @@ def _build_vehicle_routine(
                     timeout_s=float(descriptor["timeout_s"]),
                     retry_on_temporarily_rejected=True,
                     invariants=forward_invariants,
+                )
+            )
+        elif kind == "goto":
+            for field in ("x", "y", "z", "timeout_s"):
+                if field not in descriptor:
+                    raise ValueError(f"routine step {index} (goto) is missing required {field!r}")
+            x_m = float(descriptor["x"])
+            y_m = float(descriptor["y"])
+            z_m = float(descriptor["z"])
+            position_tol_m = float(descriptor.get("position_tol_m", goto_position_tol_m))
+            heading_tol_deg = float(descriptor.get("heading_tol_deg", goto_heading_tol_deg))
+            gps = synth_gps_from_enu(
+                np.array([x_m, y_m, z_m], dtype=np.float64),
+                np.zeros(3, dtype=np.float64),
+                home_lat_deg,
+                home_lon_deg,
+                home_alt_m,
+            )
+            spec = _StreamingSpec(
+                target_enu=(x_m, y_m, z_m),
+                latitude_deg=float(gps["latitude"]),
+                longitude_deg=float(gps["longitude"]),
+                altitude_m=float(gps["altitude"]),
+                prime_ticks=int(goto_offboard_prime_ticks),
+            )
+            built.append(
+                _RoutineStep(
+                    command=_set_offboard_mode(),
+                    is_complete=_and_predicates(
+                        _reached_world_position(x_m, y_m, z_m, position_tol_m),
+                        _heading_aligned(x_m, y_m, heading_tol_deg),
+                    ),
+                    label=f"goto[{x_m:.1f},{y_m:.1f},{z_m:.1f}]",
+                    timeout_s=float(descriptor["timeout_s"]),
+                    invariants=_goto_invariants(gates, x_m, y_m, goto_cross_track_m),
+                    streaming=spec,
                 )
             )
         elif kind == "land":

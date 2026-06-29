@@ -102,6 +102,13 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
             gates=gates,
             takeoff_timeout_s=30.0,
             hover_settle_s=2.0,
+            home_lat_deg=47.0,
+            home_lon_deg=8.0,
+            home_alt_m=488.0,
+            goto_position_tol_m=0.5,
+            goto_heading_tol_deg=25.0,
+            goto_cross_track_m=2.0,
+            goto_offboard_prime_ticks=3,
         )
         assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
         # The per-drone routine driver is pure too (its phase machine imports no

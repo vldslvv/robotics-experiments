@@ -222,7 +222,8 @@ the current contents and the intended home for that kind of code.
   input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
   `failsafe` / `sim_time_us`) -> `decide(routine, state, observation)` (the pure
   stepper, analogue of `commands_to_dynamics`) -> `RoutineDecision`
-  (`SEND`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output) across the
+  (`SEND`/`STREAM`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output; `STREAM` carries a
+  `PositionSetpoint` for the OFFBOARD `goto` setpoint stream) across the
   `AbstractCommandPort` seam (analogue of `AbstractFlightStackBridge`), with
   `VehicleCommander` and the pure per-drone `RoutineDriver` as the orchestrators
   (analogue of `BridgeHost`). The command layer is **per drone** like the bridge:
@@ -239,8 +240,9 @@ the current contents and the intended home for that kind of code.
   (`armed()`, `ack_accepted(command_id)`, `climbed_at_least(...)`) are pure
   functions -- no sockets, no pymavlink, no Isaac, unit-testable with plain
   dataclasses. The only side effect in the layer is the port
-  (`send` / `connect` / `pump_heartbeat` / `poll_feedback`); `VehicleCommander`
-  runs the pure `decide` and then performs the single `SEND` side effect, keeping
+  (`send` / `send_setpoint` / `connect` / `pump_heartbeat` / `poll_feedback`);
+  `VehicleCommander` runs the pure `decide` and then performs the single side
+  effect (`SEND` -> `send`, `STREAM` -> `send_setpoint`), keeping
   decision and I/O separated. Step `timeout_s` is measured in **sim time**
   (`observation.sim_time_us`) so the stepper stays pure; the driver pairs it with
   a wall-clock backstop.
@@ -314,7 +316,9 @@ the current contents and the intended home for that kind of code.
   `takeoff_timeout_s`, `hover_settle_s`), **and the flight-envelope gates**
   (`max_tilt_deg`, `max_lateral_drift_m`, `max_vertical_speed_m_s`,
   `max_downward_speed_m_s`, `max_angular_speed_rad_s`,
-  `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`). There
+  `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`), **and
+  the navigation (`goto`) tunables** (`goto_position_tol_m`, `goto_heading_tol_deg`,
+  `goto_cross_track_m`, `goto_offboard_prime_ticks`). There
   is **no** separate `integration_test` group: the integration test is just the
   routine driven with `--strict`. The routine is **per vehicle**: each
   `vehicles[]` entry may carry a `routine` partial, merged over the global
@@ -322,20 +326,37 @@ the current contents and the intended home for that kind of code.
   `RoutineConfig` lands on `ResolvedVehicle.routine`). `routine.steps` is the
   **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
   (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
-  `{kind: hover, hold_s}` mappings) gets its own `RoutineDriver`; an **empty** list
+  `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
+  `{kind: goto, x, y, z, timeout_s}` / `{kind: land, timeout_s}` mappings) gets
+  its own `RoutineDriver`; an **empty** list
   (the default `configs/experiment/routine/default.yaml`) means that drone is
   manual. Mixed fleets are allowed. There is no separate enable flag. The private
   pure routine builder maps the descriptors + a per-drone takeoff target into the
-  routine object the driver executes (unknown `kind`, or a `takeoff`/`hover`
+  routine object the driver executes (unknown `kind`, or a `takeoff`/`hover`/`goto`
   missing a required field, raises `ValueError`); it stays on the core import path
   and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver. The takeoff step completes on a real
   climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained
   `hovering_stable(...)`, with the gates as continuous invariants on both (the
   historical windowed min/max-range hover gates are now sustained
   instantaneous-rate bounds held for `hold_s`).
+  The `goto` step is the navigation primitive: it streams PX4 OFFBOARD position
+  setpoints (the `STREAM` decision) toward an **absolute world-ENU** waypoint
+  `(x, y, z)`, yawing toward the leg, and completes on
+  `reached_world_position(...)` (absolute, not baseline-relative) plus heading
+  alignment, with tilt / vertical / angular gates and a direction-agnostic
+  cross-track-to-path gate. The world-ENU target is converted to a geodetic
+  setpoint via `px4_bridge.frames.synth_gps_from_enu` against the per-vehicle
+  `px4` **home anchor** (`home_lat_deg`/`home_lon_deg`/`home_alt_m`, passed by the
+  orchestrator into `DriverParams.from_routine_config`, **not** a routine knob) --
+  frame-consistent by construction with the GPS the bridge feeds PX4, so the
+  global frame sidesteps the EKF local-NED origin. PX4 only accepts OFFBOARD once
+  a setpoint stream is already flowing, so `decide` primes
+  `goto_offboard_prime_ticks` setpoints before the one-shot mode command.
   `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
   `configs/runtime_arm_takeoff.yaml` runs it headless via
-  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml`, and the
+  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml`,
+  `configs/runtime_drone_navigate.yaml` demos an absolute-waypoint `goto` routine
+  the same way, and the
   `integration_test_*` configs select the same routine and differ only in
   scene/fleet. The GCS link baseport still lives in the `px4` group
   (`px4.gcs_baseport`); the per-drone `gcs_port` the driver talks is derived from
