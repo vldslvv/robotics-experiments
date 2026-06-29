@@ -83,7 +83,7 @@ def test_decide_runs_arm_takeoff_to_done():
     routine = _arm_takeoff_routine(min_climb_m=1.0)
     state = _RoutineState.initial()
 
-    # Tick 1: first step not sent -> SEND _arm, baseline + timer captured.
+    # Tick 1: first step not sent -> SEND _arm, active-step baseline + timer captured.
     state, decision = _decide(routine, state, make_routine_observation(sim_time_us=0))
     assert decision.kind is _DecisionKind.SEND
     assert decision.command.command_id == _MAV_CMD_COMPONENT_ARM_DISARM
@@ -254,7 +254,7 @@ def test_build_vehicle_routine_arm_takeoff_hover():
     # Flight gates are wired onto the _takeoff and hover steps.
     assert takeoff_step.invariants
     hover_step = routine.steps[2]
-    # The hover step sends nothing and holds a stable hover for hold_s; its
+    # The hover step carries no command and holds a stable hover for hold_s; its
     # timeout is hover_settle_s + hold_s.
     assert hover_step.command is None
     assert hover_step.hold_s == pytest.approx(5.0)
@@ -337,9 +337,59 @@ def _goto_routine(**overrides):
     return _build([descriptor])
 
 
-def _far(sim_time_us):
-    # On the baseline->target (x-axis) path, far from the (3, 0, 2) waypoint.
-    return make_routine_observation(sim_time_us=sim_time_us, position_enu=(0.0, 0.0, 2.0))
+def _far(sim_time_us, **overrides):
+    # On the active step's x-axis path, far from the (3, 0, 2) waypoint.
+    fields = {"sim_time_us": sim_time_us, "position_enu": (0.0, 0.0, 2.0)}
+    fields.update(overrides)
+    return make_routine_observation(**fields)
+
+
+def _goto_state_after_offboard_request():
+    routine = _goto_routine()
+    state = _RoutineState.initial()
+    for t in range(3):
+        state, decision = _decide(routine, state, _far(t))
+        assert decision.kind is _DecisionKind.STREAM
+    state, decision = _decide(routine, state, _far(3))
+    assert decision.kind is _DecisionKind.SEND
+    assert decision.command.command_id == _MAV_CMD_DO_SET_MODE
+    assert state.offboard_requested is True
+    return routine, state
+
+
+def _two_goto_routine():
+    return _build(
+        [
+            {"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0},
+            {"kind": "goto", "x": 3.0, "y": 3.0, "z": 2.0, "timeout_s": 20.0},
+        ]
+    )
+
+
+def _goto_hover_land_routine(*, hover_hold_s=1.0):
+    return _build(
+        [
+            {"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0},
+            {"kind": "hover", "hold_s": hover_hold_s},
+            {"kind": "land", "timeout_s": 10.0},
+        ]
+    )
+
+
+def _advance_first_goto(routine):
+    state = _RoutineState.initial()
+    for t in range(5):
+        state, _decision = _decide(routine, state, _far(t))
+    reached = make_routine_observation(
+        sim_time_us=5,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = _decide(routine, state, reached)
+    assert decision.kind is _DecisionKind.ADVANCE
+    assert state.cursor == 1
+    assert state.sent is False
+    return state
 
 
 def test_decide_goto_primes_then_engages_offboard_then_reaches():
@@ -379,6 +429,59 @@ def test_decide_goto_primes_then_engages_offboard_then_reaches():
     assert decision.kind is _DecisionKind.DONE
 
 
+def test_decide_goto_offboard_accepted_ack_continues_streaming():
+    routine, state = _goto_state_after_offboard_request()
+    accepted = CommandAck.from_result(_MAV_CMD_DO_SET_MODE, 0)
+
+    state, decision = _decide(routine, state, _far(4, last_ack=accepted))
+
+    assert decision.kind is _DecisionKind.STREAM
+    assert state.offboard_requested is True
+
+
+def test_decide_goto_ignores_offboard_ack_before_this_step_requests_mode():
+    routine = _goto_routine()
+    state = _RoutineState.initial()
+    state, decision = _decide(routine, state, _far(0))
+    assert decision.kind is _DecisionKind.STREAM
+
+    stale_denied = CommandAck.from_result(_MAV_CMD_DO_SET_MODE, 2)
+    state, decision = _decide(routine, state, _far(1, last_ack=stale_denied))
+
+    assert decision.kind is _DecisionKind.STREAM
+    assert state.setpoints_streamed == 2
+    assert state.offboard_requested is False
+
+
+def test_decide_goto_offboard_temporary_rejection_streams_then_retries():
+    routine, state = _goto_state_after_offboard_request()
+    temp_reject = CommandAck.from_result(
+        _MAV_CMD_DO_SET_MODE,
+        _MAV_RESULT_TEMPORARILY_REJECTED,
+    )
+
+    state, decision = _decide(routine, state, _far(4, last_ack=temp_reject))
+
+    assert decision.kind is _DecisionKind.STREAM
+    assert state.offboard_requested is False
+
+    state, decision = _decide(routine, state, _far(5))
+    assert decision.kind is _DecisionKind.SEND
+    assert decision.command.command_id == _MAV_CMD_DO_SET_MODE
+    assert state.offboard_requested is True
+
+
+def test_decide_goto_offboard_hard_rejection_fails_command():
+    routine, state = _goto_state_after_offboard_request()
+    denied = CommandAck.from_result(_MAV_CMD_DO_SET_MODE, 2)
+
+    _state, decision = _decide(routine, state, _far(4, last_ack=denied))
+
+    assert decision.kind is _DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.COMMAND
+    assert "rejected" in decision.reason
+
+
 def test_decide_goto_holds_streaming_until_heading_aligned():
     routine = _goto_routine()
     state = _RoutineState.initial()
@@ -401,6 +504,46 @@ def test_decide_goto_cross_track_breach_fails_envelope():
     assert decision.failure_kind is FailureKind.ENVELOPE
 
 
+def test_consecutive_goto_uses_current_step_baseline_for_yaw():
+    routine = _two_goto_routine()
+    state = _advance_first_goto(routine)
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
+    )
+
+    assert decision.kind is _DecisionKind.STREAM
+    # Second leg is due north from the first waypoint/current step start.
+    assert decision.setpoint.yaw_rad == pytest.approx(0.0)
+    assert state.baseline_position_enu is not None
+    assert state.baseline_position_enu.tolist() == [3.0, 0.0, 2.0]
+
+
+def test_consecutive_goto_cross_track_uses_current_leg_path():
+    routine = _two_goto_routine()
+    state = _advance_first_goto(routine)
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
+    )
+    assert decision.kind is _DecisionKind.STREAM
+
+    # This is 2.1 m east of the current northbound leg x=3 (breach), but only
+    # about 1.5 m from the stale origin->target diagonal (which would pass).
+    _state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=7, position_enu=(5.1, 3.0, 2.0)),
+    )
+
+    assert decision.kind is _DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.ENVELOPE
+    assert "cross-track" in decision.reason
+
+
 def test_decide_goto_times_out_as_command_failure():
     routine = _goto_routine()  # timeout_s=20.0
     state = _RoutineState.initial()
@@ -409,6 +552,77 @@ def test_decide_goto_times_out_as_command_failure():
     state, decision = _decide(routine, state, _far(21_000_000))
     assert decision.kind is _DecisionKind.FAIL
     assert decision.failure_kind is FailureKind.COMMAND
+
+
+def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
+    routine = _goto_hover_land_routine()
+    state = _RoutineState.initial()
+
+    last_streamed = None
+    for t in range(5):
+        state, decision = _decide(routine, state, _far(t))
+        if decision.kind is _DecisionKind.STREAM:
+            last_streamed = decision.setpoint
+    assert last_streamed is not None
+
+    reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    state, decision = _decide(routine, state, reached)
+    assert decision.kind is _DecisionKind.ADVANCE
+    assert state.cursor == 1
+    assert state.offboard_hold_setpoint == last_streamed
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+    )
+    assert decision.kind is _DecisionKind.STREAM
+    assert decision.setpoint == last_streamed
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=500_000, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+    )
+    assert decision.kind is _DecisionKind.STREAM
+    assert decision.setpoint == last_streamed
+    assert state.hold_since_us == 500_000
+
+
+def test_explicit_command_after_offboard_hover_clears_held_setpoint():
+    routine = _goto_hover_land_routine(hover_hold_s=0.0)
+    state = _RoutineState.initial()
+    for t in range(5):
+        state, _decision = _decide(routine, state, _far(t))
+
+    reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    state, decision = _decide(routine, state, reached)
+    assert decision.kind is _DecisionKind.ADVANCE
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+    )
+    assert decision.kind is _DecisionKind.STREAM
+    assert state.offboard_hold_setpoint is not None
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=7, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+    )
+    assert decision.kind is _DecisionKind.ADVANCE
+    assert state.cursor == 2
+
+    state, decision = _decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=8, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+    )
+    assert decision.kind is _DecisionKind.SEND
+    assert decision.command.command_id == _MAV_CMD_NAV_LAND
+    assert state.offboard_hold_setpoint is None
 
 
 def test_reached_world_position_within_tolerance():
@@ -425,7 +639,7 @@ def test_heading_aligned_faces_target_direction():
 
 
 def test_heading_aligned_trivial_for_near_vertical_leg():
-    # Horizontal baseline->target distance below the heading threshold: any yaw is fine.
+    # Horizontal active-step-baseline-to-target distance below the threshold: any yaw is fine.
     predicate = _heading_aligned(0.05, 0.0, 5.0)
     assert predicate(make_routine_observation(yaw_deg=90.0), np.zeros(3, dtype=np.float64)) is True
 
@@ -554,8 +768,9 @@ def test_decide_invariant_breach_fails_with_envelope_kind():
 
 
 def test_decide_hover_step_holds_before_advancing():
-    # A command-less hover step never SENDs; it advances only once the stable
-    # hover predicate has held continuously for hold_s.
+    # Without a preceding OFFBOARD hold setpoint, a command-less hover step
+    # never SENDs; it advances only once the stable hover predicate has held
+    # continuously for hold_s.
     hover_step = _RoutineStep(
         command=None,
         is_complete=_hovering_stable(

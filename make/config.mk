@@ -46,6 +46,8 @@ ISAAC_PX4_TAKEOFF_INSTABILITY_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/stan
 ISAAC_PX4_TAKEOFF_INSTABILITY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_takeoff_instability_detection.log
 ISAAC_PX4_MULTI_DRONE_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_multi_drone_takeoff.py
 ISAAC_PX4_MULTI_DRONE_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_multi_drone_takeoff.log
+ISAAC_PX4_NAVIGATION_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_navigation_routine.py
+ISAAC_PX4_NAVIGATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_navigation_routine.log
 ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):
 ISAAC_TEST_FAILURE_FILTER = ^\[isaac-standalone-test\] ERROR:
@@ -109,6 +111,7 @@ PX4_CONTAINER_NAME ?= vv-px4-sitl
 PX4_TEST_CONTAINER_NAME ?= vv-px4-sitl-test
 PX4_TAKEOFF_TEST_LOG = $(PX4_HOME)/logs/test_px4_takeoff_stability_px4.log
 PX4_TAKEOFF_INSTABILITY_TEST_LOG = $(PX4_HOME)/logs/test_px4_takeoff_instability_px4.log
+PX4_NAVIGATION_TEST_LOG = $(PX4_HOME)/logs/test_px4_navigation_routine_px4.log
 PX4_TEST_READY_TIMEOUT_S ?= 60
 
 # Host-side persistence for PX4 SITL (ULog flight logs + simulated EEPROM params).

@@ -446,8 +446,9 @@ class RoutineConfig:
             ``hover_settle_s + hold_s``).
         max_tilt_deg: Continuous tilt gate on the flight steps.
         max_lateral_drift_m: Continuous lateral-drift gate. Takeoff/hover treat
-            it as radial horizontal excursion from the baseline; forward treats
-            it as cross-track drift so commanded +X/east motion is allowed.
+            it as radial horizontal excursion from the active step baseline;
+            forward treats it as cross-track drift so commanded +X/east motion
+            is allowed.
         max_vertical_speed_m_s: Continuous upward-speed divergence gate.
         max_downward_speed_m_s: Continuous downward-speed divergence gate
             (negative).
@@ -460,7 +461,7 @@ class RoutineConfig:
             aligned with the leg direction (a per-step ``heading_tol_deg``
             overrides it).
         goto_cross_track_m: Continuous gate on a ``goto`` leg: maximum perpendicular
-            deviation from the straight baseline->waypoint path.
+            deviation from the straight active step baseline to waypoint path.
         goto_offboard_prime_ticks: Number of OFFBOARD setpoints streamed before the
             mode is engaged (PX4 rejects OFFBOARD until a setpoint stream flows).
     """

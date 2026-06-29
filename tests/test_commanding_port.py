@@ -19,6 +19,7 @@ from robotics_experiments.commanding._commands import (
 )
 from robotics_experiments.commanding._port import (
     _MAV_FRAME_GLOBAL_INT,
+    _POSITION_TARGET_TYPEMASK_POS_YAW,
     _POSITION_TARGET_TYPEMASK_YAW_IGNORE,
     MavlinkCommandPort,
 )
@@ -166,8 +167,8 @@ def test_send_setpoint_emits_global_position_target_with_yaw():
     assert call["lon"] == 80_000_000
     assert call["alt"] == pytest.approx(490.0)
     assert call["yaw"] == pytest.approx(math.pi / 2.0)
-    # A finite yaw is used (the yaw-ignore bit is clear).
-    assert call["type_mask"] & _POSITION_TARGET_TYPEMASK_YAW_IGNORE == 0
+    # Position + yaw: ignore velocity, acceleration, and yaw-rate only.
+    assert call["type_mask"] == _POSITION_TARGET_TYPEMASK_POS_YAW
 
 
 def test_send_setpoint_nan_yaw_sets_yaw_ignore():
@@ -176,7 +177,9 @@ def test_send_setpoint_nan_yaw_sets_yaw_ignore():
         _PositionSetpoint(latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=math.nan)
     )
     call = mav.setpoints[-1]
-    assert call["type_mask"] & _POSITION_TARGET_TYPEMASK_YAW_IGNORE != 0
+    assert call["type_mask"] == (
+        _POSITION_TARGET_TYPEMASK_POS_YAW | _POSITION_TARGET_TYPEMASK_YAW_IGNORE
+    )
     assert call["yaw"] == pytest.approx(0.0)
 
 

@@ -2,10 +2,10 @@
 
 A :class:`_VehicleRoutine` is an ordered tuple of :class:`_RoutineStep`s; each step
 carries one optional :class:`_MavlinkCommand`, a pure completion predicate over a
-:class:`RoutineObservation` (and the routine's captured baseline position), an
-optional sustained-hold window, and continuous invariant gates. :func:`_decide` is
-the pure transform at the heart of the layer - the command-layer analogue of the
-thrust model's ``commands_to_dynamics``: given the routine, the current
+:class:`RoutineObservation` (and the active step's captured baseline position),
+an optional sustained-hold window, and continuous invariant gates. :func:`_decide`
+is the pure transform at the heart of the layer - the command-layer analogue of
+the thrust model's ``commands_to_dynamics``: given the routine, the current
 :class:`_RoutineState`, and an observation, it returns the next state and a
 :class:`_RoutineDecision` (``SEND`` / ``WAIT`` / ``ADVANCE`` / ``DONE`` /
 ``FAIL``). No sockets, no pymavlink, no Isaac - it is unit-testable with plain
@@ -84,15 +84,15 @@ __all__ = [
 
 _EARTH_RADIUS_M = 6_378_137.0
 
-# Below this horizontal baseline->target distance a ``goto`` leg has no
-# meaningful heading (a near-vertical move): the setpoint holds heading (yaw NaN)
-# and the heading-alignment predicate passes trivially.
+# Below this horizontal active-step-baseline-to-target distance a ``goto`` leg
+# has no meaningful heading (a near-vertical move): the setpoint holds heading
+# (yaw NaN) and the heading-alignment predicate passes trivially.
 _GOTO_MIN_HEADING_DIST_M = 0.25
 
-# A completion predicate reads the observation plus the routine's captured
-# baseline position (ENU, set on the first SEND); baseline is ``None`` only
-# before any step has been sent. An invariant gate returns a breach message when
-# the continuous flight envelope is violated, or ``None`` when it holds.
+# A completion predicate reads the observation plus the active step's captured
+# baseline position (ENU, set when each step begins); baseline is ``None`` only
+# before a step has begun. An invariant gate returns a breach message when the
+# continuous flight envelope is violated, or ``None`` when it holds.
 _StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
 _Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 
@@ -169,10 +169,13 @@ class _RoutineStep:
 
     Attributes:
         command: The :class:`_MavlinkCommand` sent when the step begins, or
-            ``None`` for a verification-only step (e.g. ``hover``) that sends
-            nothing and only waits on its completion predicate and invariants.
+            ``None`` for a verification-only step (e.g. ``hover``) that only
+            waits on its completion predicate and invariants. If a command-less
+            step follows an OFFBOARD streaming step, the previous setpoint keeps
+            streaming so PX4 does not trip offboard-loss failsafe while the
+            verification step is active.
         is_complete: Pure predicate over a :class:`RoutineObservation` and the
-            routine's captured baseline position; the step advances when it
+            active step's captured baseline position; the step advances when it
             returns ``True`` (and, if ``hold_s`` is set, has held continuously).
         label: Short human-readable name used in logs and failure messages.
         timeout_s: Sim-time budget for the step; on exceed the routine fails with
@@ -243,9 +246,9 @@ class _RoutineState:
             done.
         sent: Whether the active step has begun (its command emitted, or - for a
             command-less step - simply entered) and is now awaiting completion.
-        baseline_position_enu: The vehicle position captured when the routine
-            began its first step, for climb/displacement predicates and gates
-            that need a reference. ``None`` until the first step begins.
+        baseline_position_enu: The vehicle position captured when the active
+            step began, for climb/displacement predicates and gates that need a
+            reference. ``None`` until a step begins.
         step_started_us: Sim time the active step began, used to enforce the step
             timeout. ``None`` before the step begins.
         hold_since_us: Sim time the active step's completion predicate first
@@ -256,6 +259,9 @@ class _RoutineState:
             step.
         offboard_requested: Whether the one-shot OFFBOARD-mode command has been
             sent for the active streaming step.
+        offboard_hold_setpoint: Last OFFBOARD setpoint that must keep streaming
+            across command-less verification steps after a ``goto``. Cleared
+            when a later explicit command begins.
     """
 
     cursor: int = 0
@@ -265,6 +271,7 @@ class _RoutineState:
     hold_since_us: Optional[int] = None
     setpoints_streamed: int = 0
     offboard_requested: bool = False
+    offboard_hold_setpoint: Optional[_PositionSetpoint] = None
 
     @classmethod
     def initial(cls) -> "_RoutineState":
@@ -283,8 +290,8 @@ def _decide(
     the inputs; the only state mutation is the returned new state. Semantics:
 
     - cursor past the last step -> ``DONE``.
-    - step not yet begun -> ``SEND`` (or ``WAIT`` for a command-less step),
-      capturing the baseline and starting the timer.
+    - step not yet begun -> ``SEND`` (or ``WAIT``/``STREAM`` for a command-less
+      step), capturing that step's baseline and starting the timer.
     - an active step's invariant breached -> ``FAIL`` (``ENVELOPE``).
     - completion predicate true and held for ``hold_s`` -> ``ADVANCE``.
     - a temporarily-rejected ack arrived and the step opts into retry -> ``SEND``
@@ -300,9 +307,7 @@ def _decide(
     step = steps[state.cursor]
 
     if not state.sent:
-        baseline = state.baseline_position_enu
-        if baseline is None:
-            baseline = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        baseline = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
         new_state = replace(
             state,
             sent=True,
@@ -315,12 +320,20 @@ def _decide(
         if step.streaming is not None:
             # Streaming step: begin priming the OFFBOARD setpoint stream
             # immediately; the mode command is sent later (see below).
-            return replace(new_state, setpoints_streamed=1), _RoutineDecision.stream(
-                _setpoint_for(step.streaming, baseline)
-            )
+            setpoint = _setpoint_for(step.streaming, baseline)
+            return replace(
+                new_state,
+                setpoints_streamed=1,
+                offboard_hold_setpoint=setpoint,
+            ), _RoutineDecision.stream(setpoint)
+        if step.command is None and state.offboard_hold_setpoint is not None:
+            # A command-less verifier after a goto must keep feeding PX4's
+            # OFFBOARD stream until it advances or an explicit command changes
+            # mode. Without this PX4 declares offboard signal loss.
+            return new_state, _RoutineDecision.stream(state.offboard_hold_setpoint)
         if step.command is None:
             return new_state, _RoutineDecision.wait()
-        return new_state, _RoutineDecision.send(step.command)
+        return replace(new_state, offboard_hold_setpoint=None), _RoutineDecision.send(step.command)
 
     # Continuous flight-envelope gates: a breach fails the routine as an
     # envelope event, distinct from a command rejection or a timeout.
@@ -335,7 +348,14 @@ def _decide(
     if step.is_complete(observation, state.baseline_position_enu):
         if step.hold_s <= 0.0:
             new_state = replace(
-                state, cursor=state.cursor + 1, sent=False, step_started_us=None, hold_since_us=None
+                state,
+                cursor=state.cursor + 1,
+                sent=False,
+                baseline_position_enu=None,
+                step_started_us=None,
+                hold_since_us=None,
+                setpoints_streamed=0,
+                offboard_requested=False,
             )
             return new_state, _RoutineDecision.advance()
         hold_since_us = state.hold_since_us
@@ -343,7 +363,14 @@ def _decide(
             hold_since_us = int(observation.sim_time_us)
         if int(observation.sim_time_us) - hold_since_us >= step.hold_s * 1_000_000:
             new_state = replace(
-                state, cursor=state.cursor + 1, sent=False, step_started_us=None, hold_since_us=None
+                state,
+                cursor=state.cursor + 1,
+                sent=False,
+                baseline_position_enu=None,
+                step_started_us=None,
+                hold_since_us=None,
+                setpoints_streamed=0,
+                offboard_requested=False,
             )
             return new_state, _RoutineDecision.advance()
         # Still accumulating the hold window; remember when it started.
@@ -358,22 +385,57 @@ def _decide(
     # treated as a rejected step command.
     if step.streaming is not None:
         spec = step.streaming
-        if state.setpoints_streamed < spec.prime_ticks:
-            return replace(
-                state, setpoints_streamed=state.setpoints_streamed + 1
-            ), _RoutineDecision.stream(_setpoint_for(spec, state.baseline_position_enu))
-        if not state.offboard_requested:
-            assert step.command is not None  # a streaming step always carries the mode command
-            return replace(state, offboard_requested=True), _RoutineDecision.send(step.command)
         step_started_us = state.step_started_us
         assert step_started_us is not None  # set on the entry tick, before sent=True
-        if int(observation.sim_time_us) - step_started_us > step.timeout_s * 1_000_000:
+        elapsed_us = int(observation.sim_time_us) - step_started_us
+        if elapsed_us > step.timeout_s * 1_000_000:
             return state, _RoutineDecision.fail(
                 f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
                 "(did not reach the waypoint)",
                 failure_kind=FailureKind.COMMAND,
             )
-        return state, _RoutineDecision.stream(_setpoint_for(spec, state.baseline_position_enu))
+
+        if state.offboard_requested:
+            ack = observation.last_ack
+            if (
+                ack is not None
+                and step.command is not None
+                and ack.command_id == step.command.command_id
+            ):
+                setpoint = _setpoint_for(spec, state.baseline_position_enu)
+                if ack.accepted:
+                    return replace(
+                        state,
+                        offboard_requested=True,
+                        offboard_hold_setpoint=setpoint,
+                    ), _RoutineDecision.stream(setpoint)
+                if ack.result == _MAV_RESULT_TEMPORARILY_REJECTED:
+                    # Keep the setpoint stream alive on this tick, then retry
+                    # the one-shot OFFBOARD command on a later tick inside the
+                    # same step timeout budget.
+                    return replace(
+                        state,
+                        offboard_requested=False,
+                        offboard_hold_setpoint=setpoint,
+                    ), _RoutineDecision.stream(setpoint)
+                return state, _RoutineDecision.fail(
+                    f"step {step.label!r} rejected: command={step.command.command_id} "
+                    f"result={ack.result}",
+                    failure_kind=FailureKind.COMMAND,
+                )
+
+        if state.setpoints_streamed < spec.prime_ticks:
+            setpoint = _setpoint_for(spec, state.baseline_position_enu)
+            return replace(
+                state,
+                setpoints_streamed=state.setpoints_streamed + 1,
+                offboard_hold_setpoint=setpoint,
+            ), _RoutineDecision.stream(setpoint)
+        if not state.offboard_requested:
+            assert step.command is not None  # a streaming step always carries the mode command
+            return replace(state, offboard_requested=True), _RoutineDecision.send(step.command)
+        setpoint = _setpoint_for(spec, state.baseline_position_enu)
+        return replace(state, offboard_hold_setpoint=setpoint), _RoutineDecision.stream(setpoint)
 
     ack = observation.last_ack
     if (
@@ -401,6 +463,9 @@ def _decide(
             f"(sim elapsed {elapsed_us * 1e-6:.1f}s)",
             failure_kind=FailureKind.COMMAND,
         )
+
+    if step.command is None and state.offboard_hold_setpoint is not None:
+        return state, _RoutineDecision.stream(state.offboard_hold_setpoint)
 
     return state, _RoutineDecision.wait()
 
@@ -430,8 +495,8 @@ def _ack_accepted(command_id: int) -> _StepPredicate:
 def _climbed_at_least(min_climb_m: float) -> _StepPredicate:
     """Predicate: the vehicle climbed at least ``min_climb_m`` above the baseline.
 
-    The baseline is the routine's captured start position (its ground altitude),
-    so this is a real airborne check, not just a command ack.
+    The baseline is the takeoff step's captured start position (its ground
+    altitude), so this is a real airborne check, not just a command ack.
     """
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -500,10 +565,11 @@ def _reached_world_position(x_m: float, y_m: float, z_m: float, tol_m: float) ->
 
 
 def _heading_aligned(x_m: float, y_m: float, tol_deg: float) -> _StepPredicate:
-    """Predicate: the body faces the baseline->target heading within ``tol_deg``.
+    """Predicate: the body faces the active-step-baseline-to-target heading.
 
-    Trivially satisfied for a near-vertical leg (horizontal baseline->target
-    distance below :data:`_GOTO_MIN_HEADING_DIST_M`), where heading is undefined.
+    Trivially satisfied for a near-vertical leg (horizontal
+    active-step-baseline-to-target distance below
+    :data:`_GOTO_MIN_HEADING_DIST_M`), where heading is undefined.
     """
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -537,8 +603,8 @@ def _and_predicates(*predicates: _StepPredicate) -> _StepPredicate:
 def _setpoint_for(spec: "_StreamingSpec", baseline: Optional[np.ndarray]) -> _PositionSetpoint:
     """Build the streamed setpoint: the fixed geodetic target plus a live heading.
 
-    Yaw faces the baseline->target direction (constant per leg); a near-vertical
-    leg (or no baseline yet) holds heading via ``NaN``.
+    Yaw faces the active-step-baseline-to-target direction (constant per leg); a
+    near-vertical leg (or no baseline yet) holds heading via ``NaN``.
     """
     east, north, _up = spec.target_enu
     yaw_rad = math.nan
@@ -602,7 +668,7 @@ def _cross_track_drift_below(max_cross_track_m: float) -> _Invariant:
 
 
 def _cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: float) -> _Invariant:
-    """Gate: horizontal distance from the baseline->target line stays within ``max_m``.
+    """Gate: horizontal distance from the active step's path stays within ``max_m``.
 
     The direction-agnostic generalization of :func:`_cross_track_drift_below`: it
     measures perpendicular deviation from the straight planned path (baseline to
@@ -759,12 +825,13 @@ def _build_vehicle_routine(
       ``target_altitude_m + climb_m`` and completes once the vehicle has actually
       climbed ``min_climb_m`` above its baseline; ``timeout_s`` is
       ``takeoff_timeout_s``; flight gates apply.
-    - ``hover`` (requires ``hold_s``): sends nothing and completes once a stable
-      hover is held for ``hold_s`` seconds; ``timeout_s`` is
-      ``hover_settle_s + hold_s``; flight gates apply.
+    - ``hover`` (requires ``hold_s``): verifies a stable hover for ``hold_s``
+      seconds; if it follows a ``goto`` while PX4 is still in OFFBOARD, the
+      previous setpoint keeps streaming until the hover advances; ``timeout_s``
+      is ``hover_settle_s + hold_s``; flight gates apply.
     - ``forward`` (requires ``distance_m`` and ``timeout_s``): repositions
       ``distance_m`` along world +X/east and completes once that displacement is
-      observed from the routine baseline; flight gates apply.
+      observed from the active step baseline; flight gates apply.
     - ``goto`` (requires ``x``, ``y``, ``z`` and ``timeout_s``; optional
       ``position_tol_m`` / ``heading_tol_deg``): streams OFFBOARD position
       setpoints toward the absolute world-ENU waypoint (converted to a geodetic

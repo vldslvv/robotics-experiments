@@ -44,8 +44,9 @@ are independent (cross-drone synchronization is deliberately deferred).
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
   sustained-completion window; and a tuple of continuous `invariants`),
   `VehicleRoutine` (ordered steps), `RoutineState`
-  (cursor/sent/baseline/step-start/`hold_since_us` plus the streaming counters
-  `setpoints_streamed`/`offboard_requested`), and `RoutineDecision`
+  (cursor/sent/active-step baseline/step-start/`hold_since_us` plus the
+  streaming counters `setpoints_streamed`/`offboard_requested`), and
+  `RoutineDecision`
   (`SEND` / `STREAM` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`; `SEND` carries a
   `command`, `STREAM` carries a `PositionSetpoint`, `FAIL` carries a
   `failure_kind`). `decide(routine, state, observation) -> (state, decision)` is
@@ -53,13 +54,13 @@ are independent (cross-drone synchronization is deliberately deferred).
   step `invariants` first (a breach -> `FAIL(ENVELOPE)`), then completion (held
   for `hold_s` -> `ADVANCE`), then ack-rejection/timeout (-> `FAIL(COMMAND)`).
   Completion predicate helpers: `armed()`, `ack_accepted(command_id)`,
-  `climbed_at_least(min_climb_m)` (relative to the captured baseline),
+  `climbed_at_least(min_climb_m)` (relative to the active step baseline),
   `hovering_stable(...)`, `moved_forward_at_least(distance_m)`,
   `reached_world_position(x, y, z, tol)` (the first **absolute** world-frame
   predicate), `heading_aligned(...)`, and `disarmed()`. Invariant gate helpers
   (each returns a breach message or `None`): `tilt_below`, `lateral_drift_below`,
   `cross_track_drift_below`, `cross_track_to_segment_below` (perpendicular
-  deviation from the baseline->target path, direction-agnostic),
+  deviation from the active step baseline to target path, direction-agnostic),
   `vertical_speed_within`, `angular_speed_below`. `EnvelopeGates` bundles the
   gate thresholds wired onto the flight steps.
 
@@ -67,12 +68,21 @@ are independent (cross-drone synchronization is deliberately deferred).
   step whose `decide` emits `STREAM` rather than a single `SEND`: it primes
   `prime_ticks` OFFBOARD setpoints, sends the one-shot offboard-mode command, then
   streams the setpoint every tick until the waypoint is reached or the step times
-  out. The streamed target is the absolute world-ENU waypoint converted to a
+  out. Matching `MAV_CMD_DO_SET_MODE` ACKs are part of that pure state machine:
+  accepted ACKs keep streaming, temporary rejections keep the setpoint stream
+  alive and retry OFFBOARD inside the same step timeout, and hard rejections fail
+  the step as `FailureKind.COMMAND`. The streamed target is the absolute
+  world-ENU waypoint converted to a
   geodetic setpoint via `px4_bridge.frames.synth_gps_from_enu` against the `px4`
   home anchor -- frame-consistent **by construction** with the GPS the bridge
   feeds PX4, so flying the setpoint lands the drone at the world-ENU waypoint
   (using the global frame avoids the EKF local-NED origin ambiguity). Verification
-  uses absolute Isaac world-ENU ground truth, independent of PX4's EKF.
+  uses absolute Isaac world-ENU ground truth, independent of PX4's EKF. If a
+  command-less verifier such as `hover` follows a `goto`, the stepper keeps
+  streaming the last OFFBOARD setpoint throughout that verifier. PX4 remains in
+  OFFBOARD after the waypoint is reached, so stopping the stream between `goto`
+  and `hover` would trigger offboard signal-loss failsafe before the hover hold
+  can complete.
 
   `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
@@ -194,12 +204,18 @@ seam both drivers use. The takeoff step completes on a real climb
 for `hold_s`, the forward step on observed world +X/east displacement, the `goto`
 step on `reached_world_position(...)` (absolute world ENU) plus heading
 alignment, and the land step once PX4 disarms. Flight gates are continuous
-invariants on takeoff, hover, forward, and goto. Takeoff/hover use the
-lateral-drift threshold as radial horizontal excursion from the baseline; forward
+invariants on takeoff, hover, forward, and goto. Each step captures its own
+baseline when it begins: takeoff measures climb from takeoff start; hover,
+forward, and every goto leg measure gates from their own step start. Takeoff and
+hover use the lateral-drift threshold as radial horizontal excursion from that
+active step baseline; forward
 uses it as cross-track drift so the commanded +X/east displacement itself does not
 breach the envelope; goto uses a direction-agnostic cross-track-to-path gate
 (`goto_cross_track_m`) so an arbitrary-heading leg is allowed while a sideways
-excursion off the planned path still trips. The home anchor the `goto` builder
+excursion off the planned path still trips. A hover after `goto` remains
+verification-only from the config's perspective, but the stepper continues the
+last OFFBOARD setpoint stream while the sustained hover gate is being measured.
+The home anchor the `goto` builder
 needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
 (`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by the orchestrator
 into `DriverParams.from_routine_config`.

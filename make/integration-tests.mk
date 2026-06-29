@@ -9,6 +9,7 @@ INTEGRATION_TEST_TARGETS = \
     test-integration-isaac \
     test-integration-drone-articulation \
     test-integration-px4-takeoff \
+    test-integration-px4-navigation \
     test-integration-px4-takeoff-instability \
     test-integration-px4-multi-drone-takeoff
 
@@ -83,6 +84,20 @@ test-integration-px4-takeoff:
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_TAKEOFF_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-takeoff' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-px4-navigation
+test-integration-px4-navigation: HYDRA_CONFIG = configs/runtime_drone_navigate.yaml
+test-integration-px4-navigation: SCENE = @config
+test-integration-px4-navigation:
+	@TEST_TARGET='test-integration-px4-navigation' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_navigation_routine.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_navigation_routine_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PX4_NAVIGATION_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_NAVIGATION_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-navigation' \
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"

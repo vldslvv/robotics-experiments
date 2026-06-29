@@ -409,7 +409,7 @@ def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions
                 _assert_bridge_log_clean(path, label)
     timing.report_stage("scenario_total", timing.total_start())
     context.report(
-        f"{options.test_name}: verified arm/takeoff/hover routine for " f"{drone_count} drone(s)"
+        f"{options.test_name}: verified {options.success_label} for {drone_count} drone(s)"
     )
 
 
@@ -419,11 +419,13 @@ class Px4TakeoffScenarioOptions:
 
     ``post_takeoff_hook`` is called once with the first drone's bridge host the
     tick its takeoff step completes (single-vehicle fault-injection only).
+    ``success_label`` is used only in the final diagnostic log line.
     """
 
     test_name: str
     px4_container_log_name: str
     post_takeoff_hook: Callable[[SceneTestContext, Any], None] | None = None
+    success_label: str = "configured routine"
 
 
 def run_px4_takeoff_scenario(

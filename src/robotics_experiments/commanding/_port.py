@@ -28,9 +28,9 @@ __all__ = ["_AbstractCommandPort", "MavlinkCommandPort"]
 _LOGGER = logging.getLogger(__name__)
 
 # SET_POSITION_TARGET type mask: use position + yaw, ignore velocity (bits 3-5),
-# acceleration/force (bits 6-9), and yaw-rate (bit 11). A NaN setpoint yaw adds
-# the yaw-ignore bit (bit 10) so PX4 holds the current heading.
-_POSITION_TARGET_TYPEMASK_POS_YAW = 0b1011_1111_1000
+# acceleration (bits 6-8), and yaw-rate (bit 11). A NaN setpoint yaw adds the
+# yaw-ignore bit (bit 10) so PX4 holds the current heading.
+_POSITION_TARGET_TYPEMASK_POS_YAW = 0b1001_1111_1000
 _POSITION_TARGET_TYPEMASK_YAW_IGNORE = 0b0100_0000_0000
 
 # MAV_FRAME_GLOBAL_INT (geodetic lat/lon e7 + AMSL altitude); a MAVLink protocol
