@@ -17,6 +17,8 @@ for name in \
     PX4_INSTANCE \
     PX4_LOGS \
     PX4_ROOTFS \
+    PX4_SIM_MODEL \
+    PX4_SYS_AUTOSTART \
     PX4_TOTAL_INSTANCES
 do
     require_env "${name}"
@@ -72,6 +74,8 @@ exec docker run -it \
     --name "${container}" \
     "${net_args[@]}" \
     -e "PX4_INSTANCE=${PX4_INSTANCE}" \
+    -e "PX4_SIM_MODEL=${PX4_SIM_MODEL}" \
+    -e "PX4_SYS_AUTOSTART=${PX4_SYS_AUTOSTART}" \
     -e "PX4_ROOTFS=${PX4_ROOTFS}" \
     -v "${log_mount}:${rootfs_log}" \
     -v "${eeprom_mount}:${rootfs_eeprom}" \

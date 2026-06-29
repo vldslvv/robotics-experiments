@@ -12,6 +12,7 @@ __all__ = [
     "Px4BridgeConfig",
     "VehicleConfig",
     "ResolvedVehicle",
+    "Px4SitlLaunchConfig",
     "IsaacLabConfig",
     "RoutineConfig",
     "EnvConfig",
@@ -368,6 +369,32 @@ class ResolvedVehicle:
     gcs_port: int
     debug_log_path: str
     prim_name: str
+
+
+@dataclass(frozen=True)
+class Px4SitlLaunchConfig:
+    """PX4 SITL launch airframe derived from a resolved vehicle's config.
+
+    Produced by the pure ``config._load.resolve_px4_sitl_launch_config`` from a
+    :class:`ResolvedVehicle`. The drone USD asset selects the PX4 simulator
+    airframe so a hexacopter asset launches PX4's hex geometry instead of the
+    quad ``none_iris`` default. Threaded by the host-side launch scripts into
+    each PX4 container as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
+    ``PX4_SYS_AUTOSTART``.
+
+    Attributes:
+        instance_index: PX4 ``-i`` instance index (the resolved
+            ``px4_instance_index``); the per-container port offset.
+        sim_model: ``PX4_SIM_MODEL`` selecting the SITL simulator interface
+            airframe (``none_iris`` for the quad, ``none`` for the generic
+            hexarotor-x geometry); both still start ``simulator_mavlink``.
+        sys_autostart: ``PX4_SYS_AUTOSTART`` airframe id (``10016`` for the
+            ``none_iris`` quad, ``6001`` for the generic hexarotor-x geometry).
+    """
+
+    instance_index: int
+    sim_model: str
+    sys_autostart: int
 
 
 @dataclass

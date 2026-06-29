@@ -8,11 +8,20 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
 from ._schemas import _register_schemas
-from ._types import DroneConfig, EnvConfig, Px4BridgeConfig, ResolvedVehicle, RoutineConfig
+from ._types import (
+    DroneConfig,
+    EnvConfig,
+    Px4BridgeConfig,
+    Px4SitlLaunchConfig,
+    ResolvedVehicle,
+    RoutineConfig,
+)
 
 __all__ = [
     "get_config",
     "get_enabled_px4_instance_indices",
+    "get_enabled_px4_launch_configs",
+    "resolve_px4_sitl_launch_config",
 ]
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
@@ -142,6 +151,54 @@ def get_config() -> EnvConfig:
     return env
 
 
+# Maps the spawned drone USD asset (by file name) to its PX4 SITL airframe as
+# (PX4_SIM_MODEL, PX4_SYS_AUTOSTART). Keyed by the asset basename so a
+# per-vehicle drone.usd_path override selects the matching PX4 airframe. Both
+# entries use a "none*" sim model that still starts simulator_mavlink (not
+# Gazebo/jMAVSim). Extend this when adding a new PX4-flyable asset.
+_PX4_AIRFRAME_BY_ASSET: dict[str, tuple[str, int]] = {
+    "quadcopter_500mm.usda": ("none_iris", 10016),
+    "hexacopter_s550.usda": ("none_hexa_x", 6001),
+}
+
+
+def resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchConfig:
+    """Derive the PX4 SITL launch airframe for one resolved vehicle.
+
+    Pure: reads only resolved config values (no filesystem, Docker, Hydra
+    composition, subprocess, or environment access). The drone USD asset name
+    selects the PX4 ``PX4_SIM_MODEL`` / ``PX4_SYS_AUTOSTART`` pair so a
+    hexacopter asset launches PX4's hex geometry instead of the quad
+    ``none_iris`` default. An unknown PX4-flyable asset raises ``ValueError``
+    (naming the asset and prim) rather than silently flying the wrong airframe.
+    """
+    asset = Path(vehicle.drone.usd_path).name
+    airframe = _PX4_AIRFRAME_BY_ASSET.get(asset)
+    if airframe is None:
+        raise ValueError(
+            f"no PX4 SITL airframe mapping for drone asset {vehicle.drone.usd_path!r} "
+            f"(prim {vehicle.prim_name!r}); add it to config._load._PX4_AIRFRAME_BY_ASSET"
+        )
+    sim_model, sys_autostart = airframe
+    return Px4SitlLaunchConfig(
+        instance_index=vehicle.px4_instance_index,
+        sim_model=sim_model,
+        sys_autostart=sys_autostart,
+    )
+
+
+def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
+    """Return PX4 SITL launch specs for the PX4-enabled vehicles, in fleet order.
+
+    The host-side launch scripts iterate these to start one PX4 container per
+    vehicle, threading each spec's ``instance_index`` / ``sim_model`` /
+    ``sys_autostart`` in as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
+    ``PX4_SYS_AUTOSTART`` so each container launches the airframe matching its
+    drone asset.
+    """
+    return [resolve_px4_sitl_launch_config(v) for v in get_config().vehicles if v.px4.enabled]
+
+
 def get_enabled_px4_instance_indices() -> list[int]:
     """Return the PX4 ``-i`` instance indices of the PX4-enabled vehicles.
 
@@ -150,7 +207,7 @@ def get_enabled_px4_instance_indices() -> list[int]:
     loop, so non-contiguous vehicle ids keep their derived MAVLink/PX4 port
     offsets.
     """
-    return [v.px4_instance_index for v in get_config().vehicles if v.px4.enabled]
+    return [c.instance_index for c in get_enabled_px4_launch_configs()]
 
 
 def _reset_config() -> None:

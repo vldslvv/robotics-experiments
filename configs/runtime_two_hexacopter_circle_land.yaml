@@ -7,9 +7,10 @@ defaults:
 # bridge discovers the six rotor markers from the USD metadata; the per-vehicle
 # PX4/thrust arrays below are expanded to six entries to match that asset.
 #
-# Note: the current PX4 Docker launcher selects PX4_SIM_MODEL=none_iris. This
-# config swaps the Isaac asset and bridge-side rotor sizing; PX4-side hexacopter
-# mixer/airframe startup support is outside this Hydra file.
+# The host-side PX4 launch derives the SITL airframe from each vehicle's drone
+# asset, so the hexacopter_s550.usda asset below launches PX4's generic
+# hexarotor-x geometry (PX4_SIM_MODEL=none_hexa_x, PX4_SYS_AUTOSTART=6001)
+# instead of the quad none_iris default.
 #
 # Run with: make run-all HYDRA_CONFIG=configs/runtime_two_hexacopter_circle_land.yaml
 

@@ -72,6 +72,11 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
+        # PX4 ROMFS airframe rc fragments use PX4 startup conventions (`${R}`
+        # sourcing, `param set-default`) that are intentionally not
+        # shellcheck-idiomatic; the stock upstream airframes are not
+        # shellcheck-clean either. They are PX4 build inputs, not host scripts.
+        exclude: '^px4/docker/airframes/'
 
   - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.14.0

@@ -306,6 +306,18 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
     cd ${PX4_DIR} && git checkout ${PX4_TAG} && \
     git submodule update --init --recursive
 
+# Add a SITL hexarotor airframe to the posix (external-MAVLink-simulator) set.
+# Upstream ships 6001_hexa_x only in the hardware/NuttX set, so the SITL build
+# has no none-family hexarotor; this is the airframe the hexacopter asset's
+# derived PX4_SYS_AUTOSTART=6001 selects. The guarded sed registers it next to
+# the stock none_iris quad and fails the build loudly if that anchor ever moves,
+# so a PX4 bump can never silently drop the hexa airframe.
+COPY px4/docker/airframes/6001_none_hexa_x \
+     ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/6001_none_hexa_x
+RUN cd ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes && \
+    grep -q '10016_none_iris' CMakeLists.txt && \
+    sed -i 's/\t10016_none_iris/\t10016_none_iris\n\t6001_none_hexa_x/' CMakeLists.txt
+
 # Headless SITL build; Pegasus provides dynamics over MAVLink, so no built-in sim backend.
 # Build the firmware only — omit the sim target (e.g. `none`) since it would launch
 # the nsh shell during `docker build` even with DONT_RUN=1 on PX4 v1.14.x.

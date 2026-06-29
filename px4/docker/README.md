@@ -9,8 +9,20 @@ Both PX4 launchers read `PX4_INSTANCE` (default `0`). **Every** instance
 binary run directly with `-i ${PX4_INSTANCE}` and an interactive `pxh>` console
 (no `-d`/daemon flag, so manual `commander arm` / `commander takeoff` work in
 every per-vehicle terminal), from its own per-instance rootfs subdir
-(`build/px4_sitl_default/rootfs/${PX4_INSTANCE}`). The `none_iris` airframe is
-selected via `PX4_SIM_MODEL`. `-i` shifts every port by the index, so instance
+(`build/px4_sitl_default/rootfs/${PX4_INSTANCE}`). The airframe is selected by
+`PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART` (defaulting to the `none_iris` quad when
+unset, e.g. the fresh/manual launch path): the host-side launch scripts derive
+the per-vehicle pair from the drone USD asset via
+`config.get_enabled_px4_launch_configs()` (`none_iris`/`10016` for the quad,
+`none_hexa_x`/`6001` for the generic hexarotor-x geometry) and thread it into
+each container, so a hexacopter asset no longer flies the quad airframe. The
+`none_hexa_x` airframe is a custom SITL airframe shipped in this repo
+(`airframes/6001_none_hexa_x`) and baked into the image by the Dockerfile's px4
+stage: upstream PX4 v1.14.3 ships `6001_hexa_x` only in the hardware/NuttX
+airframe set, so the SITL build has no stock none-family hexarotor. Like every
+non-gz/sih/jmavsim airframe it falls through to `simulator_mavlink` in
+`px4-rc.simulator`, so the bridge connects identically to the quad. `-i` shifts
+every port by the index, so instance
 `0` keeps simulator TCP `4560` / GCS UDP `14550` (the single-vehicle baseline)
 and instance `i` listens on simulator TCP `4560 + i` / GCS UDP `14550 + i`. There
 is intentionally no `instance == 0` special case in the launch, reset, or mount

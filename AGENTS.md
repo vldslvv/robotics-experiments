@@ -175,8 +175,24 @@ the current contents and the intended home for that kind of code.
   (`_validate_fleet` -- duplicate id/endpoint/`prim_name`, bad `spawn_xy`, or
   colliding `debug_log_path` raise a `ValueError` at resolution time).
   `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch
-  scripts read `get_enabled_px4_instance_indices()` (the launch loop's source of
-  `PX4_INSTANCE`, so non-contiguous ids keep their derived ports).
+  scripts read `get_enabled_px4_launch_configs()` (the launch loop's source of
+  `PX4_INSTANCE` / `PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART`, so non-contiguous ids
+  keep their derived ports and each PX4 container launches the SITL airframe
+  matching its drone asset). Each entry is a frozen `Px4SitlLaunchConfig`
+  (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
+  `config._load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
+  USD asset basename to its PX4 airframe (`quadcopter_500mm.usda` ->
+  `none_iris`/`10016`, `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown
+  PX4-flyable asset raises `ValueError`). The hex airframe is a custom SITL
+  airframe (`px4/docker/airframes/6001_none_hexa_x`, baked into the PX4 image by
+  the Dockerfile) -- upstream PX4 v1.14.3 ships `6001_hexa_x` only in the
+  hardware/NuttX set, so the SITL build has no stock none-family hexarotor.
+  `get_enabled_px4_instance_indices()`
+  stays as a thin compat wrapper over it. The PX4 container launcher
+  (`px4_iris_common.sh::launch_px4_iris`) reads `PX4_SIM_MODEL`
+  (default `none_iris`) and exports `PX4_SYS_AUTOSTART` only when provided, so
+  the fresh/manual launch path keeps the quad default while the script-driven
+  fleet path selects the per-asset airframe.
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
   each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
@@ -356,7 +372,8 @@ the current contents and the intended home for that kind of code.
   `configs/runtime_arm_takeoff.yaml` runs it headless via
   `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml`,
   `configs/runtime_drone_navigate.yaml` demos an absolute-waypoint `goto` routine
-  the same way, and the
+  the same way (`configs/runtime_hexacopter_navigate.yaml` is the hexacopter
+  variant), and the
   `integration_test_*` configs select the same routine and differ only in
   scene/fleet. The GCS link baseport still lives in the `px4` group
   (`px4.gcs_baseport`); the per-drone `gcs_port` the driver talks is derived from
@@ -517,6 +534,16 @@ the host. They are meant to be used in the Dockerized environment.
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
   start pxh shell"); keep the launch interactive (`-d` omitted) so every
   per-vehicle terminal accepts commands.
+- `make test-integration-px4-navigation` runs the single-drone absolute-waypoint
+  `goto` navigation routine (`configs/runtime_drone_navigate.yaml`, scene via
+  `@config`), protecting OFFBOARD setpoint continuity across the `goto` ->
+  `hover` transition. `make test-integration-px4-hexacopter-navigation` is the
+  hexacopter variant (`configs/runtime_hexacopter_navigate.yaml`): the same
+  navigation routine on the `hexacopter_s550.usda` asset, so the PX4 container
+  launches the derived generic hexarotor-x airframe (`none`/`6001`) instead of
+  the quad `none_iris`. Both reuse the shared `_px4_navigation_scenario.py`
+  driver (validate the routine's `goto`/`goto -> hover` config, then run the
+  strict takeoff scenario) under thin per-asset entrypoints.
 - The persistent Isaac container (`make run-isaac` / `make run-all`) is named
   `vv-isaac-sim-custom` (`ISAAC_CONTAINER_NAME`) and is **retained after it
   exits**, so the quickest way to inspect the last manual run is

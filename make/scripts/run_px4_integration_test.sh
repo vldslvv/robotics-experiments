@@ -98,15 +98,26 @@ done
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
-# Iterate the PX4-enabled vehicles' derived instance indices (PX4 -i / port
-# offset = vehicle id) rather than a blind 0..count loop, so non-contiguous ids
-# keep their derived ports.
-PX4_INSTANCE_INDICES="$(
+# Iterate the PX4-enabled vehicles' derived launch specs (instance index = PX4
+# -i / port offset = vehicle id, plus the per-asset PX4 airframe) rather than a
+# blind 0..count loop, so non-contiguous ids keep their derived ports and each
+# container launches the airframe matching its drone asset. Each line is
+# "<instance> <sim_model> <sys_autostart>"; split into parallel arrays.
+mapfile -t PX4_LAUNCH_SPECS < <(
     uv run python -c \
-        'from robotics_experiments.config import get_enabled_px4_instance_indices; print(" ".join(str(i) for i in get_enabled_px4_instance_indices()))'
-)"
-# shellcheck disable=SC2206
-PX4_INSTANCE_INDICES=(${PX4_INSTANCE_INDICES})
+        'from robotics_experiments.config import get_enabled_px4_launch_configs
+for c in get_enabled_px4_launch_configs():
+    print(c.instance_index, c.sim_model, c.sys_autostart)'
+)
+PX4_INSTANCE_INDICES=()
+PX4_SIM_MODELS=()
+PX4_SYS_AUTOSTARTS=()
+for spec in "${PX4_LAUNCH_SPECS[@]}"; do
+    read -r idx sim_model sys_autostart <<<"${spec}"
+    PX4_INSTANCE_INDICES+=("${idx}")
+    PX4_SIM_MODELS+=("${sim_model}")
+    PX4_SYS_AUTOSTARTS+=("${sys_autostart}")
+done
 PX4_TOTAL_INSTANCES="${#PX4_INSTANCE_INDICES[@]}"
 if [ "${PX4_TOTAL_INSTANCES}" -lt 1 ]; then
     echo "Active Hydra config has no PX4-enabled vehicles; PX4 integration requires at least one." >&2
@@ -250,7 +261,10 @@ integration_timing "prepare_logs" "${stage_start_ms}"
 # port 4560 + i and GCS UDP 14550 + i. Per-instance log/eeprom mounts keep their
 # state isolated.
 stage_start_ms="$(now_ms)"
-for i in "${PX4_INSTANCE_INDICES[@]}"; do
+for spec_idx in "${!PX4_INSTANCE_INDICES[@]}"; do
+    i="${PX4_INSTANCE_INDICES[${spec_idx}]}"
+    sim_model="${PX4_SIM_MODELS[${spec_idx}]}"
+    sys_autostart="${PX4_SYS_AUTOSTARTS[${spec_idx}]}"
     container="$(px4_container_name "${i}")"
     docker rm -f "${container}" >/dev/null 2>&1 || true
 
@@ -275,6 +289,8 @@ for i in "${PX4_INSTANCE_INDICES[@]}"; do
         --name "${container}" \
         "${net_args[@]}" \
         -e "PX4_INSTANCE=${i}" \
+        -e "PX4_SIM_MODEL=${sim_model}" \
+        -e "PX4_SYS_AUTOSTART=${sys_autostart}" \
         -v "${log_mount}:${rootfs_log}" \
         -v "${eeprom_mount}:${rootfs_eeprom}" \
         "${PX4_IMAGE}" \

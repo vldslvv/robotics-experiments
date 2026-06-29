@@ -230,6 +230,50 @@ def test_two_hexacopter_circle_land_config_composes(monkeypatch):
     reset_config()
 
 
+def test_hexacopter_navigate_config_composes(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_hexacopter_navigate.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+    assert config.routine.steps == []
+    # Single PX4-backed hexacopter flying an absolute-waypoint navigation routine
+    # with the goto -> hover transition the navigation test protects.
+    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
+        (0, (0.0, -2.0), "Hexacopter0"),
+    ]
+    vehicle = config.vehicles[0]
+    assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
+    assert len(vehicle.px4.input_scaling) == 6
+    assert [step["kind"] for step in vehicle.routine.steps] == [
+        "arm",
+        "takeoff",
+        "hover",
+        "goto",
+        "goto",
+        "hover",
+        "land",
+    ]
+    assert [(step["x"], step["y"], step["z"]) for step in vehicle.routine.steps[3:5]] == [
+        (0.0, 2.0, 2.5),
+        (3.0, 2.0, 2.5),
+    ]
+    # The host-side launch derives PX4's generic hexarotor-x airframe from the asset.
+    assert [
+        (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
+    ] == [
+        (0, "none_hexa_x", 6001),
+    ]
+    reset_config()
+
+
 def test_resolve_fleet_merges_per_vehicle_routine_override():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
@@ -315,6 +359,95 @@ def test_enabled_px4_helpers_match_active_config():
     assert get_enabled_px4_instance_indices() == [
         vehicle.px4_instance_index for vehicle in config.vehicles if vehicle.px4.enabled
     ]
+    reset_config()
+
+
+def test_quad_default_resolves_to_none_iris_airframe():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    reset_config()
+    config = get_config()  # default config: one PX4-enabled quad vehicle
+    assert config.vehicles[0].drone.usd_path.endswith("/quadcopter_500mm.usda")
+
+    launch_configs = get_enabled_px4_launch_configs()
+    assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
+        (0, "none_iris", 10016),
+    ]
+    reset_config()
+
+
+def test_hex_config_resolves_to_generic_hexarotor_airframe(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_two_hexacopter_circle_land.yaml",
+    )
+    reset_config()
+
+    launch_configs = get_enabled_px4_launch_configs()
+    assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
+        (0, "none_hexa_x", 6001),
+        (1, "none_hexa_x", 6001),
+    ]
+    reset_config()
+
+
+def test_get_enabled_px4_launch_configs_omits_disabled_vehicles(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    import dataclasses
+
+    from robotics_experiments.config import _load, get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    reset_config()
+    enabled = get_config().vehicles[0]  # the default PX4-enabled quad vehicle
+    disabled = dataclasses.replace(
+        enabled,
+        id=1,
+        px4_instance_index=1,
+        prim_name="DisabledDrone",
+        px4=dataclasses.replace(enabled.px4, enabled=False),
+    )
+
+    class _FakeConfig:
+        vehicles = [enabled, disabled]
+
+    monkeypatch.setattr(_load, "get_config", lambda: _FakeConfig())
+    launch_configs = _load.get_enabled_px4_launch_configs()
+    assert [c.instance_index for c in launch_configs] == [enabled.px4_instance_index]
+    # monkeypatch restores _load.get_config at teardown; reset the real cache too.
+    monkeypatch.undo()
+    reset_config()
+
+
+def test_resolve_px4_sitl_launch_config_rejects_unknown_asset():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    import dataclasses
+
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._load import (
+        resolve_px4_sitl_launch_config,
+    )
+
+    reset_config()
+    vehicle = get_config().vehicles[0]
+    unknown = dataclasses.replace(
+        vehicle,
+        drone=dataclasses.replace(vehicle.drone, usd_path="/assets/mystery_drone.usda"),
+    )
+
+    with pytest.raises(ValueError, match=r"mystery_drone\.usda"):
+        resolve_px4_sitl_launch_config(unknown)
     reset_config()
 
 

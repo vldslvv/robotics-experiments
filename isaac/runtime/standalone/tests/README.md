@@ -58,3 +58,14 @@ exchange; each drone runs its own independent `RoutineDriver` (one driver per
 drone, no fleet barrier) and its routine gates are evaluated against its own spawn
 baseline - every drone must
 pass.
+
+`make test-integration-px4-navigation` runs the single-drone absolute-waypoint
+`goto` navigation routine (`configs/runtime_drone_navigate.yaml`), and
+`make test-integration-px4-hexacopter-navigation` runs the hexacopter variant
+(`configs/runtime_hexacopter_navigate.yaml`, the `hexacopter_s550.usda` asset, so
+PX4 launches the derived generic hexarotor-x airframe). Both are thin entrypoints
+(`test_px4_navigation_routine.py`, `test_px4_hexacopter_navigation_routine.py`)
+over the shared `_px4_navigation_scenario.py`: it asserts the routine carries a
+`goto` leg and a `goto -> hover` transition (where PX4 failsafes if the OFFBOARD
+setpoint stream stops while OFFBOARD is active), then drives the same strict
+`_px4_takeoff_scenario.py` flight to completion.
