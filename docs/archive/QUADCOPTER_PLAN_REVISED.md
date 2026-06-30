@@ -1,5 +1,10 @@
 # Multirotor Light Switch Interaction — Revised Architecture & Task Plan (v4)
 
+> Historical source document. The canonical merged roadmap is
+> `docs/LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; update that document first. This
+> file preserves older architecture notes and contains stale hardware/control
+> assumptions such as MN3110/12-inch propulsion and PID-first simulator phases.
+
 > The platform decision is recorded as ADR 0001 (`docs/adr/`); this doc is the
 > full architecture and task plan behind it.
 
@@ -601,7 +606,7 @@ Implementation follows a strict simple-to-complex ordering. Each step produces a
 
 ## ✦ 9. Hardware Summary (v4)
 
-This section summarizes hardware-platform decisions. Full bill of materials is maintained in the companion document `HOLYBRO_X8_STAGED_BOM.md`.
+This section summarizes hardware-platform decisions. Full bill of materials is maintained in the companion document `docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md`.
 
 ### 9.1 Stage 1 (quadcopter) performance
 

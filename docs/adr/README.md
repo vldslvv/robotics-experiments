@@ -58,5 +58,8 @@ not decision snapshots:
 - Investigations / logs / scratch: the takeoff-instability investigation and
   `flight_analysis_00_26_50.md` are distilled into ADR 0003; `notes.txt` and
   `todos.txt` are scratch.
-- Supporting hardware detail for ADR 0001: `thrust_to_weight.py`,
+- Canonical roadmap and supporting hardware detail for ADR 0001:
+  `LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; historical source docs
+  `archive/QUADCOPTER_PLAN_REVISED.md` and
+  `archive/HOLYBRO_X8_STAGED_BOM_v2.md`; calculators `thrust_to_weight.py` and
   `evaluate_motors_revised.py`.

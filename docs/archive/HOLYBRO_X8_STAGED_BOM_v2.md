@@ -1,5 +1,9 @@
 # Holybro X500 V2 Staged Build — Quad to X8 Coaxial BOM (v2)
 
+> Historical source document. The canonical merged roadmap is
+> `docs/LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; this BOM remains the authoritative
+> hardware source behind that roadmap.
+
 > The staged-platform decision is recorded as ADR 0001 (`docs/adr/`); this doc is
 > the full BOM and propulsion analysis behind it.
 
