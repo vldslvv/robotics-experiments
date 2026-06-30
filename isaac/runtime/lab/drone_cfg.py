@@ -1,8 +1,9 @@
 # drone_cfg.py — Isaac Lab ArticulationCfg for the generated drone USD.
 #
-# Paired with build_copter_usd_without_pxr.py. That script emits the static
-# geometry/topology once; this file wraps the resulting .usda so Isaac Lab can
-# spawn N parallel copies with per-env randomization for sim-to-real training.
+# Paired with build_copter_usd_standalone.py. That script emits the static
+# geometry/topology AND the computed body mass/inertia/CoM once; this file wraps
+# the resulting .usda so Isaac Lab can spawn N parallel copies with per-env
+# randomization for sim-to-real training.
 #
 # Boundary (who owns what):
 #   USD (authored once, static):
@@ -10,19 +11,19 @@
 #     - Joint topology (which body pairs are connected, axis, limits)
 #     - Custom attributes like drone:spinDir on props
 #     - ArticulationRootAPI on the wrapper prim
+#     - Computed body mass / inertia / center of mass
 #   Cfg (this file, applied at spawn, randomizable per env):
-#     - Mass / inertia / center of mass
 #     - Joint drive stiffness / damping / effort limits
 #     - Initial pose and joint positions
 #     - Rigid body solver flags (max velocities, gravity toggle, CCD)
 #
 # Usage in an Isaac Lab env (not part of this repo yet):
 #
-#   from drone_cfg import QUADCOPTER_500MM_CFG
+#   from drone_cfg import HOLYBRO_X500_V2_CFG
 #
 #   @configclass
 #   class MySceneCfg(InteractiveSceneCfg):
-#       drone = QUADCOPTER_500MM_CFG.replace(prim_path="{ENV_REGEX_NS}/Drone")
+#       drone = HOLYBRO_X500_V2_CFG.replace(prim_path="{ENV_REGEX_NS}/Drone")
 #
 # Example randomization (lives in the env's EventCfg, NOT here, because
 # EventTerm/SceneEntityCfg are env-scoped):
@@ -50,13 +51,10 @@ from __future__ import annotations
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.sim import (
-    MassPropertiesCfg,
     RigidBodyPropertiesCfg,
     UsdFileCfg,
 )
 
-# Mirrored from build_copter_usd_without_pxr.py rather than imported because
-# importing that module triggers SimulationApp startup at Python import time.
 ASSETS_DIR = "/isaac-sim/proj/isaac/assets/LightSwitchWarehouse"
 
 # Mirrored from the same file's pusher constants. Keep in sync if you retune
@@ -75,7 +73,6 @@ _PUSHER_EFFORT_LIMIT = 50.0  # N — rough cap for the prismatic pusher motor
 
 def _make_drone_cfg(
     usd_filename: str,
-    total_mass: float,
     prim_name: str,
 ) -> ArticulationCfg:
     """Build an ArticulationCfg for one drone variant.
@@ -97,9 +94,10 @@ def _make_drone_cfg(
                 max_depenetration_velocity=10.0,
                 enable_gyroscopic_forces=True,
             ),
-            # Overrides the USD's MassAPI. Kept here so EventTerm can scale it
-            # per-env without re-authoring the USD.
-            mass_props=MassPropertiesCfg(mass=total_mass),
+            # No mass override: the USD carries the computed body mass/inertia/CoM
+            # (build_copter_usd_standalone.compute_body_mass_properties), so it is
+            # the single source. EventTerm randomization still scales the spawned
+            # body mass per-env without re-authoring the USD.
         ),
         # Initial state applies after spawn. pos is world-relative to the env
         # origin; pusher_joint=0.0 means the pad sits fully retracted.
@@ -124,15 +122,12 @@ def _make_drone_cfg(
     )
 
 
-# Masses mirror the `total_mass` field in build_copter_usd_without_pxr.py.
-QUADCOPTER_500MM_CFG = _make_drone_cfg(
-    usd_filename="quadcopter_500mm.usda",
-    total_mass=1.5,
-    prim_name="Quadcopter",
+HOLYBRO_X500_V2_CFG = _make_drone_cfg(
+    usd_filename="holybro_x500_v2.usda",
+    prim_name="HolybroX500V2",
 )
 
 HEXACOPTER_S550_CFG = _make_drone_cfg(
     usd_filename="hexacopter_s550.usda",
-    total_mass=1.929,
     prim_name="Hexacopter",
 )

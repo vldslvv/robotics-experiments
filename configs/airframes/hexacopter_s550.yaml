@@ -1,10 +1,12 @@
+# Placeholder S550-class hexacopter (NOT a hardware-faithful spec). It shares the
+# config schema with holybro_x500_v2: body total_mass/center_of_mass/
+# diagonal_inertia are computed by the USD builder from the component masses +
+# geometry below, and px4.bridge.rotor_constant is computed by config._load from
+# max_thrust_per_rotor_g + max_rotor_velocity + standard gravity.
+
 name: hexacopter_s550
 output_filename: hexacopter_s550.usda
 prim_name: hexacopter
-
-total_mass: 1.929
-diagonal_inertia: [0.075, 0.075, 0.14]
-center_of_mass: [0.0, 0.0, 0.01]
 
 center_plate:
   name: S550 airframe center plate
@@ -144,10 +146,14 @@ px4:
     mav_type: 13
     ca_rotor_km_abs: 0.05
   bridge:
+    # Placeholder thrust: max_thrust_per_rotor_g back-computed from the prior
+    # iris curve (8.54858e-6 * 1100^2 = 10.34 N = ~1054 gf) so this hex flies
+    # identically under the computed-rotor_constant schema. rotor_constant is
+    # derived in config._load (not authored).
+    max_thrust_per_rotor_g: 1054.0
     input_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     input_scaling: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
     zero_position_armed: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
-    rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
     rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
     min_rotor_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0, 1100.0, 1100.0]

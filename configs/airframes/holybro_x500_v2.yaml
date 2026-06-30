@@ -1,0 +1,173 @@
+# Holybro X500 V2 -- Stage 1 X4 quadcopter, hardware-faithful airframe.
+#
+# Single source of truth for this airframe. It drives three generated consumers:
+#   - USD geometry + body mass/CoM/inertia (build_copter_usd_standalone.py)
+#   - PX4 control allocation CA_ROTOR* (px4/scripts/generate_px4_airframes.py)
+#   - bridge thrust curve, via config._load merging px4.bridge below
+# Every physical value is either an authored, vendor-citable LEAF (with an inline
+# "-- BOM x.y" / vendor citation) or is COMPUTED from those leaves. The body
+# total_mass, center_of_mass, and diagonal_inertia are NOT authored here: the USD
+# builder computes them from the component masses + geometry below. rotor_constant
+# is NOT authored either: config._load derives it from max_thrust_per_rotor_g +
+# max_rotor_velocity + standard gravity. So fixing a vendor mismatch is a one-line edit.
+#
+# Sources: docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md (cited as "BOM <section>")
+# and the cited T-Motor / Holybro / Intel / Slamtec / Tattu product datasheets.
+
+name: holybro_x500_v2
+output_filename: holybro_x500_v2.usda
+prim_name: holybro_x500_v2
+
+# Frame: Holybro X500 V2 carbon center plate. Its mass folds in the frame kit,
+# landing gear, and mounting hardware (the booms below are massless geometry).
+center_plate:
+  name: Holybro X500 V2 carbon center plate + frame
+  size: [0.13, 0.13, 0.006]  # ~2mm CF twill plates, 130mm-class stack -- BOM 1.1
+  position: [0.0, 0.0, 0.0]
+  mass: 0.555  # frame 410 + landing gear 110 + isolators/mount 35 -- BOM 1.1
+
+# Geometry of one arm, authored once and shared by every arm. All positions are
+# in the arm-local frame: +X points outboard along the boom, and the per-arm
+# heading lives on the arm placement (azimuth_deg) below. The ESC therefore needs
+# no rotation -- its long (X) axis is already along the boom -- and the motor/prop
+# sit at the boom tip (radial = boom.length).
+arm_geometry:
+  boom:
+    name: X500 V2 16mm carbon-fiber tube arm
+    radius: 0.008  # 16mm OD CF tube -- BOM 1.1
+    # X500 V2 is a 500mm DIAGONAL wheelbase, so the motor sits 0.25m from center
+    # (adjacent spacing = 0.25*sqrt(2) = 0.354m). -- BOM 1.1 / Appendix C
+    length: 0.25
+  motor:
+    name: T-Motor MN4006 EVO KV380
+    radius: 0.0225  # 40x06 stator, ~45mm can OD -- BOM 1.2
+    height: 0.025
+    position: [0.25, 0.0, 0.025]  # boom tip, radial = boom.length
+    mass: 0.068  # 68g/motor -- BOM 1.2
+  esc:
+    name: HGLRC BS30A BLHeli_S
+    size: [0.026, 0.0145, 0.004]  # 26 x 14.5mm -- BOM 1.3
+    position: [0.125, 0.0, 0.005]  # mid-boom (boom.length / 2)
+    mass: 0.006  # 6g/ESC -- BOM 1.3
+  propeller:
+    name: T-Motor P134.4 13x4.4 CF
+    radius: 0.16510  # 13 inch diameter / 2 -- BOM 1.2
+    height: 0.002
+    position: [0.25, 0.0, 0.04]
+    mass: 0.007  # 7g/prop -- BOM 1.2
+    num_blades: 2
+
+# One placement per physical arm: the sole heading source (azimuth_deg) plus the
+# motor identity (spin direction and PX4 motor index). Generic Quad X order.
+arms:
+  - name: M1 FR CCW
+    azimuth_deg: 45.0
+    spin_dir: CCW
+    px4_motor_index: 2
+  - name: M2 FL CW
+    azimuth_deg: 135.0
+    spin_dir: CW
+    px4_motor_index: 1
+  - name: M3 RL CCW
+    azimuth_deg: -135.0
+    spin_dir: CCW
+    px4_motor_index: 3
+  - name: M4 RR CW
+    azimuth_deg: -45.0
+    spin_dir: CW
+    px4_motor_index: 0
+
+pixhawk:
+  name: Holybro Pixhawk 6C
+  size: [0.050, 0.038, 0.016]
+  position: [0.0, 0.0, 0.008]
+  mass: 0.035  # 35g -- BOM 1.5
+
+jetson:
+  name: NVIDIA Jetson Orin Nano Super (carrier)
+  size: [0.100, 0.080, 0.030]
+  position: [-0.03, 0.0, 0.015]
+  mass: 0.233  # Orin Nano 165 + SSD 8 + BEC 12 + cables/mount 48 -- BOM 1.6
+
+realsense:
+  name: Intel RealSense D435i
+  size: [0.090, 0.025, 0.025]
+  position: [0.07, 0.0, 0.01]
+  mass: 0.072  # 72g -- BOM 1.7
+  rotation_deg: [0.0, -15.0, 0.0]
+
+optical_flow:
+  name: Holybro PMW3901 optical flow + VL53L1X ToF
+  size: [0.020, 0.020, 0.005]
+  position: [0.0, 0.0, -0.06]
+  mass: 0.015  # 15g module -- BOM 1.7
+  rotation_deg: [180.0, 0.0, 0.0]
+
+lidar:
+  name: Slamtec RPLiDAR A2M12
+  radius: 0.038
+  height: 0.041
+  position: [0.0, 0.0, 0.0205]
+  mass: 0.190  # 190g -- BOM 1.7
+
+battery:
+  name: Tattu 4S 5000 mAh LiPo
+  size: [0.140, 0.045, 0.025]  # 132 x 42 x 32mm -- BOM 1.4
+  position: [0.0, 0.0, -0.03]
+  mass: 0.460  # 460g -- BOM 1.4
+
+wiring:
+  # Lump for hardware not modeled as its own geometry (per the no-new-geometry
+  # scope). Tuned so the body mass sum (excluding the 0.040 kg pusher pad) is
+  # ~2.211 kg, giving ~2.251 kg AUW with the pad -- BOM Stage 1 weight budget.
+  name: PM07 + GPS + prop guards + RC + connectors
+  size: [0.060, 0.040, 0.012]
+  position: [0.0, 0.0, 0.0]
+  mass: 0.327  # PM07 36 + M9N GPS 32 + 4 prop guards 88 + RC 20 + misc 151 -- BOM 1.2a/1.4/1.5/1.9
+
+# Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
+# false to build this airframe without the pusher (the geometry/drive below stay
+# defined for an easy re-enable). The pad is a sibling rigid body linked to the
+# body by a spring-damper prismatic joint (`pusher_joint`).
+pusher:
+  enabled: true
+  pad:
+    name: Spring-loaded pusher pad
+    radius: 0.015  # ~30mm pad diameter -- BOM 1.8
+    height: 0.008
+    position: [0.11, 0.0, 0.01]  # forward of the body, clear of the 0.165m prop disc
+    mass: 0.040  # pusher mechanism ~50g, 10g folded into frame -- BOM 1.8
+  drive:
+    travel: 0.015  # 10-15mm compliant travel -- BOM 1.8
+    stiffness: 800.0
+    damping: 40.0
+
+# NOTE: this file is also parsed by the non-Hydra PX4 airframe generator
+# (px4/scripts/generate_px4_airframes.py, yaml.safe_load) inside the Docker px4
+# build stage. Keep it flat/literal -- no Hydra interpolation or defaults here.
+px4:
+  sitl:
+    # Holybro X500 V2 geometry slot. 4019 is free in the posix airframe set, so
+    # SYS_AUTOSTART=4019 deterministically selects this generated airframe. Do NOT
+    # use 4001: posix already ships 4001_gz_x500, and a second 4001_* only "wins"
+    # the rcS glob by sort order. CA_ROTOR* positions are generated from the arm
+    # geometry above (motor radius 0.25 -> CA_ROTOR +/-0.1768).
+    sim_model: none_x500_v2
+    sys_autostart: 4019
+    mav_type: 2
+    ca_rotor_km_abs: 0.05
+  bridge:
+    # Physical RPM scaling for the MN4006 EVO KV380 @ 4S. rotor_constant is NOT
+    # listed -- config._load derives it from max_thrust_per_rotor_g below so that
+    # T = rotor_constant * omega^2 reaches max_thrust_per_rotor_g at
+    # max_rotor_velocity (=> per-motor max 15.35 N, T:W 2.78, hover ~56%).
+    max_thrust_per_rotor_g: 1565.0  # MN4006 EVO on P134.4 @4S static -- BOM 1.2
+    input_offset: [0.0, 0.0, 0.0, 0.0]
+    # controls=1 -> omega = 50 + 475 = 525 rad/s = max_rotor_velocity.
+    input_scaling: [475.0, 475.0, 475.0, 475.0]
+    zero_position_armed: [50.0, 50.0, 50.0, 50.0]  # armed idle omega
+    rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
+    min_rotor_velocity: [0.0, 0.0, 0.0, 0.0]
+    # KV380 * 14.8V ~ 589 rad/s no-load; ~525 rad/s loaded max -- BOM 1.2
+    max_rotor_velocity: [525.0, 525.0, 525.0, 525.0]
+    linear_drag: [0.50, 0.30, 0.0]

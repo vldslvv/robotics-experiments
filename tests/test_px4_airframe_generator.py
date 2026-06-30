@@ -21,7 +21,7 @@ def test_generator_derives_px4_rotor_allocation_from_airframe_geometry():
     result = _run_generator("--config-dir", _AIRFRAME_CONFIG_DIR, "--print-manifest")
     manifest = json.loads(result.stdout)
     airframes = {airframe["source"]: airframe for airframe in manifest["airframes"]}
-    quad = airframes["quadcopter_500mm"]
+    quad = airframes["holybro_x500_v2"]
     hexa = airframes["hexacopter_s550"]
 
     assert (
@@ -30,11 +30,12 @@ def test_generator_derives_px4_rotor_allocation_from_airframe_geometry():
         quad["sys_autostart"],
         quad["mav_type"],
     ) == ("4019_none_x500_v2", "none_x500_v2", 4019, 2)
+    # X500 V2 500mm diagonal -> motor radius 0.25 -> CA_ROTOR +/-0.25*cos(45).
     assert [(r["index"], r["px"], r["py"], r["km"]) for r in quad["rotors"]] == [
-        (0, 0.25, 0.25, 0.05),
-        (1, -0.25, -0.25, 0.05),
-        (2, 0.25, -0.25, -0.05),
-        (3, -0.25, 0.25, -0.05),
+        (0, 0.176777, 0.176777, 0.05),
+        (1, -0.176777, -0.176777, 0.05),
+        (2, 0.176777, -0.176777, -0.05),
+        (3, -0.176777, 0.176777, -0.05),
     ]
 
     assert (

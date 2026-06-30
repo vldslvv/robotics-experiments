@@ -19,7 +19,7 @@ def _load_builder_module():
     return importlib.import_module("isaac.runtime.standalone.build_copter_usd_standalone")
 
 
-def test_usd_builder_default_hydra_config_loads_quadcopter():
+def test_usd_builder_default_hydra_config_loads_holybro_x500_v2():
     builder = _load_builder_module()
 
     config = builder.load_builder_config(config_dir=_CONFIG_DIR)
@@ -28,8 +28,45 @@ def test_usd_builder_default_hydra_config_loads_quadcopter():
     assert config.airframe.pusher is not None
     assert config.airframe.pusher.enabled is True
     assert config.airframe.pusher.drive.travel == 0.015
-    assert config.airframe.name == "quadcopter_500mm"
-    assert config.airframe.output_filename == "quadcopter_500mm.usda"
+    assert config.airframe.name == "holybro_x500_v2"
+    assert config.airframe.output_filename == "holybro_x500_v2.usda"
+
+
+def test_usd_builder_computes_body_mass_properties_from_components():
+    builder = _load_builder_module()
+    cfg = builder.load_builder_config(config_dir=_CONFIG_DIR).airframe
+
+    total_mass, com, diagonal_inertia = builder.compute_body_mass_properties(cfg)
+
+    # total_mass is the sum of every body component mass, EXCLUDING the pusher
+    # pad (a separate rigid body) and the massless booms. Computing it from the
+    # cited component masses is the single source -- editing one mass propagates.
+    arm = cfg.arm_geometry
+    expected_mass = (
+        cfg.center_plate.mass
+        + len(cfg.arms) * (arm.motor.mass + arm.esc.mass + arm.propeller.mass)
+        + cfg.pixhawk.mass
+        + cfg.jetson.mass
+        + cfg.realsense.mass
+        + cfg.optical_flow.mass
+        + cfg.lidar.mass
+        + cfg.battery.mass
+        + cfg.wiring.mass
+    )
+    assert total_mass == pytest.approx(expected_mass)
+    assert total_mass == pytest.approx(2.211)
+
+    # Symmetric quad: yaw inertia is the largest principal moment, and the two
+    # horizontal moments are close (the forward sensors break exact equality).
+    ixx, iyy, izz = diagonal_inertia
+    assert izz > ixx
+    assert izz > iyy
+    assert ixx == pytest.approx(iyy, rel=0.25)
+
+    # CoM sits near the geometric center, exactly on the lateral plane of symmetry.
+    assert abs(com[0]) < 0.02
+    assert com[1] == pytest.approx(0.0, abs=1e-6)
+    assert abs(com[2]) < 0.02
 
 
 def test_usd_builder_hydra_override_loads_hexacopter():
@@ -84,7 +121,7 @@ def test_usd_builder_all_discovers_airframe_configs():
 
     assert builder._available_airframe_config_names(_CONFIG_DIR) == [
         "hexacopter_s550",
-        "quadcopter_500mm",
+        "holybro_x500_v2",
     ]
 
 
@@ -98,13 +135,13 @@ def test_usd_builder_all_generates_every_airframe_config(tmp_path):
 
     assert {Path(path).name for path in paths} == {
         "hexacopter_s550.usda",
-        "quadcopter_500mm.usda",
+        "holybro_x500_v2.usda",
     }
     assert Usd.Stage.Open(str(tmp_path / "hexacopter_s550.usda")).GetDefaultPrim().GetName() == (
         "hexacopter"
     )
-    assert Usd.Stage.Open(str(tmp_path / "quadcopter_500mm.usda")).GetDefaultPrim().GetName() == (
-        "quadcopter"
+    assert Usd.Stage.Open(str(tmp_path / "holybro_x500_v2.usda")).GetDefaultPrim().GetName() == (
+        "holybro_x500_v2"
     )
 
 
@@ -121,14 +158,14 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
     )
     stage = Usd.Stage.Open(stage_path)
 
-    assert stage.GetDefaultPrim().GetName() == "quadcopter"
+    assert stage.GetDefaultPrim().GetName() == "holybro_x500_v2"
     # arm_i carries the placement authored at config index i-1; the PX4 motor
     # index is a marker attribute, independent of the arm number.
     expected = {
-        "/quadcopter/body/arms/arm_4/prop": (0, "CW"),
-        "/quadcopter/body/arms/arm_2/prop": (1, "CW"),
-        "/quadcopter/body/arms/arm_1/prop": (2, "CCW"),
-        "/quadcopter/body/arms/arm_3/prop": (3, "CCW"),
+        "/holybro_x500_v2/body/arms/arm_4/prop": (0, "CW"),
+        "/holybro_x500_v2/body/arms/arm_2/prop": (1, "CW"),
+        "/holybro_x500_v2/body/arms/arm_1/prop": (2, "CCW"),
+        "/holybro_x500_v2/body/arms/arm_3/prop": (3, "CCW"),
     }
     for path, (px4_index, spin_dir) in expected.items():
         prim = stage.GetPrimAtPath(path)
@@ -167,13 +204,13 @@ def test_usd_builder_default_quad_has_pusher(tmp_path):
     stage = Usd.Stage.Open(stage_path)
 
     # Pad rigid body + its collision geom exist under the pusher group.
-    pad = stage.GetPrimAtPath("/quadcopter/pusher/pad")
+    pad = stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad")
     assert pad.IsValid()
     assert pad.HasAPI(UsdPhysics.RigidBodyAPI)
-    assert stage.GetPrimAtPath("/quadcopter/pusher/pad/geom").IsA(UsdGeom.Cylinder)
+    assert stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad/geom").IsA(UsdGeom.Cylinder)
 
     # Prismatic spring-damper joint with travel from airframes.pusher.drive.travel.
-    joint_prim = stage.GetPrimAtPath("/quadcopter/pusher_joint")
+    joint_prim = stage.GetPrimAtPath("/holybro_x500_v2/pusher_joint")
     assert joint_prim.IsValid()
     joint = UsdPhysics.PrismaticJoint(joint_prim)
     assert joint.GetAxisAttr().Get() == "X"
@@ -192,13 +229,13 @@ def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
     stage = Usd.Stage.Open(stage_path)
 
     # No pusher subtree is authored when disabled.
-    assert not stage.GetPrimAtPath("/quadcopter/pusher_joint").IsValid()
-    assert not stage.GetPrimAtPath("/quadcopter/pusher").IsValid()
+    assert not stage.GetPrimAtPath("/holybro_x500_v2/pusher_joint").IsValid()
+    assert not stage.GetPrimAtPath("/holybro_x500_v2/pusher").IsValid()
 
     # The rest of the airframe is intact (rotor markers still present).
     for path in (
-        "/quadcopter/body/arms/arm_4/prop",
-        "/quadcopter/body/arms/arm_1/prop",
+        "/holybro_x500_v2/body/arms/arm_4/prop",
+        "/holybro_x500_v2/body/arms/arm_1/prop",
     ):
         assert stage.GetPrimAtPath(path).GetAttribute("drone:rotorMarker").Get() is True
 
@@ -226,8 +263,8 @@ def test_usd_builder_esc_parallel_to_arm(tmp_path):
     # Each ESC's long axis (local X) must be parallel to its boom (capsule long
     # axis = local Z), with the azimuth inherited from the shared arm Xform.
     for i in range(1, len(config.airframe.arms) + 1):
-        boom_dir = _world_dir(f"/quadcopter/body/arms/arm_{i}/boom", (0, 0, 1))
-        esc_dir = _world_dir(f"/quadcopter/body/arms/arm_{i}/esc", (1, 0, 0))
+        boom_dir = _world_dir(f"/holybro_x500_v2/body/arms/arm_{i}/boom", (0, 0, 1))
+        esc_dir = _world_dir(f"/holybro_x500_v2/body/arms/arm_{i}/esc", (1, 0, 0))
         # Parallel as a line (sign-agnostic): |dot| == 1.
         assert abs(boom_dir[0] * esc_dir[0] + boom_dir[1] * esc_dir[1]) == pytest.approx(
             1.0, abs=1e-9

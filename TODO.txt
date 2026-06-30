@@ -35,4 +35,13 @@ The failsafe on hexes seems to not work -- totally wild flying
 
 Verify that new repo clone works from scratch
 
-USD generator leaves trailing newline and it conflicts with pre-commit
+Add drone builder tests that verify that components are computed correctly -- mass, inertia etc
+
+Consider if _load.py should do anything about the config or only drone builder should
+
+Add drone sanity checks -- place small motors and make sure it doesn't lift off
+Check throttle value at hover for regular config
+
+Use URDF instead of my drone config?
+Drone calculations should have some noise so that the drone construction varies to emulate physical variations
+

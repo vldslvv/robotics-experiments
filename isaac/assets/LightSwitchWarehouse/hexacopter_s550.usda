@@ -15,9 +15,9 @@ def Xform "hexacopter" (
         apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
     )
     {
-        point3f physics:centerOfMass = (0, 0, 0.01)
-        float3 physics:diagonalInertia = (0.075, 0.075, 0.14)
-        float physics:mass = 1.929
+        point3f physics:centerOfMass = (0.0008099524, 2.869778e-18, 0.0010058231)
+        float3 physics:diagonalInertia = (0.01796482, 0.019376893, 0.03502181)
+        float physics:mass = 1.889
 
         def Xform "frame"
         {

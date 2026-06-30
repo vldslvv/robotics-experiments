@@ -116,9 +116,14 @@ def test_resolve_fleet_merges_partial_over_globals_and_derives_fields():
     vehicles = resolve_fleet(cfg)
 
     assert len(vehicles) == 2
-    # Vehicle 0 inherits all global defaults.
+    # Vehicle 0 has no per-vehicle override. It inherits the global drone and the
+    # global px4 for everything except the thrust curve, which its (default X500)
+    # airframe overrides -- so the non-thrust px4 fields still match the globals.
     assert vehicles[0].drone == base_drone
-    assert vehicles[0].px4 == base_px4
+    assert vehicles[0].px4.connection_baseport == base_px4.connection_baseport
+    assert vehicles[0].px4.gcs_baseport == base_px4.gcs_baseport
+    assert vehicles[0].px4.lockstep == base_px4.lockstep
+    assert vehicles[0].px4.max_tilt_angle_deg == base_px4.max_tilt_angle_deg
     # Vehicle 1: overridden fields win, untouched fields inherit.
     assert vehicles[1].drone.prim_name == "Drone1"
     assert vehicles[1].drone.usd_path == base_drone.usd_path
@@ -263,9 +268,14 @@ def test_default_config_composes_to_one_vehicle_equal_to_globals():
     vehicle = env.vehicles[0]
     assert vehicle.id == 0
     assert vehicle.spawn_xy == (0.0, 0.0)
-    # The single default vehicle reproduces today's global drone/px4 exactly.
+    # The single default vehicle reproduces today's global drone exactly, and the
+    # global px4 except for the thrust curve, which its X500 airframe overrides
+    # (so max_thrust_per_rotor_g differs from the generic global fallback).
     assert vehicle.drone == env.drone
-    assert vehicle.px4 == env.px4
+    assert vehicle.px4.connection_baseport == env.px4.connection_baseport
+    assert vehicle.px4.lockstep == env.px4.lockstep
+    assert vehicle.px4.max_tilt_angle_deg == env.px4.max_tilt_angle_deg
+    assert vehicle.px4.max_thrust_per_rotor_g != env.px4.max_thrust_per_rotor_g
     # Derived fields reproduce the single-drone baseline.
     assert vehicle.mavlink_port == 4560
     assert vehicle.px4_instance_index == 0

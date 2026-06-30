@@ -1,5 +1,6 @@
 import functools
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
@@ -41,6 +42,40 @@ def _airframes_by_output_filename() -> dict[str, dict]:
 
 def _airframe_for_drone_asset(usd_path: str) -> dict | None:
     return _airframes_by_output_filename().get(Path(usd_path).name)
+
+
+# Standard gravity for the grams-force -> Newton unit conversion of the cited
+# per-rotor thrust. This is the definition of a gram-force (the unit the motor
+# datasheet uses), not the sim's gravity: motor thrust is a property of the
+# motor/prop, independent of what gravity the scene runs at.
+_STANDARD_GRAVITY_M_S2 = 9.80665
+
+
+def _compute_rotor_constants(
+    max_thrust_per_rotor_g: float,
+    max_rotor_velocity: Iterable[float],
+) -> list[float]:
+    """Derive the Pegasus per-rotor thrust coefficient from the cited thrust spec.
+
+    ``T_i = rotor_constant_i * omega_i^2``, so at the per-rotor maximum angular
+    velocity the thrust equals the authored static maximum
+    (``max_thrust_per_rotor_g`` grams-force). This keeps ``rotor_constant`` a pure
+    derivation of a vendor-citable thrust number rather than a hand-tuned scalar.
+    """
+    if max_thrust_per_rotor_g <= 0.0:
+        raise ValueError(
+            "px4 max_thrust_per_rotor_g must be positive, "
+            f"got {max_thrust_per_rotor_g!r}"
+        )
+    max_velocities = [float(v) for v in max_rotor_velocity]
+    if not max_velocities:
+        raise ValueError("px4 max_rotor_velocity must contain at least one rotor velocity")
+    bad_velocity = next((v for v in max_velocities if v <= 0.0), None)
+    if bad_velocity is not None:
+        raise ValueError(f"px4 max_rotor_velocity values must be positive, got {bad_velocity!r}")
+
+    max_thrust_n = max_thrust_per_rotor_g / 1000.0 * _STANDARD_GRAVITY_M_S2
+    return [max_thrust_n / (v * v) for v in max_velocities]
 
 
 def _resolve_config_path() -> Path:
@@ -171,6 +206,13 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
         airframe = _airframe_for_drone_asset(str(drone.usd_path))
         px4_airframe_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
         px4 = OmegaConf.merge(cfg.px4, px4_airframe_defaults, entry.get("px4", {}))
+        # rotor_constant is not authored: derive it from the cited per-rotor max
+        # thrust + max_rotor_velocity + standard gravity, so a datasheet thrust change
+        # is a single-line edit (see _compute_rotor_constants).
+        px4.rotor_constant = _compute_rotor_constants(
+            float(px4.max_thrust_per_rotor_g),
+            list(px4.max_rotor_velocity),
+        )
         routine = OmegaConf.merge(cfg.routine, entry.get("routine", {}))
         drone_cfg = cast(DroneConfig, OmegaConf.to_object(drone))
         px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
@@ -220,6 +262,13 @@ def get_config() -> EnvConfig:
     # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
     # them with the enriched, validated resolved fleet before caching/returning.
     env = cast(EnvConfig, OmegaConf.to_object(cfg))
+    # Derive rotor_constant for the global default px4 too (the per-vehicle
+    # resolution does the same for each fleet entry), so the authored config
+    # never duplicates the computed thrust coefficient.
+    env.px4.rotor_constant = _compute_rotor_constants(
+        env.px4.max_thrust_per_rotor_g,
+        env.px4.max_rotor_velocity,
+    )
     env.vehicles = _resolve_fleet(cfg)
     return env
 

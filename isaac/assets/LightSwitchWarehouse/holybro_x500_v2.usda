@@ -1,13 +1,13 @@
 #usda 1.0
 (
-    defaultPrim = "quadcopter"
-    doc = """Generated from Composed Stage of root layer /home/vv/ccode/r/robotics-experiments/isaac/assets/LightSwitchWarehouse/quadcopter_500mm.usda
+    defaultPrim = "holybro_x500_v2"
+    doc = """Generated from Composed Stage of root layer /home/vv/ccode/r/robotics-experiments/isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda
 """
     metersPerUnit = 1
     upAxis = "Z"
 )
 
-def Xform "quadcopter" (
+def Xform "holybro_x500_v2" (
     apiSchemas = ["PhysicsArticulationRootAPI"]
 )
 {
@@ -15,9 +15,9 @@ def Xform "quadcopter" (
         apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
     )
     {
-        point3f physics:centerOfMass = (0, 0, 0.01)
-        float3 physics:diagonalInertia = (0.0347, 0.0458, 0.0977)
-        float physics:mass = 1.5
+        point3f physics:centerOfMass = (-0.00088195386, 3.9229387e-19, 0.0014038896)
+        float3 physics:diagonalInertia = (0.011859061, 0.013262875, 0.023189386)
+        float physics:mass = 2.211
 
         def Xform "frame"
         {
@@ -25,14 +25,14 @@ def Xform "quadcopter" (
                 apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
             )
             {
-                float physics:mass = 0.35
+                float physics:mass = 0.555
                 double3 xformOp:translate = (0, 0, 0)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
                 def Cube "geom"
                 {
                     double size = 1
-                    float3 xformOp:scale = (0.12, 0.12, 0.006)
+                    float3 xformOp:scale = (0.13, 0.13, 0.006)
                     uniform token[] xformOpOrder = ["xformOp:scale"]
                 }
             }
@@ -49,10 +49,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsCollisionAPI"]
                 )
                 {
-                    double height = 0.33755339059327377
+                    double height = 0.23399999999999999
                     double radius = 0.008
                     float3 xformOp:rotateXYZ = (0, 90, 0)
-                    double3 xformOp:translate = (0.1767766952966369, 0, 0)
+                    double3 xformOp:translate = (0.125, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
                 }
 
@@ -60,10 +60,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.03
-                    float physics:mass = 0.057
-                    double radius = 0.015
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.02)
+                    double height = 0.025
+                    float physics:mass = 0.068
+                    double radius = 0.0225
+                    double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -71,14 +71,14 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.007
-                    double3 xformOp:translate = (0.21213203435596426, 0, 0.005)
+                    float physics:mass = 0.006
+                    double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
                     {
                         double size = 1
-                        float3 xformOp:scale = (0.025, 0.015, 0.004)
+                        float3 xformOp:scale = (0.026, 0.0145, 0.004)
                         uniform token[] xformOpOrder = ["xformOp:scale"]
                     }
                 }
@@ -90,27 +90,27 @@ def Xform "quadcopter" (
                     custom int drone:px4MotorIndex = 2
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CCW"
-                    float physics:mass = 0.008
+                    float physics:mass = 0.007
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.04)
+                    double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
                     {
                         double height = 0.002
-                        double radius = 0.013715999999999999
+                        double radius = 0.019812
                     }
 
                     def Xform "blade_1"
                     {
                         float xformOp:rotateZ = 0
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -118,13 +118,13 @@ def Xform "quadcopter" (
                     def Xform "blade_2"
                     {
                         float xformOp:rotateZ = 180
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -140,10 +140,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsCollisionAPI"]
                 )
                 {
-                    double height = 0.33755339059327377
+                    double height = 0.23399999999999999
                     double radius = 0.008
                     float3 xformOp:rotateXYZ = (0, 90, 0)
-                    double3 xformOp:translate = (0.1767766952966369, 0, 0)
+                    double3 xformOp:translate = (0.125, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
                 }
 
@@ -151,10 +151,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.03
-                    float physics:mass = 0.057
-                    double radius = 0.015
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.02)
+                    double height = 0.025
+                    float physics:mass = 0.068
+                    double radius = 0.0225
+                    double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -162,14 +162,14 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.007
-                    double3 xformOp:translate = (0.21213203435596426, 0, 0.005)
+                    float physics:mass = 0.006
+                    double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
                     {
                         double size = 1
-                        float3 xformOp:scale = (0.025, 0.015, 0.004)
+                        float3 xformOp:scale = (0.026, 0.0145, 0.004)
                         uniform token[] xformOpOrder = ["xformOp:scale"]
                     }
                 }
@@ -181,27 +181,27 @@ def Xform "quadcopter" (
                     custom int drone:px4MotorIndex = 1
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CW"
-                    float physics:mass = 0.008
+                    float physics:mass = 0.007
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.04)
+                    double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
                     {
                         double height = 0.002
-                        double radius = 0.013715999999999999
+                        double radius = 0.019812
                     }
 
                     def Xform "blade_1"
                     {
                         float xformOp:rotateZ = 0
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -209,13 +209,13 @@ def Xform "quadcopter" (
                     def Xform "blade_2"
                     {
                         float xformOp:rotateZ = 180
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -231,10 +231,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsCollisionAPI"]
                 )
                 {
-                    double height = 0.33755339059327377
+                    double height = 0.23399999999999999
                     double radius = 0.008
                     float3 xformOp:rotateXYZ = (0, 90, 0)
-                    double3 xformOp:translate = (0.1767766952966369, 0, 0)
+                    double3 xformOp:translate = (0.125, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
                 }
 
@@ -242,10 +242,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.03
-                    float physics:mass = 0.057
-                    double radius = 0.015
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.02)
+                    double height = 0.025
+                    float physics:mass = 0.068
+                    double radius = 0.0225
+                    double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -253,14 +253,14 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.007
-                    double3 xformOp:translate = (0.21213203435596426, 0, 0.005)
+                    float physics:mass = 0.006
+                    double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
                     {
                         double size = 1
-                        float3 xformOp:scale = (0.025, 0.015, 0.004)
+                        float3 xformOp:scale = (0.026, 0.0145, 0.004)
                         uniform token[] xformOpOrder = ["xformOp:scale"]
                     }
                 }
@@ -272,27 +272,27 @@ def Xform "quadcopter" (
                     custom int drone:px4MotorIndex = 3
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CCW"
-                    float physics:mass = 0.008
+                    float physics:mass = 0.007
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.04)
+                    double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
                     {
                         double height = 0.002
-                        double radius = 0.013715999999999999
+                        double radius = 0.019812
                     }
 
                     def Xform "blade_1"
                     {
                         float xformOp:rotateZ = 0
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -300,13 +300,13 @@ def Xform "quadcopter" (
                     def Xform "blade_2"
                     {
                         float xformOp:rotateZ = 180
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -322,10 +322,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsCollisionAPI"]
                 )
                 {
-                    double height = 0.33755339059327377
+                    double height = 0.23399999999999999
                     double radius = 0.008
                     float3 xformOp:rotateXYZ = (0, 90, 0)
-                    double3 xformOp:translate = (0.1767766952966369, 0, 0)
+                    double3 xformOp:translate = (0.125, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
                 }
 
@@ -333,10 +333,10 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.03
-                    float physics:mass = 0.057
-                    double radius = 0.015
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.02)
+                    double height = 0.025
+                    float physics:mass = 0.068
+                    double radius = 0.0225
+                    double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
 
@@ -344,14 +344,14 @@ def Xform "quadcopter" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.007
-                    double3 xformOp:translate = (0.21213203435596426, 0, 0.005)
+                    float physics:mass = 0.006
+                    double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
                     def Cube "geom"
                     {
                         double size = 1
-                        float3 xformOp:scale = (0.025, 0.015, 0.004)
+                        float3 xformOp:scale = (0.026, 0.0145, 0.004)
                         uniform token[] xformOpOrder = ["xformOp:scale"]
                     }
                 }
@@ -363,27 +363,27 @@ def Xform "quadcopter" (
                     custom int drone:px4MotorIndex = 0
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CW"
-                    float physics:mass = 0.008
+                    float physics:mass = 0.007
                     float xformOp:rotateZ = 0
-                    double3 xformOp:translate = (0.3535533905932738, 0, 0.04)
+                    double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
 
                     def Cylinder "hub"
                     {
                         double height = 0.002
-                        double radius = 0.013715999999999999
+                        double radius = 0.019812
                     }
 
                     def Xform "blade_1"
                     {
                         float xformOp:rotateZ = 0
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -391,13 +391,13 @@ def Xform "quadcopter" (
                     def Xform "blade_2"
                     {
                         float xformOp:rotateZ = 180
-                        double3 xformOp:translate = (0.05715, 0, 0)
+                        double3 xformOp:translate = (0.08255, 0, 0)
                         uniform token[] xformOpOrder = ["xformOp:rotateZ", "xformOp:translate"]
 
                         def Cube "geom"
                         {
                             double size = 1
-                            float3 xformOp:scale = (0.1143, 0.016002, 0.002)
+                            float3 xformOp:scale = (0.1651, 0.023114, 0.002)
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
@@ -427,7 +427,7 @@ def Xform "quadcopter" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.165
+                float physics:mass = 0.233
                 double3 xformOp:translate = (-0.03, 0, 0.018)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -467,7 +467,7 @@ def Xform "quadcopter" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.005
+                float physics:mass = 0.015
                 float3 xformOp:rotateXYZ = (180, 0, 0)
                 double3 xformOp:translate = (0, 0, -0.06)
                 uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
@@ -498,7 +498,7 @@ def Xform "quadcopter" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.3
+                float physics:mass = 0.46
                 double3 xformOp:translate = (0, 0, -0.03)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -514,14 +514,14 @@ def Xform "quadcopter" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.1
+                float physics:mass = 0.327
                 double3 xformOp:translate = (0, 0, 0)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
                 def Cube "geom"
                 {
                     double size = 1
-                    float3 xformOp:scale = (0.05, 0.03, 0.01)
+                    float3 xformOp:scale = (0.06, 0.04, 0.012)
                     uniform token[] xformOpOrder = ["xformOp:scale"]
                 }
             }
@@ -556,8 +556,8 @@ def Xform "quadcopter" (
         float drive:linear:physics:stiffness = 800
         uniform token drive:linear:physics:type = "force"
         uniform token physics:axis = "X"
-        rel physics:body0 = </quadcopter/body>
-        rel physics:body1 = </quadcopter/pusher/pad>
+        rel physics:body0 = </holybro_x500_v2/body>
+        rel physics:body1 = </holybro_x500_v2/pusher/pad>
         point3f physics:localPos0 = (0.11, 0, 0.01)
         point3f physics:localPos1 = (0, 0, 0)
         quatf physics:localRot0 = (1, 0, 0, 0)

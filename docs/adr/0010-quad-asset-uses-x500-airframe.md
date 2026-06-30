@@ -25,7 +25,8 @@ Findings (verified against `vv-px4-sitl:v1.14.3`):
 Bind the quad asset to **`4019` / `none_x500_v2`**, shipped as a generated SITL
 airframe with `CA_ROTOR` derived from the asset geometry.
 
-- `configs/airframes/quadcopter_500mm.yaml` sets `sim_model: none_x500_v2`,
+- `configs/airframes/holybro_x500_v2.yaml` (renamed from `quadcopter_500mm` by
+  ADR 0012) sets `sim_model: none_x500_v2`,
   `sys_autostart: 4019`; the Dockerfile px4 stage generates `4019_none_x500_v2`.
 - Guard the `4001`/`gz_x500` collision at build time
   (`generate_px4_airframes.py::_conflicting_airframe_files`, with a

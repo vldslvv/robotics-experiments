@@ -47,6 +47,10 @@ fuller design doc under `docs/` where one exists.
 - [0011](0011-config-driven-px4-airframe-generation.md) (2026-06-30) -- Generate
   airframes from `configs/airframes` at build time; single source for sim + PX4.
   Supersedes the hand-written mechanism of 0008-0010.
+- [0012](0012-hardware-faithful-x500-and-computed-airframe-properties.md)
+  (2026-06-30) -- Rebuild the quad as hardware-faithful `holybro_x500_v2`; author
+  only cited per-component leaves and compute body mass/inertia + `rotor_constant`
+  from them.
 
 ## Not captured as ADRs (intentionally)
 

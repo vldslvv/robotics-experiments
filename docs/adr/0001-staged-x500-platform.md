@@ -39,5 +39,5 @@ dual-configuration support, enabling the incremental X4->X8 path on one frame.
 
 - Defers ~$430 of Stage-2 hardware and avoids committing to an untested topology.
 - Fixes the propulsion-margin gap of the rejected hexacopter/MN3110 plan.
-- The simulated quad asset (`quadcopter_500mm.usda`) tracks this Stage-1 geometry;
-  its PX4 SITL airframe binding is ADR 0010.
+- The simulated quad asset (`holybro_x500_v2.usda`, hardware-faithful per ADR
+  0012) tracks this Stage-1 geometry; its PX4 SITL airframe binding is ADR 0010.

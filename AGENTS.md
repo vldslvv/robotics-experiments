@@ -194,13 +194,26 @@ the current contents and the intended home for that kind of code.
   (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
   `config._load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
   USD asset basename to the PX4 airframe defined in `configs/airframes`
-  (`quadcopter_500mm.usda` -> `none_x500_v2`/`4019`,
+  (`holybro_x500_v2.usda` -> `none_x500_v2`/`4019`,
   `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
   raises `ValueError`). The Dockerfile's px4 stage generates these repo-managed
   `none_*` posix airframe scripts from `configs/airframes`, registers them in
   PX4's airframe CMake list, writes an image manifest, then runs
   `make px4_sitl_default`, so USD geometry, bridge rotor arrays, and PX4 control
-  allocation share one source. The `px4.sitl.sys_autostart` ids must be **free**
+  allocation share one source. The airframe YAML authors only **cited
+  per-component leaves** (each physical value carries an inline vendor/BOM
+  citation): the body `total_mass`/`center_of_mass`/`diagonal_inertia` are
+  **computed** by the USD builder (`build_copter_usd_standalone.compute_body_mass_properties`,
+  summing the component box/cylinder inertias + parallel-axis, excluding the
+  separate pusher pad) and the bridge `rotor_constant` is **computed** by
+  `config._load` (`_compute_rotor_constants`) from the cited
+  `max_thrust_per_rotor_g` + `max_rotor_velocity` (standard-gravity gram-force ->
+  Newton conversion, so `T = rotor_constant * omega^2` reaches the cited static
+  max at `max_rotor_velocity`). Neither derived value is authored, so fixing a
+  vendor mismatch is a one-line leaf edit + regenerate. The default quad asset is
+  `holybro_x500_v2` -- a hardware-faithful Holybro X500 V2 Stage 1 X4 (MN4006 EVO
+  / P134.4 13x4.4 / 0.25 m motor radius / ~2.251 kg AUW); the `hexacopter_s550`
+  remains a placeholder that shares the same computed-properties schema. The `px4.sitl.sys_autostart` ids must be **free**
   in the posix airframe set: posix `rcS` selects the airframe by globbing
   `airframes/<id>_*` and sourcing the last match, so a stock `<id>_*` (e.g.
   `4001_gz_x500`) would shadow a generated one. The quad therefore uses the free

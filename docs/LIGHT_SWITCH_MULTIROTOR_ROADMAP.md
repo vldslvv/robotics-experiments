@@ -30,10 +30,10 @@ historical/rejected-plan note, not the completed runtime architecture.
 | Phase | State | Notes |
 |-------|-------|-------|
 | A. Runtime and PX4 SITL foundation | Done | `FleetOrchestrator`, `BridgeHost`, `BridgeHostGroup`, `VehicleState -> ActuatorCommands -> RotorDynamics`, lockstep send/poll, multi-vehicle send-all/poll-all, per-vehicle logging, and rotor visual spin are implemented. |
-| B. Placeholder quad/hexa assets and generated PX4 airframes | Partially done | `quadcopter_500mm.usda` binds to generated `4019_none_x500_v2`; `hexacopter_s550.usda` binds to generated `6001_none_hexa_x`. These are implementation placeholders, not final Holybro X500 X4/X8 hardware-faithful assets/configs. |
+| B. Generated X4/hexa assets and PX4 airframes | Mostly done | `holybro_x500_v2.usda` now models the Stage 1 Holybro X500 V2 X4 and binds to generated `4019_none_x500_v2`; `hexacopter_s550.usda` remains a placeholder bound to generated `6001_none_hexa_x`. Stage 2 X8 remains pending. |
 | C. Command routines and navigation primitives | Done for demos | Pure command routines cover arm, takeoff, hover, forward, absolute world-ENU `goto`, and land; live and standalone shells drive the same per-drone `RoutineDriver`. |
 | D. Switch/lamp environment | Mostly done | Switch/lamp spawning and the N-step light-state latch exist. Closed-loop integration from navigation handoff into an RL or contact press policy remains pending. |
-| E. Hardware-faithful X4/X8 asset/config | Not done | Build/update USD geometry, rotor definitions, mass/inertia, pusher placement, and generated PX4 airframes for the actual Holybro X500 V2 Stage 1 X4 and Stage 2 X8 platform. |
+| E. Hardware-faithful X4/X8 asset/config | Partially done | Stage 1 Holybro X500 V2 X4 USD/config is implemented with computed mass properties and generated PX4 airframe binding. Stage 2 X8 geometry, rotor mapping, and tuning remain pending. |
 | F. RL press policy | Not done | Isaac Lab has a no-op DirectRLEnv hover skeleton. The switch-press task, reward, observation/action surfaces, curriculum, and trained policy are future work. |
 | G. Sensor simulation/fusion and ROS sensor stack | Not done | D435i/RPLiDAR/optical-flow simulation, ROS topics, LiDAR SLAM, and EKF/UKF fusion remain roadmap items. |
 | H. Full mission state machine and autonomous discovery | Future | Retry/abort behavior, wall scanning, switch discovery, multi-switch task queues, and full autonomous missions are not implemented. |
@@ -300,21 +300,20 @@ Regression guardrails:
 - `VehicleState` remains pose, velocity, angular velocity, and sim time only.
 - Safety gates zero dynamics only; they do not skip the per-tick exchange.
 
-### Phase B: Placeholder Assets and Generated Airframes
+### Phase B: Generated X4/Hexa Assets and Airframes
 
-Status: partially done. Current placeholder assets and generated airframes are
-useful for runtime demos and tests, but they are not the final X4/X8 hardware
-config.
+Status: mostly done. The Stage 1 Holybro X500 V2 X4 config/USD now matches the
+MN4006/P134.4/13-inch/pusher geometry and derives body mass properties and bridge
+thrust constants from component leaves. The S550 hex remains a runtime placeholder,
+and the Stage 2 X8 hardware config is still pending.
 
 Pending:
 
-- Create or regenerate a Holybro X500 V2 Stage 1 X4 USD/config that matches the
-  MN4006/P134.4/13-inch/pusher geometry.
 - Create or regenerate a Stage 2 X8 coaxial USD/config with lower motor mounts,
   matched lower props, lower guards, and correct rotor directions.
-- Generate matching PX4 SITL airframes from `configs/airframes`.
-- Update docs/tests to treat the current `quadcopter_500mm` and
-  `hexacopter_s550` as placeholders until replaced.
+- Keep generated PX4 SITL airframes in sync with `configs/airframes`.
+- Treat `hexacopter_s550` as a placeholder until replaced by the Stage 2 X8
+  config.
 
 ### Phase C: Command Routines and Navigation Primitives
 
@@ -341,15 +340,14 @@ Pending:
 
 ### Phase E: Hardware-Faithful X4/X8 Asset and Config
 
-Status: not done.
+Status: partially done. Stage 1 X4 is represented by `holybro_x500_v2`; Stage 2
+X8 remains pending.
 
 Tasks:
 
-- Encode MN4006/P134.4 rotor positions, prop radii, directions, mass/inertia,
-  thrust model parameters, and pusher clearance.
-- Verify 13-inch adjacent-prop and pusher-boom clearances.
 - Implement X8 lower motor mount geometry and lower prop guards.
-- Map Stage 1 and Stage 2 motor order to generated PX4 airframes.
+- Map Stage 2 motor order to generated PX4 airframes.
+- Verify Stage 2 pusher/prop/boom clearance.
 - Document retuning steps and expected parameter differences.
 
 ### Phase F: RL Press Policy
@@ -419,6 +417,7 @@ current roadmap:
 - A simulator-only PID-first hover sequence has been replaced by the PX4 SITL
   bridge and command-routine architecture. PID retuning remains relevant only for
   PX4/physical-airframe transitions such as X4 to X8.
-- The current `quadcopter_500mm` and `hexacopter_s550` assets are placeholders
-  for runtime development, not declarations that the final hardware is a generic
-  square-X quad or S550 hex.
+- The removed `quadcopter_500mm` asset was a placeholder for runtime development,
+  not a declaration that the final Stage 1 hardware was a generic square-X quad.
+  The current `hexacopter_s550` asset remains a placeholder until the Stage 2 X8
+  config replaces it.

@@ -3,7 +3,7 @@
 # Run with standalone OpenUSD Python bindings:
 #   python isaac/runtime/standalone/build_copter_usd_standalone.py [config_name] [overrides...]
 #
-# Available configs: quadcopter_500mm (default), hexacopter_s550
+# Available configs: holybro_x500_v2 (default), hexacopter_s550
 #
 # --- Boundary with Isaac Lab (drone_cfg.py) ---
 # This file authors the USD once. Anything topological / geometric lives here:
@@ -11,8 +11,7 @@
 #   - Joint topology (body pairs, axis, limits, relative frames)
 #   - Custom attributes (e.g. PX4 rotor mapping metadata on props)
 #   - Articulation root marker (ArticulationRootAPI on the wrapper prim)
-# The Isaac Lab ArticulationCfg (drone_cfg.py) overrides at spawn time:
-#   - Mass / inertia / CoM (so EventTerm can randomize per-env for sim-to-real)
+# The Isaac Lab ArticulationCfg (drone_cfg.py) wraps the USD at spawn time:
 #   - Actuator stiffness / damping / effort limits
 #   - Initial pose and joint positions
 #   - Rigid body solver flags (CCD, max velocities, gravity toggle)
@@ -21,11 +20,13 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
+import numpy as np
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
@@ -115,10 +116,10 @@ class AirframeConfig:
     output_filename: str
     prim_name: str
 
-    # Articulation-level rigid-body properties (overridden per-env by drone_cfg.py).
-    total_mass: float
-    diagonal_inertia: tuple[float, float, float]
-    center_of_mass: tuple[float, float, float]
+    # Articulation-level rigid-body mass/CoM/inertia are NOT authored: they are
+    # computed from the component masses + geometry by compute_body_mass_properties
+    # so every physics number traces to a cited per-component value. (Isaac Lab's
+    # drone_cfg.py still overrides them per-env at spawn time.)
 
     # Frame
     center_plate: BoxPart
@@ -245,9 +246,6 @@ def _airframe_config(data: dict[str, Any]) -> AirframeConfig:
         name=str(data["name"]),
         output_filename=str(data["output_filename"]),
         prim_name=str(data["prim_name"]),
-        total_mass=float(data["total_mass"]),
-        diagonal_inertia=_as_tuple3(data["diagonal_inertia"], "airframes.diagonal_inertia"),
-        center_of_mass=_as_tuple3(data["center_of_mass"], "airframes.center_of_mass"),
         center_plate=_box(data["center_plate"], "airframes.center_plate"),
         arm_geometry=_arm_geometry(data["arm_geometry"], "airframes.arm_geometry"),
         arms=[_arm_placement(arm, f"airframes.arms[{i}]") for i, arm in enumerate(data["arms"])],
@@ -310,6 +308,128 @@ def _build_all_airframe_usds(
         )
         paths.append(build_drone_usd(config.airframe, output_dir=config.output_dir))
     return paths
+
+
+# --- Body mass properties (computed, not authored) --------------------------
+# total_mass / center_of_mass / diagonal_inertia are derived from the component
+# masses + geometry so every physics number traces to a cited per-component leaf
+# (change a motor mass -> regenerate -> mass/CoM/inertia all follow). The pusher
+# pad is excluded: it is a separate rigid body with its own mass, not part of the
+# drone body. The boom is massless (folded into the frame plate).
+
+
+def _euler_xyz_matrix(rotation_deg: tuple[float, float, float]) -> np.ndarray:
+    """Rotation matrix for USD ``XformCommonAPI`` SetRotate (XYZ Euler degrees)."""
+    rx, ry, rz = (math.radians(angle) for angle in rotation_deg)
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+    return rot_z @ rot_y @ rot_x
+
+
+def _part_principal_inertia(part: BoxPart | CylinderPart) -> np.ndarray:
+    """Diagonal inertia tensor of a part about its own center, in its local frame."""
+    if isinstance(part, BoxPart):
+        sx, sy, sz = part.size
+        return np.diag(
+            [
+                part.mass * (sy * sy + sz * sz) / 12.0,
+                part.mass * (sx * sx + sz * sz) / 12.0,
+                part.mass * (sx * sx + sy * sy) / 12.0,
+            ]
+        )
+    r, h = part.radius, part.height  # cylinder axis is local Z
+    return np.diag(
+        [
+            part.mass * (3.0 * r * r + h * h) / 12.0,
+            part.mass * (3.0 * r * r + h * h) / 12.0,
+            part.mass * r * r / 2.0,
+        ]
+    )
+
+
+def _part_body_properties(
+    part: BoxPart | CylinderPart, frame_rot: np.ndarray, body_pos: np.ndarray
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """(mass, body-frame inertia about the part center, body-frame center position).
+
+    ``frame_rot`` is the enclosing frame rotation (the arm azimuth, or identity);
+    it is composed with the part's own ``rotation_deg`` to orient the local
+    inertia tensor into the body frame.
+    """
+    rot = frame_rot @ _euler_xyz_matrix(part.rotation_deg)
+    inertia_body = rot @ _part_principal_inertia(part) @ rot.T
+    return part.mass, inertia_body, np.asarray(body_pos, dtype=float)
+
+
+def compute_body_mass_properties(
+    cfg: AirframeConfig,
+) -> tuple[float, Vec3, Vec3]:
+    """Compute (total_mass, center_of_mass, diagonal_inertia) of the drone body.
+
+    Sums every body component using the SAME resolved body-frame placements the
+    authoring path uses (arm parts rotated by ``azimuth_deg``; the center-plate-top
+    z-shift for pixhawk/jetson/lidar), then parallel-axes each part's inertia to
+    the mass-weighted CoM. Off-diagonal products of inertia are ~0 by the airframe
+    symmetry and are discarded (PhysX reads only the diagonal in the principal
+    frame).
+    """
+    identity = np.eye(3)
+    plate_top = cfg.center_plate.size[2] / 2.0
+    parts: list[tuple[float, np.ndarray, np.ndarray]] = [
+        _part_body_properties(cfg.center_plate, identity, np.asarray(cfg.center_plate.position)),
+    ]
+
+    for placement in cfg.arms:
+        arm_rot = _euler_xyz_matrix((0.0, 0.0, placement.azimuth_deg))
+        for part in (cfg.arm_geometry.motor, cfg.arm_geometry.esc, cfg.arm_geometry.propeller):
+            body_pos = arm_rot @ np.asarray(part.position, dtype=float)
+            parts.append(_part_body_properties(part, arm_rot, body_pos))
+
+    parts.append(
+        _part_body_properties(
+            cfg.pixhawk,
+            identity,
+            np.asarray(_shift_z(cfg.pixhawk.position, plate_top)),
+        )
+    )
+    parts.append(
+        _part_body_properties(
+            cfg.jetson,
+            identity,
+            np.asarray(_shift_z(cfg.jetson.position, plate_top)),
+        )
+    )
+    parts.append(_part_body_properties(cfg.realsense, identity, np.asarray(cfg.realsense.position)))
+    parts.append(
+        _part_body_properties(cfg.optical_flow, identity, np.asarray(cfg.optical_flow.position))
+    )
+    parts.append(
+        _part_body_properties(
+            cfg.lidar,
+            identity,
+            np.asarray(_shift_z(cfg.lidar.position, plate_top)),
+        )
+    )
+    parts.append(_part_body_properties(cfg.battery, identity, np.asarray(cfg.battery.position)))
+    parts.append(_part_body_properties(cfg.wiring, identity, np.asarray(cfg.wiring.position)))
+
+    total_mass = sum(mass for mass, _, _ in parts)
+    com = sum((mass * pos for mass, _, pos in parts), start=np.zeros(3)) / total_mass
+
+    inertia = np.zeros((3, 3))
+    for mass, inertia_body, pos in parts:
+        offset = pos - com
+        inertia += inertia_body + mass * (
+            float(offset @ offset) * np.eye(3) - np.outer(offset, offset)
+        )
+
+    com_tuple = (float(com[0]), float(com[1]), float(com[2]))
+    diag = (float(inertia[0, 0]), float(inertia[1, 1]), float(inertia[2, 2]))
+    return float(total_mass), com_tuple, diag
 
 
 # --- USD authoring helpers --------------------------------------------------
@@ -457,13 +577,15 @@ def build_drone_usd(
     wrapper = UsdGeom.Xform.Define(stage, wrapper_path)
     UsdPhysics.ArticulationRootAPI.Apply(wrapper.GetPrim())
 
-    # Drone body rigid body - articulation-level mass/inertia/CoM.
+    # Drone body rigid body - articulation-level mass/inertia/CoM, computed from
+    # the cited component masses + geometry (not authored).
+    total_mass, center_of_mass, diagonal_inertia = compute_body_mass_properties(cfg)
     root = UsdGeom.Xform.Define(stage, root_path)
     UsdPhysics.RigidBodyAPI.Apply(root.GetPrim())
     mass_api = UsdPhysics.MassAPI.Apply(root.GetPrim())
-    mass_api.CreateMassAttr(cfg.total_mass)
-    mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(*cfg.diagonal_inertia))
-    mass_api.CreateCenterOfMassAttr(Gf.Vec3f(*cfg.center_of_mass))
+    mass_api.CreateMassAttr(total_mass)
+    mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(*diagonal_inertia))
+    mass_api.CreateCenterOfMassAttr(Gf.Vec3f(*center_of_mass))
 
     # Frame: center plate (collidable). The arm booms live under the per-arm
     # assemblies below, not here.
@@ -573,7 +695,7 @@ def _parse_args() -> argparse.Namespace:
         "config_name",
         nargs="?",
         default=None,
-        help="Airframe config group option to generate, e.g. quadcopter_500mm.",
+        help="Airframe config group option to generate, e.g. holybro_x500_v2.",
     )
     parser.add_argument(
         "--output-dir",

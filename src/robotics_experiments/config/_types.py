@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List, Tuple
 
 __all__ = [
@@ -233,10 +233,20 @@ class Px4BridgeConfig:
         input_offset, input_scaling, zero_position_armed: Pegasus MAVLink
             actuator scaling from PX4 controls to rotor angular velocity
             references.
-        rotor_constant, rolling_moment_coefficient, min_rotor_velocity,
-            max_rotor_velocity: Pegasus quadratic thrust curve parameters.
-            Rotor count and spin direction come from authored USD rotor
-            metadata on the spawned drone asset.
+        max_thrust_per_rotor_g: Authored, vendor-citable per-rotor static max
+            thrust in grams-force (e.g. the motor+prop datasheet figure). The
+            single source for the thrust scale; ``rotor_constant`` is derived
+            from it, not authored.
+        rolling_moment_coefficient, min_rotor_velocity, max_rotor_velocity:
+            Pegasus quadratic thrust/torque curve parameters. Rotor count and
+            spin direction come from authored USD rotor metadata on the spawned
+            drone asset.
+        rotor_constant: Pegasus quadratic thrust coefficient per rotor
+            (``T_i = rotor_constant_i * omega_i^2``). NOT authored -- it is
+            computed in :func:`config._load._resolve_fleet` (and for the global
+            default in :func:`config._load.get_config`) from
+            ``max_thrust_per_rotor_g``, ``max_rotor_velocity``, and standard
+            gravity, so a datasheet thrust change is a single-line edit.
         linear_drag: Pegasus body-frame linear drag coefficients.
         connection_type: "tcpin" (bridge listens) or "tcpout".
         connection_ip: Address used by ``connection_type``.
@@ -287,7 +297,7 @@ class Px4BridgeConfig:
     input_offset: List[float]
     input_scaling: List[float]
     zero_position_armed: List[float]
-    rotor_constant: List[float]
+    max_thrust_per_rotor_g: float
     rolling_moment_coefficient: List[float]
     min_rotor_velocity: List[float]
     max_rotor_velocity: List[float]
@@ -309,6 +319,11 @@ class Px4BridgeConfig:
     sensor_debug_log_interval: int
     max_tilt_angle_deg: float
     rotor_spin_visual_scale: float
+
+    # Computed (not authored): derived from max_thrust_per_rotor_g +
+    # max_rotor_velocity + standard gravity in config._load. Kept last so the
+    # authored fields above stay required. See the class docstring.
+    rotor_constant: List[float] = field(default_factory=list)
 
 
 @dataclass

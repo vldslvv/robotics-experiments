@@ -20,10 +20,24 @@ def _airframe_config(file_stem):
     return OmegaConf.load(_AIRFRAME_CONFIG_DIR / f"{file_stem}.yaml")
 
 
+def test_compute_rotor_constants_rejects_invalid_inputs():
+    from robotics_experiments.config._load import _compute_rotor_constants
+
+    with pytest.raises(ValueError, match="max_thrust_per_rotor_g must be positive"):
+        _compute_rotor_constants(0.0, [100.0])
+
+    with pytest.raises(ValueError, match="at least one rotor velocity"):
+        _compute_rotor_constants(1000.0, [])
+
+    with pytest.raises(ValueError, match="max_rotor_velocity values must be positive"):
+        _compute_rotor_constants(1000.0, [100.0, 0.0])
+
+
 def test_default_config_loads_from_root_experiment_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _compute_rotor_constants
     from robotics_experiments.config._load import _reset_config as reset_config
     from robotics_experiments.config._types import EnvConfig
 
@@ -61,7 +75,7 @@ def test_default_config_loads_from_root_experiment_config():
         config.switches.state_publisher.qos.history == expected_switches.state_publisher.qos.history
     )
     assert config.px4.connection_baseport == expected_px4.connection_baseport
-    assert config.drone.usd_path.endswith("/quadcopter_500mm.usda")
+    assert config.drone.usd_path.endswith("/holybro_x500_v2.usda")
     assert not hasattr(config.px4, "num_rotors")
     assert not hasattr(config.px4, "rotor_link_paths")
     assert config.px4.connection_type == "tcpin"
@@ -74,7 +88,12 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.sensor_noise_enabled is True
     assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]
     assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
-    assert config.px4.rotor_constant == [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
+    assert config.px4.max_thrust_per_rotor_g == 1054.0
+    # rotor_constant is not authored: it is derived from max_thrust_per_rotor_g +
+    # max_rotor_velocity by config._load (here the global default fallback).
+    assert config.px4.rotor_constant == _compute_rotor_constants(
+        config.px4.max_thrust_per_rotor_g, config.px4.max_rotor_velocity
+    )
     assert not hasattr(config.px4, "rot_dir")
     assert config.px4.linear_drag == [0.50, 0.30, 0.0]
     assert config.px4.debug_log_path == (
@@ -293,6 +312,7 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _compute_rotor_constants
     from robotics_experiments.config._load import _reset_config as reset_config
 
     monkeypatch.setenv(
@@ -309,7 +329,11 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
     assert vehicle.px4.input_offset == list(airframe.px4.bridge.input_offset)
     assert vehicle.px4.input_scaling == list(airframe.px4.bridge.input_scaling)
     assert vehicle.px4.zero_position_armed == list(airframe.px4.bridge.zero_position_armed)
-    assert vehicle.px4.rotor_constant == list(airframe.px4.bridge.rotor_constant)
+    assert vehicle.px4.max_thrust_per_rotor_g == airframe.px4.bridge.max_thrust_per_rotor_g
+    # rotor_constant is derived (not authored) from the airframe's cited thrust.
+    assert vehicle.px4.rotor_constant == _compute_rotor_constants(
+        airframe.px4.bridge.max_thrust_per_rotor_g, airframe.px4.bridge.max_rotor_velocity
+    )
     assert vehicle.px4.rolling_moment_coefficient == list(
         airframe.px4.bridge.rolling_moment_coefficient
     )
@@ -543,7 +567,7 @@ def test_quad_default_resolves_to_generic_quad_x_airframe():
 
     reset_config()
     config = get_config()  # default config: one PX4-enabled quad vehicle
-    assert config.vehicles[0].drone.usd_path.endswith("/quadcopter_500mm.usda")
+    assert config.vehicles[0].drone.usd_path.endswith("/holybro_x500_v2.usda")
 
     launch_configs = get_enabled_px4_launch_configs()
     assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
@@ -670,7 +694,7 @@ def test_navigate_multi_config_composes(monkeypatch):
     assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/s550_01"]
     assert [vehicle.mavlink_port for vehicle in config.vehicles] == [4560, 4561]
     quad, hexa = config.vehicles
-    assert quad.drone.usd_path.endswith("/quadcopter_500mm.usda")
+    assert quad.drone.usd_path.endswith("/holybro_x500_v2.usda")
     assert hexa.drone.usd_path.endswith("/hexacopter_s550.usda")
     for vehicle in config.vehicles:
         assert [step["kind"] for step in vehicle.routine.steps] == [

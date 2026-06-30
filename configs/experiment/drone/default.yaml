@@ -1,7 +1,7 @@
 defaults:
   - base_drone
 
-usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/quadcopter_500mm.usda
+usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda
 prim_name: DroneSpawned
 spawn_volume_prim_name: DroneSpawnVolume
 spawn_volume_center: [0.0, 0.0, 1.0]
