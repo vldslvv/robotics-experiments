@@ -55,9 +55,8 @@ not decision snapshots:
 
 - Living references (AGENTS.md points at them): `COMMAND_ROUTINE_CONTRACT.md`,
   `INTEGRATION_TEST_ARCHITECTURE.md`.
-- Plans / roadmaps: `INTEGRATION_TEST_SPEEDUP_PLAN.md`.
-- Investigations / logs / scratch: `PX4_TAKEOFF_TEST_INSTABILITY.md` and
+- Investigations / logs / scratch: the takeoff-instability investigation and
   `flight_analysis_00_26_50.md` are distilled into ADR 0003; `notes.txt` and
   `todos.txt` are scratch.
-- Supporting hardware detail for ADR 0001: `QUADCOPTER_HARDWARE_BOM.md`,
-  `thrust_to_weight.py`, `evaluate_motors_revised.py`.
+- Supporting hardware detail for ADR 0001: `thrust_to_weight.py`,
+  `evaluate_motors_revised.py`.

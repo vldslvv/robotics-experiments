@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-16
 - Related: ADR 0007 (test semantics)
-- Distills: `docs/PX4_TAKEOFF_TEST_INSTABILITY.md`,
+- Distills the completed takeoff-instability investigation and
   `docs/flight_analysis_00_26_50.md`
 
 ## Context
