@@ -13,8 +13,13 @@ state, retreat, and eventually discover switches autonomously.
 
 Source authority is split deliberately:
 
-- `docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md` is authoritative for hardware,
-  propulsion, weight, cost, procurement, and rejected hardware alternatives.
+- `configs/airframes/holybro_x500_v2.yaml` is authoritative for the implemented
+  Stage 1 Holybro X500 V2 X4 component dimensions, masses, placements, PX4
+  airframe leaves, and bridge thrust leaves. It drives the generated USD body
+  geometry/properties, PX4 control allocation, and bridge thrust curve.
+- `docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md` remains hardware/procurement context
+  for staged platform decisions, Stage 2 planning, weight/cost targets, and
+  rejected hardware alternatives.
 - `docs/archive/QUADCOPTER_PLAN_REVISED.md` is historical source material for
   mission architecture, sensor strategy, RL/contact-task design, risk analysis,
   and the longer autonomous-discovery roadmap.
@@ -30,7 +35,7 @@ historical/rejected-plan note, not the completed runtime architecture.
 | Phase | State | Notes |
 |-------|-------|-------|
 | A. Runtime and PX4 SITL foundation | Done | `FleetOrchestrator`, `BridgeHost`, `BridgeHostGroup`, `VehicleState -> ActuatorCommands -> RotorDynamics`, lockstep send/poll, multi-vehicle send-all/poll-all, per-vehicle logging, and rotor visual spin are implemented. |
-| B. Generated X4/hexa assets and PX4 airframes | Mostly done | `holybro_x500_v2.usda` now models the Stage 1 Holybro X500 V2 X4 and binds to generated `4019_none_x500_v2`; `hexacopter_s550.usda` remains a placeholder bound to generated `6001_none_hexa_x`. Stage 2 X8 remains pending. |
+| B. Generated X4/hexa assets and PX4 airframes | Mostly done | `configs/airframes/holybro_x500_v2.yaml` now owns the Stage 1 component leaves that generate `holybro_x500_v2.usda`, body properties, bridge thrust constants, and `4019_none_x500_v2`; `hexacopter_s550.usda` remains a placeholder bound to generated `6001_none_hexa_x`. Stage 2 X8 remains pending. |
 | C. Command routines and navigation primitives | Done for demos | Pure command routines cover arm, takeoff, hover, forward, absolute world-ENU `goto`, and land; live and standalone shells drive the same per-drone `RoutineDriver`. |
 | D. Switch/lamp environment | Mostly done | Switch/lamp spawning and the N-step light-state latch exist. Closed-loop integration from navigation handoff into an RL or contact press policy remains pending. |
 | E. Hardware-faithful X4/X8 asset/config | Partially done | Stage 1 Holybro X500 V2 X4 USD/config is implemented with computed mass properties and generated PX4 airframe binding. Stage 2 X8 geometry, rotor mapping, and tuning remain pending. |
@@ -46,6 +51,11 @@ flight data shows a need for redundancy, vibration improvement, or thrust margin
 
 ### Stage 1: Holybro X500 V2 X4
 
+Detailed Stage 1 component dimensions, masses, placements, rotor ordering, PX4
+airframe leaves, and bridge thrust leaves live in
+`configs/airframes/holybro_x500_v2.yaml`. The bullets and metrics below are
+roadmap summaries; update the YAML first when a component property changes.
+
 - Frame: Holybro X500 V2, 500 mm wheelbase, carbon fiber tube arms, bolt-on arm
   attachment, tall landing gear retained for later lower-prop clearance.
 - Motors: 4x T-Motor MN4006 EVO KV380.
@@ -59,15 +69,15 @@ flight data shows a need for redundancy, vibration improvement, or thrust margin
 - Manipulator: compliant centerline pusher with a spring-damper prismatic joint,
   roughly 10-15 mm travel, and a flat pad near 30 mm diameter.
 
-Target Stage 1 metrics from the v2 BOM:
+Current Stage 1 summary metrics from the airframe config, except endurance:
 
 | Metric | Value |
 |--------|-------|
-| AUW | ~2,251 g |
+| AUW | ~2,339 g including the pusher pad |
 | Max thrust | ~6,260 g |
-| Thrust-to-weight | 2.78:1 |
-| Hover throttle | ~60% |
-| Expected hover time | ~14-16 min |
+| Thrust-to-weight | ~2.68:1 |
+| Hover throttle | ~57% |
+| Expected hover time | ~14-16 min BOM estimate |
 | Motor redundancy | None; single motor failure is catastrophic |
 
 Stage 1 is adequate but not generous. It is the right place to validate takeoff,
@@ -302,16 +312,18 @@ Regression guardrails:
 
 ### Phase B: Generated X4/Hexa Assets and Airframes
 
-Status: mostly done. The Stage 1 Holybro X500 V2 X4 config/USD now matches the
-MN4006/P134.4/13-inch/pusher geometry and derives body mass properties and bridge
-thrust constants from component leaves. The S550 hex remains a runtime placeholder,
-and the Stage 2 X8 hardware config is still pending.
+Status: mostly done. The Stage 1 Holybro X500 V2 X4 airframe YAML is now the
+source for the MN4006/P134.4/13-inch/pusher component geometry and physical
+leaves. Generated consumers derive the USD body mass properties, PX4 airframe,
+and bridge thrust constants from those leaves. The S550 hex remains a runtime
+placeholder, and the Stage 2 X8 hardware config is still pending.
 
 Pending:
 
 - Create or regenerate a Stage 2 X8 coaxial USD/config with lower motor mounts,
   matched lower props, lower guards, and correct rotor directions.
-- Keep generated PX4 SITL airframes in sync with `configs/airframes`.
+- Keep generated USD assets, body properties, bridge settings, and PX4 SITL
+  airframes in sync with `configs/airframes`.
 - Treat `hexacopter_s550` as a placeholder until replaced by the Stage 2 X8
   config.
 

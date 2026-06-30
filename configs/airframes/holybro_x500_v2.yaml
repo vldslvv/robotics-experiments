@@ -228,7 +228,8 @@ px4:
     # Physical RPM scaling for the MN4006 EVO KV380 @ 4S. rotor_constant is NOT
     # listed -- config._load derives it from max_thrust_per_rotor_g below so that
     # T = rotor_constant * omega^2 reaches max_thrust_per_rotor_g at
-    # max_rotor_velocity (=> per-motor max 15.35 N, T:W 2.78, hover ~56%).
+    # max_rotor_velocity (=> per-motor max 15.35 N, T:W ~2.68 with pusher,
+    # hover ~57%).
     max_thrust_per_rotor_g: 1565.0  # MN4006 EVO on P134.4 @4S static -- BOM 1.2
     input_offset: [0.0, 0.0, 0.0, 0.0]
     # controls=1 -> omega = 50 + 475 = 525 rad/s = max_rotor_velocity.
