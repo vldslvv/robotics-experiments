@@ -15,6 +15,11 @@ This repository integrates:
 Prefer minimal, scoped changes.
 Do not introduce new tooling unless explicitly requested.
 
+## Comments and documentation
+- Comments and docs should describe current behavior, invariants, contracts, and
+  intent. Do not leave historical comments about how code used to be implemented
+  before.
+
 ## Repository layout
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.

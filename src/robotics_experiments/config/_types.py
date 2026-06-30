@@ -289,7 +289,11 @@ class Px4BridgeConfig:
             zero or a negative value to disable.
         rotor_spin_visual_scale: Cosmetic-only factor that scales the real
             per-rotor angular velocity into a non-aliasing on-screen rotor-spin
-            rate. Visual only - it never affects forces or the PX4 lockstep.
+            rate. The source velocity is the resolved rotor omega after actuator
+            scaling and min/max rotor clipping, so KV/battery effects should be
+            represented by ``max_rotor_velocity`` unless a future config
+            generator computes that value. Visual only - it never affects forces
+            or the PX4 lockstep.
     """
 
     enabled: bool

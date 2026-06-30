@@ -78,6 +78,28 @@ def test_px4_bridge_validates_rotor_count_against_port():
         )
 
 
+def test_px4_bridge_passes_visual_spin_signs_to_default_isaac_io(monkeypatch):
+    captured = {}
+
+    class FakeIsaacArticulationIO:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import robotics_experiments.px4_bridge.isaac_articulation as isaac_articulation
+
+    monkeypatch.setattr(isaac_articulation, "IsaacArticulationIO", FakeIsaacArticulationIO)
+
+    Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=_FakeFlightStack([0.0, 0.0, 0.0, 0.0]),
+        rotor_spin_signs=[-1.0, 1.0, -1.0, 1.0],
+    )
+
+    assert captured["rotor_spin_signs"] == [-1.0, 1.0, -1.0, 1.0]
+
+
 def test_tilt_angle_deg_level():
     from robotics_experiments.px4_bridge.frames import tilt_angle_deg
 
@@ -254,6 +276,30 @@ def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
     omega, dt = io.spin_updates[0]
     np.testing.assert_allclose(omega, np.clip([100.0, 500.0, 1100.0, 1500.0], 0.0, 1100.0))
     assert dt == pytest.approx(0.004)
+
+
+def test_bridge_visual_spin_uses_airframe_max_rotor_velocity():
+    state = VehicleState.hover_at(sim_time_us=0)
+    io = _FakeArticulationIO(state)
+    port = _FakeFlightStack([1100.0, 1100.0, 1100.0, 1100.0])
+    bridge = Px4Bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=PegasusQuadraticThrustModel(
+            num_rotors=4,
+            max_rotor_velocity=[525.0, 525.0, 525.0, 525.0],
+        ),
+        port=port,
+        articulation_io=io,
+    )
+
+    bridge.start()
+    bridge.on_physics_step(0.004, 4_000)
+    bridge.stop()
+
+    omega, _dt = io.spin_updates[0]
+    np.testing.assert_allclose(omega, [525.0, 525.0, 525.0, 525.0])
+    assert np.all(omega < 1100.0)
 
 
 def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():

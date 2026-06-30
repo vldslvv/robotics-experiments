@@ -3,6 +3,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 
 import robotics_experiments.px4_bridge.isaac_articulation as isaac_articulation_module
 from robotics_experiments.px4_bridge._asset_diagnostics import RootBodyPoseDiagnosticParams
@@ -321,6 +322,60 @@ class _FakeRotateZOp:
         self.value = float(value)
 
 
+class _FakeAttr:
+    def __init__(self, value):
+        self._value = value
+
+    def HasValue(self):  # noqa: N802 - mirrors the USD attr API
+        return self._value is not None
+
+    def Get(self):  # noqa: N802 - mirrors the USD attr API
+        return self._value
+
+
+class _FakeRotorPrim:
+    def __init__(self, *, spin_dir):
+        self.spin_dir = spin_dir
+
+    def GetAttribute(self, name):  # noqa: N802 - mirrors the USD prim API
+        assert name == "drone:spinDir"
+        return _FakeAttr(self.spin_dir) if self.spin_dir is not None else None
+
+
+class _FakeStage:
+    def __init__(self, prims):
+        self._prims = prims
+
+    def GetPrimAtPath(self, path):  # noqa: N802 - mirrors the USD stage API
+        return self._prims[path]
+
+
+def _install_fake_pxr(monkeypatch, ops_by_prim):
+    pxr = types.ModuleType("pxr")
+    usd_geom = types.ModuleType("pxr.UsdGeom")
+
+    class XformOp:
+        TypeRotateZ = "RotateZ"
+
+    class Xformable:
+        def __init__(self, prim):
+            self._prim = prim
+
+        def GetOrderedXformOps(self):  # noqa: N802 - mirrors the USD xformable API
+            return ops_by_prim[self._prim]
+
+    usd_geom.XformOp = XformOp
+    usd_geom.Xformable = Xformable
+    pxr.UsdGeom = usd_geom
+    monkeypatch.setitem(sys.modules, "pxr", pxr)
+    monkeypatch.setitem(sys.modules, "pxr.UsdGeom", usd_geom)
+
+
+class _FakeUsdRotateZOp(_FakeRotateZOp):
+    def GetOpType(self):  # noqa: N802 - mirrors the USD xformOp API
+        return "RotateZ"
+
+
 def test_update_rotor_spin_accumulates_signed_angle_and_wraps():
     # Two rotors with opposite spin directions, driven for two ticks. The visual
     # angle accumulates by sign * degrees(omega) * visual_scale * dt and wraps to
@@ -349,11 +404,63 @@ def test_update_rotor_spin_accumulates_signed_angle_and_wraps():
     assert ops[1].value > 180.0
 
 
+def test_update_rotor_spin_angle_magnitude_follows_omega():
+    io = IsaacArticulationIO(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m0", "m1"],
+        rotor_spin_visual_scale=1.0,
+    )
+    ops = [_FakeRotateZOp(), _FakeRotateZOp()]
+    io._rotor_spin_ops = ops
+    io._rotor_spin_signs = np.array([1.0, 1.0], dtype=np.float64)
+    io._rotor_angle_deg = np.zeros(2, dtype=np.float64)
+
+    io.update_rotor_spin(np.array([525.0, 1100.0], dtype=np.float64), dt=0.001)
+
+    np.testing.assert_allclose(ops[0].value, math.degrees(525.0) * 0.001)
+    np.testing.assert_allclose(ops[1].value, math.degrees(1100.0) * 0.001)
+    assert ops[0].value < ops[1].value
+
+
 def test_update_rotor_spin_noop_before_initialize():
     # No spin handles acquired yet (initialize not run): the seam is a silent
     # no-op rather than raising, so a pre-init tick cannot crash the sim.
     io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=["m0"])
     io.update_rotor_spin(np.array([500.0], dtype=np.float64), dt=0.004)
+
+
+def test_injected_rotor_spin_signs_override_usd_spin_dir_in_px4_order(monkeypatch):
+    prim0 = _FakeRotorPrim(spin_dir="BROKEN")
+    prim1 = _FakeRotorPrim(spin_dir="BROKEN")
+    ops = {
+        prim0: [_FakeUsdRotateZOp()],
+        prim1: [_FakeUsdRotateZOp()],
+    }
+    _install_fake_pxr(monkeypatch, ops)
+    stage = _FakeStage({"m0": prim0, "m1": prim1})
+    io = IsaacArticulationIO(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m0", "m1"],
+        rotor_spin_signs=[-1.0, 1.0],
+    )
+
+    io._resolve_rotor_spin_ops(stage)
+
+    np.testing.assert_allclose(io._rotor_spin_signs, [-1.0, 1.0])
+    assert io._rotor_spin_ops == [ops[prim0][0], ops[prim1][0]]
+
+
+def test_usd_rotor_spin_dir_fallback_rejects_missing_or_invalid_values(monkeypatch):
+    prim = _FakeRotorPrim(spin_dir=None)
+    _install_fake_pxr(monkeypatch, {prim: [_FakeUsdRotateZOp()]})
+    io = IsaacArticulationIO(articulation_path="/World/Drone", rotor_link_paths=["m0"])
+
+    with pytest.raises(RuntimeError, match="invalid drone:spinDir"):
+        io._resolve_rotor_spin_ops(_FakeStage({"m0": prim}))
+
+    prim.spin_dir = "SIDEWAYS"
+    with pytest.raises(RuntimeError, match="expected 'CW' or 'CCW'"):
+        io._resolve_rotor_spin_ops(_FakeStage({"m0": prim}))
 
 
 def test_initialize_runs_root_body_diagnostics_before_rotor_resolution(monkeypatch):

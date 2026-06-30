@@ -269,6 +269,7 @@ class BridgeHost:
             port=port,
             max_tilt_angle_deg=self._cfg.max_tilt_angle_deg,
             rotor_spin_visual_scale=self._cfg.rotor_spin_visual_scale,
+            rotor_spin_signs=rotor_mapping.rot_dir,
         )
 
         try:

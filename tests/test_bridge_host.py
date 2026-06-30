@@ -116,6 +116,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             port,
             max_tilt_angle_deg=180.0,
             rotor_spin_visual_scale=0.03,
+            rotor_spin_signs=None,
         ):
             self.is_connected = True
             self.status = SimpleNamespace(connected=True)
@@ -126,6 +127,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
                     rotor_link_paths,
                     max_tilt_angle_deg,
                     rotor_spin_visual_scale,
+                    rotor_spin_signs,
                 )
             )
 
@@ -330,6 +332,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
         "/World/Drone/body/propulsion/motor_4/prop",
         "/World/Drone/body/propulsion/motor_2/prop",
     ]
+    assert bridge_call[5] == [-1.0, 1.0]
 
 
 def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):

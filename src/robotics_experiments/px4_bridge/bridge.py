@@ -18,7 +18,7 @@ and tested independently:
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -46,6 +46,7 @@ class Px4Bridge:
         articulation_io: Optional[ArticulationIO] = None,
         max_tilt_angle_deg: float = 180.0,
         rotor_spin_visual_scale: float = 0.03,
+        rotor_spin_signs: Sequence[float] | None = None,
     ):
         """Build the bridge. No sockets or articulation handles are touched here.
 
@@ -67,6 +68,10 @@ class Px4Bridge:
                 per-rotor angular velocity to a non-aliasing on-screen spin rate.
                 Passed to the default :class:`IsaacArticulationIO`; ignored when
                 ``articulation_io`` is injected.
+            rotor_spin_signs: Optional per-rotor visual spin signs in PX4
+                motor-index order. Passed to the default
+                :class:`IsaacArticulationIO`; ignored when ``articulation_io`` is
+                injected.
         """
         if thrust_model.num_rotors != port.num_rotors:
             raise ValueError(
@@ -99,6 +104,7 @@ class Px4Bridge:
                 articulation_path=articulation_path,
                 rotor_link_paths=rotor_link_paths,
                 rotor_spin_visual_scale=rotor_spin_visual_scale,
+                rotor_spin_signs=rotor_spin_signs,
             )
         self._io = articulation_io
 

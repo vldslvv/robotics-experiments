@@ -49,6 +49,7 @@ class IsaacArticulationIO:
         rotor_link_paths: Sequence[str],
         root_body_pose_diagnostics: RootBodyPoseDiagnosticParams | None = None,
         rotor_spin_visual_scale: float = 0.03,
+        rotor_spin_signs: Sequence[float] | None = None,
     ):
         self._articulation_path = str(articulation_path)
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
@@ -58,6 +59,10 @@ class IsaacArticulationIO:
             else RootBodyPoseDiagnosticParams()
         )
         self._rotor_spin_visual_scale = float(rotor_spin_visual_scale)
+        self._configured_rotor_spin_signs = self._coerce_rotor_spin_signs(
+            rotor_spin_signs,
+            expected_count=len(self._rotor_link_paths),
+        )
 
         self._articulation: Any | None = None
         self._body: Any | None = None
@@ -71,6 +76,23 @@ class IsaacArticulationIO:
         self._rotor_spin_ops: List[Any] = []
         self._rotor_angle_deg: Optional[np.ndarray] = None
         self._rotor_spin_signs: Optional[np.ndarray] = None
+
+    @staticmethod
+    def _coerce_rotor_spin_signs(
+        rotor_spin_signs: Sequence[float] | None,
+        *,
+        expected_count: int,
+    ) -> np.ndarray | None:
+        if rotor_spin_signs is None:
+            return None
+        signs = np.asarray(rotor_spin_signs, dtype=np.float64)
+        if signs.shape != (expected_count,):
+            raise ValueError(
+                f"rotor_spin_signs expected shape ({expected_count},), got {signs.shape}"
+            )
+        if not np.all(np.isin(signs, [-1.0, 1.0])):
+            raise ValueError("rotor_spin_signs must contain only -1.0 (CW) or 1.0 (CCW)")
+        return signs
 
     @property
     def num_rotors(self) -> int:
@@ -136,10 +158,11 @@ class IsaacArticulationIO:
         """Acquire the cosmetic RotateZ xformOp authored on each rotor marker.
 
         The drone asset builder authors a RotateZ op on every rotor marker, so
-        this requires it and raises when it is missing. Reads ``drone:spinDir``
-        to set the per-rotor sign, matching :mod:`rotor_discovery` (CW -> -1,
-        CCW -> +1). This only touches visual transforms and never the physics
-        body.
+        this requires it and raises when it is missing. Runtime wiring injects
+        rotor signs in PX4 motor-index order; direct/manual construction falls
+        back to ``drone:spinDir`` with the same convention as
+        :mod:`rotor_discovery` (CW -> -1, CCW -> +1). This only touches visual
+        transforms and never the physics body.
         """
         from pxr import UsdGeom
 
@@ -157,12 +180,25 @@ class IsaacArticulationIO:
                 raise RuntimeError(f"Rotor marker prim is missing its RotateZ spin op: {path}")
             ops.append(spin_op)
 
-            spin_attr = rotor_prim.GetAttribute("drone:spinDir")
-            spin_dir = spin_attr.Get() if spin_attr and spin_attr.HasValue() else None
-            signs.append(-1.0 if spin_dir == "CW" else 1.0)
+            if self._configured_rotor_spin_signs is None:
+                spin_attr = rotor_prim.GetAttribute("drone:spinDir")
+                spin_dir = spin_attr.Get() if spin_attr and spin_attr.HasValue() else None
+                if spin_dir == "CW":
+                    signs.append(-1.0)
+                elif spin_dir == "CCW":
+                    signs.append(1.0)
+                else:
+                    raise RuntimeError(
+                        f"Rotor marker {path} has invalid drone:spinDir={spin_dir!r}; "
+                        "expected 'CW' or 'CCW'"
+                    )
 
         self._rotor_spin_ops = ops
-        self._rotor_spin_signs = np.asarray(signs, dtype=np.float64)
+        self._rotor_spin_signs = (
+            self._configured_rotor_spin_signs.copy()
+            if self._configured_rotor_spin_signs is not None
+            else np.asarray(signs, dtype=np.float64)
+        )
         self._rotor_angle_deg = np.zeros(len(ops), dtype=np.float64)
 
     def _resolve_body_path(self, stage) -> str:
@@ -449,7 +485,7 @@ class IsaacArticulationIO:
 
         Visual-only: integrates each rotor's authored RotateZ op by
         ``sign * degrees(omega) * visual_scale * dt`` and writes it back. The
-        ``visual_scale`` factor slows the real (up to ~1100 rad/s) spin to a
+        ``visual_scale`` factor slows the resolved per-airframe omega to a
         non-aliasing on-screen rate. This never touches forces, the body, or the
         MAVLink lockstep, so it cannot perturb flight dynamics.
         """

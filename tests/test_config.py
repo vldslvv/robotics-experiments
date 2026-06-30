@@ -118,6 +118,11 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.scene.endswith("/Warehouse.usd")
     assert config.vehicles[0].ros_namespace == "/x500_01"
     assert config.vehicles[0].ros_frame_prefix == "x500_01"
+    holybro = _airframe_config("holybro_x500_v2")
+    assert (
+        config.vehicles[0].px4.rotor_spin_visual_scale
+        == holybro.px4.bridge.rotor_spin_visual_scale
+    )
     reset_config()
 
 

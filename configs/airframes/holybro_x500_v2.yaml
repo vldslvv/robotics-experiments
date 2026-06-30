@@ -170,4 +170,7 @@ px4:
     min_rotor_velocity: [0.0, 0.0, 0.0, 0.0]
     # KV380 * 14.8V ~ 589 rad/s no-load; ~525 rad/s loaded max -- BOM 1.2
     max_rotor_velocity: [525.0, 525.0, 525.0, 525.0]
+    # Cosmetic-only visual gain for readable X500 blade animation; physics stays
+    # governed by max_rotor_velocity and rotor_constant.
+    rotor_spin_visual_scale: 0.12
     linear_drag: [0.50, 0.30, 0.0]
