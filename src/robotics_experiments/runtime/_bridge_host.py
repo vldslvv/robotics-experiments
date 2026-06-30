@@ -151,8 +151,22 @@ class BridgeHost:
             return
         self._start_attempted = True
 
-        # Late imports so a disabled bridge does not pay the import cost
+        # Late import so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
+        from robotics_experiments.px4_bridge._logging import vehicle_log_context
+
+        # Tag every bridge log record produced while building this vehicle's
+        # bridge so it lands only in this vehicle's debug log file, not the
+        # last-constructed vehicle's. See px4_bridge._logging.
+        self._log_ctx = vehicle_log_context
+        with vehicle_log_context(self._vehicle_id):
+            self._build_bridge()
+
+    def _build_bridge(self) -> None:
+        """Resolve rotors and construct the bridge for this vehicle.
+
+        Runs inside the vehicle's log context (see :meth:`_start_bridge`).
+        """
         import omni.usd
 
         from robotics_experiments.px4_bridge import (
@@ -162,38 +176,9 @@ class BridgeHost:
             Px4MavlinkPort,
             discover_px4_rotor_mapping,
         )
-        from robotics_experiments.px4_bridge._logging import vehicle_log_context
-
-        # Tag every bridge log record produced while building this vehicle's
-        # bridge so it lands only in this vehicle's debug log file, not the
-        # last-constructed vehicle's. See px4_bridge._logging.
-        self._log_ctx = vehicle_log_context
-        with vehicle_log_context(self._vehicle_id):
-            self._build_bridge(
-                omni.usd,
-                LockstepSettings,
-                PegasusQuadraticThrustModel,
-                Px4Bridge,
-                Px4MavlinkPort,
-                discover_px4_rotor_mapping,
-            )
-
-    def _build_bridge(
-        self,
-        omni_usd: Any,
-        LockstepSettings: Any,
-        PegasusQuadraticThrustModel: Any,
-        Px4Bridge: Any,
-        Px4MavlinkPort: Any,
-        discover_px4_rotor_mapping: Any,
-    ) -> None:
-        """Resolve rotors and construct the bridge for this vehicle.
-
-        Runs inside the vehicle's log context (see :meth:`_start_bridge`).
-        """
 
         articulation_path = self._cfg.articulation_path or self._articulation_path
-        stage = omni_usd.get_context().get_stage()
+        stage = omni.usd.get_context().get_stage()
         if stage is None:
             carb.log_error(
                 f"[{self._tag}] cannot discover PX4 rotors without an open USD stage. "
