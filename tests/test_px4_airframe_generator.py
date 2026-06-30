@@ -78,10 +78,12 @@ def test_generator_writes_scripts_manifest_and_registers_cmake(tmp_path):
     assert "param set-default CA_ROTOR_COUNT 4" in quad_script
     assert "# @type Quadrotor x" in quad_script
     assert "param set-default MAV_TYPE 2" in quad_script
+    assert "param set-default BAT1_SOURCE 1" in quad_script
     assert "param set-default PWM_MAIN_FUNC4 104" in quad_script
     assert "param set-default CA_ROTOR_COUNT 6" in hexa_script
     assert "# @type Hexarotor x" in hexa_script
     assert "param set-default MAV_TYPE 13" in hexa_script
+    assert "param set-default BAT1_SOURCE 1" in hexa_script
     assert "param set-default PWM_MAIN_FUNC6 106" in hexa_script
     assert "\t4019_none_x500_v2\n" in patched_cmake
     assert "\t6001_none_hexa_x\n" in patched_cmake

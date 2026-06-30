@@ -178,6 +178,11 @@ def _script_text(airframe: _GeneratedAirframe) -> str:
         "param set-default CA_AIRFRAME 0",
         f"param set-default MAV_TYPE {airframe.mav_type}",
         "",
+        "# Isaac/Pegasus does not publish battery telemetry on this external",
+        "# simulator path. Use PX4's external battery source so the analog",
+        "# battery module is not started and cannot stale-trip the strict tests.",
+        "param set-default BAT1_SOURCE 1",
+        "",
         f"param set-default CA_ROTOR_COUNT {len(airframe.rotors)}",
     ]
     for rotor in airframe.rotors:
