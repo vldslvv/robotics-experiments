@@ -160,9 +160,9 @@ def _validate_generic_quad_x_order(paths: Sequence[str], positions: np.ndarray) 
 def _validate_generic_hexa_x_order(paths: Sequence[str], positions: np.ndarray) -> None:
     # Isaac body frame is FLU. The hexacopter_s550 asset clocks its arms at
     # azimuth 60*index deg (index 0 on the forward +X axis), matching the
-    # CA_ROTOR geometry baked into px4/docker/airframes/6001_none_hexa_x. Guard
-    # the per-index arm heading so a future asset/airframe mismatch (the silent
-    # bug fixed in docs/HEXACOPTER_SITL_FLIGHT_TUNING.md) fails loudly here.
+    # CA_ROTOR geometry generated from configs/airframes/hexacopter_s550.yaml.
+    # Guard the per-index arm heading so a future asset/airframe mismatch fails
+    # loudly here.
     tolerance_deg = 20.0
     for index, (path, position) in enumerate(zip(paths, positions, strict=False)):
         x, y = float(position[0]), float(position[1])

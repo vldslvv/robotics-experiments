@@ -67,6 +67,11 @@ the current contents and the intended home for that kind of code.
   `tests/test_core_imports.py` is the regression guard (it blocks
   `carb`/`pxr`/`isaacsim` and asserts the leaf modules are not eager-imported).
 - Do not rename, remove, or broaden public exports as part of cleanup unless explicitly requested.
+- When a requested change intentionally replaces a public API, config shape,
+  command, or workflow, do not add redundant compatibility shims or aliases by
+  default. Wire the new public API through every production consumer, update
+  tests/docs for the new contract, and let obsolete call sites fail loudly
+  unless compatibility is explicitly requested.
 - `VehicleState` carries pose, velocity, angular velocity, and sim time only.
   Do not add a kinematic acceleration field for the PX4 HIL path; the Pegasus
   IMU derives acceleration from velocity deltas internally.
@@ -181,18 +186,19 @@ the current contents and the intended home for that kind of code.
   matching its drone asset). Each entry is a frozen `Px4SitlLaunchConfig`
   (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
   `config._load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
-  USD asset basename to its PX4 airframe (`quadcopter_500mm.usda` ->
-  `none_iris`/`10016`, `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown
-  PX4-flyable asset raises `ValueError`). The hex airframe is a custom SITL
-  airframe (`px4/docker/airframes/6001_none_hexa_x`, baked into the PX4 image by
-  the Dockerfile) -- upstream PX4 v1.14.3 ships `6001_hexa_x` only in the
-  hardware/NuttX set, so the SITL build has no stock none-family hexarotor.
+  USD asset basename to the PX4 airframe defined in `configs/airframes`
+  (`quadcopter_500mm.usda` -> `none_quad_x`/`4001`,
+  `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
+  raises `ValueError`). The Dockerfile's px4 stage generates these repo-managed
+  `none_*` posix airframe scripts from `configs/airframes`, registers them in
+  PX4's airframe CMake list, writes an image manifest, then runs
+  `make px4_sitl_default`, so USD geometry, bridge rotor arrays, and PX4 control
+  allocation share one source.
   `get_enabled_px4_instance_indices()`
   stays as a thin compat wrapper over it. The PX4 container launcher
   (`px4_iris_common.sh::launch_px4_iris`) reads `PX4_SIM_MODEL`
-  (default `none_iris`) and exports `PX4_SYS_AUTOSTART` only when provided, so
-  the fresh/manual launch path keeps the quad default while the script-driven
-  fleet path selects the per-asset airframe.
+  (default `none_quad_x`/`4001` only for manual unset-env launches), so the
+  script-driven fleet path selects the generated per-asset airframe.
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
   each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
@@ -528,7 +534,7 @@ the host. They are meant to be used in the Dockerized environment.
   `-i ${PX4_INSTANCE}` and an interactive `pxh>` console (no `-d`), from its own
   per-instance rootfs subdir, with no `instance == 0` special case in the launch,
   reset, or mount logic. A divergent instance-0 launch (`make px4_sitl_default
-  none_iris` for instance 0 vs. additional instances started with the binary's
+  none_quad_x` for instance 0 vs. additional instances started with the binary's
   `-d` "no pxh shell" daemon flag) is exactly how the extra instances silently
   lost their console, so `commander takeoff` could only be entered for PX4[0].
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
@@ -540,8 +546,8 @@ the host. They are meant to be used in the Dockerized environment.
   `hover` transition. `make test-integration-px4-hexacopter-navigation` is the
   hexacopter variant (`configs/runtime_hexacopter_navigate.yaml`): the same
   navigation routine on the `hexacopter_s550.usda` asset, so the PX4 container
-  launches the derived generic hexarotor-x airframe (`none`/`6001`) instead of
-  the quad `none_iris`. Both reuse the shared `_px4_navigation_scenario.py`
+  launches the generated Hex X airframe (`none_hexa_x`/`6001`) instead of a quad
+  allocation. Both reuse the shared `_px4_navigation_scenario.py`
   driver (validate the routine's `goto`/`goto -> hover` config, then run the
   strict takeoff scenario) under thin per-asset entrypoints.
 - The persistent Isaac container (`make run-isaac` / `make run-all`) is named

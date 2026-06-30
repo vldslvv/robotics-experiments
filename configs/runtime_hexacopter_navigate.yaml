@@ -6,10 +6,9 @@ defaults:
 # headless on the live runtime extension, for a single PX4-backed hexacopter.
 # Inherits the default runtime config.yaml (sim/switches/px4/isaac_lab + the
 # warehouse scene) but swaps the one fleet vehicle to the hexacopter_s550.usda
-# asset and expands the per-vehicle PX4/thrust arrays to its six rotors. The
-# host-side PX4 launch derives the SITL airframe from the drone asset, so this
-# launches PX4's generic hexarotor-x geometry (PX4_SIM_MODEL=none_hexa_x,
-# PX4_SYS_AUTOSTART=6001) instead of the quad none_iris default.
+# asset. The shared airframe config supplies the six-rotor PX4 bridge arrays and
+# the matching generic hexarotor-x SITL airframe (PX4_SIM_MODEL=none_hexa_x,
+# PX4_SYS_AUTOSTART=6001).
 #
 # After takeoff the drone streams OFFBOARD position setpoints to each absolute
 # world-ENU `goto` waypoint (yawing toward the leg), holds a stable hover, then
@@ -31,14 +30,6 @@ vehicles:
     drone:
       usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda
       prim_name: Hexacopter0
-    px4:
-      input_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      input_scaling: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
-      zero_position_armed: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
-      rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
-      rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
-      min_rotor_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0, 1100.0, 1100.0]
     routine:
       steps:
         - kind: arm

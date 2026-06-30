@@ -1,5 +1,7 @@
+# @package _global_
+
 defaults:
-  - drone: quadcopter_500mm
+  - /airframes: quadcopter_500mm
   - _self_
 
 output_dir: isaac/assets/LightSwitchWarehouse

@@ -98,6 +98,10 @@ done
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
+
+source "$(dirname "${BASH_SOURCE[0]}")/px4_airframe_manifest_check.sh"
+check_px4_airframe_manifest_current "${PX4_IMAGE}"
+
 # Iterate the PX4-enabled vehicles' derived launch specs (instance index = PX4
 # -i / port offset = vehicle id, plus the per-asset PX4 airframe) rather than a
 # blind 0..count loop, so non-contiguous ids keep their derived ports and each

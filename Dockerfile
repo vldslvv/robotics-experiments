@@ -282,6 +282,7 @@ FROM ubuntu:22.04 AS px4
 
 ARG PX4_TAG=v1.14.3
 ENV PX4_DIR=/opt/PX4-Autopilot
+ENV PX4_AIRFRAME_MANIFEST=/usr/local/share/robotics-experiments/px4-airframes.json
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install --no-install-recommends -y \
@@ -306,17 +307,16 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
     cd ${PX4_DIR} && git checkout ${PX4_TAG} && \
     git submodule update --init --recursive
 
-# Add a SITL hexarotor airframe to the posix (external-MAVLink-simulator) set.
-# Upstream ships 6001_hexa_x only in the hardware/NuttX set, so the SITL build
-# has no none-family hexarotor; this is the airframe the hexacopter asset's
-# derived PX4_SYS_AUTOSTART=6001 selects. The guarded sed registers it next to
-# the stock none_iris quad and fails the build loudly if that anchor ever moves,
-# so a PX4 bump can never silently drop the hexa airframe.
-COPY px4/docker/airframes/6001_none_hexa_x \
-     ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/6001_none_hexa_x
-RUN cd ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes && \
-    grep -q '10016_none_iris' CMakeLists.txt && \
-    sed -i 's/\t10016_none_iris/\t10016_none_iris\n\t6001_none_hexa_x/' CMakeLists.txt
+# Generate the repo-managed posix airframes from configs/airframes before the
+# SITL firmware build. The none_* model names still use PX4's external
+# simulator_mavlink path; only the control-allocation scripts are generated.
+COPY px4/scripts/generate_px4_airframes.py /usr/local/bin/generate_px4_airframes.py
+COPY configs/airframes /tmp/robotics-experiments/airframes
+RUN python3 /usr/local/bin/generate_px4_airframes.py \
+      --config-dir /tmp/robotics-experiments/airframes \
+      --output-dir ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes \
+      --cmake-list ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt \
+      --manifest ${PX4_AIRFRAME_MANIFEST}
 
 # Headless SITL build; Pegasus provides dynamics over MAVLink, so no built-in sim backend.
 # Build the firmware only — omit the sim target (e.g. `none`) since it would launch

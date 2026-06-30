@@ -110,7 +110,7 @@ class ArmPlacement:
 
 
 @dataclass
-class DroneConfig:
+class AirframeConfig:
     name: str
     output_filename: str
     prim_name: str
@@ -163,7 +163,7 @@ class PusherConfig:
 @dataclass
 class BuilderConfig:
     output_dir: str
-    drone: DroneConfig
+    airframe: AirframeConfig
 
 
 # --- Config loading ---------------------------------------------------------
@@ -231,7 +231,7 @@ def _pusher_config(data: dict[str, Any] | None) -> PusherConfig | None:
     drive = data["drive"]
     return PusherConfig(
         enabled=bool(data["enabled"]),
-        pad=_cylinder(data["pad"], "drone.pusher.pad"),
+        pad=_cylinder(data["pad"], "airframes.pusher.pad"),
         drive=PusherDriveConfig(
             travel=float(drive["travel"]),
             stiffness=float(drive["stiffness"]),
@@ -240,24 +240,24 @@ def _pusher_config(data: dict[str, Any] | None) -> PusherConfig | None:
     )
 
 
-def _drone_config(data: dict[str, Any]) -> DroneConfig:
-    return DroneConfig(
+def _airframe_config(data: dict[str, Any]) -> AirframeConfig:
+    return AirframeConfig(
         name=str(data["name"]),
         output_filename=str(data["output_filename"]),
         prim_name=str(data["prim_name"]),
         total_mass=float(data["total_mass"]),
-        diagonal_inertia=_as_tuple3(data["diagonal_inertia"], "drone.diagonal_inertia"),
-        center_of_mass=_as_tuple3(data["center_of_mass"], "drone.center_of_mass"),
-        center_plate=_box(data["center_plate"], "drone.center_plate"),
-        arm_geometry=_arm_geometry(data["arm_geometry"], "drone.arm_geometry"),
-        arms=[_arm_placement(arm, f"drone.arms[{i}]") for i, arm in enumerate(data["arms"])],
-        pixhawk=_box(data["pixhawk"], "drone.pixhawk"),
-        jetson=_box(data["jetson"], "drone.jetson"),
-        realsense=_box(data["realsense"], "drone.realsense"),
-        optical_flow=_box(data["optical_flow"], "drone.optical_flow"),
-        lidar=_cylinder(data["lidar"], "drone.lidar"),
-        battery=_box(data["battery"], "drone.battery"),
-        wiring=_box(data["wiring"], "drone.wiring"),
+        diagonal_inertia=_as_tuple3(data["diagonal_inertia"], "airframes.diagonal_inertia"),
+        center_of_mass=_as_tuple3(data["center_of_mass"], "airframes.center_of_mass"),
+        center_plate=_box(data["center_plate"], "airframes.center_plate"),
+        arm_geometry=_arm_geometry(data["arm_geometry"], "airframes.arm_geometry"),
+        arms=[_arm_placement(arm, f"airframes.arms[{i}]") for i, arm in enumerate(data["arms"])],
+        pixhawk=_box(data["pixhawk"], "airframes.pixhawk"),
+        jetson=_box(data["jetson"], "airframes.jetson"),
+        realsense=_box(data["realsense"], "airframes.realsense"),
+        optical_flow=_box(data["optical_flow"], "airframes.optical_flow"),
+        lidar=_cylinder(data["lidar"], "airframes.lidar"),
+        battery=_box(data["battery"], "airframes.battery"),
+        wiring=_box(data["wiring"], "airframes.wiring"),
         pusher=_pusher_config(data.get("pusher")),
     )
 
@@ -265,7 +265,7 @@ def _drone_config(data: dict[str, Any]) -> DroneConfig:
 def _builder_config(data: dict[str, Any]) -> BuilderConfig:
     return BuilderConfig(
         output_dir=str(data["output_dir"]),
-        drone=_drone_config(data["drone"]),
+        airframe=_airframe_config(data["airframes"]),
     )
 
 
@@ -276,11 +276,40 @@ def load_builder_config(
 ) -> BuilderConfig:
     """Compose the Hydra USD-builder config and convert it to dataclasses."""
 
+    config_dir_path = Path(config_dir).resolve()
+    hydra_config_dir = config_dir_path.parent
+    config_name = f"{config_dir_path.name}/config"
+
     if GlobalHydra.instance().is_initialized():
         GlobalHydra.instance().clear()
-    with initialize_config_dir(config_dir=str(Path(config_dir).resolve()), version_base=None):
-        cfg = compose(config_name="config", overrides=overrides or [])
+    with initialize_config_dir(config_dir=str(hydra_config_dir), version_base=None):
+        cfg = compose(config_name=config_name, overrides=overrides or [])
     return _builder_config(OmegaConf.to_container(cfg, resolve=True))
+
+
+def _airframe_config_dir(config_dir: str | os.PathLike[str] = CONFIG_DIR) -> Path:
+    config_dir_path = Path(config_dir).resolve()
+    return config_dir_path.parent / "airframes"
+
+
+def _available_airframe_config_names(config_dir: str | os.PathLike[str] = CONFIG_DIR) -> list[str]:
+    airframe_dir = _airframe_config_dir(config_dir)
+    return sorted(path.stem for path in airframe_dir.glob("*.yaml") if path.is_file())
+
+
+def _build_all_airframe_usds(
+    *,
+    config_dir: str | os.PathLike[str] = CONFIG_DIR,
+    overrides: list[str] | None = None,
+) -> list[str]:
+    paths: list[str] = []
+    for name in _available_airframe_config_names(config_dir):
+        config = load_builder_config(
+            config_dir=config_dir,
+            overrides=[f"airframes={name}", *(overrides or [])],
+        )
+        paths.append(build_drone_usd(config.airframe, output_dir=config.output_dir))
+    return paths
 
 
 # --- USD authoring helpers --------------------------------------------------
@@ -408,7 +437,7 @@ def _author_arm(
 
 
 def build_drone_usd(
-    cfg: DroneConfig,
+    cfg: AirframeConfig,
     *,
     output_dir: str = ASSETS_DIR,
 ) -> str:
@@ -475,7 +504,7 @@ def build_drone_usd(
 
     # Pusher (sibling rigid body + prismatic joint). Authored only when the
     # airframe defines a pusher and it is enabled, so a single config parameter
-    # (drone.pusher.enabled) builds the drone with or without it.
+    # (airframes.pusher.enabled) builds the drone with or without it.
     if cfg.pusher is not None and cfg.pusher.enabled:
         pad = cfg.pusher.pad
         pusher_drive = cfg.pusher.drive
@@ -530,10 +559,16 @@ def _parse_args() -> argparse.Namespace:
         description="Generate a drone USD asset using standalone OpenUSD bindings."
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_configs",
+        help="Generate every airframe config option under the Hydra airframes config group.",
+    )
+    parser.add_argument(
         "config_name",
         nargs="?",
         default=None,
-        help="Drone config group option to generate, e.g. quadcopter_500mm.",
+        help="Airframe config group option to generate, e.g. quadcopter_500mm.",
     )
     parser.add_argument(
         "--output-dir",
@@ -553,7 +588,7 @@ def _parse_args() -> argparse.Namespace:
 def _hydra_overrides_from_args(args: argparse.Namespace) -> list[str]:
     overrides = list(args.overrides)
     if args.config_name:
-        overrides.insert(0, f"drone={args.config_name}")
+        overrides.insert(0, f"airframes={args.config_name}")
     if args.output_dir:
         overrides.append(f"output_dir={args.output_dir}")
     return overrides
@@ -561,13 +596,20 @@ def _hydra_overrides_from_args(args: argparse.Namespace) -> list[str]:
 
 if __name__ == "__main__":
     args = _parse_args()
+    overrides = _hydra_overrides_from_args(args)
 
-    config = load_builder_config(
-        config_dir=args.config_dir,
-        overrides=_hydra_overrides_from_args(args),
-    )
-    path = build_drone_usd(
-        config.drone,
-        output_dir=config.output_dir,
-    )
-    print(f"Saved: {path}")
+    if args.all_configs:
+        if args.config_name:
+            raise SystemExit("--all cannot be combined with a positional airframe config name")
+        for path in _build_all_airframe_usds(config_dir=args.config_dir, overrides=overrides):
+            print(f"Saved: {path}")
+    else:
+        config = load_builder_config(
+            config_dir=args.config_dir,
+            overrides=overrides,
+        )
+        path = build_drone_usd(
+            config.airframe,
+            output_dir=config.output_dir,
+        )
+        print(f"Saved: {path}")

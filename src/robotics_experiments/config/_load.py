@@ -27,6 +27,20 @@ __all__ = [
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
 _DEFAULT_CONFIG_NAME = "config"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+_AIRFRAME_CONFIG_DIR = _DEFAULT_CONF_DIR / "airframes"
+
+
+@functools.cache
+def _airframes_by_output_filename() -> dict[str, dict]:
+    airframes: dict[str, dict] = {}
+    for path in sorted(_AIRFRAME_CONFIG_DIR.glob("*.yaml")):
+        data = cast(dict, OmegaConf.to_container(OmegaConf.load(path), resolve=True))
+        airframes[str(data["output_filename"])] = data
+    return airframes
+
+
+def _airframe_for_drone_asset(usd_path: str) -> dict | None:
+    return _airframes_by_output_filename().get(Path(usd_path).name)
 
 
 def _resolve_config_path() -> Path:
@@ -100,7 +114,9 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
     resolved: list[ResolvedVehicle] = []
     for entry in raw:
         drone = OmegaConf.merge(cfg.drone, entry.get("drone", {}))
-        px4 = OmegaConf.merge(cfg.px4, entry.get("px4", {}))
+        airframe = _airframe_for_drone_asset(str(drone.usd_path))
+        px4_airframe_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
+        px4 = OmegaConf.merge(cfg.px4, px4_airframe_defaults, entry.get("px4", {}))
         routine = OmegaConf.merge(cfg.routine, entry.get("routine", {}))
         drone_cfg = cast(DroneConfig, OmegaConf.to_object(drone))
         px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
@@ -151,39 +167,33 @@ def get_config() -> EnvConfig:
     return env
 
 
-# Maps the spawned drone USD asset (by file name) to its PX4 SITL airframe as
-# (PX4_SIM_MODEL, PX4_SYS_AUTOSTART). Keyed by the asset basename so a
-# per-vehicle drone.usd_path override selects the matching PX4 airframe. Both
-# entries use a "none*" sim model that still starts simulator_mavlink (not
-# Gazebo/jMAVSim). Extend this when adding a new PX4-flyable asset.
-_PX4_AIRFRAME_BY_ASSET: dict[str, tuple[str, int]] = {
-    "quadcopter_500mm.usda": ("none_iris", 10016),
-    "hexacopter_s550.usda": ("none_hexa_x", 6001),
-}
-
-
 def resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchConfig:
     """Derive the PX4 SITL launch airframe for one resolved vehicle.
 
-    Pure: reads only resolved config values (no filesystem, Docker, Hydra
-    composition, subprocess, or environment access). The drone USD asset name
-    selects the PX4 ``PX4_SIM_MODEL`` / ``PX4_SYS_AUTOSTART`` pair so a
-    hexacopter asset launches PX4's hex geometry instead of the quad
-    ``none_iris`` default. An unknown PX4-flyable asset raises ``ValueError``
+    The drone USD asset name selects the airframe record in ``configs/airframes``,
+    whose ``px4.sitl`` block supplies the PX4 ``PX4_SIM_MODEL`` /
+    ``PX4_SYS_AUTOSTART`` pair so each asset launches its generated PX4 control
+    allocation instead of falling back to a stock quad. An unknown PX4-flyable
+    asset raises ``ValueError``
     (naming the asset and prim) rather than silently flying the wrong airframe.
     """
     asset = Path(vehicle.drone.usd_path).name
-    airframe = _PX4_AIRFRAME_BY_ASSET.get(asset)
+    airframe = _airframe_for_drone_asset(vehicle.drone.usd_path)
     if airframe is None:
         raise ValueError(
             f"no PX4 SITL airframe mapping for drone asset {vehicle.drone.usd_path!r} "
-            f"(prim {vehicle.prim_name!r}); add it to config._load._PX4_AIRFRAME_BY_ASSET"
+            f"(prim {vehicle.prim_name!r}); add it to configs/airframes"
         )
-    sim_model, sys_autostart = airframe
+    sitl = airframe.get("px4", {}).get("sitl")
+    if not sitl:
+        raise ValueError(
+            f"airframe config for drone asset {asset!r} has no px4.sitl mapping; "
+            "add px4.sitl.sim_model and px4.sitl.sys_autostart"
+        )
     return Px4SitlLaunchConfig(
         instance_index=vehicle.px4_instance_index,
-        sim_model=sim_model,
-        sys_autostart=sys_autostart,
+        sim_model=str(sitl["sim_model"]),
+        sys_autostart=int(sitl["sys_autostart"]),
     )
 
 
@@ -217,3 +227,4 @@ def _reset_config() -> None:
     extensions should not need to call this.
     """
     get_config.cache_clear()
+    _airframes_by_output_filename.cache_clear()

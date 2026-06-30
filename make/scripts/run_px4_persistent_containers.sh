@@ -9,15 +9,18 @@ require_env() {
     fi
 }
 
-for name in HYDRA_CONFIG_HOST_PATH MAKE_CMD; do
+for name in HYDRA_CONFIG_HOST_PATH MAKE_CMD PX4_IMAGE; do
     require_env "${name}"
 done
+
+source "$(dirname "${BASH_SOURCE[0]}")/px4_airframe_manifest_check.sh"
+check_px4_airframe_manifest_current "${PX4_IMAGE}"
 
 # The resolved fleet is the single source of truth: iterate the PX4-enabled
 # vehicles' derived launch specs (instance index = PX4 -i / port offset =
 # vehicle id, plus the per-asset PX4 airframe) instead of a blind 0..count loop,
 # so non-contiguous ids keep their derived ports and each container launches the
-# airframe matching its drone asset (none_iris quad vs. none/6001 hex). Each
+# generated airframe matching its drone asset. Each
 # line is "<instance> <sim_model> <sys_autostart>".
 mapfile -t launch_specs < <(
     ROBOTICS_EXPERIMENT_CONFIG_PATH="${HYDRA_CONFIG_HOST_PATH}" \

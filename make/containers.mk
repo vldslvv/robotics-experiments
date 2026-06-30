@@ -24,8 +24,12 @@ ros_DOCKER_ARGS = \
 	$(ROS_DOCKER_ENV) \
 	$(ROS_DOCKER_VOLUMES)
 
+.PHONY: generate-drone-usd
+generate-drone-usd:
+	@uv run python isaac/runtime/standalone/build_copter_usd_standalone.py --all
+
 .PHONY: run-isaac
-run-isaac: $(isaac_RUN_DEPS)
+run-isaac: generate-drone-usd $(isaac_RUN_DEPS)
 	@mkdir -p $(isaac_RUNTIME_DIRS)
 	@EXPECTED_CMD="$(ISAAC_CONTAINER_CMD)" \
 	make/scripts/run_persistent_container.sh \
@@ -71,6 +75,7 @@ remove-ros-image:
 .PHONY: run-px4
 run-px4:
 	@HYDRA_CONFIG_HOST_PATH='$(HYDRA_CONFIG_HOST_PATH)' \
+	PX4_IMAGE='$(PX4_IMAGE)' \
 	MAKE_CMD='$(MAKE)' \
 	make/scripts/run_px4_persistent_containers.sh
 

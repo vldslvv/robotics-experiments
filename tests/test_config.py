@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs" / "experiment"
+_AIRFRAME_CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs" / "airframes"
 
 
 def _group_defaults(group_name, file_stem="default"):
@@ -11,6 +12,12 @@ def _group_defaults(group_name, file_stem="default"):
     group_config = OmegaConf.load(_CONFIG_DIR / group_name / f"{file_stem}.yaml")
     group_config.pop("defaults", None)
     return group_config
+
+
+def _airframe_config(file_stem):
+    from omegaconf import OmegaConf
+
+    return OmegaConf.load(_AIRFRAME_CONFIG_DIR / f"{file_stem}.yaml")
 
 
 def test_default_config_loads_from_root_experiment_config():
@@ -274,6 +281,40 @@ def test_hexacopter_navigate_config_composes(monkeypatch):
     reset_config()
 
 
+def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/runtime_hexacopter_navigate.yaml",
+    )
+    reset_config()
+
+    airframe = _airframe_config("hexacopter_s550")
+    config = get_config()
+    vehicle = config.vehicles[0]
+
+    assert vehicle.drone.usd_path.endswith(f"/{airframe.output_filename}")
+    assert vehicle.px4.input_offset == list(airframe.px4.bridge.input_offset)
+    assert vehicle.px4.input_scaling == list(airframe.px4.bridge.input_scaling)
+    assert vehicle.px4.zero_position_armed == list(airframe.px4.bridge.zero_position_armed)
+    assert vehicle.px4.rotor_constant == list(airframe.px4.bridge.rotor_constant)
+    assert vehicle.px4.rolling_moment_coefficient == list(
+        airframe.px4.bridge.rolling_moment_coefficient
+    )
+    assert vehicle.px4.min_rotor_velocity == list(airframe.px4.bridge.min_rotor_velocity)
+    assert vehicle.px4.max_rotor_velocity == list(airframe.px4.bridge.max_rotor_velocity)
+    assert [
+        (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
+    ] == [
+        (0, airframe.px4.sitl.sim_model, airframe.px4.sitl.sys_autostart),
+    ]
+    reset_config()
+
+
 def test_resolve_fleet_merges_per_vehicle_routine_override():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
@@ -362,7 +403,7 @@ def test_enabled_px4_helpers_match_active_config():
     reset_config()
 
 
-def test_quad_default_resolves_to_none_iris_airframe():
+def test_quad_default_resolves_to_generic_quad_x_airframe():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
@@ -374,7 +415,7 @@ def test_quad_default_resolves_to_none_iris_airframe():
 
     launch_configs = get_enabled_px4_launch_configs()
     assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
-        (0, "none_iris", 10016),
+        (0, "none_quad_x", 4001),
     ]
     reset_config()
 

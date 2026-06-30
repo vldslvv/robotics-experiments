@@ -377,19 +377,21 @@ class Px4SitlLaunchConfig:
 
     Produced by the pure ``config._load.resolve_px4_sitl_launch_config`` from a
     :class:`ResolvedVehicle`. The drone USD asset selects the PX4 simulator
-    airframe so a hexacopter asset launches PX4's hex geometry instead of the
-    quad ``none_iris`` default. Threaded by the host-side launch scripts into
+    airframe so each asset launches the PX4 control allocation generated from
+    the same ``configs/airframes`` source as the USD. Threaded by the host-side
+    launch scripts into
     each PX4 container as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
     ``PX4_SYS_AUTOSTART``.
 
     Attributes:
         instance_index: PX4 ``-i`` instance index (the resolved
             ``px4_instance_index``); the per-container port offset.
-        sim_model: ``PX4_SIM_MODEL`` selecting the SITL simulator interface
-            airframe (``none_iris`` for the quad, ``none`` for the generic
-            hexarotor-x geometry); both still start ``simulator_mavlink``.
-        sys_autostart: ``PX4_SYS_AUTOSTART`` airframe id (``10016`` for the
-            ``none_iris`` quad, ``6001`` for the generic hexarotor-x geometry).
+        sim_model: ``PX4_SIM_MODEL`` selecting the external-MAVLink SITL
+            airframe (``none_quad_x`` for the generic Quad X asset,
+            ``none_hexa_x`` for the Hex X asset); both still start
+            ``simulator_mavlink``.
+        sys_autostart: ``PX4_SYS_AUTOSTART`` canonical PX4 copter airframe id
+            (``4001`` for generic Quad X, ``6001`` for Hex X).
     """
 
     instance_index: int

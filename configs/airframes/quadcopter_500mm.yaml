@@ -1,16 +1,16 @@
-name: hexacopter_s550
-output_filename: hexacopter_s550.usda
-prim_name: hexacopter
+name: quadcopter_500mm
+output_filename: quadcopter_500mm.usda
+prim_name: quadcopter
 
-total_mass: 1.929
-diagonal_inertia: [0.075, 0.075, 0.14]
+total_mass: 1.5
+diagonal_inertia: [0.0347, 0.0458, 0.0977]
 center_of_mass: [0.0, 0.0, 0.01]
 
 center_plate:
-  name: S550 airframe center plate
-  size: [0.16, 0.16, 0.008]
+  name: S500-class carbon center plate
+  size: [0.12, 0.12, 0.006]
   position: [0.0, 0.0, 0.0]
-  mass: 0.480
+  mass: 0.350
 
 # Geometry of one arm, authored once and shared by every arm. All positions are
 # in the arm-local frame: +X points outboard along the boom, and the per-arm
@@ -19,55 +19,47 @@ center_plate:
 # sit at the boom tip (radial = boom.length).
 arm_geometry:
   boom:
-    name: S550 carbon-fiber boom
-    radius: 0.01
-    length: 0.275
+    name: S500-class carbon-fiber boom
+    radius: 0.008
+    length: 0.3535533905932738
   motor:
     name: X2212-class brushless motor
-    radius: 0.018
-    height: 0.035
-    position: [0.275, 0.0, 0.02]
+    radius: 0.015
+    height: 0.03
+    position: [0.3535533905932738, 0.0, 0.02]
     mass: 0.057
   esc:
     name: BLHeli_S 20A ESC
     size: [0.025, 0.015, 0.004]
-    position: [0.165, 0.0, 0.005]
+    position: [0.21213203435596426, 0.0, 0.005]
     mass: 0.007
   propeller:
-    name: 1045 propeller
-    radius: 0.127
+    name: 9045 propeller
+    radius: 0.1143
     height: 0.002
-    position: [0.275, 0.0, 0.04]
+    position: [0.3535533905932738, 0.0, 0.04]
     mass: 0.008
     num_blades: 2
 
 # One placement per physical arm: the sole heading source (azimuth_deg) plus the
-# motor identity (spin direction and PX4 motor index). Generic Hexarotor X order.
+# motor identity (spin direction and PX4 motor index). Generic Quad X order.
 arms:
-  - name: M1 0deg CCW
-    azimuth_deg: 0.0
-    spin_dir: CCW
-    px4_motor_index: 0
-  - name: M2 60deg CW
-    azimuth_deg: 60.0
-    spin_dir: CW
-    px4_motor_index: 1
-  - name: M3 120deg CCW
-    azimuth_deg: 120.0
+  - name: M1 FR CCW
+    azimuth_deg: 45.0
     spin_dir: CCW
     px4_motor_index: 2
-  - name: M4 180deg CW
-    azimuth_deg: 180.0
+  - name: M2 FL CW
+    azimuth_deg: 135.0
     spin_dir: CW
-    px4_motor_index: 3
-  - name: M5 240deg CCW
-    azimuth_deg: -120.0
+    px4_motor_index: 1
+  - name: M3 RL CCW
+    azimuth_deg: -135.0
     spin_dir: CCW
-    px4_motor_index: 4
-  - name: M6 300deg CW
-    azimuth_deg: -60.0
+    px4_motor_index: 3
+  - name: M4 RR CW
+    azimuth_deg: -45.0
     spin_dir: CW
-    px4_motor_index: 5
+    px4_motor_index: 0
 
 pixhawk:
   name: Pixhawk 6C
@@ -84,14 +76,14 @@ jetson:
 realsense:
   name: Intel RealSense D435i
   size: [0.090, 0.025, 0.025]
-  position: [0.09, 0.0, 0.01]
+  position: [0.07, 0.0, 0.01]
   mass: 0.072
   rotation_deg: [0.0, -15.0, 0.0]
 
 optical_flow:
   name: PMW3901 optical flow
   size: [0.020, 0.020, 0.005]
-  position: [0.0, 0.0, -0.08]
+  position: [0.0, 0.0, -0.06]
   mass: 0.005
   rotation_deg: [180.0, 0.0, 0.0]
 
@@ -105,14 +97,14 @@ lidar:
 battery:
   name: 4S 5000 mAh LiPo
   size: [0.140, 0.045, 0.025]
-  position: [0.0, 0.0, -0.04]
-  mass: 0.390
+  position: [0.0, 0.0, -0.03]
+  mass: 0.300
 
 wiring:
   name: PDB + power module
   size: [0.050, 0.030, 0.010]
   position: [0.0, 0.0, 0.0]
-  mass: 0.120
+  mass: 0.100
 
 # Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
 # false to build this airframe without the pusher (the geometry/drive below stay
@@ -124,9 +116,24 @@ pusher:
     name: Spring-loaded pusher pad
     radius: 0.015
     height: 0.008
-    position: [0.13, 0.0, 0.01]
+    position: [0.11, 0.0, 0.01]
     mass: 0.040
   drive:
     travel: 0.015
     stiffness: 800.0
     damping: 40.0
+
+px4:
+  sitl:
+    sim_model: none_quad_x
+    sys_autostart: 4001
+    mav_type: 2
+    ca_rotor_km_abs: 0.05
+  bridge:
+    input_offset: [0.0, 0.0, 0.0, 0.0]
+    input_scaling: [1000.0, 1000.0, 1000.0, 1000.0]
+    zero_position_armed: [100.0, 100.0, 100.0, 100.0]
+    rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
+    rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
+    min_rotor_velocity: [0.0, 0.0, 0.0, 0.0]
+    max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0]

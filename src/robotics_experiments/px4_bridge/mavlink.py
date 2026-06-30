@@ -224,9 +224,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     "connection_baseport": port,
                     "vehicle_id": 0,
                     # The bridge never spawns PX4; PX4 SITL runs as a separate
-                    # process (Docker: none_iris). Pin the vendored backend's
-                    # autolaunch off (its own default is True) so it only
-                    # connects over MAVLink.
+                    # Docker process selected by the resolved airframe config.
+                    # Pin the vendored backend's autolaunch off (its own default
+                    # is True) so it only connects over MAVLink.
                     "px4_autolaunch": False,
                     "enable_lockstep": True,
                     "input_offset": input_offset,

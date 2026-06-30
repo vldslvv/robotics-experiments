@@ -4,13 +4,8 @@ defaults:
 
 # Runtime demonstration experiment: two PX4-backed hexacopter USD assets take
 # off, fly one shared XY circle as phase-offset `goto` waypoints, then land. The
-# bridge discovers the six rotor markers from the USD metadata; the per-vehicle
-# PX4/thrust arrays below are expanded to six entries to match that asset.
-#
-# The host-side PX4 launch derives the SITL airframe from each vehicle's drone
-# asset, so the hexacopter_s550.usda asset below launches PX4's generic
-# hexarotor-x geometry (PX4_SIM_MODEL=none_hexa_x, PX4_SYS_AUTOSTART=6001)
-# instead of the quad none_iris default.
+# shared airframe config supplies both the six-rotor PX4 bridge arrays and the
+# matching generic hexarotor-x SITL airframe for hexacopter_s550.usda.
 #
 # Run with: make run-all HYDRA_CONFIG=configs/runtime_two_hexacopter_circle_land.yaml
 
@@ -23,14 +18,6 @@ vehicles:
     drone:
       usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda
       prim_name: Hexacopter0
-    px4:
-      input_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      input_scaling: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
-      zero_position_armed: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
-      rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
-      rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
-      min_rotor_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0, 1100.0, 1100.0]
     routine:
       steps:
         - kind: arm
@@ -68,14 +55,6 @@ vehicles:
     drone:
       usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda
       prim_name: Hexacopter1
-    px4:
-      input_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      input_scaling: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
-      zero_position_armed: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]
-      rotor_constant: [8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6, 8.54858e-6]
-      rolling_moment_coefficient: [1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6, 1.0e-6]
-      min_rotor_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      max_rotor_velocity: [1100.0, 1100.0, 1100.0, 1100.0, 1100.0, 1100.0]
     routine:
       steps:
         - kind: arm
