@@ -59,13 +59,18 @@ drone, no fleet barrier) and its routine gates are evaluated against its own spa
 baseline - every drone must
 pass.
 
-`make test-integration-px4-navigation` runs the single-drone absolute-waypoint
-`goto` navigation routine (`configs/runtime_drone_navigate.yaml`), and
-`make test-integration-px4-hexacopter-navigation` runs the hexacopter variant
-(`configs/runtime_hexacopter_navigate.yaml`, the `hexacopter_s550.usda` asset, so
-PX4 launches the derived generic hexarotor-x airframe). Both are thin entrypoints
-(`test_px4_navigation_routine.py`, `test_px4_hexacopter_navigation_routine.py`)
-over the shared `_px4_navigation_scenario.py`: it asserts the routine carries a
-`goto` leg and a `goto -> hover` transition (where PX4 failsafes if the OFFBOARD
-setpoint stream stops while OFFBOARD is active), then drives the same strict
-`_px4_takeoff_scenario.py` flight to completion.
+`make test-integration-px4-navigation` runs the absolute-waypoint `goto`
+navigation routine as one multi-drone scene
+(`configs/integration_test_navigate_multi.yaml`): a quad (id 0) and a hexacopter
+(id 1, the `hexacopter_s550.usda` asset, so its PX4 instance launches the derived
+generic hexarotor-x airframe) fly the same routine concurrently in parallel lanes
+(the hex `goto` waypoints offset by its spawn so the absolute waypoints never
+converge), and the test passes only when both hold their envelope. The single
+thin entrypoint `test_px4_navigation_routine.py` runs the shared
+`_px4_navigation_scenario.py`: its `_assert_navigation_routine_config` asserts
+each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
+transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
+OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
+to completion. (`configs/runtime_drone_navigate.yaml` and
+`configs/runtime_hexacopter_navigate.yaml` remain as single-drone `make run-all`
+demos.)

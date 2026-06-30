@@ -96,8 +96,7 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
 
         if v.ros_frame_prefix in ros_frame_prefixes:
             raise ValueError(
-                f"duplicate vehicle ROS frame prefix {v.ros_frame_prefix!r} "
-                f"(vehicle id={v.id})"
+                f"duplicate vehicle ROS frame prefix {v.ros_frame_prefix!r} " f"(vehicle id={v.id})"
             )
         ros_frame_prefixes.add(v.ros_frame_prefix)
 

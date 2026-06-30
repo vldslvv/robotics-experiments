@@ -126,7 +126,7 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     takeoff_step = config.routine.steps[1]
     assert takeoff_step["climb_m"] == 2.5
     assert takeoff_step["min_climb_m"] == 1.5
-    assert config.routine.steps[2]["hold_s"] == 5.0
+    assert config.routine.steps[2]["hold_s"] == 3.0
     assert config.routine.max_downward_speed_m_s == expected_gates.max_downward_speed_m_s
     assert (
         config.routine.hover_max_abs_horizontal_speed_m_s
@@ -646,4 +646,55 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/x500_02"]
     assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["x500_01", "x500_02"]
     assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
+    reset_config()
+
+
+def test_navigate_multi_config_composes(monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    monkeypatch.setenv(
+        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
+        "configs/integration_test_navigate_multi.yaml",
+    )
+    reset_config()
+
+    config = get_config()
+    # A quad (id 0) and a hexacopter (id 1) fly the same navigation routine
+    # concurrently in parallel lanes (hex waypoints offset +4 in x by its spawn).
+    assert [vehicle.id for vehicle in config.vehicles] == [0, 1]
+    assert [vehicle.prim_name for vehicle in config.vehicles] == ["Drone0", "Hexacopter0"]
+    assert [vehicle.spawn_xy for vehicle in config.vehicles] == [(0.0, -2.0), (4.0, -2.0)]
+    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/s550_01"]
+    assert [vehicle.mavlink_port for vehicle in config.vehicles] == [4560, 4561]
+    quad, hexa = config.vehicles
+    assert quad.drone.usd_path.endswith("/quadcopter_500mm.usda")
+    assert hexa.drone.usd_path.endswith("/hexacopter_s550.usda")
+    for vehicle in config.vehicles:
+        assert [step["kind"] for step in vehicle.routine.steps] == [
+            "arm",
+            "takeoff",
+            "hover",
+            "goto",
+            "goto",
+            "hover",
+            "land",
+        ]
+    assert [(step["x"], step["y"], step["z"]) for step in quad.routine.steps[3:5]] == [
+        (0.0, 2.0, 2.5),
+        (3.0, 2.0, 2.5),
+    ]
+    assert [(step["x"], step["y"], step["z"]) for step in hexa.routine.steps[3:5]] == [
+        (4.0, 2.0, 2.5),
+        (7.0, 2.0, 2.5),
+    ]
+    # Each vehicle's PX4 container launches the per-asset airframe.
+    assert [
+        (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
+    ] == [
+        (0, "none_x500_v2", 4019),
+        (1, "none_hexa_x", 6001),
+    ]
     reset_config()

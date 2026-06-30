@@ -1,0 +1,84 @@
+defaults:
+  - config
+  - _self_
+
+# Dual-PX4 multi-drone absolute-waypoint navigation experiment. This merges the
+# former single-quad and single-hexacopter navigation integration tests into one
+# concurrent scene: a quad (id 0, x500) and a hexacopter (id 1, hexacopter_s550)
+# each fly the full nav routine (arm -> takeoff -> hover -> goto -> goto -> hover
+# -> land) at the same time, driven by the shared multi-PX4 launch path (one PX4
+# SITL container per vehicle, each with the per-asset airframe derived from its
+# USD asset). The strict harness passes only when BOTH drones hold their flight
+# envelope and protect OFFBOARD setpoint continuity across the goto -> hover
+# transition.
+#
+# Inherits the default runtime config.yaml (sim/switches/px4/isaac_lab + the
+# warehouse scene) and overrides only the vehicles list.
+#
+# Parallel-lane waypoints: the two drones never converge. Each drone's absolute
+# world-ENU goto legs are offset by its spawn x (quad lane at x in {0,3}, hex
+# lane at x in {4,7}), so they fly the same relative path 4m apart. Coordinates
+# are world ENU metres (x=east, y=north, z=up).
+#
+# Run with:
+#   make test-integration-px4-navigation
+#   make run-all HYDRA_CONFIG=configs/integration_test_navigate_multi.yaml
+
+routine:
+  steps: []
+
+vehicles:
+  - id: 0
+    ros: {namespace: /x500_01}
+    spawn_xy: [0.0, -2.0]
+    drone: {prim_name: Drone0}
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.5
+          min_climb_m: 1.5
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: 3.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: land
+          timeout_s: 30.0
+  - id: 1
+    ros: {namespace: /s550_01}
+    spawn_xy: [4.0, -2.0]
+    drone:
+      usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda
+      prim_name: Hexacopter0
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.5
+          min_climb_m: 1.5
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 4.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: goto
+          x: 7.0
+          y: 2.0
+          z: 2.5
+          timeout_s: 25.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: land
+          timeout_s: 30.0

@@ -220,12 +220,22 @@ cleanup() {
         echo "  Isaac: ${HOST_ISAAC_LOG} (not written)"
     fi
 
+    # Log-capture cost scales with the PX4 console scrollback, which is mostly
+    # ANSI redraw noise (the real artifacts are the persisted ULog + bridge logs
+    # under the run-id dir). On success capture only the tail; capture the full
+    # scrollback only when it is actually needed for diagnosis (a failure or
+    # explicit verbose), so a long passing flight does not pay to dump it all.
+    local -a docker_logs_args=()
+    if [ "${status}" -eq 0 ] && [ "${INTEGRATION_VERBOSE}" != "1" ]; then
+        docker_logs_args+=(--tail "${INTEGRATION_LOG_TAIL_LINES}")
+    fi
+
     idx=0
     for container in "${STARTED_CONTAINERS[@]}"; do
         local host_log
         host_log="$(px4_host_log "${idx}")"
         if docker inspect "${container}" >/dev/null 2>&1; then
-            if docker logs "${container}" >"${host_log}" 2>&1; then
+            if docker logs "${docker_logs_args[@]}" "${container}" >"${host_log}" 2>&1; then
                 echo "  PX4 SITL[${idx}]: ${host_log}"
             else
                 echo "  PX4 SITL[${idx}]: ${host_log} (docker logs failed)"

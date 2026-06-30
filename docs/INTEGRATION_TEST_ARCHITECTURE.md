@@ -119,7 +119,11 @@ owns the network namespace. Each additional instance `i` joins that namespace
 The runner waits on each instance's `TCP port 456i` readiness line, then the
 Isaac container joins the primary namespace and connects all N bridges. The
 cleanup trap collects each container's `docker logs` (`<px4-log>`,
-`<px4-log>.<i>`) and removes every container. The active Hydra config must carry
+`<px4-log>.<i>`) and removes every container. To keep `collect_logs` cheap on a
+long passing flight, the trap captures only the last `INTEGRATION_LOG_TAIL_LINES`
+of the PX4 console on **success** (the scrollback is ANSI redraw noise; the real
+artifacts are the persisted ULog/bridge logs) and the **full** console only on
+failure or with `INTEGRATION_VERBOSE=1`. The active Hydra config must carry
 a `{vehicle}` token in `px4.debug_log_path` for multi-vehicle bridge logs. Keep
 `INTEGRATION_TEST_JOBS=1`: a 2-drone run already loads the host with two PX4
 boots and two serial lockstep exchanges per tick.

@@ -553,16 +553,25 @@ the host. They are meant to be used in the Dockerized environment.
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
   start pxh shell"); keep the launch interactive (`-d` omitted) so every
   per-vehicle terminal accepts commands.
-- `make test-integration-px4-navigation` runs the single-drone absolute-waypoint
-  `goto` navigation routine (`configs/runtime_drone_navigate.yaml`, scene via
-  `@config`), protecting OFFBOARD setpoint continuity across the `goto` ->
-  `hover` transition. `make test-integration-px4-hexacopter-navigation` is the
-  hexacopter variant (`configs/runtime_hexacopter_navigate.yaml`): the same
-  navigation routine on the `hexacopter_s550.usda` asset, so the PX4 container
-  launches the generated Hex X airframe (`none_hexa_x`/`6001`) instead of a quad
-  allocation. Both reuse the shared `_px4_navigation_scenario.py`
-  driver (validate the routine's `goto`/`goto -> hover` config, then run the
-  strict takeoff scenario) under thin per-asset entrypoints.
+- `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
+  navigation routine as **one multi-drone scene**
+  (`configs/integration_test_navigate_multi.yaml`, scene via `@config`): a quad
+  (id 0, x500) and a hexacopter (id 1, `hexacopter_s550.usda`) fly the same
+  routine **concurrently** in parallel lanes (the hex `goto` waypoints offset +4
+  in x by its spawn, so the absolute world-ENU waypoints never converge), each on
+  its own PX4 SITL instance with the per-asset airframe derived from its USD asset
+  (the quad's `none_x500_v2`/`4019` and the hex's generated Hex X
+  `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
+  `goto` -> `hover` transition and passes only when **both** drones hold their
+  envelope. This single target replaces the former separate single-quad and
+  single-hex navigation targets (one ~120s test instead of two). It reuses the
+  generic multi-PX4 launch path (`run_px4_integration_test.sh` over
+  `get_enabled_px4_launch_configs()`, like the multi-drone takeoff) and the shared
+  `_px4_navigation_scenario.py` driver, whose
+  `_assert_navigation_routine_config` validates the `goto`/`goto -> hover` config
+  per flying vehicle before running the strict takeoff scenario. The
+  `configs/runtime_hexacopter_navigate.yaml` and `configs/runtime_drone_navigate.yaml`
+  configs remain as single-drone `make run-all` demos.
 - The persistent Isaac container (`make run-isaac` / `make run-all`) is named
   `vv-isaac-sim-custom` (`ISAAC_CONTAINER_NAME`) and is **retained after it
   exits**, so the quickest way to inspect the last manual run is

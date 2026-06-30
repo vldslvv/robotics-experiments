@@ -6,8 +6,9 @@ the point where PX4 will failsafe if the OFFBOARD setpoint stream stops while
 OFFBOARD is still active. The flight itself is driven by the host-agnostic
 :class:`~robotics_experiments.runtime.FleetOrchestrator` through the shared
 :func:`_px4_takeoff_scenario.run_px4_takeoff_scenario`; this module only adds the
-navigation-specific validation so the quad and hexacopter navigation entrypoints
-stay thin (one config, one scene) over it.
+navigation-specific validation (applied per flying vehicle, so a single config may
+mix airframes -- e.g. the merged quad + hexacopter multi-drone navigation test)
+so the navigation entrypoint stays thin (one config, one scene) over it.
 """
 
 from __future__ import annotations

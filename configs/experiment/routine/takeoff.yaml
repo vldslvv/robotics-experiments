@@ -19,4 +19,4 @@ steps:
     climb_m: 2.5
     min_climb_m: 1.5
   - kind: hover
-    hold_s: 5.0
+    hold_s: 3.0

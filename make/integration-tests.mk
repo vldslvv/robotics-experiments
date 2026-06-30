@@ -10,7 +10,6 @@ INTEGRATION_TEST_TARGETS = \
     test-integration-drone-articulation \
     test-integration-px4-takeoff \
     test-integration-px4-navigation \
-    test-integration-px4-hexacopter-navigation \
     test-integration-px4-takeoff-instability \
     test-integration-px4-multi-drone-takeoff
 
@@ -89,8 +88,15 @@ test-integration-px4-takeoff: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
+# Multi-drone navigation. A quad (id 0) and a hexacopter (id 1) fly the full
+# absolute-waypoint navigation routine concurrently in one scene, each on its own
+# PX4 SITL instance with the per-asset airframe derived from its USD asset. Uses
+# the experiment scene via the @config sentinel and the generic multi-PX4 launch
+# path; passes only when BOTH drones hold their envelope and protect OFFBOARD
+# setpoint continuity across the goto -> hover transition. This replaces the
+# former separate single-quad and single-hex navigation targets.
 .PHONY: test-integration-px4-navigation
-test-integration-px4-navigation: HYDRA_CONFIG = configs/runtime_drone_navigate.yaml
+test-integration-px4-navigation: HYDRA_CONFIG = configs/integration_test_navigate_multi.yaml
 test-integration-px4-navigation: SCENE = @config
 test-integration-px4-navigation: generate-drone-usd
 	@TEST_TARGET='test-integration-px4-navigation' \
@@ -99,20 +105,6 @@ test-integration-px4-navigation: generate-drone-usd
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_NAVIGATION_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_NAVIGATION_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-navigation' \
-	    STRICT='1' \
-	    $(PX4_INTEGRATION_COMMON_ENV) \
-	    bash "$(PX4_INTEGRATION_RUNNER)"
-
-.PHONY: test-integration-px4-hexacopter-navigation
-test-integration-px4-hexacopter-navigation: HYDRA_CONFIG = configs/runtime_hexacopter_navigate.yaml
-test-integration-px4-hexacopter-navigation: SCENE = @config
-test-integration-px4-hexacopter-navigation: generate-drone-usd
-	@TEST_TARGET='test-integration-px4-hexacopter-navigation' \
-	    HOST_ISAAC_LOG_BASENAME='test_px4_hexacopter_navigation_routine.log' \
-	    HOST_PX4_LOG_BASENAME='test_px4_hexacopter_navigation_routine_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PX4_HEX_NAVIGATION_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_HEX_NAVIGATION_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-hexacopter-navigation' \
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
@@ -159,9 +151,6 @@ test-isaac-px4-takeoff: test-integration-px4-takeoff
 
 .PHONY: test-isaac-px4-navigation
 test-isaac-px4-navigation: test-integration-px4-navigation
-
-.PHONY: test-isaac-px4-hexacopter-navigation
-test-isaac-px4-hexacopter-navigation: test-integration-px4-hexacopter-navigation
 
 .PHONY: test-isaac-px4-takeoff-instability
 test-isaac-px4-takeoff-instability: test-integration-px4-takeoff-instability
