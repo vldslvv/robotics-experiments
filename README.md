@@ -108,10 +108,11 @@ frame conventions. The main failure modes fixed during flight debugging were:
   into body-FLU before the MAVLink adapter converts it to PX4 body-FRD gyro
   fields. Sending world-frame angular velocity as body gyro can look stable
   while level, then destabilize takeoff as soon as the vehicle rotates.
-- Rotor thrust markers are configured in PX4 motor-index order for
-  `none_iris` / Generic Quad X: front-right CW, rear-left CW, front-left CCW,
-  rear-right CCW. PX4 uses FRD geometry while Isaac marker positions are FLU,
-  so the USD motor names look mirrored relative to PX4's Y-right convention.
+- Rotor thrust markers are configured in PX4 motor-index order for the
+  generated Generic Quad X airframe (`none_x500_v2`): front-right CW, rear-left
+  CW, front-left CCW, rear-right CCW. PX4 uses FRD geometry while Isaac marker
+  positions are FLU, so the USD motor names look mirrored relative to PX4's
+  Y-right convention.
 - The bridge-side tilt cutoff zeros rotor forces after excessive tilt so an
   already-crashed or inverted vehicle does not keep applying thrust.
 

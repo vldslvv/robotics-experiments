@@ -131,8 +131,14 @@ pusher:
     stiffness: 800.0
     damping: 40.0
 
+# NOTE: this file is also parsed by the non-Hydra PX4 airframe generator
+# (px4/scripts/generate_px4_airframes.py, yaml.safe_load) inside the Docker px4
+# build stage. Keep it flat/literal -- no Hydra interpolation or defaults here.
 px4:
   sitl:
+    # 6001 is free in the posix airframe set (upstream ships 6001_hexa_x only in
+    # the NuttX set), so SYS_AUTOSTART=6001 deterministically selects this
+    # generated none-family hexarotor-x airframe.
     sim_model: none_hexa_x
     sys_autostart: 6001
     mav_type: 13

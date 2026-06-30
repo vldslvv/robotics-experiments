@@ -33,6 +33,11 @@ build-ros:
 		-f Dockerfile \
 		$(CURDIR)
 
+.PHONY: print-airframes
+print-airframes:
+	@uv run python px4/scripts/generate_px4_airframes.py \
+		--config-dir configs/airframes --print-manifest
+
 .PHONY: build-px4
 build-px4:
 	@echo "Building PX4 SITL image: $(PX4_IMAGE)"

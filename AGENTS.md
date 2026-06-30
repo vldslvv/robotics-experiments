@@ -187,17 +187,23 @@ the current contents and the intended home for that kind of code.
   (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
   `config._load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
   USD asset basename to the PX4 airframe defined in `configs/airframes`
-  (`quadcopter_500mm.usda` -> `none_quad_x`/`4001`,
+  (`quadcopter_500mm.usda` -> `none_x500_v2`/`4019`,
   `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
   raises `ValueError`). The Dockerfile's px4 stage generates these repo-managed
   `none_*` posix airframe scripts from `configs/airframes`, registers them in
   PX4's airframe CMake list, writes an image manifest, then runs
   `make px4_sitl_default`, so USD geometry, bridge rotor arrays, and PX4 control
-  allocation share one source.
+  allocation share one source. The `px4.sitl.sys_autostart` ids must be **free**
+  in the posix airframe set: posix `rcS` selects the airframe by globbing
+  `airframes/<id>_*` and sourcing the last match, so a stock `<id>_*` (e.g.
+  `4001_gz_x500`) would shadow a generated one. The quad therefore uses the free
+  `4019` (X500 V2) slot, not `4001`; the generator fails the build loudly on such
+  a collision (`generate_px4_airframes.py` `_conflicting_airframe_files`), with a
+  `--prune-conflicts` seam to remove a stock file and reclaim its id.
   `get_enabled_px4_instance_indices()`
   stays as a thin compat wrapper over it. The PX4 container launcher
   (`px4_iris_common.sh::launch_px4_iris`) reads `PX4_SIM_MODEL`
-  (default `none_quad_x`/`4001` only for manual unset-env launches), so the
+  (default `none_x500_v2`/`4019` only for manual unset-env launches), so the
   script-driven fleet path selects the generated per-asset airframe.
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
   each
@@ -534,7 +540,7 @@ the host. They are meant to be used in the Dockerized environment.
   `-i ${PX4_INSTANCE}` and an interactive `pxh>` console (no `-d`), from its own
   per-instance rootfs subdir, with no `instance == 0` special case in the launch,
   reset, or mount logic. A divergent instance-0 launch (`make px4_sitl_default
-  none_quad_x` for instance 0 vs. additional instances started with the binary's
+  none_x500_v2` for instance 0 vs. additional instances started with the binary's
   `-d` "no pxh shell" daemon flag) is exactly how the extra instances silently
   lost their console, so `commander takeoff` could only be entered for PX4[0].
   PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't

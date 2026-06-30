@@ -13,7 +13,11 @@ for name in HYDRA_CONFIG_HOST_PATH MAKE_CMD PX4_IMAGE; do
     require_env "${name}"
 done
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=px4_airframe_manifest_check.sh
 source "$(dirname "${BASH_SOURCE[0]}")/px4_airframe_manifest_check.sh"
+# PX4_IMAGE is a required env var (asserted above), not the helper's local px4_image.
+# shellcheck disable=SC2153
 check_px4_airframe_manifest_current "${PX4_IMAGE}"
 
 # The resolved fleet is the single source of truth: iterate the PX4-enabled

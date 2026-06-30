@@ -99,7 +99,11 @@ done
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=px4_airframe_manifest_check.sh
 source "$(dirname "${BASH_SOURCE[0]}")/px4_airframe_manifest_check.sh"
+# PX4_IMAGE is a required env var (validated above), not the helper's local px4_image.
+# shellcheck disable=SC2153
 check_px4_airframe_manifest_current "${PX4_IMAGE}"
 
 # Iterate the PX4-enabled vehicles' derived launch specs (instance index = PX4

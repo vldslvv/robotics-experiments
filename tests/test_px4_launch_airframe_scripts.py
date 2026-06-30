@@ -58,11 +58,15 @@ def test_integration_launch_derives_and_propagates_airframe():
     assert "generate_px4_airframes.py" not in integration
 
 
-def test_common_launcher_defaults_to_repo_generic_quad_x():
+def test_common_launcher_defaults_to_repo_generated_quad():
     common = _read("px4/docker/px4_iris_common.sh")
     assert 'export PX4_SIM_MODEL="none_iris"' not in common
-    assert 'export PX4_SIM_MODEL="${PX4_SIM_MODEL:-none_quad_x}"' in common
-    assert 'export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-4001}"' in common
+    # Default to the collision-free 4019 (X500 V2) slot, not 4001 (stock
+    # 4001_gz_x500 shadows a generated 4001_* in the rcS glob).
+    assert 'export PX4_SIM_MODEL="${PX4_SIM_MODEL:-none_x500_v2}"' in common
+    assert 'export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-4019}"' in common
+    assert "none_quad_x" not in common
+    assert ":-4001}" not in common
 
 
 def test_px4_docker_build_generates_airframes_from_configs():

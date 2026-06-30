@@ -55,9 +55,9 @@ launch_px4_iris() {
   # dataman / parameters / eeprom / log state never collides between instances
   # sharing the host network namespace. The airframe is selected by the caller
   # via PX4_SIM_MODEL / PX4_SYS_AUTOSTART (the host-side launch scripts derive
-  # the per-vehicle pair from the drone asset: none_quad_x/4001 quad,
-  # none_hexa_x/6001 hex), defaulting to the repo's Generic Quad X when unset by
-  # a manual/fresh launch path. There is intentionally no
+  # the per-vehicle pair from the drone asset: none_x500_v2/4019 quad,
+  # none_hexa_x/6001 hex), defaulting to the repo's generated square-X quad when
+  # unset by a manual/fresh launch path. There is intentionally no
   # `instance == 0` special case here: a divergent instance-0 launch is exactly
   # how additional instances silently lost their pxh console.
   build_path="${px4_dir}/build/px4_sitl_default"
@@ -65,8 +65,8 @@ launch_px4_iris() {
   instance_dir="${base_rootfs}/${instance}"
   mkdir -p "${instance_dir}"
   cd "${instance_dir}" || exit
-  export PX4_SIM_MODEL="${PX4_SIM_MODEL:-none_quad_x}"
-  export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-4001}"
+  export PX4_SIM_MODEL="${PX4_SIM_MODEL:-none_x500_v2}"
+  export PX4_SYS_AUTOSTART="${PX4_SYS_AUTOSTART:-4019}"
   "${build_path}/bin/px4" -i "${instance}" \
     "${build_path}/etc" \
     -s "${px4_dir}/ROMFS/px4fmu_common/init.d-posix/rcS" \

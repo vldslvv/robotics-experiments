@@ -415,7 +415,7 @@ def test_quad_default_resolves_to_generic_quad_x_airframe():
 
     launch_configs = get_enabled_px4_launch_configs()
     assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
-        (0, "none_quad_x", 4001),
+        (0, "none_x500_v2", 4019),
     ]
     reset_config()
 

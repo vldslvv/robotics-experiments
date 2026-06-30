@@ -228,12 +228,62 @@ def _write_airframe_scripts(airframes: tuple[_GeneratedAirframe, ...], output_di
         path.chmod(0o755)
 
 
+def _conflicting_airframe_files(
+    output_dir: Path, airframes: tuple[_GeneratedAirframe, ...]
+) -> dict[str, list[Path]]:
+    """Foreign posix airframe scripts that shadow a generated airframe's id.
+
+    PX4 posix ``rcS`` resolves the airframe by globbing
+    ``airframes/<SYS_AUTOSTART>_*`` and sourcing the LAST match, so any
+    non-generated ``<id>_*`` file sharing a generated airframe's
+    ``sys_autostart`` makes the selection depend on filename sort order (e.g. a
+    stock ``4001_gz_x500`` next to a generated ``4001_none_quad_x``). Returns,
+    per generated script name, the conflicting foreign files in the output dir.
+    """
+    generated = {airframe.script_name for airframe in airframes}
+    conflicts: dict[str, list[Path]] = {}
+    for airframe in airframes:
+        foreign = [
+            path
+            for path in sorted(output_dir.glob(f"{airframe.sys_autostart}_*"))
+            if path.is_file() and path.name not in generated
+        ]
+        if foreign:
+            conflicts[airframe.script_name] = foreign
+    return conflicts
+
+
+def _deregister_cmake_names(cmake_list: Path, names: list[str]) -> None:
+    text = cmake_list.read_text()
+    for name in names:
+        text = re.sub(rf"^[^\S\n]*{re.escape(name)}[^\S\n]*\n", "", text, flags=re.M)
+    cmake_list.write_text(text)
+
+
+def _resolve_airframe_conflicts(
+    conflicts: dict[str, list[Path]], *, cmake_list: Path | None, prune: bool
+) -> None:
+    flat = [(name, path) for name, paths in conflicts.items() for path in paths]
+    detail = "; ".join(f"{path.name} shadows generated {name}" for name, path in flat)
+    if not prune:
+        raise ValueError(
+            "conflicting PX4 posix airframe id(s): "
+            f"{detail}. Pick a free SYS_AUTOSTART in configs/airframes, or pass "
+            "--prune-conflicts to remove the stock file(s) so the generated "
+            "airframe is the sole match for its id."
+        )
+    pruned_names = []
+    for _name, path in flat:
+        path.unlink()
+        pruned_names.append(path.name)
+    if cmake_list is not None:
+        _deregister_cmake_names(cmake_list, pruned_names)
+
+
 def _patch_cmake_list(cmake_list: Path, script_names: tuple[str, ...]) -> None:
     text = cmake_list.read_text()
     missing = [
-        name
-        for name in script_names
-        if not re.search(rf"^\s*{re.escape(name)}\s*$", text, re.M)
+        name for name in script_names if not re.search(rf"^\s*{re.escape(name)}\s*$", text, re.M)
     ]
     if not missing:
         return
@@ -257,6 +307,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cmake-list", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--print-manifest", action="store_true")
+    parser.add_argument(
+        "--prune-conflicts",
+        action="store_true",
+        help=(
+            "Remove stock posix airframe files (and their CMake entries) that "
+            "share a generated airframe's SYS_AUTOSTART id, instead of failing."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -269,6 +327,11 @@ def _main() -> None:
 
     if args.output_dir is not None:
         _write_airframe_scripts(airframes, args.output_dir)
+        conflicts = _conflicting_airframe_files(args.output_dir, airframes)
+        if conflicts:
+            _resolve_airframe_conflicts(
+                conflicts, cmake_list=args.cmake_list, prune=args.prune_conflicts
+            )
 
     if args.cmake_list is not None:
         _patch_cmake_list(args.cmake_list, tuple(airframe.script_name for airframe in airframes))

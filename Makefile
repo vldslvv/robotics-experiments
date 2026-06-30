@@ -17,6 +17,7 @@ help:
 		'  make build-isaac           Build the Isaac Sim image' \
 		'  make build-ros             Build the ROS 2 image' \
 		'  make build-px4             Build the PX4 SITL image' \
+		'  make print-airframes       Print the generated PX4 airframe manifest (review)' \
 		'' \
 		'  make run-isaac             Start or attach the Isaac Sim container' \
 		'  make run-ros               Start or attach the ROS 2 container' \

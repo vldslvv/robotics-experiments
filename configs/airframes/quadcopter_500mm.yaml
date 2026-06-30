@@ -123,10 +123,17 @@ pusher:
     stiffness: 800.0
     damping: 40.0
 
+# NOTE: this file is also parsed by the non-Hydra PX4 airframe generator
+# (px4/scripts/generate_px4_airframes.py, yaml.safe_load) inside the Docker px4
+# build stage. Keep it flat/literal -- no Hydra interpolation or defaults here.
 px4:
   sitl:
-    sim_model: none_quad_x
-    sys_autostart: 4001
+    # Generic square-X 500mm quad -> PX4 4019 (Holybro X500 V2) geometry slot.
+    # 4019 is free in the posix airframe set, so SYS_AUTOSTART=4019 deterministically
+    # selects this generated airframe. Do NOT use 4001: posix already ships
+    # 4001_gz_x500, and a second 4001_* only "wins" the rcS glob by sort order.
+    sim_model: none_x500_v2
+    sys_autostart: 4019
     mav_type: 2
     ca_rotor_km_abs: 0.05
   bridge:
