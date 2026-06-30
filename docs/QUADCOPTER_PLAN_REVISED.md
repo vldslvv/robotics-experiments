@@ -1,5 +1,8 @@
 # Multirotor Light Switch Interaction — Revised Architecture & Task Plan (v4)
 
+> The platform decision is recorded as ADR 0001 (`docs/adr/`); this doc is the
+> full architecture and task plan behind it.
+
 ## Overview
 
 A simulated multirotor in Isaac Sim that can navigate to light switches on a warehouse wall, apply pressure to toggle them, and detect whether the associated lamp turned on or off. The system combines classical robotics for navigation and perception with RL for the fine-grained contact-based switch pressing task.

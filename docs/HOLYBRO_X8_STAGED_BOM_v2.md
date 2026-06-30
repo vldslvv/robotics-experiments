@@ -1,5 +1,8 @@
 # Holybro X500 V2 Staged Build — Quad to X8 Coaxial BOM (v2)
 
+> The staged-platform decision is recorded as ADR 0001 (`docs/adr/`); this doc is
+> the full BOM and propulsion analysis behind it.
+
 ## Overview
 
 This document specifies a two-stage drone build on the Holybro X500 V2 frame, engineered for indoor autonomous operation with a switch-pressing contact task. The build starts as a conventional X4 quadcopter (Stage 1) and upgrades to an X8 coaxial octocopter (Stage 2) by adding four additional motors, ESCs, and propellers to the undersides of the existing four arms.

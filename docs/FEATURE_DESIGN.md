@@ -1,5 +1,8 @@
 # Feature Design
 
+> The layering decision is recorded as ADR 0002 (`docs/adr/`); this doc is the
+> living convention behind it.
+
 This repository splits each Isaac-facing feature into shared core behavior,
 Kit extension wiring, and standalone workflow coverage. Keep changes scoped to
 the layer that owns the behavior being changed.
