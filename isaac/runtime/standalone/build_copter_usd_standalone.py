@@ -540,6 +540,11 @@ def build_drone_usd(
 
     stage.SetDefaultPrim(wrapper.GetPrim())
     stage.Export(stage_path)
+    # OpenUSD's .usda text exporter ends the file with a trailing blank line
+    # ("}\n\n"); normalize to a single trailing newline so the generated asset is
+    # already end-of-file-fixer clean and regenerating it is a no-op diff.
+    stage_file = Path(stage_path)
+    stage_file.write_text(stage_file.read_text().rstrip("\n") + "\n")
     return stage_path
 
 
