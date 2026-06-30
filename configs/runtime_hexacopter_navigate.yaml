@@ -26,6 +26,7 @@ routine:
 
 vehicles:
   - id: 0
+    ros: {namespace: /s550_01}
     spawn_xy: [0.0, -2.0]
     drone:
       usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda

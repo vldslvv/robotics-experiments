@@ -19,11 +19,13 @@ scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 # Multi-vehicle scaffolding. Each entry merges its drone/px4 over the global
 # drone/px4 defaults above. One entry = today's single-drone behavior; an empty
 # list is a valid empty fleet. Add entries (distinct id, prim_name, spawn_xy) to
-# add drones. id is the single authored identity: the MAVLink port
-# (4560 + id), the PX4 -i index, and the per-vehicle log token are all derived
-# from it. An omitted drone/px4 means "use the global defaults".
+# add drones. id is the PX4 numeric identity: the MAVLink port (4560 + id),
+# the PX4 -i index, and the per-vehicle log token are all derived from it.
+# ros.namespace is the explicit operator-facing ROS identity used by sim and
+# real onboard stacks. An omitted drone/px4 means "use the global defaults".
 vehicles:
   - id: 0
+    ros: {namespace: /x500_01}
     spawn_xy: [0.0, 0.0]
 
 # Two-vehicle example (commented). The second vehicle uses a different asset and
@@ -31,7 +33,9 @@ vehicles:
 #
 # vehicles:
 #   - id: 0
+#     ros: {namespace: /x500_01}
 #     spawn_xy: [0.0, 0.0]
 #   - id: 1
+#     ros: {namespace: /s550_01}
 #     spawn_xy: [2.0, 0.0]
 #     drone: {usd_path: /isaac-sim/proj/assets/other_drone.usda, prim_name: Drone1}

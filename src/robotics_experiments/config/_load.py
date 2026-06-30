@@ -66,9 +66,13 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
     endpoints: set[tuple[str, str, int]] = set()
     prim_names: set[str] = set()
     log_paths: set[str] = set()
+    ros_namespaces: set[str] = set()
+    ros_frame_prefixes: set[str] = set()
     for v in vehicles:
         if len(v.spawn_xy) != 2:
             raise ValueError(f"vehicle id={v.id} spawn_xy must have length 2, got {v.spawn_xy!r}")
+        if v.id < 0:
+            raise ValueError(f"vehicle id must be non-negative, got {v.id}")
         if v.id in ids:
             raise ValueError(f"duplicate vehicle id={v.id}")
         ids.add(v.id)
@@ -84,6 +88,19 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
             )
         prim_names.add(v.prim_name)
 
+        if v.ros_namespace in ros_namespaces:
+            raise ValueError(
+                f"duplicate vehicle ros.namespace {v.ros_namespace!r} (vehicle id={v.id})"
+            )
+        ros_namespaces.add(v.ros_namespace)
+
+        if v.ros_frame_prefix in ros_frame_prefixes:
+            raise ValueError(
+                f"duplicate vehicle ROS frame prefix {v.ros_frame_prefix!r} "
+                f"(vehicle id={v.id})"
+            )
+        ros_frame_prefixes.add(v.ros_frame_prefix)
+
         # debug_log_path already has the {vehicle} token rendered to id; the
         # date/time tokens stay literal here. Two vehicles whose template lacks
         # {vehicle} render identically and would overwrite each other's logs.
@@ -95,6 +112,44 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
                     f"(vehicle id={v.id}); add a {{vehicle}} token to disambiguate"
                 )
             log_paths.add(v.debug_log_path)
+
+
+def _resolve_ros_namespace(entry, *, vehicle_id: int) -> str:
+    ros = entry.get("ros")
+    if ros is None or "namespace" not in ros:
+        raise ValueError(f"vehicle id={vehicle_id} must define ros.namespace")
+
+    namespace = ros["namespace"]
+    if not isinstance(namespace, str):
+        raise ValueError(
+            f"vehicle id={vehicle_id} ros.namespace must be a string, "
+            f"got {type(namespace).__name__}"
+        )
+    if namespace != namespace.strip():
+        raise ValueError(
+            f"vehicle id={vehicle_id} ros.namespace must not contain leading or "
+            f"trailing whitespace, got {namespace!r}"
+        )
+    if not namespace.startswith("/"):
+        raise ValueError(
+            f"vehicle id={vehicle_id} ros.namespace must be absolute, got {namespace!r}"
+        )
+    if namespace == "/":
+        raise ValueError(f"vehicle id={vehicle_id} ros.namespace must not be root '/'")
+    if namespace.endswith("/"):
+        raise ValueError(
+            f"vehicle id={vehicle_id} ros.namespace must not end with '/', got {namespace!r}"
+        )
+    if "//" in namespace:
+        raise ValueError(
+            f"vehicle id={vehicle_id} ros.namespace must not contain empty segments, "
+            f"got {namespace!r}"
+        )
+    return namespace
+
+
+def _ros_frame_prefix_from_namespace(namespace: str) -> str:
+    return namespace.removeprefix("/").replace("/", "_")
 
 
 def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
@@ -122,6 +177,7 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
         px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
         routine_cfg = cast(RoutineConfig, OmegaConf.to_object(routine))
         vehicle_id = int(entry["id"])
+        ros_namespace = _resolve_ros_namespace(entry, vehicle_id=vehicle_id)
         resolved.append(
             ResolvedVehicle(
                 id=vehicle_id,
@@ -132,6 +188,8 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
                 mavlink_port=px4_cfg.connection_baseport + vehicle_id,
                 px4_instance_index=vehicle_id,
                 gcs_port=px4_cfg.gcs_baseport + vehicle_id,
+                ros_namespace=ros_namespace,
+                ros_frame_prefix=_ros_frame_prefix_from_namespace(ros_namespace),
                 debug_log_path=px4_cfg.debug_log_path.replace("{vehicle}", str(vehicle_id)),
                 prim_name=drone_cfg.prim_name,
             )

@@ -21,6 +21,7 @@ routine:
 
 vehicles:
   - id: 0
+    ros: {namespace: /x500_01}
     spawn_xy: [0.0, -2.0]
     drone: {prim_name: Drone0}
     routine:

@@ -6,6 +6,7 @@ __all__ = [
     "DroneConfig",
     "BoundingBox",
     "RosQosConfig",
+    "RosVehicleConfig",
     "LightSwitchStatePublisherConfig",
     "LightSwitchConfig",
     "LockstepConfig",
@@ -100,6 +101,19 @@ class RosQosConfig:
     durability: str
     reliability: str
     history: str
+
+
+@dataclass
+class RosVehicleConfig:
+    """Per-vehicle ROS graph identity.
+
+    Attributes:
+        namespace: Absolute ROS namespace for this vehicle, such as
+            ``"/x500_01"``. Authored per vehicle so real fleet names can stay
+            stable independently of the numeric runtime ``id`` used by PX4.
+    """
+
+    namespace: str
 
 
 @dataclass
@@ -304,16 +318,18 @@ class VehicleConfig:
     The pure authored config object. ``drone`` and ``px4`` are fully resolved
     (the global ``EnvConfig`` defaults merged with the per-vehicle override).
     ``spawn_xy`` is the world X/Y; Z is computed from asset bounds at spawn; yaw
-    is 0. ``id`` is the sole authored identity: the MAVLink port, PX4 ``-i``
+    is 0. ``id`` is the PX4 numeric identity: the MAVLink port, PX4 ``-i``
     index, and per-vehicle log token are all derived from it (see
-    :class:`ResolvedVehicle`), never hand-set.
+    :class:`ResolvedVehicle`), never hand-set. ``ros.namespace`` is the explicit
+    operator-facing ROS identity.
 
     Attributes:
-        id: Stable, unique vehicle identifier within the scene; the single
-            source of every derived per-vehicle runtime value.
+        id: Stable, unique numeric vehicle identifier within the scene; the
+            source of the derived PX4 runtime values.
         spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
         drone: Fully resolved per-vehicle drone spawner configuration.
         px4: Fully resolved per-vehicle PX4 bridge configuration.
+        ros: Per-vehicle ROS identity.
         routine: Fully resolved per-vehicle flight routine (the global
             ``routine`` with this vehicle's partial merged over it). A non-empty
             ``routine.steps`` makes this drone fly; empty means manual.
@@ -323,6 +339,7 @@ class VehicleConfig:
     spawn_xy: Tuple[float, float]
     drone: DroneConfig
     px4: Px4BridgeConfig
+    ros: RosVehicleConfig
     routine: "RoutineConfig"
 
 
@@ -333,11 +350,11 @@ class ResolvedVehicle:
     Produced by the single enrichment step ``config._load._resolve_fleet`` from a
     :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
     the host-side PX4 launch) reads the derived fields here instead of
-    recomputing ``connection_baseport + id`` ad hoc. ``id`` is the sole identity
-    and drives every derived value.
+    recomputing ``connection_baseport + id`` ad hoc. ``id`` drives the PX4
+    numeric runtime values; ``ros_namespace`` is the ROS graph identity.
 
     Attributes:
-        id: Stable, unique vehicle identifier (the sole authored identity).
+        id: Stable, unique numeric vehicle identifier.
         spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
         drone: Fully resolved per-vehicle drone spawner configuration.
         px4: Fully resolved per-vehicle PX4 bridge configuration.
@@ -352,6 +369,12 @@ class ResolvedVehicle:
             standalone takeoff scenario's GCS endpoint); the bridge itself does
             not use it. Folding it here keeps ``ResolvedVehicle`` the single home
             for every port the project derives from ``id``.
+        ros_namespace: Authored absolute ROS namespace for per-drone topics,
+            nodes, services, actions, and parameters.
+        ros_frame_prefix: Relative frame prefix derived from
+            ``ros_namespace`` for future per-drone TF/message frame IDs. Nested
+            namespaces use underscores here (``/fleet_a/x500_01`` ->
+            ``fleet_a_x500_01``).
         debug_log_path: ``px4.debug_log_path`` with the ``{vehicle}`` token
             rendered to ``id``; ``{date}`` / ``{time}`` tokens stay for runtime.
         prim_name: ``drone.prim_name`` passthrough; the full USD ``prim_path``
@@ -367,6 +390,8 @@ class ResolvedVehicle:
     mavlink_port: int
     px4_instance_index: int
     gcs_port: int
+    ros_namespace: str
+    ros_frame_prefix: str
     debug_log_path: str
     prim_name: str
 

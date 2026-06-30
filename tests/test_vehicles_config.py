@@ -57,6 +57,7 @@ def _resolved_vehicle(
     connection_baseport=None,
     debug_log_path=None,
     gcs_port=None,
+    ros_namespace=None,
 ):
     """Build a ``ResolvedVehicle`` with consistent derived fields for tests.
 
@@ -82,6 +83,12 @@ def _resolved_vehicle(
         mavlink_port=port,
         px4_instance_index=vehicle_id,
         gcs_port=gcs_port if gcs_port is not None else 14550 + vehicle_id,
+        ros_namespace=ros_namespace if ros_namespace is not None else f"/x500_{vehicle_id + 1:02d}",
+        ros_frame_prefix=(
+            ros_namespace.removeprefix("/").replace("/", "_")
+            if ros_namespace is not None
+            else f"x500_{vehicle_id + 1:02d}"
+        ),
         debug_log_path=px4.debug_log_path.replace("{vehicle}", str(vehicle_id)),
         prim_name=prim_name,
     )
@@ -94,9 +101,10 @@ def test_resolve_fleet_merges_partial_over_globals_and_derives_fields():
 
     cfg = _composed_cfg(
         [
-            {"id": 0, "spawn_xy": [0.0, 0.0]},
+            {"id": 0, "ros": {"namespace": "/x500_01"}, "spawn_xy": [0.0, 0.0]},
             {
                 "id": 1,
+                "ros": {"namespace": "/x500_02"},
                 "spawn_xy": [2.0, 0.0],
                 "drone": {"prim_name": "Drone1"},
                 "px4": {"max_tilt_angle_deg": 45.0},
@@ -123,6 +131,10 @@ def test_resolve_fleet_merges_partial_over_globals_and_derives_fields():
     assert vehicles[1].px4_instance_index == 1
     assert vehicles[0].gcs_port == 14550
     assert vehicles[1].gcs_port == 14551
+    assert vehicles[0].ros_namespace == "/x500_01"
+    assert vehicles[1].ros_namespace == "/x500_02"
+    assert vehicles[0].ros_frame_prefix == "x500_01"
+    assert vehicles[1].ros_frame_prefix == "x500_02"
     assert vehicles[0].prim_name == base_drone.prim_name
     assert vehicles[1].prim_name == "Drone1"
     # The {vehicle} token is rendered to id; date/time tokens stay for runtime.
@@ -145,8 +157,13 @@ def test_resolve_fleet_supports_non_contiguous_ids():
 
     cfg = _composed_cfg(
         [
-            {"id": 0, "spawn_xy": [0.0, 0.0]},
-            {"id": 5, "spawn_xy": [2.0, 0.0], "drone": {"prim_name": "Drone5"}},
+            {"id": 0, "ros": {"namespace": "/x500_01"}, "spawn_xy": [0.0, 0.0]},
+            {
+                "id": 5,
+                "ros": {"namespace": "/x500_06"},
+                "spawn_xy": [2.0, 0.0],
+                "drone": {"prim_name": "Drone5"},
+            },
         ]
     )
 
@@ -157,6 +174,8 @@ def test_resolve_fleet_supports_non_contiguous_ids():
     assert [v.mavlink_port for v in vehicles] == [4560, 4565]
     assert [v.px4_instance_index for v in vehicles] == [0, 5]
     assert [v.gcs_port for v in vehicles] == [14550, 14555]
+    assert [v.ros_namespace for v in vehicles] == ["/x500_01", "/x500_06"]
+    assert [v.ros_frame_prefix for v in vehicles] == ["x500_01", "x500_06"]
 
 
 def _two_vehicles(**v1_overrides):
@@ -251,5 +270,7 @@ def test_default_config_composes_to_one_vehicle_equal_to_globals():
     assert vehicle.mavlink_port == 4560
     assert vehicle.px4_instance_index == 0
     assert vehicle.gcs_port == 14550
+    assert vehicle.ros_namespace == "/x500_01"
+    assert vehicle.ros_frame_prefix == "x500_01"
     assert vehicle.prim_name == env.drone.prim_name
     reset_config()

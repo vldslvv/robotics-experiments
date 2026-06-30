@@ -16,6 +16,7 @@ routine:
 # instance, MAVLink simulator port, and GCS port.
 vehicles:
   - id: 0
+    ros: {namespace: /x500_01}
     spawn_xy: [0.0, -2.0]
     drone: {prim_name: Drone0}
     routine:
@@ -32,6 +33,7 @@ vehicles:
         - kind: land
           timeout_s: 30.0
   - id: 1
+    ros: {namespace: /x500_02}
     spawn_xy: [0.0, 2.0]
     drone: {prim_name: Drone1}
     routine:

@@ -23,7 +23,7 @@ connection_type: tcpin
 connection_ip: localhost
 # Base port; the per-vehicle simulator port is connection_baseport + vehicle.id
 # (derived in config._load._resolve_fleet). There is no per-vehicle vehicle_id
-# knob: id is the single authored identity.
+# knob: id is the PX4 numeric identity.
 connection_baseport: 4560
 # Base UDP port for the per-vehicle GCS MAVLink link; the resolved per-vehicle
 # port is gcs_baseport + vehicle.id (derived in config._load._resolve_fleet onto

@@ -235,6 +235,8 @@ def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_over
         mavlink_port=px4.connection_baseport + vehicle_id,
         px4_instance_index=vehicle_id,
         gcs_port=14550 + vehicle_id,
+        ros_namespace=f"/x500_{vehicle_id + 1:02d}",
+        ros_frame_prefix=f"x500_{vehicle_id + 1:02d}",
         debug_log_path=px4.debug_log_path.replace("{vehicle}", str(vehicle_id)),
         prim_name=prim_name,
     )

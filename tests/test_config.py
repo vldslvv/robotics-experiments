@@ -97,6 +97,8 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.routine.max_tilt_deg == expected_routine.max_tilt_deg
     assert config.px4.gcs_baseport == 14550
     assert config.scene.endswith("/Warehouse.usd")
+    assert config.vehicles[0].ros_namespace == "/x500_01"
+    assert config.vehicles[0].ros_frame_prefix == "x500_01"
     reset_config()
 
 
@@ -153,6 +155,8 @@ def test_two_drone_forward_land_config_composes(monkeypatch):
         (0, (0.0, -2.0), "Drone0"),
         (1, (0.0, 2.0), "Drone1"),
     ]
+    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/x500_02"]
+    assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["x500_01", "x500_02"]
     assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
         ["arm", "takeoff", "hover", "forward", "land"],
         ["arm", "takeoff", "hover", "forward", "land"],
@@ -221,6 +225,8 @@ def test_two_hexacopter_circle_land_config_composes(monkeypatch):
         (0, (0.0, -2.0), "Hexacopter0"),
         (1, (0.0, 2.0), "Hexacopter1"),
     ]
+    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/s550_01", "/s550_02"]
+    assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["s550_01", "s550_02"]
     for vehicle in config.vehicles:
         assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
         assert len(vehicle.px4.input_offset) == 6
@@ -257,6 +263,8 @@ def test_hexacopter_navigate_config_composes(monkeypatch):
         (0, (0.0, -2.0), "Hexacopter0"),
     ]
     vehicle = config.vehicles[0]
+    assert vehicle.ros_namespace == "/s550_01"
+    assert vehicle.ros_frame_prefix == "s550_01"
     assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
     assert len(vehicle.px4.input_scaling) == 6
     assert [step["kind"] for step in vehicle.routine.steps] == [
@@ -333,10 +341,16 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
             "routine": env.routine,
             "vehicles": [
                 # Drone 0 inherits the (empty) global routine -> manual.
-                {"id": 0, "spawn_xy": [0.0, 0.0], "drone": {"prim_name": "Drone0"}},
+                {
+                    "id": 0,
+                    "ros": {"namespace": "/x500_01"},
+                    "spawn_xy": [0.0, 0.0],
+                    "drone": {"prim_name": "Drone0"},
+                },
                 # Drone 1 overrides only steps and one gate -> flies its own routine.
                 {
                     "id": 1,
+                    "ros": {"namespace": "/x500_02"},
                     "spawn_xy": [4.0, 0.0],
                     "drone": {"prim_name": "Drone1"},
                     "routine": {
@@ -357,6 +371,124 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
     # The per-vehicle override changed only the named keys; the rest inherits.
     assert fleet[1].routine.max_tilt_deg == 20.0
     assert fleet[0].routine.max_tilt_deg == env.routine.max_tilt_deg
+    reset_config()
+
+
+def test_resolve_fleet_requires_ros_namespace():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+
+    reset_config()
+    env = get_config()
+    cfg = OmegaConf.create(
+        {
+            "drone": env.drone,
+            "px4": env.px4,
+            "routine": env.routine,
+            "vehicles": [{"id": 0, "spawn_xy": [0.0, 0.0]}],
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"vehicle id=0 must define ros\.namespace"):
+        resolve_fleet(cfg)
+    reset_config()
+
+
+@pytest.mark.parametrize(
+    ("namespace", "match"),
+    [
+        ("x500_01", "must be absolute"),
+        ("/", "must not be root"),
+        ("/x500_01/", "must not end with"),
+        ("/fleet//x500_01", "empty segments"),
+        (" /x500_01", "whitespace"),
+    ],
+)
+def test_resolve_fleet_rejects_invalid_ros_namespace(namespace, match):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+
+    reset_config()
+    env = get_config()
+    cfg = OmegaConf.create(
+        {
+            "drone": env.drone,
+            "px4": env.px4,
+            "routine": env.routine,
+            "vehicles": [{"id": 0, "ros": {"namespace": namespace}, "spawn_xy": [0.0, 0.0]}],
+        }
+    )
+
+    with pytest.raises(ValueError, match=match):
+        resolve_fleet(cfg)
+    reset_config()
+
+
+@pytest.mark.parametrize(
+    ("vehicles", "match"),
+    [
+        (
+            [
+                {"id": 0, "ros": {"namespace": "/x500_01"}, "spawn_xy": [0.0, 0.0]},
+                {
+                    "id": 1,
+                    "ros": {"namespace": "/x500_01"},
+                    "spawn_xy": [4.0, 0.0],
+                    "drone": {"prim_name": "Drone1"},
+                },
+            ],
+            "duplicate vehicle ros.namespace",
+        ),
+        (
+            [
+                {"id": 0, "ros": {"namespace": "/fleet/a_b"}, "spawn_xy": [0.0, 0.0]},
+                {
+                    "id": 1,
+                    "ros": {"namespace": "/fleet_a/b"},
+                    "spawn_xy": [4.0, 0.0],
+                    "drone": {"prim_name": "Drone1"},
+                },
+            ],
+            "duplicate vehicle ROS frame prefix",
+        ),
+        (
+            [{"id": -1, "ros": {"namespace": "/x500_01"}, "spawn_xy": [0.0, 0.0]}],
+            "vehicle id must be non-negative",
+        ),
+    ],
+)
+def test_resolve_fleet_validates_ros_identity(vehicles, match):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import get_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+
+    reset_config()
+    env = get_config()
+    cfg = OmegaConf.create(
+        {
+            "drone": env.drone,
+            "px4": env.px4,
+            "routine": env.routine,
+            "vehicles": vehicles,
+        }
+    )
+
+    with pytest.raises(ValueError, match=match):
+        resolve_fleet(cfg)
     reset_config()
 
 
@@ -511,5 +643,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     assert [vehicle.mavlink_port for vehicle in config.vehicles] == [4560, 4561]
     # gcs_port is derived from px4.gcs_baseport + id.
     assert [vehicle.gcs_port for vehicle in config.vehicles] == [14550, 14551]
+    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/x500_02"]
+    assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["x500_01", "x500_02"]
     assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
     reset_config()

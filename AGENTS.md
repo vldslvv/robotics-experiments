@@ -162,22 +162,29 @@ the current contents and the intended home for that kind of code.
   behavior), and an empty list `vehicles: []` is a valid empty fleet (0..N is
   handled uniformly -- the extension spawns nothing, runs an empty
   `BridgeHostGroup`, and `run-px4` starts zero containers). Each entry has an
-  `id`, a `spawn_xy`, and partial `drone`/`px4` overrides. `id` is the **sole
-  authored identity**: there is no `px4.vehicle_id` knob -- the MAVLink port, the
-  PX4 `-i` instance index, the per-vehicle log `{vehicle}` token, and the GCS
-  link offset are all *derived* from `id`. One private enrichment step
-  (`config._load._resolve_fleet`) merges each entry's `drone`/`px4` partials over
-  the global `drone`/`px4` defaults (`OmegaConf.merge`) into a pure
-  `VehicleConfig`, then constructs an immutable `ResolvedVehicle` carrying that
-  config plus the derived runtime fields: `mavlink_port`
+  `id`, a mandatory `ros.namespace`, a `spawn_xy`, and partial `drone`/`px4`
+  overrides. `id` is the PX4 numeric identity: there is no `px4.vehicle_id` knob
+  -- the MAVLink port, the PX4 `-i` instance index, the per-vehicle log
+  `{vehicle}` token, and the GCS link offset are all *derived* from `id`.
+  `ros.namespace` is the explicit operator-facing ROS identity for sim and real
+  onboard stacks (for example `/x500_01`); it is not derived from `id`. One
+  private enrichment step (`config._load._resolve_fleet`) merges each entry's
+  `drone`/`px4` partials over the global `drone`/`px4` defaults
+  (`OmegaConf.merge`) into a pure `VehicleConfig`, then constructs an immutable
+  `ResolvedVehicle` carrying that config plus the derived runtime fields:
+  `mavlink_port`
   (`= px4.connection_baseport + id`), `px4_instance_index` (`= id`),
   `gcs_port` (`= px4.gcs_baseport + id`, the per-drone GCS MAVLink link
   used by control/test code; the bridge itself does not use it),
+  `ros_namespace` (the authored absolute ROS namespace), `ros_frame_prefix`
+  (derived from `ros_namespace` by stripping the leading slash and replacing
+  nested `/` with `_`, for future TF/message frame IDs),
   `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
   stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
   bridge host, the host-side PX4 launch, the standalone scenario's GCS endpoint)
   reads these derived fields instead of recomputing `baseport + id`. `_resolve_fleet` validates the resolved fleet
-  (`_validate_fleet` -- duplicate id/endpoint/`prim_name`, bad `spawn_xy`, or
+  (`_validate_fleet` -- missing/invalid/duplicate ROS namespace or derived frame
+  prefix, duplicate id/endpoint/`prim_name`, bad `spawn_xy`, negative id, or
   colliding `debug_log_path` raise a `ValueError` at resolution time).
   `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch
   scripts read `get_enabled_px4_launch_configs()` (the launch loop's source of
