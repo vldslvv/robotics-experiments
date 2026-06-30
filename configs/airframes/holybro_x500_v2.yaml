@@ -20,11 +20,18 @@ prim_name: holybro_x500_v2
 
 # Frame: Holybro X500 V2 carbon center plate. Its mass folds in the frame kit,
 # landing gear, and mounting hardware (the booms below are massless geometry).
+# Vendor / producer spec: Holybro X500 V2 frame kit mechanical spec
+# https://docs.holybro.com/drone-development-kit/px4-development-kit-x500v2
+# Verified vendor values: frame body 144 x 144 mm, 2 mm plates; 28 mm between
+# plates; 500 mm wheelbase; 16 mm arm tubes; 215 mm landing gear; 610 g frame-kit
+# weight. The box height below approximates the top+bottom plate stack envelope
+# (2 mm + 28 mm + 2 mm) for USD inertia, while the 610 g mass folds in the frame
+# kit, arms, landing gear, rails, and mounting hardware.
 center_plate:
-  name: Holybro X500 V2 carbon center plate + frame
-  size: [0.13, 0.13, 0.006]  # ~2mm CF twill plates, 130mm-class stack -- BOM 1.1
+  name: Holybro X500 V2 frame kit body + arms + landing gear
+  size: [0.144, 0.144, 0.032]  # 144x144mm body, ~32mm plate-stack envelope
   position: [0.0, 0.0, 0.0]
-  mass: 0.555  # frame 410 + landing gear 110 + isolators/mount 35 -- BOM 1.1
+  mass: 0.610  # X500 V2 frame kit weight
 
 # Geometry of one arm, authored once and shared by every arm. All positions are
 # in the arm-local frame: +X points outboard along the boom, and the per-arm
@@ -32,29 +39,46 @@ center_plate:
 # no rotation -- its long (X) axis is already along the boom -- and the motor/prop
 # sit at the boom tip (radial = boom.length).
 arm_geometry:
+  # Vendor / producer spec: same Holybro X500 V2 frame kit page as above.
+  # Verified: 16 mm carbon-fiber arm tube; 500 mm diagonal wheelbase implies
+  # motor radius 0.25 m for a symmetric X frame.
   boom:
     name: X500 V2 16mm carbon-fiber tube arm
     radius: 0.008  # 16mm OD CF tube -- BOM 1.1
     # X500 V2 is a 500mm DIAGONAL wheelbase, so the motor sits 0.25m from center
     # (adjacent spacing = 0.25*sqrt(2) = 0.354m). -- BOM 1.1 / Appendix C
     length: 0.25
+  # Vendor / producer spec: T-Motor Antigravity MN4006 EVO
+  # https://uav-en.tmotor.com/2024/Antigravity_0523/1183.html
+  # Verified current producer values: motor size Ø44.1 x 29.3 mm; weight 73 g
+  # including cable; KV380. Older BOM value was 68 g.
   motor:
     name: T-Motor MN4006 EVO KV380
-    radius: 0.0225  # 40x06 stator, ~45mm can OD -- BOM 1.2
-    height: 0.025
+    radius: 0.02205  # Ø44.1mm / 2
+    height: 0.0293
     position: [0.25, 0.0, 0.025]  # boom tip, radial = boom.length
-    mass: 0.068  # 68g/motor -- BOM 1.2
+    mass: 0.073  # 73g/motor including cable
+  # Vendor spec: HGLRC BS30A BLHeli_S 30A ESC
+  # https://www.hglrc.com/products/1pc-hglrc-bs30a-blheli-s-30a-esc-black
+  # Verified board values from retail/vendor specs: 26 x 14.5 mm, 2.2 g without
+  # cables. Height is not consistently listed, so 4 mm remains a geometry proxy.
+  # Power/signal wire mass is folded into the wiring lump.
   esc:
     name: HGLRC BS30A BLHeli_S
-    size: [0.026, 0.0145, 0.004]  # 26 x 14.5mm -- BOM 1.3
+    size: [0.026, 0.0145, 0.004]  # 26x14.5mm board, height proxy
     position: [0.125, 0.0, 0.005]  # mid-boom (boom.length / 2)
-    mass: 0.006  # 6g/ESC -- BOM 1.3
+    mass: 0.0022  # 2.2g without cables
+  # Producer spec: T-Motor P13x4.4 carbon-fiber propeller
+  # https://www.ligpower.com/product/13x4-4-polish-carbon-fiber-propeller.html
+  # Verified values: 13 x 4.4 in / 330.2 x 111.8 mm, 2-blade integrated,
+  # CF+epoxy, optimum 5000-8000 RPM. Available specifications list about 14.2 g
+  # per propeller; older BOM value was 7 g and was likely too low.
   propeller:
     name: T-Motor P134.4 13x4.4 CF
-    radius: 0.16510  # 13 inch diameter / 2 -- BOM 1.2
+    radius: 0.16510  # 13 inch diameter / 2
     height: 0.002
     position: [0.25, 0.0, 0.04]
-    mass: 0.007  # 7g/prop -- BOM 1.2
+    mass: 0.0142  # 14.2g/prop
     num_blades: 2
 
 # One placement per physical arm: the sole heading source (azimuth_deg) plus the
@@ -77,18 +101,31 @@ arms:
     spin_dir: CW
     px4_motor_index: 0
 
+# Vendor spec: Holybro Pixhawk 6C technical specification
+# https://docs.holybro.com/autopilot/pixhawk-6c/technical-specification
+# Verified vendor values for Pixhawk 6C: 84.8 x 44 x 12.4 mm; 34.6 g plastic
+# case or 59.3 g aluminum case. This config selects the plastic-case controller.
 pixhawk:
-  name: Holybro Pixhawk 6C
-  size: [0.050, 0.038, 0.016]
+  name: Holybro Pixhawk 6C plastic case
+  size: [0.0848, 0.044, 0.0124]
   position: [0.0, 0.0, 0.008]
-  mass: 0.035  # 35g -- BOM 1.5
+  mass: 0.0346
 
+# Producer spec: NVIDIA Jetson Orin Nano Developer Kit carrier/mechanical spec
+# https://developer.nvidia.com/downloads/assets/embedded/secure/jetson/orin_nano/docs/jetson_orin_nano_devkit_carrier_board_specification_sp.pdf
+# Verification note: NVIDIA lists dev kit envelope 103 x 90.5 x 34.77 mm and
+# 0.175 kg. The 0.233 kg mass below includes SSD, BEC, mounts, and cables from
+# the BOM; the size is a simplified mounted-compute proxy.
 jetson:
-  name: NVIDIA Jetson Orin Nano Super (carrier)
+  name: NVIDIA Jetson Orin Nano Super mounted compute package
   size: [0.100, 0.080, 0.030]
   position: [-0.03, 0.0, 0.015]
-  mass: 0.233  # Orin Nano 165 + SSD 8 + BEC 12 + cables/mount 48 -- BOM 1.6
+  mass: 0.233  # package mass: dev kit + SSD/BEC/cables/mounts; not bare dev-kit mass
 
+# Producer spec: Intel/RealSense D435i product page and D400-series datasheet
+# https://realsenseai.com/products/depth-camera-d435i/
+# https://realsenseai.com/wp-content/uploads/2024/10/Intel-RealSense-D400-Series-Datasheet-October-2024.pdf
+# Verified: 90 x 25 x 25 mm and ~72 g match the D435i spec.
 realsense:
   name: Intel RealSense D435i
   size: [0.090, 0.025, 0.025]
@@ -96,6 +133,12 @@ realsense:
   mass: 0.072  # 72g -- BOM 1.7
   rotation_deg: [0.0, -15.0, 0.0]
 
+# Vendor specs: Holybro PMW3901 optical-flow module + ST VL53L1X ToF sensor
+# https://holybro.com/products/pmw3901-optical-flow-sensor
+# https://www.st.com/resource/en/datasheet/vl53l1x.pdf
+# Verification note: Holybro PMW3901 alone is 14 x 11 x 5 mm and 0.6 g;
+# VL53L1X is a separate ToF sensor/package. The combined 20 x 20 x 5 mm / 15 g
+# entry is a mounted assembly proxy, not a direct vendor module spec.
 optical_flow:
   name: Holybro PMW3901 optical flow + VL53L1X ToF
   size: [0.020, 0.020, 0.005]
@@ -103,6 +146,9 @@ optical_flow:
   mass: 0.015  # 15g module -- BOM 1.7
   rotation_deg: [180.0, 0.0, 0.0]
 
+# Producer spec: Slamtec RPLIDAR A2 / A2M12 specification
+# https://www.slamtec.com/en/lidar/a2spec
+# Verified: 76 mm diameter, 41 mm height, 190 g match the A2M12 spec.
 lidar:
   name: Slamtec RPLiDAR A2M12
   radius: 0.038
@@ -110,25 +156,47 @@ lidar:
   position: [0.0, 0.0, 0.0205]
   mass: 0.190  # 190g -- BOM 1.7
 
+# Candidate vendor specs for manual build verification:
+# - Exact nominal config match, Tattu 4S 5000 mAh 50C Bashing pack:
+#   https://www.motionew.com/shop/power-solution/battery-lipo-4s-5000mah-50c-tattu-bashing/
+# - Producer 4S UAV/drone series, closest current listed pack is 5200 mAh 35C:
+#   https://www.grepow.com/uav-battery/tattu-4s-lipo-drone-battery.html
+# Verification note: the current 460 g mass and 140 x 45 x 25 mm proxy do not
+# match the exact 5000 mAh Tattu vendor page found during audit (132 x 42 x
+# 32 mm, 390 g) or Grepow's listed 5200 mAh UAV pack (133 x 45 x 33.5 mm,
+# 436.5 g). Select an exact SKU before procurement.
 battery:
   name: Tattu 4S 5000 mAh LiPo
-  size: [0.140, 0.045, 0.025]  # 132 x 42 x 32mm -- BOM 1.4
+  size: [0.140, 0.045, 0.025]  # UNVERIFIED exact SKU; physical size must be rechecked
   position: [0.0, 0.0, -0.03]
-  mass: 0.460  # 460g -- BOM 1.4
+  mass: 0.460  # UNVERIFIED exact SKU; conservative BOM mass
 
+# Vendor/spec links for components folded into this lump:
+# - Holybro PM07 power module: https://docs.holybro.com/power-module-and-pdb/power-module/pm07-quick-start-guide
+# - Holybro M9N GPS: https://holybro.com/products/m9n-gps
+# - Holybro SiK Telemetry Radio V3: https://docs.holybro.com/radio/sik-telemetry-radio-v3
+# - X500 V2 frame kit / mounting hardware: https://docs.holybro.com/drone-development-kit/px4-development-kit-x500v2
+# Verification note: this is intentionally a residual mass lump, not a single
+# vendor component. PM07 and GPS masses are vendor-verifiable; prop guards, RC
+# receiver, connectors, and miscellaneous mounting must be turned into exact
+# BOM SKUs if the physical build needs line-by-line procurement verification.
 wiring:
   # Lump for hardware not modeled as its own geometry (per the no-new-geometry
   # scope). Tuned so the body mass sum (excluding the 0.040 kg pusher pad) is
-  # ~2.211 kg, giving ~2.251 kg AUW with the pad -- BOM Stage 1 weight budget.
+  # ~2.299 kg, giving ~2.339 kg AUW with the pad -- BOM Stage 1 weight budget.
   name: PM07 + GPS + prop guards + RC + connectors
   size: [0.060, 0.040, 0.012]
   position: [0.0, 0.0, 0.0]
-  mass: 0.327  # PM07 36 + M9N GPS 32 + 4 prop guards 88 + RC 20 + misc 151 -- BOM 1.2a/1.4/1.5/1.9
+  mass: 0.327  # residual lump: PM07 + GPS + guards + RC + connectors + cabling
 
 # Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
 # false to build this airframe without the pusher (the geometry/drive below stay
 # defined for an easy re-enable). The pad is a sibling rigid body linked to the
 # body by a spring-damper prismatic joint (`pusher_joint`).
+# Custom assembly: no vendor SKU is currently defined for the compliant pusher.
+# Verification note: add links for the exact spring, linear guide/plunger, pad,
+# and printed/machined mount once selected. Current dimensions are design
+# requirements from the roadmap: ~30 mm pad and 10-15 mm compliant travel.
 pusher:
   enabled: true
   pad:

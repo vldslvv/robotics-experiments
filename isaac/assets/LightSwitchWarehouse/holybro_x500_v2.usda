@@ -15,9 +15,9 @@ def Xform "holybro_x500_v2" (
         apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
     )
     {
-        point3f physics:centerOfMass = (-0.00088195386, 3.9229387e-19, 0.0014038896)
-        float3 physics:diagonalInertia = (0.011859061, 0.013262875, 0.023189386)
-        float physics:mass = 2.211
+        point3f physics:centerOfMass = (-0.00084812107, 0, 0.0046209116)
+        float3 physics:diagonalInertia = (0.014118477, 0.015534429, 0.026955202)
+        float physics:mass = 2.2992
 
         def Xform "frame"
         {
@@ -25,14 +25,14 @@ def Xform "holybro_x500_v2" (
                 apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
             )
             {
-                float physics:mass = 0.555
+                float physics:mass = 0.61
                 double3 xformOp:translate = (0, 0, 0)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
                 def Cube "geom"
                 {
                     double size = 1
-                    float3 xformOp:scale = (0.13, 0.13, 0.006)
+                    float3 xformOp:scale = (0.144, 0.144, 0.032)
                     uniform token[] xformOpOrder = ["xformOp:scale"]
                 }
             }
@@ -60,9 +60,9 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.025
-                    float physics:mass = 0.068
-                    double radius = 0.0225
+                    double height = 0.0293
+                    float physics:mass = 0.073
+                    double radius = 0.02205
                     double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
@@ -71,7 +71,7 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.006
+                    float physics:mass = 0.0022
                     double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -90,7 +90,7 @@ def Xform "holybro_x500_v2" (
                     custom int drone:px4MotorIndex = 2
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CCW"
-                    float physics:mass = 0.007
+                    float physics:mass = 0.0142
                     float xformOp:rotateZ = 0
                     double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
@@ -151,9 +151,9 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.025
-                    float physics:mass = 0.068
-                    double radius = 0.0225
+                    double height = 0.0293
+                    float physics:mass = 0.073
+                    double radius = 0.02205
                     double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
@@ -162,7 +162,7 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.006
+                    float physics:mass = 0.0022
                     double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -181,7 +181,7 @@ def Xform "holybro_x500_v2" (
                     custom int drone:px4MotorIndex = 1
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CW"
-                    float physics:mass = 0.007
+                    float physics:mass = 0.0142
                     float xformOp:rotateZ = 0
                     double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
@@ -242,9 +242,9 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.025
-                    float physics:mass = 0.068
-                    double radius = 0.0225
+                    double height = 0.0293
+                    float physics:mass = 0.073
+                    double radius = 0.02205
                     double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
@@ -253,7 +253,7 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.006
+                    float physics:mass = 0.0022
                     double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -272,7 +272,7 @@ def Xform "holybro_x500_v2" (
                     custom int drone:px4MotorIndex = 3
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CCW"
-                    float physics:mass = 0.007
+                    float physics:mass = 0.0142
                     float xformOp:rotateZ = 0
                     double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
@@ -333,9 +333,9 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    double height = 0.025
-                    float physics:mass = 0.068
-                    double radius = 0.0225
+                    double height = 0.0293
+                    float physics:mass = 0.073
+                    double radius = 0.02205
                     double3 xformOp:translate = (0.25, 0, 0.025)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
@@ -344,7 +344,7 @@ def Xform "holybro_x500_v2" (
                     apiSchemas = ["PhysicsMassAPI"]
                 )
                 {
-                    float physics:mass = 0.006
+                    float physics:mass = 0.0022
                     double3 xformOp:translate = (0.125, 0, 0.005)
                     uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -363,7 +363,7 @@ def Xform "holybro_x500_v2" (
                     custom int drone:px4MotorIndex = 0
                     custom bool drone:rotorMarker = 1
                     custom string drone:spinDir = "CW"
-                    float physics:mass = 0.007
+                    float physics:mass = 0.0142
                     float xformOp:rotateZ = 0
                     double3 xformOp:translate = (0.25, 0, 0.04)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZ"]
@@ -411,14 +411,14 @@ def Xform "holybro_x500_v2" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.035
-                double3 xformOp:translate = (0, 0, 0.011)
+                float physics:mass = 0.0346
+                double3 xformOp:translate = (0, 0, 0.024)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
                 def Cube "geom"
                 {
                     double size = 1
-                    float3 xformOp:scale = (0.05, 0.038, 0.016)
+                    float3 xformOp:scale = (0.0848, 0.044, 0.0124)
                     uniform token[] xformOpOrder = ["xformOp:scale"]
                 }
             }
@@ -428,7 +428,7 @@ def Xform "holybro_x500_v2" (
             )
             {
                 float physics:mass = 0.233
-                double3 xformOp:translate = (-0.03, 0, 0.018)
+                double3 xformOp:translate = (-0.03, 0, 0.031)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
                 def Cube "geom"
@@ -487,7 +487,7 @@ def Xform "holybro_x500_v2" (
                 double height = 0.041
                 float physics:mass = 0.19
                 double radius = 0.038
-                double3 xformOp:translate = (0, 0, 0.0235)
+                double3 xformOp:translate = (0, 0, 0.036500000000000005)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
             }
         }

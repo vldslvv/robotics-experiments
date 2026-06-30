@@ -54,7 +54,7 @@ def test_usd_builder_computes_body_mass_properties_from_components():
         + cfg.wiring.mass
     )
     assert total_mass == pytest.approx(expected_mass)
-    assert total_mass == pytest.approx(2.211)
+    assert total_mass == pytest.approx(2.2992)
 
     # Symmetric quad: yaw inertia is the largest principal moment, and the two
     # horizontal moments are close (the forward sensors break exact equality).
