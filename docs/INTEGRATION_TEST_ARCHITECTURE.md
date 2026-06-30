@@ -113,7 +113,7 @@ derived `px4_instance_index = id`) rather than a blind `0..count` loop, so
 non-contiguous ids keep their derived ports. The first instance in that list
 owns the network namespace. Each additional instance `i` joins that namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so
-`run_px4_iris_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP
+`run_px4_sitl_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP
 `14550 + i`), and uses an isolated per-instance rootfs plus per-instance
 `px4/logs/<i>` / `px4/eeprom/<i>` mounts so non-volatile state never collides.
 The runner waits on each instance's `TCP port 456i` readiness line, then the

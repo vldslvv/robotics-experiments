@@ -297,7 +297,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY docker/tmux.conf /root/.tmux.conf
 
 RUN printf '%s\n' \
-      "alias px4-iris='/usr/local/bin/run_px4_iris_fresh'" \
+      "alias px4-sitl='/usr/local/bin/run_px4_sitl_fresh'" \
       >> /root/.bashrc
 
 RUN pip3 install --no-cache-dir \
@@ -323,16 +323,16 @@ RUN python3 /usr/local/bin/generate_px4_airframes.py \
 # the nsh shell during `docker build` even with DONT_RUN=1 on PX4 v1.14.x.
 RUN cd ${PX4_DIR} && make px4_sitl_default
 
-COPY px4/docker/run_px4_iris_fresh.sh /usr/local/bin/run_px4_iris_fresh
-COPY px4/docker/run_px4_iris_ci.sh /usr/local/bin/run_px4_iris_ci
+COPY px4/docker/run_px4_sitl_fresh.sh /usr/local/bin/run_px4_sitl_fresh
+COPY px4/docker/run_px4_sitl_ci.sh /usr/local/bin/run_px4_sitl_ci
 COPY px4/docker/start_px4_tmux.sh /usr/local/bin/start_px4_tmux
-COPY px4/docker/px4_iris_common.sh /usr/local/lib/px4/
+COPY px4/docker/px4_sitl_common.sh /usr/local/lib/px4/
 COPY px4/docker/reset_px4_state.sh /usr/local/lib/px4/
 RUN chmod +x \
-      /usr/local/bin/run_px4_iris_fresh \
-      /usr/local/bin/run_px4_iris_ci \
+      /usr/local/bin/run_px4_sitl_fresh \
+      /usr/local/bin/run_px4_sitl_ci \
       /usr/local/bin/start_px4_tmux \
-      /usr/local/lib/px4/px4_iris_common.sh \
+      /usr/local/lib/px4/px4_sitl_common.sh \
       /usr/local/lib/px4/reset_px4_state.sh
 
 WORKDIR ${PX4_DIR}

@@ -302,7 +302,7 @@ for spec_idx in "${!PX4_INSTANCE_INDICES[@]}"; do
         -v "${log_mount}:${rootfs_log}" \
         -v "${eeprom_mount}:${rootfs_eeprom}" \
         "${PX4_IMAGE}" \
-        /bin/bash -lc "exec /usr/local/bin/run_px4_iris_ci" \
+        /bin/bash -lc "exec /usr/local/bin/run_px4_sitl_ci" \
         >/dev/null
     STARTED_CONTAINERS+=("${container}")
 

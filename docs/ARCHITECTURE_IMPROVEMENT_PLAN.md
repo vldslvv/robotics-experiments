@@ -44,7 +44,7 @@ Verified during review (line counts are current):
   duplicated across the isaac and ros stages; the px4 stage re-does tmux
   separately). `make/containers.mk` is 162 LOC: three near-identical `run-*`
   blocks plus ~18 trivial one-line delegating targets.
-- `px4/docker/run_px4_iris_fresh.sh` and `run_px4_iris_ci.sh` share an
+- `px4/docker/run_px4_sitl_fresh.sh` and `run_px4_sitl_ci.sh` share an
   **identical** state-reset prologue (lines 1-22); the CI variant differs only in
   its `sed` log-filter tail.
 - Vendored Pegasus is ~2,100 LOC under
@@ -318,12 +318,12 @@ Verified with dry-run lifecycle targets.
 
 **Problem.** (a) The zsh setup (`Dockerfile:59-109`) and nvim/tmux setup
 (`Dockerfile:115-159`) are duplicated across the isaac and ros stages, and the px4
-stage re-does tmux separately. (b) `px4/docker/run_px4_iris_fresh.sh` and
-`run_px4_iris_ci.sh` share an identical state-reset prologue (lines 1-22); the CI
+stage re-does tmux separately. (b) `px4/docker/run_px4_sitl_fresh.sh` and
+`run_px4_sitl_ci.sh` share an identical state-reset prologue (lines 1-22); the CI
 script differs only in its trailing `sed` log filter (lines 25-28).
 
 **Files.** `Dockerfile`; new shared shell fragment(s) under an appropriate docker
-build-input dir; `px4/docker/run_px4_iris_fresh.sh`, `run_px4_iris_ci.sh`.
+build-input dir; `px4/docker/run_px4_sitl_fresh.sh`, `run_px4_sitl_ci.sh`.
 
 **Outline.**
 1. Move the zsh and nvim/tmux setup into COPY-ed scripts sourced by the isaac and

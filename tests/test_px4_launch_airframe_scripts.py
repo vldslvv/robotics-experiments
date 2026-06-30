@@ -59,7 +59,7 @@ def test_integration_launch_derives_and_propagates_airframe():
 
 
 def test_common_launcher_defaults_to_repo_generated_quad():
-    common = _read("px4/docker/px4_iris_common.sh")
+    common = _read("px4/docker/px4_sitl_common.sh")
     assert 'export PX4_SIM_MODEL="none_iris"' not in common
     # Default to the collision-free 4019 (X500 V2) slot, not 4001 (stock
     # 4001_gz_x500 shadows a generated 4001_* in the rcS glob).

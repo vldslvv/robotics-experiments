@@ -41,7 +41,7 @@ container="${PX4_CONTAINER_NAME}.${PX4_INSTANCE}"
 
 # Every instance (including 0) runs from its own per-instance rootfs subdir, so
 # its log/eeprom mounts are uniform: ${PX4_ROOTFS}/${PX4_INSTANCE}/{log,eeprom}.
-# This matches px4_iris_common.sh::launch_px4_iris and reset_px4_state.sh.
+# This matches px4_sitl_common.sh::launch_px4_sitl and reset_px4_state.sh.
 log_mount="${PX4_LOGS}/${PX4_INSTANCE}"
 eeprom_mount="${PX4_EEPROM}/${PX4_INSTANCE}"
 rootfs_log="${PX4_ROOTFS}/${PX4_INSTANCE}/log"

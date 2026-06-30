@@ -3,7 +3,7 @@
 
 px4_dir="${PX4_DIR:-/opt/PX4-Autopilot}"
 
-px4_iris_configure_instance() {
+px4_sitl_configure_instance() {
   instance="${PX4_INSTANCE:-0}"
   export PX4_INSTANCE="${instance}"
 
@@ -47,7 +47,7 @@ configure_gcs_remote_port() {
   done
 }
 
-launch_px4_iris() {
+launch_px4_sitl() {
   # Every instance (including 0) launches the prebuilt binary the same way: an
   # interactive pxh console (no -d, so manual `commander arm` / `commander
   # takeoff` work), -i ${instance} for port-shifting (instance 0 keeps simulator

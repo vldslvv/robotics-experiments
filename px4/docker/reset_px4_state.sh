@@ -13,7 +13,7 @@ reset_px4_state() {
   # Every instance (including 0) runs from its own per-instance rootfs subdir so
   # its non-volatile state (dataman / parameters / eeprom) never collides with
   # the other instances sharing the network namespace. This matches the uniform
-  # per-instance launch in px4_iris_common.sh::launch_px4_iris.
+  # per-instance launch in px4_sitl_common.sh::launch_px4_sitl.
   local rootfs="${base_rootfs}/${instance}"
 
   mkdir -p "${rootfs}"

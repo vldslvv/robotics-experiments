@@ -202,7 +202,7 @@ the current contents and the intended home for that kind of code.
   `--prune-conflicts` seam to remove a stock file and reclaim its id.
   `get_enabled_px4_instance_indices()`
   stays as a thin compat wrapper over it. The PX4 container launcher
-  (`px4_iris_common.sh::launch_px4_iris`) reads `PX4_SIM_MODEL`
+  (`px4_sitl_common.sh::launch_px4_sitl`) reads `PX4_SIM_MODEL`
   (default `none_x500_v2`/`4019` only for manual unset-env launches), so the
   script-driven fleet path selects the generated per-asset airframe.
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
@@ -531,12 +531,12 @@ the host. They are meant to be used in the Dockerized environment.
   `--network container:` and runs PX4 `-i i` so it listens on simulator TCP
   `4560 + i` / GCS UDP `14550 + i` with a per-instance rootfs), and passes only
   when *every* drone holds its takeoff/hover envelope.
-  `PX4_INSTANCE` is the per-container index threaded into `run_px4_iris_ci.sh` /
+  `PX4_INSTANCE` is the per-container index threaded into `run_px4_sitl_ci.sh` /
   `reset_px4_state.sh` (see `px4/docker/README.md`). The runner injects a
   `px4.debug_log_path` override carrying the `{vehicle}` token so the per-vehicle
   bridge logs never collide (config validation rejects two vehicles resolving to
   the same template). Every instance (including `0`) is launched uniformly by
-  `px4_iris_common.sh::launch_px4_iris`: the prebuilt binary run with
+  `px4_sitl_common.sh::launch_px4_sitl`: the prebuilt binary run with
   `-i ${PX4_INSTANCE}` and an interactive `pxh>` console (no `-d`), from its own
   per-instance rootfs subdir, with no `instance == 0` special case in the launch,
   reset, or mount logic. A divergent instance-0 launch (`make px4_sitl_default

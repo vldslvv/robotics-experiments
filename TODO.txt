@@ -35,6 +35,4 @@ The failsafe on hexes seems to not work -- totally wild flying
 
 Verify that new repo clone works from scratch
 
-Rework px4-iris alias to launch relevant airframe sim
-
 USD generator leaves trailing newline and it conflicts with pre-commit

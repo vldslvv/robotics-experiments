@@ -18,7 +18,7 @@ core package used by experiments.
 - `px4/docker` and `px4/scripts`: PX4 Docker and host-side helper area.
 - `px4/logs`: PX4 SITL log persistence.
 - `px4/eeprom`: PX4 SITL simulated EEPROM mount, cleared by the default
-  `px4-iris` launch path so each run starts from fresh PX4 state.
+  `px4-sitl` launch path so each run starts from fresh PX4 state.
 - `docs`: design and usage docs.
 
 ## Running
