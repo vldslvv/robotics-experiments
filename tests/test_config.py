@@ -208,26 +208,44 @@ def test_two_drone_circle_land_config_composes(monkeypatch):
         (0, (0.0, -2.0), "Drone0"),
         (1, (0.0, 2.0), "Drone1"),
     ]
+    expected_step_kinds = ["arm", "takeoff", "hover", *(["goto"] * 12), "hover", "land"]
     assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
-        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
-        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
+        expected_step_kinds,
+        expected_step_kinds,
     ]
     assert [
-        (step["x"], step["y"], step["z"]) for step in config.vehicles[0].routine.steps[3:7]
+        (step["x"], step["y"], step["z"]) for step in config.vehicles[0].routine.steps[3:15]
     ] == [
-        (2.0, 0.0, 2.5),
-        (0.0, 2.0, 2.5),
-        (-2.0, 0.0, 2.5),
+        (1.0, -1.732, 2.6),
+        (1.732, -1.0, 2.7),
+        (2.0, 0.0, 2.8),
+        (1.732, 1.0, 2.9),
+        (1.0, 1.732, 3.0),
+        (0.0, 2.0, 3.1),
+        (-1.0, 1.732, 3.0),
+        (-1.732, 1.0, 2.9),
+        (-2.0, 0.0, 2.8),
+        (-1.732, -1.0, 2.7),
+        (-1.0, -1.732, 2.6),
         (0.0, -2.0, 2.5),
     ]
     assert [
-        (step["x"], step["y"], step["z"]) for step in config.vehicles[1].routine.steps[3:7]
+        (step["x"], step["y"], step["z"]) for step in config.vehicles[1].routine.steps[3:15]
     ] == [
-        (-2.0, 0.0, 3.0),
-        (0.0, -2.0, 3.0),
-        (2.0, 0.0, 3.0),
-        (0.0, 2.0, 3.0),
+        (-1.0, 1.732, 3.6),
+        (-1.732, 1.0, 3.7),
+        (-2.0, 0.0, 3.8),
+        (-1.732, -1.0, 3.9),
+        (-1.0, -1.732, 4.0),
+        (0.0, -2.0, 4.1),
+        (1.0, -1.732, 4.0),
+        (1.732, -1.0, 3.9),
+        (2.0, 0.0, 3.8),
+        (1.732, 1.0, 3.7),
+        (1.0, 1.732, 3.6),
+        (0.0, 2.0, 3.5),
     ]
+    assert config.vehicles[1].routine.steps[1]["climb_m"] == 3.5
     reset_config()
 
 

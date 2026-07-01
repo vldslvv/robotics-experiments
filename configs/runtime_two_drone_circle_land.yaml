@@ -9,7 +9,8 @@ defaults:
 #
 # Coordinates are world ENU metres (x=east, y=north, z=up). The shared circle is
 # centered at the world origin with a 2 m radius; drone 0 starts from the south
-# point and drone 1 starts from the north point.
+# point and drone 1 starts from the north point. Each loop climbs over the first
+# half-circle and descends over the second half-circle.
 #
 # Run with: make run-all HYDRA_CONFIG=configs/runtime_two_drone_circle_land.yaml
 
@@ -30,19 +31,59 @@ vehicles:
         - kind: hover
           hold_s: 2.0
         - kind: goto
+          x: 1.0
+          y: -1.732
+          z: 2.6
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.732
+          y: -1.0
+          z: 2.7
+          timeout_s: 25.0
+        - kind: goto
           x: 2.0
           y: 0.0
-          z: 2.5
+          z: 2.8
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.732
+          y: 1.0
+          z: 2.9
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.0
+          y: 1.732
+          z: 3.0
           timeout_s: 25.0
         - kind: goto
           x: 0.0
           y: 2.0
-          z: 2.5
+          z: 3.1
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.0
+          y: 1.732
+          z: 3.0
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.732
+          y: 1.0
+          z: 2.9
           timeout_s: 25.0
         - kind: goto
           x: -2.0
           y: 0.0
-          z: 2.5
+          z: 2.8
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.732
+          y: -1.0
+          z: 2.7
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.0
+          y: -1.732
+          z: 2.6
           timeout_s: 25.0
         - kind: goto
           x: 0.0
@@ -61,29 +102,69 @@ vehicles:
       steps:
         - kind: arm
         - kind: takeoff
-          climb_m: 3.0
-          min_climb_m: 2.0
+          climb_m: 3.5
+          min_climb_m: 2.5
         - kind: hover
           hold_s: 2.0
         - kind: goto
+          x: -1.0
+          y: 1.732
+          z: 3.6
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.732
+          y: 1.0
+          z: 3.7
+          timeout_s: 25.0
+        - kind: goto
           x: -2.0
           y: 0.0
-          z: 3.0
+          z: 3.8
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.732
+          y: -1.0
+          z: 3.9
+          timeout_s: 25.0
+        - kind: goto
+          x: -1.0
+          y: -1.732
+          z: 4.0
           timeout_s: 25.0
         - kind: goto
           x: 0.0
           y: -2.0
-          z: 3.0
+          z: 4.1
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.0
+          y: -1.732
+          z: 4.0
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.732
+          y: -1.0
+          z: 3.9
           timeout_s: 25.0
         - kind: goto
           x: 2.0
           y: 0.0
-          z: 3.0
+          z: 3.8
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.732
+          y: 1.0
+          z: 3.7
+          timeout_s: 25.0
+        - kind: goto
+          x: 1.0
+          y: 1.732
+          z: 3.6
           timeout_s: 25.0
         - kind: goto
           x: 0.0
           y: 2.0
-          z: 3.0
+          z: 3.5
           timeout_s: 25.0
         - kind: hover
           hold_s: 2.0
