@@ -305,13 +305,13 @@ The project should use **curriculum-coupled domain randomization**, not one-shot
 
 That suggests a three-layer randomization policy for this roadmap:
 
-1. **Nominal learning zone**  
+1. **Nominal learning zone**
    Narrow ranges around the expected real platform. Used to learn the base behavior.
 
-2. **Expansion zone**  
+2. **Expansion zone**
    Gradually widened ranges on the dimensions that matter for transfer: mass, latency, wall friction, pusher stiffness, switch force, estimator delay, visual texture, lighting, and detector noise. Used once stable behavior exists.
 
-3. **Acceptance zone**  
+3. **Acceptance zone**
    Fixed evaluation distributions measured from the actual platform and environment. Used only for validation, not for shaping. citeturn15view0turn14view1turn15view3
 
 A practical randomization matrix is:
@@ -388,13 +388,13 @@ A compact planning view is:
 
 The roadmap should adopt the following non-negotiable design principles:
 
-1. **Policies consume observations, not simulator internals.** citeturn16view1turn7view6  
-2. **Observation providers are swappable and versioned.** citeturn16view1turn16view2  
-3. **PX4 remains the owner of high-rate stabilization and actuator control.** citeturn9view0turn8view4  
-4. **Mission logic owns handoff, retries, and aborts; the policy does not self-schedule missions.** citeturn8view5  
-5. **Curriculum precedes large-domain randomization; acceptance evaluation uses real-world distributions.** citeturn15view0turn15view3  
-6. **Camera simulation is an integration phase, not an RL prerequisite.** This is an architectural inference supported by the project boundaries and the sources above. citeturn16view0turn16view1turn15view0  
-7. **Contact success is defined by actuation and confirmation, not by generic wall contact.** citeturn14view3turn15view4  
+1. **Policies consume observations, not simulator internals.** citeturn16view1turn7view6
+2. **Observation providers are swappable and versioned.** citeturn16view1turn16view2
+3. **PX4 remains the owner of high-rate stabilization and actuator control.** citeturn9view0turn8view4
+4. **Mission logic owns handoff, retries, and aborts; the policy does not self-schedule missions.** citeturn8view5
+5. **Curriculum precedes large-domain randomization; acceptance evaluation uses real-world distributions.** citeturn15view0turn15view3
+6. **Camera simulation is an integration phase, not an RL prerequisite.** This is an architectural inference supported by the project boundaries and the sources above. citeturn16view0turn16view1turn15view0
+7. **Contact success is defined by actuation and confirmation, not by generic wall contact.** citeturn14view3turn15view4
 8. **Every stochastic element must be config-driven and seedable.** citeturn16view1turn7view6
 
 ## Testing, evaluation, and risk management

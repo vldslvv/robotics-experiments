@@ -169,7 +169,18 @@ the bridge or the command routine contract.
 - The future mission manager owns task sequencing, retry/abort policy, switch
   queues, and handoff into the press policy.
 - The RL policy owns only the local approach/press/retreat contact behavior once
-  the drone is already near the switch and inside the handoff gate.
+  the drone is already near the switch and inside the handoff gate. It is one
+  implementation of the contact-behavior seam (`docs/phase_f/F3b_contact_behavior_seam.md`);
+  a scripted model-based press is the other, and the baseline.
+
+### Safety Harness
+
+Real indoor flights run under a physical safety harness. The harness is a
+physics change (tether disturbance, snag hazard near the wall) and a software
+contract (hardware abort profile, geofence sized to the harness volume, contact
+entry/exit rules), not only a catch rope. `docs/SAFETY_HARNESS_PLAN.md` is the
+plan for the architecture accommodations and the harness geometry rules; its
+software steps are preconditions for the first harnessed contact flight.
 
 ## Switch, Lamp, and Pusher Design
 
@@ -366,11 +377,16 @@ Tasks:
 
 Status: not done. Detailed, implementation-ready step-by-step sub-plans live in
 `docs/phase_f/` (F1 in-Lab flight actuation, F2 observation interface + handoff,
-F3 switch-press env on ground truth + first policy, F4 contact curriculum +
-domain randomization, F5 synthetic pose estimator). Phase F stops at synthetic
-pose noise; simulated/real sensor providers plug into the F2 provider seam in
-Phase G. The in-Lab RL action level (velocity / CTBR / attitude / rotor) is a
-deferred decision surveyed in F1.
+F3 switch-press env on ground truth + first policy, F3b contact-behavior seam +
+scripted press baseline, F4 contact curriculum + domain randomization, F5
+synthetic pose estimator). Phase F stops at synthetic pose noise; simulated/real
+sensor providers plug into the F2 provider seam in Phase G. The in-Lab RL action
+level (velocity / CTBR / attitude / rotor) is a deferred decision surveyed in F1.
+F3b starts only after the F3 first-policy gate: it puts the press behavior
+behind a `ContactBehavior` seam so a scripted model-based press and the learned
+policy are interchangeable implementations, with the scripted baseline as the
+published metric floor -- the project goal is the contact task family, not one
+policy.
 
 Tasks:
 
@@ -422,6 +438,7 @@ Tasks:
 | Handoff instability | Medium | Gate on pose, velocity, angular rate, detection confidence, and localization confidence |
 | Sensor vibration | Medium | MN4006 EVO bearings, isolation mounts, PX4 notch-filter tuning, Stage 2 lower hover throttle |
 | Light timing false positives | Low | N-step light latch and persistent confirmation before success |
+| Harness tether snag or taut-catch disturbance during contact | Medium | Slack-by-default harness geometry, static clearance check, taut-tether model in F4 randomization, abort profile + geofence (`docs/SAFETY_HARNESS_PLAN.md`) |
 
 ## Historical/Replaced Assumptions
 

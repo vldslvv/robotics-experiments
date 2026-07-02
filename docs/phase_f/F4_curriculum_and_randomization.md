@@ -60,7 +60,10 @@ are config (single source of truth), never hardcoded.
   - contact mechanics: pusher stiffness/damping, contact restitution, wall friction
     (stabilization stage onward);
   - task geometry: switch pose, plate size, switch depth, wall tilt, stand-off
-    (early curriculum onward).
+    (early curriculum onward);
+  - safety harness tether: configured anchor + slack length, zero force while
+    slack, spring-damper pull when taut (contact stage onward; model and
+    rationale in `docs/SAFETY_HARNESS_PLAN.md` Step 4).
 - Action: add `PressRandomizationConfig` to `config/_types.py` and a
   `randomization:` block to `configs/experiment/press/default.yaml`. Each randomized
   parameter carries a record: `name`, `units`, `nominal`, `train_range`,

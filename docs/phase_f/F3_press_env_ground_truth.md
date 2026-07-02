@@ -141,9 +141,12 @@ no domain randomization (F4 adds those).
   assembled from the live bridge state + provider and emits the F1 action, which
   maps to a PX4 OFFBOARD setpoint stream (velocity or attitude/rate per the F1
   choice). A thin press behavior in the commanding layer (a new routine step
-  `{kind: press}` / a `PressDriver` over `MavlinkCommandPort`) is the integration
-  point -- but full mission sequencing, retry, and abort are Phase H (mission
-  manager). Keep F3 focused on training; only stub the deploy seam.
+  `{kind: press}`) is the integration point; the full contact-behavior contract
+  (scripted press + policy behind one seam, the `{kind: press}` step, and the
+  baseline eval) is F3b (`F3b_contact_behavior_seam.md`), which starts only
+  after this plan's exit gate. Full mission sequencing, retry, and abort are
+  Phase H (mission manager). Keep F3 focused on training; only stub the deploy
+  seam.
 - Done when: this boundary is documented; no mission-manager code is added in F3.
 
 ## Files touched by F3
