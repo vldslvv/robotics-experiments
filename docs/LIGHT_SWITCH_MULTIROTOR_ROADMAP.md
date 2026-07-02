@@ -364,7 +364,13 @@ Tasks:
 
 ### Phase F: RL Press Policy
 
-Status: not done.
+Status: not done. Detailed, implementation-ready step-by-step sub-plans live in
+`docs/phase_f/` (F1 in-Lab flight actuation, F2 observation interface + handoff,
+F3 switch-press env on ground truth + first policy, F4 contact curriculum +
+domain randomization, F5 synthetic pose estimator). Phase F stops at synthetic
+pose noise; simulated/real sensor providers plug into the F2 provider seam in
+Phase G. The in-Lab RL action level (velocity / CTBR / attitude / rotor) is a
+deferred decision surveyed in F1.
 
 Tasks:
 

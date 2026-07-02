@@ -6,7 +6,7 @@ defaults:
   - experiment/drone@drone: default
   - experiment/switches@switches: default
   - experiment/px4@px4: default
-  - experiment/isaac_lab@isaac_lab: default
+  - experiment/press@press: default
   - experiment/routine@routine: default
   - _self_
 

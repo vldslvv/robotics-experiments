@@ -89,12 +89,21 @@ are independent (cross-drone synchronization is deliberately deferred).
   reacts in kind: a strict driver maps `ENVELOPE` to its instability error and
   `COMMAND` to a plain assertion; a forgiving driver logs either and stops.
 - **`_port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
-  `pump_heartbeat`, `send`, `send_setpoint`, `poll_feedback`) and the PX4
+  `pump_heartbeat`, `send`, `send_setpoint`, `send_velocity_setpoint`,
+  `send_attitude_target`, `poll_feedback`) and the PX4
   `MavlinkCommandPort`, whose `pymavlink` import is function-scoped. The port
   absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
   send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
   `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes `is_handshaked`,
-  `failsafe`, `failsafe_system_status`, and `latest_global_position`.
+  `failsafe`, `failsafe_system_status`, and `latest_global_position`. The
+  velocity / attitude-rate senders are the **deploy-time seam for the F1 RL
+  action levels**: `send_velocity_setpoint` serializes a `VelocitySetpoint` to
+  `SET_POSITION_TARGET_LOCAL_NED` (body velocity, `MAV_FRAME_BODY_NED`) for the
+  `velocity` action, and `send_attitude_target` serializes an
+  `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
+  for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
+  `press._deploy.press_action_to_offboard`; the mission-level press behavior that
+  streams them (a `PressDriver` / `{kind: press}` step) is F3, not this layer yet.
 - **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
   `RoutineState`: runs `decide` and performs the single side effect -- `port.send`
   on `SEND`, `port.send_setpoint` on `STREAM`). One commander drives one drone;

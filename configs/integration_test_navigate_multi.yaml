@@ -12,7 +12,7 @@ defaults:
 # envelope and protect OFFBOARD setpoint continuity across the goto -> hover
 # transition.
 #
-# Inherits the default runtime config.yaml (sim/switches/px4/isaac_lab + the
+# Inherits the default runtime config.yaml (sim/switches/px4/press + the
 # warehouse scene) and overrides only the vehicles list.
 #
 # Parallel-lane waypoints: the two drones never converge. Each drone's absolute

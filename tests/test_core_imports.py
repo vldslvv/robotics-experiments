@@ -27,8 +27,8 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
     # state into other tests (some mock module-level state by import).
     saved_modules = dict(sys.modules)
     try:
-        _drop_modules("carb", "pxr", "isaacsim", "robotics_experiments")
-        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim"})
+        _drop_modules("carb", "pxr", "isaacsim", "torch", "robotics_experiments")
+        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim", "torch"})
         monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
         importlib.import_module("robotics_experiments")
@@ -39,10 +39,14 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
         # must import without carb/omni present.
         importlib.import_module("robotics_experiments.runtime")
+        # The pure press layer (actuation + deploy mapping) must import with both
+        # Isaac and torch absent: stdlib + numpy only at module scope.
+        importlib.import_module("robotics_experiments.press")
 
-        # The Isaac-only leaf modules must stay off the core import path: the lazy
-        # package __init__ shields (drone/environment __getattr__, simulation
-        # re-export, runtime __getattr__) must not eager-import them.
+        # The Isaac-only / torch leaf modules must stay off the core import path:
+        # the lazy package __init__ shields (drone/environment __getattr__,
+        # simulation re-export, runtime __getattr__) and the torch env leaves must
+        # not eager-import them.
         for leaf in (
             "robotics_experiments.drone._spawn",
             "robotics_experiments.environment._stage",
@@ -50,6 +54,9 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "robotics_experiments.simulation._isaac_settings",
             "robotics_experiments.runtime._bridge_host",
             "robotics_experiments.runtime.orchestrator",
+            "robotics_experiments.workflows.isaac_lab.tasks._flight",
+            "robotics_experiments.workflows.isaac_lab.tasks._drone_cfg",
+            "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env",
         ):
             assert leaf not in sys.modules
     finally:
@@ -137,6 +144,7 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
         "get_enabled_px4_instance_indices",
         "get_enabled_px4_launch_configs",
         "get_config",
+        "resolve_drone_bridge_config",
     ]
     assert config.ResolvedVehicle.__name__ == "ResolvedVehicle"
 

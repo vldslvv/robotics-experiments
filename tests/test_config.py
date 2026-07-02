@@ -48,7 +48,7 @@ def test_default_config_loads_from_root_experiment_config():
     expected_drone = _group_defaults("drone")
     expected_switches = _group_defaults("switches")
     expected_px4 = _group_defaults("px4")
-    expected_isaac_lab = _group_defaults("isaac_lab")
+    expected_press = _group_defaults("press")
 
     assert isinstance(config, EnvConfig)
     assert config.sim.physics_hz == expected_sim.physics_hz
@@ -102,13 +102,13 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.debug_log_level == "DEBUG"
     assert config.px4.sensor_debug_log_interval == 50
     assert config.px4.max_tilt_angle_deg == 60.0
-    assert (
-        config.isaac_lab.drone_hover_episode_length_s
-        == expected_isaac_lab.drone_hover_episode_length_s
-    )
-    assert config.isaac_lab.drone_hover_num_envs == expected_isaac_lab.drone_hover_num_envs
-    assert config.isaac_lab.drone_hover_env_spacing == expected_isaac_lab.drone_hover_env_spacing
-    assert config.isaac_lab.drone_hover_action_scale == expected_isaac_lab.drone_hover_action_scale
+    assert config.press.num_envs == expected_press.num_envs
+    assert config.press.env_spacing == expected_press.env_spacing
+    assert config.press.episode_length_s == expected_press.episode_length_s
+    assert config.press.policy_rate_hz == expected_press.policy_rate_hz
+    assert config.press.action.kind == expected_press.action.kind
+    assert config.press.action.action_dim == expected_press.action.action_dim
+    assert config.press.action.controller_kp_vel == list(expected_press.action.controller_kp_vel)
     # The default runtime experiment ships an empty (manual) routine and its
     # flight-envelope gates; the GCS link baseport lives in the px4 group.
     expected_routine = _group_defaults("routine")
@@ -120,8 +120,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.vehicles[0].ros_frame_prefix == "x500_01"
     holybro = _airframe_config("holybro_x500_v2")
     assert (
-        config.vehicles[0].px4.rotor_spin_visual_scale
-        == holybro.px4.bridge.rotor_spin_visual_scale
+        config.vehicles[0].px4.rotor_spin_visual_scale == holybro.px4.bridge.rotor_spin_visual_scale
     )
     reset_config()
 
@@ -536,6 +535,23 @@ def test_resolve_fleet_validates_ros_identity(vehicles, match):
 
     with pytest.raises(ValueError, match=match):
         resolve_fleet(cfg)
+    reset_config()
+
+
+def test_resolve_drone_bridge_config_uses_airframe_constants():
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import get_config, resolve_drone_bridge_config
+    from robotics_experiments.config._load import _reset_config as reset_config
+
+    reset_config()
+    config = get_config()
+    # The Isaac Lab env resolves the per-asset airframe constants (not the global
+    # iris fallback) for the drone it spawns; they match the fleet's resolution.
+    bridge = resolve_drone_bridge_config(config.drone.usd_path)
+    assert bridge.max_thrust_per_rotor_g == config.vehicles[0].px4.max_thrust_per_rotor_g
+    assert bridge.rotor_constant == config.vehicles[0].px4.rotor_constant
+    assert bridge.max_rotor_velocity == config.vehicles[0].px4.max_rotor_velocity
     reset_config()
 
 

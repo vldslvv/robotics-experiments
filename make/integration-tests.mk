@@ -8,6 +8,7 @@ test-integration: test-integration-isaac test-integration-px4-takeoff
 INTEGRATION_TEST_TARGETS = \
     test-integration-isaac \
     test-integration-drone-articulation \
+    test-integration-press-hover-goto \
     test-integration-px4-takeoff \
     test-integration-px4-navigation \
     test-integration-px4-takeoff-instability \
@@ -61,6 +62,19 @@ test-integration-drone-articulation: generate-drone-usd
 	@TEST_TARGET='test-integration-drone-articulation' \
 	    ISAAC_TEST_LOG='$(ISAAC_DRONE_ARTICULATION_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_DRONE_ARTICULATION_TEST)' \
+	    $(ISAAC_INTEGRATION_COMMON_ENV) \
+	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+# The in-Lab actuation gate needs Isaac Lab, so it runs on the isaac-lab image
+# (a superset of isaac-sim) instead of the default isaac-sim image. Only this
+# target overrides ISAAC_IMAGE; ISAAC_INTEGRATION_COMMON_ENV expands it at recipe
+# time, so the override flows through to the runner with no other change.
+.PHONY: test-integration-press-hover-goto
+test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-hover-goto: generate-drone-usd
+	@TEST_TARGET='test-integration-press-hover-goto' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 

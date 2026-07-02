@@ -3,8 +3,8 @@ from hydra.core.config_store import ConfigStore
 from ._types import (
     DroneConfig,
     EnvConfig,
-    IsaacLabConfig,
     LightSwitchConfig,
+    PressConfig,
     Px4BridgeConfig,
     RoutineConfig,
     SimSettings,
@@ -30,5 +30,5 @@ def _register_schemas() -> None:
     cs.store(group="experiment/drone", name="base_drone", node=DroneConfig)
     cs.store(group="experiment/switches", name="base_switches", node=LightSwitchConfig)
     cs.store(group="experiment/px4", name="base_px4", node=Px4BridgeConfig)
-    cs.store(group="experiment/isaac_lab", name="base_isaac_lab", node=IsaacLabConfig)
+    cs.store(group="experiment/press", name="base_press", node=PressConfig)
     cs.store(group="experiment/routine", name="base_routine", node=RoutineConfig)

@@ -3,7 +3,7 @@
 ########################################
 
 .PHONY: build
-build: build-isaac build-ros build-px4
+build: build-isaac build-isaac-lab build-ros build-px4
 	@echo "All images built/pulled."
 
 .PHONY: build-isaac
@@ -17,6 +17,24 @@ build-isaac:
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
+
+# Isaac Lab image: FROM isaac-sim, so buildx reuses the cached isaac-sim layers.
+# Only the Phase F RL workflow (test-integration-press-hover-goto; future
+# training) runs on it.
+.PHONY: build-isaac-lab
+build-isaac-lab:
+	@echo "Building Isaac Lab image: $(ISAAC_LAB_IMAGE) (ISAACLAB_REF=$(ISAACLAB_REF))"
+	docker buildx build \
+		--progress=plain \
+		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
+		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
+		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
+		--build-arg ISAACLAB_REF="$(ISAACLAB_REF)" \
+		--target isaac-lab \
+		-t $(ISAAC_LAB_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 

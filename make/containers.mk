@@ -68,6 +68,10 @@ remove-ros-container:
 remove-isaac-image:
 	@docker rmi $(isaac_IMAGE) 2>/dev/null || true
 
+.PHONY: remove-isaac-lab-image
+remove-isaac-lab-image:
+	@docker rmi $(ISAAC_LAB_IMAGE) 2>/dev/null || true
+
 .PHONY: remove-ros-image
 remove-ros-image:
 	@docker rmi $(ros_IMAGE) 2>/dev/null || true
@@ -120,8 +124,8 @@ remove-containers: remove-isaac-container remove-ros-container remove-px4-contai
 	@echo "Removed Isaac, ROS, and PX4 containers (if they existed)."
 
 .PHONY: remove-images
-remove-images: remove-isaac-image remove-ros-image remove-px4-image
-	@echo "Removed Isaac, ROS, and PX4 images (if they existed)."
+remove-images: remove-isaac-image remove-isaac-lab-image remove-ros-image remove-px4-image
+	@echo "Removed Isaac, Isaac Lab, ROS, and PX4 images (if they existed)."
 
 .PHONY: destroy
 destroy: stop remove-containers remove-images

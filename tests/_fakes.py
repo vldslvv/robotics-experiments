@@ -356,6 +356,8 @@ class FakeCommandPort:
     def __init__(self):
         self.sent = []
         self.setpoints = []  # _PositionSetpoints emitted on STREAM
+        self.velocity_setpoints = []  # _VelocitySetpoints (velocity deploy path)
+        self.attitude_targets = []  # _AttitudeRateSetpoints (ctbr deploy path)
         self.connected = False
         self.heartbeats = 0
         self.feedback_polls = 0
@@ -380,6 +382,12 @@ class FakeCommandPort:
 
     def send_setpoint(self, setpoint):
         self.setpoints.append(setpoint)
+
+    def send_velocity_setpoint(self, setpoint):
+        self.velocity_setpoints.append(setpoint)
+
+    def send_attitude_target(self, setpoint):
+        self.attitude_targets.append(setpoint)
 
     def poll_feedback(self):
         self.feedback_polls += 1

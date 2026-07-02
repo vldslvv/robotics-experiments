@@ -123,11 +123,24 @@ the current contents and the intended home for that kind of code.
   there, but do not import DirectRLEnv task modules unless Isaac Lab is actually
   constructing the task.
 - Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
-  for direct-workflow environments. The first scaffold task is
-  `Isaac-Drone-Hover-Direct-v0`; it is intentionally a no-op DirectRLEnv
-  lifecycle skeleton until a later step defines real thrust dynamics/rewards.
-  Isaac Lab workflow tunables live in the Hydra `isaac_lab` group with matching
-  bare annotations in `src/robotics_experiments/config/types.py`.
+  for direct-workflow environments. The first task is
+  `Isaac-Drone-Hover-Direct-v0`; it flies N parallel drones through the
+  pluggable in-Lab actuation seam (`robotics_experiments.press`), which maps a
+  normalized RL action to per-rotor angular-velocity references (and thence to
+  forces) without a PX4 lockstep per env. The action level is a config switch
+  (`press.action.kind`): `velocity` (default; cascaded PD tracking body-frame
+  velocity + yaw rate) or `ctbr` (collective thrust + body-rate setpoint). The
+  pure single-env reference models live in `press/_actuation.py` (numpy, the
+  test oracle) and the batched torch versions the env runs live in
+  `workflows/isaac_lab/tasks/_flight.py`; both mirror the PX4 bridge's
+  `PegasusQuadraticThrustModel` allocation so an action reproduces the commanded
+  wrench. Press-training scale and the RL action level live in the Hydra `press`
+  group (which replaced the retired `isaac_lab` group) with matching bare
+  annotations in `src/robotics_experiments/config/_types.py`; the physics
+  decimation is derived as `round(sim.physics_hz / press.policy_rate_hz)`, not
+  authored. The RL action also maps to a PX4 OFFBOARD setpoint at deploy time
+  (`press/_deploy.py` + the commanding-layer velocity / attitude-rate setpoint
+  seams).
 - PX4 bridge behavior is configured through the Hydra `px4` group. The default
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
@@ -467,8 +480,21 @@ Run ROS 2, Isaac Sim, and PX4 through the Docker targets below, not directly on
 the host. They are meant to be used in the Dockerized environment.
 
 ### Docker
-- `make build` builds Isaac Sim, ROS 2, and PX4 images.
-- `make destroy` stops/removes containers and removes built images.
+- `make build` builds the Isaac Sim, Isaac Lab, ROS 2, and PX4 images.
+- The Isaac Lab image (`build-isaac-lab`, `ISAAC_LAB_IMAGE` =
+  `vv-isaac-lab-custom:<tag>`) is the Dockerfile `isaac-lab` stage layered
+  `FROM isaac-sim`: Isaac Lab shares the same kit python (`/isaac-sim/python.sh`),
+  USD, and PhysX and cannot run standalone, so it is a superset image, not a
+  separate container. It is built from `isaac-sim/IsaacLab` pinned by the
+  `ISAACLAB_REF` build ARG / Make variable (default `v2.3.2`, the Isaac Lab
+  release built on Isaac Sim 5.1) via `./isaaclab.sh --install` (all RL
+  frameworks). Only the Phase F RL workflow needs it -- the
+  `test-integration-press-hover-goto` gate runs on `ISAAC_LAB_IMAGE` (and future
+  F2/F3 training will); every other integration target and the persistent
+  containers stay on the leaner `isaac-sim` image (`ISAAC_IMAGE`). Rebuild it
+  after changing `ISAACLAB_REF` or when moving Isaac Sim versions.
+- `make destroy` stops/removes containers and removes built images (including the
+  Isaac Lab image).
 - `make run-isaac` starts the Isaac Sim container. By default
   (`ISAAC_AUTORUN=0`) it lands in the manual two-pane tmux shell. Pass
   `ISAAC_AUTORUN=1` (on `run-isaac` or `run-all`) to override the container's
@@ -628,7 +654,7 @@ the host. They are meant to be used in the Dockerized environment.
   `configs/integration_test_multi_drone_takeoff.yaml` (two drones) -- all three
   select the same `routine` `takeoff` variant and differ only in scene/fleet); the
   composable group building blocks they select (`sim`, `drone`, `switches`,
-  `px4`, `isaac_lab`, `routine`) live under `configs/experiment/` and are
+  `px4`, `press`, `routine`) live under `configs/experiment/` and are
   referenced as `experiment/<group>@<group>`. The `routine` group is composed by
   `configs/config.yaml` itself (so every experiment that inherits `config` carries
   it; `EnvConfig.routine` is never `None`), and `routine.steps` is empty by default

@@ -9,6 +9,16 @@ Use `_runtime.py` for shared setup and teardown. Each extension should get its
 own test module when it has real standalone coverage to add, for example
 `test_sim_settings.py`.
 
+`test_press_hover_goto.py` is the exception to the `_runtime.py` pattern: it is
+the F1 in-Lab actuation gate and exercises the Isaac Lab `DirectRLEnv` surface
+(`Isaac-Drone-Hover-Direct-v0`), not the single-env `IsaacArticulationIO`, so it
+launches its own `AppLauncher` and builds the env directly. It drives the env's
+`velocity` action with an analytic outer position controller (no RL) and asserts
+every parallel env holds a hover (< 0.1 m) then tracks a 2 m goto (< 0.2 m). Run
+it with `make test-integration-press-hover-goto`; it needs no PX4 container. It
+prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
+greps for.
+
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
 tests do not validate warehouse geometry, lights, pusher mechanisms, or

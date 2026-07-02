@@ -52,6 +52,12 @@ fuller design doc under `docs/` where one exists.
   only cited per-component leaves and compute body mass/inertia + `rotor_constant`
   from them.
 
+## RL press policy
+
+- [0013](0013-in-lab-rl-action-level.md) (2026-07-01) -- In-Lab RL action level:
+  pluggable `press.action.kind` seam shipping `velocity` (default) + `ctbr`, plus
+  the PX4 OFFBOARD deploy mapping; retires the `isaac_lab` group for `press`.
+
 ## Not captured as ADRs (intentionally)
 
 These `docs/` files stay as-is -- they are living references, plans, or records,

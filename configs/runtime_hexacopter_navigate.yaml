@@ -4,7 +4,7 @@ defaults:
 
 # Runtime demonstration experiment: fly an absolute-waypoint navigation routine
 # headless on the live runtime extension, for a single PX4-backed hexacopter.
-# Inherits the default runtime config.yaml (sim/switches/px4/isaac_lab + the
+# Inherits the default runtime config.yaml (sim/switches/px4/press + the
 # warehouse scene) but swaps the one fleet vehicle to the hexacopter_s550.usda
 # asset. The shared airframe config supplies the six-rotor PX4 bridge arrays and
 # the matching generic hexarotor-x SITL airframe (PX4_SIM_MODEL=none_hexa_x,

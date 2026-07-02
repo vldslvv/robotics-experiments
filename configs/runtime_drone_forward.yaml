@@ -5,7 +5,7 @@ defaults:
 # Runtime demonstration experiment: fly the shared arm -> takeoff -> hover
 # routine (with flight-envelope verification) headless on the live drone_spawner
 # extension. Inherits the default runtime config.yaml (sim/drone/switches/px4/
-# isaac_lab + its 1-vehicle fleet and warehouse scene) and selects the `takeoff`
+# press + its 1-vehicle fleet and warehouse scene) and selects the `takeoff`
 # routine variant. The same routine the integration test asserts in strict mode;
 # here it runs forgivingly (a breach logs and stops the routine, leaving manual
 # control available).

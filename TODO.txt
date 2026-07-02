@@ -46,4 +46,3 @@ Use URDF instead of my drone config?
 Drone calculations should have some noise so that the drone construction varies to emulate physical variations
 
 Prop guards are not visualized in the built drone
-

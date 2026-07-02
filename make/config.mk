@@ -17,6 +17,14 @@ ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
 
+# Isaac Lab image (Dockerfile `isaac-lab` stage, FROM isaac-sim). Only the Phase F
+# RL workflow uses it (the test-integration-press-hover-goto gate; future F2/F3
+# training). ISAACLAB_REF pins the Isaac Lab release: v2.3.2 is built on Isaac
+# Sim 5.1. Keep it in sync with the Dockerfile ARG default.
+ISAACLAB_REF         ?= v2.3.2
+ISAAC_LAB_IMAGE_NAME ?= vv-isaac-lab-custom
+ISAAC_LAB_IMAGE      = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
+
 # Auto-launch of the custom Isaac runtime (runapp_custom.sh) on container start.
 # ISAAC_AUTORUN=0 (default) keeps the manual two-pane shell; ISAAC_AUTORUN=1
 # overrides the container tmux CMD so the first pane runs the runtime then drops
@@ -48,6 +56,8 @@ ISAAC_PX4_MULTI_DRONE_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/t
 ISAAC_PX4_MULTI_DRONE_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_multi_drone_takeoff.log
 ISAAC_PX4_NAVIGATION_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_navigation_routine.py
 ISAAC_PX4_NAVIGATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_navigation_routine.log
+ISAAC_PRESS_HOVER_GOTO_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_press_hover_goto.py
+ISAAC_PRESS_HOVER_GOTO_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_hover_goto.log
 ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):
 ISAAC_TEST_FAILURE_FILTER = ^\[isaac-standalone-test\] ERROR:

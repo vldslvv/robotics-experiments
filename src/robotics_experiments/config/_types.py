@@ -14,7 +14,8 @@ __all__ = [
     "VehicleConfig",
     "ResolvedVehicle",
     "Px4SitlLaunchConfig",
-    "IsaacLabConfig",
+    "PressActionConfig",
+    "PressConfig",
     "RoutineConfig",
     "EnvConfig",
 ]
@@ -444,23 +445,78 @@ class Px4SitlLaunchConfig:
 
 
 @dataclass
-class IsaacLabConfig:
-    """Configuration for Isaac Lab workflow skeletons.
+class PressActionConfig:
+    """RL action-level (``kind``) selection plus its controller tunables.
+
+    The ``kind`` picks the in-Lab actuation model (see
+    :mod:`robotics_experiments.press._actuation`): ``velocity`` (cascaded PD:
+    body-frame velocity + yaw rate) or ``ctbr`` (collective thrust + body-rate
+    setpoint). The gains/limits below are a superset covering both; the selected
+    ``kind`` reads the subset it needs, so switching is a one-line ``kind`` edit.
 
     Attributes:
-        drone_hover_episode_length_s: Episode timeout for the DirectRLEnv
-            drone-hover scaffold.
-        drone_hover_num_envs: Number of parallel envs used by the scaffold
-            unless overridden by Isaac Lab tooling.
-        drone_hover_env_spacing: Distance between cloned env origins in meters.
-        drone_hover_action_scale: Scale applied to normalized placeholder
-            actions before future dynamics consume them.
+        kind: Action level selecting the actuation model (``velocity`` /
+            ``ctbr``; other levels are reserved and raise if selected).
+        action_dim: Length of the normalized policy action vector (4 for both
+            ``velocity`` = ``[vx, vy, vz, yaw_rate]`` and ``ctbr`` =
+            ``[thrust, wx, wy, wz]``).
+        max_body_velocity_mps: Body-frame linear-velocity command scale (m/s) a
+            normalized ``velocity`` action of magnitude 1 maps to.
+        max_yaw_rate_radps: Yaw-rate command scale (rad/s) for a normalized
+            ``velocity`` action.
+        max_body_rate_radps: Body-rate command scale (rad/s) for a normalized
+            ``ctbr`` action.
+        max_tilt_cmd_deg: Saturation on the commanded tilt of the desired thrust
+            axis in the ``velocity`` cascade, degrees.
+        hover_thrust_fraction: Collective thrust at hover as a fraction of the
+            summed per-rotor static max thrust; centers the ``ctbr`` collective
+            command and the ``velocity`` thrust feed-forward.
+        controller_kp_vel: Per-axis P gain on world-frame velocity error
+            (``velocity`` cascade), length 3.
+        controller_kd_vel: Per-axis damping gain on world-frame velocity
+            (``velocity`` cascade), length 3.
+        controller_kp_att: Per-axis P gain mapping geometric attitude error to a
+            body-rate setpoint (``velocity`` cascade), length 3.
+        controller_kp_rate: Per-axis P gain mapping body-rate error to desired
+            body torque (both models), length 3.
     """
 
-    drone_hover_episode_length_s: float
-    drone_hover_num_envs: int
-    drone_hover_env_spacing: float
-    drone_hover_action_scale: float
+    kind: str
+    action_dim: int
+    max_body_velocity_mps: float
+    max_yaw_rate_radps: float
+    max_body_rate_radps: float
+    max_tilt_cmd_deg: float
+    hover_thrust_fraction: float
+    controller_kp_vel: List[float]
+    controller_kd_vel: List[float]
+    controller_kp_att: List[float]
+    controller_kp_rate: List[float]
+
+
+@dataclass
+class PressConfig:
+    """Isaac Lab press-training scale + the pluggable RL action level.
+
+    Replaces the retired ``isaac_lab`` group as the single source of truth for
+    the DirectRLEnv Lab-scale tunables. ``decimation`` is not authored here: the
+    env derives it as ``round(sim.physics_hz / policy_rate_hz)`` so the physics
+    cadence stays single-sourced on ``sim.physics_hz``.
+
+    Attributes:
+        action: The RL action-level selection and controller tunables.
+        num_envs: Number of parallel cloned envs.
+        env_spacing: Distance between cloned env origins, meters.
+        episode_length_s: Episode timeout, seconds.
+        policy_rate_hz: RL policy decision rate; the physics decimation is
+            ``round(sim.physics_hz / policy_rate_hz)``.
+    """
+
+    action: PressActionConfig
+    num_envs: int
+    env_spacing: float
+    episode_length_s: float
+    policy_rate_hz: float
 
 
 @dataclass
@@ -571,7 +627,7 @@ class EnvConfig:
         drone: Drone spawner configuration.
         switches: Light-switch spawner configuration.
         px4: PX4 SITL bridge configuration.
-        isaac_lab: Isaac Lab workflow configuration.
+        press: Isaac Lab press-training scale + the RL action-level selection.
         scene: USD scene to load for this experiment. ``@``-prefixed paths are
             repository-relative. Every experiment (test or not) sets a scene;
             the standalone runner uses it when not given an explicit ``--scene``.
@@ -596,7 +652,7 @@ class EnvConfig:
     drone: DroneConfig
     switches: LightSwitchConfig
     px4: Px4BridgeConfig
-    isaac_lab: IsaacLabConfig
+    press: PressConfig
     scene: str
     vehicles: List[Any]
     routine: RoutineConfig

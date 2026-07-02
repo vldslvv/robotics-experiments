@@ -25,8 +25,10 @@ __all__ = [
     "_MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
     "_PX4_CUSTOM_MAIN_MODE_OFFBOARD",
     "_PX4_FORCE_ARM_MAGIC",
+    "_AttitudeRateSetpoint",
     "_MavlinkCommand",
     "_PositionSetpoint",
+    "_VelocitySetpoint",
     "_arm",
     "_land",
     "_reposition",
@@ -193,3 +195,50 @@ class _PositionSetpoint:
     longitude_deg: float
     altitude_m: float
     yaw_rad: float
+
+
+@dataclass(frozen=True)
+class _VelocitySetpoint:
+    """One streamed OFFBOARD body-velocity setpoint (a wire payload).
+
+    The deploy-time analogue of :class:`_PositionSetpoint` for the ``velocity``
+    RL action level: a body-frame velocity + yaw rate the port serializes to a
+    ``SET_POSITION_TARGET_LOCAL_NED`` in ``MAV_FRAME_BODY_NED`` with the velocity
+    fields enabled and position/acceleration ignored. Components are in the PX4
+    body-FRD convention (forward / right / down), so the pure action->setpoint
+    mapper (``press._deploy``) converts the body-FLU RL action into these.
+
+    Attributes:
+        forward_mps: Body-forward (FRD +X) velocity.
+        right_mps: Body-right (FRD +Y) velocity.
+        down_mps: Body-down (FRD +Z) velocity.
+        yaw_rate_radps: Yaw rate in NED (+clockwise seen from above).
+    """
+
+    forward_mps: float
+    right_mps: float
+    down_mps: float
+    yaw_rate_radps: float
+
+
+@dataclass(frozen=True)
+class _AttitudeRateSetpoint:
+    """One streamed OFFBOARD collective-thrust + body-rate setpoint (CTBR).
+
+    The deploy-time analogue of :class:`_PositionSetpoint` for the ``ctbr`` RL
+    action level: the port serializes it to a ``SET_ATTITUDE_TARGET`` whose type
+    mask ignores the attitude quaternion and uses the body rates + thrust. Body
+    rates are in the PX4 body-FRD convention; ``thrust`` is the PX4 normalized
+    collective in ``[0, 1]``.
+
+    Attributes:
+        thrust: Normalized collective thrust in ``[0, 1]``.
+        roll_rate_radps: Body-roll rate (FRD +X).
+        pitch_rate_radps: Body-pitch rate (FRD +Y).
+        yaw_rate_radps: Body-yaw rate (FRD +Z).
+    """
+
+    thrust: float
+    roll_rate_radps: float
+    pitch_rate_radps: float
+    yaw_rate_radps: float

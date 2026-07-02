@@ -22,6 +22,7 @@ __all__ = [
     "get_config",
     "get_enabled_px4_instance_indices",
     "get_enabled_px4_launch_configs",
+    "resolve_drone_bridge_config",
     "resolve_px4_sitl_launch_config",
 ]
 
@@ -64,8 +65,7 @@ def _compute_rotor_constants(
     """
     if max_thrust_per_rotor_g <= 0.0:
         raise ValueError(
-            "px4 max_thrust_per_rotor_g must be positive, "
-            f"got {max_thrust_per_rotor_g!r}"
+            "px4 max_thrust_per_rotor_g must be positive, " f"got {max_thrust_per_rotor_g!r}"
         )
     max_velocities = [float(v) for v in max_rotor_velocity]
     if not max_velocities:
@@ -301,6 +301,29 @@ def resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchCon
         sim_model=str(sitl["sim_model"]),
         sys_autostart=int(sitl["sys_autostart"]),
     )
+
+
+def resolve_drone_bridge_config(usd_path: str) -> Px4BridgeConfig:
+    """Resolve the per-asset PX4 bridge config for a drone USD asset.
+
+    The same airframe enrichment :func:`_resolve_fleet` applies per vehicle
+    (global ``px4`` merged with the asset's ``configs/airframes`` bridge defaults,
+    then ``rotor_constant`` computed from the cited thrust), exposed for consumers
+    that spawn a drone outside the fleet path -- notably the Isaac Lab press env,
+    which needs the airframe's thrust constants (``rotor_constant`` /
+    ``max_rotor_velocity`` / ``rolling_moment_coefficient`` / ``linear_drag``) for
+    its in-Lab actuation instead of the global iris fallback. Falls back to the
+    global ``px4`` defaults for an asset with no airframe mapping.
+    """
+    global_px4 = get_config().px4
+    airframe = _airframe_for_drone_asset(usd_path)
+    bridge_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
+    px4 = OmegaConf.merge(global_px4, bridge_defaults)
+    px4.rotor_constant = _compute_rotor_constants(
+        float(px4.max_thrust_per_rotor_g),
+        list(px4.max_rotor_velocity),
+    )
+    return cast(Px4BridgeConfig, OmegaConf.to_object(px4))
 
 
 def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:

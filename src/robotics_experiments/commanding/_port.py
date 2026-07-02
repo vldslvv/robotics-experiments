@@ -20,7 +20,12 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from ._commands import _MavlinkCommand, _PositionSetpoint
+from ._commands import (
+    _AttitudeRateSetpoint,
+    _MavlinkCommand,
+    _PositionSetpoint,
+    _VelocitySetpoint,
+)
 from ._observation import CommandAck
 
 __all__ = ["_AbstractCommandPort", "MavlinkCommandPort"]
@@ -37,6 +42,18 @@ _POSITION_TARGET_TYPEMASK_YAW_IGNORE = 0b0100_0000_0000
 # constant named here so streaming a setpoint does not need a pymavlink import for
 # the frame id (the same pattern as the MAV_CMD ids in _commands.py).
 _MAV_FRAME_GLOBAL_INT = 5
+
+# MAV_FRAME_BODY_NED (body-forward/right/down) for the deploy-time velocity
+# setpoint. SET_POSITION_TARGET_LOCAL_NED velocity type mask: use velocity (bits
+# 3-5) + yaw-rate (bit 11 clear); ignore position (bits 0-2), acceleration (bits
+# 6-8), and yaw (bit 10).
+_MAV_FRAME_BODY_NED = 8
+_VELOCITY_TARGET_TYPEMASK = 0b0101_1100_0111
+
+# SET_ATTITUDE_TARGET type mask for the deploy-time CTBR setpoint: ignore the
+# attitude quaternion (bit 7) and use the body rates (bits 0-2 clear) + thrust
+# (bit 6 clear). ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE = 128.
+_ATTITUDE_TARGET_TYPEMASK_RATES = 0b1000_0000
 
 # PX4 emits this statustext when an external force-_arm succeeds without a
 # COMMAND_ACK; treat it as an acceptance of the _arm command. PX4-specific
@@ -73,6 +90,14 @@ class _AbstractCommandPort(ABC):
     @abstractmethod
     def send_setpoint(self, setpoint: _PositionSetpoint) -> None:
         """Stream one OFFBOARD position-plus-yaw setpoint to the flight stack."""
+
+    @abstractmethod
+    def send_velocity_setpoint(self, setpoint: _VelocitySetpoint) -> None:
+        """Stream one OFFBOARD body-velocity setpoint (the ``velocity`` deploy path)."""
+
+    @abstractmethod
+    def send_attitude_target(self, setpoint: _AttitudeRateSetpoint) -> None:
+        """Stream one OFFBOARD collective-thrust + body-rate setpoint (``ctbr`` deploy)."""
 
     @abstractmethod
     def poll_feedback(self) -> Optional[CommandAck]:
@@ -237,6 +262,49 @@ class MavlinkCommandPort(_AbstractCommandPort):
             0.0,  # acceleration (ignored)
             float(yaw),
             0.0,  # yaw_rate (ignored)
+        )
+
+    def send_velocity_setpoint(self, setpoint: _VelocitySetpoint) -> None:
+        if not self._target_known:
+            raise RuntimeError(
+                f"[{self._label}] cannot stream a velocity setpoint: GCS link has not "
+                "learned the PX4 target system yet (no heartbeat handshake)"
+            )
+        self._mav.mav.set_position_target_local_ned_send(
+            0,  # time_boot_ms (unused by PX4)
+            self._mav.target_system,
+            self._mav.target_component,
+            _MAV_FRAME_BODY_NED,
+            _VELOCITY_TARGET_TYPEMASK,
+            0.0,
+            0.0,
+            0.0,  # position (ignored)
+            float(setpoint.forward_mps),
+            float(setpoint.right_mps),
+            float(setpoint.down_mps),
+            0.0,
+            0.0,
+            0.0,  # acceleration (ignored)
+            0.0,  # yaw (ignored)
+            float(setpoint.yaw_rate_radps),
+        )
+
+    def send_attitude_target(self, setpoint: _AttitudeRateSetpoint) -> None:
+        if not self._target_known:
+            raise RuntimeError(
+                f"[{self._label}] cannot stream an attitude setpoint: GCS link has not "
+                "learned the PX4 target system yet (no heartbeat handshake)"
+            )
+        self._mav.mav.set_attitude_target_send(
+            0,  # time_boot_ms (unused by PX4)
+            self._mav.target_system,
+            self._mav.target_component,
+            _ATTITUDE_TARGET_TYPEMASK_RATES,
+            [1.0, 0.0, 0.0, 0.0],  # attitude quaternion (ignored)
+            float(setpoint.roll_rate_radps),
+            float(setpoint.pitch_rate_radps),
+            float(setpoint.yaw_rate_radps),
+            float(setpoint.thrust),
         )
 
     def poll_feedback(self) -> Optional[CommandAck]:

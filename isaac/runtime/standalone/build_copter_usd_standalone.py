@@ -5,13 +5,13 @@
 #
 # Available configs: holybro_x500_v2 (default), hexacopter_s550
 #
-# --- Boundary with Isaac Lab (drone_cfg.py) ---
+# --- Boundary with Isaac Lab (workflows/isaac_lab/tasks/_drone_cfg.py) ---
 # This file authors the USD once. Anything topological / geometric lives here:
 #   - Prim tree, meshes, collision shapes
 #   - Joint topology (body pairs, axis, limits, relative frames)
 #   - Custom attributes (e.g. PX4 rotor mapping metadata on props)
 #   - Articulation root marker (ArticulationRootAPI on the wrapper prim)
-# The Isaac Lab ArticulationCfg (drone_cfg.py) wraps the USD at spawn time:
+# The Isaac Lab ArticulationCfg (_drone_cfg.py) wraps the USD at spawn time:
 #   - Actuator stiffness / damping / effort limits
 #   - Initial pose and joint positions
 #   - Rigid body solver flags (CCD, max velocities, gravity toggle)
@@ -119,7 +119,8 @@ class AirframeConfig:
     # Articulation-level rigid-body mass/CoM/inertia are NOT authored: they are
     # computed from the component masses + geometry by compute_body_mass_properties
     # so every physics number traces to a cited per-component value. (Isaac Lab's
-    # drone_cfg.py still overrides them per-env at spawn time.)
+    # _drone_cfg.py adds no mass override; the env's EventCfg randomization scales
+    # the spawned mass per-env at reset.)
 
     # Frame
     center_plate: BoxPart

@@ -4,7 +4,7 @@ defaults:
 
 # Runtime demonstration experiment: fly an absolute-waypoint navigation routine
 # headless on the live runtime extension. Inherits the default runtime
-# config.yaml (sim/drone/switches/px4/isaac_lab + its 1-vehicle fleet and
+# config.yaml (sim/drone/switches/px4/press + its 1-vehicle fleet and
 # warehouse scene). After takeoff the drone streams OFFBOARD position setpoints to
 # each absolute world-ENU `goto` waypoint (yawing toward the leg), holds a stable
 # hover, then lands. Runs forgivingly here (a flight-envelope breach logs and
