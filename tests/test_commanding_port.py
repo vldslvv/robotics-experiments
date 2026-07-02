@@ -2,8 +2,8 @@
 
 These guard the MAVLink ``poll_feedback`` parsing that the standalone scenario
 relies on: the failsafe ``system_status`` mapping (the off-by-one that treats
-``MAV_STATE_ACTIVE`` as a failsafe would falsely abort every _takeoff), the
-``COMMAND_ACK`` parsing, the _arm-statustext acceptance, and global-position
+``MAV_STATE_ACTIVE`` as a failsafe would falsely abort every takeoff), the
+``COMMAND_ACK`` parsing, the arm-statustext acceptance, and global-position
 telemetry. They drive ``poll_feedback`` over a fake connection, so no pymavlink
 connection is opened.
 """
@@ -14,8 +14,8 @@ import types
 import pytest
 
 from robotics_experiments.commanding._commands import (
-    _MAV_CMD_COMPONENT_ARM_DISARM,
-    _PositionSetpoint,
+    MAV_CMD_COMPONENT_ARM_DISARM,
+    PositionSetpoint,
 )
 from robotics_experiments.commanding._port import (
     _MAV_FRAME_GLOBAL_INT,
@@ -92,7 +92,7 @@ def _handshaked_port():
 
 
 def test_active_heartbeat_is_not_failsafe_and_handshakes():
-    # MAV_STATE_ACTIVE (4) is the normal _armed/flying state, not a failsafe.
+    # MAV_STATE_ACTIVE (4) is the normal armed/flying state, not a failsafe.
     port = _port_with([_msg("HEARTBEAT", system_status=4, src_system=1, src_component=1)])
     port.poll_feedback()
     assert port.failsafe is False
@@ -115,15 +115,15 @@ def test_critical_emergency_termination_heartbeats_are_failsafe():
 
 
 def test_command_ack_is_parsed():
-    port = _port_with([_msg("COMMAND_ACK", command=_MAV_CMD_COMPONENT_ARM_DISARM, result=0)])
+    port = _port_with([_msg("COMMAND_ACK", command=MAV_CMD_COMPONENT_ARM_DISARM, result=0)])
     ack = port.poll_feedback()
     assert ack is not None
-    assert ack.command_id == _MAV_CMD_COMPONENT_ARM_DISARM
+    assert ack.command_id == MAV_CMD_COMPONENT_ARM_DISARM
     assert ack.accepted is True
 
 
 def test_rejected_command_ack_is_not_accepted():
-    port = _port_with([_msg("COMMAND_ACK", command=_MAV_CMD_COMPONENT_ARM_DISARM, result=2)])
+    port = _port_with([_msg("COMMAND_ACK", command=MAV_CMD_COMPONENT_ARM_DISARM, result=2)])
     ack = port.poll_feedback()
     assert ack is not None
     assert ack.accepted is False
@@ -133,7 +133,7 @@ def test_arm_statustext_synthesizes_accepted_ack():
     port = _port_with([_msg("STATUSTEXT", text="WARN Armed by external command")])
     ack = port.poll_feedback()
     assert ack is not None
-    assert ack.command_id == _MAV_CMD_COMPONENT_ARM_DISARM
+    assert ack.command_id == MAV_CMD_COMPONENT_ARM_DISARM
     assert ack.accepted is True
 
 
@@ -157,7 +157,7 @@ def test_zero_global_position_is_ignored_until_fix():
 def test_send_setpoint_emits_global_position_target_with_yaw():
     port, mav = _handshaked_port()
     port.send_setpoint(
-        _PositionSetpoint(
+        PositionSetpoint(
             latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=math.pi / 2.0
         )
     )
@@ -174,7 +174,7 @@ def test_send_setpoint_emits_global_position_target_with_yaw():
 def test_send_setpoint_nan_yaw_sets_yaw_ignore():
     port, mav = _handshaked_port()
     port.send_setpoint(
-        _PositionSetpoint(latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=math.nan)
+        PositionSetpoint(latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=math.nan)
     )
     call = mav.setpoints[-1]
     assert call["type_mask"] == (
@@ -187,5 +187,5 @@ def test_send_setpoint_before_handshake_raises():
     port = _port_with([])  # no heartbeat -> target system unknown
     with pytest.raises(RuntimeError, match="learned the PX4 target system"):
         port.send_setpoint(
-            _PositionSetpoint(latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=0.0)
+            PositionSetpoint(latitude_deg=47.0, longitude_deg=8.0, altitude_m=490.0, yaw_rad=0.0)
         )

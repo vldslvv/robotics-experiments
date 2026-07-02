@@ -1,7 +1,7 @@
 """The side-effecting command seam (mirrors ``AbstractFlightStackBridge``).
 
-:class:`_AbstractCommandPort` is the swappable boundary the orchestrators talk
-across: the pure :class:`_VehicleCommander` only ever calls :meth:`send`, and the
+:class:`AbstractCommandPort` is the swappable boundary the orchestrators talk
+across: the pure :class:`VehicleCommander` only ever calls :meth:`send`, and the
 driver pumps heartbeats and drains feedback. :class:`MavlinkCommandPort` is the
 PX4 implementation over a GCS MAVLink link (the resolved ``vehicle.gcs_port``);
 its ``pymavlink`` import is function-scoped so importing ``commanding`` never
@@ -16,19 +16,21 @@ bridge's sensor/actuator lockstep.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from ._commands import (
-    _AttitudeRateSetpoint,
-    _MavlinkCommand,
-    _PositionSetpoint,
-    _VelocitySetpoint,
+    MAV_CMD_COMPONENT_ARM_DISARM,
+    AttitudeRateSetpoint,
+    MavlinkCommand,
+    PositionSetpoint,
+    VelocitySetpoint,
 )
-from ._observation import CommandAck
+from ._observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["_AbstractCommandPort", "MavlinkCommandPort"]
+__all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,18 +57,18 @@ _VELOCITY_TARGET_TYPEMASK = 0b0101_1100_0111
 # (bit 6 clear). ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE = 128.
 _ATTITUDE_TARGET_TYPEMASK_RATES = 0b1000_0000
 
-# PX4 emits this statustext when an external force-_arm succeeds without a
-# COMMAND_ACK; treat it as an acceptance of the _arm command. PX4-specific
+# PX4 emits this statustext when an external force-arm succeeds without a
+# COMMAND_ACK; treat it as an acceptance of the arm command. PX4-specific
 # knowledge, localized to the PX4 command port.
 _ARM_ACCEPTED_STATUSTEXT = "Armed by external command"
 
 # MAVLink system_status (MAV_STATE) values that mean PX4 is in a failsafe state:
 # MAV_STATE_CRITICAL=5, MAV_STATE_EMERGENCY=6, MAV_STATE_FLIGHT_TERMINATION=8.
-# Note MAV_STATE_ACTIVE=4 is the normal _armed/flying state, NOT a failsafe.
+# Note MAV_STATE_ACTIVE=4 is the normal armed/flying state, NOT a failsafe.
 _FAILSAFE_SYSTEM_STATUS = frozenset({5, 6, 8})
 
 
-class _AbstractCommandPort(ABC):
+class AbstractCommandPort(ABC):
     """Stage-able seam between the command orchestrators and a flight stack link.
 
     Lifecycle: :meth:`connect` opens the link, :meth:`disconnect` closes it. Per
@@ -85,18 +87,18 @@ class _AbstractCommandPort(ABC):
     def pump_heartbeat(self, *, force: bool = False) -> None: ...
 
     @abstractmethod
-    def send(self, command: _MavlinkCommand) -> None: ...
+    def send(self, command: MavlinkCommand) -> None: ...
 
     @abstractmethod
-    def send_setpoint(self, setpoint: _PositionSetpoint) -> None:
+    def send_setpoint(self, setpoint: PositionSetpoint) -> None:
         """Stream one OFFBOARD position-plus-yaw setpoint to the flight stack."""
 
     @abstractmethod
-    def send_velocity_setpoint(self, setpoint: _VelocitySetpoint) -> None:
+    def send_velocity_setpoint(self, setpoint: VelocitySetpoint) -> None:
         """Stream one OFFBOARD body-velocity setpoint (the ``velocity`` deploy path)."""
 
     @abstractmethod
-    def send_attitude_target(self, setpoint: _AttitudeRateSetpoint) -> None:
+    def send_attitude_target(self, setpoint: AttitudeRateSetpoint) -> None:
         """Stream one OFFBOARD collective-thrust + body-rate setpoint (``ctbr`` deploy)."""
 
     @abstractmethod
@@ -124,14 +126,14 @@ class _AbstractCommandPort(ABC):
         """Latest ``(latitude_deg, longitude_deg, altitude_m)`` telemetry, or ``None``."""
 
 
-class MavlinkCommandPort(_AbstractCommandPort):
+class MavlinkCommandPort(AbstractCommandPort):
     """PX4 command port over a GCS MAVLink (UDP) endpoint.
 
-    Absorbs the GCS-link concerns previously inline in the standalone _takeoff
+    Absorbs the GCS-link concerns previously inline in the standalone takeoff
     scenario: connecting, throttled GCS heartbeats, ``command_long`` sends, and
     draining ``COMMAND_ACK`` / ``HEARTBEAT`` / ``STATUSTEXT`` /
     ``GLOBAL_POSITION_INT`` / ``GPS_RAW_INT`` to learn the target system, detect
-    failsafe, accept the _arm statustext, and surface the latest global position.
+    failsafe, accept the arm statustext, and surface the latest global position.
     """
 
     def __init__(
@@ -217,7 +219,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
         )
         self._last_heartbeat_sent_s = now_s
 
-    def send(self, command: _MavlinkCommand) -> None:
+    def send(self, command: MavlinkCommand) -> None:
         if not self._target_known:
             raise RuntimeError(
                 f"[{self._label}] cannot send {command.label!r}: GCS link has not "
@@ -232,9 +234,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
             *command.params,
         )
 
-    def send_setpoint(self, setpoint: _PositionSetpoint) -> None:
-        import math
-
+    def send_setpoint(self, setpoint: PositionSetpoint) -> None:
         if not self._target_known:
             raise RuntimeError(
                 f"[{self._label}] cannot stream a setpoint: GCS link has not "
@@ -264,7 +264,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
             0.0,  # yaw_rate (ignored)
         )
 
-    def send_velocity_setpoint(self, setpoint: _VelocitySetpoint) -> None:
+    def send_velocity_setpoint(self, setpoint: VelocitySetpoint) -> None:
         if not self._target_known:
             raise RuntimeError(
                 f"[{self._label}] cannot stream a velocity setpoint: GCS link has not "
@@ -289,7 +289,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
             float(setpoint.yaw_rate_radps),
         )
 
-    def send_attitude_target(self, setpoint: _AttitudeRateSetpoint) -> None:
+    def send_attitude_target(self, setpoint: AttitudeRateSetpoint) -> None:
         if not self._target_known:
             raise RuntimeError(
                 f"[{self._label}] cannot stream an attitude setpoint: GCS link has not "
@@ -339,10 +339,7 @@ class MavlinkCommandPort(_AbstractCommandPort):
             text = str(getattr(msg, "text", ""))
             _LOGGER.info("[%s] PX4 STATUSTEXT: %s", self._label, text)
             if _ARM_ACCEPTED_STATUSTEXT in text:
-                from ._commands import _MAV_CMD_COMPONENT_ARM_DISARM
-                from ._observation import _MAV_RESULT_ACCEPTED
-
-                return CommandAck.from_result(_MAV_CMD_COMPONENT_ARM_DISARM, _MAV_RESULT_ACCEPTED)
+                return CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, MAV_RESULT_ACCEPTED)
             return None
         if msg_type in {"GLOBAL_POSITION_INT", "GPS_RAW_INT"}:
             self._update_global_position(msg)
@@ -350,8 +347,6 @@ class MavlinkCommandPort(_AbstractCommandPort):
         return None
 
     def _update_global_position(self, msg: Any) -> None:
-        import math
-
         lat_e7 = getattr(msg, "lat", None)
         lon_e7 = getattr(msg, "lon", None)
         alt_mm = getattr(msg, "alt", None)

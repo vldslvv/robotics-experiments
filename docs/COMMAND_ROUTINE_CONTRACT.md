@@ -9,10 +9,13 @@ module scope, so `import robotics_experiments` succeeds with both absent.
 
 `robotics_experiments.commanding` intentionally re-exports only the production
 runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
-`RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, and `FailureKind`).
-The pure stepper, command constructors, routine builder, and lower-level seams
-live in underscore-prefixed modules and are private implementation, even where
-unit tests import them directly as white-box regression guards.
+`RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
+deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
+`press._deploy`). The pure stepper, command constructors, routine builder, and
+lower-level seams live in underscore-prefixed modules (with clean, un-prefixed
+symbol names inside -- privacy is carried by the module name) and are private
+implementation, even where unit tests import them directly as white-box
+regression guards.
 
 ## The four-part contract
 
@@ -85,9 +88,14 @@ are independent (cross-drone synchronization is deliberately deferred).
   can complete.
 
   `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
-  bounds); `FailureKind.COMMAND` is a command rejection or step timeout. A driver
-  reacts in kind: a strict driver maps `ENVELOPE` to its instability error and
-  `COMMAND` to a plain assertion; a forgiving driver logs either and stops.
+  bounds); `FailureKind.COMMAND` is a command rejection or step timeout. The pure
+  stepper emits only those two; the driver adds `FailureKind.FAILSAFE` (a PX4
+  failsafe system status on the GCS link) and `FailureKind.TIMEOUT` (a driver
+  phase exceeding its wall-clock backstop) for its own terminal conditions, so
+  `DriverEnvironment.on_failure(kind, message)` is fully typed. A driver
+  reacts in kind: the strict driver maps `ENVELOPE` to its instability error,
+  `FAILSAFE` to `Px4FailsafeDetected`, and the rest to a plain assertion; a
+  forgiving driver logs any of them and stops.
 - **`_port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
   `pump_heartbeat`, `send`, `send_setpoint`, `send_velocity_setpoint`,
   `send_attitude_target`, `poll_feedback`) and the PX4
@@ -116,9 +124,11 @@ are independent (cross-drone synchronization is deliberately deferred).
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
   stopped) routine. It imports no Isaac/pymavlink; the wall-clock backstop uses an
   injectable `monotonic`, so it is unit-testable with fakes. `DriverParams`
-  (`DriverParams.from_routine_config`) is the per-drone subset of `RoutineConfig`
-  it needs. The strict-vs-forgiving reaction lives entirely in the env's
-  `on_failure` (raise vs log).
+  (`DriverParams.from_routine_config(rc, driver=..., home_*=...)`) is the
+  per-drone subset of `RoutineConfig` it needs plus the global `driver`
+  execution heuristics (the `goto` heading epsilon and the wall-clock backstop
+  floor/multipliers from the Hydra `driver` group). The strict-vs-forgiving
+  reaction lives entirely in the env's `on_failure` (raise vs log).
 
 ## Pure / impure split
 
@@ -205,8 +215,8 @@ allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(s
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
-goto_offboard_prime_ticks)` maps the descriptors plus a per-drone takeoff
-target into a `VehicleRoutine` (unknown `kind`, or any step missing a required
+goto_offboard_prime_ticks, goto_min_heading_dist_m)` maps the descriptors plus a
+per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, or any step missing a required
 field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the shared
 seam both drivers use. The takeoff step completes on a real climb
 (`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
@@ -227,7 +237,14 @@ last OFFBOARD setpoint stream while the sustained hover gate is being measured.
 The home anchor the `goto` builder
 needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
 (`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by the orchestrator
-into `DriverParams.from_routine_config`.
+into `DriverParams.from_routine_config`. The routine-execution heuristics are
+also not routine knobs: the Hydra `driver` group (`DriverConfig`, global, not
+merged per vehicle) carries `goto_min_heading_dist_m` (below this horizontal
+baseline-to-target distance a `goto` leg holds heading and the alignment
+predicate passes trivially) and the driver wall-clock backstops
+(`prearm_backstop_floor_s`, `prearm_backstop_multiplier`,
+`drive_budget_multiplier`), passed as `driver=` into
+`DriverParams.from_routine_config`.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
 `configs/runtime_arm_takeoff.yaml` demos it headless via
 `make run-all HYDRA_CONFIG=...`, `configs/runtime_drone_navigate.yaml` demos an

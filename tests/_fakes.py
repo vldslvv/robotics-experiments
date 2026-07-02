@@ -345,9 +345,9 @@ def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
 
 
 class FakeCommandPort:
-    """An :class:`_AbstractCommandPort` for the pure command-layer / driver tests.
+    """An :class:`AbstractCommandPort` for the pure command-layer / driver tests.
 
-    Captures the ``_MavlinkCommand``s emitted on ``SEND`` and lets a test script
+    Captures the ``MavlinkCommand``s emitted on ``SEND`` and lets a test script
     the control-feedback the driver reads through the seam: queue acks via
     :attr:`feedback`, and set :attr:`handshaked` / :attr:`failsafe_flag` /
     :attr:`global_position`. Heartbeat/connect calls are counted but inert.

@@ -161,7 +161,7 @@ class Extension(omni.ext.IExt):
             handle,
             log=lambda message: carb.log_info(f"{_LOG_PREFIX} {message}"),
             on_failure=lambda kind, message: carb.log_warn(
-                f"{_LOG_PREFIX} {message} ({kind}); stopping routine "
+                f"{_LOG_PREFIX} {message} ({kind.name}); stopping routine "
                 "(manual control remains available)"
             ),
             on_step_advanced=lambda step_label: carb.log_info(

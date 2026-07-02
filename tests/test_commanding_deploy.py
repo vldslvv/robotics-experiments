@@ -10,8 +10,8 @@ import types
 import pytest
 
 from robotics_experiments.commanding._commands import (
-    _AttitudeRateSetpoint,
-    _VelocitySetpoint,
+    AttitudeRateSetpoint,
+    VelocitySetpoint,
 )
 from robotics_experiments.commanding._port import (
     _ATTITUDE_TARGET_TYPEMASK_RATES,
@@ -93,7 +93,7 @@ def _handshaked_port():
 def test_send_velocity_setpoint_emits_body_ned_velocity():
     port, mav = _handshaked_port()
     port.send_velocity_setpoint(
-        _VelocitySetpoint(forward_mps=1.5, right_mps=-0.5, down_mps=-0.25, yaw_rate_radps=0.3)
+        VelocitySetpoint(forward_mps=1.5, right_mps=-0.5, down_mps=-0.25, yaw_rate_radps=0.3)
     )
 
     (emitted,) = mav.velocity_setpoints
@@ -109,7 +109,7 @@ def test_send_velocity_setpoint_emits_body_ned_velocity():
 def test_send_attitude_target_emits_thrust_and_body_rates():
     port, mav = _handshaked_port()
     port.send_attitude_target(
-        _AttitudeRateSetpoint(
+        AttitudeRateSetpoint(
             thrust=0.55, roll_rate_radps=0.1, pitch_rate_radps=-0.2, yaw_rate_radps=0.05
         )
     )
@@ -128,6 +128,6 @@ def test_deploy_setpoints_before_handshake_raise():
         gcs_endpoint="udp:127.0.0.1:14550", heartbeat_period_s=1.0, connection=conn
     )
     with pytest.raises(RuntimeError, match="velocity setpoint"):
-        port.send_velocity_setpoint(_VelocitySetpoint(0.0, 0.0, 0.0, 0.0))
+        port.send_velocity_setpoint(VelocitySetpoint(0.0, 0.0, 0.0, 0.0))
     with pytest.raises(RuntimeError, match="attitude setpoint"):
-        port.send_attitude_target(_AttitudeRateSetpoint(0.0, 0.0, 0.0, 0.0))
+        port.send_attitude_target(AttitudeRateSetpoint(0.0, 0.0, 0.0, 0.0))

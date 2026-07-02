@@ -85,9 +85,9 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         # The config-driven routine builder is pure too (it is what the live
         # extension driver calls), so it must build a routine with Isaac and
         # pymavlink blocked.
-        from robotics_experiments.commanding._routine import _build_vehicle_routine, _EnvelopeGates
+        from robotics_experiments.commanding._routine import EnvelopeGates, build_vehicle_routine
 
-        gates = _EnvelopeGates(
+        gates = EnvelopeGates(
             max_tilt_deg=35.0,
             max_lateral_drift_m=2.0,
             max_vertical_speed_m_s=8.0,
@@ -96,7 +96,7 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
             hover_max_abs_vertical_speed_m_s=0.35,
             hover_max_abs_horizontal_speed_m_s=0.30,
         )
-        routine = _build_vehicle_routine(
+        routine = build_vehicle_routine(
             [
                 {"kind": "arm"},
                 {"kind": "takeoff", "climb_m": 1.0, "min_climb_m": 0.8},

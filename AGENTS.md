@@ -281,8 +281,11 @@ the current contents and the intended home for that kind of code.
   `commanding/__init__.py` is re-export-only. Its public package API is the
   production runtime surface (`RoutineDriver`, `DriverParams`,
   `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
-  and `FailureKind`); pure stepper/building internals live in underscore modules
-  and are tested directly as private implementation. The full reference is
+  `FailureKind`, and the deploy-time wire payloads `VelocitySetpoint` /
+  `AttitudeRateSetpoint` consumed by `press._deploy`); pure stepper/building
+  internals live in underscore modules (with clean, un-prefixed symbol names
+  inside -- privacy is carried by the module name, as elsewhere in the repo) and
+  are tested directly as private implementation. The full reference is
   `docs/COMMAND_ROUTINE_CONTRACT.md`; read it before changing this layer.
 - The contract mirrors the bridge part-for-part: `RoutineObservation` (pure
   input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
@@ -326,7 +329,11 @@ the current contents and the intended home for that kind of code.
   for this long before advancing -- "hover stable for N seconds"), and a tuple of
   `invariants` (continuous gates). `decide` checks `invariants` first (a breach ->
   `FAIL(FailureKind.ENVELOPE)`), then completion+hold (-> `ADVANCE`), then
-  ack-rejection/timeout (-> `FAIL(FailureKind.COMMAND)`). Completion helpers:
+  ack-rejection/timeout (-> `FAIL(FailureKind.COMMAND)`). `FailureKind` also
+  carries the driver-added terminal kinds `FAILSAFE` (PX4 failsafe on the GCS
+  link) and `TIMEOUT` (a driver phase exceeded its wall-clock backstop), so the
+  `DriverEnvironment.on_failure(kind, message)` seam is fully typed (no magic
+  strings). Completion helpers:
   `armed`, `ack_accepted`, `climbed_at_least(min_climb_m)` (vs the captured
   baseline), `hovering_stable(...)`; invariant helpers (breach message or `None`):
   `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
@@ -384,7 +391,13 @@ the current contents and the intended home for that kind of code.
   `max_downward_speed_m_s`, `max_angular_speed_rad_s`,
   `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`), **and
   the navigation (`goto`) tunables** (`goto_position_tol_m`, `goto_heading_tol_deg`,
-  `goto_cross_track_m`, `goto_offboard_prime_ticks`). There
+  `goto_cross_track_m`, `goto_offboard_prime_ticks`). The separate Hydra `driver`
+  group (`DriverConfig`, global, not merged per vehicle) carries the
+  routine-execution driver heuristics: `goto_min_heading_dist_m` (the heading
+  epsilon below which a `goto` leg holds heading) and the driver wall-clock
+  backstops (`prearm_backstop_floor_s`, `prearm_backstop_multiplier`,
+  `drive_budget_multiplier`), passed by the orchestrator as `driver=` into
+  `DriverParams.from_routine_config`. There
   is **no** separate `integration_test` group: the integration test is just the
   routine driven with `--strict`. The routine is **per vehicle**: each
   `vehicles[]` entry may carry a `routine` partial, merged over the global
@@ -654,7 +667,7 @@ the host. They are meant to be used in the Dockerized environment.
   `configs/integration_test_multi_drone_takeoff.yaml` (two drones) -- all three
   select the same `routine` `takeoff` variant and differ only in scene/fleet); the
   composable group building blocks they select (`sim`, `drone`, `switches`,
-  `px4`, `press`, `routine`) live under `configs/experiment/` and are
+  `px4`, `press`, `routine`, `driver`) live under `configs/experiment/` and are
   referenced as `experiment/<group>@<group>`. The `routine` group is composed by
   `configs/config.yaml` itself (so every experiment that inherits `config` carries
   it; `EnvConfig.routine` is never `None`), and `routine.steps` is empty by default
@@ -709,7 +722,7 @@ the host. They are meant to be used in the Dockerized environment.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
   the Hydra `configs/` YAML as the single source of truth, not hardcoded in code.
   Add a matching field (a bare annotation with no default) to the relevant
-  `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
+  `*Config` dataclass in `src/robotics_experiments/config/_types.py` and plumb it
   through. A library constructor may keep a neutral fallback default, but it must
   not duplicate the project value (for example `lockstep_timeout_s` is `0.1` in
   the `LockstepSettings` default but `1.0` at

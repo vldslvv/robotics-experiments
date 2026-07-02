@@ -17,6 +17,7 @@ __all__ = [
     "PressActionConfig",
     "PressConfig",
     "RoutineConfig",
+    "DriverConfig",
     "EnvConfig",
 ]
 
@@ -619,6 +620,37 @@ class RoutineConfig:
 
 
 @dataclass
+class DriverConfig:
+    """Routine-execution driver heuristics, separate from the routine itself.
+
+    The ``routine`` group says *what* is flown and how a good flight is
+    verified; this group tunes *how the driver executes it*: the geometric
+    epsilon of the ``goto`` heading logic and the driver's wall-clock backstops
+    (last-resort deadlines that only fire when the simulation itself stalls, on
+    top of the sim-time budgets in the routine). Global, not per vehicle.
+
+    Attributes:
+        goto_min_heading_dist_m: Below this horizontal baseline-to-target
+            distance a ``goto`` leg has no meaningful heading (a near-vertical
+            move): the streamed setpoint holds heading and the
+            heading-alignment completion passes trivially.
+        prearm_backstop_floor_s: Minimum wall-clock backstop for the
+            PREARM_SETTLE phase (which is budgeted in sim time).
+        prearm_backstop_multiplier: PREARM_SETTLE wall-clock backstop as a
+            multiple of ``routine.prearm_settle_s``; the backstop is
+            ``max(floor, prearm_settle_s * multiplier)``.
+        drive_budget_multiplier: DRIVE-phase wall-clock backstop as a multiple
+            of the routine's summed sim-time step budgets (plus handshake/ack
+            slack).
+    """
+
+    goto_min_heading_dist_m: float
+    prearm_backstop_floor_s: float
+    prearm_backstop_multiplier: float
+    drive_budget_multiplier: float
+
+
+@dataclass
 class EnvConfig:
     """Composite experiment config consumed by the Isaac Sim extensions.
 
@@ -646,6 +678,9 @@ class EnvConfig:
             means manual operation, a non-empty list makes every workflow
             arm/take-off/verify the fleet. The integration test is just this
             routine driven in strict mode.
+        driver: Routine-execution driver heuristics (see :class:`DriverConfig`):
+            the ``goto`` heading epsilon and the driver's wall-clock backstops.
+            Global (not merged per vehicle).
     """
 
     sim: SimSettings
@@ -656,3 +691,4 @@ class EnvConfig:
     scene: str
     vehicles: List[Any]
     routine: RoutineConfig
+    driver: DriverConfig

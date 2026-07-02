@@ -8,6 +8,7 @@ defaults:
   - experiment/px4@px4: default
   - experiment/press@press: default
   - experiment/routine@routine: default
+  - experiment/driver@driver: default
   - _self_
 
 # Scene loaded for this experiment. Every experiment (test or not) sets a scene;

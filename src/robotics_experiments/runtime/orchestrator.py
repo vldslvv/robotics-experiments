@@ -36,6 +36,7 @@ from robotics_experiments.commanding import (
     CommandAck,
     DriverEnvironment,
     DriverParams,
+    FailureKind,
     MavlinkCommandPort,
     RoutineDriver,
     RoutineObservation,
@@ -88,7 +89,7 @@ class FleetDriverEnv:
         handle: DroneRuntimeHandle,
         *,
         log: Callable[[str], None],
-        on_failure: Callable[[Any, str], None],
+        on_failure: Callable[[FailureKind, str], None],
         on_step_advanced: Callable[[str], None],
     ) -> None:
         if handle.host is None or handle.observer is None or handle.port is None:
@@ -123,7 +124,7 @@ class FleetDriverEnv:
     def log(self, message: str) -> None:
         self._log_fn(message)
 
-    def on_failure(self, kind: Any, message: str) -> None:
+    def on_failure(self, kind: FailureKind, message: str) -> None:
         self._on_failure_fn(kind, message)
 
     def on_step_advanced(self, step_label: str) -> None:
@@ -266,6 +267,7 @@ class FleetOrchestrator:
             handle.driver = RoutineDriver(
                 DriverParams.from_routine_config(
                     handle.vehicle.routine,
+                    driver=self.env.driver,
                     home_lat_deg=handle.vehicle.px4.home_lat_deg,
                     home_lon_deg=handle.vehicle.px4.home_lon_deg,
                     home_alt_m=handle.vehicle.px4.home_alt_m,

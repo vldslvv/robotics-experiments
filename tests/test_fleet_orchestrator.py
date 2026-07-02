@@ -168,6 +168,12 @@ def _env(*vehicles):
         scene="@scene.usd",
         sim=SimpleNamespace(physics_hz=250.0),
         vehicles=list(vehicles),
+        driver=SimpleNamespace(
+            goto_min_heading_dist_m=0.25,
+            prearm_backstop_floor_s=20.0,
+            prearm_backstop_multiplier=5.0,
+            drive_budget_multiplier=4.0,
+        ),
     )
 
 

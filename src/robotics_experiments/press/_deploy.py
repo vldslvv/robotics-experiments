@@ -3,8 +3,8 @@
 The deploy-time analogue of ``press._actuation``: in Lab the action drives the
 in-sim actuation model; at deploy the *same* normalized action maps to a PX4
 OFFBOARD setpoint streamed over the GCS link. This module owns only the pure
-conversion (body-FLU RL action -> the PX4 body-FRD wire payloads in
-``commanding._commands``); the side-effecting stream is the command port's
+conversion (body-FLU RL action -> the PX4 body-FRD wire payloads exported by
+``commanding``); the side-effecting stream is the command port's
 ``send_velocity_setpoint`` / ``send_attitude_target``. Keeping it here (not in
 the env leaf) keeps it torch/Isaac-free and unit-testable.
 
@@ -19,15 +19,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..commanding._commands import _AttitudeRateSetpoint, _VelocitySetpoint
+from ..commanding import AttitudeRateSetpoint, VelocitySetpoint
 
 __all__ = ["press_action_to_offboard"]
 
 
-def _velocity_setpoint(action: np.ndarray, action_cfg) -> _VelocitySetpoint:
+def _velocity_setpoint(action: np.ndarray, action_cfg) -> VelocitySetpoint:
     max_velocity = float(action_cfg.max_body_velocity_mps)
     max_yaw_rate = float(action_cfg.max_yaw_rate_radps)
-    return _VelocitySetpoint(
+    return VelocitySetpoint(
         forward_mps=float(action[0]) * max_velocity,
         right_mps=-float(action[1]) * max_velocity,
         down_mps=-float(action[2]) * max_velocity,
@@ -35,11 +35,11 @@ def _velocity_setpoint(action: np.ndarray, action_cfg) -> _VelocitySetpoint:
     )
 
 
-def _attitude_target(action: np.ndarray, action_cfg) -> _AttitudeRateSetpoint:
+def _attitude_target(action: np.ndarray, action_cfg) -> AttitudeRateSetpoint:
     hover_fraction = float(action_cfg.hover_thrust_fraction)
     max_body_rate = float(action_cfg.max_body_rate_radps)
     thrust = float(np.clip(hover_fraction * (1.0 + float(action[0])), 0.0, 1.0))
-    return _AttitudeRateSetpoint(
+    return AttitudeRateSetpoint(
         thrust=thrust,
         roll_rate_radps=float(action[1]) * max_body_rate,
         pitch_rate_radps=-float(action[2]) * max_body_rate,
@@ -58,7 +58,7 @@ def press_action_to_offboard(action: np.ndarray, action_cfg):
             ``max_body_rate_radps`` / ``hover_thrust_fraction``).
 
     Returns:
-        A ``_VelocitySetpoint`` (``velocity``) or ``_AttitudeRateSetpoint``
+        A ``VelocitySetpoint`` (``velocity``) or ``AttitudeRateSetpoint``
         (``ctbr``) for the command port to stream.
 
     Raises:

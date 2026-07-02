@@ -1,0 +1,20 @@
+defaults:
+  - base_driver
+
+# Routine-execution driver heuristics: how the per-drone RoutineDriver executes
+# a routine, separate from the routine itself (what is flown and how a good
+# flight is verified). Global for the whole fleet, not merged per vehicle.
+
+# Below this horizontal baseline-to-target distance a goto leg has no
+# meaningful heading (a near-vertical move): the streamed setpoint holds the
+# current heading and the heading-alignment completion passes trivially.
+goto_min_heading_dist_m: 0.25
+
+# Wall-clock backstops: last-resort deadlines that only fire when the
+# simulation itself stalls (the routine's own budgets are in sim time). The
+# PREARM_SETTLE backstop is max(floor, prearm_settle_s * multiplier); the DRIVE
+# backstop is the routine's summed step budgets (plus handshake/ack slack)
+# times the multiplier.
+prearm_backstop_floor_s: 20.0
+prearm_backstop_multiplier: 5.0
+drive_budget_multiplier: 4.0

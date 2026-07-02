@@ -241,15 +241,15 @@ def _build_make_env(
     def make_env(handle):
         is_first = handle.label == first_label
 
-        def on_failure(kind: Any, message: str) -> None:
+        def on_failure(kind: FailureKind, message: str) -> None:
             if strict:
-                if kind == "failsafe":
+                if kind is FailureKind.FAILSAFE:
                     _raise_failsafe(message)
                 if kind is FailureKind.ENVELOPE:
                     _raise_instability(message)
                 raise AssertionError(message)
             context.report(
-                f"WARNING: {message} ({kind}); stopping routine "
+                f"WARNING: {message} ({kind.name}); stopping routine "
                 "(manual control remains available)"
             )
 

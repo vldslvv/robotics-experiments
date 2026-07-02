@@ -1,8 +1,8 @@
 """Pure command-layer observation: the input to the routine stepper.
 
 A :class:`RoutineObservation` is the command-layer analogue of the bridge's
-:class:`VehicleState`: a frozen, dependency-free snapshot the pure ``_decide``
-function reads to make a :class:`_RoutineDecision`. It reuses the bridge's
+:class:`VehicleState`: a frozen, dependency-free snapshot the pure ``decide``
+function reads to make a :class:`RoutineDecision`. It reuses the bridge's
 existing pure :class:`VehicleState` and :class:`BridgeStatus` and adds the
 command-feedback fields (the last MAVLink ``COMMAND_ACK`` and the failsafe flag)
 parsed off the GCS link by the side-effecting port.
@@ -21,9 +21,9 @@ from robotics_experiments.px4_bridge.contract import BridgeStatus
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = [
-    "_MAV_RESULT_ACCEPTED",
-    "_MAV_RESULT_IN_PROGRESS",
-    "_MAV_RESULT_TEMPORARILY_REJECTED",
+    "MAV_RESULT_ACCEPTED",
+    "MAV_RESULT_IN_PROGRESS",
+    "MAV_RESULT_TEMPORARILY_REJECTED",
     "CommandAck",
     "RoutineObservation",
 ]
@@ -31,13 +31,13 @@ __all__ = [
 # MAVLink command-result ids (MAV_RESULT_*). Named here as plain ints so the
 # pure observation layer does not import pymavlink. Values match the MAVLink
 # common message set.
-_MAV_RESULT_ACCEPTED = 0
-_MAV_RESULT_TEMPORARILY_REJECTED = 1
-_MAV_RESULT_IN_PROGRESS = 5
+MAV_RESULT_ACCEPTED = 0
+MAV_RESULT_TEMPORARILY_REJECTED = 1
+MAV_RESULT_IN_PROGRESS = 5
 
 # Results that mean "the vehicle took the command" - acceptance plus the
 # in-progress reply PX4 may return for long-running navigation commands.
-_ACCEPTED_RESULTS = frozenset({_MAV_RESULT_ACCEPTED, _MAV_RESULT_IN_PROGRESS})
+_ACCEPTED_RESULTS = frozenset({MAV_RESULT_ACCEPTED, MAV_RESULT_IN_PROGRESS})
 
 
 @dataclass(frozen=True)
@@ -66,11 +66,11 @@ class CommandAck:
 
 @dataclass(frozen=True)
 class RoutineObservation:
-    """Frozen snapshot the pure ``_decide`` stepper reads each tick.
+    """Frozen snapshot the pure ``decide`` stepper reads each tick.
 
     Attributes:
         vehicle_state: The bridge's pure kinematic state for this tick.
-        bridge_status: The bridge lockstep snapshot (connectivity, _arm state).
+        bridge_status: The bridge lockstep snapshot (connectivity, arm state).
         last_ack: The most recent ``COMMAND_ACK`` parsed this tick, or ``None``.
         failsafe: Whether PX4 reported a failsafe system status this tick. Read
             by the driver to raise its domain-specific failsafe error; the pure

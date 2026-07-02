@@ -1,6 +1,7 @@
 from hydra.core.config_store import ConfigStore
 
 from ._types import (
+    DriverConfig,
     DroneConfig,
     EnvConfig,
     LightSwitchConfig,
@@ -32,3 +33,4 @@ def _register_schemas() -> None:
     cs.store(group="experiment/px4", name="base_px4", node=Px4BridgeConfig)
     cs.store(group="experiment/press", name="base_press", node=PressConfig)
     cs.store(group="experiment/routine", name="base_routine", node=RoutineConfig)
+    cs.store(group="experiment/driver", name="base_driver", node=DriverConfig)
