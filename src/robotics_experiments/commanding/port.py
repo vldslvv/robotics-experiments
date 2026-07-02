@@ -21,14 +21,14 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from ._commands import (
+from .commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     AttitudeRateSetpoint,
     MavlinkCommand,
     PositionSetpoint,
     VelocitySetpoint,
 )
-from ._observation import MAV_RESULT_ACCEPTED, CommandAck
+from .observation import MAV_RESULT_ACCEPTED, CommandAck
 
 __all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
 
@@ -42,7 +42,7 @@ _POSITION_TARGET_TYPEMASK_YAW_IGNORE = 0b0100_0000_0000
 
 # MAV_FRAME_GLOBAL_INT (geodetic lat/lon e7 + AMSL altitude); a MAVLink protocol
 # constant named here so streaming a setpoint does not need a pymavlink import for
-# the frame id (the same pattern as the MAV_CMD ids in _commands.py).
+# the frame id (the same pattern as the MAV_CMD ids in commands.py).
 _MAV_FRAME_GLOBAL_INT = 5
 
 # MAV_FRAME_BODY_NED (body-forward/right/down) for the deploy-time velocity
@@ -219,12 +219,16 @@ class MavlinkCommandPort(AbstractCommandPort):
         )
         self._last_heartbeat_sent_s = now_s
 
-    def send(self, command: MavlinkCommand) -> None:
+    def _require_target(self, action: str) -> None:
+        """Guard: every send needs the PX4 target learned from a heartbeat first."""
         if not self._target_known:
             raise RuntimeError(
-                f"[{self._label}] cannot send {command.label!r}: GCS link has not "
+                f"[{self._label}] cannot {action}: GCS link has not "
                 "learned the PX4 target system yet (no heartbeat handshake)"
             )
+
+    def send(self, command: MavlinkCommand) -> None:
+        self._require_target(f"send {command.label!r}")
         _LOGGER.info("[%s] sending MAVLink command %s", self._label, command.label)
         self._mav.mav.command_long_send(
             self._mav.target_system,
@@ -235,11 +239,7 @@ class MavlinkCommandPort(AbstractCommandPort):
         )
 
     def send_setpoint(self, setpoint: PositionSetpoint) -> None:
-        if not self._target_known:
-            raise RuntimeError(
-                f"[{self._label}] cannot stream a setpoint: GCS link has not "
-                "learned the PX4 target system yet (no heartbeat handshake)"
-            )
+        self._require_target("stream a setpoint")
         type_mask = _POSITION_TARGET_TYPEMASK_POS_YAW
         yaw = setpoint.yaw_rad
         if not math.isfinite(yaw):
@@ -265,11 +265,7 @@ class MavlinkCommandPort(AbstractCommandPort):
         )
 
     def send_velocity_setpoint(self, setpoint: VelocitySetpoint) -> None:
-        if not self._target_known:
-            raise RuntimeError(
-                f"[{self._label}] cannot stream a velocity setpoint: GCS link has not "
-                "learned the PX4 target system yet (no heartbeat handshake)"
-            )
+        self._require_target("stream a velocity setpoint")
         self._mav.mav.set_position_target_local_ned_send(
             0,  # time_boot_ms (unused by PX4)
             self._mav.target_system,
@@ -290,11 +286,7 @@ class MavlinkCommandPort(AbstractCommandPort):
         )
 
     def send_attitude_target(self, setpoint: AttitudeRateSetpoint) -> None:
-        if not self._target_known:
-            raise RuntimeError(
-                f"[{self._label}] cannot stream an attitude setpoint: GCS link has not "
-                "learned the PX4 target system yet (no heartbeat handshake)"
-            )
+        self._require_target("stream an attitude setpoint")
         self._mav.mav.set_attitude_target_send(
             0,  # time_boot_ms (unused by PX4)
             self._mav.target_system,

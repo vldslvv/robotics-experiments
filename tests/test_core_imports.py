@@ -85,7 +85,7 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         # The config-driven routine builder is pure too (it is what the live
         # extension driver calls), so it must build a routine with Isaac and
         # pymavlink blocked.
-        from robotics_experiments.commanding._routine import EnvelopeGates, build_vehicle_routine
+        from robotics_experiments.commanding.routine import EnvelopeGates, build_vehicle_routine
 
         gates = EnvelopeGates(
             max_tilt_deg=35.0,

@@ -42,7 +42,7 @@ from robotics_experiments.px4_bridge.frames import (
     tilt_angle_deg,
 )
 
-from ._commands import (
+from .commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     MavlinkCommand,
     PositionSetpoint,
@@ -52,34 +52,29 @@ from ._commands import (
     set_offboard_mode,
     takeoff,
 )
-from ._observation import MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
+from .observation import MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
 
 __all__ = [
     "DecisionKind",
     "EnvelopeGates",
     "FailureKind",
-    "Invariant",
     "RoutineDecision",
     "RoutineState",
     "RoutineStep",
-    "StepPredicate",
-    "StreamingSpec",
     "VehicleRoutine",
     "ack_accepted",
-    "angular_speed_below",
     "armed",
     "build_vehicle_routine",
     "climbed_at_least",
     "cross_track_drift_below",
     "cross_track_to_segment_below",
+    "decide",
     "disarmed",
     "heading_aligned",
     "hovering_stable",
-    "lateral_drift_below",
     "moved_forward_at_least",
     "reached_world_position",
     "tilt_below",
-    "vertical_speed_within",
 ]
 
 _EARTH_RADIUS_M = 6_378_137.0
@@ -95,8 +90,8 @@ _DEFAULT_MIN_HEADING_DIST_M = 0.25
 # baseline position (ENU, set when each step begins); baseline is ``None`` only
 # before a step has begun. An invariant gate returns a breach message when the
 # continuous flight envelope is violated, or ``None`` when it holds.
-StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
-Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
+_StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
+_Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 
 
 class DecisionKind(Enum):
@@ -207,17 +202,17 @@ class RoutineStep:
     """
 
     command: Optional[MavlinkCommand]
-    is_complete: StepPredicate
+    is_complete: _StepPredicate
     label: str
     timeout_s: float
     retry_on_temporarily_rejected: bool = False
     hold_s: float = 0.0
-    invariants: tuple[Invariant, ...] = ()
-    streaming: Optional["StreamingSpec"] = None
+    invariants: tuple[_Invariant, ...] = ()
+    streaming: Optional["_StreamingSpec"] = None
 
 
 @dataclass(frozen=True)
-class StreamingSpec:
+class _StreamingSpec:
     """The streamed-setpoint target for an OFFBOARD ``goto`` step.
 
     Attributes:
@@ -285,10 +280,6 @@ class RoutineState:
     setpoints_streamed: int = 0
     offboard_requested: bool = False
     offboard_hold_setpoint: Optional[PositionSetpoint] = None
-
-    @classmethod
-    def initial(cls) -> "RoutineState":
-        return cls()
 
 
 def _advanced(state: RoutineState) -> RoutineState:
@@ -480,7 +471,7 @@ def decide(
 # ---- Pure completion predicates over (RoutineObservation, baseline) ---------
 
 
-def armed() -> StepPredicate:
+def armed() -> _StepPredicate:
     """Predicate: PX4 currently commands nonzero rotor references (is armed)."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -489,7 +480,7 @@ def armed() -> StepPredicate:
     return predicate
 
 
-def ack_accepted(command_id: int) -> StepPredicate:
+def ack_accepted(command_id: int) -> _StepPredicate:
     """Predicate: the last ack this tick accepted ``command_id``."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -499,7 +490,7 @@ def ack_accepted(command_id: int) -> StepPredicate:
     return predicate
 
 
-def climbed_at_least(min_climb_m: float) -> StepPredicate:
+def climbed_at_least(min_climb_m: float) -> _StepPredicate:
     """Predicate: the vehicle climbed at least ``min_climb_m`` above the baseline.
 
     The baseline is the takeoff step's captured start position (its ground
@@ -517,7 +508,7 @@ def climbed_at_least(min_climb_m: float) -> StepPredicate:
 
 def hovering_stable(
     *, max_abs_vertical_speed_m_s: float, max_abs_horizontal_speed_m_s: float
-) -> StepPredicate:
+) -> _StepPredicate:
     """Predicate: the vehicle's translational speeds are within hover bounds.
 
     Combined with a step ``hold_s`` this expresses "held a stable hover for N
@@ -534,7 +525,7 @@ def hovering_stable(
     return predicate
 
 
-def moved_forward_at_least(distance_m: float) -> StepPredicate:
+def moved_forward_at_least(distance_m: float) -> _StepPredicate:
     """Predicate: the vehicle moved at least ``distance_m`` along world +X/east."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -546,7 +537,7 @@ def moved_forward_at_least(distance_m: float) -> StepPredicate:
     return predicate
 
 
-def disarmed() -> StepPredicate:
+def disarmed() -> _StepPredicate:
     """Predicate: PX4 no longer commands armed rotor references."""
 
     def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
@@ -555,7 +546,7 @@ def disarmed() -> StepPredicate:
     return predicate
 
 
-def reached_world_position(x_m: float, y_m: float, z_m: float, tol_m: float) -> StepPredicate:
+def reached_world_position(x_m: float, y_m: float, z_m: float, tol_m: float) -> _StepPredicate:
     """Predicate: the vehicle is within ``tol_m`` (3D) of absolute world ENU ``(x, y, z)``.
 
     The first *absolute* world-frame completion predicate: it compares the
@@ -576,7 +567,7 @@ def heading_aligned(
     y_m: float,
     tol_deg: float,
     min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
-) -> StepPredicate:
+) -> _StepPredicate:
     """Predicate: the body faces the active-step-baseline-to-target heading.
 
     Trivially satisfied for a near-vertical leg (horizontal
@@ -603,16 +594,7 @@ def heading_aligned(
     return predicate
 
 
-def _and_predicates(*predicates: StepPredicate) -> StepPredicate:
-    """Combine completion predicates: complete only when every one is satisfied."""
-
-    def predicate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
-        return all(p(observation, baseline) for p in predicates)
-
-    return predicate
-
-
-def _setpoint_for(spec: "StreamingSpec", baseline: Optional[np.ndarray]) -> PositionSetpoint:
+def _setpoint_for(spec: "_StreamingSpec", baseline: Optional[np.ndarray]) -> PositionSetpoint:
     """Build the streamed setpoint: the fixed geodetic target plus a live heading.
 
     Yaw faces the active-step-baseline-to-target direction (constant per leg); a
@@ -637,7 +619,7 @@ def _setpoint_for(spec: "StreamingSpec", baseline: Optional[np.ndarray]) -> Posi
 # ---- Continuous flight-envelope invariant gates ----------------------------
 
 
-def tilt_below(max_tilt_deg: float) -> Invariant:
+def tilt_below(max_tilt_deg: float) -> _Invariant:
     """Gate: body tilt from upright stays at or below ``max_tilt_deg``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -649,7 +631,7 @@ def tilt_below(max_tilt_deg: float) -> Invariant:
     return gate
 
 
-def lateral_drift_below(max_lateral_drift_m: float) -> Invariant:
+def _lateral_drift_below(max_lateral_drift_m: float) -> _Invariant:
     """Gate: horizontal distance from the baseline stays within ``max_lateral_drift_m``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -664,7 +646,7 @@ def lateral_drift_below(max_lateral_drift_m: float) -> Invariant:
     return gate
 
 
-def cross_track_drift_below(max_cross_track_m: float) -> Invariant:
+def cross_track_drift_below(max_cross_track_m: float) -> _Invariant:
     """Gate: world Y/north drift from the baseline stays within ``max_cross_track_m``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -679,7 +661,7 @@ def cross_track_drift_below(max_cross_track_m: float) -> Invariant:
     return gate
 
 
-def cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: float) -> Invariant:
+def cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: float) -> _Invariant:
     """Gate: horizontal distance from the active step's path stays within ``max_m``.
 
     The direction-agnostic generalization of :func:`cross_track_drift_below`: it
@@ -708,7 +690,7 @@ def cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: fl
     return gate
 
 
-def vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> Invariant:
+def _vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> _Invariant:
     """Gate: vertical speed stays within (``max_down_m_s``, ``max_up_m_s``).
 
     ``max_up_m_s`` is the positive upward limit; ``max_down_m_s`` is the negative
@@ -726,7 +708,7 @@ def vertical_speed_within(max_up_m_s: float, max_down_m_s: float) -> Invariant:
     return gate
 
 
-def angular_speed_below(max_angular_speed_rad_s: float) -> Invariant:
+def _angular_speed_below(max_angular_speed_rad_s: float) -> _Invariant:
     """Gate: body angular-speed magnitude stays within ``max_angular_speed_rad_s``."""
 
     def gate(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> Optional[str]:
@@ -749,7 +731,7 @@ def angular_speed_below(max_angular_speed_rad_s: float) -> Invariant:
 class EnvelopeGates:
     """Flight-envelope thresholds wired onto a routine's flight steps.
 
-    The continuous gates (``max_*``) become per-step :class:`Invariant`s on the
+    The continuous gates (``max_*``) become per-step :class:`_Invariant`s on the
     takeoff and hover steps; the two ``hover_*`` thresholds parameterize the
     hover step's :func:`hovering_stable` completion predicate. Built by a driver
     from the ``routine`` config and handed to :func:`build_vehicle_routine`.
@@ -764,32 +746,18 @@ class EnvelopeGates:
     hover_max_abs_horizontal_speed_m_s: float
 
 
-def _flight_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
+def _invariants(gates: EnvelopeGates, lateral: _Invariant) -> tuple[_Invariant, ...]:
+    """The four continuous flight-envelope gates, parameterized by the lateral gate.
+
+    Tilt, vertical, and angular gates are shared by every flight step; the lateral
+    gate differs per step (baseline drift for takeoff/hover, cross-track for
+    forward, cross-track-to-path for goto).
+    """
     return (
         tilt_below(gates.max_tilt_deg),
-        lateral_drift_below(gates.max_lateral_drift_m),
-        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
-        angular_speed_below(gates.max_angular_speed_rad_s),
-    )
-
-
-def _forward_invariants(gates: EnvelopeGates) -> tuple[Invariant, ...]:
-    return (
-        tilt_below(gates.max_tilt_deg),
-        cross_track_drift_below(gates.max_lateral_drift_m),
-        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
-        angular_speed_below(gates.max_angular_speed_rad_s),
-    )
-
-
-def _goto_invariants(
-    gates: EnvelopeGates, target_x_m: float, target_y_m: float, cross_track_m: float
-) -> tuple[Invariant, ...]:
-    return (
-        tilt_below(gates.max_tilt_deg),
-        cross_track_to_segment_below(target_x_m, target_y_m, cross_track_m),
-        vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
-        angular_speed_below(gates.max_angular_speed_rad_s),
+        lateral,
+        _vertical_speed_within(gates.max_vertical_speed_m_s, gates.max_downward_speed_m_s),
+        _angular_speed_below(gates.max_angular_speed_rad_s),
     )
 
 
@@ -862,8 +830,8 @@ def build_vehicle_routine(
         ValueError: on an unknown ``kind`` or a required descriptor field missing
             (invalid configuration must not pass silently).
     """
-    flight_invariants = _flight_invariants(gates)
-    forward_invariants = _forward_invariants(gates)
+    flight_invariants = _invariants(gates, _lateral_drift_below(gates.max_lateral_drift_m))
+    forward_invariants = _invariants(gates, cross_track_drift_below(gates.max_lateral_drift_m))
     built: list[RoutineStep] = []
     commanded_altitude_m = float(target_altitude_m)
     for index, descriptor in enumerate(steps):
@@ -956,7 +924,7 @@ def build_vehicle_routine(
                 home_lon_deg,
                 home_alt_m,
             )
-            spec = StreamingSpec(
+            spec = _StreamingSpec(
                 target_enu=(x_m, y_m, z_m),
                 latitude_deg=float(gps["latitude"]),
                 longitude_deg=float(gps["longitude"]),
@@ -964,16 +932,26 @@ def build_vehicle_routine(
                 prime_ticks=int(goto_offboard_prime_ticks),
                 min_heading_dist_m=float(goto_min_heading_dist_m),
             )
+            reached = reached_world_position(x_m, y_m, z_m, position_tol_m)
+            aligned = heading_aligned(x_m, y_m, heading_tol_deg, goto_min_heading_dist_m)
+
+            def _reached_and_aligned(
+                observation: RoutineObservation,
+                baseline: Optional[np.ndarray],
+                reached: _StepPredicate = reached,
+                aligned: _StepPredicate = aligned,
+            ) -> bool:
+                return reached(observation, baseline) and aligned(observation, baseline)
+
             built.append(
                 RoutineStep(
                     command=set_offboard_mode(),
-                    is_complete=_and_predicates(
-                        reached_world_position(x_m, y_m, z_m, position_tol_m),
-                        heading_aligned(x_m, y_m, heading_tol_deg, goto_min_heading_dist_m),
-                    ),
+                    is_complete=_reached_and_aligned,
                     label=f"goto[{x_m:.1f},{y_m:.1f},{z_m:.1f}]",
                     timeout_s=float(descriptor["timeout_s"]),
-                    invariants=_goto_invariants(gates, x_m, y_m, goto_cross_track_m),
+                    invariants=_invariants(
+                        gates, cross_track_to_segment_below(x_m, y_m, goto_cross_track_m)
+                    ),
                     streaming=spec,
                 )
             )

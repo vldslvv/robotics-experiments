@@ -13,10 +13,10 @@ from robotics_experiments.commanding import (
     FailureKind,
     RoutineDriver,
 )
-from robotics_experiments.commanding._commands import MAV_CMD_COMPONENT_ARM_DISARM
-from robotics_experiments.commanding._driver import DriverPhase
-from robotics_experiments.commanding._observation import CommandAck
-from robotics_experiments.commanding._routine import EnvelopeGates
+from robotics_experiments.commanding.commands import MAV_CMD_COMPONENT_ARM_DISARM
+from robotics_experiments.commanding.driver import DriverPhase
+from robotics_experiments.commanding.observation import CommandAck
+from robotics_experiments.commanding.routine import EnvelopeGates
 
 _GATES = EnvelopeGates(
     max_tilt_deg=35.0,

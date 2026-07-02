@@ -282,10 +282,14 @@ the current contents and the intended home for that kind of code.
   production runtime surface (`RoutineDriver`, `DriverParams`,
   `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
   `FailureKind`, and the deploy-time wire payloads `VelocitySetpoint` /
-  `AttitudeRateSetpoint` consumed by `press._deploy`); pure stepper/building
-  internals live in underscore modules (with clean, un-prefixed symbol names
-  inside -- privacy is carried by the module name, as elsewhere in the repo) and
-  are tested directly as private implementation. The full reference is
+  `AttitudeRateSetpoint` consumed by `press._deploy`). The command layer's public
+  seams live in non-underscored modules (`commands`, `observation`, `routine`,
+  `port`, `driver`), each declaring its own `__all__` and underscore-prefixing its
+  private top-level members; only the internal `_commander` module (the
+  `VehicleCommander`, not part of the package `__init__`) stays underscored.
+  `commanding/__init__.py` re-exports the package API from those modules and
+  production code imports from the package, not the submodules; tests import the
+  submodules directly to exercise private implementation. The full reference is
   `docs/COMMAND_ROUTINE_CONTRACT.md`; read it before changing this layer.
 - The contract mirrors the bridge part-for-part: `RoutineObservation` (pure
   input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
@@ -299,7 +303,7 @@ the current contents and the intended home for that kind of code.
   one commander + one driver per drone, no fleet object, drones independent
   (cross-drone sync is deferred). `MavlinkCommand` is a thin `command_long`
   wrapper (a `MAV_CMD_*` id + seven params); `MAV_CMD_*` / `MAV_RESULT_*` /
-  `PX4_FORCE_ARM_MAGIC` are named int constants so the pure modules never import
+  `_PX4_FORCE_ARM_MAGIC` are named int constants so the pure modules never import
   pymavlink. `tests/test_commanding_routine.py` (the `decide` transitions + a
   `VehicleCommander`) and `tests/test_commanding_driver.py` (the `RoutineDriver`
   phase machine over fake seams) are the pure regression guards, over the fakes in
@@ -324,7 +328,7 @@ the current contents and the intended home for that kind of code.
 - The routine carries its own verification, so a step's completion can require a
   physical state and a step can carry continuous flight-envelope gates. A
   `RoutineStep` has an **optional** `command` (`None` = a verification-only step
-  like `hover`), a completion predicate `StepPredicate(observation, baseline)`, a
+  like `hover`), a completion predicate `_StepPredicate(observation, baseline)`, a
   sim-time `timeout_s`, an optional `hold_s` (the predicate must hold continuously
   for this long before advancing -- "hover stable for N seconds"), and a tuple of
   `invariants` (continuous gates). `decide` checks `invariants` first (a breach ->
@@ -336,10 +340,10 @@ the current contents and the intended home for that kind of code.
   strings). Completion helpers:
   `armed`, `ack_accepted`, `climbed_at_least(min_climb_m)` (vs the captured
   baseline), `hovering_stable(...)`; invariant helpers (breach message or `None`):
-  `tilt_below`, `lateral_drift_below`, `vertical_speed_within`,
-  `angular_speed_below`; `EnvelopeGates` bundles the thresholds.
+  `tilt_below`, `_lateral_drift_below`, `_vertical_speed_within`,
+  `_angular_speed_below`; `EnvelopeGates` bundles the thresholds.
 - Where the executor lives: the pure per-drone `RoutineDriver`
-  (`commanding/_driver.py`) is the single executor -- a tick-driven phase machine
+  (`commanding/driver.py`) is the single executor -- a tick-driven phase machine
   (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET -> BUILD
   -> DRIVE -> DONE`) over one drone's routine, one `AbstractCommandPort`, and a
   `DriverEnvironment` seam (bridge connectivity, sim time, observation assembly,

@@ -429,7 +429,7 @@ def make_routine_observation(
     pass one or the other. ``linear_velocity_enu`` and ``angular_velocity_flu``
     drive the flight-envelope gates and the hover-stable completion predicate.
     """
-    from robotics_experiments.commanding._observation import RoutineObservation
+    from robotics_experiments.commanding.observation import RoutineObservation
 
     orientation = _quat_yaw_deg(yaw_deg) if yaw_deg else _quat_pitch_deg(tilt_deg)
     vehicle_state = VehicleState(

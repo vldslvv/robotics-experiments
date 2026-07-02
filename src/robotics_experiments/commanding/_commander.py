@@ -10,9 +10,9 @@ lifecycle around it. There is no fleet object - drones are independent.
 
 from __future__ import annotations
 
-from ._observation import RoutineObservation
-from ._port import AbstractCommandPort
-from ._routine import DecisionKind, RoutineDecision, RoutineState, VehicleRoutine, decide
+from .observation import RoutineObservation
+from .port import AbstractCommandPort
+from .routine import DecisionKind, RoutineDecision, RoutineState, VehicleRoutine, decide
 
 __all__ = ["VehicleCommander"]
 
@@ -20,17 +20,10 @@ __all__ = ["VehicleCommander"]
 class VehicleCommander:
     """Drives one routine over one port; pure decision, isolated side effect."""
 
-    def __init__(
-        self, routine: VehicleRoutine, port: AbstractCommandPort, *, label: str = ""
-    ) -> None:
+    def __init__(self, routine: VehicleRoutine, port: AbstractCommandPort) -> None:
         self._routine = routine
         self._port = port
-        self._label = label
-        self._state = RoutineState.initial()
-
-    @property
-    def label(self) -> str:
-        return self._label
+        self._state = RoutineState()
 
     @property
     def is_done(self) -> bool:

@@ -33,9 +33,10 @@ from robotics_experiments.px4_bridge.frames import (
 )
 
 from ._commander import VehicleCommander
-from ._observation import CommandAck, RoutineObservation
-from ._port import AbstractCommandPort
-from ._routine import (
+from .observation import CommandAck, RoutineObservation
+from .port import AbstractCommandPort
+from .routine import (
+    _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     EnvelopeGates,
     FailureKind,
@@ -93,7 +94,7 @@ class DriverParams:
     # Execution heuristics (from the Hydra ``driver`` group): the goto heading
     # epsilon and the wall-clock backstops; library-neutral fallbacks so direct
     # constructions need not set them.
-    goto_min_heading_dist_m: float = 0.25
+    goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
@@ -225,7 +226,8 @@ class RoutineDriver:
     def tick(self) -> None:
         """Advance the phase machine one control frame. Never advances physics."""
         if self._phase is DriverPhase.DONE:
-            self._pump_only()
+            # Keep the GCS link warm in DONE (heartbeat + drain) without acting on acks.
+            self._pump_and_poll()
             return
         if self._deadline_s and self._monotonic() > self._deadline_s:
             self._fail(FailureKind.TIMEOUT, f"phase {self._phase.name} timed out")
@@ -303,7 +305,7 @@ class RoutineDriver:
             goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
             goto_min_heading_dist_m=self._params.goto_min_heading_dist_m,
         )
-        self._commander = VehicleCommander(self._routine, self._port, label=self._label)
+        self._commander = VehicleCommander(self._routine, self._port)
         self._prev_cursor = 0
         self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
         self._enter(DriverPhase.DRIVE)
@@ -384,8 +386,3 @@ class RoutineDriver:
     def _pump_and_poll(self) -> Optional[CommandAck]:
         self._port.pump_heartbeat()
         return self._port.poll_feedback()
-
-    def _pump_only(self) -> None:
-        """Keep the GCS link warm in DONE without collecting acks."""
-        self._port.pump_heartbeat()
-        self._port.poll_feedback()

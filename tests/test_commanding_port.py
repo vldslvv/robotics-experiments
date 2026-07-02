@@ -13,11 +13,11 @@ import types
 
 import pytest
 
-from robotics_experiments.commanding._commands import (
+from robotics_experiments.commanding.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     PositionSetpoint,
 )
-from robotics_experiments.commanding._port import (
+from robotics_experiments.commanding.port import (
     _MAV_FRAME_GLOBAL_INT,
     _POSITION_TARGET_TYPEMASK_POS_YAW,
     _POSITION_TARGET_TYPEMASK_YAW_IGNORE,

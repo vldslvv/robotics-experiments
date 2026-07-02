@@ -9,7 +9,7 @@ parsed off the GCS link by the side-effecting port.
 
 This module imports neither pymavlink nor Isaac, so it stays on the core import
 path; the ``MAV_RESULT_*`` ids are named int constants here for the same reason
-the ``MAV_CMD_*`` ids are in ``_commands.py``.
+the ``MAV_CMD_*`` ids are in ``commands.py``.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = [
     "MAV_RESULT_ACCEPTED",
-    "MAV_RESULT_IN_PROGRESS",
     "MAV_RESULT_TEMPORARILY_REJECTED",
     "CommandAck",
     "RoutineObservation",
@@ -33,11 +32,11 @@ __all__ = [
 # common message set.
 MAV_RESULT_ACCEPTED = 0
 MAV_RESULT_TEMPORARILY_REJECTED = 1
-MAV_RESULT_IN_PROGRESS = 5
+_MAV_RESULT_IN_PROGRESS = 5
 
 # Results that mean "the vehicle took the command" - acceptance plus the
 # in-progress reply PX4 may return for long-running navigation commands.
-_ACCEPTED_RESULTS = frozenset({MAV_RESULT_ACCEPTED, MAV_RESULT_IN_PROGRESS})
+_ACCEPTED_RESULTS = frozenset({MAV_RESULT_ACCEPTED, _MAV_RESULT_IN_PROGRESS})
 
 
 @dataclass(frozen=True)

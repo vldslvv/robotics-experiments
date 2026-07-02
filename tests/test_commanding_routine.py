@@ -16,7 +16,7 @@ from _fakes import FakeCommandPort, make_routine_observation
 
 from robotics_experiments.commanding import FailureKind
 from robotics_experiments.commanding._commander import VehicleCommander
-from robotics_experiments.commanding._commands import (
+from robotics_experiments.commanding.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_REPOSITION,
     MAV_CMD_DO_SET_MODE,
@@ -26,11 +26,11 @@ from robotics_experiments.commanding._commands import (
     arm,
     takeoff,
 )
-from robotics_experiments.commanding._observation import (
+from robotics_experiments.commanding.observation import (
     MAV_RESULT_TEMPORARILY_REJECTED,
     CommandAck,
 )
-from robotics_experiments.commanding._routine import (
+from robotics_experiments.commanding.routine import (
     DecisionKind,
     EnvelopeGates,
     RoutineState,
@@ -81,7 +81,7 @@ def _arm_takeoff_routine(*, min_climb_m=1.0):
 
 def test_decide_runs_arm_takeoff_to_done():
     routine = _arm_takeoff_routine(min_climb_m=1.0)
-    state = RoutineState.initial()
+    state = RoutineState()
 
     # Tick 1: first step not sent -> SEND arm, active-step baseline + timer captured.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
@@ -129,7 +129,7 @@ def test_decide_runs_arm_takeoff_to_done():
 
 def test_decide_retries_on_temporarily_rejected():
     routine = _arm_takeoff_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
     assert decision.kind is DecisionKind.SEND
 
@@ -147,7 +147,7 @@ def test_decide_retries_on_temporarily_rejected():
 
 def test_decide_fails_on_hard_rejection():
     routine = _arm_takeoff_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     state, _ = decide(routine, state, make_routine_observation(sim_time_us=0))
 
     # A non-temporary, non-accepted ack fails the routine (DENIED == 2).
@@ -161,7 +161,7 @@ def test_decide_fails_on_hard_rejection():
 
 def test_decide_fails_on_timeout():
     routine = _arm_takeoff_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     state, _ = decide(routine, state, make_routine_observation(sim_time_us=0))
 
     # arm step timeout_s is 5.0s; 6s of sim time with no ack -> FAIL.
@@ -181,7 +181,7 @@ def test_vehicle_commander_sends_then_advances_to_done():
     # One commander drives one routine over one port: SEND on entry, ADVANCE on
     # the accepted ack, DONE past the last step. Drones are independent (no fleet).
     port = FakeCommandPort()
-    commander = VehicleCommander(_arm_takeoff_routine(), port, label="d0")
+    commander = VehicleCommander(_arm_takeoff_routine(), port)
 
     decision = commander.step(make_routine_observation(sim_time_us=0))
     assert decision.kind is DecisionKind.SEND
@@ -346,7 +346,7 @@ def _far(sim_time_us, **overrides):
 
 def _goto_state_after_offboard_request():
     routine = _goto_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     for t in range(3):
         state, decision = decide(routine, state, _far(t))
         assert decision.kind is DecisionKind.STREAM
@@ -377,7 +377,7 @@ def _goto_hover_land_routine(*, hover_hold_s=1.0):
 
 
 def _advance_first_goto(routine):
-    state = RoutineState.initial()
+    state = RoutineState()
     for t in range(5):
         state, _decision = decide(routine, state, _far(t))
     reached = make_routine_observation(
@@ -394,7 +394,7 @@ def _advance_first_goto(routine):
 
 def test_decide_goto_primes_then_engages_offboard_then_reaches():
     routine = _goto_routine()  # _build uses goto_offboard_prime_ticks=3
-    state = RoutineState.initial()
+    state = RoutineState()
 
     # Entry tick streams the first (priming) setpoint, facing the leg direction:
     # NED yaw = atan2(east=3, north=0) = pi/2.
@@ -441,7 +441,7 @@ def test_decide_goto_offboard_accepted_ack_continues_streaming():
 
 def test_decide_goto_ignores_offboard_ack_before_this_step_requests_mode():
     routine = _goto_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     state, decision = decide(routine, state, _far(0))
     assert decision.kind is DecisionKind.STREAM
 
@@ -484,7 +484,7 @@ def test_decide_goto_offboard_hard_rejection_fails_command():
 
 def test_decide_goto_holds_streaming_until_heading_aligned():
     routine = _goto_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     for t in range(6):  # prime + engage offboard + steady stream
         state, _decision = decide(routine, state, _far(t))
     # At the waypoint but yawed 90 deg off the leg direction: not yet complete.
@@ -495,7 +495,7 @@ def test_decide_goto_holds_streaming_until_heading_aligned():
 
 def test_decide_goto_cross_track_breach_fails_envelope():
     routine = _goto_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
     state, _decision = decide(routine, state, _far(0))  # entry: baseline captured
     # 3 m off the straight x-axis path exceeds goto_cross_track_m=2.0.
     off_path = make_routine_observation(sim_time_us=1, position_enu=(1.0, 3.0, 2.0))
@@ -546,7 +546,7 @@ def test_consecutive_goto_cross_track_uses_current_leg_path():
 
 def test_decide_goto_times_out_as_command_failure():
     routine = _goto_routine()  # timeout_s=20.0
-    state = RoutineState.initial()
+    state = RoutineState()
     for t in range(5):  # reach the steady streaming branch
         state, _decision = decide(routine, state, _far(t))
     state, decision = decide(routine, state, _far(21_000_000))
@@ -556,7 +556,7 @@ def test_decide_goto_times_out_as_command_failure():
 
 def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
     routine = _goto_hover_land_routine()
-    state = RoutineState.initial()
+    state = RoutineState()
 
     last_streamed = None
     for t in range(5):
@@ -591,7 +591,7 @@ def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
 
 def test_explicit_command_after_offboard_hover_clears_held_setpoint():
     routine = _goto_hover_land_routine(hover_hold_s=0.0)
-    state = RoutineState.initial()
+    state = RoutineState()
     for t in range(5):
         state, _decision = decide(routine, state, _far(t))
 
@@ -710,7 +710,7 @@ def test_forward_invariant_allows_commanded_x_displacement():
         ]
     )
     forward_routine = VehicleRoutine(steps=(routine.steps[1],))
-    state = RoutineState.initial()
+    state = RoutineState()
 
     # Entry tick captures the baseline at the pre-forward position and SENDs.
     state, decision = decide(
@@ -755,7 +755,7 @@ def test_decide_invariant_breach_fails_with_envelope_kind():
         invariants=(tilt_below(35.0),),
     )
     routine = VehicleRoutine(steps=(takeoff_step,))
-    state = RoutineState.initial()
+    state = RoutineState()
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
     assert decision.kind is DecisionKind.SEND
 
@@ -781,7 +781,7 @@ def test_decide_hover_step_holds_before_advancing():
         hold_s=2.0,
     )
     routine = VehicleRoutine(steps=(hover_step,))
-    state = RoutineState.initial()
+    state = RoutineState()
 
     # Entry tick: command-less step begins -> WAIT (no SEND).
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))

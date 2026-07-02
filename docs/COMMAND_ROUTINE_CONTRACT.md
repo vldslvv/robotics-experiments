@@ -12,10 +12,12 @@ runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
 `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
 deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
 `press._deploy`). The pure stepper, command constructors, routine builder, and
-lower-level seams live in underscore-prefixed modules (with clean, un-prefixed
-symbol names inside -- privacy is carried by the module name) and are private
-implementation, even where unit tests import them directly as white-box
-regression guards.
+lower-level seams live in non-underscored modules (`commands`, `observation`,
+`routine`, `port`, `driver`), each declaring its own `__all__` and
+underscore-prefixing its private members; only the `_commander` module (the
+internal `VehicleCommander`, absent from the package `__init__`) stays
+underscored. Production code imports from the package; unit tests import the
+submodules directly as white-box regression guards.
 
 ## The four-part contract
 
@@ -31,19 +33,19 @@ Like the bridge, the command layer is **per drone**: one `VehicleCommander` and
 one `RoutineDriver` drive one drone's routine. There is no fleet object - drones
 are independent (cross-drone synchronization is deliberately deferred).
 
-- **`_commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
+- **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
   params, a label) plus pure constructors (`arm`, `takeoff`, `reposition`,
   `land`, `set_offboard_mode`). Also `PositionSetpoint` (frozen: a geodetic
   lat/lon/alt + NED yaw), the wire payload for a streamed OFFBOARD setpoint.
-  `MAV_CMD_*` numbers, the PX4 offboard main-mode id, and `PX4_FORCE_ARM_MAGIC`
+  `MAV_CMD_*` numbers, the PX4 offboard main-mode id, and `_PX4_FORCE_ARM_MAGIC`
   are named int constants so the module never imports pymavlink.
-- **`_observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
+- **`observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
   int constants; `CommandAck.from_result` derives `accepted`.
-- **`_routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
+- **`routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
   command -- `None` for a verification-only step such as `hover`; a completion
-  predicate `StepPredicate = Callable[[RoutineObservation, baseline], bool]`; a
+  predicate `_StepPredicate = Callable[[RoutineObservation, baseline], bool]`; a
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
   sustained-completion window; and a tuple of continuous `invariants`),
   `VehicleRoutine` (ordered steps), `RoutineState`
@@ -61,13 +63,13 @@ are independent (cross-drone synchronization is deliberately deferred).
   `hovering_stable(...)`, `moved_forward_at_least(distance_m)`,
   `reached_world_position(x, y, z, tol)` (the first **absolute** world-frame
   predicate), `heading_aligned(...)`, and `disarmed()`. Invariant gate helpers
-  (each returns a breach message or `None`): `tilt_below`, `lateral_drift_below`,
+  (each returns a breach message or `None`): `tilt_below`, `_lateral_drift_below`,
   `cross_track_drift_below`, `cross_track_to_segment_below` (perpendicular
   deviation from the active step baseline to target path, direction-agnostic),
-  `vertical_speed_within`, `angular_speed_below`. `EnvelopeGates` bundles the
+  `_vertical_speed_within`, `_angular_speed_below`. `EnvelopeGates` bundles the
   gate thresholds wired onto the flight steps.
 
-  A **streaming step** (the `goto` kind, carrying a `StreamingSpec`) is the one
+  A **streaming step** (the `goto` kind, carrying a `_StreamingSpec`) is the one
   step whose `decide` emits `STREAM` rather than a single `SEND`: it primes
   `prime_ticks` OFFBOARD setpoints, sends the one-shot offboard-mode command, then
   streams the setpoint every tick until the waypoint is reached or the step times
@@ -96,7 +98,7 @@ are independent (cross-drone synchronization is deliberately deferred).
   reacts in kind: the strict driver maps `ENVELOPE` to its instability error,
   `FAILSAFE` to `Px4FailsafeDetected`, and the rest to a plain assertion; a
   forgiving driver logs any of them and stops.
-- **`_port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
+- **`port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
   `pump_heartbeat`, `send`, `send_setpoint`, `send_velocity_setpoint`,
   `send_attitude_target`, `poll_feedback`) and the PX4
   `MavlinkCommandPort`, whose `pymavlink` import is function-scoped. The port
@@ -116,7 +118,7 @@ are independent (cross-drone synchronization is deliberately deferred).
   `RoutineState`: runs `decide` and performs the single side effect -- `port.send`
   on `SEND`, `port.send_setpoint` on `STREAM`). One commander drives one drone;
   there is no fleet object or barrier.
-- **`_driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
+- **`driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
   `AbstractCommandPort` and a `DriverEnvironment` (the injected seam: bridge

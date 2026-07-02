@@ -103,7 +103,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
   `lateral_speed_max_mps`, `angular_speed_max_radps`, `estimator_health_min`). Add
   `handoff: PressHandoffConfig` to `PressConfig`.
 - Reuse note: this mirrors the command layer's continuous envelope invariants
-  (`commanding/_routine.py`: `tilt_below`, `lateral_drift_below`, ...). Keep the
+  (`commanding/routine.py`: `tilt_below`, `_lateral_drift_below`, ...). Keep the
   same pure-predicate style; do not duplicate the envelope-gate logic, but a
   separate handoff predicate is warranted (different thresholds, different frame).
 - Test: `tests/test_press_handoff.py` (pure): a calm, close, confident, fresh obs

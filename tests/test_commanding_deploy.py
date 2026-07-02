@@ -9,11 +9,11 @@ import types
 
 import pytest
 
-from robotics_experiments.commanding._commands import (
+from robotics_experiments.commanding.commands import (
     AttitudeRateSetpoint,
     VelocitySetpoint,
 )
-from robotics_experiments.commanding._port import (
+from robotics_experiments.commanding.port import (
     _ATTITUDE_TARGET_TYPEMASK_RATES,
     _MAV_FRAME_BODY_NED,
     _VELOCITY_TARGET_TYPEMASK,

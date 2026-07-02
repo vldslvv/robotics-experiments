@@ -7,7 +7,7 @@ stays on the core import path; the numeric ``MAV_CMD_*`` ids are named int
 constants here rather than read from ``pymavlink.mavutil.mavlink`` so the pure
 command layer never drags the MAVLink runtime onto the import path.
 
-The side-effecting :class:`MavlinkCommandPort` (see ``_port.py``) is the only
+The side-effecting :class:`MavlinkCommandPort` (see ``port.py``) is the only
 layer that turns a :class:`MavlinkCommand` into an actual ``command_long_send``.
 """
 
@@ -23,8 +23,6 @@ __all__ = [
     "MAV_CMD_NAV_LAND",
     "MAV_CMD_NAV_TAKEOFF",
     "MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
-    "PX4_CUSTOM_MAIN_MODE_OFFBOARD",
-    "PX4_FORCE_ARM_MAGIC",
     "AttitudeRateSetpoint",
     "MavlinkCommand",
     "PositionSetpoint",
@@ -52,11 +50,11 @@ MAV_DO_REPOSITION_FLAGS_CHANGE_MODE = 1
 # param2/param3 is active. PX4's main mode for offboard control is 6; both are
 # PX4/MAVLink protocol constants, not tunables.
 _MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1
-PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6
+_PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6
 
 # PX4 force-arm magic value, passed as the ``MAV_CMD_COMPONENT_ARM_DISARM``
 # param2 float to bypass pre-arm checks. A PX4 protocol constant, not a tunable.
-PX4_FORCE_ARM_MAGIC = 21196
+_PX4_FORCE_ARM_MAGIC = 21196
 
 
 @dataclass(frozen=True)
@@ -86,7 +84,7 @@ def arm() -> MavlinkCommand:
     """
     return MavlinkCommand(
         command_id=MAV_CMD_COMPONENT_ARM_DISARM,
-        params=(1.0, float(PX4_FORCE_ARM_MAGIC), 0.0, 0.0, 0.0, 0.0, 0.0),
+        params=(1.0, float(_PX4_FORCE_ARM_MAGIC), 0.0, 0.0, 0.0, 0.0, 0.0),
         label="arm",
     )
 
@@ -158,13 +156,13 @@ def set_offboard_mode() -> MavlinkCommand:
     param1 is the base-mode flag marking the custom mode active; param2 is PX4's
     custom main mode (OFFBOARD); param3 (custom sub mode) is unused. PX4 only
     accepts OFFBOARD once a setpoint stream is already flowing, so a ``goto`` step
-    primes setpoints before this is sent (see ``_routine.decide``).
+    primes setpoints before this is sent (see ``routine.decide``).
     """
     return MavlinkCommand(
         command_id=MAV_CMD_DO_SET_MODE,
         params=(
             float(_MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
-            float(PX4_CUSTOM_MAIN_MODE_OFFBOARD),
+            float(_PX4_CUSTOM_MAIN_MODE_OFFBOARD),
             0.0,
             0.0,
             0.0,

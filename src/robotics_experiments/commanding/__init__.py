@@ -5,11 +5,11 @@ symbols production code outside ``commanding`` uses to build and tick per-drone
 routine drivers over the GCS MAVLink link.
 """
 
-from ._commands import AttitudeRateSetpoint, VelocitySetpoint
-from ._driver import DriverEnvironment, DriverParams, RoutineDriver
-from ._observation import CommandAck, RoutineObservation
-from ._port import MavlinkCommandPort
-from ._routine import FailureKind
+from .commands import AttitudeRateSetpoint, VelocitySetpoint
+from .driver import DriverEnvironment, DriverParams, RoutineDriver
+from .observation import CommandAck, RoutineObservation
+from .port import MavlinkCommandPort
+from .routine import FailureKind
 
 __all__ = [
     "AttitudeRateSetpoint",
