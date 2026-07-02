@@ -109,6 +109,14 @@ remove-px4-container:
 remove-px4-image:
 	@docker rmi $(PX4_IMAGE) 2>/dev/null || true
 
+.PHONY: remove-cache-images
+remove-cache-images:
+	@docker rmi $(ISAAC_CACHE_IMAGE) 2>/dev/null || true
+	@docker rmi $(ISAAC_LAB_CACHE_IMAGE) 2>/dev/null || true
+	@docker rmi $(ROS_CACHE_IMAGE) 2>/dev/null || true
+	@docker rmi $(PX4_CACHE_IMAGE) 2>/dev/null || true
+	@echo "Removed Docker build cache anchor images (if they existed)."
+
 .PHONY: run
 run:
 	kitty --title ROS2 --hold $(MAKE) run-ros &
@@ -125,11 +133,11 @@ remove-containers: remove-isaac-container remove-ros-container remove-px4-contai
 
 .PHONY: remove-images
 remove-images: remove-isaac-image remove-isaac-lab-image remove-ros-image remove-px4-image
-	@echo "Removed Isaac, Isaac Lab, ROS, and PX4 images (if they existed)."
+	@echo "Removed runnable Isaac, Isaac Lab, ROS, and PX4 image tags (build cache anchors preserved)."
 
 .PHONY: destroy
 destroy: stop remove-containers remove-images
-	@echo "All containers and images removed."
+	@echo "All containers and runnable image tags removed; Docker build cache anchors preserved."
 
 .PHONY: run-all
 run-all: run
@@ -167,6 +175,9 @@ clean-px4-image: remove-px4-image
 
 .PHONY: clean-images
 clean-images: remove-images
+
+.PHONY: clean-cache-images
+clean-cache-images: remove-cache-images
 
 .PHONY: clean-all
 clean-all: destroy

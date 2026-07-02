@@ -14,9 +14,13 @@ the F1 in-Lab actuation gate and exercises the Isaac Lab `DirectRLEnv` surface
 (`Isaac-Drone-Hover-Direct-v0`), not the single-env `IsaacArticulationIO`, so it
 launches its own `AppLauncher` and builds the env directly. It drives the env's
 `velocity` action with an analytic outer position controller (no RL) and asserts
-every parallel env holds a hover (< 0.1 m) then tracks a 2 m goto (< 0.2 m). Run
-it with `make test-integration-press-hover-goto`; it needs no PX4 container. It
-prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
+every parallel env holds a hover (< 0.1 m) then tracks a 2 m goto (< 0.2 m) for
+the final 1.0 s validation window. The make gate runs with a fixed seed for
+reproducibility; direct diagnostic runs can pass `--diag --seed <N> --num-envs 1
+--log-every <N>` to inspect the response. Its `--scene` argument is accepted for
+the shared integration runner but ignored, and the script logs that explicitly.
+Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
+It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
 Integration Make targets default to the minimal

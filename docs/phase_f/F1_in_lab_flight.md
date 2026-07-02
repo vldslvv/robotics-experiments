@@ -178,11 +178,11 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 - Done when: hover holds and goto tracks for the chosen `press.action.kind`,
   confirming the in-Lab inner loop is trustworthy before any RL. This gate is the
   precondition for starting F3.
-- Status: the gate now runs (the `isaac-lab` Docker image makes `isaaclab`
-  importable) and hover holds (~0.03 m), but the 2 m goto does not yet settle -- the
-  env's velocity controller limit-cycles on the maneuver. Diagnosis and the tuning
-  plan to make the gate pass are in `F1b_velocity_controller_tuning.md` (runs before
-  F3).
+- Status: complete. `make test-integration-press-hover-goto` runs on the
+  `isaac-lab` Docker image, seeds the env for reproducibility, and requires the
+  final 1.0 s hover/goto windows to stay within tolerance (`0.1 m` hover,
+  `0.2 m` goto). The config-only F1b retune and measured results are recorded in
+  `F1b_velocity_controller_tuning.md`.
 
 ## Files touched by F1
 

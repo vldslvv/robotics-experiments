@@ -2,6 +2,8 @@
 # Image builds
 ########################################
 
+docker_cache_from = $(if $(shell docker image inspect $(1) >/dev/null 2>&1 && printf yes),--cache-from $(1),)
+
 .PHONY: build
 build: build-isaac build-isaac-lab build-ros build-px4
 	@echo "All images built/pulled."
@@ -11,12 +13,15 @@ build-isaac:
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_cache_from,$(ISAAC_CACHE_IMAGE)) \
+		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
 		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
+		-t $(ISAAC_CACHE_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -28,6 +33,8 @@ build-isaac-lab:
 	@echo "Building Isaac Lab image: $(ISAAC_LAB_IMAGE) (ISAACLAB_REF=$(ISAACLAB_REF))"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_cache_from,$(ISAAC_LAB_CACHE_IMAGE)) \
+		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
 		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
@@ -35,6 +42,7 @@ build-isaac-lab:
 		--build-arg ISAACLAB_REF="$(ISAACLAB_REF)" \
 		--target isaac-lab \
 		-t $(ISAAC_LAB_IMAGE) \
+		-t $(ISAAC_LAB_CACHE_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -43,11 +51,14 @@ build-ros:
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_cache_from,$(ROS_CACHE_IMAGE)) \
+		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
 		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--target ros \
 		-t $(ROS_IMAGE) \
+		-t $(ROS_CACHE_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -61,9 +72,12 @@ build-px4:
 	@echo "Building PX4 SITL image: $(PX4_IMAGE)"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_cache_from,$(PX4_CACHE_IMAGE)) \
+		--cache-to type=inline \
 		--build-arg PX4_TAG="$(PX4_TAG)" \
 		--target px4 \
 		-t $(PX4_IMAGE) \
+		-t $(PX4_CACHE_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 

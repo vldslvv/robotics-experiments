@@ -27,11 +27,12 @@ scenario-specific notes.
   passed/failed summary after all targets finish.
 - `make test-integration-press-hover-goto` runs the F1 in-Lab actuation gate: the
   Isaac Lab `DroneHoverEnv` driven by an analytic velocity controller (no PX4
-  container) that must hold a hover and track a 2 m goto across all parallel envs.
-  It is the one target that runs on the Isaac Lab image (`ISAAC_LAB_IMAGE`, the
-  Dockerfile `isaac-lab` stage layered `FROM isaac-sim`) instead of the default
-  `isaac-sim` image (`ISAAC_IMAGE`), because it imports `isaaclab`. The target sets
-  the override with a target-specific `ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)`;
+  container) that must hold a hover and track a 2 m goto across all parallel envs
+  for the final 1.0 s validation windows. It is the one target that runs on the
+  Isaac Lab image (`ISAAC_LAB_IMAGE`, the Dockerfile `isaac-lab` stage layered
+  `FROM isaac-sim`) instead of the default `isaac-sim` image (`ISAAC_IMAGE`),
+  because it imports `isaaclab`. The target sets the override with a
+  target-specific `ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)`;
   `ISAAC_INTEGRATION_COMMON_ENV` expands it at recipe time, so the rest of the
   runner is unchanged. Build the image first with `make build-isaac-lab` (or
   `make build`).

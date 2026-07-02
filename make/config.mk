@@ -14,6 +14,7 @@ ISAAC_BASE_TAG   ?= 5.1.0
 ISAAC_IMAGE_NAME     ?= vv-isaac-sim-custom
 ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
+ISAAC_CACHE_IMAGE    = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
 
@@ -24,6 +25,7 @@ ISAAC_PROJECT_DIR    = /isaac-sim/proj
 ISAACLAB_REF         ?= v2.3.2
 ISAAC_LAB_IMAGE_NAME ?= vv-isaac-lab-custom
 ISAAC_LAB_IMAGE      = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
+ISAAC_LAB_CACHE_IMAGE = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
 
 # Auto-launch of the custom Isaac runtime (runapp_custom.sh) on container start.
 # ISAAC_AUTORUN=0 (default) keeps the manual two-pane shell; ISAAC_AUTORUN=1
@@ -98,6 +100,7 @@ ROS_BASE_TAG       ?= $(ROS_DISTRO)
 ROS_IMAGE_NAME     ?= vv-ros-$(ROS_DISTRO)-custom
 ROS_IMAGE_TAG      ?= $(ROS_DISTRO)
 ROS_IMAGE          = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
+ROS_CACHE_IMAGE    = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)-buildcache
 ROS_CONTAINER_NAME ?= vv-ros-$(ROS_DISTRO)-custom
 
 # These paths have to be relative to be inside docker build context.
@@ -117,6 +120,7 @@ PX4_TAG            ?= v1.14.3
 PX4_IMAGE_NAME     ?= vv-px4-sitl
 PX4_IMAGE_TAG      ?= $(PX4_TAG)
 PX4_IMAGE          = $(PX4_IMAGE_NAME):$(PX4_IMAGE_TAG)
+PX4_CACHE_IMAGE    = $(PX4_IMAGE_NAME):$(PX4_IMAGE_TAG)-buildcache
 PX4_CONTAINER_NAME ?= vv-px4-sitl
 PX4_TEST_CONTAINER_NAME ?= vv-px4-sitl-test
 PX4_TAKEOFF_TEST_LOG = $(PX4_HOME)/logs/test_px4_takeoff_stability_px4.log

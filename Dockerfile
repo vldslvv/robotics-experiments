@@ -210,51 +210,6 @@ RUN chmod +x make_symlinks.sh
 ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
 CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
 
-# Isaac Lab layers on top of Isaac Sim: it shares the same kit python
-# (/isaac-sim/python.sh), USD, and PhysX and cannot run standalone, so it is a
-# superset of the isaac-sim stage rather than a separate image. Only the Phase F
-# RL/DirectRLEnv workflow needs it (the test-integration-press-hover-goto gate and
-# future F2/F3 training); the other integration targets stay on the leaner
-# isaac-sim image. ISAACLAB_REF is pinned for reproducibility -- v2.3.2 is the
-# Isaac Lab release built on Isaac Sim 5.1 (and it ships multirotor support).
-# Override with --build-arg ISAACLAB_REF=... when moving Isaac Sim versions.
-FROM isaac-sim AS isaac-lab
-
-ARG ISAACLAB_REF=v2.3.2
-# Build prerequisites: cmake/build-essential for the source packages / RL
-# frameworks the full install resolves (some compile), and ncurses-term for the
-# full terminfo DB. isaaclab.sh starts with `tabs 4`, which resolves the
-# `ansi+tabs` terminfo building block; the base image's minimal terminfo lacks it,
-# so without ncurses-term the install aborts with "'ansi+tabs': unknown terminal
-# type".
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake build-essential ncurses-term \
- && rm -rf /var/lib/apt/lists/*
-# The _isaac_sim -> /isaac-sim symlink makes isaaclab.sh target the container's
-# kit python (its kit-installation resolution path is _isaac_sim/python.sh), so
-# `--install` (no arg = all RL frameworks) lands the isaaclab* packages in the
-# exact interpreter the standalone gate runs under. TERM=xterm is forced inline so
-# isaaclab.sh's `tabs 4` has a valid terminal regardless of the login-shell
-# profile; advice.detachedHead quiets the pinned-tag checkout.
-#
-# The explicit base-package install after isaaclab.sh is load-bearing: the base
-# `source/isaaclab` is the only extension with a setup.py, so isaaclab.sh's
-# `install_isaaclab_extension` builds it under pip's default build isolation,
-# where its `import pkg_resources` fails (ModuleNotFoundError) -- and the
-# find -exec that drives the loop swallows that error, so isaaclab.sh exits 0 with
-# base `isaaclab` NOT installed (only its five PEP 660 siblings register). Kit
-# python already carries setuptools/pkg_resources/wheel, so re-installing base
-# with --no-build-isolation builds against them and registers the editable path.
-# The final import is a build-time gate: fail the image loudly if `isaaclab` is
-# not importable rather than shipping a broken Lab image.
-RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
- && cd /isaac-lab \
- && git -c advice.detachedHead=false checkout "${ISAACLAB_REF}" \
- && ln -s /isaac-sim _isaac_sim \
- && TERM=xterm ./isaaclab.sh --install \
- && /isaac-sim/python.sh -m pip install --no-build-isolation -e source/isaaclab \
- && /isaac-sim/python.sh -c "import isaaclab; print('isaaclab OK:', isaaclab.__file__)"
-
 FROM ai-tools AS ros-base
 
 ARG ROS_DISTRO="jazzy"
@@ -319,6 +274,54 @@ ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
   exec \"$@\" \
 ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
+
+
+# Isaac Lab layers on top of Isaac Sim: it shares the same kit python
+# (/isaac-sim/python.sh), USD, and PhysX and cannot run standalone, so it is a
+# superset of the isaac-sim stage rather than a separate image. Only the Phase F
+# RL/DirectRLEnv workflow needs it (the test-integration-press-hover-goto gate and
+# future F2/F3 training); the other integration targets stay on the leaner
+# isaac-sim image. ISAACLAB_REF is pinned for reproducibility -- v2.3.2 is the
+# Isaac Lab release built on Isaac Sim 5.1 (and it ships multirotor support).
+# Override with --build-arg ISAACLAB_REF=... when moving Isaac Sim versions.
+FROM isaac-sim AS isaac-lab
+
+ARG ISAACLAB_REF=v2.3.2
+# Build prerequisites: cmake/build-essential for the source packages / RL
+# frameworks the full install resolves (some compile), and ncurses-term for the
+# full terminfo DB. isaaclab.sh starts with `tabs 4`, which resolves the
+# `ansi+tabs` terminfo building block; the base image's minimal terminfo lacks it,
+# so without ncurses-term the install aborts with "'ansi+tabs': unknown terminal
+# type".
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake build-essential ncurses-term \
+ && rm -rf /var/lib/apt/lists/*
+# The _isaac_sim -> /isaac-sim symlink makes isaaclab.sh target the container's
+# kit python (its kit-installation resolution path is _isaac_sim/python.sh), so
+# `--install` (no arg = all RL frameworks) lands the isaaclab* packages in the
+# exact interpreter the standalone gate runs under. TERM=xterm is forced inline so
+# isaaclab.sh's `tabs 4` has a valid terminal regardless of the login-shell
+# profile; advice.detachedHead quiets the pinned-tag checkout.
+#
+# Isaac Lab depends on flatdict 4.0.1, whose sdist setup imports
+# pkg_resources. pip build isolation can pull a setuptools build backend without
+# pkg_resources and abort before isaaclab.sh finishes, so install that leaf in
+# the Kit Python environment first and build it against Kit's setuptools.
+# The explicit base-package install after isaaclab.sh is also load-bearing: the
+# base `source/isaaclab` is the only extension with a setup.py, and isaaclab.sh's
+# find -exec loop can swallow a failed editable install. Re-installing base with
+# --no-build-isolation registers the editable path, and the final imports fail
+# the image loudly if either flatdict or isaaclab is missing.
+RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
+ && cd /isaac-lab \
+ && git -c advice.detachedHead=false checkout "${ISAACLAB_REF}" \
+ && ln -s /isaac-sim _isaac_sim \
+ && (/isaac-sim/python.sh -c "import pkg_resources" \
+     || /isaac-sim/python.sh -m pip install --disable-pip-version-check "setuptools<80" wheel) \
+ && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-build-isolation "flatdict==4.0.1" \
+ && TERM=xterm ./isaaclab.sh --install \
+ && /isaac-sim/python.sh -m pip install --no-build-isolation -e source/isaaclab \
+ && /isaac-sim/python.sh -c "import flatdict, isaaclab; print('isaaclab OK:', isaaclab.__file__)"
 
 
 # PX4 SITL stands in for the flight controller on a real drone; kept in its own

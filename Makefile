@@ -28,8 +28,9 @@ help:
 		'' \
 		'  make stop                  Stop persistent containers' \
 		'  make remove-containers     Remove persistent containers' \
-		'  make remove-images         Remove built images' \
-		'  make destroy               Stop containers and remove containers/images' \
+		'  make remove-images         Remove runnable image tags, keeping build cache anchors' \
+		'  make remove-cache-images   Remove Docker build cache anchor images' \
+		'  make destroy               Stop containers and remove containers/runnable image tags' \
 		'' \
 		'  make test                  Run host Python tests' \
 		'  make test-integration      Run container-backed integration tests' \
