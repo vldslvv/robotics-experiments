@@ -18,7 +18,8 @@ and tested independently:
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Sequence
+from dataclasses import dataclass
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -27,10 +28,28 @@ from ._flight_stack import AbstractFlightStackBridge
 from ._simulator import ArticulationIO
 from .contract import ActuatorCommands, BridgeStatus
 from .thrust_model import _RotorDynamics, _RotorThrustModel
+from .vehicle_state import VehicleState
 
 __all__ = ["Px4Bridge"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _PendingTick:
+    """Send-leg state of one physics tick, consumed by the paired poll leg.
+
+    Produced by :meth:`Px4Bridge.send_sensors`; ``Px4Bridge._pending is None``
+    is the distinct "no send happened" state, so an unpaired
+    :meth:`Px4Bridge.recv_and_apply` fails loudly instead of applying stale
+    forces.
+    """
+
+    state: VehicleState
+    send_result: Optional[ActuatorCommands]
+    force_cutoff: bool
+    sim_time_us: int
+    dt: float
 
 
 class Px4Bridge:
@@ -89,12 +108,9 @@ class Px4Bridge:
         self._dynamics_debug_interval = 50
         self._max_tilt_angle_deg = max_tilt_angle_deg
         self._tilt_cutoff_count = 0
-        # Per-tick state stashed by send_sensors for the paired recv_and_apply.
-        self._pending_state: Any = None
-        self._pending_send_result: Optional[ActuatorCommands] = None
-        self._pending_force_cutoff: bool = False
-        self._pending_sim_time_us: int = 0
-        self._pending_dt: float = 0.0
+        # Send-leg state consumed by the paired recv_and_apply; None = no send
+        # happened this tick.
+        self._pending: Optional[_PendingTick] = None
         if articulation_io is None:
             from robotics_experiments.px4_bridge.isaac_articulation import (
                 IsaacArticulationIO,
@@ -137,9 +153,11 @@ class Px4Bridge:
     def send_sensors(self, dt: float, sim_time_us: int) -> None:
         """Send leg: read state and publish this tick's sensors to PX4 (no block).
 
-        Stashes the read state, the tilt force-cutoff decision, and the port's
-        send result on ``self`` for the paired :meth:`recv_and_apply`.
+        Leaves one frozen :class:`_PendingTick` (the read state, the tilt
+        force-cutoff decision, and the port's send result) for the paired
+        :meth:`recv_and_apply`.
         """
+        self._pending = None
         if not self._io.is_initialized:
             self._io.initialize()
 
@@ -192,26 +210,38 @@ class Px4Bridge:
         # Send leg, using the real state, before gating applied forces: publish
         # this tick's sensors out to PX4. A None result means an actuator must
         # be polled in recv_and_apply; a concrete result is the no-block case.
-        self._pending_send_result = self._port.send(state)
-        self._pending_state = state
-        self._pending_force_cutoff = force_cutoff
-        self._pending_dt = float(dt)
-        self._pending_sim_time_us = int(sim_time_us)
+        self._pending = _PendingTick(
+            state=state,
+            send_result=self._port.send(state),
+            force_cutoff=force_cutoff,
+            sim_time_us=int(sim_time_us),
+            dt=float(dt),
+        )
 
     def recv_and_apply(self) -> None:
         """Poll leg: block for the paired actuator and apply the resulting forces.
 
-        Consumes the state stashed by :meth:`send_sensors`. Tilt-gated ticks
-        apply zeros; otherwise the actuator commands run through the thrust model
-        and the resulting dynamics are applied to the articulation. The cosmetic
-        rotor spin always follows the real per-rotor omega, even on a tilt-gated
-        tick where forces are zeroed.
+        Consumes the :class:`_PendingTick` left by :meth:`send_sensors`.
+        Tilt-gated ticks apply zeros; otherwise the actuator commands run through
+        the thrust model and the resulting dynamics are applied to the
+        articulation. The cosmetic rotor spin always follows the real per-rotor
+        omega, even on a tilt-gated tick where forces are zeroed.
+
+        Raises:
+            RuntimeError: if called without a paired :meth:`send_sensors` (the
+                lockstep contract requires a vehicle's send to precede its poll).
         """
-        state = self._pending_state
-        sim_time_us = self._pending_sim_time_us
+        pending = self._pending
+        if pending is None:
+            raise RuntimeError(
+                "PX4 bridge recv_and_apply called without a paired send_sensors; "
+                "the lockstep contract requires the send leg to run first"
+            )
+        self._pending = None
+        state = pending.state
+        sim_time_us = pending.sim_time_us
         # Block for the paired actuator (or take the no-block result from send).
-        send_result = self._pending_send_result
-        commands = self._port.poll() if send_result is None else send_result
+        commands = self._port.poll() if pending.send_result is None else pending.send_result
 
         body_velocity_flu = frames.body_velocity_flu_from_state(state)
         dynamics = self._thrust_model.commands_to_dynamics(
@@ -220,9 +250,9 @@ class Px4Bridge:
         )
         # Visual spin is bound to the commanded omega regardless of force gating;
         # it is cosmetic and never feeds back into physics or the lockstep.
-        self._io.update_rotor_spin(dynamics.rotor_omega_rad_s, self._pending_dt)
+        self._io.update_rotor_spin(dynamics.rotor_omega_rad_s, pending.dt)
 
-        if self._pending_force_cutoff:
+        if pending.force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
                 _RotorDynamics(

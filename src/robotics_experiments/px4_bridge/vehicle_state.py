@@ -14,9 +14,9 @@ import numpy as np
 __all__ = ["VehicleState"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class VehicleState:
-    """Snapshot of the drone's state at a single physics tick.
+    """Frozen snapshot of the drone's state at a single physics tick.
 
     All vector fields are length-3 ``np.ndarray`` of dtype float64. The frame
     convention is fixed by the project and matches what Isaac Sim natively

@@ -148,17 +148,18 @@ class Extension(omni.ext.IExt):
         Forgiving: a control bug in one drone is logged and must not stop the
         others or spam every frame, so each driver tick is guarded.
         """
-        for handle in self._orchestrator.flying:
+        for flying in self._orchestrator.flying:
             try:
-                handle.driver.tick()
+                flying.driver.tick()
             except Exception as exc:  # noqa: BLE001 - keep the sim loop alive
-                carb.log_error(f"{_LOG_PREFIX} [{handle.label}] control tick failed: {exc}")
+                carb.log_error(f"{_LOG_PREFIX} [{flying.spawned.label}] control tick failed: {exc}")
 
-    def _make_env(self, handle):
+    def _make_env(self, spawned, port):
         """Build the forgiving :class:`DriverEnvironment` for one flying drone."""
-        label = handle.label
+        label = spawned.label
         return FleetDriverEnv(
-            handle,
+            spawned,
+            port,
             log=lambda message: carb.log_info(f"{_LOG_PREFIX} {message}"),
             on_failure=lambda kind, message: carb.log_warn(
                 f"{_LOG_PREFIX} {message} ({kind.name}); stopping routine "

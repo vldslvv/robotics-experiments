@@ -222,10 +222,10 @@ def _config(**overrides):
 
 
 def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_overrides):
-    """Build a ResolvedVehicle-shaped object around a PX4 config for BridgeHost.
+    """Build a ResolvedVehicle-shaped object around a PX4 config.
 
-    The BridgeHost reads only ``id`` / ``px4`` / ``mavlink_port`` /
-    ``debug_log_path`` off the resolved vehicle; the rest mirror the production
+    ``BridgeHostParams`` carries only ``id`` / ``px4`` / ``mavlink_port`` /
+    ``debug_log_path`` of the resolved vehicle; the rest mirror the production
     shape for completeness. Derived fields follow ``id``.
     """
     px4 = _config(**px4_overrides)
@@ -244,6 +244,20 @@ def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_over
     )
 
 
+def _make_host(module, vehicle, *, spawned_path="/World/Drone", physics_hz=250.0):
+    """Construct a BridgeHost from the vehicle's params, as the orchestrator does."""
+    return module.BridgeHost(
+        module.BridgeHostParams(
+            px4=vehicle.px4,
+            vehicle_id=vehicle.id,
+            mavlink_port=vehicle.mavlink_port,
+            debug_log_path=vehicle.debug_log_path,
+            articulation_path=vehicle.px4.articulation_path or spawned_path,
+            physics_hz=physics_hz,
+        )
+    )
+
+
 def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
     _install_fake_isaac(monkeypatch)
     _install_fake_px4_bridge(monkeypatch, [])
@@ -251,7 +265,7 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
 
     # startup_settle_time_s defaults to 0.012 -> 12_000 us, i.e. three 0.004 s
     # ticks. The bridge must not come up until that window elapses.
-    host = module.BridgeHost(articulation_path="/World/Drone", vehicle=_vehicle(), physics_hz=250.0)
+    host = _make_host(module, _vehicle())
 
     host.start()
 
@@ -282,11 +296,7 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     _install_fake_px4_bridge(monkeypatch, [])
     module = _import_bridge_host(monkeypatch)
 
-    host = module.BridgeHost(
-        articulation_path="/World/Drone",
-        vehicle=_vehicle(startup_settle_time_s=0.0),
-        physics_hz=250.0,
-    )
+    host = _make_host(module, _vehicle(startup_settle_time_s=0.0))
 
     host.start()
 
@@ -310,11 +320,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
 
-    host = module.BridgeHost(
-        articulation_path="/World/Drone",
-        vehicle=_vehicle(startup_settle_time_s=0.0),
-        physics_hz=250.0,
-    )
+    host = _make_host(module, _vehicle(startup_settle_time_s=0.0))
 
     host.start()
 
@@ -341,15 +347,11 @@ def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):
     _install_fake_px4_bridge(monkeypatch, calls)
     module = _import_bridge_host(monkeypatch)
 
-    host0 = module.BridgeHost(
-        articulation_path="/World/Drone",
-        vehicle=_vehicle(vehicle_id=0, startup_settle_time_s=0.0),
-        physics_hz=250.0,
-    )
-    host1 = module.BridgeHost(
-        articulation_path="/World/Drone1",
-        vehicle=_vehicle(vehicle_id=1, startup_settle_time_s=0.0),
-        physics_hz=250.0,
+    host0 = _make_host(module, _vehicle(vehicle_id=0, startup_settle_time_s=0.0))
+    host1 = _make_host(
+        module,
+        _vehicle(vehicle_id=1, startup_settle_time_s=0.0),
+        spawned_path="/World/Drone1",
     )
 
     host0.start()

@@ -57,6 +57,11 @@ the current contents and the intended home for that kind of code.
   for test convenience.
 - Keep private top-level helper functions before public top-level APIs when possible, so
   declarations read from implementation helpers into public entrypoints.
+- Do not add builder functions that only forward fields into a dataclass (for
+  example a `make_params(vehicle, ...) -> Params` that maps attribute-for-attribute).
+  Construct the dataclass directly at the call site; reserve a builder function
+  for construction that carries real logic (nontrivial derivation, validation,
+  or branching).
 - Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
   loading during lightweight package imports.
 - Package layering runs `config -> domain (drone / environment / simulation /
@@ -77,9 +82,10 @@ the current contents and the intended home for that kind of code.
   default. Wire the new public API through every production consumer, update
   tests/docs for the new contract, and let obsolete call sites fail loudly
   unless compatibility is explicitly requested.
-- `VehicleState` carries pose, velocity, angular velocity, and sim time only.
-  Do not add a kinematic acceleration field for the PX4 HIL path; the Pegasus
-  IMU derives acceleration from velocity deltas internally.
+- `VehicleState` is a frozen per-tick snapshot carrying pose, velocity, angular
+  velocity, and sim time only. Do not add a kinematic acceleration field for the
+  PX4 HIL path; the Pegasus IMU derives acceleration from velocity deltas
+  internally.
 
 ## Isaac Sim extension design
 
@@ -175,8 +181,9 @@ the current contents and the intended home for that kind of code.
   spin is the one explicitly non-load-bearing addition: `RotorDynamics` carries an
   additive `rotor_omega_rad_s` (the clipped per-rotor omega the thrust model
   already computes) and `IsaacArticulationIO.update_rotor_spin(rotor_omega_rad_s,
-  dt)` is a cosmetic-only seam called from `recv_and_apply` after the unchanged
-  `apply_dynamics` (with `dt` stashed by `send_sensors`). It only writes a
+  dt)` is a cosmetic-only seam called from `recv_and_apply` alongside the
+  unchanged `apply_dynamics` (`dt` rides on the frozen pending-tick state left by
+  `send_sensors`). It only writes a
   `RotateZ` xformOp on each rotor marker (scaled by `px4.rotor_spin_visual_scale`)
   and must never re-enter forces, the body, or the lockstep -- keep
   `commands_to_dynamics` pure and `apply_dynamics` the sole physics sink.
@@ -252,7 +259,8 @@ the current contents and the intended home for that kind of code.
   The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
   each
   vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
-  independent `BridgeHost` (constructed from the `ResolvedVehicle`), all driven by
+  independent `BridgeHost` (constructed from a frozen `BridgeHostParams`
+  composing the vehicle's `px4` config with its derived identity), all driven by
   a single `BridgeHostGroup` that owns the
   one physics-step subscription. Each PhysX step runs in two phases -- every
   host's send leg (`send_phase`: sensors out to its PX4, no block) first, then

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -99,8 +100,10 @@ def pegasus_path(monkeypatch):
 
 
 def test_pegasus_state_adapter_uses_canonical_quaternion_order(pegasus_path):
-    state = VehicleState.hover_at(position_enu=(1.0, 2.0, 3.0), sim_time_us=0)
-    state.orientation_flu_enu_wxyz = np.array([0.5, -0.5, 0.5, -0.5], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(position_enu=(1.0, 2.0, 3.0), sim_time_us=0),
+        orientation_flu_enu_wxyz=np.array([0.5, -0.5, 0.5, -0.5], dtype=np.float64),
+    )
 
     pegasus_state = _pegasus_state_from_vehicle(state)
 
@@ -112,9 +115,11 @@ def test_pegasus_state_adapter_uses_canonical_quaternion_order(pegasus_path):
 
 
 def test_pegasus_state_position_velocity_and_gyro_match_frame_helpers(pegasus_path):
-    state = VehicleState.hover_at(position_enu=(3.0, 4.0, 5.0), sim_time_us=0)
-    state.linear_velocity_enu = np.array([6.0, 7.0, 8.0], dtype=np.float64)
-    state.angular_velocity_flu = np.array([0.1, -0.2, 0.3], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(position_enu=(3.0, 4.0, 5.0), sim_time_us=0),
+        linear_velocity_enu=np.array([6.0, 7.0, 8.0], dtype=np.float64),
+        angular_velocity_flu=np.array([0.1, -0.2, 0.3], dtype=np.float64),
+    )
 
     pegasus_state = _pegasus_state_from_vehicle(state)
 
@@ -132,11 +137,13 @@ def test_pegasus_state_position_velocity_and_gyro_match_frame_helpers(pegasus_pa
 def test_pegasus_attitude_matches_frames_rotation_convention(pegasus_path):
     from scipy.spatial.transform import Rotation
 
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_wxyz_from_roll_pitch_yaw_deg(
-        roll_deg=17.0,
-        pitch_deg=-23.0,
-        yaw_deg=41.0,
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0),
+        orientation_flu_enu_wxyz=_quat_wxyz_from_roll_pitch_yaw_deg(
+            roll_deg=17.0,
+            pitch_deg=-23.0,
+            yaw_deg=41.0,
+        ),
     )
     pegasus_state = _pegasus_state_from_vehicle(state)
     pegasus_attitude = Rotation.from_quat(pegasus_state.get_attitude_ned_frd())
@@ -159,13 +166,15 @@ def test_pegasus_attitude_matches_frames_rotation_convention(pegasus_path):
 
 
 def test_body_velocity_helper_matches_pegasus_rotation_convention(pegasus_path):
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_wxyz_from_roll_pitch_yaw_deg(
-        roll_deg=-11.0,
-        pitch_deg=8.0,
-        yaw_deg=73.0,
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0),
+        orientation_flu_enu_wxyz=_quat_wxyz_from_roll_pitch_yaw_deg(
+            roll_deg=-11.0,
+            pitch_deg=8.0,
+            yaw_deg=73.0,
+        ),
+        linear_velocity_enu=np.array([2.0, -5.0, 1.5], dtype=np.float64),
     )
-    state.linear_velocity_enu = np.array([2.0, -5.0, 1.5], dtype=np.float64)
 
     pegasus_state = _pegasus_state_from_vehicle(state)
 
@@ -179,8 +188,10 @@ def test_body_velocity_helper_matches_pegasus_rotation_convention(pegasus_path):
 def test_reference_magnetometer_matches_pegasus_with_same_wmm_field(pegasus_path):
     from pegasus.simulator.logic.sensors.magnetometer import Magnetometer
 
-    state = VehicleState.hover_at(position_enu=(12.0, -7.5, 2.0), sim_time_us=0)
-    state.orientation_flu_enu_wxyz = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+    state = replace(
+        VehicleState.hover_at(position_enu=(12.0, -7.5, 2.0), sim_time_us=0),
+        orientation_flu_enu_wxyz=np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)]),
+    )
 
     magnetometer = Magnetometer(
         {
@@ -215,8 +226,10 @@ def test_reference_magnetometer_matches_pegasus_with_same_wmm_field(pegasus_path
 def test_reference_gps_matches_pegasus_frame_and_unit_conventions(pegasus_path):
     from pegasus.simulator.logic.sensors.gps import GPS
 
-    state = VehicleState.hover_at(position_enu=(18.0, -11.0, 3.5), sim_time_us=0)
-    state.linear_velocity_enu = np.array([4.0, -3.0, 1.5], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(position_enu=(18.0, -11.0, 3.5), sim_time_us=0),
+        linear_velocity_enu=np.array([4.0, -3.0, 1.5], dtype=np.float64),
+    )
 
     gps = GPS(
         {

@@ -17,11 +17,15 @@ The pure ``_scene`` helper is safe to import eagerly elsewhere.
 __all__ = [
     "FleetDriverEnv",
     "FleetOrchestrator",
+    "FlyingDrone",
+    "SpawnedDrone",
 ]
 
 _LAZY = {
     "FleetDriverEnv": "orchestrator",
     "FleetOrchestrator": "orchestrator",
+    "FlyingDrone": "orchestrator",
+    "SpawnedDrone": "orchestrator",
 }
 
 

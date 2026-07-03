@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from _fakes import (
@@ -41,10 +43,12 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
 
 
 def test_px4_bridge_derives_drag_velocity_from_world_velocity():
-    state = VehicleState.hover_at(sim_time_us=0)
     yaw_90_wxyz = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)], dtype=np.float64)
-    state.orientation_flu_enu_wxyz = yaw_90_wxyz
-    state.linear_velocity_enu = np.array([0.0, 3.0, 0.0], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0),
+        orientation_flu_enu_wxyz=yaw_90_wxyz,
+        linear_velocity_enu=np.array([0.0, 3.0, 0.0], dtype=np.float64),
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.0, 0.0, 0.0])
     thrust_model = _CapturingThrustModel(num_rotors=4)
@@ -129,8 +133,9 @@ def test_tilt_angle_deg_pure_yaw_is_zero():
 
 
 def test_bridge_tilt_cutoff_zeros_forces():
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0), orientation_flu_enu_wxyz=_quat_pitch_deg(80.0)
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
     bridge = Px4Bridge(
@@ -155,8 +160,9 @@ def test_bridge_tilt_cutoff_zeros_forces():
 
 
 def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0), orientation_flu_enu_wxyz=_quat_pitch_deg(80.0)
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
     bridge = Px4Bridge(
@@ -185,8 +191,10 @@ def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
 
 
 def test_bridge_nonfinite_state_raises_without_exchange():
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.position_enu = np.array([0.0, np.nan, 0.0], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0),
+        position_enu=np.array([0.0, np.nan, 0.0], dtype=np.float64),
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
     bridge = Px4Bridge(
@@ -209,8 +217,9 @@ def test_bridge_nonfinite_state_raises_without_exchange():
 
 
 def test_bridge_tilt_cutoff_passes_through_within_limit():
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_pitch_deg(30.0)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0), orientation_flu_enu_wxyz=_quat_pitch_deg(30.0)
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
     bridge = Px4Bridge(
@@ -234,8 +243,9 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
 def test_bridge_tilt_cutoff_disabled_by_default():
     # The default max_tilt_angle_deg of 180.0 is the maximum possible tilt, so
     # the cutoff never fires: a 170 deg pitch must still apply forces.
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_pitch_deg(170.0)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0), orientation_flu_enu_wxyz=_quat_pitch_deg(170.0)
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
     bridge = Px4Bridge(
@@ -305,8 +315,9 @@ def test_bridge_visual_spin_uses_airframe_max_rotor_velocity():
 def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
     # Forces are gated to zero on a tilt cutoff, but the rotors keep spinning at
     # the real commanded omega: visual spin is decoupled from the force gate.
-    state = VehicleState.hover_at(sim_time_us=0)
-    state.orientation_flu_enu_wxyz = _quat_pitch_deg(80.0)
+    state = replace(
+        VehicleState.hover_at(sim_time_us=0), orientation_flu_enu_wxyz=_quat_pitch_deg(80.0)
+    )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([700.0, 700.0, 700.0, 700.0])
     bridge = Px4Bridge(

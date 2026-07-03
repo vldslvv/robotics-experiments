@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -147,9 +148,11 @@ def test_mavlink_port_pegasus_sensors_can_disable_noise_for_precision(monkeypatc
     backend._connection = _FakeConnection()
     backend._enable_lockstep = False
 
-    state = VehicleState.hover_at(position_enu=(3.0, 4.0, 1.0), sim_time_us=100_000)
-    state.linear_velocity_enu = np.array([5.0, 6.0, 7.0], dtype=np.float64)
-    state.angular_velocity_flu = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    state = replace(
+        VehicleState.hover_at(position_enu=(3.0, 4.0, 1.0), sim_time_us=100_000),
+        linear_velocity_enu=np.array([5.0, 6.0, 7.0], dtype=np.float64),
+        angular_velocity_flu=np.array([1.0, 2.0, 3.0], dtype=np.float64),
+    )
 
     port.start()
     lockstep_exchange(port, state)

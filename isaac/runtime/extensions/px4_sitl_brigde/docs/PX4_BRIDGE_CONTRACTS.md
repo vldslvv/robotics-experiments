@@ -265,7 +265,7 @@ settings object, a single-call lockstep port, and a single Isaac sink call.
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
 # Per-tick data flow: VehicleState -> ActuatorCommands -> RotorDynamics
-@dataclass
+@dataclass(frozen=True)
 class VehicleState:        # Isaac -> bridge each tick
     position_enu; orientation_flu_enu_wxyz; linear_velocity_enu
     angular_velocity_flu; sim_time_us
@@ -360,8 +360,9 @@ is *not* part of the four-part contract above and must never feed back into it.
 (built from the omega it already computes) -- and `apply_dynamics` stays the
 unchanged physics sink. The spin lives in its own cosmetic-only seam,
 `ArticulationIO.update_rotor_spin(rotor_omega_rad_s, dt)`, called from
-`recv_and_apply` *after* `apply_dynamics`. Because `recv_and_apply` takes no
-`dt`, `send_sensors` stashes the tick `dt` for it. The seam only integrates a
+`recv_and_apply` alongside `apply_dynamics` (the relative order is immaterial:
+the seam never touches physics). Because `recv_and_apply` takes no `dt`, the
+tick's frozen pending state left by `send_sensors` carries it. The seam only integrates a
 `RotateZ` xformOp on each rotor marker prim (visual scale `rotor_spin_visual_scale`
 slows the real ~1100 rad/s omega to a non-aliasing on-screen rate); it never
 applies forces, mutates the body, or participates in the MAVLink lockstep. It

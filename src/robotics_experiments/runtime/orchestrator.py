@@ -15,9 +15,15 @@ shell's tick source and the failure reaction; the latter is the injected
 ``make_env`` callable that builds a :class:`DriverEnvironment` per flying drone,
 so strict (integration) and forgiving (live/regular) runs share this pipeline.
 
+Per-drone state is staged and immutable: ``spawn_fleet`` produces one frozen
+:class:`SpawnedDrone` per vehicle, and ``build_drivers`` composes each flying
+drone's :class:`FlyingDrone` over its spawned state -- a phase never mutates the
+previous phase's output.
+
 Production logic only: any extra integration-test checks (ground-settle wait,
 bridge-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan) live in
-the standalone shell and read the per-drone :class:`DroneRuntimeHandle`s.
+the standalone shell and read the per-drone :class:`SpawnedDrone` /
+:class:`FlyingDrone` states.
 
 Isaac-coupled domain leaf: imports ``carb``/``omni`` (here and via
 ``_bridge_host``) at module scope, so it stays off the core import path behind the
@@ -41,11 +47,12 @@ from robotics_experiments.commanding import (
     RoutineDriver,
     RoutineObservation,
 )
+from robotics_experiments.config.types import EnvConfig, ResolvedVehicle
 
-from ._bridge_host import BridgeHost, BridgeHostGroup
+from ._bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
 from ._scene import resolve_scene_path
 
-__all__ = ["DroneRuntimeHandle", "FleetDriverEnv", "FleetOrchestrator"]
+__all__ = ["FleetDriverEnv", "FleetOrchestrator", "FlyingDrone", "SpawnedDrone"]
 
 _LOG_PREFIX = "[FleetRuntime]"
 
@@ -55,51 +62,64 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-@dataclass
-class DroneRuntimeHandle:
-    """One vehicle's live runtime state -- the seams a shell reads.
+@dataclass(frozen=True)
+class SpawnedDrone:
+    """One vehicle's spawn-phase state, produced by :meth:`FleetOrchestrator.spawn_fleet`.
 
     ``host``/``observer`` exist only for ``px4.enabled`` vehicles (a disabled PX4
-    must not construct a ``BridgeHost``); ``port``/``driver`` are set by
-    :meth:`FleetOrchestrator.build_drivers` only for flying drones (non-empty
-    resolved ``routine.steps``).
+    must not construct a ``BridgeHost``). ``articulation_path`` is the
+    override-resolved body path shared by the host and the observer, so both read
+    the same body the bridge actuates.
     """
 
-    vehicle: Any
+    vehicle: ResolvedVehicle
     label: str
     articulation_path: str
-    host: Optional[BridgeHost] = None
-    observer: Any = None
-    port: Optional[MavlinkCommandPort] = None
-    driver: Optional[RoutineDriver] = None
+    host: Optional[BridgeHost]
+    observer: Any
+
+
+@dataclass(frozen=True)
+class FlyingDrone:
+    """One flying drone's driver-phase state, composing its spawn-phase state.
+
+    Produced by :meth:`FleetOrchestrator.build_drivers` only for flying drones
+    (non-empty resolved ``routine.steps`` on a ``px4.enabled`` vehicle), so
+    ``spawned.host``/``spawned.observer`` are always present here.
+    """
+
+    spawned: SpawnedDrone
+    port: MavlinkCommandPort
+    driver: RoutineDriver
 
 
 class FleetDriverEnv:
-    """Generic :class:`DriverEnvironment` over one live drone handle.
+    """Generic :class:`DriverEnvironment` over one flying drone's states.
 
     The production reads (connectivity, sim time, observation assembly) are
     identical for every host; the three varying reactions are injected callables
     so the live (forgiving) and standalone (strict/forgiving) shells share this
-    one class instead of each defining its own env. Built only for a flying drone,
-    so its handle always carries a ``host``/``observer``/``port``.
+    one class instead of each defining its own env. Built only for a flying
+    drone, so the spawned state always carries a ``host``/``observer``.
     """
 
     def __init__(
         self,
-        handle: DroneRuntimeHandle,
+        spawned: SpawnedDrone,
+        port: MavlinkCommandPort,
         *,
         log: Callable[[str], None],
         on_failure: Callable[[FailureKind, str], None],
         on_step_advanced: Callable[[str], None],
     ) -> None:
-        if handle.host is None or handle.observer is None or handle.port is None:
+        if spawned.host is None or spawned.observer is None:
             raise RuntimeError(
                 f"{_LOG_PREFIX} FleetDriverEnv requires a flying drone "
-                f"(host/observer/port); got {handle.label!r}"
+                f"(host/observer); got {spawned.label!r}"
             )
-        self._host = handle.host
-        self._observer = handle.observer
-        self._port = handle.port
+        self._host = spawned.host
+        self._observer = spawned.observer
+        self._port = port
         self._log_fn = log
         self._on_failure_fn = on_failure
         self._on_step_advanced_fn = on_step_advanced
@@ -134,32 +154,32 @@ class FleetDriverEnv:
 class FleetOrchestrator:
     """Composes the fleet runtime pipeline; driven by a thin per-host shell."""
 
-    def __init__(self, env: Any) -> None:
+    def __init__(self, env: EnvConfig) -> None:
         self.env = env
         self.stage: Any = None
         self._group: BridgeHostGroup = BridgeHostGroup([])
-        self._handles: list[DroneRuntimeHandle] = []
+        self._spawned: list[SpawnedDrone] = []
+        self._flying: list[FlyingDrone] = []
 
     @property
-    def drones(self) -> list[DroneRuntimeHandle]:
-        """Every spawned vehicle's handle."""
-        return self._handles
+    def drones(self) -> list[SpawnedDrone]:
+        """Every spawned vehicle's state."""
+        return self._spawned
 
     @property
-    def bridged(self) -> list[DroneRuntimeHandle]:
-        """Handles with a PX4 bridge host (``px4.enabled`` vehicles)."""
-        return [h for h in self._handles if h.host is not None]
+    def bridged(self) -> list[SpawnedDrone]:
+        """Spawned states with a PX4 bridge host (``px4.enabled`` vehicles)."""
+        return [s for s in self._spawned if s.host is not None]
 
     @property
-    def flying(self) -> list[DroneRuntimeHandle]:
-        """Handles with a built routine driver (non-empty ``routine.steps``)."""
-        return [h for h in self._handles if h.driver is not None]
+    def flying(self) -> list[FlyingDrone]:
+        """Flying-drone states (non-empty ``routine.steps``), with their drivers."""
+        return self._flying
 
     @property
     def all_done(self) -> bool:
         """Whether every flying drone's routine is done (vacuously true if none)."""
-        flying = self.flying
-        return all(h.driver.is_done for h in flying if h.driver is not None)
+        return all(f.driver.is_done for f in self._flying)
 
     # ---- scene + settings --------------------------------------------------
 
@@ -198,7 +218,12 @@ class FleetOrchestrator:
     # ---- fleet -------------------------------------------------------------
 
     def spawn_fleet(self) -> None:
-        """Spawn every vehicle and build a bridge host + observer per enabled PX4."""
+        """Spawn every vehicle into a frozen :class:`SpawnedDrone` per vehicle.
+
+        A bridge host (from a frozen :class:`BridgeHostParams`) and a state-only
+        observer are built only for ``px4.enabled`` vehicles; the one
+        :class:`BridgeHostGroup` coordinates all hosts.
+        """
         from robotics_experiments.drone import spawn_drone
         from robotics_experiments.px4_bridge import IsaacArticulationIO
 
@@ -210,84 +235,100 @@ class FleetOrchestrator:
             for v in self.env.vehicles
         )
         carb.log_info(f"{_LOG_PREFIX} spawning {len(self.env.vehicles)} vehicle(s): {summary}")
-        hosts: list[BridgeHost] = []
-        self._handles = []
+        self._spawned = []
         for vehicle in self.env.vehicles:
             path = spawn_drone(self.stage, vehicle.drone, position=tuple(vehicle.spawn_xy), yaw=0.0)
+            host: Optional[BridgeHost] = None
+            observer: Any = None
             # The observer reads the same body the bridge actuates (honoring any
-            # px4.articulation_path override) so it never samples a stale frame.
+            # px4.articulation_path override) so it never samples a stale frame;
+            # the params resolve that path once for both.
             articulation_path = vehicle.px4.articulation_path or path
-            label = f"drone{vehicle.id}"
-            handle = DroneRuntimeHandle(
-                vehicle=vehicle, label=label, articulation_path=articulation_path
-            )
             if vehicle.px4.enabled:
-                handle.host = BridgeHost(
-                    articulation_path=path,
-                    vehicle=vehicle,
-                    physics_hz=self.env.sim.physics_hz,
+                host = BridgeHost(
+                    BridgeHostParams(
+                        px4=vehicle.px4,
+                        vehicle_id=vehicle.id,
+                        mavlink_port=vehicle.mavlink_port,
+                        debug_log_path=vehicle.debug_log_path,
+                        articulation_path=articulation_path,
+                        physics_hz=self.env.sim.physics_hz,
+                    )
                 )
-                hosts.append(handle.host)
                 # State-only observer (read_state samples body pose/velocity; no
                 # rotor paths needed for it).
-                handle.observer = IsaacArticulationIO(
+                observer = IsaacArticulationIO(
                     articulation_path=articulation_path, rotor_link_paths=[]
                 )
-            self._handles.append(handle)
+            self._spawned.append(
+                SpawnedDrone(
+                    vehicle=vehicle,
+                    label=f"drone{vehicle.id}",
+                    articulation_path=articulation_path,
+                    host=host,
+                    observer=observer,
+                )
+            )
         # One coordinator owns the single physics-step subscription and runs all
         # sends before all polls. An empty hosts list yields a no-op group.
-        self._group = BridgeHostGroup(hosts)
+        self._group = BridgeHostGroup([s.host for s in self._spawned if s.host is not None])
 
     def start_bridges(self) -> None:
         """Start the bridge group (its hosts and the single physics-step sub)."""
         self._group.start()
 
-    def build_drivers(self, make_env: Callable[[DroneRuntimeHandle], DriverEnvironment]) -> None:
-        """Build one :class:`RoutineDriver` per flying drone.
+    def build_drivers(
+        self, make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment]
+    ) -> None:
+        """Compose a frozen :class:`FlyingDrone` per flying drone.
 
         A drone flies when its resolved ``routine.steps`` is non-empty; it then
-        gets a GCS ``MavlinkCommandPort`` and a driver wired through ``make_env``
-        (the per-host reaction). A routine on a PX4-disabled vehicle has no bridge
-        to fly it and is left manual with a warning.
+        gets a GCS ``MavlinkCommandPort`` and a driver wired through
+        ``make_env(spawned, port)`` (the per-host reaction). A routine on a
+        PX4-disabled vehicle has no bridge to fly it and is left manual with a
+        warning.
         """
-        for handle in self._handles:
-            if not handle.vehicle.routine.steps:
+        self._flying = []
+        for spawned in self._spawned:
+            if not spawned.vehicle.routine.steps:
                 continue
-            if handle.host is None:
+            if spawned.host is None:
                 carb.log_warn(
-                    f"{_LOG_PREFIX} [{handle.label}] has a routine but px4 is disabled; "
+                    f"{_LOG_PREFIX} [{spawned.label}] has a routine but px4 is disabled; "
                     "no bridge to fly it -- left manual"
                 )
                 continue
-            handle.port = MavlinkCommandPort(
-                gcs_endpoint=f"udp:127.0.0.1:{handle.vehicle.gcs_port}",
-                heartbeat_period_s=handle.vehicle.routine.gcs_heartbeat_period_s,
-                label=handle.label,
+            port = MavlinkCommandPort(
+                gcs_endpoint=f"udp:127.0.0.1:{spawned.vehicle.gcs_port}",
+                heartbeat_period_s=spawned.vehicle.routine.gcs_heartbeat_period_s,
+                label=spawned.label,
             )
-            handle.driver = RoutineDriver(
+            driver = RoutineDriver(
                 DriverParams.from_routine_config(
-                    handle.vehicle.routine,
+                    spawned.vehicle.routine,
                     driver=self.env.driver,
-                    home_lat_deg=handle.vehicle.px4.home_lat_deg,
-                    home_lon_deg=handle.vehicle.px4.home_lon_deg,
-                    home_alt_m=handle.vehicle.px4.home_alt_m,
+                    home_lat_deg=spawned.vehicle.px4.home_lat_deg,
+                    home_lon_deg=spawned.vehicle.px4.home_lon_deg,
+                    home_alt_m=spawned.vehicle.px4.home_alt_m,
                 ),
-                handle.port,
-                make_env(handle),
-                label=handle.label,
+                port,
+                make_env(spawned, port),
+                label=spawned.label,
             )
+            self._flying.append(FlyingDrone(spawned=spawned, port=port, driver=driver))
 
     def teardown(self) -> None:
         """Stop the bridge group, drop ports/observers, and despawn every vehicle."""
         from robotics_experiments.drone import despawn_drone
 
         self._group.stop()
-        for handle in self._handles:
-            if handle.port is not None:
-                handle.port.disconnect()
-            if handle.observer is not None:
-                handle.observer.shutdown()
+        for flying in self._flying:
+            flying.port.disconnect()
+        for spawned in self._spawned:
+            if spawned.observer is not None:
+                spawned.observer.shutdown()
             if self.stage is not None:
-                despawn_drone(self.stage, handle.vehicle.drone)
+                despawn_drone(self.stage, spawned.vehicle.drone)
         self._group = BridgeHostGroup([])
-        self._handles = []
+        self._spawned = []
+        self._flying = []

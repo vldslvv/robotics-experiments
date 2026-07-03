@@ -19,10 +19,8 @@ import pytest
 
 
 class _FakeBridgeHost:
-    def __init__(self, *, articulation_path, vehicle, physics_hz):
-        self.articulation_path = articulation_path
-        self.vehicle = vehicle
-        self.physics_hz = physics_hz
+    def __init__(self, params):
+        self.params = params
         self.is_connected = False
         self.sim_time_us = 0
         self.status = object()
@@ -160,6 +158,7 @@ def _vehicle(vid, prim, xy, *, enabled, steps=()):
         routine=SimpleNamespace(steps=list(steps), gcs_heartbeat_period_s=1.0),
         gcs_port=14550 + vid,
         mavlink_port=4560 + vid,
+        debug_log_path=f"/logs/{vid}_bridge.log",
     )
 
 
@@ -193,6 +192,15 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
     assert orch.drones[1].host is None and orch.drones[1].observer is None
     assert rec.spawned == [("Drone", (0.0, 0.0)), ("Drone1", (2.0, 0.0))]
     assert len(orch.bridged) == 1
+    # The host receives the bridge config as one component plus the derived
+    # identity straight from the resolved vehicle (never recomputed).
+    params = orch.bridged[0].host.params
+    assert params.px4 is env.vehicles[0].px4
+    assert params.vehicle_id == 0
+    assert params.mavlink_port == 4560
+    assert params.debug_log_path == "/logs/0_bridge.log"
+    assert params.articulation_path == "/World/Drone"
+    assert params.physics_hz == 250.0
 
 
 def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
@@ -213,13 +221,12 @@ def test_build_drivers_only_for_enabled_with_steps(monkeypatch):
     orch.stage = object()
     orch.spawn_fleet()
 
-    orch.build_drivers(lambda handle: object())
+    orch.build_drivers(lambda spawned, port: object())
 
-    assert [h.label for h in orch.flying] == ["drone0"]
-    assert orch.drones[0].port is not None
-    assert orch.drones[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
-    assert orch.drones[1].port is None and orch.drones[1].driver is None
-    assert orch.drones[2].port is None and orch.drones[2].driver is None
+    assert [f.spawned.label for f in orch.flying] == ["drone0"]
+    assert orch.flying[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
+    # The manual drone (no steps) and the disabled one (no bridge) fly nothing.
+    assert len(orch.flying) == 1
 
 
 def test_all_done_reflects_flying_drivers(monkeypatch):
@@ -228,10 +235,10 @@ def test_all_done_reflects_flying_drivers(monkeypatch):
     orch = module.FleetOrchestrator(env)
     orch.stage = object()
     orch.spawn_fleet()
-    orch.build_drivers(lambda handle: object())
+    orch.build_drivers(lambda spawned, port: object())
 
     assert orch.all_done is False
-    orch.drones[0].driver.is_done = True
+    orch.flying[0].driver.is_done = True
     assert orch.all_done is True
 
 
@@ -240,7 +247,7 @@ def test_all_done_true_when_no_drone_flies(monkeypatch):
     orch = module.FleetOrchestrator(_env(_vehicle(0, "D0", (0.0, 0.0), enabled=True)))
     orch.stage = object()
     orch.spawn_fleet()
-    orch.build_drivers(lambda handle: object())
+    orch.build_drivers(lambda spawned, port: object())
 
     assert orch.flying == []
     assert orch.all_done is True
@@ -255,9 +262,9 @@ def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
     orch = module.FleetOrchestrator(env)
     orch.stage = object()
     orch.spawn_fleet()
-    orch.build_drivers(lambda handle: object())
+    orch.build_drivers(lambda spawned, port: object())
     group = _FakeBridgeHostGroup.last
-    port = orch.drones[0].port
+    port = orch.flying[0].port
     observer = orch.drones[0].observer
 
     orch.teardown()

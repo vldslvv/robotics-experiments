@@ -238,8 +238,8 @@ def _build_make_env(
     from robotics_experiments.commanding import FailureKind
     from robotics_experiments.runtime import FleetDriverEnv
 
-    def make_env(handle):
-        is_first = handle.label == first_label
+    def make_env(spawned, port):
+        is_first = spawned.label == first_label
 
         def on_failure(kind: FailureKind, message: str) -> None:
             if strict:
@@ -255,10 +255,11 @@ def _build_make_env(
 
         def on_step_advanced(step_label: str) -> None:
             if post_takeoff_hook is not None and is_first and step_label == "takeoff":
-                post_takeoff_hook(context, handle.host)
+                post_takeoff_hook(context, spawned.host)
 
         return FleetDriverEnv(
-            handle,
+            spawned,
+            port,
             log=context.report,
             on_failure=on_failure,
             on_step_advanced=on_step_advanced,
@@ -289,8 +290,8 @@ def _drive_to_done(context: SceneTestContext, orchestrator, fleet_routine) -> No
         if time.monotonic() > deadline_s:
             raise AssertionError("Timed out driving the routine to completion")
         _advance_once(context, orchestrator)
-        for handle in active:
-            handle.driver.tick()
+        for flying in active:
+            flying.driver.tick()
 
 
 def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions") -> None:

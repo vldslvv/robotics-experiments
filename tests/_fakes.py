@@ -8,6 +8,7 @@ These fakes back the split `test_px4_bridge_*.py` modules. pytest puts the
 import math
 import sys
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -43,7 +44,7 @@ class _FakeArticulationIO:
         self.shutdown_called = True
 
     def read_state(self, sim_time_us: int):
-        self.state.sim_time_us = sim_time_us
+        self.state = replace(self.state, sim_time_us=sim_time_us)
         return self.state
 
     def apply_dynamics(self, dynamics: _RotorDynamics):

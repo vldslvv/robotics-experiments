@@ -44,8 +44,8 @@ layering this design removed.
   owns the SimApp/Kit lifecycle and the tick source.
 - **Production logic only.** Integration-test-only checks (ground-settle wait,
   bridge first-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan)
-  live in the standalone shell and read the per-drone `DroneRuntimeHandle`s. They
-  do not enter the orchestrator. Verification that is part of *flight* (a real
+  live in the standalone shell and read the per-drone `SpawnedDrone` /
+  `FlyingDrone` states. They do not enter the orchestrator. Verification that is part of *flight* (a real
   climb, a sustained stable hover, the continuous envelope gates) belongs to the
   routine/driver, not here.
 - **Scene + settings are orchestrator-owned, uniformly.** `open_scene` /
@@ -55,6 +55,14 @@ layering this design removed.
 - **A disabled PX4 builds no bridge.** `spawn_fleet` constructs a `BridgeHost` and
   observer only for `px4.enabled` vehicles (mirrors the bridge contract). Disabled
   vehicles are spawned but carry no `host`/`observer`.
+- **Per-drone state is staged and immutable.** Each phase produces frozen state
+  objects and a later phase composes the earlier one's output instead of mutating
+  it: `spawn_fleet` -> `SpawnedDrone` (vehicle, label, resolved articulation path,
+  optional host/observer), `build_drivers` -> `FlyingDrone` (composes its
+  `SpawnedDrone` with the port and driver). Config components arrive separated: a
+  `BridgeHost` is constructed from a frozen `BridgeHostParams` (the vehicle's
+  `px4` config composed with the derived identity/endpoint/path), constructed
+  directly by `spawn_fleet` -- never from the whole `ResolvedVehicle`.
 - **A driver is built only for a flying drone.** `build_drivers` builds a
   `MavlinkCommandPort` + `RoutineDriver` only where the resolved `routine.steps`
   is non-empty *and* the vehicle is `px4.enabled`. A routine on a disabled vehicle
@@ -101,27 +109,30 @@ The orchestrator does NOT:
 | Open scene | `open_scene(scene_override=None)` | Resolve the scene (`env.scene`, or an override; `@` = repo-relative) and fire the USD `open_stage`. |
 | Adopt stage | `adopt_current_stage()` | Bind `self.stage` once the stage has finished loading (after a pump in standalone, or on the `OPENED` event live). |
 | Apply settings | `apply_settings()` | `simulation.apply_settings(stage, env.sim)`. |
-| Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle; a `BridgeHost` + state-only `IsaacArticulationIO` observer per `px4.enabled` vehicle; build the one `BridgeHostGroup`. |
+| Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle into a frozen `SpawnedDrone`; a `BridgeHost` (from a frozen `BridgeHostParams`) + state-only `IsaacArticulationIO` observer per `px4.enabled` vehicle; build the one `BridgeHostGroup`. |
 | Start bridges | `start_bridges()` | `group.start()` (its hosts + the single physics-step subscription). |
-| Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(handle)`. |
+| Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(spawned, port)`, composed into a frozen `FlyingDrone`. |
 | (tick) | -- | The shell ticks `orchestrator.flying[i].driver.tick()` from its own tick source until `orchestrator.all_done`. |
 | Teardown | `teardown()` | `group.stop()`, disconnect ports, shut down observers, despawn every vehicle. |
 
-Read-only views the shells use: `drones` (all handles), `bridged` (handles with a
-host), `flying` (handles with a driver), `all_done` (every flying driver done;
-vacuously true when none).
+Read-only views the shells use: `drones` (all `SpawnedDrone`s), `bridged`
+(spawned states with a host), `flying` (the `FlyingDrone`s), `all_done` (every
+flying driver done; vacuously true when none).
 
-`DroneRuntimeHandle` is the per-vehicle seam the shells read:
-`vehicle, label, articulation_path, host?, observer?, port?, driver?` (the `?`
-fields are populated only when applicable per the invariants above).
+The per-vehicle seams the shells read are the staged frozen states:
+`SpawnedDrone` (`vehicle, label, articulation_path, host?, observer?`; the `?`
+fields exist only for `px4.enabled` vehicles) and `FlyingDrone`
+(`spawned, port, driver`; built only for flying drones, so its `spawned` always
+carries a host and observer).
 
 ## The injected reaction seam: `make_env`
 
-`build_drivers` takes `make_env: (DroneRuntimeHandle) -> DriverEnvironment`. The
+`build_drivers` takes
+`make_env: (SpawnedDrone, MavlinkCommandPort) -> DriverEnvironment`. The
 orchestrator ships one generic implementation, `FleetDriverEnv`, that provides the
 production reads every host shares (`is_bridge_connected` / `sim_time_us` /
-`read_observation` over the handle's `host` + `observer` + `port`) and forwards
-three injected callables:
+`read_observation` over the spawned state's `host` + `observer` and the port) and
+forwards three injected callables:
 
 - `log(message)` -- where routine progress goes (`carb` live, the runner's
   `report` standalone).
@@ -173,7 +184,7 @@ spawn_fleet() --> start_bridges()
 build_drivers(make_env)     # only when a drone flies
         |
         v
-[shell control tick]  for handle in flying: handle.driver.tick()
+[shell control tick]  for f in flying: f.driver.tick()
         |   (live: Kit app-update sub, guarded; standalone: blocking loop, raw)
         v
 [Stop / done / shutdown]  teardown()
@@ -187,8 +198,13 @@ onto an extension.** Concretely:
 
 1. Decide where it sits in the phase order and what it owns for its full lifecycle
    (construction in a phase, teardown in `teardown`). If it is per-drone state, add
-   a field to `DroneRuntimeHandle` and populate it in the relevant phase; if it is
-   fleet-wide, hold it on the orchestrator.
+   a field to the frozen state of the phase that constructs it (`SpawnedDrone` /
+   `FlyingDrone`), or introduce a new frozen stage state that composes the previous
+   one -- do not mutate an earlier stage's state; if it is fleet-wide, hold it on
+   the orchestrator. If it needs config plus derived values, compose them into a
+   frozen params object constructed at the phase that owns them (the
+   `BridgeHostParams` pattern) -- without a separate builder function unless the
+   construction carries real logic.
 2. Express it as an orchestrator phase (or an extension of an existing one), not as
    new lifecycle logic in a shell. The shells stay thin: they only drive phases,
    choose the tick source, and inject the reaction.
