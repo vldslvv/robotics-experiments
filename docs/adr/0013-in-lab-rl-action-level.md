@@ -31,13 +31,13 @@ levels, defaulting to `velocity`:
 - `attitude` / `rotor` / `residual` / `hierarchical` remain seam options that raise
   if selected until implemented.
 
-The pure single-env reference models live in `press/_actuation.py` (numpy, the
+The pure single-env reference models live in `press/actuation.py` (numpy, the
 test oracle); the batched torch versions the env runs live in
 `workflows/isaac_lab/tasks/_flight.py`. Both invert the PX4 bridge's
 `PegasusQuadraticThrustModel` allocation, so an action reproduces the commanded
 wrench. F1 also added the OFFBOARD deploy plumbing (both levels): `velocity` ->
 `SET_POSITION_TARGET_LOCAL_NED` (body velocity), `ctbr` -> `SET_ATTITUDE_TARGET`
-(thrust + body rates), with a pure `press._deploy.press_action_to_offboard`
+(thrust + body rates), with a pure `press.deploy.press_action_to_offboard`
 mapper. The mission-level press routine step / `PressDriver` stays in F3 (only the
 port-level plumbing + mapper land in F1).
 

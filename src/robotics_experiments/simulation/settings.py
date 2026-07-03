@@ -10,7 +10,7 @@ subscription, outside this module; callers share this stage-level API.
 
 from __future__ import annotations
 
-from robotics_experiments.config._types import SimSettings
+from robotics_experiments.config.types import SimSettings
 
 __all__ = ["apply_settings"]
 

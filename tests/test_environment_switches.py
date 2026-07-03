@@ -1,5 +1,5 @@
 from robotics_experiments.environment import SwitchState
-from robotics_experiments.environment._switches import _apply_button_sample as apply_button_sample
+from robotics_experiments.environment.switches import _apply_button_sample as apply_button_sample
 
 
 def test_switch_toggles_only_on_rising_edge():

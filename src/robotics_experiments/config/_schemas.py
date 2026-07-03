@@ -1,6 +1,6 @@
 from hydra.core.config_store import ConfigStore
 
-from ._types import (
+from .types import (
     DriverConfig,
     DroneConfig,
     EnvConfig,

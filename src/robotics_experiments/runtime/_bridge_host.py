@@ -131,7 +131,7 @@ class BridgeHost:
 
         # SimClock is pure Python (no Isaac deps); import it here so a disabled
         # bridge does not pay the px4_bridge import cost.
-        from robotics_experiments.px4_bridge._sim_clock import SimClock
+        from robotics_experiments.px4_bridge.sim_clock import SimClock
 
         settle_time_s = max(0.0, float(getattr(self._cfg, "startup_settle_time_s", 0.0)))
         self._clock = SimClock(physics_hz=self._physics_hz, settle_time_s=settle_time_s)
@@ -153,11 +153,11 @@ class BridgeHost:
 
         # Late import so a disabled bridge does not pay the import cost
         # (and does not require the bridge extension to be loaded).
-        from robotics_experiments.px4_bridge._logging import vehicle_log_context
+        from robotics_experiments.px4_bridge.logging import vehicle_log_context
 
         # Tag every bridge log record produced while building this vehicle's
         # bridge so it lands only in this vehicle's debug log file, not the
-        # last-constructed vehicle's. See px4_bridge._logging.
+        # last-constructed vehicle's. See px4_bridge.logging.
         self._log_ctx = vehicle_log_context
         with vehicle_log_context(self._vehicle_id):
             self._build_bridge()

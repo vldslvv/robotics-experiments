@@ -88,13 +88,15 @@ def _yaw_tilt_from_quat(quat_wxyz):
 def _diagnostic_sample(env, target_w, action, max_velocity: float) -> str:
     import torch
 
+    from robotics_experiments.workflows.isaac_lab.tasks import _flight
+
     position_error = env.drone.data.root_pos_w - target_w
     error_norm = torch.linalg.norm(position_error, dim=-1)
     env_index = int(torch.argmax(error_norm).item())
     yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
 
-    actuation = vars(env)["_actuation"]
-    omega = actuation.action_to_rotor_omega(
+    omega = _flight.action_to_rotor_omega(
+        env.actuation_params,
         action,
         env.drone.data.root_quat_w,
         env.drone.data.root_lin_vel_w,
@@ -182,9 +184,8 @@ def _make_env(env_cfg_cls, *, seed: int, num_envs: int | None):
 def _ctbr_hover_action(env, action_cfg):
     import torch
 
-    actuation = vars(env)["_actuation"]
     mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
-    max_total_thrust = float(vars(actuation)["_max_total_thrust"])
+    max_total_thrust = float(env.actuation_params.max_total_thrust)
     hover_fraction = mass * 9.81 / max_total_thrust
     action = torch.zeros((env.num_envs, env.cfg.action_space), device=env.device)
     action[:, 0] = hover_fraction / float(action_cfg.hover_thrust_fraction) - 1.0
@@ -193,6 +194,8 @@ def _ctbr_hover_action(env, action_cfg):
 
 def _run_ctbr_sanity(args: argparse.Namespace, action_cfg, env_cls, env_cfg_cls) -> None:
     import torch
+
+    from robotics_experiments.workflows.isaac_lab.tasks import _flight
 
     _seed_everything(args.seed)
     num_envs = args.num_envs if args.num_envs is not None else 1
@@ -222,7 +225,8 @@ def _run_ctbr_sanity(args: argparse.Namespace, action_cfg, env_cls, env_cfg_cls)
 
         z_drift = torch.max(torch.abs(env.drone.data.root_pos_w[:, 2] - start_z))
         final_z_drift = float(z_drift.item())
-        omega = vars(env)["_actuation"].action_to_rotor_omega(
+        omega = _flight.action_to_rotor_omega(
+            env.actuation_params,
             hover_action,
             env.drone.data.root_quat_w,
             env.drone.data.root_lin_vel_w,

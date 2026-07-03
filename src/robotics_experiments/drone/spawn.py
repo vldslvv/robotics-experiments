@@ -18,7 +18,7 @@ from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
 from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config._types import DroneConfig
+from robotics_experiments.config.types import DroneConfig
 
 __all__ = ["spawn_drone", "despawn_drone"]
 

@@ -213,14 +213,14 @@ def _install_fake_isaac_modules(monkeypatch, *, min_z=-0.06, empty_bound=False):
 
 def _import_spawn_module(monkeypatch, *, min_z=-0.06, empty_bound=False):
     for name in list(sys.modules):
-        if name == "robotics_experiments.drone._spawn":
+        if name == "robotics_experiments.drone.spawn":
             sys.modules.pop(name, None)
     stage, carb, references = _install_fake_isaac_modules(
         monkeypatch,
         min_z=min_z,
         empty_bound=empty_bound,
     )
-    module = importlib.import_module("robotics_experiments.drone._spawn")
+    module = importlib.import_module("robotics_experiments.drone.spawn")
     return module, stage, carb, references
 
 

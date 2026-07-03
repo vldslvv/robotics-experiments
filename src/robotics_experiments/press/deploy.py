@@ -1,6 +1,6 @@
 """Pure RL-action -> PX4 OFFBOARD setpoint mapping (deploy-time seam).
 
-The deploy-time analogue of ``press._actuation``: in Lab the action drives the
+The deploy-time analogue of ``press.actuation``: in Lab the action drives the
 in-sim actuation model; at deploy the *same* normalized action maps to a PX4
 OFFBOARD setpoint streamed over the GCS link. This module owns only the pure
 conversion (body-FLU RL action -> the PX4 body-FRD wire payloads exported by
@@ -11,7 +11,8 @@ the env leaf) keeps it torch/Isaac-free and unit-testable.
 Frame note: the RL action is body-FLU (forward / left / up, yaw +CCW); PX4's
 setpoint frames are body-FRD (forward / right / down, yaw +CW), so ``y`` and
 ``z`` (and yaw) flip sign. The ``velocity`` action is interpreted in the
-body-yaw (heading) frame, matching ``VelocitySetpointActuation``; PX4 tracks it
+body-yaw (heading) frame, matching the ``velocity`` actuation cascade; PX4
+tracks it
 via ``MAV_FRAME_BODY_NED``.
 """
 

@@ -19,7 +19,7 @@ no domain randomization (F4 adds those).
   (torch/isaaclab leaf) with `SwitchPressEnvCfg(DirectRLEnvCfg)` and
   `SwitchPressEnv(DirectRLEnv)`, reusing F1's `_flight.py` actuation/force sink and
   F2's observation assembly. Do not fork the hover env; import the shared pieces.
-- Action: register it in `workflows/isaac_lab/_registration.py`
+- Action: register it in `workflows/isaac_lab/registration.py`
   (`_SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v0"`, guarded like the hover
   task).
 - Config: `SwitchPressEnvCfg` reads sizes/spacing/episode from `cfg.press`.
@@ -46,7 +46,7 @@ no domain randomization (F4 adds those).
 - Action: add a contact signal for `contact_flag` (Isaac Lab contact sensor on the
   pad, or threshold on pusher compression as a first cut) and `contact_valid`.
 - Action: vectorize the N-step press latch. The pure single-switch logic already
-  exists: `environment/_switches.py::_apply_button_sample` (press_threshold +
+  exists: `environment/switches.py::_apply_button_sample` (press_threshold +
   press_confirm_steps -> single toggle). Add a pure batched version in `press/`
   (e.g. `press/_latch.py`, numpy/torch-agnostic core with a torch wrapper in the
   leaf) that maintains `press_steps` / `toggle_latched` / `state` per env, so
@@ -79,7 +79,7 @@ no domain randomization (F4 adds those).
   from `press.reset` (close to the switch, calm). Curriculum ranges come in F4.
 - Config: add `PressRewardConfig` (all term weights) and `PressResetConfig`
   (start-pose ranges, easy switch scale/stiffness/threshold overrides) to
-  `config/_types.py` + `configs/experiment/press/default.yaml`; add to `PressConfig`.
+  `config/types.py` + `configs/experiment/press/default.yaml`; add to `PressConfig`.
 - Test: `tests/test_press_reward.py`, `tests/test_press_termination.py` (pure):
   each term fires only in its phase; toggle reward is one-shot; timeout terminates;
   generic contact without toggle earns no toggle reward.
@@ -100,7 +100,7 @@ no domain randomization (F4 adds those).
   pure `press` modules free of any training import.
 - Config: add `PressTrainingConfig` (PPO hyperparameters: lr, num_steps_per_env,
   max_iterations, gamma, lam, entropy_coef, actor/critic hidden dims, seed) to
-  `config/_types.py` + YAML. No hyperparameter hardcoded in Python.
+  `config/types.py` + YAML. No hyperparameter hardcoded in Python.
 - Dependency: add `rsl_rl` to an optional `training` extra in `pyproject.toml`
   (installed in the Isaac/training environment only), not to the core deps. Update
   `uv.lock` via `uv add --optional training rsl-rl` (do not hand-edit the lock).
@@ -151,10 +151,10 @@ no domain randomization (F4 adds those).
 
 ## Files touched by F3
 
-- add `.../tasks/switch_press_env.py`; edit `.../isaac_lab/_registration.py`
+- add `.../tasks/switch_press_env.py`; edit `.../isaac_lab/registration.py`
 - add `press/_reward.py`, `press/_termination.py`, `press/_latch.py`,
   `press/_policy.py`, `press/training/__init__.py`, `press/training/_rsl_rl.py`
-- edit `config/_types.py` (`PressRewardConfig`, `PressResetConfig`,
+- edit `config/types.py` (`PressRewardConfig`, `PressResetConfig`,
   `PressTrainingConfig`), `configs/experiment/press/default.yaml`
 - add `isaac/runtime/standalone/train_press.py` + eval; make targets
 - add `tests/test_press_latch.py`, `tests/test_press_reward.py`,

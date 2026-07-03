@@ -15,7 +15,7 @@ from robotics_experiments.px4_bridge import (
     LockstepSettings,
     Px4MavlinkPort,
 )
-from robotics_experiments.px4_bridge._logging import vehicle_log_context
+from robotics_experiments.px4_bridge.logging import vehicle_log_context
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 

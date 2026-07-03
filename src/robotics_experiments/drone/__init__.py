@@ -5,7 +5,7 @@ __all__ = ["spawn_drone", "despawn_drone"]
 
 def __getattr__(name: str):
     if name in __all__:
-        from . import _spawn
+        from . import spawn
 
-        return getattr(_spawn, name)
+        return getattr(spawn, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

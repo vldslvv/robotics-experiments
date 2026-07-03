@@ -34,8 +34,8 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
 
 
 def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
-    import robotics_experiments.workflows.isaac_lab._registration as registration
-    from robotics_experiments.workflows.isaac_lab._registration import _DRONE_HOVER_TASK_ID
+    import robotics_experiments.workflows.isaac_lab.registration as registration
+    from robotics_experiments.workflows.isaac_lab.registration import _DRONE_HOVER_TASK_ID
 
     fake_gym = types.ModuleType("gymnasium")
     fake_gym.registry = {}

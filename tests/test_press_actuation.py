@@ -13,10 +13,10 @@ import numpy as np
 import pytest
 
 from robotics_experiments.press import (
-    BodyRateActuation,
     MixerGeometry,
-    VelocitySetpointActuation,
-    make_actuation_model,
+    action_to_rotor_omega,
+    build_actuation_params,
+    hover_action,
     reduce_to_body_wrench,
 )
 from robotics_experiments.px4_bridge import PegasusQuadraticThrustModel
@@ -81,6 +81,10 @@ def _action_cfg(kind: str) -> SimpleNamespace:
     )
 
 
+def _params(kind: str):
+    return build_actuation_params(_quad_geometry(), _action_cfg(kind), _MASS_KG)
+
+
 def _level_rest_state():
     from robotics_experiments.press import ActuationState
 
@@ -91,9 +95,9 @@ def _level_rest_state():
     )
 
 
-def _realized_wrench(model, action, state):
+def _realized_wrench(params, action, state):
     geometry = _quad_geometry()
-    omega = model.action_to_rotor_omega(action, state)
+    omega = action_to_rotor_omega(params, action, state)
     dynamics = _thrust_model().commands_to_dynamics(ActuatorCommands(controls=omega))
     return reduce_to_body_wrench(
         geometry.positions_body,
@@ -104,8 +108,8 @@ def _realized_wrench(model, action, state):
 
 
 def test_velocity_hover_action_cancels_weight():
-    model = VelocitySetpointActuation(_quad_geometry(), _action_cfg("velocity"), _MASS_KG)
-    force_body, torque_body = _realized_wrench(model, model.hover_action(), _level_rest_state())
+    params = _params("velocity")
+    force_body, torque_body = _realized_wrench(params, hover_action(params), _level_rest_state())
 
     assert force_body[2] == pytest.approx(_MASS_KG * _GRAVITY, rel=1e-6)
     assert abs(force_body[0]) < 1e-9
@@ -114,17 +118,17 @@ def test_velocity_hover_action_cancels_weight():
 
 
 def test_ctbr_hover_action_cancels_weight():
-    model = BodyRateActuation(_quad_geometry(), _action_cfg("ctbr"), _MASS_KG)
-    force_body, torque_body = _realized_wrench(model, model.hover_action(), _level_rest_state())
+    params = _params("ctbr")
+    force_body, torque_body = _realized_wrench(params, hover_action(params), _level_rest_state())
 
     assert force_body[2] == pytest.approx(_MASS_KG * _GRAVITY, rel=1e-6)
     assert np.allclose(torque_body, 0.0, atol=1e-9)
 
 
 def test_velocity_forward_command_tilts_toward_plus_x():
-    model = VelocitySetpointActuation(_quad_geometry(), _action_cfg("velocity"), _MASS_KG)
+    params = _params("velocity")
     forward_action = np.array([1.0, 0.0, 0.0, 0.0])
-    force_body, torque_body = _realized_wrench(model, forward_action, _level_rest_state())
+    force_body, torque_body = _realized_wrench(params, forward_action, _level_rest_state())
 
     # Forward (+x) motion requires a nose-down pitch = a positive body torque
     # about +y; roll and yaw stay ~0, and collective still holds weight.
@@ -135,9 +139,9 @@ def test_velocity_forward_command_tilts_toward_plus_x():
 
 
 def test_velocity_left_command_tilts_toward_plus_y():
-    model = VelocitySetpointActuation(_quad_geometry(), _action_cfg("velocity"), _MASS_KG)
+    params = _params("velocity")
     left_action = np.array([0.0, 1.0, 0.0, 0.0])
-    _force_body, torque_body = _realized_wrench(model, left_action, _level_rest_state())
+    _force_body, torque_body = _realized_wrench(params, left_action, _level_rest_state())
 
     # Left (+y) motion requires a roll toward -x about ... a negative body torque
     # about +x (right-hand rule: +x torque tilts +z toward -y).
@@ -145,6 +149,6 @@ def test_velocity_left_command_tilts_toward_plus_y():
     assert abs(torque_body[1]) < 1e-4
 
 
-def test_make_actuation_model_rejects_unimplemented_kind():
+def test_build_actuation_params_rejects_unimplemented_kind():
     with pytest.raises(ValueError, match="attitude"):
-        make_actuation_model("attitude", _quad_geometry(), _action_cfg("attitude"), _MASS_KG)
+        build_actuation_params(_quad_geometry(), _action_cfg("attitude"), _MASS_KG)

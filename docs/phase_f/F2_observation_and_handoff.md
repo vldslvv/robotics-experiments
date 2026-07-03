@@ -96,7 +96,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
   error <= threshold, wall-normal speed <= threshold, lateral speed <= threshold,
   angular-rate magnitude <= threshold, estimator_health >= threshold.
 - `HandoffGate` is a frozen dataclass built from config (no magic numbers in code).
-- Action: append a `PressHandoffConfig` to `config/_types.py` and a
+- Action: append a `PressHandoffConfig` to `config/types.py` and a
   `handoff:` block to `configs/experiment/press/default.yaml` with the initial
   thresholds from ROADMAP1's handoff table (`pose_confidence_min`, `pose_age_max_s`,
   `switch_range_max_m`, `lateral_align_max_m`, `wall_normal_speed_max_mps`,
@@ -129,7 +129,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 - add `src/robotics_experiments/press/_observation.py`, `.../_provider.py`,
   `.../_handoff.py`, `.../_isaac_provider.py`
 - edit `src/robotics_experiments/press/__init__.py` (lazy re-exports)
-- edit `src/robotics_experiments/config/_types.py` (`PressHandoffConfig`,
+- edit `src/robotics_experiments/config/types.py` (`PressHandoffConfig`,
   `PressObservationConfig` if needed), `configs/experiment/press/default.yaml`
 - edit the env leaf to assemble/pack the observation
 - add `tests/test_press_observation.py`, `tests/test_press_handoff.py`; extend

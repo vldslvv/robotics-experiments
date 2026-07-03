@@ -11,7 +11,7 @@ module scope, so `import robotics_experiments` succeeds with both absent.
 runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
 `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
 deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
-`press._deploy`). The pure stepper, command constructors, routine builder, and
+`press.deploy`). The pure stepper, command constructors, routine builder, and
 lower-level seams live in non-underscored modules (`commands`, `observation`,
 `routine`, `port`, `driver`), each declaring its own `__all__` and
 underscore-prefixing its private members; only the `_commander` module (the
@@ -112,7 +112,7 @@ are independent (cross-drone synchronization is deliberately deferred).
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `press._deploy.press_action_to_offboard`; the mission-level press behavior that
+  `press.deploy.press_action_to_offboard`; the mission-level press behavior that
   streams them (a `PressDriver` / `{kind: press}` step) is F3, not this layer yet.
 - **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
   `RoutineState`: runs `decide` and performs the single side effect -- `port.send`
@@ -205,7 +205,7 @@ the takeoff target/timeout, and the hover settle). There is no separate
 `integration_test` group: the integration test is just this routine driven with
 `--strict`. The routine is **per vehicle**: each `vehicles[]` entry may carry a
 `routine` partial, merged over the global `routine` exactly like `drone`/`px4` in
-`config._load._resolve_fleet` (the resolved `RoutineConfig` lands on
+`config.load._resolve_fleet` (the resolved `RoutineConfig` lands on
 `ResolvedVehicle.routine`). `routine.steps` is the per-drone on/off switch: a
 drone whose resolved `steps` is non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /

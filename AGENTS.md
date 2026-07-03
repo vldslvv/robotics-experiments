@@ -130,16 +130,22 @@ the current contents and the intended home for that kind of code.
   forces) without a PX4 lockstep per env. The action level is a config switch
   (`press.action.kind`): `velocity` (default; cascaded PD tracking body-frame
   velocity + yaw rate) or `ctbr` (collective thrust + body-rate setpoint). The
-  pure single-env reference models live in `press/_actuation.py` (numpy, the
-  test oracle) and the batched torch versions the env runs live in
+  actuation is written functionally -- state in frozen params dataclasses built
+  once (`build_actuation_params` / `build_flight_actuation_params`, both
+  precomputing the allocation pseudoinverse), behavior in pure functions
+  (`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
+  a future pipeline composes it as plain functions with the RL policy as one
+  stage. The pure single-env reference implementation lives in
+  `press/actuation.py` (numpy, the test oracle) and its batched torch twin the
+  env runs lives in
   `workflows/isaac_lab/tasks/_flight.py`; both mirror the PX4 bridge's
   `PegasusQuadraticThrustModel` allocation so an action reproduces the commanded
   wrench. Press-training scale and the RL action level live in the Hydra `press`
   group (which replaced the retired `isaac_lab` group) with matching bare
-  annotations in `src/robotics_experiments/config/_types.py`; the physics
+  annotations in `src/robotics_experiments/config/types.py`; the physics
   decimation is derived as `round(sim.physics_hz / press.policy_rate_hz)`, not
   authored. The RL action also maps to a PX4 OFFBOARD setpoint at deploy time
-  (`press/_deploy.py` + the commanding-layer velocity / attitude-rate setpoint
+  (`press/deploy.py` + the commanding-layer velocity / attitude-rate setpoint
   seams).
 - PX4 bridge behavior is configured through the Hydra `px4` group. The default
   experiment enables the bridge for the custom Isaac runtime; use Hydra
@@ -186,7 +192,7 @@ the current contents and the intended home for that kind of code.
   `{vehicle}` token, and the GCS link offset are all *derived* from `id`.
   `ros.namespace` is the explicit operator-facing ROS identity for sim and real
   onboard stacks (for example `/x500_01`); it is not derived from `id`. One
-  private enrichment step (`config._load._resolve_fleet`) merges each entry's
+  private enrichment step (`config.load._resolve_fleet`) merges each entry's
   `drone`/`px4` partials over the global `drone`/`px4` defaults
   (`OmegaConf.merge`) into a pure `VehicleConfig`, then constructs an immutable
   `ResolvedVehicle` carrying that config plus the derived runtime fields:
@@ -210,7 +216,7 @@ the current contents and the intended home for that kind of code.
   keep their derived ports and each PX4 container launches the SITL airframe
   matching its drone asset). Each entry is a frozen `Px4SitlLaunchConfig`
   (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
-  `config._load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
+  `config.load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
   USD asset basename to the PX4 airframe defined in `configs/airframes`
   (`holybro_x500_v2.usda` -> `none_x500_v2`/`4019`,
   `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
@@ -224,7 +230,7 @@ the current contents and the intended home for that kind of code.
   **computed** by the USD builder (`build_copter_usd_standalone.compute_body_mass_properties`,
   summing the component box/cylinder inertias + parallel-axis, excluding the
   separate pusher pad) and the bridge `rotor_constant` is **computed** by
-  `config._load` (`_compute_rotor_constants`) from the cited
+  `config.load` (`_compute_rotor_constants`) from the cited
   `max_thrust_per_rotor_g` + `max_rotor_velocity` (standard-gravity gram-force ->
   Newton conversion, so `T = rotor_constant * omega^2` reaches the cited static
   max at `max_rotor_velocity`). Neither derived value is authored, so fixing a
@@ -266,7 +272,7 @@ the current contents and the intended home for that kind of code.
   `robotics_experiments.px4_bridge` package logger, so the `BridgeHost` wraps each
   vehicle's construction/teardown and per-tick work in
   `px4_bridge.vehicle_log_context(id)`, and each per-vehicle file handler
-  carries a `VehicleLogFilter` (see `px4_bridge/_logging.py`). Without this a
+  carries a `VehicleLogFilter` (see `px4_bridge/logging.py`). Without this a
   multi-vehicle process merged every bridge's records into the last-constructed
   vehicle's file. `EnvConfig.vehicles` is annotated `List[Any]` for Hydra
   compose-time tolerance of partial entries; the runtime value is
@@ -282,7 +288,7 @@ the current contents and the intended home for that kind of code.
   production runtime surface (`RoutineDriver`, `DriverParams`,
   `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
   `FailureKind`, and the deploy-time wire payloads `VelocitySetpoint` /
-  `AttitudeRateSetpoint` consumed by `press._deploy`). The command layer's public
+  `AttitudeRateSetpoint` consumed by `press.deploy`). The command layer's public
   seams live in non-underscored modules (`commands`, `observation`, `routine`,
   `port`, `driver`), each declaring its own `__all__` and underscore-prefixing its
   private top-level members; only the internal `_commander` module (the
@@ -405,7 +411,7 @@ the current contents and the intended home for that kind of code.
   is **no** separate `integration_test` group: the integration test is just the
   routine driven with `--strict`. The routine is **per vehicle**: each
   `vehicles[]` entry may carry a `routine` partial, merged over the global
-  `routine` exactly like `drone`/`px4` in `config._load._resolve_fleet` (the resolved
+  `routine` exactly like `drone`/`px4` in `config.load._resolve_fleet` (the resolved
   `RoutineConfig` lands on `ResolvedVehicle.routine`). `routine.steps` is the
   **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
   (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
@@ -726,7 +732,7 @@ the host. They are meant to be used in the Dockerized environment.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
   the Hydra `configs/` YAML as the single source of truth, not hardcoded in code.
   Add a matching field (a bare annotation with no default) to the relevant
-  `*Config` dataclass in `src/robotics_experiments/config/_types.py` and plumb it
+  `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
   through. A library constructor may keep a neutral fallback default, but it must
   not duplicate the project value (for example `lockstep_timeout_s` is `0.1` in
   the `LockstepSettings` default but `1.0` at

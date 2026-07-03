@@ -10,7 +10,7 @@ import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
 from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config._types import SimSettings
+from robotics_experiments.config.types import SimSettings
 
 __all__: list[str] = []
 

@@ -48,9 +48,9 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         # simulation re-export, runtime __getattr__) and the torch env leaves must
         # not eager-import them.
         for leaf in (
-            "robotics_experiments.drone._spawn",
-            "robotics_experiments.environment._stage",
-            "robotics_experiments.environment._step",
+            "robotics_experiments.drone.spawn",
+            "robotics_experiments.environment.stage",
+            "robotics_experiments.environment.step",
             "robotics_experiments.simulation._isaac_settings",
             "robotics_experiments.runtime._bridge_host",
             "robotics_experiments.runtime.orchestrator",

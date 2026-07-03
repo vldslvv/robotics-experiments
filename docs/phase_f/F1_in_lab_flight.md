@@ -4,6 +4,10 @@ Goal served: enabler for goal 1 (an easy task at all needs a flyable Lab env).
 Depends on: nothing. Blocks: F3.
 Action-level decision: resolved in ADR 0013. `press.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
+Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
+frozen params dataclasses + pure functions (`build_actuation_params` /
+`action_to_rotor_omega` in `press/actuation.py`, mirrored in `_flight.py`); same
+math and gates.
 
 Why this exists: `workflows/isaac_lab/tasks/drone_hover_env.py` is a no-op scaffold
 (`_apply_action` returns `None`, rewards are zero). PX4 SITL cannot run per-env at
@@ -16,7 +20,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 ## Step 1 -- Create the pure `press` package skeleton
 
 - Action: create `src/robotics_experiments/press/__init__.py` (re-export only) and
-  `src/robotics_experiments/press/_actuation.py`.
+  `src/robotics_experiments/press/actuation.py`.
 - `press/__init__.py`: `__all__` empty for now; add exports as later steps land.
   Import nothing from torch/isaaclab/carb/pxr at module scope.
 - Rule: this package is on the core import path. It must import only stdlib +
@@ -27,7 +31,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 2 -- Add the `press` Hydra config group (scaffold only)
 
-- Action: edit `src/robotics_experiments/config/_types.py`.
+- Action: edit `src/robotics_experiments/config/types.py`.
   - Add `@dataclass class PressActionConfig` with bare annotations:
     `kind: str` (the deferred action level, see Step 6),
     `action_dim: int`,
@@ -75,13 +79,13 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Reuse the physical constants already resolved per-airframe: rotor count + spin
   dirs from USD rotor metadata (`px4_bridge/rotor_discovery.py`), `rotor_constant`,
   `max_rotor_velocity`, `linear_drag` from `cfg.px4` (already computed in
-  `config._load`). Do not re-derive thrust constants here.
+  `config.load`). Do not re-derive thrust constants here.
 - Done when: a single-env manual test applies uniform hover thrust and the drone
   holds altitude (not sink/climb) for 2 s in a scripted Lab session.
 
 ## Step 4 -- Implement the pluggable actuation seam
 
-- Action: in `press/_actuation.py` (pure), define the seam that maps a normalized
+- Action: in `press/actuation.py` (pure), define the seam that maps a normalized
   action to per-rotor angular-velocity references, independent of torch:
   - `class ActuationModel(Protocol)` with
     `action_to_rotor_omega(action, state) -> np.ndarray` (single-env, numpy) --
@@ -98,7 +102,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Action: in `_flight.py` (torch leaf), add a vectorized implementation of the
   selected `kind` that matches the pure reference (batched over envs). The torch
   version is the one the env runs; the numpy version is the test oracle.
-- Test: `tests/test_press_actuation.py` (pure): for a hover action the model
+- Test: `tests/test_pressactuation.py` (pure): for a hover action the model
   returns rotor omegas whose `commands_to_dynamics` net force approximately cancels
   weight; for a +x velocity command the resulting body wrench tilts toward +x. Assert
   on the realized wrench (public thrust-model output), not internals.
@@ -186,13 +190,13 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 
 ## Files touched by F1
 
-- add `src/robotics_experiments/press/__init__.py`, `.../press/_actuation.py`
+- add `src/robotics_experiments/press/__init__.py`, `.../press/actuation.py`
 - add `src/robotics_experiments/workflows/isaac_lab/tasks/_flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
-- edit `src/robotics_experiments/config/_types.py`, `.../config/_schemas.py`
+- edit `src/robotics_experiments/config/types.py`, `.../config/_schemas.py`
 - add `configs/experiment/press/default.yaml`; edit `configs/config.yaml`
 - move/adopt `isaac/runtime/lab/drone_cfg.py` into the tasks package (or import it)
-- add `tests/test_press_actuation.py`; extend a config test; extend
+- add `tests/test_pressactuation.py`; extend a config test; extend
   `tests/test_core_imports.py` to assert `press` imports without torch/isaac
 - add a standalone hover+goto validation script + make target
 - record ADR after Step 6 decision

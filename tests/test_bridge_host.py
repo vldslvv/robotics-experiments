@@ -83,14 +83,14 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     # SimClock is pure Python with no Isaac deps and the host's sim-time
     # behavior is exercised here, so the fake reuses the real implementation.
     # Import it before the module is replaced in sys.modules below.
-    from robotics_experiments.px4_bridge._logging import vehicle_log_context
-    from robotics_experiments.px4_bridge._sim_clock import SimClock
+    from robotics_experiments.px4_bridge.logging import vehicle_log_context
+    from robotics_experiments.px4_bridge.sim_clock import SimClock
 
     fake_px4_bridge = types.ModuleType("robotics_experiments.px4_bridge")
     fake_px4_bridge.__path__ = []
-    fake_logging = types.ModuleType("robotics_experiments.px4_bridge._logging")
+    fake_logging = types.ModuleType("robotics_experiments.px4_bridge.logging")
     fake_logging.vehicle_log_context = vehicle_log_context
-    fake_sim_clock = types.ModuleType("robotics_experiments.px4_bridge._sim_clock")
+    fake_sim_clock = types.ModuleType("robotics_experiments.px4_bridge.sim_clock")
     fake_sim_clock.SimClock = SimClock
 
     class Px4MavlinkPort:
@@ -166,8 +166,8 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.SimClock = SimClock
     fake_px4_bridge.vehicle_log_context = vehicle_log_context
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
-    monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge._logging", fake_logging)
-    monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge._sim_clock", fake_sim_clock)
+    monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge.logging", fake_logging)
+    monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge.sim_clock", fake_sim_clock)
 
 
 def _import_bridge_host(monkeypatch):

@@ -386,7 +386,7 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
 list). `id` is the sole authored identity; one pure enrichment step
-(`config._load._resolve_fleet`) derives each vehicle's `mavlink_port`
+(`config.load._resolve_fleet`) derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
 into an immutable `ResolvedVehicle`. The fleet runtime (`FleetOrchestrator`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
@@ -534,7 +534,7 @@ implemented in `src/robotics_experiments/px4_bridge/mavlink.py`.
 of truth for both the Isaac physics rate and the PX4 sensor rate; the host plumbs
 it into the port as `LockstepSettings.physics_rate_hz` (there is no separate
 sensor-rate knob to drift). The integer-microsecond tick is derived in exactly
-one place -- `physics_tick_us(physics_hz)` in `px4_bridge/_sim_clock.py`, shared by
+one place -- `physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
 the port and by `SimClock`. The port pins the Pegasus sensor `update_period` to
 that integer-microsecond tick (rate `1e6 / tick_us`), not `1/physics_rate_hz`, so
 the `update_at_rate` gate fires on every physics step at any rate;

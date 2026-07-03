@@ -1,12 +1,15 @@
 """Flyable Isaac Lab DirectRLEnv for drone hover.
 
 Maps a normalized RL action to per-rotor forces through the pluggable in-Lab
-actuation seam (``VectorizedActuation`` in ``_flight``, the batched analogue of
-the host-tested ``robotics_experiments.press._actuation``), with no PX4 lockstep
-per env. The action level is ``press.action.kind`` (``velocity`` / ``ctbr``). The
-reward here is a temporary hover-tracking shaping term so the env is trainable
-end-to-end for the F1 validation gate; F3 replaces it with the switch-press
-reward.
+actuation seam (the ``_flight`` params + pure functions, the batched twin of
+the host-tested ``robotics_experiments.press.actuation``), with no PX4 lockstep
+per env. The action level is ``press.action.kind`` (``velocity`` / ``ctbr``).
+The env class is thin wiring: the frozen ``actuation_params`` plus the pure
+per-step math (``_hover_observation`` / ``_hover_reward`` /
+``_hover_terminated``) do the work, so external composition (rollout/eval
+scripts, the standalone gate) can run the same function chain. The reward here
+is a temporary hover-tracking shaping term so the env is trainable end-to-end
+for the F1 validation gate; F3 replaces it with the switch-press reward.
 """
 
 from __future__ import annotations
@@ -22,7 +25,12 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
 from ._drone_cfg import make_drone_articulation_cfg
-from ._flight import VectorizedActuation, apply_body_wrench
+from ._flight import (
+    action_to_rotor_omega,
+    apply_body_wrench,
+    build_flight_actuation_params,
+    rotor_omega_to_body_wrench,
+)
 
 __all__ = ["DroneHoverEnvCfg", "DroneHoverEnv"]
 
@@ -44,6 +52,54 @@ _MAX_POSITION_ERROR_M = 5.0
 # Reset start-pose randomization box around the hover target (meters).
 _RESET_XY_HALF_M = 0.5
 _RESET_Z_HALF_M = 0.3
+
+
+def _hover_observation(
+    position_w: torch.Tensor,
+    target_w: torch.Tensor,
+    quat_w: torch.Tensor,
+    lin_vel_w: torch.Tensor,
+    ang_vel_w: torch.Tensor,
+) -> torch.Tensor:
+    """Pack the 13-dim hover observation ``[pos_err, quat, lin_vel, ang_vel]``.
+
+    Placeholder F1 observation: carries the world-frame angular velocity even
+    though the actuation controller consumes the body-frame one; F2's
+    ``PressObservation`` replaces this vector and reconciles the frames.
+    """
+    return torch.cat((position_w - target_w, quat_w, lin_vel_w, ang_vel_w), dim=-1)
+
+
+def _hover_reward(
+    position_w: torch.Tensor,
+    target_w: torch.Tensor,
+    lin_vel_w: torch.Tensor,
+    ang_vel_w: torch.Tensor,
+) -> torch.Tensor:
+    position_error = torch.linalg.norm(position_w - target_w, dim=-1)
+    linear_speed = torch.linalg.norm(lin_vel_w, dim=-1)
+    angular_speed = torch.linalg.norm(ang_vel_w, dim=-1)
+    return (
+        _REWARD_ALIVE
+        - _REWARD_POS_WEIGHT * position_error
+        - _REWARD_LINVEL_WEIGHT * linear_speed
+        - _REWARD_ANGVEL_WEIGHT * angular_speed
+    )
+
+
+def _hover_terminated(
+    position_w: torch.Tensor,
+    target_w: torch.Tensor,
+    quat_w: torch.Tensor,
+) -> torch.Tensor:
+    # Body-Z projected onto world-Z: the (0,0,1) column of the body->world
+    # rotation is 1 - 2(x^2 + y^2) for a wxyz quaternion.
+    body_z_world_z = 1.0 - 2.0 * (quat_w[:, 1] ** 2 + quat_w[:, 2] ** 2)
+    tilted = body_z_world_z < _CRASH_TILT_COS
+    too_low = position_w[:, 2] < _MIN_ALTITUDE_M
+    position_error = torch.linalg.norm(position_w - target_w, dim=-1)
+    out_of_bounds = position_error > _MAX_POSITION_ERROR_M
+    return tilted | too_low | out_of_bounds
 
 
 def _experiment_config():
@@ -87,9 +143,12 @@ class DroneHoverEnv(DirectRLEnv):
     """Drone-hover task that actually flies N parallel drones.
 
     ``_apply_action`` closes the actuation loop every physics substep: the stored
-    normalized action -> per-rotor omega (``VectorizedActuation``) -> the realized
-    body wrench (thrust at the rotor offsets + yaw reaction + drag) -> the
-    vectorized force sink.
+    normalized action -> per-rotor omega (``action_to_rotor_omega`` over the
+    frozen ``actuation_params``) -> the realized body wrench (thrust at the
+    rotor offsets + yaw reaction + drag) -> the vectorized force sink.
+    ``actuation_params`` is public: it is the composition seam external
+    consumers (e.g. the standalone hover+goto gate) run the same pure functions
+    against.
     """
 
     cfg: DroneHoverEnvCfg
@@ -132,7 +191,7 @@ class DroneHoverEnv(DirectRLEnv):
             bridge.linear_drag, dtype=torch.float32, device=self.device
         )
         action_cfg = _experiment_config().press.action
-        self._actuation = VectorizedActuation(
+        self.actuation_params = build_flight_actuation_params(
             kind=action_cfg.kind,
             positions_body=rotors.positions_body,
             rot_dir=rotors.rot_dir,
@@ -149,55 +208,40 @@ class DroneHoverEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-1.0, 1.0)
 
     def _apply_action(self) -> None:
-        omega = self._actuation.action_to_rotor_omega(
+        omega = action_to_rotor_omega(
+            self.actuation_params,
             self.actions,
             self.drone.data.root_quat_w,
             self.drone.data.root_lin_vel_w,
             self.drone.data.root_ang_vel_b,
         )
-        force_body, torque_body = self._actuation.rotor_omega_to_body_wrench(
-            omega, self.drone.data.root_lin_vel_b, self._linear_drag
+        force_body, torque_body = rotor_omega_to_body_wrench(
+            self.actuation_params, omega, self.drone.data.root_lin_vel_b, self._linear_drag
         )
         apply_body_wrench(self.drone, self._body_id, force_body, torque_body)
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
-        position_error = self.drone.data.root_pos_w - self._hover_target_w
-        observations = torch.cat(
-            (
-                position_error,
-                self.drone.data.root_quat_w,
-                self.drone.data.root_lin_vel_w,
-                self.drone.data.root_ang_vel_w,
-            ),
-            dim=-1,
+        observations = _hover_observation(
+            self.drone.data.root_pos_w,
+            self._hover_target_w,
+            self.drone.data.root_quat_w,
+            self.drone.data.root_lin_vel_w,
+            self.drone.data.root_ang_vel_w,
         )
         return {"policy": observations}
 
     def _get_rewards(self) -> torch.Tensor:
-        position_error = torch.linalg.norm(
-            self.drone.data.root_pos_w - self._hover_target_w, dim=-1
-        )
-        linear_speed = torch.linalg.norm(self.drone.data.root_lin_vel_w, dim=-1)
-        angular_speed = torch.linalg.norm(self.drone.data.root_ang_vel_w, dim=-1)
-        return (
-            _REWARD_ALIVE
-            - _REWARD_POS_WEIGHT * position_error
-            - _REWARD_LINVEL_WEIGHT * linear_speed
-            - _REWARD_ANGVEL_WEIGHT * angular_speed
+        return _hover_reward(
+            self.drone.data.root_pos_w,
+            self._hover_target_w,
+            self.drone.data.root_lin_vel_w,
+            self.drone.data.root_ang_vel_w,
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        # Body-Z projected onto world-Z: the (0,0,1) column of the body->world
-        # rotation is 1 - 2(x^2 + y^2) for a wxyz quaternion.
-        quat = self.drone.data.root_quat_w
-        body_z_world_z = 1.0 - 2.0 * (quat[:, 1] ** 2 + quat[:, 2] ** 2)
-        tilted = body_z_world_z < _CRASH_TILT_COS
-        too_low = self.drone.data.root_pos_w[:, 2] < _MIN_ALTITUDE_M
-        position_error = torch.linalg.norm(
-            self.drone.data.root_pos_w - self._hover_target_w, dim=-1
+        terminated = _hover_terminated(
+            self.drone.data.root_pos_w, self._hover_target_w, self.drone.data.root_quat_w
         )
-        out_of_bounds = position_error > _MAX_POSITION_ERROR_M
-        terminated = tilted | too_low | out_of_bounds
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return terminated, time_out
 

@@ -3,29 +3,30 @@
 This package is on the core import path and must import cleanly with Isaac and
 torch absent (stdlib + numpy only at module scope). The torch/isaaclab env code
 lives in ``robotics_experiments.workflows.isaac_lab.tasks``; the pure reference
-models and pure deploy-mapping live here. ``__init__`` stays re-export-only.
+implementation (frozen params + pure functions) and pure deploy-mapping live
+here. ``__init__`` stays re-export-only.
 """
 
 from __future__ import annotations
 
-from ._actuation import (
-    ActuationModel,
+from .actuation import (
+    ActuationParams,
     ActuationState,
-    BodyRateActuation,
     MixerGeometry,
-    VelocitySetpointActuation,
-    make_actuation_model,
+    action_to_rotor_omega,
+    build_actuation_params,
+    hover_action,
     reduce_to_body_wrench,
 )
-from ._deploy import press_action_to_offboard
+from .deploy import press_action_to_offboard
 
 __all__ = [
-    "ActuationModel",
+    "ActuationParams",
     "ActuationState",
-    "BodyRateActuation",
     "MixerGeometry",
-    "VelocitySetpointActuation",
-    "make_actuation_model",
+    "action_to_rotor_omega",
+    "build_actuation_params",
+    "hover_action",
     "press_action_to_offboard",
     "reduce_to_body_wrench",
 ]

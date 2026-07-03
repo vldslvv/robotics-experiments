@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from robotics_experiments.px4_bridge._sim_clock import SimClock, physics_tick_us
+from robotics_experiments.px4_bridge.sim_clock import SimClock, physics_tick_us
 
 
 def test_physics_tick_us_rounds_to_integer_microseconds():

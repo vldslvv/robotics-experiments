@@ -77,7 +77,7 @@ the learned policy must beat.
     retries.
 - Config: add `PressScriptedConfig` (stand-off distances, approach/press speed
   caps, alignment thresholds, compression cap, confirm window, retry bound) to
-  `config/_types.py` (bare annotations) and a `scripted:` block to
+  `config/types.py` (bare annotations) and a `scripted:` block to
   `configs/experiment/press/default.yaml`. No literal thresholds in Python.
 - Test: `tests/test_press_scripted.py` (pure): a synthetic observation sequence
   (approach -> contact -> compression -> lamp toggle) walks the phases in order;
@@ -94,7 +94,7 @@ the learned policy must beat.
 - Action: add the `{kind: press}` routine step in the commanding layer per F3
   Step 8: the step enters only when F2's `handoff_ready` gate passes, ticks the
   configured `ContactBehavior`, maps each `ContactDecision.action` through the
-  `press/_deploy.py` OFFBOARD setpoint mapping, and completes on `DONE`
+  `press/deploy.py` OFFBOARD setpoint mapping, and completes on `DONE`
   (-> ADVANCE) or `ABORT` (-> FAIL). Keep `decide` pure: the behavior tick and
   deploy mapping run in the driver/commander side-effect position, mirroring how
   `STREAM` setpoints work today.
@@ -120,7 +120,7 @@ the learned policy must beat.
 
 - add `src/robotics_experiments/press/_behavior.py`; edit `press/__init__.py`
   (re-exports)
-- edit `config/_types.py` (`PressScriptedConfig`, behavior selector),
+- edit `config/types.py` (`PressScriptedConfig`, behavior selector),
   `configs/experiment/press/default.yaml`
 - edit the commanding layer for the `{kind: press}` step (+ the routine builder
   and `docs/COMMAND_ROUTINE_CONTRACT.md`)

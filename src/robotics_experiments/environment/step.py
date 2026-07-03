@@ -17,8 +17,8 @@ from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
 from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config._types import LightSwitchConfig
-from robotics_experiments.environment._switches import SwitchState, _apply_button_sample
+from robotics_experiments.config.types import LightSwitchConfig
+from robotics_experiments.environment.switches import SwitchState, _apply_button_sample
 
 __all__ = ["init_articulations", "step_switches"]
 

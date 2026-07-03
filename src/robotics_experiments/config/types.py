@@ -245,8 +245,8 @@ class Px4BridgeConfig:
             drone asset.
         rotor_constant: Pegasus quadratic thrust coefficient per rotor
             (``T_i = rotor_constant_i * omega_i^2``). NOT authored -- it is
-            computed in :func:`config._load._resolve_fleet` (and for the global
-            default in :func:`config._load.get_config`) from
+            computed in :func:`config.load._resolve_fleet` (and for the global
+            default in :func:`config.load.get_config`) from
             ``max_thrust_per_rotor_g``, ``max_rotor_velocity``, and standard
             gravity, so a datasheet thrust change is a single-line edit.
         linear_drag: Pegasus body-frame linear drag coefficients.
@@ -327,7 +327,7 @@ class Px4BridgeConfig:
     rotor_spin_visual_scale: float
 
     # Computed (not authored): derived from max_thrust_per_rotor_g +
-    # max_rotor_velocity + standard gravity in config._load. Kept last so the
+    # max_rotor_velocity + standard gravity in config.load. Kept last so the
     # authored fields above stay required. See the class docstring.
     rotor_constant: List[float] = field(default_factory=list)
 
@@ -368,7 +368,7 @@ class VehicleConfig:
 class ResolvedVehicle:
     """One fully resolved vehicle: pure config plus derived runtime fields.
 
-    Produced by the single enrichment step ``config._load._resolve_fleet`` from a
+    Produced by the single enrichment step ``config.load._resolve_fleet`` from a
     :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
     the host-side PX4 launch) reads the derived fields here instead of
     recomputing ``connection_baseport + id`` ad hoc. ``id`` drives the PX4
@@ -421,7 +421,7 @@ class ResolvedVehicle:
 class Px4SitlLaunchConfig:
     """PX4 SITL launch airframe derived from a resolved vehicle's config.
 
-    Produced by the pure ``config._load.resolve_px4_sitl_launch_config`` from a
+    Produced by the pure ``config.load.resolve_px4_sitl_launch_config`` from a
     :class:`ResolvedVehicle`. The drone USD asset selects the PX4 simulator
     airframe so each asset launches the PX4 control allocation generated from
     the same ``configs/airframes`` source as the USD. Threaded by the host-side
@@ -450,7 +450,7 @@ class PressActionConfig:
     """RL action-level (``kind``) selection plus its controller tunables.
 
     The ``kind`` picks the in-Lab actuation model (see
-    :mod:`robotics_experiments.press._actuation`): ``velocity`` (cascaded PD:
+    :mod:`robotics_experiments.press.actuation`): ``velocity`` (cascaded PD:
     body-frame velocity + yaw rate) or ``ctbr`` (collective thrust + body-rate
     setpoint). The gains/limits below are a superset covering both; the selected
     ``kind`` reads the subset it needs, so switching is a one-line ``kind`` edit.
@@ -672,7 +672,7 @@ class EnvConfig:
             structured-config validation accepts the *partial* YAML entries
             during ``compose()``. The loader replaces the raw dicts with a
             fully enriched, validated ``list[ResolvedVehicle]`` (see
-            ``config._load._resolve_fleet``), which is the public/runtime type.
+            ``config.load._resolve_fleet``), which is the public/runtime type.
         routine: High-level flight routine plus its verification gates (see
             :class:`RoutineConfig`). Always present; an empty ``routine.steps``
             means manual operation, a non-empty list makes every workflow

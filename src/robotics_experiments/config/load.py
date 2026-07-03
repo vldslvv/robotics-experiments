@@ -9,7 +9,7 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
 from ._schemas import _register_schemas
-from ._types import (
+from .types import (
     DroneConfig,
     EnvConfig,
     Px4BridgeConfig,

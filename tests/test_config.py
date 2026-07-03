@@ -21,7 +21,7 @@ def _airframe_config(file_stem):
 
 
 def test_compute_rotor_constants_rejects_invalid_inputs():
-    from robotics_experiments.config._load import _compute_rotor_constants
+    from robotics_experiments.config.load import _compute_rotor_constants
 
     with pytest.raises(ValueError, match="max_thrust_per_rotor_g must be positive"):
         _compute_rotor_constants(0.0, [100.0])
@@ -37,9 +37,9 @@ def test_default_config_loads_from_root_experiment_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _compute_rotor_constants
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._types import EnvConfig
+    from robotics_experiments.config.load import _compute_rotor_constants
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.types import EnvConfig
 
     reset_config()
 
@@ -90,7 +90,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
     assert config.px4.max_thrust_per_rotor_g == 1054.0
     # rotor_constant is not authored: it is derived from max_thrust_per_rotor_g +
-    # max_rotor_velocity by config._load (here the global default fallback).
+    # max_rotor_velocity by config.load (here the global default fallback).
     assert config.px4.rotor_constant == _compute_rotor_constants(
         config.px4.max_thrust_per_rotor_g, config.px4.max_rotor_velocity
     )
@@ -129,7 +129,7 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -164,7 +164,7 @@ def test_two_drone_forward_land_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -193,7 +193,7 @@ def test_two_drone_circle_land_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -252,7 +252,7 @@ def test_two_hexacopter_circle_land_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -288,7 +288,7 @@ def test_hexacopter_navigate_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -334,8 +334,8 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
-    from robotics_experiments.config._load import _compute_rotor_constants
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _compute_rotor_constants
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -375,8 +375,8 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
     from omegaconf import OmegaConf
 
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.load import _resolve_fleet as resolve_fleet
 
     reset_config()
     env = get_config()  # default config: global routine.steps is empty (manual)
@@ -426,8 +426,8 @@ def test_resolve_fleet_requires_ros_namespace():
     from omegaconf import OmegaConf
 
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.load import _resolve_fleet as resolve_fleet
 
     reset_config()
     env = get_config()
@@ -461,8 +461,8 @@ def test_resolve_fleet_rejects_invalid_ros_namespace(namespace, match):
     from omegaconf import OmegaConf
 
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.load import _resolve_fleet as resolve_fleet
 
     reset_config()
     env = get_config()
@@ -519,8 +519,8 @@ def test_resolve_fleet_validates_ros_identity(vehicles, match):
     from omegaconf import OmegaConf
 
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._load import _resolve_fleet as resolve_fleet
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.load import _resolve_fleet as resolve_fleet
 
     reset_config()
     env = get_config()
@@ -542,7 +542,7 @@ def test_resolve_drone_bridge_config_uses_airframe_constants():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, resolve_drone_bridge_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
     config = get_config()
@@ -567,8 +567,8 @@ def test_resolve_section_falls_back_to_named_section():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
     from robotics_experiments.config._resolve import _resolve_section as resolve_section
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
     config = get_config()
@@ -586,7 +586,7 @@ def test_enabled_px4_helpers_match_active_config():
         get_config,
         get_enabled_px4_instance_indices,
     )
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
 
@@ -602,7 +602,7 @@ def test_quad_default_resolves_to_generic_quad_x_airframe():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
     config = get_config()  # default config: one PX4-enabled quad vehicle
@@ -619,7 +619,7 @@ def test_hex_config_resolves_to_generic_hexarotor_airframe(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_enabled_px4_launch_configs
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -640,8 +640,8 @@ def test_get_enabled_px4_launch_configs_omits_disabled_vehicles(monkeypatch):
     pytest.importorskip("omegaconf")
     import dataclasses
 
-    from robotics_experiments.config import _load, get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config import get_config, load
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
     enabled = get_config().vehicles[0]  # the default PX4-enabled quad vehicle
@@ -656,10 +656,10 @@ def test_get_enabled_px4_launch_configs_omits_disabled_vehicles(monkeypatch):
     class _FakeConfig:
         vehicles = [enabled, disabled]
 
-    monkeypatch.setattr(_load, "get_config", lambda: _FakeConfig())
-    launch_configs = _load.get_enabled_px4_launch_configs()
+    monkeypatch.setattr(load, "get_config", lambda: _FakeConfig())
+    launch_configs = load.get_enabled_px4_launch_configs()
     assert [c.instance_index for c in launch_configs] == [enabled.px4_instance_index]
-    # monkeypatch restores _load.get_config at teardown; reset the real cache too.
+    # monkeypatch restores load.get_config at teardown; reset the real cache too.
     monkeypatch.undo()
     reset_config()
 
@@ -670,8 +670,8 @@ def test_resolve_px4_sitl_launch_config_rejects_unknown_asset():
     import dataclasses
 
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
-    from robotics_experiments.config._load import (
+    from robotics_experiments.config.load import _reset_config as reset_config
+    from robotics_experiments.config.load import (
         resolve_px4_sitl_launch_config,
     )
 
@@ -691,7 +691,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
@@ -716,7 +716,7 @@ def test_navigate_multi_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
-    from robotics_experiments.config._load import _reset_config as reset_config
+    from robotics_experiments.config.load import _reset_config as reset_config
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",

@@ -35,7 +35,7 @@ action:
 
 The fix is config-only. No integral term, explicit yaw hold, or controller
 structure change was needed, so the numpy reference in
-`press/_actuation.py` and the torch implementation in
+`press/actuation.py` and the torch implementation in
 `workflows/isaac_lab/tasks/_flight.py` remain structurally unchanged.
 
 ## Measured Results
@@ -75,7 +75,7 @@ omega=[319.2,322.7] rad/s
 Host-side:
 
 ```bash
-uv run pytest tests/test_press_actuation.py tests/test_config.py tests/test_core_imports.py
+uv run pytest tests/test_pressactuation.py tests/test_config.py tests/test_core_imports.py
 ```
 
 Isaac Lab:
