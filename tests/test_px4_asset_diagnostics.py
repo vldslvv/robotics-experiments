@@ -8,9 +8,7 @@ import pytest
 
 from robotics_experiments.px4_bridge._asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
-    RootBodyPoseDiagnostics,
     compute_root_body_pose_diagnostics,
-    handle_root_body_pose_diagnostics,
     validate_root_body_pose,
 )
 
@@ -138,15 +136,18 @@ def test_rotated_body_reports_angular_delta():
 
 
 def test_warn_policy_logs_warning_and_does_not_raise(caplog):
-    diagnostics = _diagnostics_for_policy_tests(translation_delta_m=0.25)
+    stage = _stage_with_translated_body(0.25)
 
     with caplog.at_level(logging.INFO, logger="px4-diagnostics-test"):
-        handle_root_body_pose_diagnostics(
-            diagnostics,
-            policy="warn",
+        diagnostics = validate_root_body_pose(
+            stage,
+            "/World/Drone",
+            "/World/Drone/body",
+            RootBodyPoseDiagnosticParams(policy="warn"),
             logger=logging.getLogger("px4-diagnostics-test"),
         )
 
+    assert diagnostics is not None and diagnostics.has_mismatch
     assert "PX4 root/body pose diagnostic" in caplog.text
     assert "PX4 root/body pose mismatch" in caplog.text
     assert "articulation=/World/Drone" in caplog.text
@@ -159,33 +160,32 @@ def test_warn_policy_logs_warning_and_does_not_raise(caplog):
 
 
 def test_fail_policy_logs_error_and_raises(caplog):
-    diagnostics = _diagnostics_for_policy_tests(orientation_delta_rad=0.25)
+    stage = _stage_with_translated_body(0.25)
 
     with caplog.at_level(logging.INFO, logger="px4-diagnostics-test"):
         with pytest.raises(RuntimeError, match="PX4 root/body pose mismatch"):
-            handle_root_body_pose_diagnostics(
-                diagnostics,
-                policy="fail",
+            validate_root_body_pose(
+                stage,
+                "/World/Drone",
+                "/World/Drone/body",
+                RootBodyPoseDiagnosticParams(policy="fail"),
                 logger=logging.getLogger("px4-diagnostics-test"),
             )
 
     assert "PX4 root/body pose diagnostic" in caplog.text
     assert "PX4 root/body pose mismatch" in caplog.text
-    assert "orientation_delta_rad=0.25" in caplog.text
+    assert "translation_delta_m=0.25" in caplog.text
     assert "body_relative_to_root_pose=" in caplog.text
 
 
-def test_ignore_policy_does_not_log_or_raise(caplog):
-    diagnostics = _diagnostics_for_policy_tests(translation_delta_m=0.25)
-
-    with caplog.at_level(logging.INFO, logger="px4-diagnostics-test"):
-        handle_root_body_pose_diagnostics(
-            diagnostics,
-            policy="ignore",
-            logger=logging.getLogger("px4-diagnostics-test"),
+def test_unknown_policy_raises_value_error():
+    with pytest.raises(ValueError, match="Unsupported root/body mismatch policy"):
+        validate_root_body_pose(
+            _FakeStage({}),
+            "/World/Drone",
+            "/World/Drone/body",
+            RootBodyPoseDiagnosticParams(policy="explode"),
         )
-
-    assert caplog.text == ""
 
 
 def test_validate_ignore_policy_skips_diagnostic_work(caplog):
@@ -202,30 +202,15 @@ def test_validate_ignore_policy_skips_diagnostic_work(caplog):
     assert caplog.text == ""
 
 
-def _diagnostics_for_policy_tests(
-    *,
-    translation_delta_m: float = 0.0,
-    orientation_delta_rad: float = 0.0,
-) -> RootBodyPoseDiagnostics:
-    return RootBodyPoseDiagnostics(
-        articulation_path="/World/Drone",
-        body_path="/World/Drone/body",
-        root_world_pose=(
-            np.array([0.0, 0.0, 0.0], dtype=np.float64),
-            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
-        ),
-        body_world_pose=(
-            np.array([translation_delta_m, 0.0, 0.0], dtype=np.float64),
-            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
-        ),
-        body_relative_to_root_pose=(
-            np.array([translation_delta_m, 0.0, 0.0], dtype=np.float64),
-            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
-        ),
-        translation_delta_m=translation_delta_m,
-        orientation_delta_rad=orientation_delta_rad,
-        translation_threshold_m=1e-4,
-        orientation_threshold_rad=1e-4,
+def _stage_with_translated_body(translation_delta_m: float) -> _FakeStage:
+    return _FakeStage(
+        {
+            "/World/Drone": _FakeMatrix([0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]),
+            "/World/Drone/body": _FakeMatrix(
+                [translation_delta_m, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ),
+        }
     )
 
 

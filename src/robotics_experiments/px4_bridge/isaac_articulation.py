@@ -19,6 +19,7 @@ from robotics_experiments.px4_bridge._asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
     validate_root_body_pose,
 )
+from robotics_experiments.px4_bridge.rotor_discovery import _resolve_body_path
 from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
@@ -116,6 +117,7 @@ class IsaacArticulationIO:
         # contexts (e.g. unit tests for the surrounding logic).
         import omni.usd
         from isaacsim.core.prims import RigidPrim, SingleArticulation
+        from pxr import UsdPhysics
 
         self._articulation = SingleArticulation(prim_path=self._articulation_path)
         if hasattr(self._articulation, "initialize"):
@@ -134,7 +136,7 @@ class IsaacArticulationIO:
         if stage is None:
             raise RuntimeError("Cannot initialize Isaac articulation I/O without an open USD stage")
 
-        body_path = self._resolve_body_path(stage)
+        body_path = _resolve_body_path(stage, self._articulation_path, UsdPhysics)
         self._body_path = body_path
         self._body = RigidPrim(prim_paths_expr=body_path)
         if hasattr(self._body, "initialize"):
@@ -201,25 +203,6 @@ class IsaacArticulationIO:
         )
         self._rotor_angle_deg = np.zeros(len(ops), dtype=np.float64)
 
-    def _resolve_body_path(self, stage) -> str:
-        from pxr import UsdPhysics
-
-        articulation_prim = stage.GetPrimAtPath(self._articulation_path)
-        if not articulation_prim.IsValid():
-            raise RuntimeError(f"Articulation prim does not exist: {self._articulation_path}")
-        if articulation_prim.HasAPI(UsdPhysics.RigidBodyAPI):
-            return self._articulation_path
-
-        body_path = f"{self._articulation_path.rstrip('/')}/body"
-        body_prim = stage.GetPrimAtPath(body_path)
-        if body_prim.IsValid() and body_prim.HasAPI(UsdPhysics.RigidBodyAPI):
-            return body_path
-
-        raise RuntimeError(
-            "Drone articulation must be a rigid body or contain a rigid body child at "
-            f"{body_path}"
-        )
-
     def _resolve_rotor_positions_body(self, stage, body_path: str) -> np.ndarray:
         from pxr import Usd, UsdGeom
 
@@ -278,8 +261,6 @@ class IsaacArticulationIO:
         """
         if self._articulation is None:
             self.initialize()
-        if self._articulation is None:
-            raise RuntimeError("Isaac articulation handle is not initialized")
         if self._body is None:
             raise RuntimeError("Isaac body handle is not initialized")
 
@@ -356,10 +337,6 @@ class IsaacArticulationIO:
             velocity = self._first_body_row(velocity)
         return np.asarray(velocity, dtype=np.float64)
 
-    def _body_world_pose(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return the current body pose as ``(position, quaternion_wxyz)``."""
-        return self._sample_body_world_pose()
-
     @staticmethod
     def _rotor_forces_to_world(
         *,
@@ -420,7 +397,7 @@ class IsaacArticulationIO:
                 f"apply_forces expected shape ({self.num_rotors},), got {forces.shape}"
             )
 
-        body_position_world, body_orientation_wxyz = self._body_world_pose()
+        body_position_world, body_orientation_wxyz = self._sample_body_world_pose()
         rotor_forces_world, rotor_positions_world = self._rotor_forces_to_world(
             body_position_world=body_position_world,
             body_orientation_wxyz=body_orientation_wxyz,
@@ -461,14 +438,6 @@ class IsaacArticulationIO:
             except Exception as exc:
                 _LOGGER.warning("Failed to apply rotor force to %s: %s", self._body_path, exc)
 
-    def apply_body_force(self, force_n: np.ndarray) -> None:
-        """Apply a body-frame force at the drone body origin."""
-        self._apply_body_effect(force_n=force_n, torque_n_m=None)
-
-    def apply_body_torque(self, torque_n_m: np.ndarray) -> None:
-        """Apply a body-frame torque at the drone body origin."""
-        self._apply_body_effect(force_n=None, torque_n_m=torque_n_m)
-
     def apply_dynamics(self, dynamics: _RotorDynamics) -> None:
         """Apply a full rotor-model result to the drone - the single sink to Isaac.
 
@@ -477,8 +446,8 @@ class IsaacArticulationIO:
         match the Pegasus thrust model.
         """
         self.apply_forces(dynamics.forces_n)
-        self.apply_body_torque(dynamics.body_torque_n_m)
-        self.apply_body_force(dynamics.body_drag_n)
+        self._apply_body_effect(force_n=None, torque_n_m=dynamics.body_torque_n_m)
+        self._apply_body_effect(force_n=dynamics.body_drag_n, torque_n_m=None)
 
     def update_rotor_spin(self, rotor_omega_rad_s: np.ndarray, dt: float) -> None:
         """Advance the cosmetic rotor spin from per-rotor angular velocity.

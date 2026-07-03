@@ -498,9 +498,9 @@ def test_initialize_runs_root_body_diagnostics_before_rotor_resolution(monkeypat
     monkeypatch.setitem(sys.modules, "isaacsim.core", isaacsim_core)
     monkeypatch.setitem(sys.modules, "isaacsim.core.prims", isaacsim_core_prims)
     monkeypatch.setattr(
-        IsaacArticulationIO,
+        isaac_articulation_module,
         "_resolve_body_path",
-        lambda self, _stage: "/Drone/body",
+        lambda _stage, _articulation_path, _usd_physics: "/Drone/body",
     )
 
     def validate(stage_arg, articulation_path, body_path, params, **kwargs):

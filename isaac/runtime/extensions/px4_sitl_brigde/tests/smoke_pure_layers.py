@@ -7,7 +7,7 @@ Run with the Isaac Kit Python interpreter or any Python with ``numpy`` and
 
 Exercises:
   - ``VehicleState.hover_at`` constructs without error
-  - ``frames.magnetometer_body_flu`` returns the expected FLU vector
+  - ``frames._magnetometer_body_flu`` returns the expected FLU vector
   - ``frames.synth_gps_from_enu`` shifts lat/lon by the right sign
   - the private linear thrust scaffold clips and scales as advertised
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(EXT_ROOT))
 
 from robotics_experiments.px4_bridge import frames  # noqa: E402
 from robotics_experiments.px4_bridge.contract import ActuatorCommands  # noqa: E402
+from robotics_experiments.px4_bridge.frames import _magnetometer_body_flu  # noqa: E402
 from robotics_experiments.px4_bridge.thrust_model import _LinearThrustModel  # noqa: E402
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState  # noqa: E402
 
@@ -46,7 +47,7 @@ def main() -> int:
     _check("hover state position", np.allclose(s.position_enu, [0, 0, 1]))
     _check("hover state quat wxyz", np.allclose(s.orientation_flu_enu_wxyz, [1, 0, 0, 0]))
 
-    mag = frames.magnetometer_body_flu(np.array([1.0, 0, 0, 0]))
+    mag = _magnetometer_body_flu(np.array([1.0, 0, 0, 0]))
     # Default NED ref [0.215, 0, 0.43] → ENU [0, 0.215, -0.43] → body FLU same (level).
     _check(
         "magnetometer FLU level",

@@ -9,6 +9,8 @@ from typing import Literal
 
 import numpy as np
 
+from .frames import _normalize_quat_wxyz, _quat_conjugate_wxyz, _quat_multiply_wxyz
+
 RootBodyMismatchPolicy = Literal["warn", "fail", "ignore"]
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,12 +82,17 @@ def validate_root_body_pose(
     body_path: str,
     params: RootBodyPoseDiagnosticParams,
     *,
-    logger: logging.Logger | None = None,
+    logger: logging.Logger = _LOGGER,
 ) -> RootBodyPoseDiagnostics | None:
     """Validate root/body pose according to ``params``.
 
-    Returns computed diagnostics unless the configured policy is ``"ignore"``.
+    Logs the computed diagnostics and enforces the mismatch policy: ``"warn"``
+    logs a warning, ``"fail"`` raises ``RuntimeError``. Returns the computed
+    diagnostics, or ``None`` when the policy is ``"ignore"`` (no diagnostic
+    work is done).
     """
+    if params.policy not in ("warn", "fail", "ignore"):
+        raise ValueError(f"Unsupported root/body mismatch policy: {params.policy!r}")
     if params.policy == "ignore":
         return None
 
@@ -96,11 +103,14 @@ def validate_root_body_pose(
         translation_threshold_m=params.translation_threshold_m,
         orientation_threshold_rad=params.orientation_threshold_rad,
     )
-    handle_root_body_pose_diagnostics(
-        diagnostics,
-        policy=params.policy,
-        logger=logger,
-    )
+    message = _format_root_body_pose_diagnostics(diagnostics)
+    logger.info("PX4 root/body pose diagnostic: %s", message)
+    if diagnostics.has_mismatch:
+        if params.policy == "warn":
+            logger.warning("PX4 root/body pose mismatch: %s", message)
+        else:
+            logger.error("PX4 root/body pose mismatch: %s", message)
+            raise RuntimeError(f"PX4 root/body pose mismatch: {message}")
     return diagnostics
 
 
@@ -158,32 +168,6 @@ def compute_root_body_pose_diagnostics(
     )
 
 
-def handle_root_body_pose_diagnostics(
-    diagnostics: RootBodyPoseDiagnostics,
-    *,
-    policy: RootBodyMismatchPolicy = "warn",
-    logger: logging.Logger | None = None,
-) -> None:
-    """Log and enforce root/body pose mismatch policy."""
-    if policy not in ("warn", "fail", "ignore"):
-        raise ValueError(f"Unsupported root/body mismatch policy: {policy!r}")
-    if policy == "ignore":
-        return
-
-    log = logger if logger is not None else _LOGGER
-    message = _format_root_body_pose_diagnostics(diagnostics)
-    log.info("PX4 root/body pose diagnostic: %s", message)
-
-    if not diagnostics.has_mismatch:
-        return
-    if policy == "warn":
-        log.warning("PX4 root/body pose mismatch: %s", message)
-        return
-
-    log.error("PX4 root/body pose mismatch: %s", message)
-    raise RuntimeError(f"PX4 root/body pose mismatch: {message}")
-
-
 def _format_root_body_pose_diagnostics(diagnostics: RootBodyPoseDiagnostics) -> str:
     relative_position, relative_orientation = diagnostics.body_relative_to_root_pose
     root_position, root_orientation = diagnostics.root_world_pose
@@ -215,33 +199,6 @@ def _matrix_quat_wxyz(matrix) -> np.ndarray:
         dtype=np.float64,
     )
     return _normalize_quat_wxyz(result)
-
-
-def _normalize_quat_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
-    q = np.asarray(q_wxyz, dtype=np.float64)
-    norm = np.linalg.norm(q)
-    if norm <= 0.0:
-        raise ValueError("Quaternion norm must be positive")
-    return q / norm
-
-
-def _quat_conjugate_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
-    q = np.asarray(q_wxyz, dtype=np.float64)
-    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=np.float64)
-
-
-def _quat_multiply_wxyz(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> np.ndarray:
-    aw, ax, ay, az = (float(v) for v in a_wxyz)
-    bw, bx, by, bz = (float(v) for v in b_wxyz)
-    return np.array(
-        [
-            aw * bw - ax * bx - ay * by - az * bz,
-            aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-        ],
-        dtype=np.float64,
-    )
 
 
 def _quat_angle_between_rad(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> float:

@@ -45,7 +45,7 @@ def test_bridge_log_path_renders_px4_style_timestamp_and_vehicle_token(tmp_path)
         assert resolved_second == (tmp_path / "2026-06-10" / "21_10_05_v1_bridge.log").resolve()
     finally:
         for handler in list(logger.handlers):
-            if getattr(handler, mavlink_module._FILE_LOG_HANDLER_ATTR, None) is not None:
+            if getattr(handler, mavlink_module._FILE_LOG_HANDLER_VEHICLE_ATTR, None) is not None:
                 logger.removeHandler(handler)
                 handler.close()
 
@@ -85,7 +85,7 @@ def test_per_vehicle_handlers_coexist_and_isolate_by_log_context(tmp_path):
         assert "untagged marker" in v1_text
     finally:
         for handler in list(logger.handlers):
-            if getattr(handler, mavlink_module._FILE_LOG_HANDLER_ATTR, None) is not None:
+            if getattr(handler, mavlink_module._FILE_LOG_HANDLER_VEHICLE_ATTR, None) is not None:
                 logger.removeHandler(handler)
                 handler.close()
 

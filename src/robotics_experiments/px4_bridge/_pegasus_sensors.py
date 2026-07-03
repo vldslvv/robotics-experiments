@@ -74,11 +74,12 @@ class _PegasusSensorSuite:
         self._last_sim_time_us = sim_time_us
 
         pegasus_state = self._to_pegasus_state(state)
-        imu = self._update_imu(pegasus_state, dt_s)
-        mag = self._update_mag(pegasus_state, dt_s)
-        baro = self._update_baro(pegasus_state, dt_s)
-        gps = self._update_gps(pegasus_state, dt_s) if self._gps_enabled else None
-        return {"imu": imu, "mag": mag, "baro": baro, "gps": gps}
+        return {
+            "imu": self._imu.update(pegasus_state, dt_s),
+            "mag": self._magnetometer.update(pegasus_state, dt_s),
+            "baro": self._barometer.update(pegasus_state, dt_s),
+            "gps": self._gps.update(pegasus_state, dt_s) if self._gps_enabled else None,
+        }
 
     def _to_pegasus_state(self, state: VehicleState):
         from pegasus.simulator.logic.state import State
@@ -93,18 +94,6 @@ class _PegasusSensorSuite:
             state.linear_velocity_enu,
         )
         return pegasus_state
-
-    def _update_imu(self, state, dt_s: float) -> dict | None:
-        return self._imu.update(state, dt_s)
-
-    def _update_mag(self, state, dt_s: float) -> dict | None:
-        return self._magnetometer.update(state, dt_s)
-
-    def _update_baro(self, state, dt_s: float) -> dict | None:
-        return self._barometer.update(state, dt_s)
-
-    def _update_gps(self, state, dt_s: float) -> dict | None:
-        return self._gps.update(state, dt_s)
 
 
 def _zero_noise(cfg: dict, keys: Iterable[str]) -> None:

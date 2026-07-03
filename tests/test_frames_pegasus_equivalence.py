@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.px4_bridge import frames
+from robotics_experiments.px4_bridge.frames import _magnetometer_body_flu, _synth_barometer
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _PX4_BRIDGE_EXTENSION_ROOT = (
@@ -198,7 +199,7 @@ def test_reference_magnetometer_matches_pegasus_with_same_wmm_field(pegasus_path
 
     pegasus_mag = magnetometer.update(_pegasus_state_from_vehicle(state), 1.0)
     reference_frd = _flu_to_frd(
-        frames.magnetometer_body_flu(
+        _magnetometer_body_flu(
             state.orientation_flu_enu_wxyz,
             _wmm_field_ned_gauss(
                 state.position_enu,
@@ -317,7 +318,7 @@ def test_reference_barometer_matches_pegasus_altitude_sign_and_pressure(pegasus_
     barometer.update(_pegasus_state_from_vehicle(baseline), 1.0)
     pegasus_baro = barometer.update(_pegasus_state_from_vehicle(raised), 1.0)
 
-    reference_baro = frames.synth_barometer(frames.DEFAULT_HOME_ALT_M + raised.position_enu[2])
+    reference_baro = _synth_barometer(frames.DEFAULT_HOME_ALT_M + raised.position_enu[2])
 
     assert pegasus_baro["pressure_altitude"] == pytest.approx(
         reference_baro["pressure_altitude"],

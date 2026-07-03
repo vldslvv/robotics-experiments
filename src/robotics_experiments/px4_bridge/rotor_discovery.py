@@ -35,12 +35,7 @@ def discover_px4_rotor_mapping(stage, articulation_path: str) -> DiscoveredRotor
 
     from pxr import Usd, UsdGeom, UsdPhysics
 
-    root_path = str(articulation_path).rstrip("/")
-    root_prim = stage.GetPrimAtPath(root_path)
-    if not root_prim.IsValid():
-        raise RuntimeError(f"Articulation prim does not exist: {root_path}")
-
-    body_path = _resolve_body_path(stage, root_path, UsdPhysics)
+    body_path = _resolve_body_path(stage, articulation_path, UsdPhysics)
     body_prim = stage.GetPrimAtPath(body_path)
     body_to_world = UsdGeom.Xformable(body_prim).ComputeLocalToWorldTransform(
         Usd.TimeCode.Default()
@@ -103,11 +98,21 @@ def discover_px4_rotor_mapping(stage, articulation_path: str) -> DiscoveredRotor
 
 
 def _resolve_body_path(stage, articulation_path: str, usd_physics) -> str:
-    articulation_prim = stage.GetPrimAtPath(articulation_path)
-    if articulation_prim.HasAPI(usd_physics.RigidBodyAPI):
-        return articulation_path
+    """Resolve the rigid-body prim path of a drone articulation.
 
-    body_path = f"{articulation_path}/body"
+    Shared by rotor discovery and :class:`IsaacArticulationIO`: the
+    articulation root itself when it is a rigid body, else its ``/body``
+    child. ``usd_physics`` is the caller-imported ``pxr.UsdPhysics`` module,
+    keeping this module importable without Isaac.
+    """
+    root_path = str(articulation_path).rstrip("/")
+    articulation_prim = stage.GetPrimAtPath(root_path)
+    if not articulation_prim.IsValid():
+        raise RuntimeError(f"Articulation prim does not exist: {root_path}")
+    if articulation_prim.HasAPI(usd_physics.RigidBodyAPI):
+        return root_path
+
+    body_path = f"{root_path}/body"
     body_prim = stage.GetPrimAtPath(body_path)
     if body_prim.IsValid() and body_prim.HasAPI(usd_physics.RigidBodyAPI):
         return body_path

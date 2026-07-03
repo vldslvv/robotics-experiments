@@ -17,10 +17,12 @@ open-coding sign flips or quaternion reorders. The vendored Pegasus
 ``rotations.py`` module remains internal to the Pegasus sensor/backend path.
 
 The runtime PX4 MAVLink path intentionally obtains sensor payloads from the
-vendored Pegasus sensors through ``_PegasusSensorSuite``. The synthesis helpers
-below remain exported as deterministic reference utilities for tests, smoke
-checks, and diagnostics; equivalence tests keep this canonical layer aligned
-with the Pegasus path and fail if the two drift beyond tolerance.
+vendored Pegasus sensors through ``_PegasusSensorSuite``. The private
+magnetometer/barometer synthesis helpers below are deterministic reference
+oracles for the equivalence tests, which keep this canonical layer aligned with
+the Pegasus path and fail if the two drift beyond tolerance;
+``synth_gps_from_enu`` additionally serves the commanding layer's world-ENU ->
+geodetic setpoint conversion.
 """
 
 from __future__ import annotations
@@ -53,14 +55,11 @@ __all__ = [
     "DEFAULT_HOME_LON_DEG",
     "DEFAULT_HOME_ALT_M",
     "quat_wxyz_to_xyzw",
-    "quat_xyzw_to_wxyz",
     "rotate_vector_wxyz",
     "world_enu_to_body_flu",
     "body_velocity_flu_from_state",
     "tilt_angle_deg",
-    "magnetometer_body_flu",
     "synth_gps_from_enu",
-    "synth_barometer",
 ]
 
 
@@ -98,12 +97,6 @@ def quat_wxyz_to_xyzw(q_wxyz: np.ndarray) -> np.ndarray:
     """Reorder a quaternion from ``[w, x, y, z]`` to ``[x, y, z, w]``."""
     q = np.asarray(q_wxyz, dtype=np.float64)
     return np.array([q[1], q[2], q[3], q[0]], dtype=np.float64)
-
-
-def quat_xyzw_to_wxyz(q_xyzw: np.ndarray) -> np.ndarray:
-    """Reorder a quaternion from ``[x, y, z, w]`` to ``[w, x, y, z]``."""
-    q = np.asarray(q_xyzw, dtype=np.float64)
-    return np.array([q[3], q[0], q[1], q[2]], dtype=np.float64)
 
 
 def rotate_vector_wxyz(q_wxyz: np.ndarray, vec: np.ndarray) -> np.ndarray:
@@ -155,7 +148,7 @@ def tilt_angle_deg(q_flu_enu_wxyz: np.ndarray) -> float:
     return math.degrees(math.acos(cos_angle))
 
 
-def magnetometer_body_flu(
+def _magnetometer_body_flu(
     q_flu_enu_wxyz: np.ndarray,
     mag_ned_gauss: np.ndarray = DEFAULT_MAG_NED_GAUSS,
 ) -> np.ndarray:
@@ -231,7 +224,7 @@ def synth_gps_from_enu(
 # ---- Barometer synthesis ----------------------------------------------------
 
 
-def synth_barometer(altitude_m: float, sea_level_pressure_hpa: float = 1013.25) -> dict:
+def _synth_barometer(altitude_m: float, sea_level_pressure_hpa: float = 1013.25) -> dict:
     """Synthesize a reference barometer payload (ISA approximation).
 
     Returns:

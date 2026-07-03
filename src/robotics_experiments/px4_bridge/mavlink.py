@@ -38,7 +38,6 @@ _HIL_SENSOR_MAG_UPDATED = 0b0000111000000
 _HIL_SENSOR_BARO_UPDATED = 0b1101000000000
 _HIL_SENSOR_DIFF_PRESS_UPDATED = 0b0010000000000
 _DEFAULT_DEBUG_LOG_PATH = "/tmp/robotics_experiments_px4_bridge.log"
-_FILE_LOG_HANDLER_ATTR = "_robotics_experiments_px4_bridge_file_path"
 _FILE_LOG_HANDLER_VEHICLE_ATTR = "_robotics_experiments_px4_bridge_vehicle_id"
 # Immutable shared default for the lockstep settings argument (a module-level
 # singleton keeps it out of the mutable-default lint while staying a plain
@@ -85,7 +84,6 @@ def _configure_file_logging(
             handler.close()
 
     handler = logging.FileHandler(resolved, mode="w", encoding="utf-8")
-    setattr(handler, _FILE_LOG_HANDLER_ATTR, str(resolved))
     setattr(handler, _FILE_LOG_HANDLER_VEHICLE_ATTR, int(vehicle_id))
     handler.addFilter(VehicleLogFilter(vehicle_id))
     handler.setLevel(level)
@@ -168,11 +166,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         # regression lets a stale-but-still-flowing backlog form (PX4 keeps
         # answering, but with persistently old timestamps). See _actuator_is_fresh.
         self._max_sustained_actuator_lag_us = int(lockstep.max_sustained_actuator_lag_s * 1_000_000)
-        self._heartbeat_period_s = (
-            1.0 / float(lockstep.heartbeat_rate_hz) if lockstep.heartbeat_rate_hz > 0 else None
-        )
+        self._heartbeat_period_s = 1.0 / float(lockstep.heartbeat_rate_hz)
         self._gps_enabled = bool(gps_enabled)
-        self._gps_period_s = 1.0 / float(gps_send_rate_hz) if gps_send_rate_hz > 0 else None
+        self._gps_period_s = 1.0 / float(gps_send_rate_hz)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
         self._home_lat_deg = float(home_lat_deg)
         self._home_lon_deg = float(home_lon_deg)
@@ -191,14 +187,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         # SimClock); it raises on a non-positive rate.
         self._physics_tick_us = physics_tick_us(physics_rate_hz)
         self._sensor_rate_hz = 1_000_000 / self._physics_tick_us
-        self._sensor_suite = _PegasusSensorSuite(
-            home_lat_deg=self._home_lat_deg,
-            home_lon_deg=self._home_lon_deg,
-            home_alt_m=self._home_alt_m,
-            gps_enabled=self._gps_enabled,
-            sensor_noise_enabled=self._sensor_noise_enabled,
-            update_rate_hz=self._sensor_rate_hz,
-        )
+        self._sensor_suite = self._make_sensor_suite()
         input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
         input_scaling = [1000.0] * self._num_rotors if input_scaling is None else input_scaling
         zero_position_armed = (
@@ -284,9 +273,8 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
 
     # ---- Lifecycle ---------------------------------------------------------
 
-    def start(self) -> None:
-        self._backend.start()
-        self._sensor_suite = _PegasusSensorSuite(
+    def _make_sensor_suite(self) -> _PegasusSensorSuite:
+        return _PegasusSensorSuite(
             home_lat_deg=self._home_lat_deg,
             home_lon_deg=self._home_lon_deg,
             home_alt_m=self._home_alt_m,
@@ -294,6 +282,11 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             sensor_noise_enabled=self._sensor_noise_enabled,
             update_rate_hz=self._sensor_rate_hz,
         )
+
+    def start(self) -> None:
+        self._backend.start()
+        # Fresh sensor state on every (re)start.
+        self._sensor_suite = self._make_sensor_suite()
         self._pending_poll_sim_time_us = 0
         self._last_gps_send_us = None
         self._last_sensor_send_us = None
@@ -423,7 +416,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         ``exchange()`` returns zeros this tick.
         """
         # Send heartbeat at configured rate (wallclock is fine - pacing only).
-        if self._should_send_heartbeat(now):
+        if (now - self._last_heartbeat_send_s) >= self._heartbeat_period_s:
             try:
                 self._backend.send_heartbeat()
             except Exception as exc:
@@ -490,7 +483,11 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
                     actuator_lag_us,
                     self.is_connected,
                 )
-            if self._should_send_gps(sim_time_us):
+            gps_due = (
+                self._last_gps_send_us is None
+                or (sim_time_us - self._last_gps_send_us) >= self._gps_period_s * 1_000_000
+            )
+            if self._gps_enabled and gps_due:
                 self._backend.send_gps_msgs(sim_time_us)
                 self._last_gps_send_us = sim_time_us
                 _LOGGER.debug(
@@ -543,11 +540,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             self._backend.update_gps_data(updates["gps"])
         return imu_refreshed
 
-    def _should_send_heartbeat(self, now_s: float) -> bool:
-        if self._heartbeat_period_s is None:
-            return False
-        return (now_s - self._last_heartbeat_send_s) >= self._heartbeat_period_s
-
     def _wait_for_first_heartbeat(self, now_s: float) -> bool:
         if self._first_heartbeat_wait_start_s is None:
             self._first_heartbeat_wait_start_s = now_s
@@ -570,13 +562,6 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
             )
             return False
         return True
-
-    def _should_send_gps(self, sim_time_us: int) -> bool:
-        if not self._gps_enabled or self._gps_period_s is None:
-            return False
-        if self._last_gps_send_us is None:
-            return True
-        return (sim_time_us - self._last_gps_send_us) >= self._gps_period_s * 1_000_000
 
     def _send_sensor_msgs(self, sim_time_us: int) -> None:
         """Send HIL_SENSOR through Pegasus' backend implementation."""
