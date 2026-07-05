@@ -9,14 +9,17 @@ from __future__ import annotations
 
 from _runtime import SceneTestContext, run_scene_test
 
+from robotics_experiments.config import get_config
+from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
+
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_discovered_paths"
 
 
 def _run_test(context: SceneTestContext) -> None:
-    from robotics_experiments.config import get_config
+    # The drone spawn helpers import isaacsim at module scope, so they need the
+    # running Kit app and stay deferred here.
     from robotics_experiments.drone import despawn_drone, spawn_drone
-    from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
 
     env = get_config()
     spawn_drone(context.stage, env.drone)

@@ -28,10 +28,23 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
+
+from robotics_experiments.commanding import FailureKind, MavlinkCommandPort
+from robotics_experiments.config import get_config
+from robotics_experiments.px4_bridge import IsaacArticulationIO, frames
+
+if TYPE_CHECKING:
+    from robotics_experiments.config.types import RoutineConfig
+    from robotics_experiments.runtime import (
+        FleetDriverEnv,
+        FleetOrchestrator,
+        SpawnedDrone,
+    )
+    from robotics_experiments.runtime._bridge_host import BridgeHost
 
 __all__ = [
     "ExpectedInstabilityDetected",
@@ -88,20 +101,20 @@ def _latest_log_hint(px4_container_log_name: str) -> str:
     return "\n".join(parts)
 
 
-def _bridge_received_first_heartbeat(host) -> bool:
+def _bridge_received_first_heartbeat(host: BridgeHost) -> bool:
     bridge = getattr(host, "_bridge", None)
     port = getattr(bridge, "_port", None)
     backend = getattr(port, "_backend", None)
     return bool(getattr(backend, "_received_first_hearbeat", False))
 
 
-def _bridge_disconnect_reason(host) -> str | None:
+def _bridge_disconnect_reason(host: BridgeHost) -> str | None:
     bridge = getattr(host, "_bridge", None)
     port = getattr(bridge, "_port", None)
     return getattr(port, "_last_disconnect_reason", None)
 
 
-def _bridge_debug_log_path(host) -> Path | None:
+def _bridge_debug_log_path(host: BridgeHost) -> Path | None:
     bridge = getattr(host, "_bridge", None)
     port = getattr(bridge, "_port", None)
     path = getattr(port, "_debug_log_path", None)
@@ -116,7 +129,7 @@ def _raise_failsafe(message: str) -> None:
     raise Px4FailsafeDetected(message)
 
 
-def _require_bridge_connected(host, *, label: str) -> None:
+def _require_bridge_connected(host: BridgeHost, label: str) -> None:
     bridge = getattr(host, "_bridge", None)
     if bridge is None:
         if getattr(host, "_start_attempted", False):
@@ -129,23 +142,22 @@ def _require_bridge_connected(host, *, label: str) -> None:
         raise AssertionError(f"[{label}] PX4 bridge disconnected during takeoff scenario: {reason}")
 
 
-def _sim_time_us(orchestrator) -> int:
+def _sim_time_us(orchestrator: FleetOrchestrator) -> int:
     # All bridges share the same PhysX steps, so any host's clock is the fleet
     # clock; use the first bridged host as the reference.
     return int(orchestrator.bridged[0].host.sim_time_us)
 
 
-def _advance_once(context: SceneTestContext, orchestrator) -> None:
+def _advance_once(context: SceneTestContext, orchestrator: FleetOrchestrator) -> None:
     """Advance PhysX one step (ticks every bridge) and assert all stay connected."""
     context.simulation_app.update()
     for handle in orchestrator.bridged:
-        _require_bridge_connected(handle.host, label=handle.label)
+        _require_bridge_connected(handle.host, handle.label)
 
 
 def _advance_sim_time(
     context: SceneTestContext,
-    orchestrator,
-    *,
+    orchestrator: FleetOrchestrator,
     seconds: float,
     wall_timeout_s: float | None = None,
 ) -> None:
@@ -166,9 +178,8 @@ def _advance_sim_time(
 
 def _wait_for_bridge_heartbeat(
     context: SceneTestContext,
-    orchestrator,
-    handle,
-    *,
+    orchestrator: FleetOrchestrator,
+    handle: SpawnedDrone,
     timeout_s: float,
 ) -> None:
     """Infra check: wait until the bridge received its first PX4 heartbeat."""
@@ -184,9 +195,7 @@ def _wait_for_bridge_heartbeat(
     )
 
 
-def _sample_state(observer, sim_time_us: int) -> _FlightSample:
-    from robotics_experiments.px4_bridge import frames
-
+def _sample_state(observer: IsaacArticulationIO, sim_time_us: int) -> _FlightSample:
     state = observer.read_state(sim_time_us=sim_time_us)
     return _FlightSample(
         sim_time_us=sim_time_us,
@@ -223,11 +232,10 @@ def _assert_bridge_log_clean(path: Path | None, label: str) -> None:
 
 def _build_make_env(
     context: SceneTestContext,
-    *,
     strict: bool,
-    post_takeoff_hook: "Callable[[SceneTestContext, Any], None] | None",
+    post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None,
     first_label: str,
-):
+) -> Callable[[SpawnedDrone, MavlinkCommandPort], FleetDriverEnv]:
     """Build the per-drone ``make_env`` closure with the strict/forgiving reaction.
 
     ``on_failure`` raises the scenario's typed exceptions in strict mode (so the
@@ -235,10 +243,11 @@ def _build_make_env(
     idles). ``on_step_advanced`` fires the optional post-takeoff hook on the first
     drone when its takeoff step completes (the negative test's fault injection).
     """
-    from robotics_experiments.commanding import FailureKind
+    # FleetDriverEnv lives in the Isaac-coupled runtime package; import it here so
+    # module import stays free of the Kit app.
     from robotics_experiments.runtime import FleetDriverEnv
 
-    def make_env(spawned, port):
+    def make_env(spawned: SpawnedDrone, port: MavlinkCommandPort) -> FleetDriverEnv:
         is_first = spawned.label == first_label
 
         def on_failure(kind: FailureKind, message: str) -> None:
@@ -268,7 +277,11 @@ def _build_make_env(
     return make_env
 
 
-def _drive_to_done(context: SceneTestContext, orchestrator, fleet_routine) -> None:
+def _drive_to_done(
+    context: SceneTestContext,
+    orchestrator: FleetOrchestrator,
+    fleet_routine: RoutineConfig,
+) -> None:
     """Tick physics and every per-drone driver until all routines are done.
 
     Each per-drone :class:`RoutineDriver` owns its phase machine, flight
@@ -294,10 +307,11 @@ def _drive_to_done(context: SceneTestContext, orchestrator, fleet_routine) -> No
             flying.driver.tick()
 
 
-def _run_scenario(context: SceneTestContext, options: "Px4TakeoffScenarioOptions") -> None:
+def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions) -> None:
+    # omni.timeline and FleetOrchestrator (Isaac-coupled runtime) require the
+    # running Kit app, so they are imported after SimulationApp has started.
     import omni.timeline
 
-    from robotics_experiments.config import get_config
     from robotics_experiments.runtime import FleetOrchestrator
 
     strict = context.strict
@@ -425,7 +439,7 @@ class Px4TakeoffScenarioOptions:
 
     test_name: str
     px4_container_log_name: str
-    post_takeoff_hook: Callable[[SceneTestContext, Any], None] | None = None
+    post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None = None
     success_label: str = "configured routine"
 
 

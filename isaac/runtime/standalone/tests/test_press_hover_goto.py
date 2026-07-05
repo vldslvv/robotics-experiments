@@ -19,8 +19,22 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import numpy as np
+import torch
+
+from robotics_experiments.config import get_config
+
+if TYPE_CHECKING:
+    from robotics_experiments.config.types import PressActionConfig
+    from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
+        DroneHoverEnv,
+        DroneHoverEnvCfg,
+    )
 
 # Analytic outer-loop gain + tolerances for the gate (validation-only, not a
 # config surface): a position P controller produces the velocity command the
@@ -48,11 +62,6 @@ def _report(message: str) -> None:
 
 
 def _seed_everything(seed: int) -> None:
-    import random
-
-    import numpy as np
-    import torch
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -60,9 +69,9 @@ def _seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _position_action(env, target_w, max_velocity: float):
-    import torch
-
+def _position_action(
+    env: DroneHoverEnv, target_w: torch.Tensor, max_velocity: float
+) -> torch.Tensor:
     position = env.drone.data.root_pos_w
     velocity_command = torch.clamp(
         _POSITION_KP * (target_w - position), -max_velocity, max_velocity
@@ -74,9 +83,7 @@ def _position_action(env, target_w, max_velocity: float):
     return action
 
 
-def _yaw_tilt_from_quat(quat_wxyz):
-    import torch
-
+def _yaw_tilt_from_quat(quat_wxyz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     quat = quat_wxyz / torch.linalg.norm(quat_wxyz, dim=-1, keepdim=True).clamp_min(1e-9)
     w, x, y, z = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
     yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
@@ -85,9 +92,10 @@ def _yaw_tilt_from_quat(quat_wxyz):
     return yaw, tilt
 
 
-def _diagnostic_sample(env, target_w, action, max_velocity: float) -> str:
-    import torch
-
+def _diagnostic_sample(
+    env: DroneHoverEnv, target_w: torch.Tensor, action: torch.Tensor, max_velocity: float
+) -> str:
+    # _flight pulls in Isaac Lab task code, so it is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab.tasks import _flight
 
     position_error = env.drone.data.root_pos_w - target_w
@@ -126,16 +134,13 @@ def _diagnostic_sample(env, target_w, action, max_velocity: float) -> str:
 
 
 def _drive_to(
-    env,
-    target_w,
+    env: DroneHoverEnv,
+    target_w: torch.Tensor,
     settle_s: float,
     max_velocity: float,
-    *,
     diag: bool,
     log_every: int,
 ) -> _DriveStats:
-    import torch
-
     steps = max(1, round(settle_s / env.step_dt))
     window_steps = max(1, round(_SETTLED_WINDOW_S / env.step_dt))
     max_errors: list[float] = []
@@ -158,20 +163,20 @@ def _drive_to(
     )
 
 
-def _max_position_error(env, target_w) -> float:
-    import torch
-
+def _max_position_error(env: DroneHoverEnv, target_w: torch.Tensor) -> float:
     return float(torch.linalg.norm(env.drone.data.root_pos_w - target_w, dim=-1).max().item())
 
 
-def _reset_env(env, seed: int) -> None:
+def _reset_env(env: DroneHoverEnv, seed: int) -> None:
     try:
         env.reset(seed=seed)
     except TypeError:
         env.reset()
 
 
-def _make_env(env_cfg_cls, *, seed: int, num_envs: int | None):
+def _make_env(
+    env_cfg_cls: type[DroneHoverEnvCfg], seed: int, num_envs: int | None
+) -> DroneHoverEnvCfg:
     cfg = env_cfg_cls()
     cfg.episode_length_s = _HOVER_SETTLE_S + _GOTO_SETTLE_S + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
@@ -181,9 +186,9 @@ def _make_env(env_cfg_cls, *, seed: int, num_envs: int | None):
     return cfg
 
 
-def _ctbr_hover_action(env, action_cfg):
-    import torch
-
+def _ctbr_hover_action(
+    env: DroneHoverEnv, action_cfg: PressActionConfig
+) -> tuple[torch.Tensor, float]:
     mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
     max_total_thrust = float(env.actuation_params.max_total_thrust)
     hover_fraction = mass * 9.81 / max_total_thrust
@@ -192,9 +197,13 @@ def _ctbr_hover_action(env, action_cfg):
     return action, hover_fraction
 
 
-def _run_ctbr_sanity(args: argparse.Namespace, action_cfg, env_cls, env_cfg_cls) -> None:
-    import torch
-
+def _run_ctbr_sanity(
+    args: argparse.Namespace,
+    action_cfg: PressActionConfig,
+    env_cls: type[DroneHoverEnv],
+    env_cfg_cls: type[DroneHoverEnvCfg],
+) -> None:
+    # _flight pulls in Isaac Lab task code, so it is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab.tasks import _flight
 
     _seed_everything(args.seed)
@@ -249,14 +258,11 @@ def _run_ctbr_sanity(args: argparse.Namespace, action_cfg, env_cls, env_cfg_cls)
 
 
 def _run(args: argparse.Namespace) -> None:
-    import torch
-
-    from robotics_experiments.config import get_config
-
     action_cfg = get_config().press.action
     if args.ctbr_sanity:
         action_cfg.kind = "ctbr"
 
+    # DroneHoverEnv is Isaac Lab task code, so it is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
         DroneHoverEnv,
         DroneHoverEnvCfg,

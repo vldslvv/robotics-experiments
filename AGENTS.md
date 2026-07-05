@@ -783,6 +783,22 @@ the host. They are meant to be used in the Dockerized environment.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.
+- In the standalone Isaac scripts (`isaac/runtime/standalone/tests/`,
+  `isaac/runtime/standalone/`), import ordering is load-bearing: `SimulationApp`
+  (or Isaac Lab's `AppLauncher`) must be constructed before any Kit-app-dependent
+  module is imported. Keep those imports function-scoped (deferred until after the
+  app starts) -- `omni.*`, `carb`, `pxr`, `robotics_experiments.drone` (imports
+  `isaacsim`), `robotics_experiments.runtime` (imports `omni.physx`/`carb`), and
+  `robotics_experiments.workflows.isaac_lab` / `isaaclab` -- with a one-line
+  comment on the first deferred import in each file noting why. Only
+  app-independent imports belong at module top: stdlib, `numpy`, `torch`, and the
+  pure `robotics_experiments` packages (`config`, `simulation`, `commanding`,
+  `px4_bridge` -- its `__init__` defers all `omni`/`carb` internally). These files
+  carry `from __future__ import annotations`, and ruff lints them but mypy does
+  not (its scope is `src tests`), so annotate parameters/returns precisely using
+  `TYPE_CHECKING` imports for the Kit-app-only types (never a runtime import just
+  for a hint). Do not convert the deferred imports to module top to "remove
+  redundancy" -- that breaks the scripts at import time before the app boots.
 
 ## Docker assumptions
 - Containers often run with `--network=host`.

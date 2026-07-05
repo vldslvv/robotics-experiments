@@ -20,6 +20,9 @@ from typing import Any, Iterator
 
 from isaacsim import SimulationApp
 
+from robotics_experiments.config import get_config
+from robotics_experiments.config.load import _reset_config as reset_config
+
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
 
 # Sentinel ``--scene`` value meaning "load the scene from the Hydra ``scene``
@@ -85,12 +88,12 @@ class SceneTestContext:
 class TimingReporter:
     """Emit elapsed wall-clock timings for standalone integration stages."""
 
-    def __init__(self, test_name: str, *, emit: Callable[[str], None] | None = None):
+    def __init__(self, test_name: str, emit: Callable[[str], None] | None = None) -> None:
         self._test_name = test_name
         self._emit = emit or report
         self._total_start_s = time.monotonic()
 
-    def report_stage(self, stage: str, start_s: float, *, status: str = "ok") -> None:
+    def report_stage(self, stage: str, start_s: float, status: str = "ok") -> None:
         now_s = time.monotonic()
         self._emit(
             "TIMING "
@@ -102,7 +105,7 @@ class TimingReporter:
         )
 
     @contextmanager
-    def timed_stage(self, stage: str, *, sim_clock: object | None = None) -> Iterator[None]:
+    def timed_stage(self, stage: str, sim_clock: object | None = None) -> Iterator[None]:
         """Report one timed stage, optionally including simulated elapsed time."""
         start_s = time.monotonic()
         start_us = int(getattr(sim_clock, "sim_time_us", 0)) if sim_clock is not None else None
@@ -193,9 +196,6 @@ def _resolve_scene_from_config(test_name: str) -> str:
     config composes without Isaac, so this is safe before ``SimulationApp``
     starts; the test body later resets and recomposes the cache.
     """
-    from robotics_experiments.config import get_config
-    from robotics_experiments.config.load import _reset_config as reset_config
-
     reset_config()
     scene = get_config().scene
     report(f"{test_name}: scene from scene config: {scene}")
@@ -203,7 +203,6 @@ def _resolve_scene_from_config(test_name: str) -> str:
 
 
 def run_scene_test(
-    *,
     test_name: str,
     test_body: Callable[[SceneTestContext], None],
     description: str,
@@ -268,8 +267,6 @@ def run_scene_test(
 
         stage_start_s = timing.start()
         report(f"{test_name}: resetting Hydra config cache")
-        from robotics_experiments.config.load import _reset_config as reset_config
-
         reset_config()
         timing.report_stage("hydra_reset", stage_start_s)
 

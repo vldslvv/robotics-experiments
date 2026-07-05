@@ -12,6 +12,8 @@ Isaac:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 from _px4_takeoff_scenario import (
     ExpectedInstabilityDetected,
@@ -21,6 +23,9 @@ from _px4_takeoff_scenario import (
 from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.px4_bridge.contract import ActuatorCommands
+
+if TYPE_CHECKING:
+    from robotics_experiments.runtime._bridge_host import BridgeHost
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_instability_detection"
@@ -34,12 +39,11 @@ FAULT_BODY_TORQUE_BIAS_N_M = np.array([4.0, 0.0, 0.0], dtype=np.float64)
 class _RotorFailureFault:
     def __init__(
         self,
-        base_model,
-        *,
+        base_model: Any,
         rotor_index: int,
         command_scale: float,
         body_torque_bias_n_m: np.ndarray,
-    ):
+    ) -> None:
         self._base_model = base_model
         self._rotor_index = int(rotor_index)
         self._command_scale = float(command_scale)
@@ -60,10 +64,12 @@ class _RotorFailureFault:
         faulted[self._rotor_index] *= self._command_scale
         return ActuatorCommands(faulted)
 
-    def commands_to_forces(self, commands):
+    def commands_to_forces(self, commands: ActuatorCommands) -> Any:
         return self._base_model.commands_to_forces(self._faulted_commands(commands))
 
-    def commands_to_dynamics(self, commands, *, linear_body_velocity_flu=None):
+    def commands_to_dynamics(
+        self, commands: ActuatorCommands, linear_body_velocity_flu: np.ndarray | None = None
+    ) -> Any:
         dynamics = self._base_model.commands_to_dynamics(
             self._faulted_commands(commands),
             linear_body_velocity_flu=linear_body_velocity_flu,
@@ -77,7 +83,7 @@ class _RotorFailureFault:
         )
 
 
-def _inject_one_rotor_fault(context: SceneTestContext, host) -> None:
+def _inject_one_rotor_fault(context: SceneTestContext, host: BridgeHost) -> None:
     bridge = getattr(host, "_bridge", None)
     if bridge is None:
         raise AssertionError("PX4 bridge was not constructed before fault injection")

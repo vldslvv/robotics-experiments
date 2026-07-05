@@ -1,7 +1,8 @@
 # F2 -- Observation Interface + pose-provider seam + handoff gate
 
 Goal served: goal 1 (a stable policy input for the easy task) and the substrate for
-goals 3/4. Depends on: nothing (parallel with F1). Blocks: F3.
+goals 3/4. Depends on: nothing (parallel with F1 and F2b; Step 1 adopts F2b's
+versioned-layout convention when both exist). Blocks: F3.
 No deferred decisions.
 
 Why this exists: the policy must observe a normalized, task-relative observation --
@@ -32,7 +33,16 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 - Add a pure `to_vector(obs, layout) -> np.ndarray` that flattens to a fixed-length
   float vector in a documented, versioned order (`OBSERVATION_SCHEMA_VERSION`
   constant). The env leaf packs this into a torch tensor; keep the ordering here so
-  it is testable without torch.
+  it is testable without torch. Adopt the versioned-layout mechanism F2b Step 2
+  establishes for the hover layout -- one implementation style, two layouts --
+  and carry the same PARITY INVARIANT: the identical packing function is fed
+  from Lab tensors in training and from `VehicleState`/`BridgeStatus`/provider
+  state at deploy. That parity is what makes a trained policy deployable at
+  all; a field the deploy side cannot assemble is forbidden in the layout. The
+  schema version is also what F2b's artifact metadata records and
+  `load_policy` validates. Angular velocity is body-frame on both sides (the
+  world-vs-body reconciliation landed in F2b Step 2; do not reintroduce a
+  world-frame rate here).
 - `__all__`: `PressObservation`, `to_vector`, `OBSERVATION_SCHEMA_VERSION`.
 - Rationale for `pose_confidence`/`pose_age_s`/`detection_valid` being mandatory:
   they turn perception uncertainty into explicit control state, which is what lets

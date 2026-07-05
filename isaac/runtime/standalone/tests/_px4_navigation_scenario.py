@@ -21,6 +21,8 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext
 
+from robotics_experiments.config import get_config
+
 __all__ = ["run_px4_navigation_scenario"]
 
 
@@ -45,8 +47,6 @@ def _has_goto_hover_transition(steps: list[Any]) -> bool:
 
 
 def _assert_navigation_routine_config(context: SceneTestContext, test_name: str) -> None:
-    from robotics_experiments.config import get_config
-
     env = get_config()
     flying = [vehicle for vehicle in env.vehicles if vehicle.routine.steps]
     if not flying:
@@ -73,7 +73,6 @@ def _assert_navigation_routine_config(context: SceneTestContext, test_name: str)
 
 def run_px4_navigation_scenario(
     context: SceneTestContext,
-    *,
     test_name: str,
     px4_container_log_name: str,
     success_label: str,

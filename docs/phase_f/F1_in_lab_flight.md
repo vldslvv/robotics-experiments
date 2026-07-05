@@ -1,13 +1,22 @@
 # F1 -- In-Lab flight actuation (make the DirectRLEnv fly)
 
+Status: COMPLETE. The hover env flies N parallel drones through the actuation
+seam and the Step-7 gate (`make test-integration-press-hover-goto`, on the
+Isaac Lab image) passes; the config-only gain retune is recorded in
+`F1b_velocity_controller_tuning.md`.
+
 Goal served: enabler for goal 1 (an easy task at all needs a flyable Lab env).
-Depends on: nothing. Blocks: F3.
+Depends on: nothing. Blocks: F2b, F3.
 Action-level decision: resolved in ADR 0013. `press.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
 frozen params dataclasses + pure functions (`build_actuation_params` /
 `action_to_rotor_omega` in `press/actuation.py`, mirrored in `_flight.py`); same
 math and gates.
+Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
+constants move into config (`press.hover_task`, task-as-config) and the
+observation's angular velocity switches to body frame in F2b Steps 1-2, so the
+hover task becomes the first YAML-defined task of the task->policy pipeline.
 
 Why this exists: `workflows/isaac_lab/tasks/drone_hover_env.py` is a no-op scaffold
 (`_apply_action` returns `None`, rewards are zero). PX4 SITL cannot run per-env at

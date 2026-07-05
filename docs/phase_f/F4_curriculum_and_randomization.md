@@ -79,8 +79,9 @@ are config (single source of truth), never hardcoded.
 
 ## Step 4 -- Retrain / continue training to the real geometry
 
-- Action: run the F3 training entrypoint with the curriculum + DR config; continue
-  from the F3 checkpoint. Log per-stage metrics + per-term rewards.
+- Action: run the shared F2b training entrypoint (`make train-press`, pointed at
+  the press task per F3 Step 7) with the curriculum + DR config; continue from
+  the F3 checkpoint. Log per-stage metrics + per-term rewards.
 - Metrics targets (ROADMAP1 mature/randomized columns): press success >= 85%
   randomized, first-contact stability >= 95%, retreat >= 99%, bounded compression
   overshoot.

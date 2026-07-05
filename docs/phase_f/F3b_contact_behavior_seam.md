@@ -14,14 +14,17 @@ is trained. The seam must be extracted from two concrete working consumers (the
 F3 policy and the scripted press), not speculated up front while the press env is
 still moving.
 
-Why this exists: F3 Step 8 stubs the deploy seam and gestures at a
-`{kind: press}` routine step. This plan promotes that stub to an explicit
-contact-behavior contract, symmetric with the command-routine contract
-(`docs/COMMAND_ROUTINE_CONTRACT.md`): a pure decision surface over an injected
-side-effect seam. It also delivers the scripted press as the first production
-behavior -- it closes the Phase D loop end-to-end, exercises the handoff gate,
-pusher, latch, and deploy path ahead of the policy, and becomes the metric floor
-the learned policy must beat.
+Why this exists: F2b already ships the generic deploy mechanism -- the
+`{kind: policy}` routine step, the widened `STREAM` setpoint payload, the
+validated artifact loader, all flowing through the unchanged `FleetOrchestrator`
+(the orchestrator is not touched here either). What F2b does NOT cover is
+contact: phases, the handoff gate, and a scripted baseline. This plan adds the
+explicit contact-behavior contract on top of that mechanism, symmetric with the
+command-routine contract (`docs/COMMAND_ROUTINE_CONTRACT.md`): a pure decision
+surface over an injected side-effect seam. It also delivers the scripted press
+as the first production behavior -- it closes the Phase D loop end-to-end,
+exercises the handoff gate, pusher, latch, and deploy path ahead of the policy,
+and becomes the metric floor the learned policy must beat.
 
 ---
 
@@ -49,11 +52,13 @@ the learned policy must beat.
 
 ## Step 2 -- Policy behavior (wrap the F3 policy)
 
-- Action: in `press/_behavior.py` (or `press/_policy.py` if the import weight
-  fits better there), implement `PolicyContactBehavior` wrapping F3's
-  `load_policy(path)`: `act` runs `to_vector(obs)` through the loaded policy and
-  returns the action; `phase` is derived from the observation (contact/latch
-  fields), not from the network.
+- Action: in `press/_behavior.py` (or `press/policy.py` if the import weight
+  fits better there), implement `PolicyContactBehavior` wrapping F2b's
+  validated `load_policy(path, action_cfg)` (the artifact's metadata --
+  obs schema version, action kind, dims, scales -- is checked at load, so a
+  stale press artifact is refused, never silently misread): `act` runs
+  `to_vector(obs)` through the loaded policy and returns the action; `phase` is
+  derived from the observation (contact/latch fields), not from the network.
 - Test: extend `tests/test_press_policy.py`: the behavior over the tiny exported
   test module produces a `ContactDecision` with the right shape.
 - Done when: the F3-trained policy runs behind the seam with no change to its
@@ -91,13 +96,15 @@ the learned policy must beat.
 - Action: behavior selection is config: `press.behavior: scripted | policy`
   (+ `press.policy_path` for `policy`). Add the field to `PressConfig`; unknown
   kind raises `ValueError` at resolution time.
-- Action: add the `{kind: press}` routine step in the commanding layer per F3
-  Step 8: the step enters only when F2's `handoff_ready` gate passes, ticks the
-  configured `ContactBehavior`, maps each `ContactDecision.action` through the
-  `press/deploy.py` OFFBOARD setpoint mapping, and completes on `DONE`
-  (-> ADVANCE) or `ABORT` (-> FAIL). Keep `decide` pure: the behavior tick and
-  deploy mapping run in the driver/commander side-effect position, mirroring how
-  `STREAM` setpoints work today.
+- Action: add the `{kind: press}` routine step in the commanding layer,
+  building on F2b's `{kind: policy}` step mechanism (the per-tick
+  observation -> action -> `press/deploy.py` mapping -> `STREAM` setpoint
+  chain): the press step differs by entering only when F2's `handoff_ready`
+  gate passes and by ticking the configured `ContactBehavior` in place of the
+  direct policy call, completing on `DONE` (-> ADVANCE) or `ABORT` (-> FAIL).
+  Keep `decide` pure, exactly as in F2b Step 6. The orchestrator remains
+  untouched: `FleetOrchestrator.build_drivers` already runs any routine step
+  through the per-drone `RoutineDriver`.
 - Test: extend `tests/test_commanding_routine.py` /
   `tests/test_commanding_driver.py` with the press step over fakes: gate blocks
   entry, `DONE` advances, `ABORT` fails with `FailureKind.COMMAND` semantics.

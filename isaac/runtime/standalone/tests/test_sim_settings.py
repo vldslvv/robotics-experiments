@@ -14,14 +14,21 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, Any
 
 from _runtime import SceneTestContext, run_scene_test
+
+from robotics_experiments.config import get_config
+from robotics_experiments.simulation import apply_settings
+
+if TYPE_CHECKING:
+    from pxr import Usd, UsdPhysics
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "sim_settings"
 
 
-def _find_physics_scenes(stage):
+def _find_physics_scenes(stage: Usd.Stage) -> list[UsdPhysics.Scene]:
     from pxr import UsdPhysics
 
     return [UsdPhysics.Scene(prim) for prim in stage.Traverse() if prim.IsA(UsdPhysics.Scene)]
@@ -32,17 +39,17 @@ def _assert_close(actual: float, expected: float, label: str) -> None:
         raise AssertionError(f"{label}: expected {expected}, got {actual}")
 
 
-def _assert_vec3_close(actual, expected: tuple[float, float, float], label: str) -> None:
+def _assert_vec3_close(actual: Any, expected: tuple[float, float, float], label: str) -> None:
     actual_tuple = tuple(float(value) for value in actual)
     for axis, (actual_value, expected_value) in enumerate(zip(actual_tuple, expected, strict=True)):
         _assert_close(actual_value, expected_value, f"{label}[{axis}]")
 
 
 def _assert_settings_applied(context: SceneTestContext, original_scene_paths: list[str]) -> None:
+    # carb / pxr.PhysxSchema follow Isaac's create-app-first import convention and
+    # stay deferred until after SimulationApp has started.
     import carb
     from pxr import PhysxSchema
-
-    from robotics_experiments.config import get_config
 
     expected = get_config().sim
     scenes = _find_physics_scenes(context.stage)
@@ -112,8 +119,6 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
 
 
 def _run_test(context: SceneTestContext) -> None:
-    from robotics_experiments.simulation import apply_settings
-
     original_scene_paths = [
         scene.GetPrim().GetPath().pathString for scene in _find_physics_scenes(context.stage)
     ]

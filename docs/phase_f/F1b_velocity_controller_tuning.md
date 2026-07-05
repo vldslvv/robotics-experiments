@@ -1,5 +1,9 @@
 # F1b -- In-Lab velocity-controller tuning
 
+Status: COMPLETE. The final gains below are live in
+`configs/experiment/press/default.yaml` and the gate passes reproducibly; the
+measured results are the record of this tuning.
+
 Goal served: the F1 Step-7 `test-integration-press-hover-goto` gate is a
 trustworthy precondition for F3 training. It drives the Isaac Lab
 `DroneHoverEnv` with a scripted outer position loop, verifies hover and a 2 m

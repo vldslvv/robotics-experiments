@@ -1,14 +1,19 @@
 # F3 -- Switch-press RL env on ground truth (easy/large switch) + first policy
 
 Goal served: goal 1 (easier task on ground-truth pose). Depends on: F1 (flyable
-env + actuation seam) and F2 (observation + provider + handoff). Blocks: F4.
+env + actuation seam), F2 (observation + provider + handoff), and F2b (the
+proven task->policy pipeline: training adapter, validated artifact,
+`{kind: policy}` deploy step). Blocks: F4.
 No deferred decisions (inherits F1's action-level decision).
 
-Why this exists: with a flyable env (F1) and a stable observation (F2), build the
-contact task itself -- spawn a switch per env, wire the pusher/contact/lamp, define
-the reward, and train the first policy that approaches, presses, confirms the
-toggle, and retreats. Deliberately easy: oversized/soft switch, ground-truth pose,
-no domain randomization (F4 adds those).
+Why this exists: with a flyable env (F1), a stable observation (F2), and a
+working train->export->deploy pipeline (F2b), build the contact task itself --
+spawn a switch per env, wire the pusher/contact/lamp, define the reward, and
+train the first policy that approaches, presses, confirms the toggle, and
+retreats. F3 adds a task, not plumbing: the training adapter, artifact format,
+loader, and entrypoint all exist from F2b and are reused unchanged. Deliberately
+easy: oversized/soft switch, ground-truth pose, no domain randomization (F4 adds
+those).
 
 ---
 
@@ -86,53 +91,38 @@ no domain randomization (F4 adds those).
 - Done when: reward/termination unit tests pass and a scripted successful press
   yields a positive shaped return with the one-shot toggle bonus.
 
-## Step 5 -- rsl_rl adapter (module-level, swappable) + config
+## Step 5 -- Training adapter + config (exists from F2b; press specifics only)
 
-- Action: create `src/robotics_experiments/press/training/__init__.py` and
-  `src/robotics_experiments/press/training/_rsl_rl.py` -- the ONLY module importing
-  `rsl_rl`. Expose the functional contract:
-  - `build_runner(env, runner_cfg) -> Runner`
-  - `train(runner, iterations) -> TrainResult`
-  - `export_policy(runner, out_path) -> None` (TorchScript or ONNX)
-  - a `PolicyRunner` `Protocol` typing the surface so `_skrl.py` / `_rl_games.py`
-    are drop-in later.
-- `press/training/__init__.py` stays lazy (rsl_rl is a training-only dep). Keep the
-  pure `press` modules free of any training import.
-- Config: add `PressTrainingConfig` (PPO hyperparameters: lr, num_steps_per_env,
-  max_iterations, gamma, lam, entropy_coef, actor/critic hidden dims, seed) to
-  `config/types.py` + YAML. No hyperparameter hardcoded in Python.
-- Dependency: add `rsl_rl` to an optional `training` extra in `pyproject.toml`
-  (installed in the Isaac/training environment only), not to the core deps. Update
-  `uv.lock` via `uv add --optional training rsl-rl` (do not hand-edit the lock).
-- Done when: `build_runner` + a 5-iteration smoke `train` runs in the Isaac
-  container without importing rsl_rl anywhere in `press/` pure modules.
+- The rsl_rl adapter (`press/training/_rsl_rl.py`), `PressTrainingConfig`, and
+  the `training` pyproject extra exist from F2b Step 3. F3 adds NO training or
+  loader code.
+- Action: author the press-task hyperparameter values in the `training:` block
+  (they may differ from the hover run; still no hyperparameter in Python).
+- Done when: a 5-iteration smoke `train` runs against
+  `Isaac-Switch-Press-Direct-v0` on the Isaac Lab image through the unchanged
+  adapter.
 
-## Step 6 -- Framework-agnostic inference contract (for deployment)
+## Step 6 -- Inference contract (exists from F2b)
 
-- Action: create `src/robotics_experiments/press/_policy.py` (pure-ish; imports
-  torch only inside functions, like `MavlinkCommandPort` imports pymavlink inside
-  methods). Provide `load_policy(path) -> Callable[[np.ndarray], np.ndarray]` that
-  loads the exported TorchScript/ONNX policy and runs a forward pass, importing
-  neither rsl_rl nor the training stack. This is the deploy-time seam: the runtime
-  press behavior depends only on this, never on the training library.
-- Test: `tests/test_press_policy.py`: a tiny exported identity/linear TorchScript
-  module loads and produces the right-shaped action from a sample observation
-  vector (guarded on torch availability).
-- Done when: an exported policy loads and infers with the training stack uninstalled.
+- The validated artifact format (TorchScript + metadata sidecar) and
+  `press/policy.py::load_policy` exist from F2b Step 4; the runtime press
+  behavior depends only on that seam, never on the training library. Nothing to
+  add here; the F2b metadata validation (obs schema version, action kind, dims,
+  scales) applies to press artifacts identically -- the press observation's
+  `OBSERVATION_SCHEMA_VERSION` (F2) is what lands in the sidecar.
 
-## Step 7 -- Train/eval entrypoint + make targets (thin)
+## Step 7 -- Point the F2b entrypoint at the press task + eval
 
-- Action: add a training entrypoint script under
-  `isaac/runtime/standalone/train_press.py` (or extend the standalone runner) that
-  composes config, builds `Isaac-Switch-Press-Direct-v0`, and calls the training
-  adapter; and an eval script that loads an exported policy and reports metrics.
-- Action: add thin make targets (`make train-press`, `make eval-press`) that run in
-  the Isaac container, following the existing standalone/integration target style
-  (keep recipes thin per the Makefile rule).
+- Action: select `Isaac-Switch-Press-Direct-v0` as the config-selected task id
+  for the F2b `train_press.py` entrypoint (`make train-press` reused unchanged,
+  running on `ISAAC_LAB_IMAGE`); add an eval script that loads an exported
+  artifact and reports metrics, with a thin `make eval-press` target on the
+  same image.
 - Metrics to log (per ROADMAP1 eval table): press success rate, first-contact
   stability, post-success retreat rate, median time-to-toggle, peak compression
   overshoot -- logged with per-term reward breakdown.
-- Done when: a documented run trains a policy and eval prints the metric table.
+- Done when: a documented run trains a press policy and eval prints the metric
+  table.
 
 ## Step 8 -- Deployment/runtime handoff note (scope boundary)
 
@@ -140,26 +130,27 @@ no domain randomization (F4 adds those).
   OFFBOARD: the exported policy (`load_policy`) consumes a `PressObservation`
   assembled from the live bridge state + provider and emits the F1 action, which
   maps to a PX4 OFFBOARD setpoint stream (velocity or attitude/rate per the F1
-  choice). A thin press behavior in the commanding layer (a new routine step
-  `{kind: press}`) is the integration point; the full contact-behavior contract
-  (scripted press + policy behind one seam, the `{kind: press}` step, and the
-  baseline eval) is F3b (`F3b_contact_behavior_seam.md`), which starts only
-  after this plan's exit gate. Full mission sequencing, retry, and abort are
-  Phase H (mission manager). Keep F3 focused on training; only stub the deploy
-  seam.
+  choice). The deploy mechanism (the routine-step plug-in over the widened
+  `STREAM` payload, through the unchanged `FleetOrchestrator`) exists from F2b
+  Step 6; the press-specific integration (handoff-gated `{kind: press}` step,
+  scripted press + policy behind one contact-behavior seam, the baseline eval)
+  is F3b (`F3b_contact_behavior_seam.md`), which starts only after this plan's
+  exit gate. Full mission sequencing, retry, and abort are Phase H (mission
+  manager). Keep F3 focused on training; the deploy seam needs no stubbing --
+  it is already proven on the hover task.
 - Done when: this boundary is documented; no mission-manager code is added in F3.
 
 ## Files touched by F3
 
 - add `.../tasks/switch_press_env.py`; edit `.../isaac_lab/registration.py`
-- add `press/_reward.py`, `press/_termination.py`, `press/_latch.py`,
-  `press/_policy.py`, `press/training/__init__.py`, `press/training/_rsl_rl.py`
-- edit `config/types.py` (`PressRewardConfig`, `PressResetConfig`,
-  `PressTrainingConfig`), `configs/experiment/press/default.yaml`
-- add `isaac/runtime/standalone/train_press.py` + eval; make targets
+- add `press/_reward.py`, `press/_termination.py`, `press/_latch.py`
+- edit `config/types.py` (`PressRewardConfig`, `PressResetConfig`),
+  `configs/experiment/press/default.yaml` (press values in the F2b `training:`
+  block)
+- add the eval script + `make eval-press` (the training entrypoint, adapter,
+  artifact loader, and `pyproject.toml` extra come from F2b)
 - add `tests/test_press_latch.py`, `tests/test_press_reward.py`,
-  `tests/test_press_termination.py`, `tests/test_press_policy.py`
-- `pyproject.toml` training extra + `uv.lock`
+  `tests/test_press_termination.py`
 
 ## Exit gate
 
