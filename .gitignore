@@ -220,3 +220,4 @@ ros/ros2_ws/
 .build/
 
 .claude
+loops/runs/
