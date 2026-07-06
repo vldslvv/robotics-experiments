@@ -77,11 +77,12 @@ unchanged apart from injecting the artifact-loader factory into
   (`world_switch_to_contact_frame`; switch local `+X` = outward plate
   normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
   and `VehicleState` at deploy; a field the deploy side cannot assemble is
-  forbidden in a layout. The pose source is the `AbstractPoseProvider` /
-  `PoseSample` seam (`rl/press/_provider.py`; ground truth in the Isaac leaf
-  `rl/press/_isaac_provider.py` behind the lazy `rl/press/__init__.__getattr__`),
-  and the nav->contact handoff is the pure `handoff_ready` gate
-  (`rl/press/_handoff.py`, thresholds in `rl.press.handoff`). See ADR 0014.
+  forbidden in a layout. The `rl.press` public facade exposes the
+  `AbstractPoseProvider` / `PoseSample` seam (implemented in
+  `rl/press/_provider.py`; ground truth is the lazy Isaac-only
+  `GroundTruthPoseProvider`), and the nav->contact handoff is the pure
+  `handoff_ready` gate (implemented in `rl/press/_handoff.py`, thresholds in
+  `rl.press.handoff`). See ADR 0014.
 - **Training** (`rl/training/`, lazy; `_rsl_rl.py` is the only rsl_rl
   importer): `build_runner`/`train`/`export_policy` over `RlTrainingConfig`
   (the `rl.training` block, incl. explicit `task_id` and `policy_name`).

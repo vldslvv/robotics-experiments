@@ -1,10 +1,8 @@
-"""High-level RL press layer: pure actuation/observation/reward building blocks.
+"""High-level RL press public API.
 
 This package is on the core import path and must import cleanly with Isaac and
-torch absent (stdlib + numpy only at module scope). The torch/isaaclab env code
-lives in ``robotics_experiments.workflows.isaac_lab.tasks``; the pure reference
-implementation (frozen params + pure functions) and pure deploy-mapping live
-here. ``__init__`` stays re-export-only.
+torch absent. ``__init__`` is the curated public facade; implementation modules
+remain private unless a production consumer needs a narrower module import.
 """
 
 from __future__ import annotations
@@ -16,15 +14,6 @@ from robotics_experiments.rl.press._handoff import (
     handoff_ready,
 )
 from robotics_experiments.rl.press._provider import AbstractPoseProvider, PoseSample
-from robotics_experiments.rl.press.actuation import (
-    ActuationParams,
-    ActuationState,
-    MixerGeometry,
-    action_to_rotor_omega,
-    build_actuation_params,
-    hover_action,
-    reduce_to_body_wrench,
-)
 from robotics_experiments.rl.press.deploy import press_action_to_offboard
 from robotics_experiments.rl.press.observation import (
     HOVER_OBSERVATION_DIM,
@@ -36,29 +25,32 @@ from robotics_experiments.rl.press.observation import (
     to_vector,
     world_switch_to_contact_frame,
 )
+from robotics_experiments.rl.press.policy import (
+    METADATA_FILENAME,
+    POLICY_FILENAME,
+    build_policy_step_fn,
+    policy_metadata,
+)
 
 __all__ = [
     "HOVER_OBSERVATION_DIM",
     "HOVER_OBSERVATION_SCHEMA_VERSION",
+    "METADATA_FILENAME",
     "OBSERVATION_SCHEMA_VERSION",
+    "POLICY_FILENAME",
     "AbstractPoseProvider",
-    "ActuationParams",
-    "ActuationState",
     "GroundTruthPoseProvider",
     "HandoffGate",
     "HandoffReason",
     "HandoffResult",
-    "MixerGeometry",
     "PoseSample",
     "PressObservation",
-    "action_to_rotor_omega",
-    "build_actuation_params",
+    "build_policy_step_fn",
     "handoff_ready",
-    "hover_action",
     "hover_observation_from_state",
     "pack_hover_observation",
+    "policy_metadata",
     "press_action_to_offboard",
-    "reduce_to_body_wrench",
     "to_vector",
     "world_switch_to_contact_frame",
 ]

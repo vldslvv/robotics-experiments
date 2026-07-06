@@ -14,12 +14,12 @@ import pytest
 
 from robotics_experiments.px4_bridge import PegasusQuadraticThrustModel
 from robotics_experiments.px4_bridge.contract import ActuatorCommands
-from robotics_experiments.rl.press import (
+from robotics_experiments.rl.press.actuation import (
     MixerGeometry,
+    _reduce_to_body_wrench,
     action_to_rotor_omega,
     build_actuation_params,
     hover_action,
-    reduce_to_body_wrench,
 )
 
 _MASS_KG = 1.5
@@ -86,7 +86,7 @@ def _params(kind: str):
 
 
 def _level_rest_state():
-    from robotics_experiments.rl.press import ActuationState
+    from robotics_experiments.rl.press.actuation import ActuationState
 
     return ActuationState(
         attitude_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
@@ -99,7 +99,7 @@ def _realized_wrench(params, action, state):
     geometry = _quad_geometry()
     omega = action_to_rotor_omega(params, action, state)
     dynamics = _thrust_model().commands_to_dynamics(ActuatorCommands(controls=omega))
-    return reduce_to_body_wrench(
+    return _reduce_to_body_wrench(
         geometry.positions_body,
         dynamics.forces_n,
         dynamics.body_torque_n_m,

@@ -11,7 +11,7 @@ term-for-term:
   this module batches the velocity/ctbr cascade over ``[num_envs]``; both
   builders precompute the allocation pseudoinverse;
 - the per-rotor -> body-wrench reduction in
-  ``rl.press.actuation.reduce_to_body_wrench`` -- ``_rotor_forces_to_body_wrench``
+  ``rl.press.actuation._reduce_to_body_wrench`` -- ``_rotor_forces_to_body_wrench``
   batches it.
 
 ``apply_body_wrench`` is the sole side-effecting sink, the vectorized analogue
@@ -123,7 +123,7 @@ def _rotor_forces_to_body_wrench(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Reduce per-rotor thrust + body effects to one body wrench per env.
 
-    Batched analogue of ``rl.press.actuation.reduce_to_body_wrench``. ``forces_n``
+    Batched analogue of ``rl.press.actuation._reduce_to_body_wrench``. ``forces_n``
     is ``[B, N]``; ``positions_body`` is ``[N, 3]``; ``body_torque`` /
     ``body_drag`` are ``[B, 3]``. Returns ``(force_body, torque_body)``, both
     ``[B, 3]`` in body-FLU.

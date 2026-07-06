@@ -285,7 +285,7 @@ class FleetOrchestrator:
         config. A repo-relative ``artifact`` path (the committed configs use
         ``.build/training/<policy-name>/latest``) resolves against the repo root.
         """
-        from robotics_experiments.rl.press.policy import build_policy_step_fn
+        from robotics_experiments.rl.press import build_policy_step_fn
 
         artifact = Path(str(descriptor["artifact"]))
         if not artifact.is_absolute():

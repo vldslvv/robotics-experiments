@@ -99,8 +99,7 @@ def _build_env(task_id: str, seed: int, num_envs: int | None):
 
 def _run(args: argparse.Namespace) -> None:
     import robotics_experiments.rl.training as training
-    from robotics_experiments.rl.press.observation import HOVER_OBSERVATION_SCHEMA_VERSION
-    from robotics_experiments.rl.press.policy import policy_metadata
+    from robotics_experiments.rl.press import HOVER_OBSERVATION_SCHEMA_VERSION, policy_metadata
 
     config = get_config()
     training_cfg = config.rl.training

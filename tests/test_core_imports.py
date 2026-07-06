@@ -41,7 +41,29 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         importlib.import_module("robotics_experiments.runtime")
         # The pure press layer (actuation + deploy mapping) must import with both
         # Isaac and torch absent: stdlib + numpy only at module scope.
-        importlib.import_module("robotics_experiments.rl.press")
+        press = importlib.import_module("robotics_experiments.rl.press")
+        assert press.__all__ == [
+            "HOVER_OBSERVATION_DIM",
+            "HOVER_OBSERVATION_SCHEMA_VERSION",
+            "METADATA_FILENAME",
+            "OBSERVATION_SCHEMA_VERSION",
+            "POLICY_FILENAME",
+            "AbstractPoseProvider",
+            "GroundTruthPoseProvider",
+            "HandoffGate",
+            "HandoffReason",
+            "HandoffResult",
+            "PoseSample",
+            "PressObservation",
+            "build_policy_step_fn",
+            "handoff_ready",
+            "hover_observation_from_state",
+            "pack_hover_observation",
+            "policy_metadata",
+            "press_action_to_offboard",
+            "to_vector",
+            "world_switch_to_contact_frame",
+        ]
         # Shared RL adapters are lazy: the package and adapter facade must not
         # import torch/rsl_rl/isaaclab on the core path.
         importlib.import_module("robotics_experiments.rl")

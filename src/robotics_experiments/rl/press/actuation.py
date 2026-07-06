@@ -38,7 +38,6 @@ __all__ = [
     "action_to_rotor_omega",
     "build_actuation_params",
     "hover_action",
-    "reduce_to_body_wrench",
 ]
 
 _EPS = 1e-9
@@ -256,7 +255,7 @@ def _ctbr_action_to_omega(
     return _rate_to_omega(params, collective, body_rate_setpoint, state)
 
 
-def reduce_to_body_wrench(
+def _reduce_to_body_wrench(
     positions_body: np.ndarray,
     forces_n: np.ndarray,
     body_torque: np.ndarray,

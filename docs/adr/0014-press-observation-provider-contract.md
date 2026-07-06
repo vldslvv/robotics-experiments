@@ -33,7 +33,8 @@ path):
    `world_switch_to_contact_frame` so every provider agrees on the frame, with
    the relative quaternion canonicalized to non-negative w.
 
-2. **Pose-provider seam** (`rl/press/_provider.py`). `AbstractPoseProvider.sample
+2. **Pose-provider seam** (`rl.press` facade; implementation in
+   `rl/press/_provider.py`). `AbstractPoseProvider.sample
    (sim_time_s) -> PoseSample` (pos, quat, confidence, age, valid) is the single
    swap point for the switch pose source. The provider owns only the switch
    pose estimate; drone state comes from the env/bridge. Swapping providers
@@ -41,7 +42,8 @@ path):
    Perception uncertainty is explicit policy input
    (`pose_confidence`/`pose_age_s`/`detection_valid`), never hidden failure.
 
-3. **Handoff gate** (`rl/press/_handoff.py`). `handoff_ready(obs, gate)` is a pure
+3. **Handoff gate** (`rl.press` facade; implementation in
+   `rl/press/_handoff.py`). `handoff_ready(obs, gate)` is a pure
    predicate over the observation with config-built thresholds
    (`rl.press.handoff`), returning the first violated check as a typed reason. It
    mirrors the command layer's pure-invariant style but is a separate predicate

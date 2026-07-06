@@ -107,7 +107,7 @@ def export_policy(runner: PolicyRunner, out_dir: Path, *, metadata: dict[str, An
 
     import torch
 
-    from robotics_experiments.rl.press.policy import METADATA_FILENAME, POLICY_FILENAME
+    from robotics_experiments.rl.press import METADATA_FILENAME, POLICY_FILENAME
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
