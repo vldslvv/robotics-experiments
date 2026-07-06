@@ -30,7 +30,7 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
+__all__ = ["MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
 

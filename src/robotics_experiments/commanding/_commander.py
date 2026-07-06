@@ -25,7 +25,7 @@ from robotics_experiments.commanding.routine import (
     decide,
 )
 
-__all__ = ["VehicleCommander"]
+__all__: list[str] = []
 
 
 class VehicleCommander:

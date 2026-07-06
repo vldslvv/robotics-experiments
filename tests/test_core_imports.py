@@ -155,6 +155,34 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         sys.modules.update(saved_modules)
 
 
+def test_commanding_public_api_is_minimal():
+    commanding = importlib.import_module("robotics_experiments.commanding")
+    commands = importlib.import_module("robotics_experiments.commanding.commands")
+    driver = importlib.import_module("robotics_experiments.commanding.driver")
+    observation = importlib.import_module("robotics_experiments.commanding.observation")
+    port = importlib.import_module("robotics_experiments.commanding.port")
+    routine = importlib.import_module("robotics_experiments.commanding.routine")
+    commander = importlib.import_module("robotics_experiments.commanding._commander")
+
+    assert commanding.__all__ == [
+        "AttitudeRateSetpoint",
+        "CommandAck",
+        "DriverEnvironment",
+        "DriverParams",
+        "FailureKind",
+        "MavlinkCommandPort",
+        "RoutineDriver",
+        "RoutineObservation",
+        "VelocitySetpoint",
+    ]
+    assert commands.__all__ == ["AttitudeRateSetpoint", "VelocitySetpoint"]
+    assert driver.__all__ == ["DriverEnvironment", "DriverParams", "RoutineDriver"]
+    assert observation.__all__ == ["CommandAck", "RoutineObservation"]
+    assert port.__all__ == ["MavlinkCommandPort"]
+    assert routine.__all__ == ["FailureKind"]
+    assert commander.__all__ == []
+
+
 def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     _drop_modules(
         "hydra",

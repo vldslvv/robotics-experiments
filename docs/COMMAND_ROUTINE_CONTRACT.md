@@ -12,12 +12,13 @@ runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
 `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
 deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
 `rl.press.deploy`). The pure stepper, command constructors, routine builder, and
-lower-level seams live in non-underscored modules (`commands`, `observation`,
-`routine`, `port`, `driver`), each declaring its own `__all__` and
-underscore-prefixing its private members; only the `_commander` module (the
-internal `VehicleCommander`, absent from the package `__init__`) stays
-underscored. Production code imports from the package; unit tests import the
-submodules directly as white-box regression guards.
+lower-level seams stay importable from their implementation modules
+(`commands`, `observation`, `routine`, `port`, `driver`) for internal wiring and
+white-box tests, but they are not exported from those modules' `__all__` unless
+they are part of the production boundary. Only the `_commander` module (the
+internal `VehicleCommander`, absent from the package `__init__` and from
+`__all__`) stays underscored. Production code imports from the package; unit
+tests may import submodules directly as white-box regression guards.
 
 ## The four-part contract
 

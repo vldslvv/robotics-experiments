@@ -42,6 +42,8 @@ set -Eeuo pipefail
 # Environment overrides:
 #   PROJECT_ROOT_NAME=robotics-experiments
 #   CODEX_SANDBOX=workspace-write
+#   CODEX_NETWORK_ACCESS=1
+#   CODEX_NETWORK_DOMAINS=json.schemastore.org
 #   CODEX_APPROVAL=never
 #   REQUIRE_CLEAN_START=1
 #   REQUIRE_CLEAN_BETWEEN_RUNS=1
@@ -52,6 +54,8 @@ PROMPT_TEMPLATE=""
 
 PROJECT_ROOT_NAME="${PROJECT_ROOT_NAME:-robotics-experiments}"
 CODEX_SANDBOX="${CODEX_SANDBOX:-workspace-write}"
+CODEX_NETWORK_ACCESS="${CODEX_NETWORK_ACCESS:-1}"
+CODEX_NETWORK_DOMAINS="${CODEX_NETWORK_DOMAINS:-json.schemastore.org}"
 CODEX_APPROVAL="${CODEX_APPROVAL:-never}"
 REQUIRE_CLEAN_START="${REQUIRE_CLEAN_START:-1}"
 REQUIRE_CLEAN_BETWEEN_RUNS="${REQUIRE_CLEAN_BETWEEN_RUNS:-1}"
@@ -149,6 +153,29 @@ slugify() {
         -e 's#^-##' \
         -e 's#-$##' \
     | cut -c 1-120
+}
+
+toml_quote_string() {
+  local value="$1"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+toml_array_from_words() {
+  local words="$1"
+  local result="["
+  local separator=""
+  local word
+
+  for word in $words; do
+    result+="$separator$(toml_quote_string "$word")"
+    separator=", "
+  done
+
+  result+="]"
+  printf '%s' "$result"
 }
 
 assert_project_root() {
@@ -390,6 +417,7 @@ run_codex_for_item() {
   local before_head
   local after_head
   local commit=""
+  local codex_config_args=()
 
   started_at="$(now_iso)"
   start_epoch="$(date +%s)"
@@ -399,6 +427,14 @@ run_codex_for_item() {
   log "Rendered prompt: $prompt_path"
   log "Item log: $item_log"
 
+  if [[ "$CODEX_NETWORK_ACCESS" == "1" ]]; then
+    codex_config_args+=(-c "sandbox_workspace_write.network_access=true")
+
+    if [[ -n "$CODEX_NETWORK_DOMAINS" ]]; then
+      codex_config_args+=(-c "network_proxy.domains=$(toml_array_from_words "$CODEX_NETWORK_DOMAINS")")
+    fi
+  fi
+
   if {
     echo "=== Codex run for item: $item ==="
     echo "Started at: $started_at"
@@ -406,6 +442,7 @@ run_codex_for_item() {
     echo
 
     codex --ask-for-approval "$CODEX_APPROVAL" exec \
+      "${codex_config_args[@]}" \
       --cd . \
       --sandbox "$CODEX_SANDBOX" \
       < "$prompt_path"

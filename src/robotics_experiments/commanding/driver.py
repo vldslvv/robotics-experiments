@@ -44,7 +44,7 @@ from robotics_experiments.px4_bridge.frames import (
     DEFAULT_HOME_LON_DEG,
 )
 
-__all__ = ["DriverEnvironment", "DriverParams", "DriverPhase", "RoutineDriver"]
+__all__ = ["DriverEnvironment", "DriverParams", "RoutineDriver"]
 
 
 class DriverPhase(Enum):
