@@ -14,7 +14,8 @@ Kit-app-dependent module. Keep those imports function-scoped and deferred until
 after the app starts.
 
 Deferred modules include `omni.*`, `carb`, `pxr`,
-`robotics_experiments.drone` (imports `isaacsim`),
+`robotics_experiments.drone` when accessing its spawn/despawn exports
+(loads the Isaac-only stage authoring implementation),
 `robotics_experiments.runtime` (imports `omni.physx`/`carb`), and
 `robotics_experiments.workflows.isaac_lab` / `isaaclab`. Put a one-line comment
 on the first deferred import in each file noting why it is deferred.

@@ -7,8 +7,8 @@ stays on the core import path; the numeric ``MAV_CMD_*`` ids are named int
 constants here rather than read from ``pymavlink.mavutil.mavlink`` so the pure
 command layer never drags the MAVLink runtime onto the import path.
 
-The side-effecting :class:`MavlinkCommandPort` (see ``port.py``) is the only
-layer that turns a :class:`MavlinkCommand` into an actual ``command_long_send``.
+The side-effecting :class:`MavlinkCommandPort` is the only layer that turns a
+:class:`MavlinkCommand` into an actual ``command_long_send``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,23 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-__all__ = ["AttitudeRateSetpoint", "VelocitySetpoint"]
+__all__ = [
+    "MAV_CMD_COMPONENT_ARM_DISARM",
+    "MAV_CMD_DO_REPOSITION",
+    "MAV_CMD_DO_SET_MODE",
+    "MAV_CMD_NAV_LAND",
+    "MAV_CMD_NAV_TAKEOFF",
+    "MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
+    "AttitudeRateSetpoint",
+    "MavlinkCommand",
+    "PositionSetpoint",
+    "VelocitySetpoint",
+    "arm",
+    "land",
+    "reposition",
+    "set_offboard_mode",
+    "takeoff",
+]
 
 # MAVLink command ids (MAV_CMD_*). Named here as plain ints so the pure command
 # layer does not import pymavlink. Values match the MAVLink common message set.
@@ -140,7 +156,7 @@ def set_offboard_mode() -> MavlinkCommand:
     param1 is the base-mode flag marking the custom mode active; param2 is PX4's
     custom main mode (OFFBOARD); param3 (custom sub mode) is unused. PX4 only
     accepts OFFBOARD once a setpoint stream is already flowing, so a ``goto`` step
-    primes setpoints before this is sent (see ``routine.decide``).
+    primes setpoints before this is sent (see ``decide``).
     """
     return MavlinkCommand(
         command_id=MAV_CMD_DO_SET_MODE,
@@ -188,7 +204,8 @@ class VelocitySetpoint:
     ``SET_POSITION_TARGET_LOCAL_NED`` in ``MAV_FRAME_BODY_NED`` with the velocity
     fields enabled and position/acceleration ignored. Components are in the PX4
     body-FRD convention (forward / right / down), so the pure action->setpoint
-    mapper (``rl.press.deploy``) converts the body-FLU RL action into these.
+    mapper (``robotics_experiments.rl.press_action_to_offboard``) converts the body-FLU RL
+    action into these.
 
     Attributes:
         forward_mps: Body-forward (FRD +X) velocity.

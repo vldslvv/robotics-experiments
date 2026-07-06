@@ -15,7 +15,7 @@ zero_position_armed: [100.0, 100.0, 100.0, 100.0]
 # Pegasus default quadratic thrust/torque curve and multirotor body dynamics.
 # Generic fleet fallback; each airframe's px4.bridge block overrides these. The
 # thrust coefficient (rotor_constant) is NOT authored -- it is computed in
-# config._load from max_thrust_per_rotor_g + max_rotor_velocity + standard gravity.
+# config.loading from max_thrust_per_rotor_g + max_rotor_velocity + standard gravity.
 # This fallback value reproduces the prior Pegasus iris curve
 # (8.54858e-6 * 1100^2 = 10.34 N = ~1054 gf) for any unmapped airframe.
 max_thrust_per_rotor_g: 1054.0
@@ -27,11 +27,11 @@ linear_drag: [0.50, 0.30, 0.0]
 connection_type: tcpin
 connection_ip: localhost
 # Base port; the per-vehicle simulator port is connection_baseport + vehicle.id
-# (derived in config._load._resolve_fleet). There is no per-vehicle vehicle_id
+# (derived in config.loading._resolve_fleet). There is no per-vehicle vehicle_id
 # knob: id is the PX4 numeric identity.
 connection_baseport: 4560
 # Base UDP port for the per-vehicle GCS MAVLink link; the resolved per-vehicle
-# port is gcs_baseport + vehicle.id (derived in config._load._resolve_fleet onto
+# port is gcs_baseport + vehicle.id (derived in config.loading._resolve_fleet onto
 # ResolvedVehicle.gcs_port), parallel to connection_baseport. Used by
 # control/test code (the standalone takeoff GCS endpoint); the bridge does not
 # use it.

@@ -9,7 +9,7 @@ parsed off the GCS link by the side-effecting port.
 
 This module imports neither pymavlink nor Isaac, so it stays on the core import
 path; the ``MAV_RESULT_*`` ids are named int constants here for the same reason
-the ``MAV_CMD_*`` ids are in ``commands.py``.
+the ``MAV_CMD_*`` ids are named in the command payload layer.
 """
 
 from __future__ import annotations
@@ -17,10 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from robotics_experiments.px4_bridge.contract import BridgeStatus
-from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+from robotics_experiments.px4_bridge import BridgeStatus, VehicleState
 
-__all__ = ["CommandAck", "RoutineObservation"]
+__all__ = [
+    "MAV_RESULT_ACCEPTED",
+    "MAV_RESULT_TEMPORARILY_REJECTED",
+    "CommandAck",
+    "RoutineObservation",
+]
 
 # MAVLink command-result ids (MAV_RESULT_*). Named here as plain ints so the
 # pure observation layer does not import pymavlink. Values match the MAVLink

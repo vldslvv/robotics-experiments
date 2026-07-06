@@ -9,7 +9,7 @@
 The intended dependency direction is
 `config -> domain (drone / environment / simulation / px4_bridge) -> Isaac
 extensions`, with simulator imports lazy. But `drone/spawn.py`,
-`environment/stage.py`, and `environment/step.py` imported `carb`/`pxr`/`isaacsim`
+`environment/_stage.py`, and `environment/_step.py` imported `carb`/`pxr`/`isaacsim`
 at module top level, coupling import time to a live simulator and breaking
 `import robotics_experiments` outside Isaac. Separately, `frames.py` and the
 vendored Pegasus `rotations.py` held parallel quaternion implementations with no
@@ -23,7 +23,7 @@ Make the core package import cleanly without Isaac, and enforce it:
   keep top-level `carb`/`pxr`/`isaacsim` imports, but must (a) carry a docstring
   declaring the exception and (b) stay off the core import path, shielded by a
   lazy package `__init__` (re-export-only or `__getattr__` deferral). The three
-  leaf modules above follow the `simulation/_isaac_settings.py` precedent.
+  leaf modules above follow the `simulation` package's private Isaac backend precedent.
 - `tests/test_core_imports.py` blocks `carb`/`pxr`/`isaacsim` via a
   `_BlockedDependencyFinder` and asserts the leaf modules are not eager-imported,
   so the boundary cannot silently regress.

@@ -45,13 +45,15 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   with `uv sync --extra dev` if missing. The target activates `.venv` and runs
   `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
   under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
-- Shared unit-test fakes/helpers live in `tests/_fakes.py` (pytest puts
-  `tests/` on `sys.path`, so test modules import them with
-  `from _fakes import ...`). Define each fake once there rather than inline per
-  test file. The PX4 bridge unit tests are split by concern across
-  `tests/test_px4_bridge_sensors.py`, `tests/test_px4_bridge_lockstep.py`,
-  `tests/test_px4_bridge_actuator.py`, and `tests/test_px4_bridge_gating.py`
-  (there is no single `test_px4_bridge.py`).
+- Unit tests mirror the structure of the logic they cover. Package tests live
+  under `tests/src/robotics_experiments/...`; tests for repo-root subsystems
+  such as Isaac runtime helpers, PX4 scripts, and Make launch wiring live under
+  matching `tests/isaac/...`, `tests/px4/...`, and `tests/make/...` paths.
+- Shared unit-test fakes/helpers live in `tests/support/`. Define each fake
+  once there rather than inline per test file, and import helpers by package
+  path such as `from tests.support.fakes import ...`. Use
+  `tests.support.paths.REPO_ROOT` for repository-root path lookups instead of
+  deriving parent depth from a test file location.
 - Tests assert on public behavior, not internals: prefer public properties,
   return values, raised errors, and recorded contract seams (constructor kwargs a
   collaborator received, commands sent to a port, forces/dynamics applied to an

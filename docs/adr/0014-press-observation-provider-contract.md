@@ -17,14 +17,15 @@ make every swap a retrain-plus-rewire.
 
 ## Decision
 
-Three load-bearing seams in `robotics_experiments.rl.press` (pure, core import
+Three load-bearing seams in `robotics_experiments.rl` (pure, core import
 path):
 
-1. **Versioned observation layouts** (`rl/press/observation.py`). Each layout is a
+1. **Versioned observation layouts** (`robotics_experiments.rl` facade,
+   implemented in `rl/press/observation.py`). Each layout is a
    documented field order packed by a pure function and stamped with a schema
    version (`HOVER_OBSERVATION_SCHEMA_VERSION`, `OBSERVATION_SCHEMA_VERSION`).
    The version is recorded in the exported policy artifact's metadata and
-   validated at `load_policy` time. PARITY INVARIANT: the same packing function
+   validated when the policy step is built. PARITY INVARIANT: the same packing function
    is fed from Lab tensors in training and from `VehicleState` (+ provider
    state) at deploy; a field the deploy side cannot assemble is forbidden.
    The press layout's task-relative pose lives in the **contact frame**
@@ -33,8 +34,8 @@ path):
    `world_switch_to_contact_frame` so every provider agrees on the frame, with
    the relative quaternion canonicalized to non-negative w.
 
-2. **Pose-provider seam** (`rl.press` facade; implementation in
-   `rl/press/_provider.py`). `AbstractPoseProvider.sample
+2. **Pose-provider seam** (`robotics_experiments.rl` facade; implementation in
+   `rl/press/provider.py`). `AbstractPoseProvider.sample
    (sim_time_s) -> PoseSample` (pos, quat, confidence, age, valid) is the single
    swap point for the switch pose source. The provider owns only the switch
    pose estimate; drone state comes from the env/bridge. Swapping providers
@@ -42,16 +43,16 @@ path):
    Perception uncertainty is explicit policy input
    (`pose_confidence`/`pose_age_s`/`detection_valid`), never hidden failure.
 
-3. **Handoff gate** (`rl.press` facade; implementation in
-   `rl/press/_handoff.py`). `handoff_ready(obs, gate)` is a pure
+3. **Handoff gate** (`robotics_experiments.rl` facade; implementation in
+   `rl/press/handoff.py`). `handoff_ready(obs, gate)` is a pure
    predicate over the observation with config-built thresholds
    (`rl.press.handoff`), returning the first violated check as a typed reason. It
    mirrors the command layer's pure-invariant style but is a separate predicate
    (it gates *entering* contact; the envelope gates a flight in progress).
 
-`GroundTruthPoseProvider` (`rl/press/_isaac_provider.py`) is an Isaac-only leaf
+`GroundTruthPoseProvider` (`rl/press/isaac_provider.py`) is an Isaac-only leaf
 shielded by the lazy `rl/press/__init__.__getattr__`, mirroring
-`environment/stage.py`; `tests/test_core_imports.py` guards the boundary.
+`environment/_stage.py`; `tests/test_core_imports.py` guards the boundary.
 
 ## Consequences
 

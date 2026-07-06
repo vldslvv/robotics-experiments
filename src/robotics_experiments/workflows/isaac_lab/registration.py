@@ -1,12 +1,12 @@
-"""Gymnasium registration helpers for Isaac Lab tasks."""
+"""Gymnasium registration contract for Isaac Lab tasks."""
 
 from __future__ import annotations
 
 from importlib.util import find_spec
 
-__all__ = ["register_isaac_lab_tasks"]
+__all__ = ["DRONE_HOVER_TASK_ID", "register_isaac_lab_tasks"]
 
-_DRONE_HOVER_TASK_ID = "Isaac-Drone-Hover-Direct-v0"
+DRONE_HOVER_TASK_ID = "Isaac-Drone-Hover-Direct-v0"
 
 
 def _dependency_available(module_name: str) -> bool:
@@ -33,11 +33,11 @@ def register_isaac_lab_tasks() -> bool:
 
     import gymnasium as gym
 
-    if _gym_has_task(gym, _DRONE_HOVER_TASK_ID):
+    if _gym_has_task(gym, DRONE_HOVER_TASK_ID):
         return True
 
     gym.register(
-        id=_DRONE_HOVER_TASK_ID,
+        id=DRONE_HOVER_TASK_ID,
         entry_point=(
             "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnv"
         ),

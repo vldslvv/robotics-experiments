@@ -10,7 +10,7 @@ the shared ``robotics_experiments.px4_bridge`` package logger (see
 ``mavlink._configure_file_logging``). Without a discriminator every handler
 would receive every vehicle's records, so a multi-drone scene merged all
 bridges into one file. :func:`vehicle_log_context` marks the dynamic scope of a
-single vehicle's bridge work, and :class:`VehicleLogFilter` (installed on each
+single vehicle's bridge work, and :class:`_VehicleLogFilter` (installed on each
 per-vehicle handler) keeps each file to its own vehicle.
 
 Records emitted outside any context (``vehicle id is None``) are passed by every
@@ -24,7 +24,7 @@ import logging
 from contextlib import contextmanager
 from typing import Iterator
 
-__all__ = ["VehicleLogFilter", "vehicle_log_context"]
+__all__ = ["vehicle_log_context"]
 
 _CURRENT_VEHICLE_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     "robotics_experiments_px4_bridge_vehicle_id", default=None
@@ -45,7 +45,7 @@ def vehicle_log_context(vehicle_id: int) -> Iterator[None]:
         _CURRENT_VEHICLE_ID.reset(token)
 
 
-class VehicleLogFilter(logging.Filter):
+class _VehicleLogFilter(logging.Filter):
     """Pass records tagged for this handler's vehicle (or untagged records)."""
 
     def __init__(self, vehicle_id: int):

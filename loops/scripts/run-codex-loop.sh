@@ -53,6 +53,7 @@ set -Eeuo pipefail
 #   CODEX_GIT_WRITE=1
 #     Add the repository Git metadata directory as writable so Codex can commit.
 #   CODEX_APPROVAL=never
+#   UV_CACHE_DIR=.uv-cache
 #   REQUIRE_CLEAN_START=1
 #   REQUIRE_CLEAN_BETWEEN_RUNS=1
 #   VALIDATE_ITEM_PATHS=1
@@ -67,9 +68,12 @@ CODEX_NETWORK_ACCESS="${CODEX_NETWORK_ACCESS:-1}"
 CODEX_NETWORK_DOMAINS="${CODEX_NETWORK_DOMAINS:-json.schemastore.org}"
 CODEX_GIT_WRITE="${CODEX_GIT_WRITE:-1}"
 CODEX_APPROVAL="${CODEX_APPROVAL:-never}"
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
 REQUIRE_CLEAN_START="${REQUIRE_CLEAN_START:-1}"
 REQUIRE_CLEAN_BETWEEN_RUNS="${REQUIRE_CLEAN_BETWEEN_RUNS:-1}"
 VALIDATE_ITEM_PATHS="${VALIDATE_ITEM_PATHS:-1}"
+
+export UV_CACHE_DIR
 
 RUNS_ROOT="loops/runs"
 RUN_ID=""
@@ -388,6 +392,7 @@ init_run_dir() {
   log "Items file: $ITEMS_FILE"
   log "Prompt template: $PROMPT_TEMPLATE"
   log "Codex mode: $CODEX_MODE"
+  log "UV cache dir: $UV_CACHE_DIR"
   log "Resume: $RESUME"
   log "Skip completed: $SKIP_COMPLETED"
 }
@@ -440,6 +445,8 @@ run_codex_for_item() {
   log "Starting item: $item"
   log "Rendered prompt: $prompt_path"
   log "Item log: $item_log"
+
+  codex_config_args+=(-c "shell_environment_policy.inherit=all")
 
   if [[ "$CODEX_NETWORK_ACCESS" == "1" ]]; then
     codex_config_args+=(-c "sandbox_workspace_write.network_access=true")

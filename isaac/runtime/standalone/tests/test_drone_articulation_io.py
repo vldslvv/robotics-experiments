@@ -25,8 +25,8 @@ from robotics_experiments.simulation import apply_settings
 if TYPE_CHECKING:
     from pxr import Usd
 
-    from robotics_experiments.config.types import EnvConfig
-    from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+    from robotics_experiments.config import EnvConfig
+    from robotics_experiments.px4_bridge import VehicleState
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "drone_articulation_io"

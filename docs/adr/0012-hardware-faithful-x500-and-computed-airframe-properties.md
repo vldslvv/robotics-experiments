@@ -35,7 +35,7 @@ to the BOM, and split every airframe value into authored **cited leaves** vs
   masses + geometry (box/cylinder principal inertia + parallel-axis to the CoM,
   excluding the separate pusher pad). These fields are removed from the YAML and
   the builder's `AirframeConfig`.
-- **Computed thrust coefficient**: `config.load._compute_rotor_constants` derives
+- **Computed thrust coefficient**: `config.loading._compute_rotor_constants` derives
   `rotor_constant` from `max_thrust_per_rotor_g` + `max_rotor_velocity` (standard
   gravity gram-force -> Newton), so `T = rotor_constant * omega^2` reaches the
   cited static max at `max_rotor_velocity`. `rotor_constant` is removed from every

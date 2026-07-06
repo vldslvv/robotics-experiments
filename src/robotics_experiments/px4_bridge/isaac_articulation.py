@@ -15,13 +15,13 @@ from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
-from robotics_experiments.px4_bridge import frames
-from robotics_experiments.px4_bridge._asset_diagnostics import (
+import robotics_experiments.px4_bridge.frames as frames
+from robotics_experiments.px4_bridge.asset_diagnostics import (
     RootBodyPoseDiagnosticParams,
     validate_root_body_pose,
 )
 from robotics_experiments.px4_bridge.rotor_discovery import _resolve_body_path
-from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["IsaacArticulationIO"]
@@ -437,7 +437,7 @@ class IsaacArticulationIO:
             except Exception as exc:
                 _LOGGER.warning("Failed to apply rotor force to %s: %s", self._body_path, exc)
 
-    def apply_dynamics(self, dynamics: _RotorDynamics) -> None:
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None:
         """Apply a full rotor-model result to the drone - the single sink to Isaac.
 
         Per-rotor thrust is applied at each marker; the body reaction torque and

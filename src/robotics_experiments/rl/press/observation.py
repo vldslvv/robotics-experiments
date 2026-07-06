@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.frames import (
+from robotics_experiments.px4_bridge import (
     normalize_quat_wxyz,
     quat_conjugate_wxyz,
     quat_multiply_wxyz,
@@ -27,7 +27,7 @@ from robotics_experiments.px4_bridge.frames import (
 )
 
 if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+    from robotics_experiments.px4_bridge import VehicleState
 
 __all__ = [
     "HOVER_OBSERVATION_DIM",

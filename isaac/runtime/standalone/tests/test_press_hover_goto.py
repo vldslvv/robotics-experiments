@@ -30,8 +30,8 @@ import torch
 from robotics_experiments.config import get_config
 
 if TYPE_CHECKING:
-    from robotics_experiments.config.types import PressActionConfig
-    from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
+    from robotics_experiments.config import PressActionConfig
+    from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
     )
@@ -101,15 +101,15 @@ def _yaw_tilt_from_quat(quat_wxyz: torch.Tensor) -> tuple[torch.Tensor, torch.Te
 def _diagnostic_sample(
     env: DroneHoverEnv, target_w: torch.Tensor, action: torch.Tensor, max_velocity: float
 ) -> str:
-    # _flight pulls in Isaac Lab task code, so it is imported after AppLauncher.
-    from robotics_experiments.workflows.isaac_lab.tasks import _flight
+    # Isaac Lab workflow code is imported after AppLauncher.
+    from robotics_experiments.workflows.isaac_lab import compute_lab_rotor_omega
 
     position_error = env.drone.data.root_pos_w - target_w
     error_norm = torch.linalg.norm(position_error, dim=-1)
     env_index = int(torch.argmax(error_norm).item())
     yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
 
-    omega = _flight.action_to_rotor_omega(
+    omega = compute_lab_rotor_omega(
         env.actuation_params,
         action,
         env.drone.data.root_quat_w,
@@ -209,8 +209,8 @@ def _run_ctbr_sanity(
     env_cls: type[DroneHoverEnv],
     env_cfg_cls: type[DroneHoverEnvCfg],
 ) -> None:
-    # _flight pulls in Isaac Lab task code, so it is imported after AppLauncher.
-    from robotics_experiments.workflows.isaac_lab.tasks import _flight
+    # Isaac Lab workflow code is imported after AppLauncher.
+    from robotics_experiments.workflows.isaac_lab import compute_lab_rotor_omega
 
     _seed_everything(args.seed)
     num_envs = args.num_envs if args.num_envs is not None else 1
@@ -240,7 +240,7 @@ def _run_ctbr_sanity(
 
         z_drift = torch.max(torch.abs(env.drone.data.root_pos_w[:, 2] - start_z))
         final_z_drift = float(z_drift.item())
-        omega = _flight.action_to_rotor_omega(
+        omega = compute_lab_rotor_omega(
             env.actuation_params,
             hover_action,
             env.drone.data.root_quat_w,
@@ -268,14 +268,14 @@ def _setup_press_side_channel(goto_target_env0: np.ndarray):
 
     The prim's world pose is what the provider reads; its authored orientation
     (pi about Z) makes the local +X outward plate normal face the approaching
-    drone, per the contact-frame convention in ``rl.press.observation``.
+    drone, per the RL contact-frame convention.
     """
     # Isaac-app imports (omni/pxr and the press Isaac leaf) stay deferred until
     # after AppLauncher, per the standalone import-ordering rule.
     import omni.usd
     from pxr import Gf, UsdGeom
 
-    from robotics_experiments.rl.press import GroundTruthPoseProvider
+    from robotics_experiments.rl import GroundTruthPoseProvider
 
     stage = omni.usd.get_context().get_stage()
     prim = stage.DefinePrim(_SWITCH_PRIM_PATH, "Xform")
@@ -294,8 +294,8 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     This is the F2 deploy-shape assembly running as a side channel: it never
     touches the env's training observation.
     """
-    from robotics_experiments.px4_bridge.frames import quat_wxyz_to_xyzw, world_enu_to_body_flu
-    from robotics_experiments.rl.press import (
+    from robotics_experiments.px4_bridge import quat_wxyz_to_xyzw, world_enu_to_body_flu
+    from robotics_experiments.rl import (
         PressObservation,
         to_vector,
         world_switch_to_contact_frame,
@@ -338,7 +338,7 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
 
 def _validate_press_side_channel(start_obs, end_obs) -> None:
     """F2 exit-gate checks over the start/end side-channel observations."""
-    from robotics_experiments.rl.press import HandoffGate, handoff_ready
+    from robotics_experiments.rl import HandoffGate, handoff_ready
 
     start_range = float(start_obs.relative_switch_pos_m[0])
     end_range = float(end_obs.relative_switch_pos_m[0])
@@ -369,7 +369,7 @@ def _run(args: argparse.Namespace) -> None:
         action_cfg.kind = "ctbr"
 
     # DroneHoverEnv is Isaac Lab task code, so it is imported after AppLauncher.
-    from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
+    from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
     )

@@ -7,18 +7,15 @@ an observation into a decision across a swappable MAVLink port. It is a domain
 leaf on the core import path: every module imports neither Isaac nor pymavlink at
 module scope, so `import robotics_experiments` succeeds with both absent.
 
-`robotics_experiments.commanding` intentionally re-exports only the production
-runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
-`RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
-deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
-`rl.press.deploy`). The pure stepper, command constructors, routine builder, and
-lower-level seams stay importable from their implementation modules
-(`commands`, `observation`, `routine`, `port`, `driver`) for internal wiring and
-white-box tests, but they are not exported from those modules' `__all__` unless
-they are part of the production boundary. Only the `_commander` module (the
-internal `VehicleCommander`, absent from the package `__init__` and from
-`__all__`) stays underscored. Production code imports from the package; unit
-tests may import submodules directly as white-box regression guards.
+`robotics_experiments.commanding` is the only public import surface for the
+package. Code outside `src/robotics_experiments/commanding` imports the command
+payloads, pure routine model, driver seam, and concrete PX4 GCS port from the
+package root. The public-concept implementation modules (`commands`,
+`observation`, `routine`, `port`, `driver`) use non-private names because they
+host symbols exported through the root; they are not separate supported import
+surfaces. Tests exercise the same root contract as production consumers. The
+private `_commander` module and its `_VehicleCommander` class remain absent from
+the package `__init__` because `RoutineDriver` is the public executor.
 
 ## The four-part contract
 
@@ -27,12 +24,12 @@ tests may import submodules directly as white-box regression guards.
 | `VehicleState` (pure input) | `RoutineObservation` (pure input) |
 | `commands_to_dynamics` (pure transform) | `decide(...)` (pure stepper) |
 | `RotorDynamics` (pure output) | `RoutineDecision` (pure output) |
-| `AbstractFlightStackBridge` (seam) | `AbstractCommandPort` (seam) |
-| `Px4Bridge` / `BridgeHost` (orchestrators) | `VehicleCommander` / `RoutineDriver` |
+| `Px4MavlinkPort` lockstep seam | `AbstractCommandPort` (seam) |
+| `Px4Bridge` / `BridgeHost` (orchestrators) | `RoutineDriver` |
 
-Like the bridge, the command layer is **per drone**: one `VehicleCommander` and
-one `RoutineDriver` drive one drone's routine. There is no fleet object - drones
-are independent (cross-drone synchronization is deliberately deferred).
+Like the bridge, the command layer is **per drone**: one `RoutineDriver` drives
+one drone's routine. There is no fleet object - drones are independent
+(cross-drone synchronization is deliberately deferred).
 
 - **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
   params, a label) plus pure constructors (`arm`, `takeoff`, `reposition`,
@@ -82,7 +79,7 @@ are independent (cross-drone synchronization is deliberately deferred).
   alive and retry OFFBOARD inside the same step timeout, and hard rejections fail
   the step as `FailureKind.COMMAND`. The streamed target is the absolute
   world-ENU waypoint converted to a
-  geodetic setpoint via `px4_bridge.frames.synth_gps_from_enu` against the `px4`
+  geodetic setpoint via package-root `synth_gps_from_enu` against the `px4`
   home anchor -- frame-consistent **by construction** with the GPS the bridge
   feeds PX4, so flying the setpoint lands the drone at the world-ENU waypoint
   (using the global frame avoids the EKF local-NED origin ambiguity). Verification
@@ -99,7 +96,7 @@ are independent (cross-drone synchronization is deliberately deferred).
   streamed payload is `policy_fn(observation.vehicle_state, target_enu)` -- a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
   The `PolicyStepFn` is composed at the runtime layer
-  (`rl.press.policy.build_policy_step_fn`: validated artifact load + hover
+  (`robotics_experiments.rl.build_policy_step_fn`: validated artifact load + hover
   observation packing + `press_action_to_offboard`) and injected as
   `DriverParams.policy_fn_factory`; `build_vehicle_routine` calls the factory
   per `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` descriptor
@@ -139,10 +136,10 @@ are independent (cross-drone synchronization is deliberately deferred).
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `rl.press.deploy.press_action_to_offboard`; the `{kind: policy}` routine step
+  `robotics_experiments.rl.press_action_to_offboard`; the `{kind: policy}` routine step
   streams them in production (F2b), and the handoff-gated contact behavior
   (`{kind: press}`) is F3b on the same mechanism.
-- **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
+- **`_commander.py`** -- `_VehicleCommander` (one routine + one port + the
   `RoutineState`: runs `decide` and performs the single side effect --
   `port.send` on `SEND`; on `STREAM` the payload type selects the port method:
   `PositionSetpoint` -> `send_setpoint`, `VelocitySetpoint` ->
@@ -168,7 +165,7 @@ are independent (cross-drone synchronization is deliberately deferred).
 observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
 pymavlink). The only side effects in the layer are the port's send methods
 (`send`, `send_setpoint`, `send_velocity_setpoint`, `send_attitude_target` --
-MAVLink out) and the port's connect/heartbeat/drain. `VehicleCommander.step`
+MAVLink out) and the port's connect/heartbeat/drain. `_VehicleCommander.step`
 runs the pure `decide`, then performs the one side effect (`SEND` -> `send`,
 `STREAM` -> the send method matching the payload type), keeping the decision
 and the I/O cleanly separated. A `policy` step's network forward pass runs
@@ -238,7 +235,7 @@ the takeoff target/timeout, and the hover settle). There is no separate
 `integration_test` group: the integration test is just this routine driven with
 `--strict`. The routine is **per vehicle**: each `vehicles[]` entry may carry a
 `routine` partial, merged over the global `routine` exactly like `drone`/`px4` in
-`config.load._resolve_fleet` (the resolved `RoutineConfig` lands on
+the config package's fleet resolution (the resolved `RoutineConfig` lands on
 `ResolvedVehicle.routine`). `routine.steps` is the per-drone on/off switch: a
 drone whose resolved `steps` is non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /

@@ -1,12 +1,13 @@
 """Pure RL-action -> PX4 OFFBOARD setpoint mapping (deploy-time seam).
 
-The deploy-time analogue of ``rl.press.actuation``: in Lab the action drives the
+The deploy-time analogue of the RL actuation contract: in Lab the action drives the
 in-sim actuation model; at deploy the *same* normalized action maps to a PX4
 OFFBOARD setpoint streamed over the GCS link. This module owns only the pure
 conversion (body-FLU RL action -> the PX4 body-FRD wire payloads exported by
 ``commanding``); the side-effecting stream is the command port's
 ``send_velocity_setpoint`` / ``send_attitude_target``. Keeping it here (not in
-the env leaf) keeps it torch/Isaac-free and unit-testable.
+the env leaf) keeps it torch/Isaac-free and unit-testable. The public entrypoint
+is exported through ``robotics_experiments.rl``.
 
 Frame note: the RL action is body-FLU (forward / left / up, yaw +CCW); PX4's
 setpoint frames are body-FRD (forward / right / down, yaw +CW), so ``y`` and

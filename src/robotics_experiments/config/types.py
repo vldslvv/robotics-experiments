@@ -169,10 +169,10 @@ class LightSwitchConfig:
 class LockstepConfig:
     """Tunables for the PX4 lockstep exchange (the ``px4.lockstep`` group).
 
-    Maps onto the library :class:`robotics_experiments.px4_bridge.LockstepSettings`
-    at construction time, with ``physics_rate_hz`` injected from ``sim.physics_hz``
-    (the single source of truth for the physics/sensor cadence, so it is not a
-    standalone knob here).
+    Maps onto the library
+    :class:`robotics_experiments.px4_bridge.LockstepSettings` at construction
+    time, with ``physics_rate_hz`` injected from ``sim.physics_hz`` (the single source
+    of truth for the physics/sensor cadence, so it is not a standalone knob here).
 
     Attributes:
         lockstep_timeout_s: Hard deadline on receiving an actuator message each
@@ -249,8 +249,8 @@ class Px4BridgeConfig:
             drone asset.
         rotor_constant: Pegasus quadratic thrust coefficient per rotor
             (``T_i = rotor_constant_i * omega_i^2``). NOT authored -- it is
-            computed in :func:`config.load._resolve_fleet` (and for the global
-            default in :func:`config.load.get_config`) from
+            computed during config package loading (and for the global default
+            in :func:`robotics_experiments.config.get_config`) from
             ``max_thrust_per_rotor_g``, ``max_rotor_velocity``, and standard
             gravity, so a datasheet thrust change is a single-line edit.
         linear_drag: Pegasus body-frame linear drag coefficients.
@@ -331,7 +331,7 @@ class Px4BridgeConfig:
     rotor_spin_visual_scale: float
 
     # Computed (not authored): derived from max_thrust_per_rotor_g +
-    # max_rotor_velocity + standard gravity in config.load. Kept last so the
+    # max_rotor_velocity + standard gravity in the config loader. Kept last so the
     # authored fields above stay required. See the class docstring.
     rotor_constant: List[float] = field(default_factory=list)
 
@@ -372,7 +372,7 @@ class VehicleConfig:
 class ResolvedVehicle:
     """One fully resolved vehicle: pure config plus derived runtime fields.
 
-    Produced by the single enrichment step ``config.load._resolve_fleet`` from a
+    Produced by the config package's single enrichment step from a
     :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
     the host-side PX4 launch) reads the derived fields here instead of
     recomputing ``connection_baseport + id`` ad hoc. ``id`` drives the PX4
@@ -453,7 +453,7 @@ class PressActionConfig:
     """RL action-level (``kind``) selection plus its controller tunables.
 
     The ``kind`` picks the in-Lab actuation model (see
-    :mod:`robotics_experiments.rl.press.actuation`): ``velocity`` (cascaded PD:
+    :mod:`robotics_experiments.rl`): ``velocity`` (cascaded PD:
     body-frame velocity + yaw rate) or ``ctbr`` (collective thrust + body-rate
     setpoint). The gains/limits below are a superset covering both; the selected
     ``kind`` reads the subset it needs, so switching is a one-line ``kind`` edit.
@@ -535,7 +535,7 @@ class PressHoverTaskConfig:
 
 @dataclass
 class PressHandoffConfig:
-    """Thresholds for the nav -> contact handoff gate (``rl.press._handoff``).
+    """Thresholds for the nav -> contact handoff gate (``rl.press.handoff_ready``).
 
     All checks are over the task-relative :class:`PressObservation` (contact
     frame); the gate decides whether the contact behavior may start.
@@ -809,8 +809,8 @@ class EnvConfig:
             Typing note: the annotation is intentionally ``List[Any]`` so Hydra's
             structured-config validation accepts the *partial* YAML entries
             during ``compose()``. The loader replaces the raw dicts with a
-            fully enriched, validated ``list[ResolvedVehicle]`` (see
-            ``config.load._resolve_fleet``), which is the public/runtime type.
+            fully enriched, validated ``list[ResolvedVehicle]``, which is the
+            public/runtime type.
         routine: High-level flight routine plus its verification gates (see
             :class:`RoutineConfig`). Always present; an empty ``routine.steps``
             means manual operation, a non-empty list makes every workflow

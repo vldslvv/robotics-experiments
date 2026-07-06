@@ -87,6 +87,10 @@ the current contents and the intended home for that kind of code.
 ## Python API organization
 - Public top-level functions, classes, and intentional constants in Python
   modules must be listed in module-level `__all__`.
+- `robotics_experiments.config` has a single public boundary at the package
+  root. Code outside `src/robotics_experiments/config` must import config
+  dataclasses and loader functions from `robotics_experiments.config`, not from
+  config submodules.
 - Keep public API minimal. Public exports are for production consumers outside
   the module or package boundary; tests alone do not justify public API. If a
   top-level symbol is only used by tests or internal implementation, make it
@@ -117,7 +121,7 @@ the current contents and the intended home for that kind of code.
   imports, but it must (a) carry a module docstring declaring the exception and
   (b) stay off the core import path, shielded by a lazy package `__init__`
   (re-export-only, or `__getattr__` deferral). `drone/spawn.py`,
-  `environment/stage.py`, `environment/step.py`, and
+  `environment/_stage.py`, `environment/_step.py`, and
   `simulation/_isaac_settings.py` follow this pattern;
   `tests/test_core_imports.py` is the regression guard.
 - Do not rename, remove, or broaden public exports as part of cleanup unless

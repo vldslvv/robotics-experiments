@@ -3,10 +3,12 @@
 numpy + stdlib only. State lives in frozen params dataclasses and behavior in
 pure top-level functions (``f(params, inputs) -> outputs``), so the actuation
 stage composes into a plain function pipeline. This is the single-env
-reference/spec implementation and the unit-test oracle; the batched torch twin
-the Isaac Lab env runs lives in
-``robotics_experiments.workflows.isaac_lab.tasks._flight`` and must match it
-term-for-term (both precompute the allocation pseudoinverse in their builder).
+reference/spec implementation and the unit-test oracle; it is exported through
+``robotics_experiments.rl``. The Isaac Lab package exposes the batched torch
+twin's external diagnostic entry point as
+``robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega``; it must
+match this module term-for-term (both precompute the allocation pseudoinverse in
+their builder).
 
 The rotor mix inverts the exact allocation the PX4 bridge's
 ``PegasusQuadraticThrustModel.commands_to_dynamics`` realizes: per-rotor thrust
@@ -29,7 +31,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.frames import GRAVITY_M_S2, rotate_vector_wxyz
+from robotics_experiments.px4_bridge import GRAVITY_M_S2, rotate_vector_wxyz
 
 __all__ = [
     "ActuationParams",
@@ -38,6 +40,7 @@ __all__ = [
     "action_to_rotor_omega",
     "build_actuation_params",
     "hover_action",
+    "rotor_forces_to_body_wrench",
 ]
 
 _EPS = 1e-9
@@ -49,9 +52,8 @@ class MixerGeometry:
 
     Mirrors the fields the bridge's ``PegasusQuadraticThrustModel`` consumes; the
     per-rotor arrays are ordered by PX4 motor index. ``positions_body`` are the
-    rotor marker offsets from the body origin (from
-    ``px4_bridge.rotor_discovery.DiscoveredRotorMapping``); ``rot_dir`` is
-    ``+1`` CCW / ``-1`` CW.
+    rotor marker offsets from the body origin (from the package-root
+    ``DiscoveredRotorMapping``); ``rot_dir`` is ``+1`` CCW / ``-1`` CW.
     """
 
     positions_body: np.ndarray
@@ -255,7 +257,7 @@ def _ctbr_action_to_omega(
     return _rate_to_omega(params, collective, body_rate_setpoint, state)
 
 
-def _reduce_to_body_wrench(
+def rotor_forces_to_body_wrench(
     positions_body: np.ndarray,
     forces_n: np.ndarray,
     body_torque: np.ndarray,

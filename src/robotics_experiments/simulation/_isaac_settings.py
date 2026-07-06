@@ -9,8 +9,7 @@ the package without loading simulator-only modules.
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
-from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config.types import SimSettings
+from robotics_experiments.config import SimSettings, get_config
 
 __all__: list[str] = []
 
@@ -103,7 +102,7 @@ def _apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None)
         settings: Simulation settings to apply; when ``None``, resolved via
             :func:`.config.get_config` at call time.
     """
-    settings = _resolve_section("sim", settings)
+    settings = settings if settings is not None else get_config().sim
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
     _apply_physx(scene, settings.physics_hz, settings.solver_type)

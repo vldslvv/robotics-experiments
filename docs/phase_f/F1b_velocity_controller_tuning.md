@@ -40,7 +40,7 @@ action:
 The fix is config-only. No integral term, explicit yaw hold, or controller
 structure change was needed, so the numpy reference in
 `rl/press/actuation.py` and the torch implementation in
-`workflows/isaac_lab/tasks/_flight.py` remain structurally unchanged.
+`workflows/isaac_lab/tasks/flight.py` remain structurally unchanged.
 
 ## Measured Results
 

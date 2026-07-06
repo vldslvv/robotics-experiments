@@ -1,4 +1,8 @@
-"""Drone spawning and randomization logic."""
+"""Public drone stage-authoring contract.
+
+The Isaac-specific implementation is imported lazily so host-side imports of
+``robotics_experiments.drone`` do not require Isaac Sim, USD, or carb.
+"""
 
 __all__ = ["spawn_drone", "despawn_drone"]
 

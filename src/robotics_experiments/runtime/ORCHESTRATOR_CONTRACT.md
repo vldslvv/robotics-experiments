@@ -2,9 +2,11 @@
 
 ## Purpose
 
-This document specifies the contract of `FleetOrchestrator`
-(`src/robotics_experiments/runtime/orchestrator.py`), the single host-agnostic
-pipeline that composes a runnable experiment from its parts. It is the top of the
+This document specifies the contract of
+`robotics_experiments.runtime.FleetOrchestrator`, the single host-agnostic
+pipeline that composes a runnable experiment from its parts. The public runtime
+contract is exported from `robotics_experiments.runtime`; submodules are internal
+implementation layout. It is the top of the
 runtime layering and the place where every high-level component is wired together:
 
 ```
@@ -45,7 +47,7 @@ layering this design removed.
 - **Production logic only.** Integration-test-only checks (ground-settle wait,
   bridge first-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan)
   live in the standalone shell and read the per-drone `SpawnedDrone` /
-  `FlyingDrone` states. They do not enter the orchestrator. Verification that is part of *flight* (a real
+  flying-driver states. They do not enter the orchestrator. Verification that is part of *flight* (a real
   climb, a sustained stable hover, the continuous envelope gates) belongs to the
   routine/driver, not here.
 - **Scene + settings are orchestrator-owned, uniformly.** `open_scene` /
@@ -58,8 +60,8 @@ layering this design removed.
 - **Per-drone state is staged and immutable.** Each phase produces frozen state
   objects and a later phase composes the earlier one's output instead of mutating
   it: `spawn_fleet` -> `SpawnedDrone` (vehicle, label, resolved articulation path,
-  optional host/observer), `build_drivers` -> `FlyingDrone` (composes its
-  `SpawnedDrone` with the port and driver). Config components arrive separated: a
+  optional host/observer), `build_drivers` -> a private flying-driver state
+  (composes its `SpawnedDrone` with the port and driver). Config components arrive separated: a
   `BridgeHost` is constructed from a frozen `BridgeHostParams` (the vehicle's
   `px4` config composed with the derived identity/endpoint/path), constructed
   directly by `spawn_fleet` -- never from the whole `ResolvedVehicle`.
@@ -79,7 +81,7 @@ layering this design removed.
   spawns the fleet only on timeline PLAY, so the persisted stage is not mutated
   with drones until the user presses Play.
 - **Isaac-coupled leaf, off the core import path.** `orchestrator.py` and
-  `_bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
+  `bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
   `__init__` is lazy so `import robotics_experiments.runtime` succeeds with Isaac
   absent. `tests/test_core_imports.py` is the regression guard.
 
@@ -111,19 +113,19 @@ The orchestrator does NOT:
 | Apply settings | `apply_settings()` | `simulation.apply_settings(stage, env.sim)`. |
 | Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle into a frozen `SpawnedDrone`; a `BridgeHost` (from a frozen `BridgeHostParams`) + state-only `IsaacArticulationIO` observer per `px4.enabled` vehicle; build the one `BridgeHostGroup`. |
 | Start bridges | `start_bridges()` | `group.start()` (its hosts + the single physics-step subscription). |
-| Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(spawned, port)`, composed into a frozen `FlyingDrone`. |
+| Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(spawned, port)`, composed into a frozen private flying-driver state. |
 | (tick) | -- | The shell ticks `orchestrator.flying[i].driver.tick()` from its own tick source until `orchestrator.all_done`. |
 | Teardown | `teardown()` | `group.stop()`, disconnect ports, shut down observers, despawn every vehicle. |
 
 Read-only views the shells use: `drones` (all `SpawnedDrone`s), `bridged`
-(spawned states with a host), `flying` (the `FlyingDrone`s), `all_done` (every
-flying driver done; vacuously true when none).
+(spawned states with a host), `flying` (the private flying-driver states),
+`all_done` (every flying driver done; vacuously true when none).
 
 The per-vehicle seams the shells read are the staged frozen states:
 `SpawnedDrone` (`vehicle, label, articulation_path, host?, observer?`; the `?`
-fields exist only for `px4.enabled` vehicles) and `FlyingDrone`
-(`spawned, port, driver`; built only for flying drones, so its `spawned` always
-carries a host and observer).
+fields exist only for `px4.enabled` vehicles). The private flying-driver state
+(`spawned, port, driver`) is built only for flying drones, so its `spawned`
+always carries a host and observer.
 
 ## The injected reaction seam: `make_env`
 
@@ -199,7 +201,7 @@ onto an extension.** Concretely:
 1. Decide where it sits in the phase order and what it owns for its full lifecycle
    (construction in a phase, teardown in `teardown`). If it is per-drone state, add
    a field to the frozen state of the phase that constructs it (`SpawnedDrone` /
-   `FlyingDrone`), or introduce a new frozen stage state that composes the previous
+   the private flying-driver state), or introduce a new frozen stage state that composes the previous
    one -- do not mutate an earlier stage's state; if it is fleet-wide, hold it on
    the orchestrator. If it needs config plus derived values, compose them into a
    frozen params object constructed at the phase that owns them (the

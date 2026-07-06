@@ -37,7 +37,7 @@ Verify that new repo clone works from scratch
 
 Add drone builder tests that verify that components are computed correctly -- mass, inertia etc
 
-Consider if _load.py should do anything about the config or only drone builder should
+Consider if loading.py should do anything about the config or only drone builder should
 
 Add drone sanity checks -- place small motors and make sure it doesn't lift off
 Check throttle value at hover for regular config

@@ -1,11 +1,11 @@
-"""Drone spawning and pose randomization on a USD stage.
+"""Isaac-only implementation for the package-level drone stage contract.
 
 This module is intentionally Isaac-only: it imports ``carb``, ``pxr``, and
 ``isaacsim`` at import time because every function operates on a live USD stage.
 The core import path never loads it directly; ``drone/__init__.py`` exposes the
 public API (``spawn_drone`` / ``despawn_drone``) lazily via ``__getattr__``, so
 ``import robotics_experiments`` works outside the Isaac runtime. See
-``robotics_experiments.simulation._isaac_settings`` for the same pattern and
+``robotics_experiments.simulation`` for the same pattern and
 ``tests/test_core_imports.py`` for the boundary guard.
 """
 
@@ -17,8 +17,7 @@ import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
-from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config.types import DroneConfig
+from robotics_experiments.config import DroneConfig, get_config
 
 __all__ = ["spawn_drone", "despawn_drone"]
 
@@ -207,7 +206,7 @@ def spawn_drone(
     Returns:
         The drone prim path (``<parent>/<config.prim_name>``).
     """
-    config = _resolve_section("drone", config)
+    config = config if config is not None else get_config().drone
     parent = _resolve_parent(stage)
 
     drone_path = f"{parent}/{config.prim_name}"
@@ -253,7 +252,7 @@ def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
     """
     if stage is None:
         return
-    config = _resolve_section("drone", config)
+    config = config if config is not None else get_config().drone
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     drone_path = f"{parent}/{config.prim_name}"

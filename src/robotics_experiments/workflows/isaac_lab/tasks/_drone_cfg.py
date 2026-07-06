@@ -18,7 +18,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.sim import RigidBodyPropertiesCfg, UsdFileCfg
 
-__all__ = ["make_drone_articulation_cfg"]
+__all__: list[str] = []
 
 # Pusher prismatic-joint drive. cfg values override the USD defaults at spawn, so
 # these are authoritative for RL training; EventTerm randomization (in the env's
@@ -28,7 +28,7 @@ _PUSHER_DAMPING = 40.0
 _PUSHER_EFFORT_LIMIT = 50.0  # N -- rough cap for the prismatic pusher motor
 
 
-def make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationCfg:
+def _make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationCfg:
     """Build the drone ``ArticulationCfg`` for the Lab env from config.
 
     Args:

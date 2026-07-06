@@ -9,7 +9,7 @@ the thrust model's ``commands_to_dynamics``: given the routine, the current
 :class:`RoutineState`, and an observation, it returns the next state and a
 :class:`RoutineDecision` (``SEND`` / ``WAIT`` / ``ADVANCE`` / ``DONE`` /
 ``FAIL``). No sockets, no pymavlink, no Isaac - it is unit-testable with plain
-dataclasses, and the side-effecting :class:`VehicleCommander` (see
+dataclasses, and the side-effecting :class:`_VehicleCommander` (see
 ``_commander.py``) is the only thing that turns a ``SEND`` decision into MAVLink.
 
 The same routine verifies a takeoff in every workflow: a step's completion
@@ -52,16 +52,39 @@ from robotics_experiments.commanding.observation import (
     MAV_RESULT_TEMPORARILY_REJECTED,
     RoutineObservation,
 )
-from robotics_experiments.px4_bridge.frames import (
+from robotics_experiments.px4_bridge import (
     rotate_vector_wxyz,
     synth_gps_from_enu,
     tilt_angle_deg,
 )
 
 if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+    from robotics_experiments.px4_bridge import VehicleState
 
-__all__ = ["FailureKind"]
+__all__ = [
+    "DecisionKind",
+    "EnvelopeGates",
+    "FailureKind",
+    "PolicyStepFn",
+    "RoutineDecision",
+    "RoutineState",
+    "RoutineStep",
+    "StreamSetpoint",
+    "VehicleRoutine",
+    "ack_accepted",
+    "armed",
+    "build_vehicle_routine",
+    "climbed_at_least",
+    "cross_track_drift_below",
+    "cross_track_to_segment_below",
+    "decide",
+    "disarmed",
+    "heading_aligned",
+    "hovering_stable",
+    "moved_forward_at_least",
+    "reached_world_position",
+    "tilt_below",
+]
 
 _EARTH_RADIUS_M = 6_378_137.0
 
@@ -87,7 +110,7 @@ StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
 # vehicle state and the step's world-ENU target to the OFFBOARD setpoint
 # payload to stream (composed at the runtime layer from the observation
 # packing, the loaded policy, and the deploy action mapping -- see
-# ``rl.press.policy.build_policy_step_fn``).
+# ``robotics_experiments.rl.build_policy_step_fn``).
 PolicyStepFn = Callable[["VehicleState", np.ndarray], StreamSetpoint]
 
 
@@ -1014,7 +1037,7 @@ def build_vehicle_routine(
             if policy_fn_factory is None:
                 raise ValueError(
                     f"routine step {index} (policy) requires an injected policy_fn_factory "
-                    "(the runtime composes it from rl.press.policy)"
+                    "(the runtime composes it from robotics_experiments.rl)"
                 )
             hold_s = float(descriptor["hold_s"])
             target = descriptor.get("target")

@@ -12,7 +12,7 @@ from collections.abc import Iterable
 
 import numpy as np
 
-from robotics_experiments.px4_bridge import frames
+import robotics_experiments.px4_bridge.frames as frames
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _DEFAULT_SENSOR_RATE_HZ = 250.0

@@ -1,7 +1,7 @@
 # Placeholder S550-class hexacopter (NOT a hardware-faithful spec). It shares the
 # config schema with holybro_x500_v2: body total_mass/center_of_mass/
 # diagonal_inertia are computed by the USD builder from the component masses +
-# geometry below, and px4.bridge.rotor_constant is computed by config._load from
+# geometry below, and px4.bridge.rotor_constant is computed by config.loading from
 # max_thrust_per_rotor_g + max_rotor_velocity + standard gravity.
 
 name: hexacopter_s550
@@ -149,7 +149,7 @@ px4:
     # Placeholder thrust: max_thrust_per_rotor_g back-computed from the prior
     # iris curve (8.54858e-6 * 1100^2 = 10.34 N = ~1054 gf) so this hex flies
     # identically under the computed-rotor_constant schema. rotor_constant is
-    # derived in config._load (not authored).
+    # derived in config.loading (not authored).
     max_thrust_per_rotor_g: 1054.0
     input_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     input_scaling: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]

@@ -15,7 +15,7 @@ hover_task:
   reset_xy_half_m: 0.5
   reset_z_half_m: 0.3
 
-# Nav -> contact handoff gate thresholds (rl.press._handoff.handoff_ready).
+# Nav -> contact handoff gate thresholds (rl.press.handoff_ready).
 # Initial-column values from the ROADMAP1 handoff table; the mature column
 # tightens them once the perception stack stabilizes.
 handoff:

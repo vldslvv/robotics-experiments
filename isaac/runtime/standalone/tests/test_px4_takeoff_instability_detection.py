@@ -22,10 +22,10 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.px4_bridge.contract import ActuatorCommands
+from robotics_experiments.px4_bridge import ActuatorCommands
 
 if TYPE_CHECKING:
-    from robotics_experiments.runtime._bridge_host import BridgeHost
+    from robotics_experiments.runtime import BridgeHost
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "px4_takeoff_instability_detection"

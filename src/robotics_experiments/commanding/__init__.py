@@ -1,24 +1,111 @@
-"""Public command / routine API for production runtime orchestration.
+"""Public command / routine API.
 
-The implementation lives in private modules. This package re-exports only the
-symbols production code outside ``commanding`` uses to build and tick per-drone
-routine drivers over the GCS MAVLink link.
+Code outside this package should import only from this root, which exposes the
+command payloads, pure routine model, driver seam, and concrete PX4 GCS port
+that make up the stable commanding contract.
 """
 
-from robotics_experiments.commanding.commands import AttitudeRateSetpoint, VelocitySetpoint
-from robotics_experiments.commanding.driver import DriverEnvironment, DriverParams, RoutineDriver
-from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
-from robotics_experiments.commanding.port import MavlinkCommandPort
-from robotics_experiments.commanding.routine import FailureKind
+from robotics_experiments.commanding.commands import (
+    MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_REPOSITION,
+    MAV_CMD_DO_SET_MODE,
+    MAV_CMD_NAV_LAND,
+    MAV_CMD_NAV_TAKEOFF,
+    MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
+    AttitudeRateSetpoint,
+    MavlinkCommand,
+    PositionSetpoint,
+    VelocitySetpoint,
+    arm,
+    land,
+    reposition,
+    set_offboard_mode,
+    takeoff,
+)
+from robotics_experiments.commanding.driver import (
+    DriverEnvironment,
+    DriverParams,
+    DriverPhase,
+    RoutineDriver,
+)
+from robotics_experiments.commanding.observation import (
+    MAV_RESULT_ACCEPTED,
+    MAV_RESULT_TEMPORARILY_REJECTED,
+    CommandAck,
+    RoutineObservation,
+)
+from robotics_experiments.commanding.port import AbstractCommandPort, MavlinkCommandPort
+from robotics_experiments.commanding.routine import (
+    DecisionKind,
+    EnvelopeGates,
+    FailureKind,
+    PolicyStepFn,
+    RoutineDecision,
+    RoutineState,
+    RoutineStep,
+    StreamSetpoint,
+    VehicleRoutine,
+    ack_accepted,
+    armed,
+    build_vehicle_routine,
+    climbed_at_least,
+    cross_track_drift_below,
+    cross_track_to_segment_below,
+    decide,
+    disarmed,
+    heading_aligned,
+    hovering_stable,
+    moved_forward_at_least,
+    reached_world_position,
+    tilt_below,
+)
 
 __all__ = [
+    "AbstractCommandPort",
     "AttitudeRateSetpoint",
     "CommandAck",
+    "DecisionKind",
     "DriverEnvironment",
     "DriverParams",
+    "DriverPhase",
+    "EnvelopeGates",
     "FailureKind",
+    "MAV_CMD_COMPONENT_ARM_DISARM",
+    "MAV_CMD_DO_REPOSITION",
+    "MAV_CMD_DO_SET_MODE",
+    "MAV_CMD_NAV_LAND",
+    "MAV_CMD_NAV_TAKEOFF",
+    "MAV_DO_REPOSITION_FLAGS_CHANGE_MODE",
+    "MAV_RESULT_ACCEPTED",
+    "MAV_RESULT_TEMPORARILY_REJECTED",
     "MavlinkCommandPort",
+    "MavlinkCommand",
+    "PolicyStepFn",
+    "PositionSetpoint",
+    "RoutineDecision",
     "RoutineDriver",
     "RoutineObservation",
+    "RoutineState",
+    "RoutineStep",
+    "StreamSetpoint",
     "VelocitySetpoint",
+    "VehicleRoutine",
+    "ack_accepted",
+    "arm",
+    "armed",
+    "build_vehicle_routine",
+    "climbed_at_least",
+    "cross_track_drift_below",
+    "cross_track_to_segment_below",
+    "decide",
+    "disarmed",
+    "heading_aligned",
+    "hovering_stable",
+    "land",
+    "moved_forward_at_least",
+    "reached_world_position",
+    "reposition",
+    "set_offboard_mode",
+    "takeoff",
+    "tilt_below",
 ]

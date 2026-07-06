@@ -17,16 +17,15 @@ so strict (integration) and forgiving (live/regular) runs share this pipeline.
 
 Per-drone state is staged and immutable: ``spawn_fleet`` produces one frozen
 :class:`SpawnedDrone` per vehicle, and ``build_drivers`` composes each flying
-drone's :class:`FlyingDrone` over its spawned state -- a phase never mutates the
+drone's private driver state over its spawned state -- a phase never mutates the
 previous phase's output.
 
 Production logic only: any extra integration-test checks (ground-settle wait,
 bridge-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan) live in
-the standalone shell and read the per-drone :class:`SpawnedDrone` /
-:class:`FlyingDrone` states.
+the standalone shell and read the per-drone :class:`SpawnedDrone` / driver states.
 
 Isaac-coupled domain leaf: imports ``carb``/``omni`` (here and via
-``_bridge_host``) at module scope, so it stays off the core import path behind the
+``bridge_host``) at module scope, so it stays off the core import path behind the
 lazy ``robotics_experiments.runtime`` package ``__init__``.
 """
 
@@ -47,11 +46,11 @@ from robotics_experiments.commanding import (
     RoutineDriver,
     RoutineObservation,
 )
-from robotics_experiments.config.types import EnvConfig, ResolvedVehicle
-from robotics_experiments.runtime._bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
+from robotics_experiments.config import EnvConfig, ResolvedVehicle
 from robotics_experiments.runtime._scene import resolve_scene_path
+from robotics_experiments.runtime.bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
 
-__all__ = ["FleetDriverEnv", "FleetOrchestrator", "FlyingDrone", "SpawnedDrone"]
+__all__ = ["FleetDriverEnv", "FleetOrchestrator", "SpawnedDrone"]
 
 _LOG_PREFIX = "[FleetRuntime]"
 
@@ -79,7 +78,7 @@ class SpawnedDrone:
 
 
 @dataclass(frozen=True)
-class FlyingDrone:
+class _FlyingDrone:
     """One flying drone's driver-phase state, composing its spawn-phase state.
 
     Produced by :meth:`FleetOrchestrator.build_drivers` only for flying drones
@@ -158,7 +157,7 @@ class FleetOrchestrator:
         self.stage: Any = None
         self._group: BridgeHostGroup = BridgeHostGroup([])
         self._spawned: list[SpawnedDrone] = []
-        self._flying: list[FlyingDrone] = []
+        self._flying: list[_FlyingDrone] = []
 
     @property
     def drones(self) -> list[SpawnedDrone]:
@@ -171,7 +170,7 @@ class FleetOrchestrator:
         return [s for s in self._spawned if s.host is not None]
 
     @property
-    def flying(self) -> list[FlyingDrone]:
+    def flying(self) -> list[_FlyingDrone]:
         """Flying-drone states (non-empty ``routine.steps``), with their drivers."""
         return self._flying
 
@@ -280,12 +279,12 @@ class FleetOrchestrator:
         """Load a ``{kind: policy}`` step's artifact into its pure step function.
 
         Injected into every driver's params: composes
-        ``rl.press.policy.build_policy_step_fn`` (validated artifact load +
+        ``robotics_experiments.rl.build_policy_step_fn`` (validated artifact load +
         observation packing + OFFBOARD mapping) over the global ``rl.action``
         config. A repo-relative ``artifact`` path (the committed configs use
         ``.build/training/<policy-name>/latest``) resolves against the repo root.
         """
-        from robotics_experiments.rl.press import build_policy_step_fn
+        from robotics_experiments.rl import build_policy_step_fn
 
         artifact = Path(str(descriptor["artifact"]))
         if not artifact.is_absolute():
@@ -295,7 +294,7 @@ class FleetOrchestrator:
     def build_drivers(
         self, make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment]
     ) -> None:
-        """Compose a frozen :class:`FlyingDrone` per flying drone.
+        """Compose a frozen driver state per flying drone.
 
         A drone flies when its resolved ``routine.steps`` is non-empty; it then
         gets a GCS ``MavlinkCommandPort`` and a driver wired through
@@ -331,7 +330,7 @@ class FleetOrchestrator:
                 make_env(spawned, port),
                 label=spawned.label,
             )
-            self._flying.append(FlyingDrone(spawned=spawned, port=port, driver=driver))
+            self._flying.append(_FlyingDrone(spawned=spawned, port=port, driver=driver))
 
     def teardown(self) -> None:
         """Stop the bridge group, drop ports/observers, and despawn every vehicle."""

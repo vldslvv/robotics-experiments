@@ -91,7 +91,7 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 
 ## Files touched by F5
 
-- add `src/robotics_experiments/rl/press/_synthetic_pose.py`; edit `.../_provider.py`
+- add `src/robotics_experiments/rl/press/_synthetic_pose.py`; edit `.../provider.py`
   (or a new `SyntheticPoseProvider`), `rl/press/__init__.py`
 - edit `config/types.py` (`PressPerceptionConfig`),
   `configs/experiment/rl/default.yaml`

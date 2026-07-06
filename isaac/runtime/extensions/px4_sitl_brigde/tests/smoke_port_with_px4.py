@@ -36,7 +36,7 @@ from Px4SitlBridge_python import (  # noqa: E402
     Px4MavlinkPort,
 )
 
-from robotics_experiments.px4_bridge.vehicle_state import VehicleState  # noqa: E402
+from robotics_experiments.px4_bridge import VehicleState  # noqa: E402
 
 
 def main() -> int:

@@ -160,9 +160,9 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 | Layer | Owns | Must not own |
 |-------|------|--------------|
 | `robotics_experiments.runtime.FleetOrchestrator` | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine drivers, teardown. Driven by a thin per-host shell (the live `experiment_runtime` Kit extension or the standalone runner) | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
-| `robotics_experiments.drone._spawn` | USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn | Physics callbacks, PX4 bridge construction |
-| `BridgeHostGroup` (`robotics_experiments.runtime._bridge_host`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
-| `BridgeHost` (`robotics_experiments.runtime._bridge_host`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
+| `robotics_experiments.drone` (`spawn_drone` / `despawn_drone`) | Public stage-authoring contract for USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn; backed by an Isaac-only private implementation | Physics callbacks, PX4 bridge construction |
+| `BridgeHostGroup` (`robotics_experiments.runtime.BridgeHostGroup`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
+| `BridgeHost` (`robotics_experiments.runtime.BridgeHost`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
 | `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
 | `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
 | `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
@@ -259,6 +259,13 @@ contains the raise so one bad tick does not crash the simulator loop.
 
 ### Public API shape
 
+`robotics_experiments.px4_bridge.__init__` is the only supported public import
+surface for this package. Runtime, command, RL, tests, and extension shims must
+import bridge concepts from the package root, for example
+`from robotics_experiments.px4_bridge import Px4Bridge, VehicleState`. Internal
+submodules remain implementation detail even when their names are stable inside
+the package.
+
 The contract is expressed as four explicit pieces: pure-data state objects, a
 settings object, a single-call lockstep port, and a single Isaac sink call.
 
@@ -293,8 +300,9 @@ class LockstepSettings:
     first_actuator_timeout_s; max_sustained_actuator_lag_s
     heartbeat_rate_hz; physics_rate_hz
 
-# The flight-stack port: the lockstep seam (Pegasus stays hidden behind it).
-class AbstractFlightStackBridge:
+# The flight-stack port behavior: the lockstep seam (Pegasus stays hidden behind it).
+# Implemented by Px4MavlinkPort; the local structural protocol is private.
+class _AbstractFlightStackBridge:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
@@ -309,8 +317,9 @@ class AbstractFlightStackBridge:
     @property
     def is_armed(self) -> bool: ...
 
-# The Isaac seam: read state in, apply a full rotor-model result out.
-class ArticulationIO(Protocol):
+# The Isaac seam behavior: read state in, apply a full rotor-model result out.
+# Implemented by IsaacArticulationIO; the local structural protocol is private.
+class _ArticulationIO(Protocol):
     def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
     def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac (physics sink)
     def update_rotor_spin(self, rotor_omega_rad_s, dt) -> None: ...  # cosmetic-only visual rotor spin; never touches forces/lockstep
@@ -324,8 +333,8 @@ class Px4Bridge:
         articulation_path: str,         # USD path to drone root
         rotor_link_paths: list[str],    # discovered rotor marker paths in PX4 motor-index order
         thrust_model: RotorThrustModel,
-        port: AbstractFlightStackBridge,
-        articulation_io: ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
+        port: _AbstractFlightStackBridge,
+        articulation_io: _ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
         max_tilt_angle_deg: float = 180.0,              # zeros forces past this tilt; 180 = disabled
         rotor_spin_visual_scale: float = 0.03,          # cosmetic-only spin scale; passed to the default IsaacArticulationIO
     ): ...
@@ -359,7 +368,7 @@ is *not* part of the four-part contract above and must never feed back into it.
 `commands_to_dynamics` stays pure -- it only adds the `rotor_omega_rad_s` field
 (built from the omega it already computes) -- and `apply_dynamics` stays the
 unchanged physics sink. The spin lives in its own cosmetic-only seam,
-`ArticulationIO.update_rotor_spin(rotor_omega_rad_s, dt)`, called from
+`IsaacArticulationIO.update_rotor_spin(rotor_omega_rad_s, dt)`, called from
 `recv_and_apply` alongside `apply_dynamics` (the relative order is immaterial:
 the seam never touches physics). Because `recv_and_apply` takes no `dt`, the
 tick's frozen pending state left by `send_sensors` carries it. The seam only integrates a
@@ -387,7 +396,7 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
 list). `id` is the sole authored identity; one pure enrichment step
-(`config.load._resolve_fleet`) derives each vehicle's `mavlink_port`
+derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
 into an immutable `ResolvedVehicle`. The fleet runtime (`FleetOrchestrator`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
@@ -535,7 +544,7 @@ implemented in `src/robotics_experiments/px4_bridge/mavlink.py`.
 of truth for both the Isaac physics rate and the PX4 sensor rate; the host plumbs
 it into the port as `LockstepSettings.physics_rate_hz` (there is no separate
 sensor-rate knob to drift). The integer-microsecond tick is derived in exactly
-one place -- `physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
+one place -- `_physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
 the port and by `SimClock`. The port pins the Pegasus sensor `update_period` to
 that integer-microsecond tick (rate `1e6 / tick_us`), not `1/physics_rate_hz`, so
 the `update_at_rate` gate fires on every physics step at any rate;

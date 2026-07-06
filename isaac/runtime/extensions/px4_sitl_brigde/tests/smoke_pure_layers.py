@@ -7,9 +7,9 @@ Run with the Isaac Kit Python interpreter or any Python with ``numpy`` and
 
 Exercises:
   - ``VehicleState.hover_at`` constructs without error
-  - ``frames._magnetometer_body_flu`` returns the expected FLU vector
-  - ``frames.synth_gps_from_enu`` shifts lat/lon by the right sign
-  - the private linear thrust scaffold clips and scales as advertised
+  - ``synth_magnetometer_body_flu`` returns the expected FLU vector
+  - ``synth_gps_from_enu`` shifts lat/lon by the right sign
+  - the Pegasus thrust model clips and scales as advertised
 
 Prints PASS/FAIL per assertion. Exit status is 0 only when every check passes.
 """
@@ -25,11 +25,16 @@ import numpy as np
 EXT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXT_ROOT))
 
-from robotics_experiments.px4_bridge import frames  # noqa: E402
-from robotics_experiments.px4_bridge.contract import ActuatorCommands  # noqa: E402
-from robotics_experiments.px4_bridge.frames import _magnetometer_body_flu  # noqa: E402
-from robotics_experiments.px4_bridge.thrust_model import _LinearThrustModel  # noqa: E402
-from robotics_experiments.px4_bridge.vehicle_state import VehicleState  # noqa: E402
+from robotics_experiments.px4_bridge import (  # noqa: E402
+    DEFAULT_HOME_ALT_M,
+    DEFAULT_HOME_LAT_DEG,
+    DEFAULT_HOME_LON_DEG,
+    ActuatorCommands,
+    PegasusQuadraticThrustModel,
+    VehicleState,
+    synth_gps_from_enu,
+    synth_magnetometer_body_flu,
+)
 
 _failed = 0
 
@@ -47,7 +52,7 @@ def main() -> int:
     _check("hover state position", np.allclose(s.position_enu, [0, 0, 1]))
     _check("hover state quat wxyz", np.allclose(s.orientation_flu_enu_wxyz, [1, 0, 0, 0]))
 
-    mag = _magnetometer_body_flu(np.array([1.0, 0, 0, 0]))
+    mag = synth_magnetometer_body_flu(np.array([1.0, 0, 0, 0]))
     # Default NED ref [0.215, 0, 0.43] → ENU [0, 0.215, -0.43] → body FLU same (level).
     _check(
         "magnetometer FLU level",
@@ -55,25 +60,27 @@ def main() -> int:
         f"got {mag}",
     )
 
-    gps = frames.synth_gps_from_enu(np.array([10.0, 20.0, 1.0]), np.zeros(3))
+    gps = synth_gps_from_enu(np.array([10.0, 20.0, 1.0]), np.zeros(3))
     _check(
         "gps lat shift sign (north→larger lat)",
-        gps["latitude"] > frames.DEFAULT_HOME_LAT_DEG,
+        gps["latitude"] > DEFAULT_HOME_LAT_DEG,
     )
     _check(
         "gps lon shift sign (east→larger lon)",
-        gps["longitude"] > frames.DEFAULT_HOME_LON_DEG,
+        gps["longitude"] > DEFAULT_HOME_LON_DEG,
     )
     _check(
         "gps alt shift",
-        abs(gps["altitude"] - (frames.DEFAULT_HOME_ALT_M + 1.0)) < 1e-6,
+        abs(gps["altitude"] - (DEFAULT_HOME_ALT_M + 1.0)) < 1e-6,
     )
 
-    model = _LinearThrustModel(num_rotors=4, max_force_n=8.0)
-    forces = model.commands_to_forces(ActuatorCommands(np.array([0.0, 0.5, 1.0, 1.5])))
+    model = PegasusQuadraticThrustModel(num_rotors=4)
+    commands = np.array([0.0, 500.0, 1100.0, 1500.0])
+    forces = model.commands_to_forces(ActuatorCommands(commands))
+    expected_forces = 8.54858e-6 * np.square(np.clip(commands, 0.0, 1100.0))
     _check(
-        "linear thrust model clips above 1.0",
-        np.allclose(forces, [0.0, 4.0, 8.0, 8.0]),
+        "Pegasus thrust model clips above max rotor velocity",
+        np.allclose(forces, expected_forces),
         f"got {forces}",
     )
 

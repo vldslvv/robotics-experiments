@@ -11,7 +11,8 @@ Action-level decision: resolved in ADR 0013. `rl.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
 frozen params dataclasses + pure functions (`build_actuation_params` /
-`action_to_rotor_omega` in `rl/press/actuation.py`, mirrored in `_flight.py`); same
+`action_to_rotor_omega` exported by `robotics_experiments.rl` and implemented in
+`rl/press/actuation.py`, mirrored in `flight.py`); same
 math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
 constants move into config (`rl.press.hover_task`, task-as-config) and the
@@ -35,7 +36,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Rule: this package is on the core import path. It must import only stdlib +
   numpy. The torch/isaaclab env code lives in `workflows/isaac_lab/tasks/`, not
   here.
-- Done when: `python -c "import robotics_experiments.rl.press"` works in a plain
+- Done when: `python -c "import robotics_experiments.rl"` works in a plain
   `.venv` (no Isaac/torch).
 
 ## Step 2 -- Add the `press` Hydra config group (scaffold only)
@@ -76,7 +77,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 3 -- Add a vectorized force sink for Isaac Lab
 
-- Action: create `src/robotics_experiments/workflows/isaac_lab/tasks/_flight.py`
+- Action: create `src/robotics_experiments/workflows/isaac_lab/tasks/flight.py`
   (torch/isaaclab leaf).
 - Provide `apply_rotor_forces(articulation, forces_n, body_torque, body_drag,
   rotor_offsets)` that writes per-rotor external forces + body wrench to the
@@ -88,7 +89,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Reuse the physical constants already resolved per-airframe: rotor count + spin
   dirs from USD rotor metadata (`px4_bridge/rotor_discovery.py`), `rotor_constant`,
   `max_rotor_velocity`, `linear_drag` from `cfg.px4` (already computed in
-  `config.load`). Do not re-derive thrust constants here.
+  the config package). Do not re-derive thrust constants here.
 - Done when: a single-env manual test applies uniform hover thrust and the drone
   holds altitude (not sink/climb) for 2 s in a scripted Lab session.
 
@@ -108,7 +109,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
   - The rotor mix inverts the same allocation the thrust model realizes, so
     feeding its output through `PegasusQuadraticThrustModel.commands_to_dynamics`
     reproduces the commanded wrench.
-- Action: in `_flight.py` (torch leaf), add a vectorized implementation of the
+- Action: in `flight.py` (torch leaf), add a vectorized implementation of the
   selected `kind` that matches the pure reference (batched over envs). The torch
   version is the one the env runs; the numpy version is the test oracle.
 - Test: `tests/test_pressactuation.py` (pure): for a hover action the model
@@ -200,7 +201,7 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 ## Files touched by F1
 
 - add `src/robotics_experiments/rl/press/__init__.py`, `.../rl/press/actuation.py`
-- add `src/robotics_experiments/workflows/isaac_lab/tasks/_flight.py`
+- add `src/robotics_experiments/workflows/isaac_lab/tasks/flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
 - edit `src/robotics_experiments/config/types.py`, `.../config/_schemas.py`
 - add `configs/experiment/rl/default.yaml`; edit `configs/base.yaml`

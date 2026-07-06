@@ -4,7 +4,7 @@ The policy artifact is a directory holding a TorchScript module
 (``policy.pt``) and a JSON metadata sidecar (``policy_meta.json``) recording
 the contract the policy was trained against: the observation schema version
 and dimension, the action level (``kind``/``action_dim``), and the action
-command scales. ``load_policy`` refuses any artifact whose metadata mismatches
+command scales. The internal loader refuses any artifact whose metadata mismatches
 the active config -- fail loudly at load, never a shape error deep in the
 driver. A bare checkpoint without metadata is not a valid artifact.
 
@@ -30,13 +30,12 @@ from robotics_experiments.rl.press.observation import (
 
 if TYPE_CHECKING:
     from robotics_experiments.commanding import AttitudeRateSetpoint, VelocitySetpoint
-    from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+    from robotics_experiments.px4_bridge import VehicleState
 
 __all__ = [
     "METADATA_FILENAME",
     "POLICY_FILENAME",
     "build_policy_step_fn",
-    "load_policy",
     "policy_metadata",
 ]
 
@@ -86,7 +85,7 @@ def _validate_metadata(found: dict[str, Any], expected: dict[str, Any], artifact
             )
 
 
-def load_policy(
+def _load_policy(
     artifact_dir: Union[str, Path],
     *,
     action_cfg: Any,
@@ -151,13 +150,13 @@ def build_policy_step_fn(
     Loads the artifact against the hover observation layout and returns
     ``(vehicle_state, target_enu) -> OFFBOARD setpoint payload``: pack the
     hover observation, run the policy, clip to [-1, 1] (the env-side clamp),
-    and map through :func:`press_action_to_offboard`.
+    and map through :func:`robotics_experiments.rl.press_action_to_offboard`.
 
     Raises:
-        ValueError: propagated from :func:`load_policy` on a missing or
+        ValueError: propagated from the internal artifact loader on a missing or
             mismatched artifact (surfaces at routine build time).
     """
-    policy = load_policy(
+    policy = _load_policy(
         artifact_dir,
         action_cfg=action_cfg,
         obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,

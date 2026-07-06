@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional, Protocol
 
-from robotics_experiments.commanding._commander import VehicleCommander
+from robotics_experiments.commanding._commander import _VehicleCommander
 from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
 from robotics_experiments.commanding.port import AbstractCommandPort
 from robotics_experiments.commanding.routine import (
@@ -38,13 +38,13 @@ from robotics_experiments.commanding.routine import (
     VehicleRoutine,
     build_vehicle_routine,
 )
-from robotics_experiments.px4_bridge.frames import (
+from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,
     DEFAULT_HOME_LON_DEG,
 )
 
-__all__ = ["DriverEnvironment", "DriverParams", "RoutineDriver"]
+__all__ = ["DriverEnvironment", "DriverParams", "DriverPhase", "RoutineDriver"]
 
 
 class DriverPhase(Enum):
@@ -99,7 +99,7 @@ class DriverParams:
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
     # The injected artifact-loading seam for ``policy`` steps (built by the
-    # runtime from ``rl.press.policy.build_policy_step_fn``); ``None`` means a
+    # runtime from ``robotics_experiments.rl.build_policy_step_fn``); ``None`` means a
     # routine with a policy step fails loudly at BUILD.
     policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None
 
@@ -217,7 +217,7 @@ class RoutineDriver:
         self._settle_target_us = 0
         self._target: Optional[tuple[float, float, float]] = None
         self._routine: Optional[VehicleRoutine] = None
-        self._commander: Optional[VehicleCommander] = None
+        self._commander: Optional[_VehicleCommander] = None
         self._prev_cursor = 0
         self._enter(DriverPhase.WAIT_BRIDGE)
 
@@ -301,7 +301,7 @@ class RoutineDriver:
             # on_failure so the strict/forgiving reaction applies.
             self._fail(FailureKind.COMMAND, f"[{self._label}] routine build failed: {exc}")
             return
-        self._commander = VehicleCommander(self._routine, self._port)
+        self._commander = _VehicleCommander(self._routine, self._port)
         self._prev_cursor = 0
         self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
         self._enter(DriverPhase.DRIVE)

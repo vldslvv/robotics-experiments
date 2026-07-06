@@ -20,8 +20,8 @@ from typing import Optional
 
 import numpy as np
 
-from robotics_experiments.px4_bridge import frames
-from robotics_experiments.px4_bridge._flight_stack import AbstractFlightStackBridge
+import robotics_experiments.px4_bridge.frames as frames
+from robotics_experiments.px4_bridge._flight_stack import _AbstractFlightStackBridge
 from robotics_experiments.px4_bridge._pegasus_sensors import (
     _DEFAULT_SENSOR_RATE_HZ,
     _PegasusSensorSuite,
@@ -31,8 +31,8 @@ from robotics_experiments.px4_bridge.contract import (
     BridgeStatus,
     LockstepSettings,
 )
-from robotics_experiments.px4_bridge.logging import VehicleLogFilter, vehicle_log_context
-from robotics_experiments.px4_bridge.sim_clock import physics_tick_us
+from robotics_experiments.px4_bridge.logging import _VehicleLogFilter, vehicle_log_context
+from robotics_experiments.px4_bridge.sim_clock import _physics_tick_us
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["Px4MavlinkPort"]
@@ -92,7 +92,7 @@ def _configure_file_logging(
 
     handler = logging.FileHandler(resolved, mode="w", encoding="utf-8")
     setattr(handler, _FILE_LOG_HANDLER_VEHICLE_ATTR, int(vehicle_id))
-    handler.addFilter(VehicleLogFilter(vehicle_id))
+    handler.addFilter(_VehicleLogFilter(vehicle_id))
     handler.setLevel(level)
     handler.setFormatter(
         logging.Formatter(
@@ -104,7 +104,7 @@ def _configure_file_logging(
     return resolved
 
 
-class Px4MavlinkPort(AbstractFlightStackBridge):
+class Px4MavlinkPort(_AbstractFlightStackBridge):
     """PX4 SITL adapter over Pegasus' ``PX4MavlinkBackend``.
 
     Differences from a raw ``PX4MavlinkBackend.update(dt)`` call:
@@ -190,9 +190,9 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         # fails by a float ULP at rates such as 333 Hz and silently drops the
         # accel/gyro bits on half the HIL_SENSOR packets).
         physics_rate_hz = lockstep.physics_rate_hz
-        # physics_tick_us is the single source of the integer tick (shared with
+        # _physics_tick_us is the single source of the integer tick (shared with
         # SimClock); it raises on a non-positive rate.
-        self._physics_tick_us = physics_tick_us(physics_rate_hz)
+        self._physics_tick_us = _physics_tick_us(physics_rate_hz)
         self._sensor_rate_hz = 1_000_000 / self._physics_tick_us
         self._sensor_suite = self._make_sensor_suite()
         input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
@@ -372,7 +372,7 @@ class Px4MavlinkPort(AbstractFlightStackBridge):
         heartbeat, or on a sensor-cadence failure.
 
         ``send`` strictly precedes its paired ``poll`` within a vehicle; see
-        :meth:`AbstractFlightStackBridge.exchange` for the single-vehicle
+        :meth:`_AbstractFlightStackBridge.exchange` for the single-vehicle
         send-then-poll composition.
         """
         if not self.is_connected:

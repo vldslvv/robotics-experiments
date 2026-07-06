@@ -62,7 +62,9 @@ __all__ = [
     "world_enu_to_body_flu",
     "body_velocity_flu_from_state",
     "tilt_angle_deg",
+    "synth_barometer",
     "synth_gps_from_enu",
+    "synth_magnetometer_body_flu",
 ]
 
 
@@ -154,7 +156,7 @@ def tilt_angle_deg(q_flu_enu_wxyz: np.ndarray) -> float:
     return math.degrees(math.acos(cos_angle))
 
 
-def _magnetometer_body_flu(
+def synth_magnetometer_body_flu(
     q_flu_enu_wxyz: np.ndarray,
     mag_ned_gauss: np.ndarray = DEFAULT_MAG_NED_GAUSS,
 ) -> np.ndarray:
@@ -230,7 +232,7 @@ def synth_gps_from_enu(
 # ---- Barometer synthesis ----------------------------------------------------
 
 
-def _synth_barometer(altitude_m: float, sea_level_pressure_hpa: float = 1013.25) -> dict:
+def synth_barometer(altitude_m: float, sea_level_pressure_hpa: float = 1013.25) -> dict:
     """Synthesize a reference barometer payload (ISA approximation).
 
     Returns:

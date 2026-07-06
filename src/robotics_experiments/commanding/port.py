@@ -1,8 +1,8 @@
-"""The side-effecting command seam (mirrors ``AbstractFlightStackBridge``).
+"""The side-effecting command seam (mirrors the ``Px4MavlinkPort`` lockstep seam).
 
 :class:`AbstractCommandPort` is the swappable boundary the orchestrators talk
-across: the pure :class:`VehicleCommander` only ever calls :meth:`send`, and the
-driver pumps heartbeats and drains feedback. :class:`MavlinkCommandPort` is the
+across: the private commander only ever calls :meth:`send`, and the driver pumps
+heartbeats and drains feedback. :class:`MavlinkCommandPort` is the
 PX4 implementation over a GCS MAVLink link (the resolved ``vehicle.gcs_port``);
 its ``pymavlink`` import is function-scoped so importing ``commanding`` never
 pulls in the MAVLink runtime, exactly as the standalone scenario did inline.
@@ -30,7 +30,7 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["MavlinkCommandPort"]
+__all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ _POSITION_TARGET_TYPEMASK_YAW_IGNORE = 0b0100_0000_0000
 
 # MAV_FRAME_GLOBAL_INT (geodetic lat/lon e7 + AMSL altitude); a MAVLink protocol
 # constant named here so streaming a setpoint does not need a pymavlink import for
-# the frame id (the same pattern as the MAV_CMD ids in commands.py).
+# the frame id (the same pattern as the MAV_CMD ids in the command payload layer).
 _MAV_FRAME_GLOBAL_INT = 5
 
 # MAV_FRAME_BODY_NED (body-forward/right/down) for the deploy-time velocity

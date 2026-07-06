@@ -1,16 +1,17 @@
-"""Public simulation settings entrypoint.
+"""Simulation settings entrypoint implementation.
 
 This module intentionally does not import Isaac Sim modules at import time.
-Importing ``carb`` or ``pxr`` outside the Isaac runtime can fail, so the public
-``apply_settings`` function performs a lazy import of the Isaac backend only
-when a caller actually applies settings to a USD stage. Keep workflow-specific
-setup, such as standalone ``SimulationApp`` startup or Kit extension event
-subscription, outside this module; callers share this stage-level API.
+Importing ``carb`` or ``pxr`` outside the Isaac runtime can fail, so
+``apply_settings`` performs a lazy import of the Isaac backend only when a
+caller actually applies settings to a USD stage. Keep workflow-specific setup,
+such as standalone ``SimulationApp`` startup or Kit extension event
+subscription, outside this module; callers share the package-level
+``robotics_experiments.simulation.apply_settings`` API.
 """
 
 from __future__ import annotations
 
-from robotics_experiments.config.types import SimSettings
+from robotics_experiments.config import SimSettings
 
 __all__ = ["apply_settings"]
 

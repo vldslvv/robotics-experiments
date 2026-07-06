@@ -31,7 +31,7 @@ and becomes the metric floor the learned policy must beat.
 ## Step 1 -- Pure contact-behavior contract
 
 - Action: create `src/robotics_experiments/rl/press/_behavior.py` (pure; numpy +
-  stdlib only, like `_observation.py`).
+  stdlib only, like `observation.py`).
   - `class ContactBehavior(Protocol)`:
     - `reset() -> None` -- new attempt; clears internal phase/state.
     - `act(obs: PressObservation) -> ContactDecision`.
@@ -47,14 +47,14 @@ and becomes the metric floor the learned policy must beat.
 - `__all__`: `ContactBehavior`, `ContactDecision`, `ContactPhase`.
 - Test: `tests/test_press_behavior.py` (pure): the protocol is satisfied by a
   trivial fake; `ContactDecision.action` shape matches `action_dim`.
-- Done when: `import robotics_experiments.rl.press` still succeeds without
+- Done when: `import robotics_experiments.rl` still succeeds without
   torch/Isaac and exposes the contract.
 
 ## Step 2 -- Policy behavior (wrap the F3 policy)
 
-- Action: in `press/_behavior.py` (or `rl/press/policy.py` if the import weight
+- Action: in `press/behavior.py` (or `rl/press/policy.py` if the import weight
   fits better there), implement `PolicyContactBehavior` wrapping F2b's
-  validated `load_policy(path, action_cfg)` (the artifact's metadata --
+  validated policy-step loader (the artifact's metadata --
   obs schema version, action kind, dims, scales -- is checked at load, so a
   stale press artifact is refused, never silently misread): `act` runs
   `to_vector(obs)` through the loaded policy and returns the action; `phase` is
@@ -98,7 +98,8 @@ and becomes the metric floor the learned policy must beat.
   kind raises `ValueError` at resolution time.
 - Action: add the `{kind: press}` routine step in the commanding layer,
   building on F2b's `{kind: policy}` step mechanism (the per-tick
-  observation -> action -> `rl/press/deploy.py` mapping -> `STREAM` setpoint
+  observation -> action -> `robotics_experiments.rl.press_action_to_offboard` mapping ->
+  `STREAM` setpoint
   chain): the press step differs by entering only when F2's `handoff_ready`
   gate passes and by ticking the configured `ContactBehavior` in place of the
   direct policy call, completing on `DONE` (-> ADVANCE) or `ABORT` (-> FAIL).

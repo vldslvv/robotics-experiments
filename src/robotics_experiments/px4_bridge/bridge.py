@@ -23,11 +23,11 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from robotics_experiments.px4_bridge import frames
-from robotics_experiments.px4_bridge._flight_stack import AbstractFlightStackBridge
-from robotics_experiments.px4_bridge._simulator import ArticulationIO
+import robotics_experiments.px4_bridge.frames as frames
+from robotics_experiments.px4_bridge._flight_stack import _AbstractFlightStackBridge
+from robotics_experiments.px4_bridge._simulator import _ArticulationIO
 from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
-from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics, _RotorThrustModel
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics, RotorThrustModel
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = ["Px4Bridge"]
@@ -60,9 +60,9 @@ class Px4Bridge:
         *,
         articulation_path: str,
         rotor_link_paths,
-        thrust_model: _RotorThrustModel,
-        port: AbstractFlightStackBridge,
-        articulation_io: Optional[ArticulationIO] = None,
+        thrust_model: RotorThrustModel,
+        port: _AbstractFlightStackBridge,
+        articulation_io: Optional[_ArticulationIO] = None,
         max_tilt_angle_deg: float = 180.0,
         rotor_spin_visual_scale: float = 0.03,
         rotor_spin_signs: Sequence[float] | None = None,
@@ -112,9 +112,7 @@ class Px4Bridge:
         # happened this tick.
         self._pending: Optional[_PendingTick] = None
         if articulation_io is None:
-            from robotics_experiments.px4_bridge.isaac_articulation import (
-                IsaacArticulationIO,
-            )
+            from robotics_experiments.px4_bridge import IsaacArticulationIO
 
             articulation_io = IsaacArticulationIO(
                 articulation_path=articulation_path,
@@ -255,7 +253,7 @@ class Px4Bridge:
         if pending.force_cutoff:
             zero = np.zeros(self._thrust_model.num_rotors, dtype=np.float64)
             self._io.apply_dynamics(
-                _RotorDynamics(
+                RotorDynamics(
                     forces_n=zero,
                     body_torque_n_m=np.zeros(3, dtype=np.float64),
                     body_drag_n=np.zeros(3, dtype=np.float64),

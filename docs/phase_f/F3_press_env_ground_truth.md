@@ -22,7 +22,7 @@ those).
 - Action: create
   `src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py`
   (torch/isaaclab leaf) with `SwitchPressEnvCfg(DirectRLEnvCfg)` and
-  `SwitchPressEnv(DirectRLEnv)`, reusing F1's `_flight.py` actuation/force sink and
+  `SwitchPressEnv(DirectRLEnv)`, reusing F1's `flight.py` actuation/force sink and
   F2's observation assembly. Do not fork the hover env; import the shared pieces.
 - Action: register it in `workflows/isaac_lab/registration.py`
   (`_SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v0"`, guarded like the hover
@@ -50,8 +50,8 @@ those).
   env for `pusher_compression_m` and its rate for `pusher_compression_rate_mps`.
 - Action: add a contact signal for `contact_flag` (Isaac Lab contact sensor on the
   pad, or threshold on pusher compression as a first cut) and `contact_valid`.
-- Action: vectorize the N-step press latch. The pure single-switch logic already
-  exists: `environment/switches.py::_apply_button_sample` (press_threshold +
+- Action: vectorize the N-step press latch. The pure single-switch logic is
+  exported as `robotics_experiments.environment.apply_button_sample` (press_threshold +
   press_confirm_steps -> single toggle). Add a pure batched version in `press/`
   (e.g. `press/_latch.py`, numpy/torch-agnostic core with a torch wrapper in the
   leaf) that maintains `press_steps` / `toggle_latched` / `state` per env, so
@@ -60,7 +60,7 @@ those).
 - Config: reuse `switches.press_threshold` / `switches.press_confirm_steps`; the
   "easy" stage may loosen them via a `press.reset`/curriculum override (F4).
 - Test: `tests/test_press_latch.py` (pure): batched latch matches the scalar
-  `_apply_button_sample` for the same input sequences; a sustained press toggles
+  switch latch for the same input sequences; a sustained press toggles
   once; a tap does not.
 - Done when: pressing the switch in a scripted rollout flips `lamp_state` exactly
   once per sustained press across envs.
@@ -93,7 +93,7 @@ those).
 
 ## Step 5 -- Training adapter + config (exists from F2b; press specifics only)
 
-- The rsl_rl adapter (`rl/training/_rsl_rl.py`), `RlTrainingConfig`, and
+- The rsl_rl adapter (`rl/training/rsl_rl.py`), `RlTrainingConfig`, and
   the `training` pyproject extra exist from F2b Step 3. F3 adds NO training or
   loader code.
 - Action: author the press-task hyperparameter values in the `training:` block
@@ -105,7 +105,7 @@ those).
 ## Step 6 -- Inference contract (exists from F2b)
 
 - The validated artifact format (TorchScript + metadata sidecar) and
-  `rl/press/policy.py::load_policy` exist from F2b Step 4; the runtime press
+  `robotics_experiments.rl.build_policy_step_fn` exists from F2b Step 4; the runtime press
   behavior depends only on that seam, never on the training library. Nothing to
   add here; the F2b metadata validation (obs schema version, action kind, dims,
   scales) applies to press artifacts identically -- the press observation's
@@ -127,7 +127,7 @@ those).
 ## Step 8 -- Deployment/runtime handoff note (scope boundary)
 
 - The trained policy runs at deploy time as a local contact behavior ABOVE PX4
-  OFFBOARD: the exported policy (`load_policy`) consumes a `PressObservation`
+  OFFBOARD: the exported policy loader consumes a `PressObservation`
   assembled from the live bridge state + provider and emits the F1 action, which
   maps to a PX4 OFFBOARD setpoint stream (velocity or attitude/rate per the F1
   choice). The deploy mechanism (the routine-step plug-in over the widened

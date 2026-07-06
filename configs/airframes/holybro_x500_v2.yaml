@@ -3,12 +3,12 @@
 # Single source of truth for this airframe. It drives three generated consumers:
 #   - USD geometry + body mass/CoM/inertia (build_copter_usd_standalone.py)
 #   - PX4 control allocation CA_ROTOR* (px4/scripts/generate_px4_airframes.py)
-#   - bridge thrust curve, via config._load merging px4.bridge below
+#   - bridge thrust curve, via config.loading merging px4.bridge below
 # Every physical value is either an authored, vendor-citable LEAF (with an inline
 # "-- BOM x.y" / vendor citation) or is COMPUTED from those leaves. The body
 # total_mass, center_of_mass, and diagonal_inertia are NOT authored here: the USD
 # builder computes them from the component masses + geometry below. rotor_constant
-# is NOT authored either: config._load derives it from max_thrust_per_rotor_g +
+# is NOT authored either: config.loading derives it from max_thrust_per_rotor_g +
 # max_rotor_velocity + standard gravity. So fixing a vendor mismatch is a one-line edit.
 #
 # Sources: docs/archive/HOLYBRO_X8_STAGED_BOM_v2.md (cited as "BOM <section>")
@@ -226,7 +226,7 @@ px4:
     ca_rotor_km_abs: 0.05
   bridge:
     # Physical RPM scaling for the MN4006 EVO KV380 @ 4S. rotor_constant is NOT
-    # listed -- config._load derives it from max_thrust_per_rotor_g below so that
+    # listed -- config.loading derives it from max_thrust_per_rotor_g below so that
     # T = rotor_constant * omega^2 reaches max_thrust_per_rotor_g at
     # max_rotor_velocity (=> per-motor max 15.35 N, T:W ~2.68 with pusher,
     # hover ~57%).

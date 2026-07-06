@@ -2,11 +2,10 @@
 
 This module is intentionally Isaac-only: it imports ``carb``, ``pxr``, and
 ``isaacsim`` at import time because every function operates on a live USD stage
-and PhysX articulations. The core import path never loads it directly;
-``environment/__init__.py`` exposes the public API (``init_articulations`` /
-``step_switches``) lazily via ``__getattr__``, so ``import robotics_experiments``
-works outside the Isaac runtime. See
-``robotics_experiments.simulation._isaac_settings`` for the same pattern and
+and PhysX articulations. The core import path never loads it directly; Isaac
+runtime code imports this leaf module explicitly, so ``import
+robotics_experiments`` works outside the Isaac runtime. See
+``robotics_experiments.simulation`` for the same pattern and
 ``tests/test_core_imports.py`` for the boundary guard.
 """
 
@@ -16,9 +15,8 @@ import carb
 from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
-from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config.types import LightSwitchConfig
-from robotics_experiments.environment.switches import SwitchState, _apply_button_sample
+from robotics_experiments.config import LightSwitchConfig, get_config
+from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
 __all__ = ["init_articulations", "step_switches"]
 
@@ -110,7 +108,7 @@ def step_switches(
         config: Spawner configuration; when ``None``, resolved via
             :func:`.config.get_config` at call time.
     """
-    config = _resolve_section("switches", config)
+    config = config if config is not None else get_config().switches
     for i, sw in enumerate(switch_state):
         if sw.articulation is None:
             carb.log_error(f"[LightSwitch] No articulation set for switch with index {i}")
@@ -118,7 +116,7 @@ def step_switches(
         joint_positions = sw.articulation.get_joint_positions()
         button_pos = joint_positions[0]
 
-        if _apply_button_sample(
+        if apply_button_sample(
             sw,
             button_position=float(button_pos),
             press_threshold=config.press_threshold,

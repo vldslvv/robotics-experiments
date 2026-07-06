@@ -1,8 +1,8 @@
 """Flyable Isaac Lab DirectRLEnv for drone hover.
 
 Maps a normalized RL action to per-rotor forces through the pluggable in-Lab
-actuation seam (the ``_flight`` params + pure functions, the batched twin of
-the host-tested ``robotics_experiments.rl.press.actuation``), with no PX4 lockstep
+actuation seam (the ``flight`` params + pure functions, the batched twin of
+the host-tested ``robotics_experiments.rl``), with no PX4 lockstep
 per env. The action level is ``rl.action.kind`` (``velocity`` / ``ctbr``).
 The env class is thin wiring: the frozen ``actuation_params`` plus the pure
 per-step math (``_hover_observation`` / ``_hover_reward`` /
@@ -24,8 +24,8 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import make_drone_articulation_cfg
-from robotics_experiments.workflows.isaac_lab.tasks._flight import (
+from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
+from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
@@ -46,7 +46,7 @@ def _hover_observation(
 ) -> torch.Tensor:
     """Pack the 13-dim hover observation ``[pos_err, quat, lin_vel_w, ang_vel_b]``.
 
-    The batched twin of the pure ``rl.press.observation.pack_hover_observation``
+    The batched twin of the pure ``rl.press.pack_hover_observation``
     layout (`HOVER_OBSERVATION_SCHEMA_VERSION`): the angular velocity is
     body-frame, matching ``VehicleState.angular_velocity_flu`` so the same
     vector is assemblable at deploy time.
@@ -114,7 +114,7 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     state_space = 0
 
     sim: SimulationCfg = SimulationCfg(dt=_physics_dt(), render_interval=decimation)
-    drone_cfg: ArticulationCfg = make_drone_articulation_cfg(
+    drone_cfg: ArticulationCfg = _make_drone_articulation_cfg(
         _experiment_config().drone.usd_path, _DRONE_PRIM_PATH
     )
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -164,7 +164,7 @@ class DroneHoverEnv(DirectRLEnv):
         import omni.usd
 
         from robotics_experiments.config import resolve_drone_bridge_config
-        from robotics_experiments.px4_bridge.rotor_discovery import discover_px4_rotor_mapping
+        from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
 
         stage = omni.usd.get_context().get_stage()
         env0_path = _DRONE_PRIM_PATH.replace("env_.*", "env_0")

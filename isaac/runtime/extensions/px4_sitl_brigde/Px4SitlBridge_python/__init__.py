@@ -29,15 +29,15 @@ except ModuleNotFoundError as exc:
     if exc.name not in ("omni", "carb"):
         raise
 
-# Re-export the narrowed core bridge API directly; this package is a thin shim
-# that lets Kit import the extension while consumers use
-# ``robotics_experiments.px4_bridge``.
-from robotics_experiments.px4_bridge import (  # noqa: F401
-    IsaacArticulationIO,
-    LockstepSettings,
+# Re-export the core bridge API directly for legacy Kit-side imports. The
+# canonical project imports live on the owning ``robotics_experiments.px4_bridge``
+# package root.
+from robotics_experiments.px4_bridge import (  # noqa: F401  # noqa: F401
+    IsaacArticulationIO,  # noqa: F401
+    LockstepSettings,  # noqa: F401
     PegasusQuadraticThrustModel,
-    Px4Bridge,
-    Px4MavlinkPort,
+    Px4Bridge,  # noqa: F401
+    Px4MavlinkPort,  # noqa: F401
     discover_px4_rotor_mapping,
 )
 

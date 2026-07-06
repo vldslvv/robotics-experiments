@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["SwitchState"]
+__all__ = ["SwitchState", "apply_button_sample"]
 
 
 @dataclass
@@ -13,7 +13,7 @@ class SwitchState:
     ``press_steps`` counts how many consecutive samples the button has stayed at
     or above the press threshold, and ``toggle_latched`` records that the current
     sustained press has already produced its single toggle. Together they drive
-    the N-step confirmation window (see :func:`_apply_button_sample`); both reset
+    the N-step confirmation window; both reset
     when the button releases.
     """
 
@@ -25,7 +25,7 @@ class SwitchState:
     toggle_latched: bool = False
 
 
-def _apply_button_sample(
+def apply_button_sample(
     switch: SwitchState,
     *,
     button_position: float,

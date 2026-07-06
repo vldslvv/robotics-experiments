@@ -1,10 +1,10 @@
 """The command orchestrator (mirrors ``BridgeHost``).
 
-:class:`VehicleCommander` wires one :class:`VehicleRoutine` to one
+:class:`_VehicleCommander` wires one :class:`VehicleRoutine` to one
 :class:`AbstractCommandPort`, holding the :class:`RoutineState`: it runs the pure
 :func:`decide` and performs the single side effect (``port.send`` on a ``SEND``
 decision), keeping the pure decision and the impure I/O cleanly separated. One
-commander drives one drone; the per-drone :class:`~._driver.RoutineDriver` owns the
+commander drives one drone; the per-drone :class:`~.driver.RoutineDriver` owns the
 lifecycle around it. There is no fleet object - drones are independent.
 """
 
@@ -28,7 +28,7 @@ from robotics_experiments.commanding.routine import (
 __all__: list[str] = []
 
 
-class VehicleCommander:
+class _VehicleCommander:
     """Drives one routine over one port; pure decision, isolated side effect."""
 
     def __init__(self, routine: VehicleRoutine, port: AbstractCommandPort) -> None:

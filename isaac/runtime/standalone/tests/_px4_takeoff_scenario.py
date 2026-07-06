@@ -35,16 +35,16 @@ from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vect
 
 from robotics_experiments.commanding import FailureKind, MavlinkCommandPort
 from robotics_experiments.config import get_config
-from robotics_experiments.px4_bridge import IsaacArticulationIO, frames
+from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
-    from robotics_experiments.config.types import RoutineConfig
+    from robotics_experiments.config import RoutineConfig
     from robotics_experiments.runtime import (
+        BridgeHost,
         FleetDriverEnv,
         FleetOrchestrator,
         SpawnedDrone,
     )
-    from robotics_experiments.runtime._bridge_host import BridgeHost
 
 __all__ = [
     "ExpectedInstabilityDetected",
@@ -202,7 +202,7 @@ def _sample_state(observer: IsaacArticulationIO, sim_time_us: int) -> _FlightSam
         position_enu=np.asarray(state.position_enu, dtype=np.float64),
         linear_velocity_enu=np.asarray(state.linear_velocity_enu, dtype=np.float64),
         angular_velocity_flu=np.asarray(state.angular_velocity_flu, dtype=np.float64),
-        tilt_deg=float(frames.tilt_angle_deg(state.orientation_flu_enu_wxyz)),
+        tilt_deg=float(tilt_angle_deg(state.orientation_flu_enu_wxyz)),
     )
 
 

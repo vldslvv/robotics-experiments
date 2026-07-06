@@ -4,13 +4,13 @@ from typing import Protocol
 
 import numpy as np
 
-from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
+from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["ArticulationIO"]
+__all__: list[str] = []
 
 
-class ArticulationIO(Protocol):
+class _ArticulationIO(Protocol):
     @property
     def is_initialized(self) -> bool: ...
 
@@ -20,6 +20,6 @@ class ArticulationIO(Protocol):
 
     def read_state(self, sim_time_us: int) -> VehicleState: ...
 
-    def apply_dynamics(self, dynamics: _RotorDynamics) -> None: ...
+    def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...
 
     def update_rotor_spin(self, rotor_omega_rad_s: np.ndarray, dt: float) -> None: ...

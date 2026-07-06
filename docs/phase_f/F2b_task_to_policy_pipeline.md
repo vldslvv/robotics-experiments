@@ -86,12 +86,12 @@ is the routine step, not the orchestrator.
 ## Step 3 -- rsl_rl training adapter (module-level, swappable)
 
 - Action: create `src/robotics_experiments/rl/training/__init__.py` and
-  `src/robotics_experiments/rl/training/_rsl_rl.py` -- the ONLY module
+  `src/robotics_experiments/rl/training/rsl_rl.py` -- the ONLY module
   importing `rsl_rl`. Expose the functional contract:
   - `build_runner(env, runner_cfg) -> Runner`
-  - `train(runner, iterations) -> TrainResult`
+  - `train(runner, iterations) -> training result`
   - `export_policy(runner, out_dir) -> None` (Step-4 artifact format)
-  - a `PolicyRunner` `Protocol` typing the surface so `_skrl.py` /
+  - a private runner `Protocol` typing the surface so `_skrl.py` /
     `_rl_games.py` are drop-in later.
 - `rl/training/__init__.py` stays lazy (rsl_rl is a training-only dep). Keep
   the pure `press` modules free of any training import;
@@ -118,20 +118,20 @@ is the routine step, not the orchestrator.
   scale values (`max_body_velocity_mps` / `max_yaw_rate_radps` /
   `max_body_rate_radps` / `hover_thrust_fraction` as applicable to the kind).
   The artifact = module + metadata; a bare checkpoint is not a valid artifact.
-- Action: create `src/robotics_experiments/rl/press/policy.py` (pure-ish; imports
+- Action: create the press policy-artifact loader behind the `robotics_experiments.rl` facade
+  (implemented in `src/robotics_experiments/rl/press/policy.py`; imports
   torch only inside functions, like `MavlinkCommandPort` imports pymavlink
   inside methods). Provide
-  `load_policy(path, action_cfg) -> Callable[[np.ndarray], np.ndarray]`
-  (numpy in/out) that loads the artifact and raises `ValueError` on ANY
-  metadata mismatch against the active config (schema version, kind, dims,
-  scales) -- fail loudly at load, never a shape error deep in the driver. It
-  imports neither rsl_rl nor the training stack; the runtime depends only on
-  this seam, never on the training library.
+  `build_policy_step_fn(path, action_cfg) -> Callable[[VehicleState, np.ndarray], setpoint]`
+  that loads the artifact and raises `ValueError` on ANY metadata mismatch
+  against the active config (schema version, kind, dims, scales) -- fail loudly
+  at load, never a shape error deep in the driver. It imports neither rsl_rl nor
+  the training stack; the runtime depends only on this seam, never on the
+  training library.
 - Test: `tests/test_press_policy.py`: a tiny exported identity/linear
-  TorchScript module + metadata round-trips and produces the right-shaped
-  action from a sample observation vector (guarded on torch availability);
-  each metadata field mismatch (version, kind, dims, a scale) rejects with
-  `ValueError`.
+  TorchScript module + metadata round-trips through `build_policy_step_fn`
+  (guarded on torch availability); each metadata field mismatch (version, kind,
+  dims, a scale) rejects with `ValueError`.
 - Done when: an exported artifact loads and infers with the training stack
   uninstalled, and a mismatched artifact is refused at load time.
 
@@ -161,12 +161,12 @@ is the routine step, not the orchestrator.
   (`Callable[[np.ndarray], np.ndarray]`, deterministic, no I/O) carried by the
   step, so the per-tick chain inside `decide` is pure end-to-end:
   pack the Step-2 layout from `RoutineObservation.vehicle_state` (+ the step's
-  target position) -> `policy(obs)` -> `rl.press.deploy.press_action_to_offboard`
+  target position) -> `policy(obs)` -> `robotics_experiments.rl.press_action_to_offboard`
   -> a `STREAM` decision carrying the setpoint payload.
 - Action: extend the `STREAM` decision payload from `PositionSetpoint`-only to
   a union also carrying `VelocitySetpoint` / `AttitudeRateSetpoint` (the wire
   payloads and port methods `send_velocity_setpoint` / `send_attitude_target`
-  already exist); `VehicleCommander` dispatches by payload type in its single
+  already exist); the private commander dispatches by payload type in its single
   side-effect position. OFFBOARD entry reuses the existing
   `goto_offboard_prime_ticks` priming semantics.
 - Config: a `{kind: policy, artifact: <path>, hold_s, ...}` step descriptor in
@@ -213,7 +213,7 @@ is the routine step, not the orchestrator.
   ang vel observation)
 - add the pure hover-observation layout module under `press/`;
   add `rl/press/policy.py`, `rl/training/__init__.py`,
-  `rl/training/_rsl_rl.py`; edit `rl/press/__init__.py` (re-exports)
+  `rl/training/rsl_rl.py`; edit `rl/__init__.py` (re-exports)
 - edit `config/types.py` (`PressHoverTaskConfig`, `RlTrainingConfig`),
   `configs/experiment/rl/default.yaml`
 - add `isaac/runtime/standalone/train_rl.py`; add the `train-rl` make
@@ -227,7 +227,7 @@ is the routine step, not the orchestrator.
 ## Exit gate
 
 `make train-rl` produces a validated artifact from the YAML-defined hover
-task; `load_policy` enforces the metadata contract; the `{kind: policy}` step
+task; the policy-step loader enforces the metadata contract; the `{kind: policy}` step
 flies that artifact over PX4 SITL through the unchanged orchestrator in the
 strict standalone scenario. The task->policy pipeline is proven end-to-end;
 F3 adds the press task, not plumbing.

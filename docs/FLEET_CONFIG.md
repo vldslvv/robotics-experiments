@@ -25,7 +25,7 @@ onboard stacks (for example `/x500_01`); it is not derived from `id`.
 
 ## Resolution and validation
 
-One private enrichment step (`config.load._resolve_fleet`) merges each entry's
+One private enrichment step in the config package merges each entry's
 `drone`/`px4` partials over the global `drone`/`px4` defaults
 (`OmegaConf.merge`) into a pure `VehicleConfig`, then constructs an immutable
 `ResolvedVehicle` carrying that config plus the derived runtime fields:
@@ -40,10 +40,10 @@ nested `/` with `_`, for future TF/message frame IDs), `debug_log_path` (the
 host-side PX4 launch, the standalone scenario's GCS endpoint) reads these
 derived fields instead of recomputing `baseport + id`.
 
-`_resolve_fleet` validates the resolved fleet (`_validate_fleet` --
-missing/invalid/duplicate ROS namespace or derived frame prefix, duplicate
-id/endpoint/`prim_name`, bad `spawn_xy`, negative id, or colliding
-`debug_log_path` raise a `ValueError` at resolution time).
+The enrichment step validates the resolved fleet (missing/invalid/duplicate ROS
+namespace or derived frame prefix, duplicate id/endpoint/`prim_name`, bad
+`spawn_xy`, negative id, or colliding `debug_log_path` raise a `ValueError` at
+resolution time).
 `get_config().vehicles` is `list[ResolvedVehicle]`. `EnvConfig.vehicles` is
 annotated `List[Any]` for Hydra compose-time tolerance of partial entries; the
 runtime value is `list[ResolvedVehicle]`.
@@ -70,8 +70,8 @@ value carries an inline vendor/BOM citation): the body
 `total_mass`/`center_of_mass`/`diagonal_inertia` are **computed** by the USD
 builder (`build_copter_usd_standalone.compute_body_mass_properties`, summing
 the component box/cylinder inertias + parallel-axis, excluding the separate
-pusher pad) and the bridge `rotor_constant` is **computed** by `config.load`
-(`_compute_rotor_constants`) from the cited `max_thrust_per_rotor_g` +
+pusher pad) and the bridge `rotor_constant` is **computed** by the config
+package from the cited `max_thrust_per_rotor_g` +
 `max_rotor_velocity` (standard-gravity gram-force -> Newton conversion, so
 `T = rotor_constant * omega^2` reaches the cited static max at
 `max_rotor_velocity`). Neither derived value is authored, so fixing a vendor
@@ -116,4 +116,4 @@ token so the filenames never collide. The token alone is not enough: every
 bridge layer logs through the shared `robotics_experiments.px4_bridge` package
 logger, so the `BridgeHost` wraps each vehicle's construction/teardown and
 per-tick work in `px4_bridge.vehicle_log_context(id)`, and each per-vehicle
-file handler carries a `VehicleLogFilter` (see `px4_bridge/logging.py`).
+file handler filters on that context (see `px4_bridge/logging.py`).

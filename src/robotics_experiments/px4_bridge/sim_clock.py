@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-__all__ = ["SimClock", "physics_tick_us"]
+__all__ = ["SimClock"]
 
 
-def physics_tick_us(physics_hz: float) -> int:
+def _physics_tick_us(physics_hz: float) -> int:
     """Return the integer-microsecond physics tick for a physics rate.
 
     This is the single source of the integer tick. Deriving the sensor rate as
@@ -50,7 +50,7 @@ class SimClock:
                 The bridge-facing time is the total accumulated time minus this
                 offset, so it is near zero on the first post-settle tick.
         """
-        self._tick_us = physics_tick_us(physics_hz)
+        self._tick_us = _physics_tick_us(physics_hz)
         self._settle_time_us = int(round(max(0.0, settle_time_s) * 1_000_000))
         self._total_us = 0
         self._tick_count = 0

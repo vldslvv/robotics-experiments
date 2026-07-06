@@ -23,7 +23,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 1 -- Define the pure observation dataclass
 
-- Action: create `src/robotics_experiments/rl/press/_observation.py` (pure; numpy +
+- Action: create `src/robotics_experiments/rl/press/observation.py` (pure; numpy +
   stdlib only). Define `@dataclass(frozen=True) class PressObservation` with the
   task-relative fields (units/frames in docstrings):
   - `relative_switch_pos_m: np.ndarray` (3,), in the contact frame (Step 2)
@@ -48,7 +48,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
   state at deploy. That parity is what makes a trained policy deployable at
   all; a field the deploy side cannot assemble is forbidden in the layout. The
   schema version is also what F2b's artifact metadata records and
-  `load_policy` validates. Angular velocity is body-frame on both sides (the
+  the policy-step loader validates. Angular velocity is body-frame on both sides (the
   world-vs-body reconciliation landed in F2b Step 2; do not reintroduce a
   world-frame rate here).
 - `__all__`: `PressObservation`, `to_vector`, `OBSERVATION_SCHEMA_VERSION`.
@@ -63,7 +63,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 2 -- Define the contact frame + transform helpers
 
-- Action: in `press/_observation.py`, document and implement the contact frame:
+- Action: in `press/observation.py`, document and implement the contact frame:
   x = wall-normal press axis (drone toward switch surface), y = plate horizontal
   tangent, z = plate vertical tangent. Add a pure
   `world_switch_to_contact_frame(drone_pose, switch_pose) -> (rel_pos, rel_quat)`
@@ -75,7 +75,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 3 -- Define the pose-provider seam
 
-- Action: create `src/robotics_experiments/rl/press/_provider.py` (pure). Define
+- Action: create `src/robotics_experiments/rl/press/provider.py` (pure). Define
   `class AbstractPoseProvider(Protocol)` with:
   - `sample(sim_time_s) -> PoseSample` where
     `@dataclass(frozen=True) class PoseSample` carries
@@ -92,21 +92,21 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 4 -- Ground-truth provider (Isaac leaf)
 
-- Action: create `src/robotics_experiments/rl/press/_isaac_provider.py` -- a guarded
+- Action: create `src/robotics_experiments/rl/press/isaac_provider.py` -- a guarded
   Isaac leaf (imports isaacsim/pxr; off the core path; re-exported lazily only when
   Isaac is present, mirroring `environment/__init__.py __getattr__`). Implement
   `GroundTruthPoseProvider` that reads the switch prim world pose from the live
   stage/articulation and returns a `PoseSample` with `confidence=1.0`, `age_s=0.0`,
   `valid=True`.
 - Keep `rl/press/__init__.py` re-export-only and lazy for this symbol so
-  `import robotics_experiments.rl.press` stays Isaac-free.
+  `import robotics_experiments.rl` stays Isaac-free.
 - Test: `tests/test_core_imports.py` asserts `press` imports with Isaac absent and
-  that `_isaac_provider` is not eager-imported.
+  that `isaac_provider` is not eager-imported.
 
 ## Step 5 -- Handoff gate (pure predicate + config)
 
-- Action: create `src/robotics_experiments/rl/press/_handoff.py` (pure). Implement
-  `handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult` where
+- Action: create `src/robotics_experiments/rl/press/handoff.py` (pure). Implement
+  `handoff_ready(obs: PressObservation, gate: HandoffGate)` where
   the result is either ready or a reason enum (`NOT_VALID`, `LOW_CONFIDENCE`,
   `STALE`, `TOO_FAR`, `LATERAL`, `WALL_NORMAL_SPEED`, `LATERAL_SPEED`,
   `ANGULAR_SPEED`, `ESTIMATOR`). Checks, in order: `detection_valid`, confidence >=
@@ -149,8 +149,8 @@ length there.
 
 ## Files touched by F2
 
-- add `src/robotics_experiments/rl/press/_observation.py`, `.../_provider.py`,
-  `.../_handoff.py`, `.../_isaac_provider.py`
+- add `src/robotics_experiments/rl/press/observation.py`, `.../provider.py`,
+  `.../handoff.py`, `.../isaac_provider.py`
 - edit `src/robotics_experiments/rl/press/__init__.py` (lazy re-exports)
 - edit `src/robotics_experiments/config/types.py` (`PressHandoffConfig`,
   `PressObservationConfig` if needed), `configs/experiment/rl/default.yaml`

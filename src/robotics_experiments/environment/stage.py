@@ -2,11 +2,10 @@
 
 This module is intentionally Isaac-only: it imports ``carb`` and ``pxr`` at
 import time because every function operates on a live USD stage. The core import
-path never loads it directly; ``environment/__init__.py`` exposes the public API
-(``spawn_switches`` / ``despawn_switches`` / ``validate_switches``) lazily via
-``__getattr__``, so ``import robotics_experiments`` works outside the Isaac
-runtime. See ``robotics_experiments.simulation._isaac_settings`` for the same
-pattern and ``tests/test_core_imports.py`` for the boundary guard.
+path never loads it directly; Isaac runtime code imports this leaf module
+explicitly, so ``import robotics_experiments`` works outside the Isaac runtime.
+See ``robotics_experiments.simulation`` for the same pattern and
+``tests/test_core_imports.py`` for the boundary guard.
 """
 
 import os
@@ -16,8 +15,7 @@ from typing import List
 import carb
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
-from robotics_experiments.config._resolve import _resolve_section
-from robotics_experiments.config.types import BoundingBox, LightSwitchConfig
+from robotics_experiments.config import BoundingBox, LightSwitchConfig, get_config
 from robotics_experiments.environment.switches import SwitchState
 
 __all__ = ["spawn_switches", "despawn_switches", "validate_switches"]
@@ -209,7 +207,7 @@ def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) ->
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
-    config = _resolve_section("switches", config)
+    config = config if config is not None else get_config().switches
     positions = _sample_positions(
         config.num_switches,
         [_to_range(b) for b in config.spawn_bounds],

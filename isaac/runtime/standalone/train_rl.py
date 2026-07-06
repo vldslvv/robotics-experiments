@@ -98,8 +98,7 @@ def _build_env(task_id: str, seed: int, num_envs: int | None):
 
 
 def _run(args: argparse.Namespace) -> None:
-    import robotics_experiments.rl.training as training
-    from robotics_experiments.rl.press import HOVER_OBSERVATION_SCHEMA_VERSION, policy_metadata
+    import robotics_experiments.rl as rl
 
     config = get_config()
     training_cfg = config.rl.training
@@ -119,16 +118,14 @@ def _run(args: argparse.Namespace) -> None:
 
     env, env_cfg = _build_env(training_cfg.task_id, seed=seed, num_envs=args.num_envs)
     try:
-        runner = training.build_runner(
-            env, training_cfg, log_dir=str(run_dir / "logs"), device=device
-        )
-        result = training.train(runner, iterations)
-        metadata = policy_metadata(
+        runner = rl.build_runner(env, training_cfg, log_dir=str(run_dir / "logs"), device=device)
+        result = rl.train(runner, iterations)
+        metadata = rl.policy_metadata(
             config.rl.action,
-            obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
+            obs_schema_version=rl.HOVER_OBSERVATION_SCHEMA_VERSION,
             obs_dim=int(env_cfg.observation_space),
         )
-        training.export_policy(runner, run_dir, metadata=metadata)
+        rl.export_policy(runner, run_dir, metadata=metadata)
     finally:
         env.close()
 

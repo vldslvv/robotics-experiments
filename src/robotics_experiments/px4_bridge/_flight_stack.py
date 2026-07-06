@@ -6,10 +6,10 @@ from typing import Optional
 from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["AbstractFlightStackBridge"]
+__all__: list[str] = []
 
 
-class AbstractFlightStackBridge(ABC):
+class _AbstractFlightStackBridge(ABC):
     """Stage-able lockstep seam between sim orchestration and a flight stack.
 
     A tick decomposes into a non-blocking send leg and a blocking poll leg:

@@ -21,7 +21,7 @@ from typing import Any, Iterator
 from isaacsim import SimulationApp
 
 from robotics_experiments.config import get_config
-from robotics_experiments.config.load import _reset_config as reset_config
+from robotics_experiments.config import reset_config_cache as reset_config
 
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
 

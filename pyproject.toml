@@ -78,17 +78,16 @@ ignore = []
 "src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py" = ["SLF001"]
 # Bridge unit tests inject a fake connection into the vendored Pegasus backend
 # (fixture injection; the backend builds its own connection otherwise).
-"tests/test_px4_bridge_sensors.py" = ["SLF001"]
-"tests/test_px4_bridge_lockstep.py" = ["SLF001"]
-"tests/test_px4_bridge_actuator.py" = ["SLF001"]
+"tests/src/robotics_experiments/px4_bridge/test_px4_bridge_sensors.py" = ["SLF001"]
+"tests/src/robotics_experiments/px4_bridge/test_px4_bridge_lockstep.py" = ["SLF001"]
+"tests/src/robotics_experiments/px4_bridge/test_px4_bridge_actuator.py" = ["SLF001"]
 # Fake-state fixture injection (there is no live Isaac stage to initialize).
-"tests/test_isaac_articulation.py" = ["SLF001"]
-# Focused private-helper unit tests over a fixture-/importorskip-gated module
-# (the module cannot be imported at top level to bind the helper by name).
-"tests/test_isaac_settings.py" = ["SLF001"]
-"tests/test_usd_builder_config.py" = ["SLF001"]
+"tests/src/robotics_experiments/px4_bridge/test_isaac_articulation.py" = ["SLF001"]
+# Focused private-helper unit tests over fixture-/importorskip-gated modules
+# (the modules cannot be imported at top level to bind the helpers by name).
+"tests/isaac/runtime/standalone/test_usd_builder_config.py" = ["SLF001"]
 # Deliberate time-base corruption guard (writes a private to force the failure).
-"tests/test_sim_clock.py" = ["SLF001"]
+"tests/src/robotics_experiments/px4_bridge/test_sim_clock.py" = ["SLF001"]
 # Negative-test fault injection: swaps the bridge's thrust model for a faulty one.
 "isaac/runtime/standalone/tests/test_px4_takeoff_instability_detection.py" = ["SLF001"]
 
