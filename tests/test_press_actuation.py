@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from robotics_experiments.press import (
+from robotics_experiments.rl.press import (
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
@@ -86,7 +86,7 @@ def _params(kind: str):
 
 
 def _level_rest_state():
-    from robotics_experiments.press import ActuationState
+    from robotics_experiments.rl.press import ActuationState
 
     return ActuationState(
         attitude_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),

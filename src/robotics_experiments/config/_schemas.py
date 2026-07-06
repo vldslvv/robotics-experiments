@@ -5,8 +5,9 @@ from .types import (
     DroneConfig,
     EnvConfig,
     LightSwitchConfig,
-    PressConfig,
+    PressTaskConfig,
     Px4BridgeConfig,
+    RlConfig,
     RoutineConfig,
     SimSettings,
 )
@@ -31,6 +32,7 @@ def _register_schemas() -> None:
     cs.store(group="experiment/drone", name="base_drone", node=DroneConfig)
     cs.store(group="experiment/switches", name="base_switches", node=LightSwitchConfig)
     cs.store(group="experiment/px4", name="base_px4", node=Px4BridgeConfig)
-    cs.store(group="experiment/press", name="base_press", node=PressConfig)
+    cs.store(group="experiment/rl", name="base_rl", node=RlConfig)
+    cs.store(group="experiment/rl/press", name="base_press_task", node=PressTaskConfig)
     cs.store(group="experiment/routine", name="base_routine", node=RoutineConfig)
     cs.store(group="experiment/driver", name="base_driver", node=DriverConfig)

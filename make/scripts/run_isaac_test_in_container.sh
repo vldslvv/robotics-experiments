@@ -66,6 +66,14 @@ strict_args=()
 if [ -n "${STRICT}" ]; then
     strict_args+=("--strict")
 fi
+# Optional extra CLI args for the test script (word-split on purpose), e.g.
+# a training smoke run's "--max-iterations 5".
+: "${ISAAC_TEST_EXTRA_ARGS:=}"
+extra_args=()
+if [ -n "${ISAAC_TEST_EXTRA_ARGS}" ]; then
+    # shellcheck disable=SC2206
+    extra_args=(${ISAAC_TEST_EXTRA_ARGS})
+fi
 
 SCRIPT_START_MS="$(now_ms)"
 cd /isaac-sim
@@ -84,7 +92,7 @@ else
 fi
 
 stage_start_ms="$(now_ms)"
-if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" "${strict_args[@]}" \
+if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" "${strict_args[@]}" "${extra_args[@]}" \
     2>&1 | tee -a "${ISAAC_TEST_LOG}" | terminal_control_filter | \
         grep --line-buffered -E "${ISAAC_TEST_LOG_FILTER}"; then
     integration_timing "test_script" "${stage_start_ms}"

@@ -40,6 +40,7 @@ from .routine import (
     DecisionKind,
     EnvelopeGates,
     FailureKind,
+    PolicyStepFn,
     VehicleRoutine,
     build_vehicle_routine,
 )
@@ -98,6 +99,10 @@ class DriverParams:
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
+    # The injected artifact-loading seam for ``policy`` steps (built by the
+    # runtime from ``rl.press.policy.build_policy_step_fn``); ``None`` means a
+    # routine with a policy step fails loudly at BUILD.
+    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None
 
     @classmethod
     def from_routine_config(
@@ -108,6 +113,7 @@ class DriverParams:
         home_lat_deg: float = DEFAULT_HOME_LAT_DEG,
         home_lon_deg: float = DEFAULT_HOME_LON_DEG,
         home_alt_m: float = DEFAULT_HOME_ALT_M,
+        policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None,
     ) -> "DriverParams":
         """Build from ``RoutineConfig``- and ``DriverConfig``-shaped objects.
 
@@ -146,6 +152,7 @@ class DriverParams:
             prearm_backstop_floor_s=driver.prearm_backstop_floor_s,
             prearm_backstop_multiplier=driver.prearm_backstop_multiplier,
             drive_budget_multiplier=driver.drive_budget_multiplier,
+            policy_fn_factory=policy_fn_factory,
         )
 
 
@@ -287,7 +294,23 @@ class RoutineDriver:
     def _tick_build(self) -> None:
         assert self._target is not None
         latitude_deg, longitude_deg, altitude_m = self._target
-        self._routine = build_vehicle_routine(
+        try:
+            self._routine = self._build_routine(latitude_deg, longitude_deg, altitude_m)
+        except ValueError as exc:
+            # A bad routine config (unknown kind, missing field, unloadable
+            # policy artifact) is a terminal command failure, routed through
+            # on_failure so the strict/forgiving reaction applies.
+            self._fail(FailureKind.COMMAND, f"[{self._label}] routine build failed: {exc}")
+            return
+        self._commander = VehicleCommander(self._routine, self._port)
+        self._prev_cursor = 0
+        self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
+        self._enter(DriverPhase.DRIVE)
+
+    def _build_routine(
+        self, latitude_deg: float, longitude_deg: float, altitude_m: float
+    ) -> VehicleRoutine:
+        return build_vehicle_routine(
             self._params.steps,
             target_latitude_deg=latitude_deg,
             target_longitude_deg=longitude_deg,
@@ -304,11 +327,8 @@ class RoutineDriver:
             goto_cross_track_m=self._params.goto_cross_track_m,
             goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
             goto_min_heading_dist_m=self._params.goto_min_heading_dist_m,
+            policy_fn_factory=self._params.policy_fn_factory,
         )
-        self._commander = VehicleCommander(self._routine, self._port)
-        self._prev_cursor = 0
-        self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
-        self._enter(DriverPhase.DRIVE)
 
     def _tick_drive(self) -> None:
         assert self._commander is not None and self._routine is not None

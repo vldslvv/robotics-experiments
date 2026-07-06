@@ -1,5 +1,13 @@
 # F2 -- Observation Interface + pose-provider seam + handoff gate
 
+Status: COMPLETE (2026-07-05). The pure stack (`PressObservation`/`to_vector`,
+contact frame, `AbstractPoseProvider`/`PoseSample`, `handoff_ready` +
+`rl.press.handoff` config, the lazy `GroundTruthPoseProvider` Isaac leaf) is
+implemented with pure tests, ADR 0014 records the contract, and the hover+goto
+gate's side channel measured the exit condition: wall-normal range shrinking
+2.190 m -> 0.254 m across the goto with the handoff gate flipping from
+`TOO_FAR` to ready at the settled endpoint.
+
 Goal served: goal 1 (a stable policy input for the easy task) and the substrate for
 goals 3/4. Depends on: nothing (parallel with F1 and F2b; Step 1 adopts F2b's
 versioned-layout convention when both exist). Blocks: F3.
@@ -15,7 +23,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 1 -- Define the pure observation dataclass
 
-- Action: create `src/robotics_experiments/press/_observation.py` (pure; numpy +
+- Action: create `src/robotics_experiments/rl/press/_observation.py` (pure; numpy +
   stdlib only). Define `@dataclass(frozen=True) class PressObservation` with the
   task-relative fields (units/frames in docstrings):
   - `relative_switch_pos_m: np.ndarray` (3,), in the contact frame (Step 2)
@@ -67,7 +75,7 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 3 -- Define the pose-provider seam
 
-- Action: create `src/robotics_experiments/press/_provider.py` (pure). Define
+- Action: create `src/robotics_experiments/rl/press/_provider.py` (pure). Define
   `class AbstractPoseProvider(Protocol)` with:
   - `sample(sim_time_s) -> PoseSample` where
     `@dataclass(frozen=True) class PoseSample` carries
@@ -84,20 +92,20 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ## Step 4 -- Ground-truth provider (Isaac leaf)
 
-- Action: create `src/robotics_experiments/press/_isaac_provider.py` -- a guarded
+- Action: create `src/robotics_experiments/rl/press/_isaac_provider.py` -- a guarded
   Isaac leaf (imports isaacsim/pxr; off the core path; re-exported lazily only when
   Isaac is present, mirroring `environment/__init__.py __getattr__`). Implement
   `GroundTruthPoseProvider` that reads the switch prim world pose from the live
   stage/articulation and returns a `PoseSample` with `confidence=1.0`, `age_s=0.0`,
   `valid=True`.
-- Keep `press/__init__.py` re-export-only and lazy for this symbol so
-  `import robotics_experiments.press` stays Isaac-free.
+- Keep `rl/press/__init__.py` re-export-only and lazy for this symbol so
+  `import robotics_experiments.rl.press` stays Isaac-free.
 - Test: `tests/test_core_imports.py` asserts `press` imports with Isaac absent and
   that `_isaac_provider` is not eager-imported.
 
 ## Step 5 -- Handoff gate (pure predicate + config)
 
-- Action: create `src/robotics_experiments/press/_handoff.py` (pure). Implement
+- Action: create `src/robotics_experiments/rl/press/_handoff.py` (pure). Implement
   `handoff_ready(obs: PressObservation, gate: HandoffGate) -> HandoffResult` where
   the result is either ready or a reason enum (`NOT_VALID`, `LOW_CONFIDENCE`,
   `STALE`, `TOO_FAR`, `LATERAL`, `WALL_NORMAL_SPEED`, `LATERAL_SPEED`,
@@ -107,11 +115,11 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
   angular-rate magnitude <= threshold, estimator_health >= threshold.
 - `HandoffGate` is a frozen dataclass built from config (no magic numbers in code).
 - Action: append a `PressHandoffConfig` to `config/types.py` and a
-  `handoff:` block to `configs/experiment/press/default.yaml` with the initial
+  `handoff:` block to `configs/experiment/rl/default.yaml` with the initial
   thresholds from ROADMAP1's handoff table (`pose_confidence_min`, `pose_age_max_s`,
   `switch_range_max_m`, `lateral_align_max_m`, `wall_normal_speed_max_mps`,
   `lateral_speed_max_mps`, `angular_speed_max_radps`, `estimator_health_min`). Add
-  `handoff: PressHandoffConfig` to `PressConfig`.
+  `handoff: PressHandoffConfig` to `RlConfig`.
 - Reuse note: this mirrors the command layer's continuous envelope invariants
   (`commanding/routine.py`: `tilt_below`, `_lateral_drift_below`, ...). Keep the
   same pure-predicate style; do not duplicate the envelope-gate logic, but a
@@ -120,34 +128,41 @@ over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
   is ready; each individual violation returns its specific reason; boundary values
   behave.
 
-## Step 6 -- Wire the observation into the env
+## Step 6 -- In-sim validation (side channel; env wiring is F3's)
 
-- Action: in the env leaf (`drone_hover_env.py` for now; F3's press env after), add
-  `_assemble_observation()` that builds a `PressObservation` from the provider's
-  `PoseSample` + the drone's sim state (vel, ang vel, attitude), packs it with
-  `to_vector`, and returns `{"policy": tensor}`. Set the env's
-  `observation_space` from the layout length.
-- Contact/pusher/lamp fields are placeholders here (F3 fills them from the pusher
-  joint + contact reporter + latch); set `contact_flag=False`,
-  `pusher_compression_m` from the pusher joint position if present, else 0.
-- Done when: the env emits a fixed-length observation whose length equals
-  `to_vector` layout, and a ground-truth run shows `relative_switch_pos_m` shrinking
-  as the drone approaches a placed switch.
+Decision (2026-07-05, keeps F2 consistent with F2b): the hover env KEEPS its
+13-dim hover layout -- that is the F2b training observation -- so
+`PressObservation` is NOT wired into `drone_hover_env.py`. The env that consumes
+`PressObservation` as its policy input is F3's press env (`switch_press_env.py`),
+which owns `_assemble_observation()` + `observation_space` from the layout
+length there.
+
+- Action: validate the F2 stack in-sim as a side channel in the existing
+  hover+goto gate (`isaac/runtime/standalone/tests/test_press_hover_goto.py`):
+  reference one `LightSwitch.usd` prim near the goto target (env 0), and each
+  policy step sample `GroundTruthPoseProvider`, assemble a `PressObservation`
+  (contact/pusher/lamp fields placeholder: `contact_flag=False`, compression 0),
+  and evaluate `handoff_ready`. The env's training observation is untouched.
+- Done when: the gate run shows the wall-normal range shrinking as the drone
+  flies the goto leg toward the placed switch, and `handoff_ready` flips to
+  ready inside the configured thresholds.
 
 ## Files touched by F2
 
-- add `src/robotics_experiments/press/_observation.py`, `.../_provider.py`,
+- add `src/robotics_experiments/rl/press/_observation.py`, `.../_provider.py`,
   `.../_handoff.py`, `.../_isaac_provider.py`
-- edit `src/robotics_experiments/press/__init__.py` (lazy re-exports)
+- edit `src/robotics_experiments/rl/press/__init__.py` (lazy re-exports)
 - edit `src/robotics_experiments/config/types.py` (`PressHandoffConfig`,
-  `PressObservationConfig` if needed), `configs/experiment/press/default.yaml`
-- edit the env leaf to assemble/pack the observation
+  `PressObservationConfig` if needed), `configs/experiment/rl/default.yaml`
+- edit `isaac/runtime/standalone/tests/test_press_hover_goto.py` (side-channel
+  validation; the env leaf itself is untouched -- press-env wiring is F3)
 - add `tests/test_press_observation.py`, `tests/test_press_handoff.py`; extend
   `tests/test_core_imports.py`
 - record an ADR for the observation/provider contract (it is a load-bearing seam)
 
 ## Exit gate
 
-Pure observation + handoff tests pass; `press` imports Isaac-free; a ground-truth
-run produces a shrinking relative-switch-pose observation and the handoff predicate
-flips to ready inside the gate. This plus F1's gate are the preconditions for F3.
+Pure observation + handoff tests pass; `press` imports Isaac-free; the hover+goto
+gate's side channel shows a shrinking relative-switch-pose observation from the
+ground-truth provider and the handoff predicate flips to ready inside the
+thresholds. This plus F1's gate are the preconditions for F3.

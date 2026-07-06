@@ -15,7 +15,7 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 
 ## Step 1 -- Pure synthetic-estimator math
 
-- Action: create `src/robotics_experiments/press/_synthetic_pose.py` (pure; numpy +
+- Action: create `src/robotics_experiments/rl/press/_synthetic_pose.py` (pure; numpy +
   stdlib, seedable). Implement the noise models from ROADMAP1's appendix as pure
   functions over a ground-truth `PoseSample`:
   - position noise (Gaussian), orientation noise (Gaussian on axis-angle),
@@ -46,12 +46,12 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 
 - Action: add `PressPerceptionConfig` (provider selector + the synthetic-estimator
   parameters) to `config/types.py` and a `perception:` block to
-  `configs/experiment/press/default.yaml`, authored from ROADMAP1's appendix YAML:
+  `configs/experiment/rl/default.yaml`, authored from ROADMAP1's appendix YAML:
   `publish_rate_hz`, `position_noise_std_m`, `orientation_noise_std_deg`,
   `latency` (base/jitter/max), `dropout` (bernoulli_p, burst enter p, burst
   length), `bias_random_walk`, `outliers` (p, shift ranges),
   `confidence_model` (min/nominal/age penalty). Add `perception: PressPerceptionConfig`
-  to `PressConfig`.
+  to `RlConfig`.
 - Also activate the `pose_noise` dimension of the F4 curriculum (which was 0 until
   now): the noisy-perception curriculum stages ramp these ranges.
 - Rule: every stochastic parameter is config-driven and seedable.
@@ -91,10 +91,10 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 
 ## Files touched by F5
 
-- add `src/robotics_experiments/press/_synthetic_pose.py`; edit `.../_provider.py`
-  (or a new `SyntheticPoseProvider`), `press/__init__.py`
+- add `src/robotics_experiments/rl/press/_synthetic_pose.py`; edit `.../_provider.py`
+  (or a new `SyntheticPoseProvider`), `rl/press/__init__.py`
 - edit `config/types.py` (`PressPerceptionConfig`),
-  `configs/experiment/press/default.yaml`
+  `configs/experiment/rl/default.yaml`
 - edit the env to select the provider by config + the bounded retry stub
 - add `tests/test_press_synthetic_pose.py`; extend `tests/test_press_handoff.py`
 

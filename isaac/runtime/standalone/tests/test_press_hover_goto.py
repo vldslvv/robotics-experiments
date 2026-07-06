@@ -49,6 +49,12 @@ _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
 
+# F2 side-channel validation: one switch prim placed this far beyond the goto
+# target along +X, outward plate normal facing the approaching drone, so the
+# settled drone sits inside the handoff gate's switch-range threshold.
+_SWITCH_BEYOND_GOTO_M = 0.25
+_SWITCH_PRIM_PATH = "/World/PressValidationSwitch"
+
 
 @dataclass(frozen=True)
 class _DriveStats:
@@ -257,8 +263,108 @@ def _run_ctbr_sanity(
         env.close()
 
 
+def _setup_press_side_channel(goto_target_env0: np.ndarray):
+    """Place the F2 validation switch prim and return its ground-truth provider.
+
+    The prim's world pose is what the provider reads; its authored orientation
+    (pi about Z) makes the local +X outward plate normal face the approaching
+    drone, per the contact-frame convention in ``rl.press.observation``.
+    """
+    # Isaac-app imports (omni/pxr and the press Isaac leaf) stay deferred until
+    # after AppLauncher, per the standalone import-ordering rule.
+    import omni.usd
+    from pxr import Gf, UsdGeom
+
+    from robotics_experiments.rl.press import GroundTruthPoseProvider
+
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.DefinePrim(_SWITCH_PRIM_PATH, "Xform")
+    prim.GetReferences().AddReference(get_config().switches.switch_usd_path)
+    xform = UsdGeom.Xformable(prim)
+    xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
+        Gf.Vec3d(*(float(v) for v in goto_target_env0))
+    )
+    xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(0.0, Gf.Vec3d(0.0, 0.0, 1.0)))
+    return GroundTruthPoseProvider(stage, _SWITCH_PRIM_PATH)
+
+
+def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
+    """Assemble a PressObservation for env 0 from the provider + sim state.
+
+    This is the F2 deploy-shape assembly running as a side channel: it never
+    touches the env's training observation.
+    """
+    from robotics_experiments.rl.press import (
+        PressObservation,
+        to_vector,
+        world_switch_to_contact_frame,
+    )
+    from robotics_experiments.px4_bridge.frames import quat_wxyz_to_xyzw, world_enu_to_body_flu
+
+    position = env.drone.data.root_pos_w[0].cpu().numpy().astype(np.float64)
+    quat_wxyz = env.drone.data.root_quat_w[0].cpu().numpy().astype(np.float64)
+    lin_vel_w = env.drone.data.root_lin_vel_w[0].cpu().numpy().astype(np.float64)
+    ang_vel_b = env.drone.data.root_ang_vel_b[0].cpu().numpy().astype(np.float64)
+    sample = provider.sample(0.0)
+    sq = sample.world_switch_quat_xyzw
+    switch_quat_wxyz = np.array([sq[3], sq[0], sq[1], sq[2]], dtype=np.float64)
+    rel_pos, rel_quat = world_switch_to_contact_frame(
+        (position, quat_wxyz), (sample.world_switch_pos_m, switch_quat_wxyz)
+    )
+    observation = PressObservation(
+        relative_switch_pos_m=rel_pos,
+        relative_switch_quat_xyzw=rel_quat,
+        pose_confidence=sample.confidence,
+        pose_age_s=sample.age_s,
+        detection_valid=sample.valid,
+        body_lin_vel_mps=world_enu_to_body_flu(quat_wxyz, lin_vel_w),
+        body_ang_vel_radps=ang_vel_b,
+        attitude_quat_xyzw=quat_wxyz_to_xyzw(quat_wxyz),
+        pusher_compression_m=0.0,
+        pusher_compression_rate_mps=0.0,
+        contact_valid=False,
+        contact_flag=False,
+        lamp_state=-1,
+        lamp_confidence=0.0,
+        lamp_age_s=0.0,
+        previous_action=np.zeros(action_dim),
+        handoff_mode=0,
+        estimator_health=1.0,
+        obs_mask=0,
+    )
+    assert to_vector(observation).shape == (30 + action_dim,)
+    return observation
+
+
+def _validate_press_side_channel(start_obs, end_obs) -> None:
+    """F2 exit-gate checks over the start/end side-channel observations."""
+    from robotics_experiments.rl.press import HandoffGate, handoff_ready
+
+    start_range = float(start_obs.relative_switch_pos_m[0])
+    end_range = float(end_obs.relative_switch_pos_m[0])
+    _report(f"press observation wall-normal range: start={start_range:.3f} m end={end_range:.3f} m")
+    if not end_range < start_range - 1.5:
+        raise AssertionError(
+            f"relative switch range did not shrink across the goto: "
+            f"{start_range:.3f} m -> {end_range:.3f} m"
+        )
+    gate = HandoffGate.from_config(get_config().rl.press.handoff)
+    start_result = handoff_ready(start_obs, gate)
+    if start_result.ready:
+        raise AssertionError("handoff gate was already ready 2 m from the switch")
+    end_result = handoff_ready(end_obs, gate)
+    _report(
+        f"handoff gate: start_reason={start_result.reason} "
+        f"end_ready={end_result.ready} end_reason={end_result.reason}"
+    )
+    if not end_result.ready:
+        raise AssertionError(
+            f"handoff gate not ready at the settled goto endpoint: {end_result.reason}"
+        )
+
+
 def _run(args: argparse.Namespace) -> None:
-    action_cfg = get_config().press.action
+    action_cfg = get_config().rl.action
     if args.ctbr_sanity:
         action_cfg.kind = "ctbr"
 
@@ -275,7 +381,7 @@ def _run(args: argparse.Namespace) -> None:
     if action_cfg.kind != "velocity":
         raise AssertionError(
             f"hover+goto gate drives the analytic velocity controller; "
-            f"press.action.kind={action_cfg.kind!r} is not supported here"
+            f"rl.action.kind={action_cfg.kind!r} is not supported here"
         )
     max_velocity = float(action_cfg.max_body_velocity_mps)
 
@@ -312,6 +418,15 @@ def _run(args: argparse.Namespace) -> None:
             )
 
         goto_target = target + torch.tensor([_GOTO_DISTANCE_M, 0.0, 0.0], device=env.device)
+        # F2 side channel: a switch just beyond env 0's goto target; the
+        # ground-truth provider + PressObservation assembly run alongside the
+        # gate without touching the env's training observation.
+        switch_pos_env0 = goto_target[0].cpu().numpy().astype(np.float64) + np.array(
+            [_SWITCH_BEYOND_GOTO_M, 0.0, 0.0]
+        )
+        provider = _setup_press_side_channel(switch_pos_env0)
+        action_dim = int(env.cfg.action_space)
+        press_start_obs = _press_observation_sample(env, provider, action_dim)
         goto = _drive_to(
             env,
             goto_target,
@@ -332,6 +447,9 @@ def _run(args: argparse.Namespace) -> None:
                 f"last-window max error {goto.last_window_max_error_m:.3f} m "
                 f"> {_GOTO_TOLERANCE_M} m"
             )
+
+        press_end_obs = _press_observation_sample(env, provider, action_dim)
+        _validate_press_side_channel(press_start_obs, press_end_obs)
     finally:
         env.close()
 

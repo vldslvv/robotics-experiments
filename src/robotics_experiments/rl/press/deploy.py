@@ -1,6 +1,6 @@
 """Pure RL-action -> PX4 OFFBOARD setpoint mapping (deploy-time seam).
 
-The deploy-time analogue of ``press.actuation``: in Lab the action drives the
+The deploy-time analogue of ``rl.press.actuation``: in Lab the action drives the
 in-sim actuation model; at deploy the *same* normalized action maps to a PX4
 OFFBOARD setpoint streamed over the GCS link. This module owns only the pure
 conversion (body-FLU RL action -> the PX4 body-FRD wire payloads exported by
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..commanding import AttitudeRateSetpoint, VelocitySetpoint
+from ...commanding import AttitudeRateSetpoint, VelocitySetpoint
 
 __all__ = ["press_action_to_offboard"]
 
@@ -54,7 +54,7 @@ def press_action_to_offboard(action: np.ndarray, action_cfg):
     Args:
         action: The normalized policy action (``[vx, vy, vz, yaw_rate]`` for
             ``velocity`` / ``[thrust, wx, wy, wz]`` for ``ctbr``), body-FLU.
-        action_cfg: The ``press.action`` config (``kind`` + the command scales
+        action_cfg: The ``rl.action`` config (``kind`` + the command scales
             ``max_body_velocity_mps`` / ``max_yaw_rate_radps`` /
             ``max_body_rate_radps`` / ``hover_thrust_fraction``).
 
@@ -72,5 +72,5 @@ def press_action_to_offboard(action: np.ndarray, action_cfg):
     if kind == "ctbr":
         return _attitude_target(action, action_cfg)
     raise ValueError(
-        f"unsupported press.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
+        f"unsupported rl.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
     )

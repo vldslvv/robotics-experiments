@@ -131,10 +131,10 @@ the current contents and the intended home for that kind of code.
 - Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
   for direct-workflow environments. The first task is
   `Isaac-Drone-Hover-Direct-v0`; it flies N parallel drones through the
-  pluggable in-Lab actuation seam (`robotics_experiments.press`), which maps a
+  pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
   normalized RL action to per-rotor angular-velocity references (and thence to
   forces) without a PX4 lockstep per env. The action level is a config switch
-  (`press.action.kind`): `velocity` (default; cascaded PD tracking body-frame
+  (`rl.action.kind`): `velocity` (default; cascaded PD tracking body-frame
   velocity + yaw rate) or `ctbr` (collective thrust + body-rate setpoint). The
   actuation is written functionally -- state in frozen params dataclasses built
   once (`build_actuation_params` / `build_flight_actuation_params`, both
@@ -142,17 +142,61 @@ the current contents and the intended home for that kind of code.
   (`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
   a future pipeline composes it as plain functions with the RL policy as one
   stage. The pure single-env reference implementation lives in
-  `press/actuation.py` (numpy, the test oracle) and its batched torch twin the
+  `rl/press/actuation.py` (numpy, the test oracle) and its batched torch twin the
   env runs lives in
   `workflows/isaac_lab/tasks/_flight.py`; both mirror the PX4 bridge's
   `PegasusQuadraticThrustModel` allocation so an action reproduces the commanded
-  wrench. Press-training scale and the RL action level live in the Hydra `press`
-  group (which replaced the retired `isaac_lab` group) with matching bare
-  annotations in `src/robotics_experiments/config/types.py`; the physics
-  decimation is derived as `round(sim.physics_hz / press.policy_rate_hz)`, not
-  authored. The RL action also maps to a PX4 OFFBOARD setpoint at deploy time
-  (`press/deploy.py` + the commanding-layer velocity / attitude-rate setpoint
-  seams).
+    wrench. Shared RL training scale and the RL action level live in the Hydra
+  `rl` group (which replaced the retired `press`/`isaac_lab` hierarchy) with
+  matching bare annotations in `src/robotics_experiments/config/types.py`; the physics
+  decimation is derived as `round(sim.physics_hz / rl.policy_rate_hz)`, not
+  authored, and the hover task's reward/termination/reset values are the
+  `rl.press.hover_task` block (task definition = one YAML block; no task-tuning
+  literal in the env module). The RL action also maps to a PX4 OFFBOARD
+  setpoint at deploy time (`rl/press/deploy.py` + the commanding-layer velocity /
+  attitude-rate setpoint seams).
+- The task->policy pipeline (F2b) is `task YAML -> make train-rl -> policy
+  artifact -> {kind: policy} routine step -> FleetOrchestrator` (the
+  orchestrator itself is unchanged apart from injecting the artifact-loader
+  factory into `DriverParams`). Pieces:
+  - **Observation layouts** (`rl/press/observation.py`, pure, versioned): the
+    13-dim hover layout (`HOVER_OBSERVATION_SCHEMA_VERSION`,
+    `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
+    velocity) and the press-task `PressObservation`/`to_vector`
+    (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
+    (`world_switch_to_contact_frame`; switch local `+X` = outward plate
+    normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
+    and `VehicleState` at deploy; a field the deploy side cannot assemble is
+    forbidden in a layout. The pose source is the `AbstractPoseProvider` /
+    `PoseSample` seam (`rl/press/_provider.py`; ground truth in the Isaac leaf
+    `rl/press/_isaac_provider.py` behind the lazy `rl/press/__init__.__getattr__`),
+    and the nav->contact handoff is the pure `handoff_ready` gate
+    (`rl/press/_handoff.py`, thresholds in `rl.press.handoff`). See ADR 0014.
+  - **Training** (`rl/training/`, lazy; `_rsl_rl.py` is the only rsl_rl
+    importer): `build_runner`/`train`/`export_policy` over `RlTrainingConfig`
+    (the `rl.training` block, incl. explicit `task_id` and `policy_name`).
+    `make train-rl` (thin
+    target in `make/training.mk`, runs `isaac/runtime/standalone/train_rl.py`
+    on `ISAAC_LAB_IMAGE`, never the base image) writes the artifact under
+    `.build/training/<policy-name>/<run-id>/` and updates the named
+    `.build/training/<policy-name>/latest` symlink; `TRAIN_ARGS='--max-iterations
+    5'` is the smoke run. rsl_rl comes from the Lab image (`isaaclab.sh
+    --install`); the host `training` extra (`rsl-rl-lib`) exists for tooling
+    only.
+  - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
+    version/dim, action kind/dim, action scales). `rl/press/policy.py::load_policy`
+    raises `ValueError` on ANY metadata/config mismatch at load (a bare
+    checkpoint is not a valid artifact); `build_policy_step_fn` composes
+    load + hover-observation packing + `press_action_to_offboard` into the
+    `PolicyStepFn` the `{kind: policy}` routine step streams.
+  - **Gate**: `make test-integration-press-policy` flies
+    `configs/integration_test_press_policy.yaml` (routine `policy_hover`: arm ->
+    takeoff -> policy hover hold -> land) strict over PX4 SITL on
+    `ISAAC_LAB_IMAGE`. It needs a prior `make train-rl` (the routine
+    references `.build/training/hover/latest`), so it is deliberately NOT part of
+    `test-integration-all`. The hover+goto gate additionally runs the F2
+    side-channel validation (ground-truth provider + `PressObservation` +
+    handoff flip) without touching the env's training observation.
 - PX4 bridge behavior is configured through the Hydra `px4` group. The default
   experiment enables the bridge for the custom Isaac runtime; use Hydra
   overrides such as `px4.enabled=false` for Isaac sessions that should not
@@ -296,7 +340,7 @@ the current contents and the intended home for that kind of code.
   production runtime surface (`RoutineDriver`, `DriverParams`,
   `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
   `FailureKind`, and the deploy-time wire payloads `VelocitySetpoint` /
-  `AttitudeRateSetpoint` consumed by `press.deploy`). The command layer's public
+  `AttitudeRateSetpoint` consumed by `rl.press.deploy`). The command layer's public
   seams live in non-underscored modules (`commands`, `observation`, `routine`,
   `port`, `driver`), each declaring its own `__all__` and underscore-prefixing its
   private top-level members; only the internal `_commander` module (the
@@ -310,7 +354,9 @@ the current contents and the intended home for that kind of code.
   `failsafe` / `sim_time_us`) -> `decide(routine, state, observation)` (the pure
   stepper, analogue of `commands_to_dynamics`) -> `RoutineDecision`
   (`SEND`/`STREAM`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output; `STREAM` carries a
-  `PositionSetpoint` for the OFFBOARD `goto` setpoint stream) across the
+  `StreamSetpoint` -- `PositionSetpoint` for the `goto` stream,
+  `VelocitySetpoint`/`AttitudeRateSetpoint` for the `policy` step -- dispatched
+  by the commander on the concrete payload type) across the
   `AbstractCommandPort` seam (analogue of `AbstractFlightStackBridge`), with
   `VehicleCommander` and the pure per-drone `RoutineDriver` as the orchestrators
   (analogue of `BridgeHost`). The command layer is **per drone** like the bridge:
@@ -329,8 +375,10 @@ the current contents and the intended home for that kind of code.
   dataclasses. The only side effect in the layer is the port
   (`send` / `send_setpoint` / `connect` / `pump_heartbeat` / `poll_feedback`);
   `VehicleCommander` runs the pure `decide` and then performs the single side
-  effect (`SEND` -> `send`, `STREAM` -> `send_setpoint`), keeping
-  decision and I/O separated. Step `timeout_s` is measured in **sim time**
+  effect (`SEND` -> `send`, `STREAM` -> the send method matching the payload
+  type), keeping decision and I/O separated. A `policy` step's network forward
+  pass runs inside `decide` as an injected deterministic callable (numpy
+  in/out, no I/O), preserving the split. Step `timeout_s` is measured in **sim time**
   (`observation.sim_time_us`) so the stepper stays pure; the driver pairs it with
   a wall-clock backstop.
 - `gcs_port` is control, not bridge: the `MavlinkCommandPort` talks the per-drone
@@ -424,14 +472,25 @@ the current contents and the intended home for that kind of code.
   **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
   (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
   `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
-  `{kind: goto, x, y, z, timeout_s}` / `{kind: land, timeout_s}` mappings) gets
+  `{kind: goto, x, y, z, timeout_s}` /
+  `{kind: policy, artifact, hold_s, timeout_s[, target]}` /
+  `{kind: land, timeout_s}` mappings) gets
   its own `RoutineDriver`; an **empty** list
   (the default `configs/experiment/routine/default.yaml`) means that drone is
   manual. Mixed fleets are allowed. There is no separate enable flag. The private
   pure routine builder maps the descriptors + a per-drone takeoff target into the
-  routine object the driver executes (unknown `kind`, or a `takeoff`/`hover`/`goto`
-  missing a required field, raises `ValueError`); it stays on the core import path
-  and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver. The takeoff step completes on a real
+  routine object the driver executes (unknown `kind`, or a step
+  missing a required field, raises `ValueError`, routed through `on_failure` at
+  the driver's BUILD phase); it stays on the core import path
+  and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver.
+  The `policy` step streams a trained policy's OFFBOARD setpoints over the
+  `goto` prime/engage/stream lifecycle: the orchestrator injects
+  `policy_fn_factory` (from `rl.press.policy.build_policy_step_fn`) into
+  `DriverParams`, the step completes after PX4 accepts OFFBOARD and then
+  `hold_s` of continuous in-envelope flight (a bad policy fails as
+  `ENVELOPE`), and a routine should follow it with an explicit-command step
+  such as `land`
+  (`configs/experiment/routine/policy_hover.yaml` is the shipped variant). The takeoff step completes on a real
   climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained
   `hovering_stable(...)`, with the gates as continuous invariants on both (the
   historical windowed min/max-range hover gates are now sustained
@@ -487,7 +546,10 @@ the current contents and the intended home for that kind of code.
   and must not be committed.
 - Initialize or repair the environment with `uv sync --extra dev`. The `dev`
   extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
-  intentionally omits it; pass `--extra dev` when you need the tooling.
+  intentionally omits it; pass `--extra dev` when you need the tooling. The
+  `training` extra (`rsl-rl-lib`, pulls torch) exists for host-side tooling
+  only -- actual training runs in the Isaac Lab image, which already ships
+  rsl_rl; do not install it routinely.
 - If `.venv` is missing, points outside the repository, or cannot be read from
   the sandbox, recreate it with the repo-local interpreter:
   `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then

@@ -32,6 +32,9 @@ dev = [
   "vulture==2.16",
   "types-requests",
 ]
+training = [
+    "rsl-rl-lib>=3.1.2,<4",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -92,6 +95,10 @@ ignore = []
 [tool.vulture]
 paths = ["src"]
 min_confidence = 80
+# Interface parameters on seam Protocols whose consuming implementations live
+# outside src (rsl_rl's OnPolicyRunner.learn) or arrive with F5 (the synthetic
+# pose provider is the first to actually read sample()'s sim_time_s).
+ignore_names = ["sim_time_s", "num_learning_iterations", "init_at_random_ep_len"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -1,0 +1,14 @@
+defaults:
+  - config
+  - override experiment/routine@routine: policy_hover
+  - _self_
+
+# Single-drone F2b task->policy pipeline experiment: arm -> takeoff -> trained
+# RL policy holds the hover over PX4 SITL -> land, through the unchanged
+# FleetOrchestrator. Identical in shape to the takeoff experiment; it selects
+# the policy_hover routine and the minimal integration stage. The strict make
+# target (`make test-integration-press-policy`, Isaac Lab image for torch)
+# requires a trained artifact at .build/training/hover/latest (`make train-rl`);
+# `make run-all HYDRA_CONFIG=configs/integration_test_press_policy.yaml` flies
+# it forgivingly.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"

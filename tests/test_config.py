@@ -48,7 +48,8 @@ def test_default_config_loads_from_root_experiment_config():
     expected_drone = _group_defaults("drone")
     expected_switches = _group_defaults("switches")
     expected_px4 = _group_defaults("px4")
-    expected_press = _group_defaults("press")
+    expected_rl = _group_defaults("rl")
+    expected_press = _group_defaults("rl/press")
 
     assert isinstance(config, EnvConfig)
     assert config.sim.physics_hz == expected_sim.physics_hz
@@ -102,13 +103,18 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.debug_log_level == "DEBUG"
     assert config.px4.sensor_debug_log_interval == 50
     assert config.px4.max_tilt_angle_deg == 60.0
-    assert config.press.num_envs == expected_press.num_envs
-    assert config.press.env_spacing == expected_press.env_spacing
-    assert config.press.episode_length_s == expected_press.episode_length_s
-    assert config.press.policy_rate_hz == expected_press.policy_rate_hz
-    assert config.press.action.kind == expected_press.action.kind
-    assert config.press.action.action_dim == expected_press.action.action_dim
-    assert config.press.action.controller_kp_vel == list(expected_press.action.controller_kp_vel)
+    assert config.rl.num_envs == expected_rl.num_envs
+    assert config.rl.env_spacing == expected_rl.env_spacing
+    assert config.rl.episode_length_s == expected_rl.episode_length_s
+    assert config.rl.policy_rate_hz == expected_rl.policy_rate_hz
+    assert config.rl.training.policy_name == expected_rl.training.policy_name == "hover"
+    assert config.rl.action.kind == expected_rl.action.kind
+    assert config.rl.action.action_dim == expected_rl.action.action_dim
+    assert config.rl.action.controller_kp_vel == list(expected_rl.action.controller_kp_vel)
+    # The hover task definition is config (task definition = one YAML block).
+    assert config.rl.press.hover_task.reward_alive == expected_press.hover_task.reward_alive
+    assert config.rl.press.hover_task.min_altitude_m == expected_press.hover_task.min_altitude_m
+    assert config.rl.press.hover_task.reset_xy_half_m == expected_press.hover_task.reset_xy_half_m
     # The default runtime experiment ships an empty (manual) routine and its
     # flight-envelope gates; the GCS link baseport lives in the px4 group.
     expected_routine = _group_defaults("routine")
@@ -123,6 +129,21 @@ def test_default_config_loads_from_root_experiment_config():
         config.vehicles[0].px4.rotor_spin_visual_scale == holybro.px4.bridge.rotor_spin_visual_scale
     )
     reset_config()
+
+
+def test_press_training_policy_name_is_required_by_schema():
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+    from omegaconf.errors import MissingMandatoryValue
+
+    from robotics_experiments.config.types import RlTrainingConfig
+
+    defaults = _group_defaults("rl").training
+    defaults.pop("policy_name")
+    cfg = OmegaConf.merge(OmegaConf.structured(RlTrainingConfig), defaults)
+
+    with pytest.raises(MissingMandatoryValue, match="policy_name"):
+        OmegaConf.to_object(cfg)
 
 
 def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):

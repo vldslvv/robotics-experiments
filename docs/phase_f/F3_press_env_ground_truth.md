@@ -27,7 +27,7 @@ those).
 - Action: register it in `workflows/isaac_lab/registration.py`
   (`_SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v0"`, guarded like the hover
   task).
-- Config: `SwitchPressEnvCfg` reads sizes/spacing/episode from `cfg.press`.
+- Config: `SwitchPressEnvCfg` reads sizes/spacing/episode from `cfg.rl`.
 - Done when: `gym.make("Isaac-Switch-Press-Direct-v0")` builds under Isaac Lab and
   steps N envs.
 
@@ -67,7 +67,7 @@ those).
 
 ## Step 4 -- Reward, termination, reset
 
-- Action: create `src/robotics_experiments/press/_reward.py` (pure) with
+- Action: create `src/robotics_experiments/rl/press/_reward.py` (pure) with
   composable, config-weighted terms returning per-env scalars from a
   `PressObservation` (+ minimal extra state like distance-improved,
   toggled-this-step):
@@ -84,7 +84,7 @@ those).
   from `press.reset` (close to the switch, calm). Curriculum ranges come in F4.
 - Config: add `PressRewardConfig` (all term weights) and `PressResetConfig`
   (start-pose ranges, easy switch scale/stiffness/threshold overrides) to
-  `config/types.py` + `configs/experiment/press/default.yaml`; add to `PressConfig`.
+  `config/types.py` + `configs/experiment/rl/default.yaml`; add to `RlConfig`.
 - Test: `tests/test_press_reward.py`, `tests/test_press_termination.py` (pure):
   each term fires only in its phase; toggle reward is one-shot; timeout terminates;
   generic contact without toggle earns no toggle reward.
@@ -93,7 +93,7 @@ those).
 
 ## Step 5 -- Training adapter + config (exists from F2b; press specifics only)
 
-- The rsl_rl adapter (`press/training/_rsl_rl.py`), `PressTrainingConfig`, and
+- The rsl_rl adapter (`rl/training/_rsl_rl.py`), `RlTrainingConfig`, and
   the `training` pyproject extra exist from F2b Step 3. F3 adds NO training or
   loader code.
 - Action: author the press-task hyperparameter values in the `training:` block
@@ -105,7 +105,7 @@ those).
 ## Step 6 -- Inference contract (exists from F2b)
 
 - The validated artifact format (TorchScript + metadata sidecar) and
-  `press/policy.py::load_policy` exist from F2b Step 4; the runtime press
+  `rl/press/policy.py::load_policy` exist from F2b Step 4; the runtime press
   behavior depends only on that seam, never on the training library. Nothing to
   add here; the F2b metadata validation (obs schema version, action kind, dims,
   scales) applies to press artifacts identically -- the press observation's
@@ -114,7 +114,7 @@ those).
 ## Step 7 -- Point the F2b entrypoint at the press task + eval
 
 - Action: select `Isaac-Switch-Press-Direct-v0` as the config-selected task id
-  for the F2b `train_press.py` entrypoint (`make train-press` reused unchanged,
+  for the F2b `train_rl.py` entrypoint (`make train-rl` reused unchanged,
   running on `ISAAC_LAB_IMAGE`); add an eval script that loads an exported
   artifact and reports metrics, with a thin `make eval-press` target on the
   same image.
@@ -145,7 +145,7 @@ those).
 - add `.../tasks/switch_press_env.py`; edit `.../isaac_lab/registration.py`
 - add `press/_reward.py`, `press/_termination.py`, `press/_latch.py`
 - edit `config/types.py` (`PressRewardConfig`, `PressResetConfig`),
-  `configs/experiment/press/default.yaml` (press values in the F2b `training:`
+  `configs/experiment/rl/default.yaml` (press values in the F2b `training:`
   block)
 - add the eval script + `make eval-press` (the training entrypoint, adapter,
   artifact loader, and `pyproject.toml` extra come from F2b)

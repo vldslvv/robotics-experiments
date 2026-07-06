@@ -7,14 +7,14 @@ Isaac Lab image) passes; the config-only gain retune is recorded in
 
 Goal served: enabler for goal 1 (an easy task at all needs a flyable Lab env).
 Depends on: nothing. Blocks: F2b, F3.
-Action-level decision: resolved in ADR 0013. `press.action.kind=velocity` is the
+Action-level decision: resolved in ADR 0013. `rl.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
 frozen params dataclasses + pure functions (`build_actuation_params` /
-`action_to_rotor_omega` in `press/actuation.py`, mirrored in `_flight.py`); same
+`action_to_rotor_omega` in `rl/press/actuation.py`, mirrored in `_flight.py`); same
 math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
-constants move into config (`press.hover_task`, task-as-config) and the
+constants move into config (`rl.press.hover_task`, task-as-config) and the
 observation's angular velocity switches to body frame in F2b Steps 1-2, so the
 hover task becomes the first YAML-defined task of the task->policy pipeline.
 
@@ -28,14 +28,14 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 1 -- Create the pure `press` package skeleton
 
-- Action: create `src/robotics_experiments/press/__init__.py` (re-export only) and
-  `src/robotics_experiments/press/actuation.py`.
-- `press/__init__.py`: `__all__` empty for now; add exports as later steps land.
+- Action: create `src/robotics_experiments/rl/press/__init__.py` (re-export only) and
+  `src/robotics_experiments/rl/press/actuation.py`.
+- `rl/press/__init__.py`: `__all__` empty for now; add exports as later steps land.
   Import nothing from torch/isaaclab/carb/pxr at module scope.
 - Rule: this package is on the core import path. It must import only stdlib +
   numpy. The torch/isaaclab env code lives in `workflows/isaac_lab/tasks/`, not
   here.
-- Done when: `python -c "import robotics_experiments.press"` works in a plain
+- Done when: `python -c "import robotics_experiments.rl.press"` works in a plain
   `.venv` (no Isaac/torch).
 
 ## Step 2 -- Add the `press` Hydra config group (scaffold only)
@@ -54,25 +54,25 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
     (Superset covering the candidate action levels; the selected `kind` reads the
     subset it needs. Keep unused ones -- they are cheap and keep the switch a
     config change.)
-  - Add `@dataclass class PressConfig` with (for now) `action: PressActionConfig`
+  - Add `@dataclass class RlConfig` with (for now) `action: PressActionConfig`
     and the Lab-scale fields moved/duplicated from `IsaacLabConfig`
     (`num_envs: int`, `env_spacing: float`, `episode_length_s: float`,
     `physics_decimation: int`, `policy_rate_hz: float`). Later plans append
     `observation`, `handoff`, `reward`, `reset`, `curriculum`, `randomization`,
     `perception`.
-  - Add `press: PressConfig` to `EnvConfig` and to its `__all__`-adjacent field
-    list; add `PressConfig`, `PressActionConfig` to the module `__all__`.
+  - Add `press: RlConfig` to `EnvConfig` and to its `__all__`-adjacent field
+    list; add `RlConfig`, `PressActionConfig` to the module `__all__`.
 - Action: edit `src/robotics_experiments/config/_schemas.py::_register_schemas`:
-  add `cs.store(group="experiment/press", name="base_press", node=PressConfig)`.
-- Action: create `configs/experiment/press/default.yaml` (`defaults: - base_press`)
+  add `cs.store(group="experiment/rl", name="base_press", node=RlConfig)`.
+- Action: create `configs/experiment/rl/default.yaml` (`defaults: - base_press`)
   with concrete values (16 envs, 4 m spacing, 5 s episode, decimation from
   `sim.physics_hz` / `policy_rate_hz`, `policy_rate_hz: 50`, action gains).
 - Action: edit `configs/config.yaml` defaults to add
-  `experiment/press@press: default`.
-- Test: extend `tests/` with a config test asserting `get_config().press.action`
-  resolves and `press.num_envs > 0`.
+  `experiment/rl@press: default`.
+- Test: extend `tests/` with a config test asserting `get_config().rl.action`
+  resolves and `rl.num_envs > 0`.
 - Done when: `uv run python -c "from robotics_experiments.config import get_config;
-  print(get_config().press)"` prints the resolved config.
+  print(get_config().rl)"` prints the resolved config.
 
 ## Step 3 -- Add a vectorized force sink for Isaac Lab
 
@@ -94,7 +94,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 4 -- Implement the pluggable actuation seam
 
-- Action: in `press/actuation.py` (pure), define the seam that maps a normalized
+- Action: in `rl/press/actuation.py` (pure), define the seam that maps a normalized
   action to per-rotor angular-velocity references, independent of torch:
   - `class ActuationModel(Protocol)` with
     `action_to_rotor_omega(action, state) -> np.ndarray` (single-env, numpy) --
@@ -124,7 +124,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
     `isaac/runtime/lab/drone_cfg.py` (move that ArticulationCfg into the tasks
     package or import it) so the pusher joint + rigid caps come along. Keep the
     ground plane.
-  - `action_space` / `observation_space`: set from `cfg.press.action.action_dim`
+  - `action_space` / `observation_space`: set from `cfg.rl.action.action_dim`
     and the F2 observation length (until F2 lands, keep a plain flight-state obs:
     pos err, quat, lin vel, ang vel).
   - `_pre_physics_step`: store the clipped normalized action.
@@ -142,7 +142,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 ## Step 6 -- Decision: RL action level
 
 ADR 0013 (`docs/adr/0013-in-lab-rl-action-level.md`) accepts a pluggable
-`press.action.kind` seam with `velocity` as the default and `ctbr` as the
+`rl.action.kind` seam with `velocity` as the default and `ctbr` as the
 implemented alternative. Selection criteria were: (a) sim-to-real transfer quality
 on the flight controller, (b) clean mapping to a PX4 OFFBOARD setpoint at deploy
 time, (c) training stability/throughput, and (d) enough authority for contact.
@@ -178,7 +178,7 @@ Accepted default: `velocity`, because it is the simplest stable training surface
 is the direct target of the hover+goto validation gate, and maps cleanly to PX4
 body-velocity OFFBOARD setpoints. `ctbr` remains implemented for later
 transfer/contact-authority experiments. Switching between the two is a one-line
-`press.action.kind` config edit.
+`rl.action.kind` config edit.
 
 ## Step 7 -- Validation gate: hover + goto in Lab
 
@@ -188,7 +188,7 @@ transfer/contact-authority experiments. Switching between the two is a one-line
   tracks the goto (final pos error < 0.2 m) across all envs. Put it under
   `isaac/runtime/standalone/tests/` (guarded, container-run) with a thin make
   target, mirroring the existing standalone test pattern.
-- Done when: hover holds and goto tracks for the chosen `press.action.kind`,
+- Done when: hover holds and goto tracks for the chosen `rl.action.kind`,
   confirming the in-Lab inner loop is trustworthy before any RL. This gate is the
   precondition for starting F3.
 - Status: complete. `make test-integration-press-hover-goto` runs on the
@@ -199,11 +199,11 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 
 ## Files touched by F1
 
-- add `src/robotics_experiments/press/__init__.py`, `.../press/actuation.py`
+- add `src/robotics_experiments/rl/press/__init__.py`, `.../rl/press/actuation.py`
 - add `src/robotics_experiments/workflows/isaac_lab/tasks/_flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
 - edit `src/robotics_experiments/config/types.py`, `.../config/_schemas.py`
-- add `configs/experiment/press/default.yaml`; edit `configs/config.yaml`
+- add `configs/experiment/rl/default.yaml`; edit `configs/config.yaml`
 - move/adopt `isaac/runtime/lab/drone_cfg.py` into the tasks package (or import it)
 - add `tests/test_pressactuation.py`; extend a config test; extend
   `tests/test_core_imports.py` to assert `press` imports without torch/isaac

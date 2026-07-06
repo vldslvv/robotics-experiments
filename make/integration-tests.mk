@@ -102,6 +102,26 @@ test-integration-px4-takeoff: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
+# F2b task->policy pipeline gate: arm -> takeoff -> trained RL policy holds the
+# hover over PX4 SITL -> land, strict, through the unchanged orchestrator. Runs
+# the generic takeoff scenario with the policy_hover routine on the Isaac Lab
+# image (torch for the TorchScript artifact). Requires a trained artifact at
+# .build/training/hover/latest (`make train-rl` first), so it is deliberately
+# NOT in INTEGRATION_TEST_TARGETS / test-integration-all.
+.PHONY: test-integration-press-policy
+test-integration-press-policy: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-policy: HYDRA_CONFIG = configs/integration_test_press_policy.yaml
+test-integration-press-policy: generate-drone-usd
+	@TEST_TARGET='test-integration-press-policy' \
+	    HOST_ISAAC_LOG_BASENAME='test_press_policy_hover.log' \
+	    HOST_PX4_LOG_BASENAME='test_press_policy_hover_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_POLICY_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-policy' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
 # Multi-drone navigation. A quad (id 0) and a hexacopter (id 1) fly the full
 # absolute-waypoint navigation routine concurrently in one scene, each on its own
 # PX4 SITL instance with the per-asset airframe derived from its USD asset. Uses

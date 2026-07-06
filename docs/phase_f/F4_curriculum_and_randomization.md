@@ -14,7 +14,7 @@ are config (single source of truth), never hardcoded.
 
 ## Step 1 -- Curriculum config + pure advance logic
 
-- Action: create `src/robotics_experiments/press/_curriculum.py` (pure). Model a
+- Action: create `src/robotics_experiments/rl/press/_curriculum.py` (pure). Model a
   stage as parameters + a promotion predicate:
   - `@dataclass(frozen=True) class CurriculumStage` with the tightening knobs from
     ROADMAP1's tables: `switch_size_scale`, `press_force_scale`, `travel_scale`,
@@ -25,7 +25,7 @@ are config (single source of truth), never hardcoded.
     promote when the window metrics clear the stage's `promote_when`.
 - Action: add `PressCurriculumConfig` (ordered `stages` list + window size) to
   `config/types.py` and a `curriculum:` block to
-  `configs/experiment/press/default.yaml`. Author the ordered stages:
+  `configs/experiment/rl/default.yaml`. Author the ordered stages:
   1. stabilization: free hover -> wall approach (no switch) -> stable contact ->
      randomized wall tilt/contact point (the ROADMAP1 stabilization curriculum);
   2. contact: easy (F3) -> real geometry/easy actuation -> nominal geometry/rising
@@ -65,7 +65,7 @@ are config (single source of truth), never hardcoded.
     slack, spring-damper pull when taut (contact stage onward; model and
     rationale in `docs/SAFETY_HARNESS_PLAN.md` Step 4).
 - Action: add `PressRandomizationConfig` to `config/types.py` and a
-  `randomization:` block to `configs/experiment/press/default.yaml`. Each randomized
+  `randomization:` block to `configs/experiment/rl/default.yaml`. Each randomized
   parameter carries a record: `name`, `units`, `nominal`, `train_range`,
   `acceptance_range`, `sampling_law`, `stage_introduced` (so DR is
   curriculum-coupled: narrow near nominal first, widen as stages advance, and an
@@ -79,7 +79,7 @@ are config (single source of truth), never hardcoded.
 
 ## Step 4 -- Retrain / continue training to the real geometry
 
-- Action: run the shared F2b training entrypoint (`make train-press`, pointed at
+- Action: run the shared F2b training entrypoint (`make train-rl`, pointed at
   the press task per F3 Step 7) with the curriculum + DR config; continue from
   the F3 checkpoint. Log per-stage metrics + per-term rewards.
 - Metrics targets (ROADMAP1 mature/randomized columns): press success >= 85%
@@ -90,10 +90,10 @@ are config (single source of truth), never hardcoded.
 
 ## Files touched by F4
 
-- add `src/robotics_experiments/press/_curriculum.py`
+- add `src/robotics_experiments/rl/press/_curriculum.py`
 - edit `.../tasks/switch_press_env.py` (EventCfg, stage apply, curriculum hook)
 - edit `config/types.py` (`PressCurriculumConfig`, `PressRandomizationConfig`),
-  `configs/experiment/press/default.yaml`
+  `configs/experiment/rl/default.yaml`
 - add `tests/test_press_curriculum.py`, `tests/test_press_randomization.py`
 
 ## Exit gate

@@ -10,6 +10,7 @@ lifecycle around it. There is no fleet object - drones are independent.
 
 from __future__ import annotations
 
+from .commands import AttitudeRateSetpoint, PositionSetpoint, VelocitySetpoint
 from .observation import RoutineObservation
 from .port import AbstractCommandPort
 from .routine import DecisionKind, RoutineDecision, RoutineState, VehicleRoutine, decide
@@ -36,8 +37,9 @@ class VehicleCommander:
     def step(self, observation: RoutineObservation) -> RoutineDecision:
         """Run one tick: decide, commit the new state, perform the side effect.
 
-        The only side effects are ``SEND`` (a ``command_long``) and ``STREAM`` (an
-        OFFBOARD position setpoint); every other decision is pure progress.
+        The only side effects are ``SEND`` (a ``command_long``) and ``STREAM``
+        (an OFFBOARD setpoint, dispatched by payload type to the matching port
+        method); every other decision is pure progress.
         """
         new_state, decision = decide(self._routine, self._state, observation)
         self._state = new_state
@@ -45,6 +47,13 @@ class VehicleCommander:
             assert decision.command is not None
             self._port.send(decision.command)
         elif decision.kind is DecisionKind.STREAM:
-            assert decision.setpoint is not None
-            self._port.send_setpoint(decision.setpoint)
+            setpoint = decision.setpoint
+            if isinstance(setpoint, PositionSetpoint):
+                self._port.send_setpoint(setpoint)
+            elif isinstance(setpoint, VelocitySetpoint):
+                self._port.send_velocity_setpoint(setpoint)
+            elif isinstance(setpoint, AttitudeRateSetpoint):
+                self._port.send_attitude_target(setpoint)
+            else:
+                raise TypeError(f"STREAM decision carried unsupported payload {setpoint!r}")
         return decision

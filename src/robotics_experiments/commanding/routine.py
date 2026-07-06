@@ -32,7 +32,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import numpy as np
 
@@ -44,8 +44,10 @@ from robotics_experiments.px4_bridge.frames import (
 
 from .commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    AttitudeRateSetpoint,
     MavlinkCommand,
     PositionSetpoint,
+    VelocitySetpoint,
     arm,
     land,
     reposition,
@@ -54,13 +56,18 @@ from .commands import (
 )
 from .observation import MAV_RESULT_TEMPORARILY_REJECTED, RoutineObservation
 
+if TYPE_CHECKING:
+    from robotics_experiments.px4_bridge.vehicle_state import VehicleState
+
 __all__ = [
     "DecisionKind",
     "EnvelopeGates",
     "FailureKind",
+    "PolicyStepFn",
     "RoutineDecision",
     "RoutineState",
     "RoutineStep",
+    "StreamSetpoint",
     "VehicleRoutine",
     "ack_accepted",
     "armed",
@@ -92,6 +99,17 @@ _DEFAULT_MIN_HEADING_DIST_M = 0.25
 # continuous flight envelope is violated, or ``None`` when it holds.
 _StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
 _Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
+
+# Any OFFBOARD setpoint payload a STREAM decision can carry; the commander
+# dispatches on the concrete type to the matching port send method.
+StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
+
+# The injected per-tick pure function of a ``policy`` step: maps the live
+# vehicle state and the step's world-ENU target to the OFFBOARD setpoint
+# payload to stream (composed at the runtime layer from the observation
+# packing, the loaded policy, and the deploy action mapping -- see
+# ``rl.press.policy.build_policy_step_fn``).
+PolicyStepFn = Callable[["VehicleState", np.ndarray], StreamSetpoint]
 
 
 class DecisionKind(Enum):
@@ -136,7 +154,7 @@ class RoutineDecision:
 
     kind: DecisionKind
     command: Optional[MavlinkCommand] = None
-    setpoint: Optional[PositionSetpoint] = None
+    setpoint: Optional[StreamSetpoint] = None
     reason: Optional[str] = None
     failure_kind: Optional[FailureKind] = None
 
@@ -145,7 +163,7 @@ class RoutineDecision:
         return cls(DecisionKind.SEND, command=command)
 
     @classmethod
-    def stream(cls, setpoint: PositionSetpoint) -> "RoutineDecision":
+    def stream(cls, setpoint: StreamSetpoint) -> "RoutineDecision":
         return cls(DecisionKind.STREAM, setpoint=setpoint)
 
     @classmethod
@@ -228,6 +246,11 @@ class _StreamingSpec:
         min_heading_dist_m: Below this horizontal baseline-to-target distance
             the leg has no meaningful heading and the streamed setpoint holds
             the current heading (yaw ``NaN``).
+        setpoint_fn: When set (a ``policy`` step), the per-tick setpoint source:
+            a pure function of the observation and the step baseline returning
+            the payload to stream, replacing the fixed geodetic target (whose
+            fields are then unused, ``NaN``). The OFFBOARD prime/engage/stream
+            lifecycle is identical either way.
     """
 
     target_enu: tuple[float, float, float]
@@ -236,6 +259,9 @@ class _StreamingSpec:
     altitude_m: float
     prime_ticks: int
     min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
+    setpoint_fn: Optional[Callable[[RoutineObservation, Optional[np.ndarray]], StreamSetpoint]] = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -267,6 +293,10 @@ class RoutineState:
             step.
         offboard_requested: Whether the one-shot OFFBOARD-mode command has been
             sent for the active streaming step.
+        offboard_accepted: Whether PX4 accepted the OFFBOARD-mode command for
+            the active streaming step. Policy-step hold windows start only
+            after this is true, so a policy cannot complete before PX4 enters
+            the mode that is supposed to consume its stream.
         offboard_hold_setpoint: Last OFFBOARD setpoint that must keep streaming
             across command-less verification steps after a ``goto``. Cleared
             when a later explicit command begins.
@@ -279,7 +309,8 @@ class RoutineState:
     hold_since_us: Optional[int] = None
     setpoints_streamed: int = 0
     offboard_requested: bool = False
-    offboard_hold_setpoint: Optional[PositionSetpoint] = None
+    offboard_accepted: bool = False
+    offboard_hold_setpoint: Optional[StreamSetpoint] = None
 
 
 def _advanced(state: RoutineState) -> RoutineState:
@@ -294,6 +325,7 @@ def _advanced(state: RoutineState) -> RoutineState:
         hold_since_us=None,
         setpoints_streamed=0,
         offboard_requested=False,
+        offboard_accepted=False,
     )
 
 
@@ -335,11 +367,12 @@ def decide(
             hold_since_us=None,
             setpoints_streamed=0,
             offboard_requested=False,
+            offboard_accepted=False,
         )
         if step.streaming is not None:
             # Streaming step: begin priming the OFFBOARD setpoint stream
             # immediately; the mode command is sent later (see below).
-            setpoint = _setpoint_for(step.streaming, baseline)
+            setpoint = _setpoint_for(step.streaming, baseline, observation)
             return replace(
                 new_state,
                 setpoints_streamed=1,
@@ -364,7 +397,11 @@ def decide(
                 failure_kind=FailureKind.ENVELOPE,
             )
 
-    if step.is_complete(observation, state.baseline_position_enu):
+    completion_enabled = (
+        not (step.streaming is not None and step.streaming.setpoint_fn is not None)
+        or state.offboard_accepted
+    )
+    if completion_enabled and step.is_complete(observation, state.baseline_position_enu):
         if step.hold_s <= 0.0:
             return _advanced(state), RoutineDecision.advance()
         hold_since_us = state.hold_since_us
@@ -401,11 +438,16 @@ def decide(
                 and step.command is not None
                 and ack.command_id == step.command.command_id
             ):
-                setpoint = _setpoint_for(spec, state.baseline_position_enu)
+                setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
                 if ack.accepted:
+                    hold_since_us = state.hold_since_us
+                    if spec.setpoint_fn is not None and hold_since_us is None:
+                        hold_since_us = int(observation.sim_time_us)
                     return replace(
                         state,
                         offboard_hold_setpoint=setpoint,
+                        offboard_accepted=True,
+                        hold_since_us=hold_since_us,
                     ), RoutineDecision.stream(setpoint)
                 if ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
                     # Keep the setpoint stream alive on this tick, then retry
@@ -414,6 +456,8 @@ def decide(
                     return replace(
                         state,
                         offboard_requested=False,
+                        offboard_accepted=False,
+                        hold_since_us=None,
                         offboard_hold_setpoint=setpoint,
                     ), RoutineDecision.stream(setpoint)
                 return state, RoutineDecision.fail(
@@ -423,7 +467,7 @@ def decide(
                 )
 
         if state.setpoints_streamed < spec.prime_ticks:
-            setpoint = _setpoint_for(spec, state.baseline_position_enu)
+            setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
             return replace(
                 state,
                 setpoints_streamed=state.setpoints_streamed + 1,
@@ -432,7 +476,7 @@ def decide(
         if not state.offboard_requested:
             assert step.command is not None  # a streaming step always carries the mode command
             return replace(state, offboard_requested=True), RoutineDecision.send(step.command)
-        setpoint = _setpoint_for(spec, state.baseline_position_enu)
+        setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
         return replace(state, offboard_hold_setpoint=setpoint), RoutineDecision.stream(setpoint)
 
     ack = observation.last_ack
@@ -469,6 +513,12 @@ def decide(
 
 
 # ---- Pure completion predicates over (RoutineObservation, baseline) ---------
+
+
+def _always(observation: RoutineObservation, baseline: Optional[np.ndarray]) -> bool:
+    """Completion predicate that holds every tick: the step is a pure
+    ``hold_s`` wait whose real gate is its continuous invariants (``policy``)."""
+    return True
 
 
 def armed() -> _StepPredicate:
@@ -594,12 +644,20 @@ def heading_aligned(
     return predicate
 
 
-def _setpoint_for(spec: "_StreamingSpec", baseline: Optional[np.ndarray]) -> PositionSetpoint:
-    """Build the streamed setpoint: the fixed geodetic target plus a live heading.
+def _setpoint_for(
+    spec: "_StreamingSpec",
+    baseline: Optional[np.ndarray],
+    observation: RoutineObservation,
+) -> StreamSetpoint:
+    """Build the streamed setpoint for this tick.
 
-    Yaw faces the active-step-baseline-to-target direction (constant per leg); a
-    near-vertical leg (or no baseline yet) holds heading via ``NaN``.
+    A ``setpoint_fn`` spec (policy step) delegates to the injected pure
+    function. Otherwise (a ``goto``): the fixed geodetic target plus a live
+    heading -- yaw faces the active-step-baseline-to-target direction (constant
+    per leg); a near-vertical leg (or no baseline yet) holds heading (``NaN``).
     """
+    if spec.setpoint_fn is not None:
+        return spec.setpoint_fn(observation, baseline)
     east, north, _up = spec.target_enu
     yaw_rad = math.nan
     if baseline is not None:
@@ -788,6 +846,7 @@ def build_vehicle_routine(
     goto_cross_track_m: float,
     goto_offboard_prime_ticks: int,
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
+    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None,
 ) -> VehicleRoutine:
     """Build a :class:`VehicleRoutine` from authored step descriptors and a target.
 
@@ -820,6 +879,19 @@ def build_vehicle_routine(
       the bridge's synthesized GPS), yawing toward the leg direction; completes
       once within ``goto_position_tol_m`` of the waypoint and heading-aligned. A
       cross-track-to-path gate plus tilt / vertical / angular gates apply.
+    - ``policy`` (requires ``artifact``, ``hold_s`` and ``timeout_s``; optional
+      ``target`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
+      produced by a trained policy each tick -- the injected
+      ``policy_fn_factory(descriptor)`` loads the artifact and returns the pure
+      :data:`PolicyStepFn` (raising ``ValueError`` for a missing or mismatched
+      artifact, so a bad config fails at build time). Reuses the ``goto``
+      OFFBOARD prime/engage/stream lifecycle. Without an authored ``target``
+      the policy holds the position captured when the step began. Completes
+      after PX4 accepts OFFBOARD and then ``hold_s`` of continuous in-envelope
+      flight (the flight gates are the invariants, so a bad policy fails as
+      ``ENVELOPE``). A routine should follow a policy step with an
+      explicit-command step (e.g. ``land``): a command-less verifier would keep
+      re-streaming the last policy payload.
     - ``land`` (requires ``timeout_s``): commands a landing at the current
       position and completes once PX4 disarms.
 
@@ -827,7 +899,8 @@ def build_vehicle_routine(
     no pymavlink, no sockets.
 
     Raises:
-        ValueError: on an unknown ``kind`` or a required descriptor field missing
+        ValueError: on an unknown ``kind``, a required descriptor field missing,
+            or a ``policy`` step without an injected ``policy_fn_factory``
             (invalid configuration must not pass silently).
     """
     flight_invariants = _invariants(gates, _lateral_drift_below(gates.max_lateral_drift_m))
@@ -952,6 +1025,62 @@ def build_vehicle_routine(
                     invariants=_invariants(
                         gates, cross_track_to_segment_below(x_m, y_m, goto_cross_track_m)
                     ),
+                    streaming=spec,
+                )
+            )
+        elif kind == "policy":
+            for field in ("artifact", "hold_s", "timeout_s"):
+                if field not in descriptor:
+                    raise ValueError(f"routine step {index} (policy) is missing required {field!r}")
+            if policy_fn_factory is None:
+                raise ValueError(
+                    f"routine step {index} (policy) requires an injected policy_fn_factory "
+                    "(the runtime composes it from rl.press.policy)"
+                )
+            hold_s = float(descriptor["hold_s"])
+            target = descriptor.get("target")
+            if target is None:
+                target_enu = None
+            else:
+                try:
+                    target_values = [float(v) for v in target]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"routine step {index} (policy) target must be a 3-item numeric sequence"
+                    ) from exc
+                if len(target_values) != 3:
+                    raise ValueError(
+                        f"routine step {index} (policy) target must be a 3-item numeric sequence"
+                    )
+                target_enu = np.asarray(target_values, dtype=np.float64)
+            policy_fn = policy_fn_factory(descriptor)
+
+            def _policy_setpoint(
+                observation: RoutineObservation,
+                baseline: Optional[np.ndarray],
+                policy_fn: PolicyStepFn = policy_fn,
+                target_enu: Optional[np.ndarray] = target_enu,
+            ) -> StreamSetpoint:
+                goal = target_enu if target_enu is not None else baseline
+                assert goal is not None  # baseline is captured on the entry tick
+                return policy_fn(observation.vehicle_state, goal)
+
+            spec = _StreamingSpec(
+                target_enu=(math.nan, math.nan, math.nan),
+                latitude_deg=math.nan,
+                longitude_deg=math.nan,
+                altitude_m=math.nan,
+                prime_ticks=int(goto_offboard_prime_ticks),
+                setpoint_fn=_policy_setpoint,
+            )
+            built.append(
+                RoutineStep(
+                    command=set_offboard_mode(),
+                    is_complete=_always,
+                    label=(f"policy[{descriptor['name']}]" if "name" in descriptor else "policy"),
+                    timeout_s=float(descriptor["timeout_s"]),
+                    hold_s=hold_s,
+                    invariants=flight_invariants,
                     streaming=spec,
                 )
             )

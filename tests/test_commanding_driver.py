@@ -13,7 +13,10 @@ from robotics_experiments.commanding import (
     FailureKind,
     RoutineDriver,
 )
-from robotics_experiments.commanding.commands import MAV_CMD_COMPONENT_ARM_DISARM
+from robotics_experiments.commanding.commands import (
+    MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_SET_MODE,
+)
 from robotics_experiments.commanding.driver import DriverPhase
 from robotics_experiments.commanding.observation import CommandAck
 from robotics_experiments.commanding.routine import EnvelopeGates
@@ -217,3 +220,87 @@ def test_routine_driver_goto_streams_setpoints_and_engages_offboard():
     assert env.advanced_steps == ["goto[3.0,0.0,2.0]"]
     assert driver.is_done
     assert env.failures == []
+
+
+_POLICY_STEPS = [
+    {"kind": "policy", "artifact": "does/not/matter", "hold_s": 1.0, "timeout_s": 10.0}
+]
+
+
+def _fake_policy_fn(vehicle_state, target_enu):
+    from robotics_experiments.commanding.commands import VelocitySetpoint
+
+    return VelocitySetpoint(forward_mps=0.2, right_mps=0.0, down_mps=0.0, yaw_rate_radps=0.0)
+
+
+def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    params = DriverParams(
+        steps=_POLICY_STEPS,
+        gates=_GATES,
+        command_ack_timeout_s=10.0,
+        bridge_heartbeat_timeout_s=12.0,
+        handshake_timeout_s=12.0,
+        prearm_settle_s=0.0,
+        takeoff_target_timeout_s=30.0,
+        takeoff_timeout_s=30.0,
+        hover_settle_s=2.0,
+        goto_position_tol_m=0.5,
+        goto_heading_tol_deg=25.0,
+        goto_cross_track_m=2.0,
+        goto_offboard_prime_ticks=3,
+        policy_fn_factory=lambda descriptor: _fake_policy_fn,
+    )
+    driver = RoutineDriver(params, port, env, label="d0", monotonic=lambda: 0.0)
+
+    env.connected = True
+    port.handshaked = True
+    port.global_position = (47.0, 8.0, 488.0)
+    env.observation = make_routine_observation(sim_time_us=0, position_enu=(0.0, 0.0, 2.0))
+    for _ in range(20):
+        driver.tick()
+        if driver.phase is DriverPhase.DRIVE:
+            break
+    assert driver.phase is DriverPhase.DRIVE
+
+    # prime_ticks=3: the policy's velocity payloads stream (dispatched to
+    # port.send_velocity_setpoint), then the single OFFBOARD-mode command.
+    for _ in range(6):
+        driver.tick()
+    assert len(port.velocity_setpoints) >= 3
+    assert port.setpoints == []
+    assert [c.label for c in port.sent] == ["set_offboard_mode"]
+
+    # It does not complete before PX4 accepts OFFBOARD, even after hold_s elapses.
+    env.sim_us = 2_000_000
+    driver.tick()
+    assert env.advanced_steps == []
+    assert not driver.is_done
+
+    # hold_s of calm in-envelope sim time after OFFBOARD acceptance -> complete.
+    port.feedback.append(CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0))
+    driver.tick()
+    env.sim_us = 4_000_000
+    driver.tick()
+    assert env.advanced_steps == ["policy"]
+    assert driver.is_done
+    assert env.failures == []
+
+
+def test_routine_driver_policy_step_without_factory_fails_at_build():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    driver = RoutineDriver(_params(_POLICY_STEPS), port, env, label="d0", monotonic=lambda: 0.0)
+
+    env.connected = True
+    port.handshaked = True
+    port.global_position = (47.0, 8.0, 488.0)
+    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
+    for _ in range(20):
+        driver.tick()
+        if driver.phase is DriverPhase.DONE:
+            break
+    assert env.failures
+    kind, message = env.failures[0]
+    assert "policy_fn_factory" in message

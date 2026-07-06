@@ -6,12 +6,12 @@ once by :func:`build_flight_actuation_params`) and behavior in pure top-level
 functions, the batched twin of two pure, host-tested references it must match
 term-for-term:
 
-- the actuation cascade in ``robotics_experiments.press.actuation``
+- the actuation cascade in ``robotics_experiments.rl.press.actuation``
   (numpy single-env oracle: ``ActuationParams`` + ``action_to_rotor_omega``) --
   this module batches the velocity/ctbr cascade over ``[num_envs]``; both
   builders precompute the allocation pseudoinverse;
 - the per-rotor -> body-wrench reduction in
-  ``press.actuation.reduce_to_body_wrench`` -- ``_rotor_forces_to_body_wrench``
+  ``rl.press.actuation.reduce_to_body_wrench`` -- ``_rotor_forces_to_body_wrench``
   batches it.
 
 ``apply_body_wrench`` is the sole side-effecting sink, the vectorized analogue
@@ -51,7 +51,7 @@ _EPS = 1e-9
 class FlightActuationParams:
     """Immutable batched actuation state: geometry + allocation + gains + limits.
 
-    Device-tensor twin of ``press.actuation.ActuationParams``; built once per
+    Device-tensor twin of ``rl.press.actuation.ActuationParams``; built once per
     env by :func:`build_flight_actuation_params`. The velocity-cascade gains and
     limits are populated for both kinds (``ctbr`` ignores them).
     """
@@ -123,7 +123,7 @@ def _rotor_forces_to_body_wrench(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Reduce per-rotor thrust + body effects to one body wrench per env.
 
-    Batched analogue of ``press.actuation.reduce_to_body_wrench``. ``forces_n``
+    Batched analogue of ``rl.press.actuation.reduce_to_body_wrench``. ``forces_n``
     is ``[B, N]``; ``positions_body`` is ``[N, 3]``; ``body_torque`` /
     ``body_drag`` are ``[B, 3]``. Returns ``(force_body, torque_body)``, both
     ``[B, 3]`` in body-FLU.
@@ -226,17 +226,17 @@ def build_flight_actuation_params(
     mass: float,
     device,
 ) -> FlightActuationParams:
-    """Build the frozen batched actuation params from geometry + ``press.action``.
+    """Build the frozen batched actuation params from geometry + ``rl.action``.
 
     Precomputes the device tensors, the allocation pseudoinverse, and the max
-    total thrust once (mirroring ``press.actuation.build_actuation_params``).
+    total thrust once (mirroring ``rl.press.actuation.build_actuation_params``).
 
     Raises:
         ValueError: for an unknown or not-yet-implemented action level.
     """
     if kind not in ("velocity", "ctbr"):
         raise ValueError(
-            f"unsupported press.action.kind={kind!r}; implemented levels are "
+            f"unsupported rl.action.kind={kind!r}; implemented levels are "
             "'velocity' and 'ctbr'"
         )
 

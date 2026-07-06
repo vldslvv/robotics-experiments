@@ -30,14 +30,14 @@ and becomes the metric floor the learned policy must beat.
 
 ## Step 1 -- Pure contact-behavior contract
 
-- Action: create `src/robotics_experiments/press/_behavior.py` (pure; numpy +
+- Action: create `src/robotics_experiments/rl/press/_behavior.py` (pure; numpy +
   stdlib only, like `_observation.py`).
   - `class ContactBehavior(Protocol)`:
     - `reset() -> None` -- new attempt; clears internal phase/state.
     - `act(obs: PressObservation) -> ContactDecision`.
   - `@dataclass(frozen=True) class ContactDecision`: the normalized F1 action
-    (`action: np.ndarray`, `press.action.action_dim`, same semantics as the env
-    action for the configured `press.action.kind`) plus a
+    (`action: np.ndarray`, `rl.action.action_dim`, same semantics as the env
+    action for the configured `rl.action.kind`) plus a
     `phase: ContactPhase` enum (`APPROACH`, `PRESS`, `CONFIRM`, `RETREAT`,
     `DONE`, `ABORT`) so the caller (routine step, eval harness) can observe
     progress without reaching into behavior internals.
@@ -47,12 +47,12 @@ and becomes the metric floor the learned policy must beat.
 - `__all__`: `ContactBehavior`, `ContactDecision`, `ContactPhase`.
 - Test: `tests/test_press_behavior.py` (pure): the protocol is satisfied by a
   trivial fake; `ContactDecision.action` shape matches `action_dim`.
-- Done when: `import robotics_experiments.press` still succeeds without
+- Done when: `import robotics_experiments.rl.press` still succeeds without
   torch/Isaac and exposes the contract.
 
 ## Step 2 -- Policy behavior (wrap the F3 policy)
 
-- Action: in `press/_behavior.py` (or `press/policy.py` if the import weight
+- Action: in `press/_behavior.py` (or `rl/press/policy.py` if the import weight
   fits better there), implement `PolicyContactBehavior` wrapping F2b's
   validated `load_policy(path, action_cfg)` (the artifact's metadata --
   obs schema version, action kind, dims, scales -- is checked at load, so a
@@ -83,7 +83,7 @@ and becomes the metric floor the learned policy must beat.
 - Config: add `PressScriptedConfig` (stand-off distances, approach/press speed
   caps, alignment thresholds, compression cap, confirm window, retry bound) to
   `config/types.py` (bare annotations) and a `scripted:` block to
-  `configs/experiment/press/default.yaml`. No literal thresholds in Python.
+  `configs/experiment/rl/default.yaml`. No literal thresholds in Python.
 - Test: `tests/test_press_scripted.py` (pure): a synthetic observation sequence
   (approach -> contact -> compression -> lamp toggle) walks the phases in order;
   a lost detection triggers retreat; the toggle is required before `RETREAT`
@@ -94,11 +94,11 @@ and becomes the metric floor the learned policy must beat.
 ## Step 4 -- Behavior selection + routine integration
 
 - Action: behavior selection is config: `press.behavior: scripted | policy`
-  (+ `press.policy_path` for `policy`). Add the field to `PressConfig`; unknown
+  (+ `rl.press.policy_path` for `policy`). Add the field to `RlConfig`; unknown
   kind raises `ValueError` at resolution time.
 - Action: add the `{kind: press}` routine step in the commanding layer,
   building on F2b's `{kind: policy}` step mechanism (the per-tick
-  observation -> action -> `press/deploy.py` mapping -> `STREAM` setpoint
+  observation -> action -> `rl/press/deploy.py` mapping -> `STREAM` setpoint
   chain): the press step differs by entering only when F2's `handoff_ready`
   gate passes and by ticking the configured `ContactBehavior` in place of the
   direct policy call, completing on `DONE` (-> ADVANCE) or `ABORT` (-> FAIL).
@@ -125,10 +125,10 @@ and becomes the metric floor the learned policy must beat.
 
 ## Files touched by F3b
 
-- add `src/robotics_experiments/press/_behavior.py`; edit `press/__init__.py`
+- add `src/robotics_experiments/rl/press/_behavior.py`; edit `rl/press/__init__.py`
   (re-exports)
 - edit `config/types.py` (`PressScriptedConfig`, behavior selector),
-  `configs/experiment/press/default.yaml`
+  `configs/experiment/rl/default.yaml`
 - edit the commanding layer for the `{kind: press}` step (+ the routine builder
   and `docs/COMMAND_ROUTINE_CONTRACT.md`)
 - add `tests/test_press_behavior.py`, `tests/test_press_scripted.py`; extend

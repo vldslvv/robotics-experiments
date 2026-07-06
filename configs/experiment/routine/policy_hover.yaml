@@ -1,0 +1,25 @@
+defaults:
+  - default
+
+# Arm -> takeoff -> RL-policy hover hold -> land: the F2b task->policy pipeline
+# routine. The policy step streams OFFBOARD setpoints produced by the trained
+# hover artifact (.build/training/hover/latest, written by `make train-rl`; a
+# missing artifact fails loudly at routine build). Without an authored target
+# the policy holds the position captured when the step begins (the
+# post-takeoff hover point). The step completes after hold_s of continuous
+# in-envelope flight; the standard flight gates are its invariants, so a bad
+# policy fails as an envelope breach. It ends with an explicit `land` (a
+# command-less verifier after a policy step would keep re-streaming the last
+# policy payload).
+steps:
+  - kind: arm
+  - kind: takeoff
+    climb_m: 2.5
+    min_climb_m: 1.5
+  - kind: policy
+    name: hover
+    artifact: .build/training/hover/latest
+    hold_s: 5.0
+    timeout_s: 20.0
+  - kind: land
+    timeout_s: 30.0

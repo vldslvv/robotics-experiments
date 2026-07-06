@@ -83,6 +83,7 @@ done
 
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${ISAAC_TEST_PIP_PACKAGES:=hydra-core omegaconf}"
+: "${ISAAC_TEST_EXTRA_ARGS:=}"
 
 SCRIPT_START_MS="$(now_ms)"
 run_root="$(make_run_root)"
@@ -112,6 +113,7 @@ if docker run --rm \
     -e "ISAAC_TEST_LOG_FILTER=${ISAAC_TEST_LOG_FILTER}" \
     -e "ISAAC_TEST_PIP_PACKAGES=${ISAAC_TEST_PIP_PACKAGES}" \
     -e "ISAAC_TEST_SCRIPT=${ISAAC_TEST_SCRIPT}" \
+    -e "ISAAC_TEST_EXTRA_ARGS=${ISAAC_TEST_EXTRA_ARGS}" \
     -e "SCENE=${SCENE}" \
     -e "TEST_TARGET=${TEST_TARGET}" \
     ${ISAAC_DOCKER_VOLUMES} \

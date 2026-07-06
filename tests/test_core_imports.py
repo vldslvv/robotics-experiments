@@ -41,7 +41,11 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         importlib.import_module("robotics_experiments.runtime")
         # The pure press layer (actuation + deploy mapping) must import with both
         # Isaac and torch absent: stdlib + numpy only at module scope.
-        importlib.import_module("robotics_experiments.press")
+        importlib.import_module("robotics_experiments.rl.press")
+        # Shared RL adapters are lazy: the package and adapter facade must not
+        # import torch/rsl_rl/isaaclab on the core path.
+        importlib.import_module("robotics_experiments.rl")
+        importlib.import_module("robotics_experiments.rl.training")
 
         # The Isaac-only / torch leaf modules must stay off the core import path:
         # the lazy package __init__ shields (drone/environment __getattr__,
@@ -52,6 +56,8 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "robotics_experiments.environment.stage",
             "robotics_experiments.environment.step",
             "robotics_experiments.simulation._isaac_settings",
+            "robotics_experiments.rl.press._isaac_provider",
+            "robotics_experiments.rl.training._rsl_rl",
             "robotics_experiments.runtime._bridge_host",
             "robotics_experiments.runtime.orchestrator",
             "robotics_experiments.workflows.isaac_lab.tasks._flight",

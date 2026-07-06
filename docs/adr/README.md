@@ -55,8 +55,12 @@ fuller design doc under `docs/` where one exists.
 ## RL press policy
 
 - [0013](0013-in-lab-rl-action-level.md) (2026-07-01) -- In-Lab RL action level:
-  pluggable `press.action.kind` seam shipping `velocity` (default) + `ctbr`, plus
-  the PX4 OFFBOARD deploy mapping; retires the `isaac_lab` group for `press`.
+  pluggable `rl.action.kind` seam shipping `velocity` (default) + `ctbr`, plus
+  the PX4 OFFBOARD deploy mapping; retires the `isaac_lab` group for `rl`.
+- [0014](0014-press-observation-provider-contract.md) (2026-07-05) -- Press
+  observation contract: versioned pure layouts with a train/deploy parity
+  invariant, the `AbstractPoseProvider` swap seam (+ contact frame convention),
+  and the config-built handoff gate.
 
 ## Not captured as ADRs (intentionally)
 

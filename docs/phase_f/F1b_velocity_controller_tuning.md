@@ -1,7 +1,7 @@
 # F1b -- In-Lab velocity-controller tuning
 
 Status: COMPLETE. The final gains below are live in
-`configs/experiment/press/default.yaml` and the gate passes reproducibly; the
+`configs/experiment/rl/default.yaml` and the gate passes reproducibly; the
 measured results are the record of this tuning.
 
 Goal served: the F1 Step-7 `test-integration-press-hover-goto` gate is a
@@ -12,7 +12,7 @@ lateral goto, and requires the final 1.0 s window to stay inside tolerance.
 ## Current Gate Contract
 
 - Default seed: `7`, so the make target is reproducible.
-- Default fleet scale: the configured `press.num_envs` (`16` in the default
+- Default fleet scale: the configured `rl.num_envs` (`16` in the default
   config).
 - Hover phase: 4.0 s, final-window max position error must stay below `0.1 m`.
 - Goto phase: 6.0 s to a 2 m +X target, final-window max position error must
@@ -27,7 +27,7 @@ lateral goto, and requires the final 1.0 s window to stay inside tolerance.
 
 ## Final Gains
 
-`configs/experiment/press/default.yaml`:
+`configs/experiment/rl/default.yaml`:
 
 ```yaml
 action:
@@ -39,7 +39,7 @@ action:
 
 The fix is config-only. No integral term, explicit yaw hold, or controller
 structure change was needed, so the numpy reference in
-`press/actuation.py` and the torch implementation in
+`rl/press/actuation.py` and the torch implementation in
 `workflows/isaac_lab/tasks/_flight.py` remain structurally unchanged.
 
 ## Measured Results

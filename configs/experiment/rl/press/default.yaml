@@ -1,0 +1,29 @@
+defaults:
+  - base_press_task
+
+# The hover task definition (Isaac-Drone-Hover-Direct-v0): reward weights,
+# termination envelope, and reset randomization. Authoring this block IS the
+# task definition; the env module carries no task-tuning literals.
+hover_task:
+  reward_pos_weight: 1.0
+  reward_linvel_weight: 0.1
+  reward_angvel_weight: 0.05
+  reward_alive: 0.5
+  crash_tilt_cos: 0.0
+  min_altitude_m: 0.15
+  max_position_error_m: 5.0
+  reset_xy_half_m: 0.5
+  reset_z_half_m: 0.3
+
+# Nav -> contact handoff gate thresholds (rl.press._handoff.handoff_ready).
+# Initial-column values from the ROADMAP1 handoff table; the mature column
+# tightens them once the perception stack stabilizes.
+handoff:
+  pose_confidence_min: 0.85
+  pose_age_max_s: 0.1
+  switch_range_max_m: 0.35
+  lateral_align_max_m: 0.08
+  wall_normal_speed_max_mps: 0.15
+  lateral_speed_max_mps: 0.20
+  angular_speed_max_radps: 0.40
+  estimator_health_min: 0.80

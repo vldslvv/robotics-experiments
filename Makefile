@@ -6,6 +6,7 @@ include make/images.mk
 include make/containers.mk
 include make/tests.mk
 include make/integration-tests.mk
+include make/training.mk
 include make/flight-analysis.mk
 
 .PHONY: help

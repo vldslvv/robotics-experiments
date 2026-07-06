@@ -54,6 +54,9 @@ __all__ = [
     "DEFAULT_HOME_LAT_DEG",
     "DEFAULT_HOME_LON_DEG",
     "DEFAULT_HOME_ALT_M",
+    "normalize_quat_wxyz",
+    "quat_conjugate_wxyz",
+    "quat_multiply_wxyz",
     "quat_wxyz_to_xyzw",
     "rotate_vector_wxyz",
     "world_enu_to_body_flu",
@@ -66,7 +69,8 @@ __all__ = [
 # ---- Quaternion helpers -----------------------------------------------------
 
 
-def _normalize_quat_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
+def normalize_quat_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
+    """Return the unit quaternion; raise ``ValueError`` on zero norm."""
     q = np.asarray(q_wxyz, dtype=np.float64)
     norm = np.linalg.norm(q)
     if norm <= 0.0:
@@ -74,12 +78,14 @@ def _normalize_quat_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
     return q / norm
 
 
-def _quat_conjugate_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
+def quat_conjugate_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
+    """Return the quaternion conjugate (inverse rotation for a unit quat)."""
     q = np.asarray(q_wxyz, dtype=np.float64)
     return np.array([q[0], -q[1], -q[2], -q[3]], dtype=np.float64)
 
 
-def _quat_multiply_wxyz(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> np.ndarray:
+def quat_multiply_wxyz(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> np.ndarray:
+    """Hamilton product ``a * b`` of two wxyz quaternions."""
     aw, ax, ay, az = (float(v) for v in a_wxyz)
     bw, bx, by, bz = (float(v) for v in b_wxyz)
     return np.array(
@@ -101,9 +107,9 @@ def quat_wxyz_to_xyzw(q_wxyz: np.ndarray) -> np.ndarray:
 
 def rotate_vector_wxyz(q_wxyz: np.ndarray, vec: np.ndarray) -> np.ndarray:
     """Rotate ``vec`` by quaternion ``q_wxyz``."""
-    q = _normalize_quat_wxyz(q_wxyz)
+    q = normalize_quat_wxyz(q_wxyz)
     v = np.array([0.0, *np.asarray(vec, dtype=np.float64)], dtype=np.float64)
-    return _quat_multiply_wxyz(_quat_multiply_wxyz(q, v), _quat_conjugate_wxyz(q))[1:]
+    return quat_multiply_wxyz(quat_multiply_wxyz(q, v), quat_conjugate_wxyz(q))[1:]
 
 
 # ---- World<->body conversions ----------------------------------------------
@@ -115,7 +121,7 @@ def world_enu_to_body_flu(
 ) -> np.ndarray:
     """Rotate a world-ENU vector into body-FLU using the body attitude."""
     return rotate_vector_wxyz(
-        _quat_conjugate_wxyz(_normalize_quat_wxyz(q_flu_enu_wxyz)),
+        quat_conjugate_wxyz(normalize_quat_wxyz(q_flu_enu_wxyz)),
         np.asarray(vec_enu, dtype=np.float64),
     )
 

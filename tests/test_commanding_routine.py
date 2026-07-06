@@ -23,6 +23,7 @@ from robotics_experiments.commanding.commands import (
     MAV_CMD_NAV_LAND,
     MAV_CMD_NAV_TAKEOFF,
     MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
+    VelocitySetpoint,
     arm,
     takeoff,
 )
@@ -204,7 +205,7 @@ def test_vehicle_commander_sends_then_advances_to_done():
     assert commander.step(make_routine_observation(sim_time_us=40_000)).kind is DecisionKind.DONE
 
 
-def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0):
+def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy_fn_factory=None):
     return build_vehicle_routine(
         steps,
         target_latitude_deg=47.0,
@@ -221,6 +222,7 @@ def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0):
         goto_heading_tol_deg=25.0,
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
+        policy_fn_factory=policy_fn_factory,
     )
 
 
@@ -811,3 +813,155 @@ def test_decide_hover_step_holds_before_advancing():
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=3_500_000))
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 1
+
+
+# ---- policy (OFFBOARD RL policy) --------------------------------------------
+
+
+class _FakePolicyFn:
+    """Records (vehicle_state, goal) calls and returns a fixed velocity payload."""
+
+    def __init__(self):
+        self.goals = []
+
+    def __call__(self, vehicle_state, target_enu):
+        self.goals.append(np.asarray(target_enu, dtype=np.float64))
+        return VelocitySetpoint(forward_mps=0.1, right_mps=0.0, down_mps=0.0, yaw_rate_radps=0.0)
+
+
+def _policy_routine(policy_fn, **overrides):
+    descriptor = {"kind": "policy", "artifact": "does/not/matter", "hold_s": 2.0, "timeout_s": 10.0}
+    descriptor.update(overrides)
+    return _build([descriptor], policy_fn_factory=lambda d: policy_fn)
+
+
+def test_build_vehicle_routine_policy_requires_factory():
+    with pytest.raises(ValueError, match="policy_fn_factory"):
+        _build([{"kind": "policy", "artifact": "a", "hold_s": 1.0, "timeout_s": 5.0}])
+
+
+def test_build_vehicle_routine_policy_requires_fields():
+    for missing in ("artifact", "hold_s", "timeout_s"):
+        descriptor = {"kind": "policy", "artifact": "a", "hold_s": 1.0, "timeout_s": 5.0}
+        descriptor.pop(missing)
+        with pytest.raises(ValueError, match=missing):
+            _build([descriptor], policy_fn_factory=lambda d: _FakePolicyFn())
+
+
+def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
+    policy_fn = _FakePolicyFn()
+    routine = _policy_routine(policy_fn)
+    state = RoutineState()
+
+    # Entry + priming ticks stream the policy's payload (a VelocitySetpoint).
+    for t in range(3):
+        state, decision = decide(routine, state, make_routine_observation(sim_time_us=t))
+        assert decision.kind is DecisionKind.STREAM
+        assert isinstance(decision.setpoint, VelocitySetpoint)
+    assert state.setpoints_streamed == 3
+
+    # Primed: engage OFFBOARD once, then stream again.
+    state, decision = decide(routine, state, make_routine_observation(sim_time_us=3))
+    assert decision.kind is DecisionKind.SEND
+    assert decision.command.command_id == MAV_CMD_DO_SET_MODE
+    state, decision = decide(routine, state, make_routine_observation(sim_time_us=4))
+    assert decision.kind is DecisionKind.STREAM
+
+    # Without an accepted OFFBOARD ack, the policy stream stays alive but the
+    # hold window does not start.
+    state, decision = decide(routine, state, make_routine_observation(sim_time_us=4 + 2_000_000))
+    assert decision.kind is DecisionKind.STREAM
+    assert state.cursor == 0
+
+    accepted = CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0)
+    state, decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=5 + 2_000_000, last_ack=accepted),
+    )
+    assert decision.kind is DecisionKind.STREAM
+    assert state.offboard_accepted is True
+
+    # hold_s=2.0 of continuous in-envelope flight after accepted OFFBOARD -> ADVANCE.
+    state, decision = decide(routine, state, make_routine_observation(sim_time_us=5 + 4_000_000))
+    assert decision.kind is DecisionKind.ADVANCE
+    assert state.cursor == 1
+
+
+def test_decide_policy_without_target_hovers_at_step_baseline():
+    policy_fn = _FakePolicyFn()
+    routine = _policy_routine(policy_fn)
+    state = RoutineState()
+    start = make_routine_observation(sim_time_us=0, position_enu=(1.0, 2.0, 3.0))
+    state, decision = decide(routine, state, start)
+    assert decision.kind is DecisionKind.STREAM
+    np.testing.assert_allclose(policy_fn.goals[-1], [1.0, 2.0, 3.0])
+
+
+def test_decide_policy_with_authored_target_uses_it():
+    policy_fn = _FakePolicyFn()
+    routine = _policy_routine(policy_fn, target=[5.0, 6.0, 7.0])
+    state = RoutineState()
+    state, _decision = decide(routine, state, make_routine_observation(sim_time_us=0))
+    np.testing.assert_allclose(policy_fn.goals[-1], [5.0, 6.0, 7.0])
+
+
+def test_build_vehicle_routine_policy_rejects_bad_target_shape():
+    for target in ([1.0, 2.0], [1.0, 2.0, 3.0, 4.0], "bad"):
+        with pytest.raises(ValueError, match="3-item numeric sequence"):
+            _policy_routine(_FakePolicyFn(), target=target)
+
+
+def test_build_vehicle_routine_policy_supports_multiple_artifacts():
+    hover_policy = _FakePolicyFn()
+    press_policy = _FakePolicyFn()
+    policies = {"hover": hover_policy, "press": press_policy}
+    descriptors = [
+        {
+            "kind": "policy",
+            "name": "hover",
+            "artifact": ".build/training/hover/latest",
+            "hold_s": 1.0,
+            "timeout_s": 5.0,
+            "target": [1.0, 2.0, 3.0],
+        },
+        {
+            "kind": "policy",
+            "name": "press",
+            "artifact": ".build/training/press/latest",
+            "hold_s": 1.0,
+            "timeout_s": 5.0,
+            "target": [4.0, 5.0, 6.0],
+        },
+    ]
+    seen_artifacts = []
+
+    def factory(descriptor):
+        seen_artifacts.append(descriptor["artifact"])
+        return policies[descriptor["name"]]
+
+    routine = _build(descriptors, policy_fn_factory=factory)
+
+    assert [step.label for step in routine.steps] == ["policy[hover]", "policy[press]"]
+    assert seen_artifacts == [".build/training/hover/latest", ".build/training/press/latest"]
+
+    obs = make_routine_observation(sim_time_us=0)
+    first_stream = routine.steps[0].streaming
+    second_stream = routine.steps[1].streaming
+    assert first_stream is not None and first_stream.setpoint_fn is not None
+    assert second_stream is not None and second_stream.setpoint_fn is not None
+    first_stream.setpoint_fn(obs, np.zeros(3, dtype=np.float64))
+    second_stream.setpoint_fn(obs, np.zeros(3, dtype=np.float64))
+
+    np.testing.assert_allclose(hover_policy.goals[-1], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(press_policy.goals[-1], [4.0, 5.0, 6.0])
+
+
+def test_decide_policy_envelope_breach_fails():
+    routine = _policy_routine(_FakePolicyFn())
+    state = RoutineState()
+    state, _decision = decide(routine, state, make_routine_observation(sim_time_us=0))
+    tilted = make_routine_observation(sim_time_us=1, tilt_deg=60.0)
+    _state, decision = decide(routine, state, tilted)
+    assert decision.kind is DecisionKind.FAIL
+    assert decision.failure_kind is FailureKind.ENVELOPE

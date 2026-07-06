@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..px4_bridge.frames import GRAVITY_M_S2, rotate_vector_wxyz
+from ...px4_bridge.frames import GRAVITY_M_S2, rotate_vector_wxyz
 
 __all__ = [
     "ActuationParams",
@@ -304,7 +304,7 @@ def build_actuation_params(
     kind = action_cfg.kind
     if kind not in ("velocity", "ctbr"):
         raise ValueError(
-            f"unsupported press.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
+            f"unsupported rl.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
         )
     return ActuationParams(
         kind=kind,

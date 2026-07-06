@@ -18,7 +18,7 @@ mapping was net-new either way.
 
 ## Decision
 
-Build a pluggable actuation seam (`press.action.kind`) and ship **both** reference
+Build a pluggable actuation seam (`rl.action.kind`) and ship **both** reference
 levels, defaulting to `velocity`:
 
 - `velocity` (**default**): cascaded geometric controller tracking a yaw-frame
@@ -31,13 +31,13 @@ levels, defaulting to `velocity`:
 - `attitude` / `rotor` / `residual` / `hierarchical` remain seam options that raise
   if selected until implemented.
 
-The pure single-env reference models live in `press/actuation.py` (numpy, the
+The pure single-env reference models live in `rl/press/actuation.py` (numpy, the
 test oracle); the batched torch versions the env runs live in
 `workflows/isaac_lab/tasks/_flight.py`. Both invert the PX4 bridge's
 `PegasusQuadraticThrustModel` allocation, so an action reproduces the commanded
 wrench. F1 also added the OFFBOARD deploy plumbing (both levels): `velocity` ->
 `SET_POSITION_TARGET_LOCAL_NED` (body velocity), `ctbr` -> `SET_ATTITUDE_TARGET`
-(thrust + body rates), with a pure `press.deploy.press_action_to_offboard`
+(thrust + body rates), with a pure `rl.press.deploy.press_action_to_offboard`
 mapper. The mission-level press routine step / `PressDriver` stays in F3 (only the
 port-level plumbing + mapper land in F1).
 
@@ -48,6 +48,6 @@ port-level plumbing + mapper land in F1).
 - The numpy reference is the host-tested oracle; the torch env path is validated in
   the container by the hover+goto gate (`make test-integration-press-hover-goto`).
 - The `isaac_lab` Hydra group + `IsaacLabConfig` are retired; the Lab-scale
-  tunables and the action level live in the new `press` group (single source).
+  tunables and the action level live in the `rl` group (single source).
 - The deploy setpoint types are available for F3's press behavior, which layers a
   `PressDriver` over the same command port without new wire plumbing.

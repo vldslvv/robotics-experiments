@@ -11,7 +11,7 @@ module scope, so `import robotics_experiments` succeeds with both absent.
 runtime surface (`RoutineDriver`, `DriverParams`, `DriverEnvironment`,
 `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`, `FailureKind`, and the
 deploy-time wire payloads `VelocitySetpoint` / `AttitudeRateSetpoint` consumed by
-`press.deploy`). The pure stepper, command constructors, routine builder, and
+`rl.press.deploy`). The pure stepper, command constructors, routine builder, and
 lower-level seams live in non-underscored modules (`commands`, `observation`,
 `routine`, `port`, `driver`), each declaring its own `__all__` and
 underscore-prefixing its private members; only the `_commander` module (the
@@ -53,7 +53,9 @@ are independent (cross-drone synchronization is deliberately deferred).
   streaming counters `setpoints_streamed`/`offboard_requested`), and
   `RoutineDecision`
   (`SEND` / `STREAM` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`; `SEND` carries a
-  `command`, `STREAM` carries a `PositionSetpoint`, `FAIL` carries a
+  `command`, `STREAM` carries a `StreamSetpoint` -- the union
+  `PositionSetpoint | VelocitySetpoint | AttitudeRateSetpoint`, dispatched by
+  the commander on the concrete payload type -- and `FAIL` carries a
   `failure_kind`). `decide(routine, state, observation) -> (state, decision)` is
   the contract centerpiece: no sockets, no pymavlink, no Isaac. It checks the
   step `invariants` first (a breach -> `FAIL(ENVELOPE)`), then completion (held
@@ -69,7 +71,8 @@ are independent (cross-drone synchronization is deliberately deferred).
   `_vertical_speed_within`, `_angular_speed_below`. `EnvelopeGates` bundles the
   gate thresholds wired onto the flight steps.
 
-  A **streaming step** (the `goto` kind, carrying a `_StreamingSpec`) is the one
+  A **streaming step** (the `goto` and `policy` kinds, carrying a
+  `_StreamingSpec`) is a
   step whose `decide` emits `STREAM` rather than a single `SEND`: it primes
   `prime_ticks` OFFBOARD setpoints, sends the one-shot offboard-mode command, then
   streams the setpoint every tick until the waypoint is reached or the step times
@@ -88,6 +91,29 @@ are independent (cross-drone synchronization is deliberately deferred).
   OFFBOARD after the waypoint is reached, so stopping the stream between `goto`
   and `hover` would trigger offboard signal-loss failsafe before the hover hold
   can complete.
+
+  The **`policy` step** is the RL deploy plug-in over the same streaming
+  lifecycle: its `_StreamingSpec` carries a `setpoint_fn` (built from the
+  injected `PolicyStepFn`) instead of a fixed geodetic target, so each tick the
+  streamed payload is `policy_fn(observation.vehicle_state, target_enu)` -- a
+  `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
+  The `PolicyStepFn` is composed at the runtime layer
+  (`rl.press.policy.build_policy_step_fn`: validated artifact load + hover
+  observation packing + `press_action_to_offboard`) and injected as
+  `DriverParams.policy_fn_factory`; `build_vehicle_routine` calls the factory
+  per `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` descriptor
+  and raises `ValueError` without it (or on a missing/mismatched artifact), which
+  the driver's BUILD phase routes through `on_failure` as `FailureKind.COMMAND`.
+  Because the artifact path is per step, a single routine can sequence multiple
+  policy steps backed by different named artifacts, such as
+  `.build/training/hover/latest` followed by `.build/training/press/latest`.
+  Without an authored `target` the policy holds the position captured when the
+  step began. The step's completion predicate is `_always` + `hold_s`, gated by
+  accepted OFFBOARD entry, so it completes after PX4 accepts OFFBOARD and then
+  `hold_s` of continuous in-envelope flight. A bad policy fails as
+  `FailureKind.ENVELOPE` through the unchanged flight gates. Follow a policy
+  step with an explicit-command step (e.g. `land`), not a command-less verifier:
+  the verifier would keep re-streaming the last policy payload.
 
   `FailureKind.ENVELOPE` is a flight-envelope invariant breach (flew out of
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. The pure
@@ -112,12 +138,15 @@ are independent (cross-drone synchronization is deliberately deferred).
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `press.deploy.press_action_to_offboard`; the mission-level press behavior that
-  streams them (a `PressDriver` / `{kind: press}` step) is F3, not this layer yet.
+  `rl.press.deploy.press_action_to_offboard`; the `{kind: policy}` routine step
+  streams them in production (F2b), and the handoff-gated contact behavior
+  (`{kind: press}`) is F3b on the same mechanism.
 - **`_commander.py`** -- `VehicleCommander` (one routine + one port + the
-  `RoutineState`: runs `decide` and performs the single side effect -- `port.send`
-  on `SEND`, `port.send_setpoint` on `STREAM`). One commander drives one drone;
-  there is no fleet object or barrier.
+  `RoutineState`: runs `decide` and performs the single side effect --
+  `port.send` on `SEND`; on `STREAM` the payload type selects the port method:
+  `PositionSetpoint` -> `send_setpoint`, `VelocitySetpoint` ->
+  `send_velocity_setpoint`, `AttitudeRateSetpoint` -> `send_attitude_target`).
+  One commander drives one drone; there is no fleet object or barrier.
 - **`driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
@@ -136,11 +165,14 @@ are independent (cross-drone synchronization is deliberately deferred).
 
 `decide` and every predicate are pure functions of `(routine, state,
 observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
-pymavlink). The only side effects in the layer are `AbstractCommandPort.send` and
-`send_setpoint` (MAVLink out) and the port's connect/heartbeat/drain.
-`VehicleCommander.step` runs the pure `decide`, then performs the one side effect
-(`SEND` -> `send`, `STREAM` -> `send_setpoint`), keeping the decision and the I/O
-cleanly separated. Step timeouts are measured in **sim time**
+pymavlink). The only side effects in the layer are the port's send methods
+(`send`, `send_setpoint`, `send_velocity_setpoint`, `send_attitude_target` --
+MAVLink out) and the port's connect/heartbeat/drain. `VehicleCommander.step`
+runs the pure `decide`, then performs the one side effect (`SEND` -> `send`,
+`STREAM` -> the send method matching the payload type), keeping the decision
+and the I/O cleanly separated. A `policy` step's network forward pass runs
+inside `decide` as an injected deterministic callable (numpy in/out, no I/O),
+so it does not break the purity split. Step timeouts are measured in **sim time**
 (`observation.sim_time_us`) so the stepper stays pure; the driver pairs that with
 its own wall-clock backstop for a fully stalled sim.
 
@@ -211,20 +243,24 @@ drone whose resolved `steps` is non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
+`{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
 `{kind: land, timeout_s}`)
 gets a `RoutineDriver`; empty (the global default) means manual. Mixed fleets are
 allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
-goto_offboard_prime_ticks, goto_min_heading_dist_m)` maps the descriptors plus a
-per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, or any step missing a required
-field, raises `ValueError`); it is pure (no Isaac/pymavlink) and is the shared
+goto_offboard_prime_ticks, goto_min_heading_dist_m, policy_fn_factory)` maps the
+descriptors plus a
+per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missing a required
+field, or a `policy` step without an injected factory, raises `ValueError`); it
+is pure (no Isaac/pymavlink) and is the shared
 seam both drivers use. The takeoff step completes on a real climb
 (`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
 for `hold_s`, the forward step on observed world +X/east displacement, the `goto`
 step on `reached_world_position(...)` (absolute world ENU) plus heading
-alignment, and the land step once PX4 disarms. Flight gates are continuous
+alignment, the `policy` step after accepted OFFBOARD entry plus `hold_s` of
+continuous in-envelope flight, and the land step once PX4 disarms. Flight gates are continuous
 invariants on takeoff, hover, forward, and goto. Each step captures its own
 baseline when it begins: takeoff measures climb from takeoff start; hover,
 forward, and every goto leg measure gates from their own step start. Takeoff and

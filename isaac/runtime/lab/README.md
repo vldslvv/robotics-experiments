@@ -17,15 +17,16 @@ Isaac Lab session.
 The first registered task is `Isaac-Drone-Hover-Direct-v0`, a flyable DirectRLEnv
 in `robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env`. It flies N
 parallel drones through the pluggable in-Lab actuation seam
-(`robotics_experiments.press`), which maps a normalized RL action to per-rotor
+(`robotics_experiments.rl.press`), which maps a normalized RL action to per-rotor
 forces via the batched torch model in
 `robotics_experiments.workflows.isaac_lab.tasks._flight` (no PX4 lockstep per
 env). Future RL rewards, sensors, and contact behavior should extend that task or
 add sibling task modules under the same package.
 
-Task-level tunables (Lab-scale + the RL action level) live in the Hydra `press`
-group (`configs/experiment/press/default.yaml`) with matching typed config
-fields. The env spawns from the config-driven `ArticulationCfg` builder in
+Shared RL tunables (Lab-scale + the RL action level) live in the Hydra `rl`
+group (`configs/experiment/rl/default.yaml`), with Press task tunables under
+`rl.press` (`configs/experiment/rl/press/default.yaml`). The env spawns from the
+config-driven `ArticulationCfg` builder in
 `robotics_experiments.workflows.isaac_lab.tasks._drone_cfg` (reads
 `drone.usd_path`), not a hardcoded asset path.
 

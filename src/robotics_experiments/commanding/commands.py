@@ -204,7 +204,7 @@ class VelocitySetpoint:
     ``SET_POSITION_TARGET_LOCAL_NED`` in ``MAV_FRAME_BODY_NED`` with the velocity
     fields enabled and position/acceleration ignored. Components are in the PX4
     body-FRD convention (forward / right / down), so the pure action->setpoint
-    mapper (``press.deploy``) converts the body-FLU RL action into these.
+    mapper (``rl.press.deploy``) converts the body-FLU RL action into these.
 
     Attributes:
         forward_mps: Body-forward (FRD +X) velocity.

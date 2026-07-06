@@ -277,6 +277,22 @@ class FleetOrchestrator:
         """Start the bridge group (its hosts and the single physics-step sub)."""
         self._group.start()
 
+    def _policy_fn_factory(self, descriptor: Any) -> Any:
+        """Load a ``{kind: policy}`` step's artifact into its pure step function.
+
+        Injected into every driver's params: composes
+        ``rl.press.policy.build_policy_step_fn`` (validated artifact load +
+        observation packing + OFFBOARD mapping) over the global ``rl.action``
+        config. A repo-relative ``artifact`` path (the committed configs use
+        ``.build/training/<policy-name>/latest``) resolves against the repo root.
+        """
+        from robotics_experiments.rl.press.policy import build_policy_step_fn
+
+        artifact = Path(str(descriptor["artifact"]))
+        if not artifact.is_absolute():
+            artifact = _repo_root() / artifact
+        return build_policy_step_fn(artifact, self.env.rl.action)
+
     def build_drivers(
         self, make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment]
     ) -> None:
@@ -310,6 +326,7 @@ class FleetOrchestrator:
                     home_lat_deg=spawned.vehicle.px4.home_lat_deg,
                     home_lon_deg=spawned.vehicle.px4.home_lon_deg,
                     home_alt_m=spawned.vehicle.px4.home_alt_m,
+                    policy_fn_factory=self._policy_fn_factory,
                 ),
                 port,
                 make_env(spawned, port),

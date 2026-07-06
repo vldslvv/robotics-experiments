@@ -9,7 +9,7 @@ from typing import Literal
 
 import numpy as np
 
-from .frames import _normalize_quat_wxyz, _quat_conjugate_wxyz, _quat_multiply_wxyz
+from .frames import normalize_quat_wxyz, quat_conjugate_wxyz, quat_multiply_wxyz
 
 RootBodyMismatchPolicy = Literal["warn", "fail", "ignore"]
 
@@ -149,8 +149,8 @@ def compute_root_body_pose_diagnostics(
     body_orientation = _matrix_quat_wxyz(body_to_world)
 
     body_position_root = _vec3_to_array(root_to_world.GetInverse().Transform(body_translation))
-    body_orientation_root = _normalize_quat_wxyz(
-        _quat_multiply_wxyz(_quat_conjugate_wxyz(root_orientation), body_orientation)
+    body_orientation_root = normalize_quat_wxyz(
+        quat_multiply_wxyz(quat_conjugate_wxyz(root_orientation), body_orientation)
     )
     if body_orientation_root[0] < 0.0:
         body_orientation_root = -body_orientation_root
@@ -198,11 +198,11 @@ def _matrix_quat_wxyz(matrix) -> np.ndarray:
         [quat.GetReal(), imaginary[0], imaginary[1], imaginary[2]],
         dtype=np.float64,
     )
-    return _normalize_quat_wxyz(result)
+    return normalize_quat_wxyz(result)
 
 
 def _quat_angle_between_rad(a_wxyz: np.ndarray, b_wxyz: np.ndarray) -> float:
-    a = _normalize_quat_wxyz(a_wxyz)
-    b = _normalize_quat_wxyz(b_wxyz)
+    a = normalize_quat_wxyz(a_wxyz)
+    b = normalize_quat_wxyz(b_wxyz)
     dot = abs(float(np.dot(a, b)))
     return float(2.0 * math.acos(np.clip(dot, -1.0, 1.0)))
