@@ -37,7 +37,7 @@ from omni.usd import StageEventType
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.runtime import FleetDriverEnv, FleetOrchestrator
 
-from .global_variables import EXTENSION_TITLE
+from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
 
 __all__ = ["Extension"]
 

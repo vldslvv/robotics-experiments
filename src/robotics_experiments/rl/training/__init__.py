@@ -17,7 +17,7 @@ _RSL_RL_ATTRS = {"PolicyRunner", "TrainResult", "build_runner", "export_policy",
 
 def __getattr__(name: str):
     if name in _RSL_RL_ATTRS:
-        from . import _rsl_rl as adapter_module
+        import robotics_experiments.rl.training._rsl_rl as adapter_module
 
         return getattr(adapter_module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

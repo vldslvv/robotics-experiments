@@ -22,7 +22,7 @@ from robotics_experiments.environment import (
     validate_switches,
 )
 
-from .global_variables import EXTENSION_TITLE
+from LightSwitch_python.global_variables import EXTENSION_TITLE
 
 __all__ = ["LightSwitchExtension", "LightSwitchNode"]
 

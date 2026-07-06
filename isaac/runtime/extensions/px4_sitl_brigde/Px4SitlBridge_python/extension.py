@@ -12,7 +12,7 @@ no flight or scene work.
 import carb
 import omni.ext
 
-from .global_variables import EXTENSION_TITLE
+from Px4SitlBridge_python.global_variables import EXTENSION_TITLE
 
 
 class Extension(omni.ext.IExt):

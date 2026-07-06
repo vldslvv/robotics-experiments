@@ -11,11 +11,11 @@ __all__ = ["press", "training"]
 
 def __getattr__(name: str):
     if name == "press":
-        from . import press
+        import robotics_experiments.rl.press as press
 
         return press
     if name == "training":
-        from . import training
+        import robotics_experiments.rl.training as training
 
         return training
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -69,7 +69,7 @@ def __getattr__(name: str):
     # module scope); defer it so `import robotics_experiments.rl.press` stays
     # Isaac-free. Same pattern as environment/__init__.py.
     if name == "GroundTruthPoseProvider":
-        from . import _isaac_provider as provider_module
+        import robotics_experiments.rl.press._isaac_provider as provider_module
 
         return provider_module.GroundTruthPoseProvider
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

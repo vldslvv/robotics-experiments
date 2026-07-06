@@ -1,1 +1,1 @@
-from .extension import *  # noqa: F403
+from LightSwitch_python.extension import *  # noqa: F403

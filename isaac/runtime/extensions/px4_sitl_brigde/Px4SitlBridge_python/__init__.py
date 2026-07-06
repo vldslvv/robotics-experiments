@@ -22,7 +22,7 @@ Typical wiring (done by the drone-spawning host, not by this extension):
 """
 
 try:
-    from .extension import *  # noqa: F401,F403  -- registers omni.ext entrypoint
+    from Px4SitlBridge_python.extension import *  # noqa: F401,F403  -- registers omni.ext entrypoint
 except ModuleNotFoundError as exc:
     # ``extension.py`` pulls Kit-only deps (omni, carb) that are absent in
     # pure-Python smoke/unit runs; tolerate those, re-raise anything else.

@@ -34,7 +34,7 @@ def __getattr__(name: str):
     if module is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     if module == "orchestrator":
-        from . import orchestrator
+        import robotics_experiments.runtime.orchestrator as orchestrator
 
         return getattr(orchestrator, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
