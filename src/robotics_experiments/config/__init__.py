@@ -1,4 +1,4 @@
-from .types import Px4SitlLaunchConfig, ResolvedVehicle
+from robotics_experiments.config.types import Px4SitlLaunchConfig, ResolvedVehicle
 
 __all__ = [
     "ResolvedVehicle",
@@ -17,7 +17,7 @@ def __getattr__(name: str):
         "get_enabled_px4_launch_configs",
         "resolve_drone_bridge_config",
     }:
-        from .load import (
+        from robotics_experiments.config.load import (
             get_config,
             get_enabled_px4_instance_indices,
             get_enabled_px4_launch_configs,

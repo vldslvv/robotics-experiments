@@ -64,6 +64,11 @@ the current contents and the intended home for that kind of code.
   or branching).
 - Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
   loading during lightweight package imports.
+- Use absolute imports for project modules (`from robotics_experiments...`)
+  instead of relative imports. The only exception is a narrowly scoped workaround
+  for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
+  Docker environment; keep those workarounds in Isaac-only lazy leaf modules so
+  core imports still work on the host.
 - Package layering runs `config -> domain (drone / environment / simulation /
   px4_bridge) -> Isaac extensions`, and `import robotics_experiments` (plus its
   subpackages) must succeed with Isaac absent. A domain leaf module that is

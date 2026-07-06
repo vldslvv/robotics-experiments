@@ -9,7 +9,11 @@ from typing import Literal
 
 import numpy as np
 
-from .frames import normalize_quat_wxyz, quat_conjugate_wxyz, quat_multiply_wxyz
+from robotics_experiments.px4_bridge.frames import (
+    normalize_quat_wxyz,
+    quat_conjugate_wxyz,
+    quat_multiply_wxyz,
+)
 
 RootBodyMismatchPolicy = Literal["warn", "fail", "ignore"]
 

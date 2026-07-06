@@ -1,6 +1,6 @@
 """Environment spawning, randomization, and interaction logic."""
 
-from .switches import SwitchState
+from robotics_experiments.environment.switches import SwitchState
 
 __all__ = [
     "SwitchState",

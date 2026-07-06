@@ -24,8 +24,8 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from ._drone_cfg import make_drone_articulation_cfg
-from ._flight import (
+from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import make_drone_articulation_cfg
+from robotics_experiments.workflows.isaac_lab.tasks._flight import (
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,

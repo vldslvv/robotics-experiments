@@ -21,14 +21,14 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from .commands import (
+from robotics_experiments.commanding.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     AttitudeRateSetpoint,
     MavlinkCommand,
     PositionSetpoint,
     VelocitySetpoint,
 )
-from .observation import MAV_RESULT_ACCEPTED, CommandAck
+from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
 __all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
 

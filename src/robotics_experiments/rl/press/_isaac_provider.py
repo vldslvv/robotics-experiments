@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 from pxr import Usd, UsdGeom
 
-from ._provider import PoseSample
+from robotics_experiments.rl.press._provider import PoseSample
 
 __all__ = ["GroundTruthPoseProvider"]
 

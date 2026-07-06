@@ -17,7 +17,7 @@ import numpy as np
 
 from robotics_experiments.px4_bridge.frames import rotate_vector_wxyz
 
-from .observation import PressObservation
+from robotics_experiments.rl.press.observation import PressObservation
 
 __all__ = ["HandoffGate", "HandoffReason", "HandoffResult", "handoff_ready"]
 

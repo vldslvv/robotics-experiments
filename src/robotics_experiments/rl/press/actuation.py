@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...px4_bridge.frames import GRAVITY_M_S2, rotate_vector_wxyz
+from robotics_experiments.px4_bridge.frames import GRAVITY_M_S2, rotate_vector_wxyz
 
 __all__ = [
     "ActuationParams",

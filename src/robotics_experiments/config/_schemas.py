@@ -1,6 +1,6 @@
 from hydra.core.config_store import ConfigStore
 
-from .types import (
+from robotics_experiments.config.types import (
     DriverConfig,
     DroneConfig,
     EnvConfig,

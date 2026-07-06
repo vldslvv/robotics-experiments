@@ -23,7 +23,7 @@ from robotics_experiments.px4_bridge.rotor_discovery import _resolve_body_path
 from robotics_experiments.px4_bridge.thrust_model import _RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-from . import frames
+from robotics_experiments.px4_bridge import frames
 
 __all__ = ["IsaacArticulationIO"]
 

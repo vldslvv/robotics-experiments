@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...commanding import AttitudeRateSetpoint, VelocitySetpoint
+from robotics_experiments.commanding import AttitudeRateSetpoint, VelocitySetpoint
 
 __all__ = ["press_action_to_offboard"]
 

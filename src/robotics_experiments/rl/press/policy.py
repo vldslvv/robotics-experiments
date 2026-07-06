@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Any, Callable, Union
 
 import numpy as np
 
-from .deploy import press_action_to_offboard
-from .observation import (
+from robotics_experiments.rl.press.deploy import press_action_to_offboard
+from robotics_experiments.rl.press.observation import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     hover_observation_from_state,

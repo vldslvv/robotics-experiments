@@ -9,9 +9,14 @@ here. ``__init__`` stays re-export-only.
 
 from __future__ import annotations
 
-from ._handoff import HandoffGate, HandoffReason, HandoffResult, handoff_ready
-from ._provider import AbstractPoseProvider, PoseSample
-from .actuation import (
+from robotics_experiments.rl.press._handoff import (
+    HandoffGate,
+    HandoffReason,
+    HandoffResult,
+    handoff_ready,
+)
+from robotics_experiments.rl.press._provider import AbstractPoseProvider, PoseSample
+from robotics_experiments.rl.press.actuation import (
     ActuationParams,
     ActuationState,
     MixerGeometry,
@@ -20,8 +25,8 @@ from .actuation import (
     hover_action,
     reduce_to_body_wrench,
 )
-from .deploy import press_action_to_offboard
-from .observation import (
+from robotics_experiments.rl.press.deploy import press_action_to_offboard
+from robotics_experiments.rl.press.observation import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     OBSERVATION_SCHEMA_VERSION,
@@ -64,7 +69,7 @@ def __getattr__(name: str):
     # module scope); defer it so `import robotics_experiments.rl.press` stays
     # Isaac-free. Same pattern as environment/__init__.py.
     if name == "GroundTruthPoseProvider":
-        from . import _isaac_provider
+        from . import _isaac_provider as provider_module
 
-        return _isaac_provider.GroundTruthPoseProvider
+        return provider_module.GroundTruthPoseProvider
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

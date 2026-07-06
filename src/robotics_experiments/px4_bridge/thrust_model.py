@@ -14,7 +14,7 @@ from typing import Sequence
 
 import numpy as np
 
-from .contract import ActuatorCommands
+from robotics_experiments.px4_bridge.contract import ActuatorCommands
 
 __all__ = ["PegasusQuadraticThrustModel"]
 

@@ -8,8 +8,8 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-from ._schemas import _register_schemas
-from .types import (
+from robotics_experiments.config._schemas import _register_schemas
+from robotics_experiments.config.types import (
     DroneConfig,
     EnvConfig,
     Px4BridgeConfig,

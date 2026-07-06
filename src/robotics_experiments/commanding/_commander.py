@@ -10,10 +10,20 @@ lifecycle around it. There is no fleet object - drones are independent.
 
 from __future__ import annotations
 
-from .commands import AttitudeRateSetpoint, PositionSetpoint, VelocitySetpoint
-from .observation import RoutineObservation
-from .port import AbstractCommandPort
-from .routine import DecisionKind, RoutineDecision, RoutineState, VehicleRoutine, decide
+from robotics_experiments.commanding.commands import (
+    AttitudeRateSetpoint,
+    PositionSetpoint,
+    VelocitySetpoint,
+)
+from robotics_experiments.commanding.observation import RoutineObservation
+from robotics_experiments.commanding.port import AbstractCommandPort
+from robotics_experiments.commanding.routine import (
+    DecisionKind,
+    RoutineDecision,
+    RoutineState,
+    VehicleRoutine,
+    decide,
+)
 
 __all__ = ["VehicleCommander"]
 

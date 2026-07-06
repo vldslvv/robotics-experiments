@@ -32,10 +32,10 @@ from robotics_experiments.px4_bridge.frames import (
     DEFAULT_HOME_LON_DEG,
 )
 
-from ._commander import VehicleCommander
-from .observation import CommandAck, RoutineObservation
-from .port import AbstractCommandPort
-from .routine import (
+from robotics_experiments.commanding._commander import VehicleCommander
+from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
+from robotics_experiments.commanding.port import AbstractCommandPort
+from robotics_experiments.commanding.routine import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     EnvelopeGates,
