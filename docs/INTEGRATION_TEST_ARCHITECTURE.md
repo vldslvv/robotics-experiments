@@ -142,10 +142,10 @@ tunables come from the active Hydra experiment.
 paths, starts one PX4 SITL container per PX4-enabled vehicle in the active Hydra
 config, and delegates the Isaac-side test body to
 `make/scripts/run_isaac_test_in_container.sh` inside the Isaac container. It
-iterates the resolved `get_enabled_px4_instance_indices()` (each vehicle's
-derived `px4_instance_index = id`) rather than a blind `0..count` loop, so
-non-contiguous ids keep their derived ports. The first instance in that list
-owns the network namespace. Each additional instance `i` joins that namespace
+iterates the resolved `get_enabled_px4_launch_configs()` (each entry carries the
+vehicle's derived `instance_index = id`) rather than a blind `0..count` loop, so
+non-contiguous ids keep their derived ports. The first instance in that list owns
+the network namespace. Each additional instance `i` joins that namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so
 `run_px4_sitl_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP
 `14550 + i`), and uses an isolated per-instance rootfs plus per-instance

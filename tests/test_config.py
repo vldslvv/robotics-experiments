@@ -527,20 +527,17 @@ def test_resolve_section_falls_back_to_named_section():
     reset_config()
 
 
-def test_enabled_px4_helpers_match_active_config():
+def test_enabled_px4_launch_configs_match_active_config():
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
-    from robotics_experiments.config import (
-        get_config,
-        get_enabled_px4_instance_indices,
-    )
+    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
     from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
 
     config = get_config()
 
-    assert get_enabled_px4_instance_indices() == [
+    assert [c.instance_index for c in get_enabled_px4_launch_configs()] == [
         vehicle.px4_instance_index for vehicle in config.vehicles if vehicle.px4.enabled
     ]
     reset_config()
@@ -620,7 +617,7 @@ def test_resolve_px4_sitl_launch_config_rejects_unknown_asset():
     from robotics_experiments.config import get_config
     from robotics_experiments.config.load import _reset_config as reset_config
     from robotics_experiments.config.load import (
-        resolve_px4_sitl_launch_config,
+        _resolve_px4_sitl_launch_config as resolve_px4_sitl_launch_config,
     )
 
     reset_config()

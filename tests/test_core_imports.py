@@ -195,14 +195,10 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
 
     config = importlib.import_module("robotics_experiments.config")
     assert config.__all__ == [
-        "ResolvedVehicle",
-        "Px4SitlLaunchConfig",
-        "get_enabled_px4_instance_indices",
         "get_enabled_px4_launch_configs",
         "get_config",
         "resolve_drone_bridge_config",
     ]
-    assert config.ResolvedVehicle.__name__ == "ResolvedVehicle"
 
     simulation = importlib.import_module("robotics_experiments.simulation")
     assert simulation.__all__ == ["apply_settings"]

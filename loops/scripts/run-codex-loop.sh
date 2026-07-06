@@ -17,6 +17,8 @@ set -Eeuo pipefail
 #   ./loops/scripts/run-codex-loop.sh --start-after src/foo/bar
 #   ./loops/scripts/run-codex-loop.sh --only src/foo/bar
 #   ./loops/scripts/run-codex-loop.sh --max-items 3
+#   CODEX_MODE=exec-interactive CODEX_APPROVAL=on-request ./loops/scripts/run-codex-loop.sh
+#   CODEX_MODE=tui CODEX_APPROVAL=on-request ./loops/scripts/run-codex-loop.sh --resume
 #
 # Directory layout:
 #   loops/
@@ -41,9 +43,15 @@ set -Eeuo pipefail
 #
 # Environment overrides:
 #   PROJECT_ROOT_NAME=robotics-experiments
+#   CODEX_MODE=exec
+#     exec: unattended `codex exec`; prompt is stdin and output is logged.
+#     exec-interactive: `codex exec` with terminal stdin for approvals.
+#     tui: full interactive Codex TUI per item; exit the TUI to advance.
 #   CODEX_SANDBOX=workspace-write
 #   CODEX_NETWORK_ACCESS=1
 #   CODEX_NETWORK_DOMAINS=json.schemastore.org
+#   CODEX_GIT_WRITE=1
+#     Add the repository Git metadata directory as writable so Codex can commit.
 #   CODEX_APPROVAL=never
 #   REQUIRE_CLEAN_START=1
 #   REQUIRE_CLEAN_BETWEEN_RUNS=1
@@ -53,9 +61,11 @@ ITEMS_FILE=""
 PROMPT_TEMPLATE=""
 
 PROJECT_ROOT_NAME="${PROJECT_ROOT_NAME:-robotics-experiments}"
+CODEX_MODE="${CODEX_MODE:-exec}"
 CODEX_SANDBOX="${CODEX_SANDBOX:-workspace-write}"
 CODEX_NETWORK_ACCESS="${CODEX_NETWORK_ACCESS:-1}"
 CODEX_NETWORK_DOMAINS="${CODEX_NETWORK_DOMAINS:-json.schemastore.org}"
+CODEX_GIT_WRITE="${CODEX_GIT_WRITE:-1}"
 CODEX_APPROVAL="${CODEX_APPROVAL:-never}"
 REQUIRE_CLEAN_START="${REQUIRE_CLEAN_START:-1}"
 REQUIRE_CLEAN_BETWEEN_RUNS="${REQUIRE_CLEAN_BETWEEN_RUNS:-1}"
@@ -377,6 +387,7 @@ init_run_dir() {
   log "Run directory: $RUN_DIR"
   log "Items file: $ITEMS_FILE"
   log "Prompt template: $PROMPT_TEMPLATE"
+  log "Codex mode: $CODEX_MODE"
   log "Resume: $RESUME"
   log "Skip completed: $SKIP_COMPLETED"
 }
@@ -417,7 +428,10 @@ run_codex_for_item() {
   local before_head
   local after_head
   local commit=""
+  local codex_exit=0
   local codex_config_args=()
+  local codex_workspace_args=()
+  local prompt_text=""
 
   started_at="$(now_iso)"
   start_epoch="$(date +%s)"
@@ -435,18 +449,90 @@ run_codex_for_item() {
     fi
   fi
 
-  if {
-    echo "=== Codex run for item: $item ==="
-    echo "Started at: $started_at"
-    echo "Prompt: $prompt_path"
-    echo
+  if [[ "$CODEX_GIT_WRITE" == "1" && "$CODEX_SANDBOX" == "workspace-write" ]]; then
+    codex_workspace_args+=(--add-dir "$(git rev-parse --git-common-dir)")
+  fi
 
-    codex --ask-for-approval "$CODEX_APPROVAL" exec \
-      "${codex_config_args[@]}" \
-      --cd . \
-      --sandbox "$CODEX_SANDBOX" \
-      < "$prompt_path"
-  } 2>&1 | tee -a "$RUN_LOG" "$item_log"; then
+  case "$CODEX_MODE" in
+    exec)
+      if {
+        echo "=== Codex run for item: $item ==="
+        echo "Mode: exec"
+        echo "Started at: $started_at"
+        echo "Prompt: $prompt_path"
+        echo
+
+        codex --ask-for-approval "$CODEX_APPROVAL" exec \
+          "${codex_config_args[@]}" \
+          "${codex_workspace_args[@]}" \
+          --cd . \
+          --sandbox "$CODEX_SANDBOX" \
+          < "$prompt_path"
+      } 2>&1 | tee -a "$RUN_LOG" "$item_log"; then
+        codex_exit=0
+      else
+        codex_exit="$?"
+      fi
+      ;;
+
+    exec-interactive)
+      prompt_text="$(< "$prompt_path")"
+
+      if {
+        echo "=== Codex run for item: $item ==="
+        echo "Mode: exec-interactive"
+        echo "Started at: $started_at"
+        echo "Prompt: $prompt_path"
+        echo
+
+        codex --ask-for-approval "$CODEX_APPROVAL" exec \
+          "${codex_config_args[@]}" \
+          "${codex_workspace_args[@]}" \
+          --cd . \
+          --sandbox "$CODEX_SANDBOX" \
+          "$prompt_text"
+      } 2>&1 | tee -a "$RUN_LOG" "$item_log"; then
+        codex_exit=0
+      else
+        codex_exit="$?"
+      fi
+      ;;
+
+    tui)
+      prompt_text="$(< "$prompt_path")"
+
+      {
+        echo "=== Codex run for item: $item ==="
+        echo "Mode: tui"
+        echo "Started at: $started_at"
+        echo "Prompt: $prompt_path"
+        echo "TUI output is not tee'd so Codex can own the terminal."
+        echo
+      } | tee -a "$RUN_LOG" "$item_log"
+
+      if codex --ask-for-approval "$CODEX_APPROVAL" \
+        "${codex_config_args[@]}" \
+        "${codex_workspace_args[@]}" \
+        --cd . \
+        --sandbox "$CODEX_SANDBOX" \
+        "$prompt_text"; then
+        codex_exit=0
+      else
+        codex_exit="$?"
+      fi
+
+      {
+        echo
+        echo "Codex TUI exited with code: $codex_exit"
+      } | tee -a "$RUN_LOG" "$item_log"
+      ;;
+
+    *)
+      die "invalid CODEX_MODE: $CODEX_MODE (expected exec, exec-interactive, or tui)"
+      ;;
+  esac
+
+  if [[ "$codex_exit" == "0" ]]; then
     after_head="$(git rev-parse HEAD)"
 
     if [[ "$after_head" != "$before_head" ]]; then
@@ -495,8 +581,6 @@ run_codex_for_item() {
 
     return 0
   else
-    local exit_code="$?"
-
     after_head="$(git rev-parse HEAD)"
 
     if [[ "$after_head" != "$before_head" ]]; then
@@ -513,15 +597,15 @@ run_codex_for_item() {
       "$commit" \
       "$prompt_path" \
       "$item_log" \
-      "codex exec failed with exit code $exit_code" \
+      "codex $CODEX_MODE failed with exit code $codex_exit" \
       "$started_at" \
       "$finished_at" \
       "$duration_seconds"
 
     log "ERROR: Codex failed for item: $item"
-    log "Exit code: $exit_code"
+    log "Exit code: $codex_exit"
 
-    return "$exit_code"
+    return "$codex_exit"
   fi
 }
 

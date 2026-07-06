@@ -115,10 +115,10 @@ class BridgeHostParams:
 
     ``px4`` is the vehicle's bridge behavior config; the remaining fields are the
     derived per-vehicle runtime state, taken straight from the
-    :class:`~robotics_experiments.config.ResolvedVehicle` (never recomputed here)
-    plus the spawn result. ``articulation_path`` is resolved exactly once (the
-    ``px4.articulation_path`` override, else the spawned prim path), so the host
-    and the state observer read the same body.
+    :class:`~robotics_experiments.config.types.ResolvedVehicle` (never
+    recomputed here) plus the spawn result. ``articulation_path`` is resolved
+    exactly once (the ``px4.articulation_path`` override, else the spawned prim
+    path), so the host and the state observer read the same body.
     """
 
     px4: Px4BridgeConfig

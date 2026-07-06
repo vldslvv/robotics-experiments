@@ -20,10 +20,8 @@ from robotics_experiments.config.types import (
 
 __all__ = [
     "get_config",
-    "get_enabled_px4_instance_indices",
     "get_enabled_px4_launch_configs",
     "resolve_drone_bridge_config",
-    "resolve_px4_sitl_launch_config",
 ]
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
@@ -273,7 +271,7 @@ def get_config() -> EnvConfig:
     return env
 
 
-def resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchConfig:
+def _resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchConfig:
     """Derive the PX4 SITL launch airframe for one resolved vehicle.
 
     The drone USD asset name selects the airframe record in ``configs/airframes``,
@@ -335,18 +333,7 @@ def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
     ``PX4_SYS_AUTOSTART`` so each container launches the airframe matching its
     drone asset.
     """
-    return [resolve_px4_sitl_launch_config(v) for v in get_config().vehicles if v.px4.enabled]
-
-
-def get_enabled_px4_instance_indices() -> list[int]:
-    """Return the PX4 ``-i`` instance indices of the PX4-enabled vehicles.
-
-    The host-side launch scripts iterate these (the resolved
-    ``px4_instance_index``, in fleet order) instead of a blind ``0..count``
-    loop, so non-contiguous vehicle ids keep their derived MAVLink/PX4 port
-    offsets.
-    """
-    return [c.instance_index for c in get_enabled_px4_launch_configs()]
+    return [_resolve_px4_sitl_launch_config(v) for v in get_config().vehicles if v.px4.enabled]
 
 
 def _reset_config() -> None:

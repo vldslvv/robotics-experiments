@@ -55,11 +55,11 @@ launch loop's source of `PX4_INSTANCE` / `PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART`,
 so non-contiguous ids keep their derived ports and each PX4 container launches
 the SITL airframe matching its drone asset). Each entry is a frozen
 `Px4SitlLaunchConfig` (`instance_index` / `sim_model` / `sys_autostart`)
-produced by the pure `config.load.resolve_px4_sitl_launch_config(vehicle)`,
-which maps the drone USD asset basename to the PX4 airframe defined in
-`configs/airframes` (`holybro_x500_v2.usda` -> `none_x500_v2`/`4019`,
-`hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
-raises `ValueError`). The Dockerfile's px4 stage generates these repo-managed
+derived by the config loader from the drone USD asset basename and the PX4
+airframe defined in `configs/airframes` (`holybro_x500_v2.usda` ->
+`none_x500_v2`/`4019`, `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown
+PX4-flyable asset raises `ValueError`). The Dockerfile's px4 stage generates
+these repo-managed
 `none_*` posix airframe scripts from `configs/airframes`, registers them in
 PX4's airframe CMake list, writes an image manifest, then runs
 `make px4_sitl_default`, so USD geometry, bridge rotor arrays, and PX4 control
@@ -87,8 +87,7 @@ generated one. The quad therefore uses the free `4019` (X500 V2) slot, not
 `4001`; the generator fails the build loudly on such a collision
 (`generate_px4_airframes.py` `_conflicting_airframe_files`), with a
 `--prune-conflicts` seam to remove a stock file and reclaim its id.
-`get_enabled_px4_instance_indices()` stays as a thin compat wrapper over
-`get_enabled_px4_launch_configs()`. The PX4 container launcher
+The PX4 container launcher
 (`px4_sitl_common.sh::launch_px4_sitl`) reads `PX4_SIM_MODEL` (default
 `none_x500_v2`/`4019` only for manual unset-env launches), so the
 script-driven fleet path selects the generated per-asset airframe.

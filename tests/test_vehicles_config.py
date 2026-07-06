@@ -64,7 +64,7 @@ def _resolved_vehicle(
     Overrides let a single derived constraint be broken at a time (e.g. an
     explicit ``mavlink_port`` to force an endpoint collision).
     """
-    from robotics_experiments.config import ResolvedVehicle
+    from robotics_experiments.config.types import ResolvedVehicle
 
     base_drone, base_px4 = _base_defaults()
     px4 = base_px4

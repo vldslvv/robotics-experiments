@@ -425,11 +425,10 @@ class ResolvedVehicle:
 class Px4SitlLaunchConfig:
     """PX4 SITL launch airframe derived from a resolved vehicle's config.
 
-    Produced by the pure ``config.load.resolve_px4_sitl_launch_config`` from a
-    :class:`ResolvedVehicle`. The drone USD asset selects the PX4 simulator
-    airframe so each asset launches the PX4 control allocation generated from
-    the same ``configs/airframes`` source as the USD. Threaded by the host-side
-    launch scripts into
+    Produced by the config loader from a :class:`ResolvedVehicle`. The drone USD
+    asset selects the PX4 simulator airframe so each asset launches the PX4
+    control allocation generated from the same ``configs/airframes`` source as
+    the USD. Threaded by the host-side launch scripts into
     each PX4 container as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
     ``PX4_SYS_AUTOSTART``.
 
