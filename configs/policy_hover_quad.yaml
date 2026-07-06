@@ -1,5 +1,5 @@
 defaults:
-  - config
+  - base
   - override experiment/routine@routine: policy_hover
   - _self_
 
@@ -9,6 +9,11 @@ defaults:
 # the policy_hover routine and the minimal integration stage. The strict make
 # target (`make test-integration-press-policy`, Isaac Lab image for torch)
 # requires a trained artifact at .build/training/hover/latest (`make train-rl`);
-# `make run-all HYDRA_CONFIG=configs/integration_test_press_policy.yaml` flies
+# `make run-all HYDRA_CONFIG=configs/policy_hover_quad.yaml` flies
 # it forgivingly.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+vehicles:
+  - id: 0
+    ros: {namespace: /x500_01}
+    spawn_xy: [0.0, 0.0]

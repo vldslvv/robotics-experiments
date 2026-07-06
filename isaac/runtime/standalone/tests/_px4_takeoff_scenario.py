@@ -321,7 +321,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     if not any(vehicle.routine.steps for vehicle in env.vehicles):
         raise ValueError(
             f"{options.test_name}: no vehicle has a non-empty routine.steps; run this scenario "
-            "under a takeoff experiment (e.g. configs/integration_test_takeoff.yaml)"
+            "under a takeoff experiment (e.g. configs/takeoff_quad.yaml)"
         )
     # Fleet-level infra knobs come from the global routine default (ground settle
     # and the bridge-heartbeat infra wait apply uniformly before any drone flies).

@@ -1,0 +1,15 @@
+defaults:
+  - base
+  - override experiment/routine@routine: takeoff
+  - _self_
+
+# Single-drone PX4 arm/takeoff/hover experiment. It selects the shared `takeoff`
+# routine (steps + flight-envelope gates) and overrides only the scene to the
+# minimal stage. Strict standalone runs fail on a flight-envelope breach;
+# `make run-all` runs the same config forgivingly.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+vehicles:
+  - id: 0
+    ros: {namespace: /x500_01}
+    spawn_xy: [0.0, 0.0]

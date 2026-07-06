@@ -115,13 +115,13 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.rl.press.hover_task.reward_alive == expected_press.hover_task.reward_alive
     assert config.rl.press.hover_task.min_altitude_m == expected_press.hover_task.min_altitude_m
     assert config.rl.press.hover_task.reset_xy_half_m == expected_press.hover_task.reset_xy_half_m
-    # The default runtime experiment ships an empty (manual) routine and its
-    # flight-envelope gates; the GCS link baseport lives in the px4 group.
+    # The default runnable experiment selects the takeoff routine; the GCS link
+    # baseport lives in the px4 group.
     expected_routine = _group_defaults("routine")
-    assert config.routine.steps == []
+    assert [step["kind"] for step in config.routine.steps] == ["arm", "takeoff", "hover"]
     assert config.routine.max_tilt_deg == expected_routine.max_tilt_deg
     assert config.px4.gcs_baseport == 14550
-    assert config.scene.endswith("/Warehouse.usd")
+    assert config.scene.endswith("/MinimalIntegration.usda")
     assert config.vehicles[0].ros_namespace == "/x500_01"
     assert config.vehicles[0].ros_frame_prefix == "x500_01"
     holybro = _airframe_config("holybro_x500_v2")
@@ -129,6 +129,16 @@ def test_default_config_loads_from_root_experiment_config():
         config.vehicles[0].px4.rotor_spin_visual_scale == holybro.px4.bridge.rotor_spin_visual_scale
     )
     reset_config()
+
+
+def test_base_config_is_shared_defaults_only():
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.load(Path(__file__).resolve().parents[1] / "configs" / "base.yaml")
+
+    assert "scene" not in cfg
+    assert "vehicles" not in cfg
 
 
 def test_press_training_policy_name_is_required_by_schema():
@@ -154,7 +164,7 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/integration_test_takeoff.yaml",
+        "configs/takeoff_quad.yaml",
     )
     reset_config()
 
@@ -176,12 +186,12 @@ def test_takeoff_experiment_composes_routine_steps_gates_and_scene(monkeypatch):
         config.routine.hover_max_abs_horizontal_speed_m_s
         == expected_gates.hover_max_abs_horizontal_speed_m_s
     )
-    # Single-drone fleet inherited from config.yaml.
+    # The single-drone experiment declares its own fleet.
     assert [vehicle.id for vehicle in config.vehicles] == [0]
     reset_config()
 
 
-def test_two_drone_forward_land_config_composes(monkeypatch):
+def test_forward_quad_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
@@ -189,7 +199,7 @@ def test_two_drone_forward_land_config_composes(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_two_drone_forward_land.yaml",
+        "configs/forward_quad.yaml",
     )
     reset_config()
 
@@ -197,20 +207,14 @@ def test_two_drone_forward_land_config_composes(monkeypatch):
     assert config.routine.steps == []
     assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
         (0, (0.0, -2.0), "Drone0"),
-        (1, (0.0, 2.0), "Drone1"),
     ]
-    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/x500_01", "/x500_02"]
-    assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["x500_01", "x500_02"]
-    assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
-        ["arm", "takeoff", "hover", "forward", "land"],
-        ["arm", "takeoff", "hover", "forward", "land"],
-    ]
-    assert config.vehicles[0].routine.steps[3]["distance_m"] == 1.0
-    assert config.vehicles[1].routine.steps[3]["distance_m"] == 2.0
+    steps = config.vehicles[0].routine.steps
+    assert [step["kind"] for step in steps] == ["arm", "takeoff", "hover", "forward", "land"]
+    assert steps[3]["distance_m"] == 5.0
     reset_config()
 
 
-def test_two_drone_circle_land_config_composes(monkeypatch):
+def test_circle_land_quad_quad_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config
@@ -218,7 +222,7 @@ def test_two_drone_circle_land_config_composes(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_two_drone_circle_land.yaml",
+        "configs/circle_land_quad_quad.yaml",
     )
     reset_config()
 
@@ -269,88 +273,6 @@ def test_two_drone_circle_land_config_composes(monkeypatch):
     reset_config()
 
 
-def test_two_hexacopter_circle_land_config_composes(monkeypatch):
-    pytest.importorskip("hydra")
-    pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config
-    from robotics_experiments.config.load import _reset_config as reset_config
-
-    monkeypatch.setenv(
-        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_two_hexacopter_circle_land.yaml",
-    )
-    reset_config()
-
-    config = get_config()
-    assert config.routine.steps == []
-    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
-        (0, (0.0, -2.0), "Hexacopter0"),
-        (1, (0.0, 2.0), "Hexacopter1"),
-    ]
-    assert [vehicle.ros_namespace for vehicle in config.vehicles] == ["/s550_01", "/s550_02"]
-    assert [vehicle.ros_frame_prefix for vehicle in config.vehicles] == ["s550_01", "s550_02"]
-    for vehicle in config.vehicles:
-        assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
-        assert len(vehicle.px4.input_offset) == 6
-        assert len(vehicle.px4.input_scaling) == 6
-        assert len(vehicle.px4.zero_position_armed) == 6
-        assert len(vehicle.px4.rotor_constant) == 6
-        assert len(vehicle.px4.rolling_moment_coefficient) == 6
-        assert len(vehicle.px4.min_rotor_velocity) == 6
-        assert len(vehicle.px4.max_rotor_velocity) == 6
-    assert [[step["kind"] for step in vehicle.routine.steps] for vehicle in config.vehicles] == [
-        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
-        ["arm", "takeoff", "hover", "goto", "goto", "goto", "goto", "hover", "land"],
-    ]
-    reset_config()
-
-
-def test_hexacopter_navigate_config_composes(monkeypatch):
-    pytest.importorskip("hydra")
-    pytest.importorskip("omegaconf")
-    from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
-    from robotics_experiments.config.load import _reset_config as reset_config
-
-    monkeypatch.setenv(
-        "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_hexacopter_navigate.yaml",
-    )
-    reset_config()
-
-    config = get_config()
-    assert config.routine.steps == []
-    # Single PX4-backed hexacopter flying an absolute-waypoint navigation routine
-    # with the goto -> hover transition the navigation test protects.
-    assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
-        (0, (0.0, -2.0), "Hexacopter0"),
-    ]
-    vehicle = config.vehicles[0]
-    assert vehicle.ros_namespace == "/s550_01"
-    assert vehicle.ros_frame_prefix == "s550_01"
-    assert vehicle.drone.usd_path.endswith("/hexacopter_s550.usda")
-    assert len(vehicle.px4.input_scaling) == 6
-    assert [step["kind"] for step in vehicle.routine.steps] == [
-        "arm",
-        "takeoff",
-        "hover",
-        "goto",
-        "goto",
-        "hover",
-        "land",
-    ]
-    assert [(step["x"], step["y"], step["z"]) for step in vehicle.routine.steps[3:5]] == [
-        (0.0, 2.0, 2.5),
-        (3.0, 2.0, 2.5),
-    ]
-    # The host-side launch derives PX4's generic hexarotor-x airframe from the asset.
-    assert [
-        (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
-    ] == [
-        (0, "none_hexa_x", 6001),
-    ]
-    reset_config()
-
-
 def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
@@ -360,13 +282,13 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_hexacopter_navigate.yaml",
+        "configs/navigate_quad_hex.yaml",
     )
     reset_config()
 
     airframe = _airframe_config("hexacopter_s550")
     config = get_config()
-    vehicle = config.vehicles[0]
+    vehicle = config.vehicles[1]
 
     assert vehicle.drone.usd_path.endswith(f"/{airframe.output_filename}")
     assert vehicle.px4.input_offset == list(airframe.px4.bridge.input_offset)
@@ -385,7 +307,8 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
     assert [
         (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
     ] == [
-        (0, airframe.px4.sitl.sim_model, airframe.px4.sitl.sys_autostart),
+        (0, "none_x500_v2", 4019),
+        (1, airframe.px4.sitl.sim_model, airframe.px4.sitl.sys_autostart),
     ]
     reset_config()
 
@@ -398,14 +321,16 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
     from robotics_experiments.config import get_config
     from robotics_experiments.config.load import _reset_config as reset_config
     from robotics_experiments.config.load import _resolve_fleet as resolve_fleet
+    from robotics_experiments.config.types import RoutineConfig
 
     reset_config()
-    env = get_config()  # default config: global routine.steps is empty (manual)
+    env = get_config()
+    global_routine = OmegaConf.merge(OmegaConf.structured(RoutineConfig), _group_defaults("routine"))
     cfg = OmegaConf.create(
         {
             "drone": env.drone,
             "px4": env.px4,
-            "routine": env.routine,
+            "routine": global_routine,
             "vehicles": [
                 # Drone 0 inherits the (empty) global routine -> manual.
                 {
@@ -626,7 +551,7 @@ def test_quad_default_resolves_to_generic_quad_x_airframe():
     from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
-    config = get_config()  # default config: one PX4-enabled quad vehicle
+    config = get_config()
     assert config.vehicles[0].drone.usd_path.endswith("/holybro_x500_v2.usda")
 
     launch_configs = get_enabled_px4_launch_configs()
@@ -636,7 +561,7 @@ def test_quad_default_resolves_to_generic_quad_x_airframe():
     reset_config()
 
 
-def test_hex_config_resolves_to_generic_hexarotor_airframe(monkeypatch):
+def test_mixed_navigation_config_resolves_hexarotor_airframe(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_enabled_px4_launch_configs
@@ -644,13 +569,13 @@ def test_hex_config_resolves_to_generic_hexarotor_airframe(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/runtime_two_hexacopter_circle_land.yaml",
+        "configs/navigate_quad_hex.yaml",
     )
     reset_config()
 
     launch_configs = get_enabled_px4_launch_configs()
     assert [(c.instance_index, c.sim_model, c.sys_autostart) for c in launch_configs] == [
-        (0, "none_hexa_x", 6001),
+        (0, "none_x500_v2", 4019),
         (1, "none_hexa_x", 6001),
     ]
     reset_config()
@@ -665,7 +590,7 @@ def test_get_enabled_px4_launch_configs_omits_disabled_vehicles(monkeypatch):
     from robotics_experiments.config.load import _reset_config as reset_config
 
     reset_config()
-    enabled = get_config().vehicles[0]  # the default PX4-enabled quad vehicle
+    enabled = get_config().vehicles[0]
     disabled = dataclasses.replace(
         enabled,
         id=1,
@@ -716,7 +641,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/integration_test_multi_drone_takeoff.yaml",
+        "configs/takeoff_quad_quad.yaml",
     )
     reset_config()
 
@@ -733,7 +658,7 @@ def test_config_path_env_selects_top_level_hydra_config(monkeypatch):
     reset_config()
 
 
-def test_navigate_multi_config_composes(monkeypatch):
+def test_navigate_quad_hex_config_composes(monkeypatch):
     pytest.importorskip("hydra")
     pytest.importorskip("omegaconf")
     from robotics_experiments.config import get_config, get_enabled_px4_launch_configs
@@ -741,7 +666,7 @@ def test_navigate_multi_config_composes(monkeypatch):
 
     monkeypatch.setenv(
         "ROBOTICS_EXPERIMENT_CONFIG_PATH",
-        "configs/integration_test_navigate_multi.yaml",
+        "configs/navigate_quad_hex.yaml",
     )
     reset_config()
 

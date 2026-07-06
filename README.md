@@ -64,7 +64,7 @@ Select a different top-level Hydra experiment config with `HYDRA_CONFIG`, for
 example:
 
 ```bash
-make run-all HYDRA_CONFIG=configs/integration_test_multi_drone_takeoff.yaml
+make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
 ```
 
 Run host Python tests:

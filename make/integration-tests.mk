@@ -90,7 +90,7 @@ PX4_INTEGRATION_COMMON_ENV = \
     ROBOTICS_EXPERIMENT_CONFIG_PATH='$(HYDRA_CONFIG_HOST_PATH)'
 
 .PHONY: test-integration-px4-takeoff
-test-integration-px4-takeoff: HYDRA_CONFIG = configs/integration_test_takeoff.yaml
+test-integration-px4-takeoff: HYDRA_CONFIG = configs/takeoff_quad.yaml
 test-integration-px4-takeoff: generate-drone-usd
 	@TEST_TARGET='test-integration-px4-takeoff' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_stability.log' \
@@ -110,7 +110,7 @@ test-integration-px4-takeoff: generate-drone-usd
 # NOT in INTEGRATION_TEST_TARGETS / test-integration-all.
 .PHONY: test-integration-press-policy
 test-integration-press-policy: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-policy: HYDRA_CONFIG = configs/integration_test_press_policy.yaml
+test-integration-press-policy: HYDRA_CONFIG = configs/policy_hover_quad.yaml
 test-integration-press-policy: generate-drone-usd
 	@TEST_TARGET='test-integration-press-policy' \
 	    HOST_ISAAC_LOG_BASENAME='test_press_policy_hover.log' \
@@ -127,10 +127,9 @@ test-integration-press-policy: generate-drone-usd
 # PX4 SITL instance with the per-asset airframe derived from its USD asset. Uses
 # the experiment scene via the @config sentinel and the generic multi-PX4 launch
 # path; passes only when BOTH drones hold their envelope and protect OFFBOARD
-# setpoint continuity across the goto -> hover transition. This replaces the
-# former separate single-quad and single-hex navigation targets.
+# setpoint continuity across the goto -> hover transition.
 .PHONY: test-integration-px4-navigation
-test-integration-px4-navigation: HYDRA_CONFIG = configs/integration_test_navigate_multi.yaml
+test-integration-px4-navigation: HYDRA_CONFIG = configs/navigate_quad_hex.yaml
 test-integration-px4-navigation: SCENE = @config
 test-integration-px4-navigation: generate-drone-usd
 	@TEST_TARGET='test-integration-px4-navigation' \
@@ -144,7 +143,7 @@ test-integration-px4-navigation: generate-drone-usd
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 .PHONY: test-integration-px4-takeoff-instability
-test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/integration_test_takeoff.yaml
+test-integration-px4-takeoff-instability: HYDRA_CONFIG = configs/takeoff_quad.yaml
 test-integration-px4-takeoff-instability: generate-drone-usd
 	@TEST_TARGET='test-integration-px4-takeoff-instability' \
 	    HOST_ISAAC_LOG_BASENAME='test_px4_takeoff_instability_detection.log' \
@@ -157,11 +156,11 @@ test-integration-px4-takeoff-instability: generate-drone-usd
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
 # Multi-drone takeoff. Starts one PX4 SITL instance per PX4-enabled vehicle in
-# the integration_test_multi_drone_takeoff experiment, uses its scene config via
+# the takeoff_quad_quad experiment, uses its scene config via
 # the @config sentinel, and requires every drone to hold its takeoff/hover
 # envelope.
 .PHONY: test-integration-px4-multi-drone-takeoff
-test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/integration_test_multi_drone_takeoff.yaml
+test-integration-px4-multi-drone-takeoff: HYDRA_CONFIG = configs/takeoff_quad_quad.yaml
 test-integration-px4-multi-drone-takeoff: SCENE = @config
 test-integration-px4-multi-drone-takeoff: generate-drone-usd
 	@TEST_TARGET='test-integration-px4-multi-drone-takeoff' \

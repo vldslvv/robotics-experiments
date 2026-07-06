@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
-_DEFAULT_CONFIG_NAME = "config"
+_DEFAULT_CONFIG_NAME = "takeoff_quad"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _AIRFRAME_CONFIG_DIR = _DEFAULT_CONF_DIR / "airframes"
 

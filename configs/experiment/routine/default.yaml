@@ -5,10 +5,10 @@ defaults:
 # of truth and the on/off switch: an empty list (the default) means purely manual
 # operation -- no control driver is built and you fly each drone from its PX4
 # console. A non-empty `steps` (see the `takeoff` routine variant) makes the live
-# extension (`make run-all`), a regular standalone run, and the strict standalone
-# integration test all arm/take-off/verify the fleet over each drone's derived
-# gcs_port; only the reaction to a flight-envelope breach differs (strict raises,
-# forgiving logs and stops).
+# extension (`make run-all`), a regular standalone run, and a strict standalone
+# run all arm/take-off/verify the fleet over each drone's derived gcs_port; only
+# the reaction to a flight-envelope breach differs (strict raises, forgiving logs
+# and stops).
 steps: []
 
 # Control-link and command-flow tunables (used only when steps is non-empty).

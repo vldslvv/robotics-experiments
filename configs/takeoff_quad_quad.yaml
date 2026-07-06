@@ -1,10 +1,10 @@
 defaults:
-  - integration_test_takeoff
+  - base
+  - override experiment/routine@routine: takeoff
   - _self_
 
-# Dual-PX4 multi-drone takeoff experiment. Inherits the single-drone
-# integration_test_takeoff experiment (scene + the shared `takeoff` routine with
-# its flight-envelope gates) and overrides only the vehicles list below.
+# Dual-PX4 multi-drone takeoff experiment. Selects the shared `takeoff` routine
+# (scene + flight-envelope gates) and overrides the vehicles list below.
 #
 # Two drones, each bound to its own PX4 SITL instance: id 0/1 -> derived
 # simulator ports 4560/4561, GCS links px4.gcs_baseport + id (14550/14551).
@@ -13,6 +13,8 @@ defaults:
 # Distinct prim_name avoids prim collisions; the px4 default debug_log_path
 # carries the {vehicle} token so the two bridge logs never collide. Spawned ~4m
 # apart so the drones never cross within the hover envelope.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
 vehicles:
   - id: 0
     ros: {namespace: /x500_01}

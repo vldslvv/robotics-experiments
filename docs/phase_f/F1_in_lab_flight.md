@@ -67,7 +67,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Action: create `configs/experiment/rl/default.yaml` (`defaults: - base_press`)
   with concrete values (16 envs, 4 m spacing, 5 s episode, decimation from
   `sim.physics_hz` / `policy_rate_hz`, `policy_rate_hz: 50`, action gains).
-- Action: edit `configs/config.yaml` defaults to add
+- Action: edit `configs/base.yaml` defaults to add
   `experiment/rl@press: default`.
 - Test: extend `tests/` with a config test asserting `get_config().rl.action`
   resolves and `rl.num_envs > 0`.
@@ -203,7 +203,7 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 - add `src/robotics_experiments/workflows/isaac_lab/tasks/_flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
 - edit `src/robotics_experiments/config/types.py`, `.../config/_schemas.py`
-- add `configs/experiment/rl/default.yaml`; edit `configs/config.yaml`
+- add `configs/experiment/rl/default.yaml`; edit `configs/base.yaml`
 - move/adopt `isaac/runtime/lab/drone_cfg.py` into the tasks package (or import it)
 - add `tests/test_pressactuation.py`; extend a config test; extend
   `tests/test_core_imports.py` to assert `press` imports without torch/isaac

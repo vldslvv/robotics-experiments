@@ -37,9 +37,8 @@ scenario is just the shared `routine` (`[arm, takeoff, hover]`) driven by
 hover, and the continuous tilt/drift/speed envelope gates) lives in the routine
 itself, configured by the `routine` Hydra group (`RoutineConfig`); there is no
 separate `integration_test` group. `configs/experiment/routine/takeoff.yaml` is
-the shared routine, selected by `configs/integration_test_takeoff.yaml`,
-`configs/integration_test_multi_drone_takeoff.yaml`, and
-`configs/runtime_arm_takeoff.yaml` alike.
+the shared routine, selected by `configs/takeoff_quad.yaml`,
+`configs/takeoff_quad_quad.yaml`, and regular `make run-all` invocations alike.
 
 The same scenario can run two ways. With `--strict` it is an **integration test**:
 a flight-envelope breach raises `ExpectedInstabilityDetected` and any other
@@ -62,7 +61,7 @@ least 1.5 m and the hover step then holds 5 seconds of stable hover within
 0.35 m/s vertical and 0.30 m/s horizontal speed.
 
 `make test-integration-px4-multi-drone-takeoff` runs the same routine for two
-drones at once (the `integration_test_multi_drone_takeoff` Hydra experiment). The
+drones at once (the `takeoff_quad_quad` Hydra experiment). The
 shared scenario in `_px4_takeoff_scenario.py` is driven by the `vehicles` list:
 one entry is the single-vehicle baseline, N entries drive N drones, each bound to
 its own PX4 SITL instance (the resolved simulator port `4560 + id`, GCS link the
@@ -75,7 +74,7 @@ pass.
 
 `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
 navigation routine as one multi-drone scene
-(`configs/integration_test_navigate_multi.yaml`): a quad (id 0) and a hexacopter
+(`configs/navigate_quad_hex.yaml`): a quad (id 0) and a hexacopter
 (id 1, the `hexacopter_s550.usda` asset, so its PX4 instance launches the derived
 generic hexarotor-x airframe) fly the same routine concurrently in parallel lanes
 (the hex `goto` waypoints offset by its spawn so the absolute waypoints never
@@ -85,6 +84,4 @@ thin entrypoint `test_px4_navigation_routine.py` runs the shared
 each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
 transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
 OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
-to completion. (`configs/runtime_drone_navigate.yaml` and
-`configs/runtime_hexacopter_navigate.yaml` remain as single-drone `make run-all`
-demos.)
+to completion.

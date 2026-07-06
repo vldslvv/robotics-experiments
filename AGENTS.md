@@ -195,7 +195,7 @@ the current contents and the intended home for that kind of code.
     load + hover-observation packing + `press_action_to_offboard` into the
     `PolicyStepFn` the `{kind: policy}` routine step streams.
   - **Gate**: `make test-integration-press-policy` flies
-    `configs/integration_test_press_policy.yaml` (routine `policy_hover`: arm ->
+    `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
     takeoff -> policy hover hold -> land) strict over PX4 SITL on
     `ISAAC_LAB_IMAGE`. It needs a prior `make train-rl` (the routine
     references `.build/training/hover/latest`), so it is deliberately NOT part of
@@ -238,8 +238,8 @@ the current contents and the intended home for that kind of code.
   `commands_to_dynamics` pure and `apply_dynamics` the sole physics sink.
 - Multi-vehicle scenes are driven by a top-level `vehicles:` list. It is the
   single source of truth and the only spawn path: one vehicle = a one-element
-  list (the default config ships exactly that, reproducing the single-drone
-  behavior), and an empty list `vehicles: []` is a valid empty fleet (0..N is
+  list (single-drone experiment configs declare exactly that), and an empty list
+  `vehicles: []` is a valid empty fleet (0..N is
   handled uniformly -- the extension spawns nothing, runs an empty
   `BridgeHostGroup`, and `run-px4` starts zero containers). Each entry has an
   `id`, a mandatory `ros.namespace`, a `spawn_xy`, and partial `drone`/`px4`
@@ -514,15 +514,13 @@ the current contents and the intended home for that kind of code.
   a setpoint stream is already flowing, so `decide` primes
   `goto_offboard_prime_ticks` setpoints before the one-shot mode command.
   `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
-  `configs/runtime_arm_takeoff.yaml` runs it headless via
-  `make run-all HYDRA_CONFIG=configs/runtime_arm_takeoff.yaml`,
-  `configs/runtime_drone_navigate.yaml` demos an absolute-waypoint `goto` routine
-  the same way (`configs/runtime_hexacopter_navigate.yaml` is the hexacopter
-  variant), and the
-  `integration_test_*` configs select the same routine and differ only in
-  scene/fleet. The GCS link baseport still lives in the `px4` group
-  (`px4.gcs_baseport`); the per-drone `gcs_port` the driver talks is derived from
-  it.
+  `configs/takeoff_quad.yaml` runs it headless via
+  `make run-all HYDRA_CONFIG=configs/takeoff_quad.yaml`,
+  `configs/navigate_quad_hex.yaml` demos an absolute-waypoint `goto` routine
+  the same way, and `configs/takeoff_quad.yaml` / `configs/takeoff_quad_quad.yaml`
+  select the same routine and differ only in scene/fleet. The GCS link baseport
+  still lives in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port`
+  the driver talks is derived from it.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
@@ -673,7 +671,7 @@ the host. They are meant to be used in the Dockerized environment.
   a test-local PX4 rotor mapping fault and passes only when the stability
   envelope detects the resulting instability.
 - `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
-  scenario from the `integration_test_multi_drone_takeoff` experiment (the target
+  scenario from the `takeoff_quad_quad` experiment (the target
   sets `HYDRA_CONFIG` itself): it starts one PX4 SITL container per
   resolved `vehicles` entry whose `px4.enabled` is true, in one shared network
   namespace (instance 0 owns it; instance `i>0` joins via
@@ -697,7 +695,7 @@ the host. They are meant to be used in the Dockerized environment.
   per-vehicle terminal accepts commands.
 - `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
   navigation routine as **one multi-drone scene**
-  (`configs/integration_test_navigate_multi.yaml`, scene via `@config`): a quad
+  (`configs/navigate_quad_hex.yaml`, scene via `@config`): a quad
   (id 0, x500) and a hexacopter (id 1, `hexacopter_s550.usda`) fly the same
   routine **concurrently** in parallel lanes (the hex `goto` waypoints offset +4
   in x by its spawn, so the absolute world-ENU waypoints never converge), each on
@@ -705,15 +703,12 @@ the host. They are meant to be used in the Dockerized environment.
   (the quad's `none_x500_v2`/`4019` and the hex's generated Hex X
   `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
   `goto` -> `hover` transition and passes only when **both** drones hold their
-  envelope. This single target replaces the former separate single-quad and
-  single-hex navigation targets (one ~120s test instead of two). It reuses the
-  generic multi-PX4 launch path (`run_px4_integration_test.sh` over
-  `get_enabled_px4_launch_configs()`, like the multi-drone takeoff) and the shared
-  `_px4_navigation_scenario.py` driver, whose
+  envelope. It reuses the generic multi-PX4 launch path
+  (`run_px4_integration_test.sh` over `get_enabled_px4_launch_configs()`, like
+  the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
+  whose
   `_assert_navigation_routine_config` validates the `goto`/`goto -> hover` config
-  per flying vehicle before running the strict takeoff scenario. The
-  `configs/runtime_hexacopter_navigate.yaml` and `configs/runtime_drone_navigate.yaml`
-  configs remain as single-drone `make run-all` demos.
+  per flying vehicle before running the strict takeoff scenario.
 - The persistent Isaac container (`make run-isaac` / `make run-all`) is named
   `vv-isaac-sim-custom` (`ISAAC_CONTAINER_NAME`) and is **retained after it
   exits**, so the quickest way to inspect the last manual run is
@@ -731,7 +726,7 @@ the host. They are meant to be used in the Dockerized environment.
   you need the structured Kit log rather than the console stream. (The
   `isaac/isaac-sim/logs/test_*.log` files there are integration-test output, which
   redirects explicitly; manual runs do not land there.)
-- Every top-level config is an *experiment* (sibling of `config.yaml`), loaded
+- Every top-level config is an *experiment* (sibling of `base.yaml`), loaded
   identically; there is no system distinction between a runtime experiment and a
   test experiment, and **every** experiment is uniformly runnable both through the
   standalone workflow and the extension workflow (`make run-all`). Each experiment
@@ -745,19 +740,19 @@ the host. They are meant to be used in the Dockerized environment.
   runner's `--scene` is optional and overrides the experiment scene; the
   multi-drone target passes the `@config` sentinel so the scene comes from the
   experiment `scene`. Experiment variants are selected with the `HYDRA_CONFIG`
-  Make variable. The top-level entry configs are independent and live directly
-  under `configs/` (the default runtime config is `configs/config.yaml`, the
-  shared-routine demo is `configs/runtime_arm_takeoff.yaml`, and the takeoff
-  experiments are `configs/integration_test_takeoff.yaml` (one drone) and
-  `configs/integration_test_multi_drone_takeoff.yaml` (two drones) -- all three
-  select the same `routine` `takeoff` variant and differ only in scene/fleet); the
-  composable group building blocks they select (`sim`, `drone`, `switches`,
-  `px4`, `press`, `routine`, `driver`) live under `configs/experiment/` and are
-  referenced as `experiment/<group>@<group>`. The `routine` group is composed by
-  `configs/config.yaml` itself (so every experiment that inherits `config` carries
-  it; `EnvConfig.routine` is never `None`), and `routine.steps` is empty by default
-  (manual operation) -- see the Commanding section for the routine switch and the
-  `takeoff` variant (`configs/experiment/routine/takeoff.yaml`). The persistent
+  Make variable. The top-level experiment configs are independent and live
+  directly under `configs/`; `configs/base.yaml` is shared defaults only and does
+  not carry `scene` or `vehicles`. The takeoff experiments are
+  `configs/takeoff_quad.yaml` (one drone) and `configs/takeoff_quad_quad.yaml`
+  (two drones) -- both select the same `routine` `takeoff` variant and declare
+  their own scene/fleet. The composable group building blocks they select (`sim`,
+  `drone`, `switches`, `px4`, `press`, `routine`, `driver`) live under
+  `configs/experiment/` and are referenced as `experiment/<group>@<group>`. The
+  `routine` group is composed by `configs/base.yaml` itself (so every experiment
+  that inherits `base` carries it; `EnvConfig.routine` is never `None`), and
+  `routine.steps` is empty by default (manual operation) -- see the Commanding
+  section for the routine switch and the `takeoff` variant
+  (`configs/experiment/routine/takeoff.yaml`). The persistent
   runtime entrypoint `isaac/runtime/standalone/runapp_custom.sh` reads its stage
   from the experiment `scene` too.
 
@@ -777,7 +772,7 @@ the host. They are meant to be used in the Dockerized environment.
 - Persistent and integration Make targets accept `HYDRA_CONFIG=<path>` to select
   a top-level Hydra experiment config for both host-side PX4 counting and Isaac
   runtime config composition, for example
-  `make run-all HYDRA_CONFIG=configs/integration_test_multi_drone_takeoff.yaml`.
+  `make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml`.
 
 ### Flight log analysis and PX4 bridge debugging
 - `flight_analysis/README.md` is the single source for the repeatable flight-log

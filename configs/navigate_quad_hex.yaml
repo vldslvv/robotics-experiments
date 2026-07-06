@@ -1,19 +1,12 @@
 defaults:
-  - config
+  - base
   - _self_
 
-# Dual-PX4 multi-drone absolute-waypoint navigation experiment. This merges the
-# former single-quad and single-hexacopter navigation integration tests into one
-# concurrent scene: a quad (id 0, x500) and a hexacopter (id 1, hexacopter_s550)
-# each fly the full nav routine (arm -> takeoff -> hover -> goto -> goto -> hover
-# -> land) at the same time, driven by the shared multi-PX4 launch path (one PX4
-# SITL container per vehicle, each with the per-asset airframe derived from its
-# USD asset). The strict harness passes only when BOTH drones hold their flight
-# envelope and protect OFFBOARD setpoint continuity across the goto -> hover
-# transition.
-#
-# Inherits the default runtime config.yaml (sim/switches/px4/press + the
-# warehouse scene) and overrides only the vehicles list.
+# Dual-PX4 multi-drone absolute-waypoint navigation experiment. A quad (id 0,
+# x500) and a hexacopter (id 1, hexacopter_s550) each fly the full nav routine
+# (arm -> takeoff -> hover -> goto -> goto -> hover -> land) at the same time,
+# driven by the shared multi-PX4 launch path. Each PX4 SITL container uses the
+# per-asset airframe derived from its USD asset.
 #
 # Parallel-lane waypoints: the two drones never converge. Each drone's absolute
 # world-ENU goto legs are offset by its spawn x (quad lane at x in {0,3}, hex
@@ -22,7 +15,9 @@ defaults:
 #
 # Run with:
 #   make test-integration-px4-navigation
-#   make run-all HYDRA_CONFIG=configs/integration_test_navigate_multi.yaml
+#   make run-all HYDRA_CONFIG=configs/navigate_quad_hex.yaml
+
+scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 routine:
   steps: []

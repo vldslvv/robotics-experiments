@@ -1,0 +1,10 @@
+defaults:
+  - base_env
+  - experiment/sim@sim: default
+  - experiment/drone@drone: default
+  - experiment/switches@switches: default
+  - experiment/px4@px4: default
+  - experiment/rl@rl: default
+  - experiment/routine@routine: default
+  - experiment/driver@driver: default
+  - _self_

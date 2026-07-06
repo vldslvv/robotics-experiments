@@ -1,7 +1,7 @@
 """Standalone Isaac/PX4 absolute-waypoint navigation routine.
 
 This test runs the same routine as:
-    make run-all HYDRA_CONFIG=configs/runtime_drone_navigate.yaml
+    make run-all HYDRA_CONFIG=configs/navigate_quad_hex.yaml
 
 The strict integration harness starts a PX4 SITL instance, launches Isaac
 headless, spawns the configured drone, starts the production PX4 bridge, and
@@ -36,7 +36,7 @@ def _run_navigation_routine(context: SceneTestContext) -> None:
 
 def main() -> None:
     # default_scene omitted: the target passes SCENE=@config so this executes the
-    # scene authored by configs/runtime_drone_navigate.yaml.
+    # scene authored by configs/navigate_quad_hex.yaml.
     run_scene_test(
         test_name=TEST_NAME,
         manage_stage=False,

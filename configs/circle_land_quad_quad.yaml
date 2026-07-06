@@ -1,5 +1,5 @@
 defaults:
-  - config
+  - base
   - _self_
 
 # Runtime demonstration experiment: two PX4-backed drones take off, fly one
@@ -12,7 +12,9 @@ defaults:
 # point and drone 1 starts from the north point. Each loop climbs over the first
 # half-circle and descends over the second half-circle.
 #
-# Run with: make run-all HYDRA_CONFIG=configs/runtime_two_drone_circle_land.yaml
+# Run with: make run-all HYDRA_CONFIG=configs/circle_land_quad_quad.yaml
+
+scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 routine:
   steps: []

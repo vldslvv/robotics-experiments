@@ -284,11 +284,11 @@ predicate passes trivially) and the driver wall-clock backstops
 `drive_budget_multiplier`), passed as `driver=` into
 `DriverParams.from_routine_config`.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
-`configs/runtime_arm_takeoff.yaml` demos it headless via
-`make run-all HYDRA_CONFIG=...`, `configs/runtime_drone_navigate.yaml` demos an
+`configs/takeoff_quad.yaml` demos it headless via
+`make run-all HYDRA_CONFIG=...`, `configs/navigate_quad_hex.yaml` demos an
 absolute-waypoint `goto` routine the same way, and
-`configs/integration_test_takeoff.yaml` selects the takeoff routine and only
-changes the scene. The GCS link baseport stays
+the multi-drone takeoff config selects the same routine and only changes the
+fleet. The GCS link baseport stays
 in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port` is derived from
 it.
 
