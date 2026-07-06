@@ -26,7 +26,11 @@ from robotics_experiments.px4_bridge._pegasus_sensors import (
     _DEFAULT_SENSOR_RATE_HZ,
     _PegasusSensorSuite,
 )
-from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus, LockstepSettings
+from robotics_experiments.px4_bridge.contract import (
+    ActuatorCommands,
+    BridgeStatus,
+    LockstepSettings,
+)
 from robotics_experiments.px4_bridge.logging import VehicleLogFilter, vehicle_log_context
 from robotics_experiments.px4_bridge.sim_clock import physics_tick_us
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState

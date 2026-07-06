@@ -294,12 +294,12 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     This is the F2 deploy-shape assembly running as a side channel: it never
     touches the env's training observation.
     """
+    from robotics_experiments.px4_bridge.frames import quat_wxyz_to_xyzw, world_enu_to_body_flu
     from robotics_experiments.rl.press import (
         PressObservation,
         to_vector,
         world_switch_to_contact_frame,
     )
-    from robotics_experiments.px4_bridge.frames import quat_wxyz_to_xyzw, world_enu_to_body_flu
 
     position = env.drone.data.root_pos_w[0].cpu().numpy().astype(np.float64)
     quat_wxyz = env.drone.data.root_quat_w[0].cpu().numpy().astype(np.float64)

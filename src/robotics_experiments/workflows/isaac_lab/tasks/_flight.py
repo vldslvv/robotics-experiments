@@ -236,8 +236,7 @@ def build_flight_actuation_params(
     """
     if kind not in ("velocity", "ctbr"):
         raise ValueError(
-            f"unsupported rl.action.kind={kind!r}; implemented levels are "
-            "'velocity' and 'ctbr'"
+            f"unsupported rl.action.kind={kind!r}; implemented levels are " "'velocity' and 'ctbr'"
         )
 
     def _tensor(values):

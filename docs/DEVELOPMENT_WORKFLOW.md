@@ -1,0 +1,101 @@
+# Development workflow
+
+This is the reference for host-side Python, tests, quality gates, and Makefile
+maintenance. `AGENTS.md` keeps only the hard rules and points here.
+
+## Python environment
+
+- This project uses `uv` for all host-side Python work. Do not call `pip`,
+  `python -m venv`, or a system/global Python directly.
+- The project virtualenv lives at `.venv` and is pinned to the Python in
+  `.python-version` (3.11). Dependencies and the resolver index (including the
+  NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
+  are locked in `uv.lock`. Do not edit `uv.lock` by hand.
+- The project uses a repo-local uv-managed Python install under `.uv-python/`
+  so sandboxed tools do not need access to user-level Python installs under
+  `/home/vv/.local` or `/home/vv/.pyenv`. `.uv-python/` is local machine state
+  and must not be committed.
+- Initialize or repair the environment with `uv sync --extra dev`. The `dev`
+  extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
+  intentionally omits it; pass `--extra dev` when you need the tooling. The
+  `training` extra (`rsl-rl-lib`, pulls torch) exists for host-side tooling
+  only; actual training runs in the Isaac Lab image, which already ships
+  rsl_rl.
+- If `.venv` is missing, points outside the repository, or cannot be read from
+  the sandbox, recreate it with the repo-local interpreter:
+  `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then
+  `UV_PYTHON_INSTALL_DIR=.uv-python uv sync --extra dev --managed-python`.
+  After that, normal `uv run ...` and `uv sync ...` commands reuse `.venv`.
+- Always work inside the project venv. Either activate it with
+  `source .venv/bin/activate`, or prefix commands with `uv run` (for example
+  `uv run pytest`, `uv run ruff check`). Prefer `uv run` for one-off commands so
+  the correct interpreter is used without relying on shell state.
+- Add or change dependencies with `uv add` / `uv remove` (or by editing
+  `pyproject.toml` and running `uv lock`), never with ad hoc `pip install`. Keep
+  `uv.lock` committed and in sync; `uv lock --check` must pass.
+- Host-side Isaac Sim, ROS 2, and PX4 work that does not run inside their Docker
+  containers still goes through this venv. Throwaway
+  `uv run --no-project ...` invocations are deliberate exceptions for one-off
+  tooling that must not touch the project environment.
+
+## Unit tests
+
+- `make test` runs the host Python unit test suite (pytest, defined in
+  `make/tests.mk`). It requires the project venv at `.venv`; create it first
+  with `uv sync --extra dev` if missing. The target activates `.venv` and runs
+  `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
+  under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
+- Shared unit-test fakes/helpers live in `tests/_fakes.py` (pytest puts
+  `tests/` on `sys.path`, so test modules import them with
+  `from _fakes import ...`). Define each fake once there rather than inline per
+  test file. The PX4 bridge unit tests are split by concern across
+  `tests/test_px4_bridge_sensors.py`, `tests/test_px4_bridge_lockstep.py`,
+  `tests/test_px4_bridge_actuator.py`, and `tests/test_px4_bridge_gating.py`
+  (there is no single `test_px4_bridge.py`).
+- Tests assert on public behavior, not internals: prefer public properties,
+  return values, raised errors, and recorded contract seams (constructor kwargs a
+  collaborator received, commands sent to a port, forces/dynamics applied to an
+  articulation IO) over reading a unit's private state or asserting on a
+  mock/interaction-log when a public observable exists.
+- External private-member access is lint-enforced off via Ruff `SLF001` (in
+  `[tool.ruff.lint] select`). The existing `per-file-ignores` in
+  `pyproject.toml` are grandfathered exceptions for production seams against
+  vendored Pegasus / Isaac Lab privates, fixture injection into the vendored
+  backend, focused private-helper unit tests over import-gated modules, and
+  deliberate corruption/fault injection.
+- Do not add new lint/type ignores to `pyproject.toml`. If new external private
+  access or another lint exception is genuinely unavoidable, use a narrow inline
+  suppression at the offending line, such as `# noqa: SLF001`, with a brief
+  reason.
+
+## Quality gates
+
+- pre-commit is the local quality gate; there is no CI pipeline (local-only for
+  now). Install it once with `uv run pre-commit install` and run it with
+  `uv run pre-commit run --all-files`.
+- The mirror hooks (ruff, mypy) only see staged files. For a full sweep run
+  `uv run ruff check`, `uv run ruff format --check`, and
+  `uv run mypy src tests`.
+- The hook list and the per-tool tunables (`.hadolint.yaml`, `.codespellrc`,
+  `.yamllint.yaml`, `.taplo.toml`) live in `.pre-commit-config.yaml` and those
+  dotfiles at the repo root.
+- For large-scope changes, especially public API, module-name, or runtime
+  behavior changes, run `uv run pytest`, `make test-integration-all`, and
+  `uv run pre-commit run --all-files` before completion.
+- When a quality gate reports a failure, fix it along with the current task. If a
+  flagged line is genuinely correct, silence it narrowly and on purpose with a
+  scoped inline suppression such as `# shellcheck disable=...` or
+  `# noqa: <code>` plus a brief reason.
+- For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
+  (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
+  does not collapse manual column spacing.
+
+## Makefile maintenance
+
+- Keep Make recipes thin. If Makefile logic grows into a complex Bash script
+  with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
+  it into a separate shell script and let Make prepare variables and call that
+  script.
+- Avoid `define`/`eval` target templates when they require nested Make/shell
+  escaping such as `$$($(1)_VAR)`; prefer explicit targets with ordinary
+  recursive Make variables so command-line overrides stay dynamic.

@@ -12,6 +12,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from robotics_experiments.px4_bridge import PegasusQuadraticThrustModel
+from robotics_experiments.px4_bridge.contract import ActuatorCommands
 from robotics_experiments.rl.press import (
     MixerGeometry,
     action_to_rotor_omega,
@@ -19,8 +21,6 @@ from robotics_experiments.rl.press import (
     hover_action,
     reduce_to_body_wrench,
 )
-from robotics_experiments.px4_bridge import PegasusQuadraticThrustModel
-from robotics_experiments.px4_bridge.contract import ActuatorCommands
 
 _MASS_KG = 1.5
 _GRAVITY = 9.81

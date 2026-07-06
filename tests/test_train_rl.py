@@ -24,10 +24,16 @@ def _load_train_rl_module():
 def test_train_rl_paths_are_namespaced_by_policy_name(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     training_root = tmp_path / "training"
-    policy_root = train_rl._policy_out_root(training_root, "hover")
+    policy_root = train_rl._policy_out_root(  # noqa: SLF001 - helper contract.
+        training_root,
+        "hover",
+    )
 
-    run_dir = train_rl._make_run_dir(policy_root)
-    train_rl._update_latest_symlink(policy_root, run_dir)
+    run_dir = train_rl._make_run_dir(policy_root)  # noqa: SLF001 - helper contract.
+    train_rl._update_latest_symlink(  # noqa: SLF001 - helper contract.
+        policy_root,
+        run_dir,
+    )
 
     assert run_dir.parent == training_root / "hover"
     assert run_dir.name != "latest"
@@ -39,4 +45,7 @@ def test_train_rl_rejects_invalid_policy_names(policy_name: str, tmp_path: Path)
     train_rl = _load_train_rl_module()
 
     with pytest.raises(ValueError, match="policy_name"):
-        train_rl._policy_out_root(tmp_path, policy_name)
+        train_rl._policy_out_root(  # noqa: SLF001 - helper contract.
+            tmp_path,
+            policy_name,
+        )

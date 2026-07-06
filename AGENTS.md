@@ -15,6 +15,41 @@ This repository integrates:
 Prefer minimal, scoped changes.
 Do not introduce new tooling unless explicitly requested.
 
+## Context map
+Read area docs on demand when a task touches that area:
+- Development workflow: `docs/DEVELOPMENT_WORKFLOW.md` for host Python, `uv`,
+  tests, quality gates, and Makefile maintenance.
+- Runtime operations: `docs/RUNTIME_OPERATIONS.md` for Docker runtime targets,
+  persistent Isaac/PX4 containers, tmux behavior, runtime logs, and flight-log
+  debugging.
+- Experiment config: `docs/EXPERIMENT_CONFIG.md` for top-level Hydra
+  experiments, `scene`, `HYDRA_CONFIG`, `configs/experiment/`, and strict-mode
+  routine test relationships.
+- Fleet config: `docs/FLEET_CONFIG.md` for `vehicles:`, `ResolvedVehicle`,
+  per-vehicle PX4 launch, config-generated airframes, and multi-vehicle runtime
+  behavior.
+- Command/routine: `docs/COMMAND_ROUTINE_CONTRACT.md` for
+  `src/robotics_experiments/commanding/`, routine config, GCS MAVLink commands,
+  `{kind: goto}` / `{kind: policy}`, and driver orchestration.
+- RL workflow: `docs/RL_WORKFLOW.md` for `src/robotics_experiments/rl/`,
+  `src/robotics_experiments/workflows/isaac_lab/`, Isaac Lab images, training,
+  policy artifacts, and RL integration gates.
+- Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
+  target mechanics, harness scripts, caching, artifacts, concurrency, and
+  multi-instance PX4.
+- PX4 bridge contract:
+  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` for
+  bridge interfaces, frame conventions, motor ordering, lockstep, and actuator
+  freshness.
+- Pegasus vendoring:
+  `isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` for the
+  vendored snapshot, reachable modules, divergences, and re-sync procedure.
+- Standalone Isaac: `isaac/runtime/standalone/README.md` for direct Isaac Sim
+  scripts and import-order rules; standalone test details live in
+  `isaac/runtime/standalone/tests/README.md`.
+- Flight log analysis: `flight_analysis/README.md` for ULog/bridge-log pairing
+  and repeatable instability or sim-to-real debugging.
+
 ## Comments and documentation
 - Comments and docs should describe current behavior, invariants, contracts, and
   intent. Do not leave historical comments about how code used to be implemented
@@ -29,41 +64,46 @@ the current contents and the intended home for that kind of code.
   `BridgeHostGroup` lockstep wiring. Isaac-coupled domain leaf (lazy package
   `__init__`, off the core import path); driven by the thin per-host shells
   (the live `experiment_runtime` extension and the standalone runner).
-- `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by container. Persists changes made inside Isaac Sim container.
+- `isaac/isaac-sim/` -> Isaac Sim cache and config, populated automatically by
+  container. Persists changes made inside Isaac Sim container.
 - `isaac/docker/` -> Isaac Sim Docker build/init inputs.
 - `isaac/runtime/extensions/` -> Isaac Kit extension workflow.
 - `isaac/runtime/templates/` -> Copyable Isaac runtime templates, not loaded directly.
 - `isaac/runtime/standalone/` -> Direct Isaac Sim scripts and launch helpers.
-- `isaac/runtime/lab/` -> Isaac Lab configs, task definitions, and future environment code.
-- `ros/ros2_ws/` -> ROS 2 workspace (colcon). Persists changes made inside ROS 2 container.
+- `isaac/runtime/lab/` -> Isaac Lab configs, task definitions, and future
+  environment code.
+- `ros/ros2_ws/` -> ROS 2 workspace (colcon). Persists changes made inside ROS 2
+  container.
 - `ros/config/` -> ROS middleware config mounted into Isaac Sim and ROS 2 containers.
 - `ros/docker/` -> ROS 2 Docker build/init area.
 - `ros/scripts/` -> ROS 2 host-side helper scripts.
 - `px4/docker/` -> PX4 Docker build/init area.
 - `px4/scripts/` -> PX4 host-side helper scripts.
 - `px4/logs/` -> PX4 SITL log persistence.
-- `px4/eeprom/` -> PX4 SITL simulated EEPROM mount; cleared by the default PX4 launch wrapper.
+- `px4/eeprom/` -> PX4 SITL simulated EEPROM mount; cleared by the default PX4
+  launch wrapper.
 - `docs/` -> Design and usage docs.
 
 ## Python API organization
-- Public top-level functions, classes, and intentional constants in Python modules must be
-  listed in module-level `__all__`.
+- Public top-level functions, classes, and intentional constants in Python
+  modules must be listed in module-level `__all__`.
 - Keep public API minimal. Public exports are for production consumers outside
   the module or package boundary; tests alone do not justify public API. If a
   top-level symbol is only used by tests or internal implementation, make it
   private. If a whole module is only used internally, prefer an
   underscore-prefixed module name. Keep `__all__` limited to the intended
-  production API rather than exporting helpers, scaffolding, constants, or seams
-  for test convenience.
-- Keep private top-level helper functions before public top-level APIs when possible, so
-  declarations read from implementation helpers into public entrypoints.
+  production API rather than exporting helpers, scaffolding, constants, or
+  seams for test convenience.
+- Keep private top-level helper functions before public top-level APIs when
+  possible, so declarations read from implementation helpers into public
+  entrypoints.
 - Do not add builder functions that only forward fields into a dataclass (for
   example a `make_params(vehicle, ...) -> Params` that maps attribute-for-attribute).
   Construct the dataclass directly at the call site; reserve a builder function
   for construction that carries real logic (nontrivial derivation, validation,
   or branching).
-- Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus dependencies from
-  loading during lightweight package imports.
+- Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus
+  dependencies from loading during lightweight package imports.
 - Use absolute imports for project modules (`from robotics_experiments...`)
   instead of relative imports. The only exception is a narrowly scoped workaround
   for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
@@ -79,9 +119,9 @@ the current contents and the intended home for that kind of code.
   (re-export-only, or `__getattr__` deferral). `drone/spawn.py`,
   `environment/stage.py`, `environment/step.py`, and
   `simulation/_isaac_settings.py` follow this pattern;
-  `tests/test_core_imports.py` is the regression guard (it blocks
-  `carb`/`pxr`/`isaacsim` and asserts the leaf modules are not eager-imported).
-- Do not rename, remove, or broaden public exports as part of cleanup unless explicitly requested.
+  `tests/test_core_imports.py` is the regression guard.
+- Do not rename, remove, or broaden public exports as part of cleanup unless
+  explicitly requested.
 - When a requested change intentionally replaces a public API, config shape,
   command, or workflow, do not add redundant compatibility shims or aliases by
   default. Wire the new public API through every production consumer, update
@@ -93,7 +133,6 @@ the current contents and the intended home for that kind of code.
   internally.
 
 ## Isaac Sim extension design
-
 - Keep internal logic and Isaac Sim event wiring separate.
 - Treat `on_startup`, `on_shutdown`, and Isaac/Kit event callbacks as wiring.
   They should subscribe, unsubscribe, decode events, update direct runtime
@@ -113,12 +152,8 @@ the current contents and the intended home for that kind of code.
 - Use `experiment_runtime` as the extension pattern: a thin Kit shell that wires
   Isaac/Kit events to the host-agnostic `robotics_experiments.runtime.FleetOrchestrator`
   and owns no flight/scene logic itself. Cross-component runtime composition
-  belongs in the orchestrator (`src/robotics_experiments/runtime/`), a layer above
-  the extensions; an extension stays single-responsibility (event wiring) and a
-  component extension stays scene/bridge-agnostic. The orchestrator owns the whole
-  pipeline (open scene -> apply settings -> spawn fleet -> start the lockstep
-  bridge group -> build per-drone routine drivers -> teardown); the shell only
-  chooses the tick source and the failure reaction (the injected `make_env`).
+  belongs in the orchestrator (`src/robotics_experiments/runtime/`), a layer
+  above the extensions; an extension stays single-responsibility (event wiring).
 - `robotics_experiments_core` exposes the shared `src/robotics_experiments`
   package to Isaac Sim extensions. Extension code that needs the core package
   should depend on `robotics_experiments_core` instead of manipulating
@@ -127,408 +162,43 @@ the current contents and the intended home for that kind of code.
   Hydra config lazily and caches it for the process.
 - Feature extensions should depend on `robotics_experiments_core` and use a
   small local `config.py` adapter when they need feature-specific config access.
-- Importable Isaac Lab task/env code lives under
-  `src/robotics_experiments/workflows/isaac_lab/`; `isaac/runtime/lab/` is the
-  workflow/design-note area for Isaac Lab runtime files. Keep package
-  `__init__` modules lazy-import clean: expose guarded registration helpers
-  there, but do not import DirectRLEnv task modules unless Isaac Lab is actually
-  constructing the task.
-- Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
-  for direct-workflow environments. The first task is
-  `Isaac-Drone-Hover-Direct-v0`; it flies N parallel drones through the
-  pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
-  normalized RL action to per-rotor angular-velocity references (and thence to
-  forces) without a PX4 lockstep per env. The action level is a config switch
-  (`rl.action.kind`): `velocity` (default; cascaded PD tracking body-frame
-  velocity + yaw rate) or `ctbr` (collective thrust + body-rate setpoint). The
-  actuation is written functionally -- state in frozen params dataclasses built
-  once (`build_actuation_params` / `build_flight_actuation_params`, both
-  precomputing the allocation pseudoinverse), behavior in pure functions
-  (`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
-  a future pipeline composes it as plain functions with the RL policy as one
-  stage. The pure single-env reference implementation lives in
-  `rl/press/actuation.py` (numpy, the test oracle) and its batched torch twin the
-  env runs lives in
-  `workflows/isaac_lab/tasks/_flight.py`; both mirror the PX4 bridge's
-  `PegasusQuadraticThrustModel` allocation so an action reproduces the commanded
-    wrench. Shared RL training scale and the RL action level live in the Hydra
-  `rl` group (which replaced the retired `press`/`isaac_lab` hierarchy) with
-  matching bare annotations in `src/robotics_experiments/config/types.py`; the physics
-  decimation is derived as `round(sim.physics_hz / rl.policy_rate_hz)`, not
-  authored, and the hover task's reward/termination/reset values are the
-  `rl.press.hover_task` block (task definition = one YAML block; no task-tuning
-  literal in the env module). The RL action also maps to a PX4 OFFBOARD
-  setpoint at deploy time (`rl/press/deploy.py` + the commanding-layer velocity /
-  attitude-rate setpoint seams).
-- The task->policy pipeline (F2b) is `task YAML -> make train-rl -> policy
-  artifact -> {kind: policy} routine step -> FleetOrchestrator` (the
-  orchestrator itself is unchanged apart from injecting the artifact-loader
-  factory into `DriverParams`). Pieces:
-  - **Observation layouts** (`rl/press/observation.py`, pure, versioned): the
-    13-dim hover layout (`HOVER_OBSERVATION_SCHEMA_VERSION`,
-    `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
-    velocity) and the press-task `PressObservation`/`to_vector`
-    (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
-    (`world_switch_to_contact_frame`; switch local `+X` = outward plate
-    normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
-    and `VehicleState` at deploy; a field the deploy side cannot assemble is
-    forbidden in a layout. The pose source is the `AbstractPoseProvider` /
-    `PoseSample` seam (`rl/press/_provider.py`; ground truth in the Isaac leaf
-    `rl/press/_isaac_provider.py` behind the lazy `rl/press/__init__.__getattr__`),
-    and the nav->contact handoff is the pure `handoff_ready` gate
-    (`rl/press/_handoff.py`, thresholds in `rl.press.handoff`). See ADR 0014.
-  - **Training** (`rl/training/`, lazy; `_rsl_rl.py` is the only rsl_rl
-    importer): `build_runner`/`train`/`export_policy` over `RlTrainingConfig`
-    (the `rl.training` block, incl. explicit `task_id` and `policy_name`).
-    `make train-rl` (thin
-    target in `make/training.mk`, runs `isaac/runtime/standalone/train_rl.py`
-    on `ISAAC_LAB_IMAGE`, never the base image) writes the artifact under
-    `.build/training/<policy-name>/<run-id>/` and updates the named
-    `.build/training/<policy-name>/latest` symlink; `TRAIN_ARGS='--max-iterations
-    5'` is the smoke run. rsl_rl comes from the Lab image (`isaaclab.sh
-    --install`); the host `training` extra (`rsl-rl-lib`) exists for tooling
-    only.
-  - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
-    version/dim, action kind/dim, action scales). `rl/press/policy.py::load_policy`
-    raises `ValueError` on ANY metadata/config mismatch at load (a bare
-    checkpoint is not a valid artifact); `build_policy_step_fn` composes
-    load + hover-observation packing + `press_action_to_offboard` into the
-    `PolicyStepFn` the `{kind: policy}` routine step streams.
-  - **Gate**: `make test-integration-press-policy` flies
-    `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
-    takeoff -> policy hover hold -> land) strict over PX4 SITL on
-    `ISAAC_LAB_IMAGE`. It needs a prior `make train-rl` (the routine
-    references `.build/training/hover/latest`), so it is deliberately NOT part of
-    `test-integration-all`. The hover+goto gate additionally runs the F2
-    side-channel validation (ground-truth provider + `PressObservation` +
-    handoff flip) without touching the env's training observation.
-- PX4 bridge behavior is configured through the Hydra `px4` group. The default
-  experiment enables the bridge for the custom Isaac runtime; use Hydra
-  overrides such as `px4.enabled=false` for Isaac sessions that should not
-  connect to PX4 SITL. Lockstep tunables live in the nested `px4.lockstep`
-  group (override e.g. `px4.lockstep.lockstep_timeout_s=...`), mapped to the
-  library `LockstepSettings` dataclass at construction; `physics_rate_hz` is not
-  a YAML knob there but injected from `sim.physics_hz`.
-- The PX4 bridge's full interface contract lives in
-  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` -- read
-  it before changing bridge code. It is the single source for the four-part
-  contract (`VehicleState` -> `ActuatorCommands` -> `RotorDynamics` plus the
-  `BridgeStatus` snapshot, the `LockstepSettings` object, the `send(state)` /
-  `poll()` lockstep seam with `exchange(state)` as the single-vehicle
-  send-then-poll convenience, and the `ArticulationIO.apply_dynamics` Isaac
-  sink), the frame conventions, motor-index ordering, the lockstep algorithm, and
-  the cadence/actuator-freshness guards. Load-bearing invariants you must not
-  break (all detailed there): `HIL_SENSOR.time_usec` strictly increasing from sim
-  time; a vehicle's `send` (sensors out, no block) strictly precedes its `poll`
-  (blocking recv), and the multi-vehicle coordinator runs all sends before all
-  polls; angular
-  velocity is rotated world -> body-FLU before the FRD gyro conversion; sensor
-  cadence must equal physics cadence (else disconnect "sensor cadence mismatch");
-  prime-then-block startup plus newest-packet draining keep actuators fresh
-  (backlog trips `max_sustained_actuator_lag_s`); safety gating zeros forces only,
-  never the per-tick exchange; a non-finite vehicle state raises. Visual rotor
-  spin is the one explicitly non-load-bearing addition: `RotorDynamics` carries an
-  additive `rotor_omega_rad_s` (the clipped per-rotor omega the thrust model
-  already computes) and `IsaacArticulationIO.update_rotor_spin(rotor_omega_rad_s,
-  dt)` is a cosmetic-only seam called from `recv_and_apply` alongside the
-  unchanged `apply_dynamics` (`dt` rides on the frozen pending-tick state left by
-  `send_sensors`). It only writes a
-  `RotateZ` xformOp on each rotor marker (scaled by `px4.rotor_spin_visual_scale`)
-  and must never re-enter forces, the body, or the lockstep -- keep
-  `commands_to_dynamics` pure and `apply_dynamics` the sole physics sink.
-- Multi-vehicle scenes are driven by a top-level `vehicles:` list. It is the
-  single source of truth and the only spawn path: one vehicle = a one-element
-  list (single-drone experiment configs declare exactly that), and an empty list
-  `vehicles: []` is a valid empty fleet (0..N is
-  handled uniformly -- the extension spawns nothing, runs an empty
-  `BridgeHostGroup`, and `run-px4` starts zero containers). Each entry has an
-  `id`, a mandatory `ros.namespace`, a `spawn_xy`, and partial `drone`/`px4`
-  overrides. `id` is the PX4 numeric identity: there is no `px4.vehicle_id` knob
-  -- the MAVLink port, the PX4 `-i` instance index, the per-vehicle log
-  `{vehicle}` token, and the GCS link offset are all *derived* from `id`.
-  `ros.namespace` is the explicit operator-facing ROS identity for sim and real
-  onboard stacks (for example `/x500_01`); it is not derived from `id`. One
-  private enrichment step (`config.load._resolve_fleet`) merges each entry's
-  `drone`/`px4` partials over the global `drone`/`px4` defaults
-  (`OmegaConf.merge`) into a pure `VehicleConfig`, then constructs an immutable
-  `ResolvedVehicle` carrying that config plus the derived runtime fields:
-  `mavlink_port`
-  (`= px4.connection_baseport + id`), `px4_instance_index` (`= id`),
-  `gcs_port` (`= px4.gcs_baseport + id`, the per-drone GCS MAVLink link
-  used by control/test code; the bridge itself does not use it),
-  `ros_namespace` (the authored absolute ROS namespace), `ros_frame_prefix`
-  (derived from `ros_namespace` by stripping the leading slash and replacing
-  nested `/` with `_`, for future TF/message frame IDs),
-  `debug_log_path` (the `{vehicle}` token rendered to `id`; `{date}`/`{time}`
-  stay for runtime), and `prim_name`. Every consumer (Isaac orchestration, the
-  bridge host, the host-side PX4 launch, the standalone scenario's GCS endpoint)
-  reads these derived fields instead of recomputing `baseport + id`. `_resolve_fleet` validates the resolved fleet
-  (`_validate_fleet` -- missing/invalid/duplicate ROS namespace or derived frame
-  prefix, duplicate id/endpoint/`prim_name`, bad `spawn_xy`, negative id, or
-  colliding `debug_log_path` raise a `ValueError` at resolution time).
-  `get_config().vehicles` is `list[ResolvedVehicle]`; the host-side launch
-  scripts read `get_enabled_px4_launch_configs()` (the launch loop's source of
-  `PX4_INSTANCE` / `PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART`, so non-contiguous ids
-  keep their derived ports and each PX4 container launches the SITL airframe
-  matching its drone asset). Each entry is a frozen `Px4SitlLaunchConfig`
-  (`instance_index` / `sim_model` / `sys_autostart`) produced by the pure
-  `config.load.resolve_px4_sitl_launch_config(vehicle)`, which maps the drone
-  USD asset basename to the PX4 airframe defined in `configs/airframes`
-  (`holybro_x500_v2.usda` -> `none_x500_v2`/`4019`,
-  `hexacopter_s550.usda` -> `none_hexa_x`/`6001`; unknown PX4-flyable asset
-  raises `ValueError`). The Dockerfile's px4 stage generates these repo-managed
-  `none_*` posix airframe scripts from `configs/airframes`, registers them in
-  PX4's airframe CMake list, writes an image manifest, then runs
-  `make px4_sitl_default`, so USD geometry, bridge rotor arrays, and PX4 control
-  allocation share one source. The airframe YAML authors only **cited
-  per-component leaves** (each physical value carries an inline vendor/BOM
-  citation): the body `total_mass`/`center_of_mass`/`diagonal_inertia` are
-  **computed** by the USD builder (`build_copter_usd_standalone.compute_body_mass_properties`,
-  summing the component box/cylinder inertias + parallel-axis, excluding the
-  separate pusher pad) and the bridge `rotor_constant` is **computed** by
-  `config.load` (`_compute_rotor_constants`) from the cited
-  `max_thrust_per_rotor_g` + `max_rotor_velocity` (standard-gravity gram-force ->
-  Newton conversion, so `T = rotor_constant * omega^2` reaches the cited static
-  max at `max_rotor_velocity`). Neither derived value is authored, so fixing a
-  vendor mismatch is a one-line leaf edit + regenerate. The default quad asset is
-  `holybro_x500_v2` -- a hardware-faithful Holybro X500 V2 Stage 1 X4 (MN4006 EVO
-  / P134.4 13x4.4 / 0.25 m motor radius / ~2.251 kg AUW); the `hexacopter_s550`
-  remains a placeholder that shares the same computed-properties schema. The `px4.sitl.sys_autostart` ids must be **free**
-  in the posix airframe set: posix `rcS` selects the airframe by globbing
-  `airframes/<id>_*` and sourcing the last match, so a stock `<id>_*` (e.g.
-  `4001_gz_x500`) would shadow a generated one. The quad therefore uses the free
-  `4019` (X500 V2) slot, not `4001`; the generator fails the build loudly on such
-  a collision (`generate_px4_airframes.py` `_conflicting_airframe_files`), with a
-  `--prune-conflicts` seam to remove a stock file and reclaim its id.
-  `get_enabled_px4_instance_indices()`
-  stays as a thin compat wrapper over it. The PX4 container launcher
-  (`px4_sitl_common.sh::launch_px4_sitl`) reads `PX4_SIM_MODEL`
-  (default `none_x500_v2`/`4019` only for manual unset-env launches), so the
-  script-driven fleet path selects the generated per-asset airframe.
-  The fleet orchestrator (`robotics_experiments.runtime.FleetOrchestrator`) spawns
-  each
-  vehicle at its `spawn_xy` (yaw 0) and gives every `px4.enabled` vehicle its own
-  independent `BridgeHost` (constructed from a frozen `BridgeHostParams`
-  composing the vehicle's `px4` config with its derived identity), all driven by
-  a single `BridgeHostGroup` that owns the
-  one physics-step subscription. Each PhysX step runs in two phases -- every
-  host's send leg (`send_phase`: sensors out to its PX4, no block) first, then
-  every host's poll leg (`recv_phase`: block for that PX4's actuator). The PX4
-  instances therefore compute concurrently, so per-tick latency is ~the max
-  blocking wait across vehicles (not the sum) and the per-vehicle lockstep is
-  decoupled: one stalled PX4 disconnects only its own vehicle instead of freezing
-  the others. The port exposes the seam as `send(state)` / `poll()`, with
-  `exchange(state)` kept as the single-vehicle send-then-poll convenience (a
-  1-host group is byte-for-byte the old behavior).
-  Per-vehicle isolation: the MAVLink simulator port is the resolved
-  `mavlink_port` (`Px4MavlinkPort` takes a single resolved `port`, handed to the
-  vendored Pegasus backend with a zero `vehicle_id` offset), the USD prim is
-  `<default_prim>/<drone.prim_name>`, and bridge
-  debug logs carry a `{vehicle}` token so the filenames never collide. The token
-  alone is not enough: every bridge layer logs through the shared
-  `robotics_experiments.px4_bridge` package logger, so the `BridgeHost` wraps each
-  vehicle's construction/teardown and per-tick work in
-  `px4_bridge.vehicle_log_context(id)`, and each per-vehicle file handler
-  carries a `VehicleLogFilter` (see `px4_bridge/logging.py`). Without this a
-  multi-vehicle process merged every bridge's records into the last-constructed
-  vehicle's file. `EnvConfig.vehicles` is annotated `List[Any]` for Hydra
-  compose-time tolerance of partial entries; the runtime value is
-  `list[ResolvedVehicle]`.
+- RL invariants: read `docs/RL_WORKFLOW.md` before touching RL code; keep Isaac
+  Lab task/env package imports lazy; keep the in-Lab actuation seam pure and
+  aligned with its numpy reference and torch twin; keep RL tunables in the Hydra
+  `rl` group; keep task IDs, policy artifacts, and RL gates aligned with that
+  doc and the command/routine contract.
+- PX4 bridge invariants: read
+  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
+  touching bridge code. Keep the interface contract, frame conversions, motor
+  ordering, lockstep sequencing, sensor-cadence/freshness guards, and visual
+  rotor-spin non-physics seam aligned with that doc. `apply_dynamics` remains
+  the sole physics sink.
+- Fleet invariants: read `docs/FLEET_CONFIG.md` before touching fleet config or
+  runtime behavior. `vehicles:` is the only spawn path; identity, ports, frame
+  prefixes, log paths, and airframes are resolved once from config; multi-vehicle
+  lockstep runs all sends before all polls while isolating each vehicle.
 
 ## Commanding (high-level command / routine layer)
-- `src/robotics_experiments/commanding/` is the high-level control layer: the
-  pure-function counterpart to the PX4 bridge contract. It is a domain leaf on
-  the core import path -- every module imports neither Isaac nor pymavlink at
-  module scope (the concrete `MavlinkCommandPort` imports `pymavlink` only inside
-  its methods), so `import robotics_experiments` succeeds with both absent, and
-  `commanding/__init__.py` is re-export-only. Its public package API is the
-  production runtime surface (`RoutineDriver`, `DriverParams`,
-  `DriverEnvironment`, `RoutineObservation`, `CommandAck`, `MavlinkCommandPort`,
-  `FailureKind`, and the deploy-time wire payloads `VelocitySetpoint` /
-  `AttitudeRateSetpoint` consumed by `rl.press.deploy`). The command layer's public
-  seams live in non-underscored modules (`commands`, `observation`, `routine`,
-  `port`, `driver`), each declaring its own `__all__` and underscore-prefixing its
-  private top-level members; only the internal `_commander` module (the
-  `VehicleCommander`, not part of the package `__init__`) stays underscored.
-  `commanding/__init__.py` re-exports the package API from those modules and
-  production code imports from the package, not the submodules; tests import the
-  submodules directly to exercise private implementation. The full reference is
-  `docs/COMMAND_ROUTINE_CONTRACT.md`; read it before changing this layer.
-- The contract mirrors the bridge part-for-part: `RoutineObservation` (pure
-  input, reusing the bridge's `VehicleState` / `BridgeStatus` plus `last_ack` /
-  `failsafe` / `sim_time_us`) -> `decide(routine, state, observation)` (the pure
-  stepper, analogue of `commands_to_dynamics`) -> `RoutineDecision`
-  (`SEND`/`STREAM`/`WAIT`/`ADVANCE`/`DONE`/`FAIL`, pure output; `STREAM` carries a
-  `StreamSetpoint` -- `PositionSetpoint` for the `goto` stream,
-  `VelocitySetpoint`/`AttitudeRateSetpoint` for the `policy` step -- dispatched
-  by the commander on the concrete payload type) across the
-  `AbstractCommandPort` seam (analogue of `AbstractFlightStackBridge`), with
-  `VehicleCommander` and the pure per-drone `RoutineDriver` as the orchestrators
-  (analogue of `BridgeHost`). The command layer is **per drone** like the bridge:
-  one commander + one driver per drone, no fleet object, drones independent
-  (cross-drone sync is deferred). `MavlinkCommand` is a thin `command_long`
-  wrapper (a `MAV_CMD_*` id + seven params); `MAV_CMD_*` / `MAV_RESULT_*` /
-  `_PX4_FORCE_ARM_MAGIC` are named int constants so the pure modules never import
-  pymavlink. `tests/test_commanding_routine.py` (the `decide` transitions + a
-  `VehicleCommander`) and `tests/test_commanding_driver.py` (the `RoutineDriver`
-  phase machine over fake seams) are the pure regression guards, over the fakes in
-  `tests/_fakes.py`; `tests/test_core_imports.py` asserts the subpackage (incl.
-  `RoutineDriver`) imports with Isaac/pymavlink absent.
-- Pure stepper rule: `decide` and every completion predicate
-  (`armed()`, `ack_accepted(command_id)`, `climbed_at_least(...)`) are pure
-  functions -- no sockets, no pymavlink, no Isaac, unit-testable with plain
-  dataclasses. The only side effect in the layer is the port
-  (`send` / `send_setpoint` / `connect` / `pump_heartbeat` / `poll_feedback`);
-  `VehicleCommander` runs the pure `decide` and then performs the single side
-  effect (`SEND` -> `send`, `STREAM` -> the send method matching the payload
-  type), keeping decision and I/O separated. A `policy` step's network forward
-  pass runs inside `decide` as an injected deterministic callable (numpy
-  in/out, no I/O), preserving the split. Step `timeout_s` is measured in **sim time**
-  (`observation.sim_time_us`) so the stepper stays pure; the driver pairs it with
-  a wall-clock backstop.
-- `gcs_port` is control, not bridge: the `MavlinkCommandPort` talks the per-drone
-  GCS link (`ResolvedVehicle.gcs_port`) only and never touches the bridge's
-  simulator MAVLink port or its sensor/actuator lockstep -- the symmetric half of
-  the bridge contract's rule that the bridge never touches `gcs_port`. The
-  commander is stepped from the control driver (today the standalone scenario run
-  loop), never from the bridge's physics send/recv legs.
-- The routine carries its own verification, so a step's completion can require a
-  physical state and a step can carry continuous flight-envelope gates. A
-  `RoutineStep` has an **optional** `command` (`None` = a verification-only step
-  like `hover`), a completion predicate `_StepPredicate(observation, baseline)`, a
-  sim-time `timeout_s`, an optional `hold_s` (the predicate must hold continuously
-  for this long before advancing -- "hover stable for N seconds"), and a tuple of
-  `invariants` (continuous gates). `decide` checks `invariants` first (a breach ->
-  `FAIL(FailureKind.ENVELOPE)`), then completion+hold (-> `ADVANCE`), then
-  ack-rejection/timeout (-> `FAIL(FailureKind.COMMAND)`). `FailureKind` also
-  carries the driver-added terminal kinds `FAILSAFE` (PX4 failsafe on the GCS
-  link) and `TIMEOUT` (a driver phase exceeded its wall-clock backstop), so the
-  `DriverEnvironment.on_failure(kind, message)` seam is fully typed (no magic
-  strings). Completion helpers:
-  `armed`, `ack_accepted`, `climbed_at_least(min_climb_m)` (vs the captured
-  baseline), `hovering_stable(...)`; invariant helpers (breach message or `None`):
-  `tilt_below`, `_lateral_drift_below`, `_vertical_speed_within`,
-  `_angular_speed_below`; `EnvelopeGates` bundles the thresholds.
-- Where the executor lives: the pure per-drone `RoutineDriver`
-  (`commanding/driver.py`) is the single executor -- a tick-driven phase machine
-  (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET -> BUILD
-  -> DRIVE -> DONE`) over one drone's routine, one `AbstractCommandPort`, and a
-  `DriverEnvironment` seam (bridge connectivity, sim time, observation assembly,
-  `log`, `on_failure`, `on_step_advanced`; wall-clock backstop via an injectable
-  `monotonic`). It imports no Isaac/pymavlink and is unit-tested with fakes
-  (`tests/test_commanding_driver.py`). The host-agnostic
-  `robotics_experiments.runtime.FleetOrchestrator` is the single place that
-  *builds* one driver per flying drone (only where the resolved `routine.steps`
-  is non-empty) via the generic `FleetDriverEnv` seam (built per drone from an
-  injected `make_env`); each workflow is a **thin shell** that drives the
-  orchestrator phases and ticks the drivers. The phase machine and flight
-  verification live in the driver/routine, so the shells differ only in tick
-  source and the env's `on_failure` reaction.
-  - Live `experiment_runtime` extension
-    (`experiment_runtime/ExperimentRuntime_python/extension.py`): the runtime path
-    for `make run-all` / `make run-isaac`. On PLAY it has the orchestrator spawn +
-    start the bridge group + `build_drivers`, then ticks each drone's
-    `RoutineDriver` from one **Kit app-update** subscription (separate from the
-    bridge's physics-step subscription, never its send/recv legs), reading state
-    through a state-only `IsaacArticulationIO` and `BridgeHost.status` over each
-    drone's `MavlinkCommandPort`. Always **forgiving**: `on_failure` (a `FAIL`, a
-    PX4 failsafe, or a phase timeout) logs a warning and that drone's driver idles
-    (never raises into the sim); after `DONE` it keeps the GCS link warm so
-    PX4-console control returns. STOP/PAUSE and shutdown drop the tick and tear
-    down.
-  - Standalone scenario
-    (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`): a blocking runner
-    that drives the same orchestrator phases, adds the integration-test-only infra
-    checks the orchestrator does not own (ground settle, bridge first heartbeat,
-    the pre-arm start-tilt check), builds the drivers, and ticks them in a
-    `while not orchestrator.all_done: simulation_app.update(); for d: d.tick()`
-    loop, then runs the strict bridge-log scan. Its `make_env` is **strict** under
-    `--strict` (the integration test, set by `STRICT=1` in the Make target):
-    `on_failure` raises `ExpectedInstabilityDetected` for a
-    `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe (so the
-    negative test passes only on an envelope breach, never a failsafe flake), and
-    `AssertionError` otherwise; without `--strict` it logs and the driver idles,
-    like the live path. The `post_takeoff_hook` (negative-test fault injection) is
-    wired to the first drone's `on_step_advanced` and fires when the takeoff step
-    completes, so the hover step's envelope catches the instability. It hand-rolls
-    no MAVLink.
-- The routine is config-driven and the config is the single source of truth: the
-  Hydra `routine` group (`RoutineConfig`, always composed onto `EnvConfig`)
-  carries `steps`, the control-flow tunables (`gcs_heartbeat_period_s`,
-  `command_ack_timeout_s`, `bridge_heartbeat_timeout_s`, `handshake_timeout_s`,
-  `prearm_settle_s`, `takeoff_target_timeout_s`, `ground_settle_s`,
-  `takeoff_timeout_s`, `hover_settle_s`), **and the flight-envelope gates**
-  (`max_tilt_deg`, `max_lateral_drift_m`, `max_vertical_speed_m_s`,
-  `max_downward_speed_m_s`, `max_angular_speed_rad_s`,
-  `hover_max_abs_vertical_speed_m_s`, `hover_max_abs_horizontal_speed_m_s`), **and
-  the navigation (`goto`) tunables** (`goto_position_tol_m`, `goto_heading_tol_deg`,
-  `goto_cross_track_m`, `goto_offboard_prime_ticks`). The separate Hydra `driver`
-  group (`DriverConfig`, global, not merged per vehicle) carries the
-  routine-execution driver heuristics: `goto_min_heading_dist_m` (the heading
-  epsilon below which a `goto` leg holds heading) and the driver wall-clock
-  backstops (`prearm_backstop_floor_s`, `prearm_backstop_multiplier`,
-  `drive_budget_multiplier`), passed by the orchestrator as `driver=` into
-  `DriverParams.from_routine_config`. There
-  is **no** separate `integration_test` group: the integration test is just the
-  routine driven with `--strict`. The routine is **per vehicle**: each
-  `vehicles[]` entry may carry a `routine` partial, merged over the global
-  `routine` exactly like `drone`/`px4` in `config.load._resolve_fleet` (the resolved
-  `RoutineConfig` lands on `ResolvedVehicle.routine`). `routine.steps` is the
-  **per-drone** on/off switch: a drone whose resolved `steps` is **non-empty**
-  (authored as `{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
-  `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
-  `{kind: goto, x, y, z, timeout_s}` /
-  `{kind: policy, artifact, hold_s, timeout_s[, target]}` /
-  `{kind: land, timeout_s}` mappings) gets
-  its own `RoutineDriver`; an **empty** list
-  (the default `configs/experiment/routine/default.yaml`) means that drone is
-  manual. Mixed fleets are allowed. There is no separate enable flag. The private
-  pure routine builder maps the descriptors + a per-drone takeoff target into the
-  routine object the driver executes (unknown `kind`, or a step
-  missing a required field, raises `ValueError`, routed through `on_failure` at
-  the driver's BUILD phase); it stays on the core import path
-  and `DriverParams.from_routine_config` adapts a `RoutineConfig` for the driver.
-  The `policy` step streams a trained policy's OFFBOARD setpoints over the
-  `goto` prime/engage/stream lifecycle: the orchestrator injects
-  `policy_fn_factory` (from `rl.press.policy.build_policy_step_fn`) into
-  `DriverParams`, the step completes after PX4 accepts OFFBOARD and then
-  `hold_s` of continuous in-envelope flight (a bad policy fails as
-  `ENVELOPE`), and a routine should follow it with an explicit-command step
-  such as `land`
-  (`configs/experiment/routine/policy_hover.yaml` is the shipped variant). The takeoff step completes on a real
-  climb (`climbed_at_least(min_climb_m)`) and the hover step on a sustained
-  `hovering_stable(...)`, with the gates as continuous invariants on both (the
-  historical windowed min/max-range hover gates are now sustained
-  instantaneous-rate bounds held for `hold_s`).
-  The `goto` step is the navigation primitive: it streams PX4 OFFBOARD position
-  setpoints (the `STREAM` decision) toward an **absolute world-ENU** waypoint
-  `(x, y, z)`, yawing toward the leg, and completes on
-  `reached_world_position(...)` (absolute, not baseline-relative) plus heading
-  alignment, with tilt / vertical / angular gates and a direction-agnostic
-  cross-track-to-path gate. The world-ENU target is converted to a geodetic
-  setpoint via `px4_bridge.frames.synth_gps_from_enu` against the per-vehicle
-  `px4` **home anchor** (`home_lat_deg`/`home_lon_deg`/`home_alt_m`, passed by the
-  orchestrator into `DriverParams.from_routine_config`, **not** a routine knob) --
-  frame-consistent by construction with the GPS the bridge feeds PX4, so the
-  global frame sidesteps the EKF local-NED origin. PX4 only accepts OFFBOARD once
-  a setpoint stream is already flowing, so `decide` primes
-  `goto_offboard_prime_ticks` setpoints before the one-shot mode command.
-  `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
-  `configs/takeoff_quad.yaml` runs it headless via
-  `make run-all HYDRA_CONFIG=configs/takeoff_quad.yaml`,
-  `configs/navigate_quad_hex.yaml` demos an absolute-waypoint `goto` routine
-  the same way, and `configs/takeoff_quad.yaml` / `configs/takeoff_quad_quad.yaml`
-  select the same routine and differ only in scene/fleet. The GCS link baseport
-  still lives in the `px4` group (`px4.gcs_baseport`); the per-drone `gcs_port`
-  the driver talks is derived from it.
+- Read `docs/COMMAND_ROUTINE_CONTRACT.md` before touching
+  `src/robotics_experiments/commanding/`, routine config, GCS MAVLink commands,
+  `{kind: goto}` / `{kind: policy}` behavior, or driver orchestration.
+- `commanding` mirrors the PX4 bridge as a pure contract
+  (`RoutineObservation` -> `decide(...)` -> `RoutineDecision` over
+  `AbstractCommandPort`) and must stay import-clean with Isaac/pymavlink absent.
+- `decide` and completion/invariant predicates are pure. The port is the only
+  MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
+  bridge simulator port.
+- `RoutineDriver` is the only executor, one per drone whose resolved
+  `routine.steps` is non-empty. Live and standalone workflows stay thin shells
+  that differ only in tick source and failure reaction.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under
   `isaac/runtime/extensions/px4_sitl_brigde/pegasus/` is a vendored, stripped,
   unpinned source snapshot (not a PyPI dependency), reduced to the modules the
   PX4 bridge transitively imports and excluded from ruff/mypy via
-  `pyproject.toml`. The project's deviations from upstream are load-bearing fixes,
-  each with a guarding unit test -- never "sync them away."
+  `pyproject.toml`. The project's deviations from upstream are load-bearing
+  fixes, each with a guarding unit test -- never "sync them away."
 - `isaac/runtime/extensions/px4_sitl_brigde/pegasus/PROVENANCE.md` is the single
   source of truth: upstream repo/license and synced commit, the reachable module
   set, the dead-at-runtime modules, the full divergence index (with guarding
@@ -536,264 +206,26 @@ the current contents and the intended home for that kind of code.
   re-syncing, and update it -- not just code comments -- when the snapshot or a
   divergence changes.
 
-## Python environment
-- This project uses `uv` for all host-side Python work. Do not call `pip`,
+## Development workflow
+- Use `uv` for all host-side Python work. Do not call `pip`,
   `python -m venv`, or a system/global Python directly.
-- The project virtualenv lives at `.venv` and is pinned to the Python in
-  `.python-version` (3.11). Dependencies and the resolver index (including the
-  NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
-  are locked in `uv.lock`. Do not edit `uv.lock` by hand.
-- The project uses a repo-local uv-managed Python install under `.uv-python/`
-  so sandboxed tools do not need access to user-level Python installs under
-  `/home/vv/.local` or `/home/vv/.pyenv`. `.uv-python/` is local machine state
-  and must not be committed.
-- Initialize or repair the environment with `uv sync --extra dev`. The `dev`
-  extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
-  intentionally omits it; pass `--extra dev` when you need the tooling. The
-  `training` extra (`rsl-rl-lib`, pulls torch) exists for host-side tooling
-  only -- actual training runs in the Isaac Lab image, which already ships
-  rsl_rl; do not install it routinely.
-- If `.venv` is missing, points outside the repository, or cannot be read from
-  the sandbox, recreate it with the repo-local interpreter:
-  `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then
-  `UV_PYTHON_INSTALL_DIR=.uv-python uv sync --extra dev --managed-python`.
-  After that, normal `uv run ...` and `uv sync ...` commands reuse `.venv`.
-- Always work inside the project venv. Either activate it with
-  `source .venv/bin/activate`, or prefix commands with `uv run` (for example
-  `uv run pytest`, `uv run ruff check`). Prefer `uv run` for one-off commands so
-  the correct interpreter is used without relying on shell state.
-- Add or change dependencies with `uv add` / `uv remove` (or by editing
-  `pyproject.toml` and running `uv lock`), never with ad hoc `pip install`. Keep
-  `uv.lock` committed and in sync; `uv lock --check` must pass.
-- Host-side Isaac Sim, ROS 2, and PX4 work that does not run inside their Docker
-  containers still goes through this venv. The throwaway `uv run --no-project`
-  invocations (such as the ULog parser below) are deliberate exceptions for
-  one-off tooling that must not touch the project environment.
+- Run `uv run pre-commit run --all-files` after implementing a task and fix
+  every reported issue before considering the task complete.
+- Development workflow details live in `docs/DEVELOPMENT_WORKFLOW.md`.
 
-## Common commands
-
-Run ROS 2, Isaac Sim, and PX4 through the Docker targets below, not directly on
-the host. They are meant to be used in the Dockerized environment.
-
-### Docker
-- `make build` builds the Isaac Sim, Isaac Lab, ROS 2, and PX4 images.
-- The Isaac Lab image (`build-isaac-lab`, `ISAAC_LAB_IMAGE` =
-  `vv-isaac-lab-custom:<tag>`) is the Dockerfile `isaac-lab` stage layered
-  `FROM isaac-sim`: Isaac Lab shares the same kit python (`/isaac-sim/python.sh`),
-  USD, and PhysX and cannot run standalone, so it is a superset image, not a
-  separate container. It is built from `isaac-sim/IsaacLab` pinned by the
-  `ISAACLAB_REF` build ARG / Make variable (default `v2.3.2`, the Isaac Lab
-  release built on Isaac Sim 5.1) via `./isaaclab.sh --install` (all RL
-  frameworks). Only the Phase F RL workflow needs it -- the
-  `test-integration-press-hover-goto` gate runs on `ISAAC_LAB_IMAGE` (and future
-  F2/F3 training will); every other integration target and the persistent
-  containers stay on the leaner `isaac-sim` image (`ISAAC_IMAGE`). Rebuild it
-  after changing `ISAACLAB_REF` or when moving Isaac Sim versions.
-- `make destroy` stops/removes containers and removes built images (including the
-  Isaac Lab image).
-- `make run-isaac` starts the Isaac Sim container. By default
-  (`ISAAC_AUTORUN=0`) it lands in the manual two-pane tmux shell. Pass
-  `ISAAC_AUTORUN=1` (on `run-isaac` or `run-all`) to override the container's
-  tmux CMD so the first pane auto-launches the custom runtime
-  (`isaac/runtime/standalone/runapp_custom.sh`) and then drops to a login shell,
-  leaving the second pane a plain shell. `make run-all-autorun` is the
-  convenience target for that (it is `run-all` with `ISAAC_AUTORUN=1`, propagated
-  to the kitty-spawned `run-isaac` sub-make). The selected startup command is
-  passed to `run_persistent_container.sh` as `EXPECTED_CMD`, which recreates the
-  persistent container when the desired command changes (so toggling the flag
-  takes effect on an already-created container).
-- `make run-ros` starts the ROS 2 container.
-- `make run-px4` starts one PX4 SITL container per PX4-enabled vehicle.
-- `make stop` stops persistent containers without removing them.
-- Legacy targets such as `build-all`, `run-all`, and `clean-all` are
-  compatibility aliases.
-
-### Isaac Sim
-- `make test` runs the host Python unit test suite (pytest, defined in
-  `make/tests.mk`). It requires the project venv at `.venv`; create it first with
-  `uv sync --extra dev` if missing. The target activates `.venv` and runs
-  `python -m pytest`; the direct equivalent is `uv run pytest`. Unit tests live
-  under `tests/` and do not need Docker, Isaac Sim, or PX4 running.
-- Shared unit-test fakes/helpers live in `tests/_fakes.py` (pytest puts `tests/`
-  on `sys.path`, so test modules import them with `from _fakes import ...`).
-  Define each fake once there rather than inline per test file. The PX4 bridge
-  unit tests are split by concern across `tests/test_px4_bridge_sensors.py`,
-  `tests/test_px4_bridge_lockstep.py`, `tests/test_px4_bridge_actuator.py`, and
-  `tests/test_px4_bridge_gating.py` (there is no single `test_px4_bridge.py`).
-- Tests assert on **public behavior**, not internals: prefer public properties,
-  return values, raised errors, and recorded contract seams (constructor kwargs a
-  collaborator received, commands sent to a port, forces/dynamics applied to an
-  articulation IO) over reading a unit's private state or asserting on a
-  mock/interaction-log when a public observable exists. External private-member
-  access is lint-enforced off via Ruff `SLF001` (in `[tool.ruff.lint] select`).
-  The only allowed exceptions are the `per-file-ignores` in `pyproject.toml`,
-  each justified inline: production seams against vendored Pegasus / Isaac Lab
-  privates, fixture injection into the vendored backend, focused private-helper
-  unit tests over import-gated modules, and deliberate corruption/fault
-  injection. Do not add new external private access; if one is genuinely
-  unavoidable, add a narrow `# noqa: SLF001` with a reason or a justified
-  `per-file-ignores` entry.
-- pre-commit is the local quality gate; there is no CI pipeline (local-only for
-  now). Install it once with `uv run pre-commit install` and run it with
-  `uv run pre-commit run --all-files`. The mirror hooks (ruff, mypy) only see
-  staged files, so for a full sweep run `uv run ruff check` /
-  `uv run ruff format --check` / `uv run mypy src tests`. The hook list and the
-  per-tool tunables (`.hadolint.yaml`, `.codespellrc`, `.yamllint.yaml`,
-  `.taplo.toml`) live in `.pre-commit-config.yaml` and those dotfiles at the repo
-  root.
-- For large-scope changes, especially public API, module-name, or runtime
-  behavior changes, run `uv run pytest`, `make test-integration-all`, and
-  `uv run pre-commit run --all-files` before completion.
-- Keep Make recipes thin. If Makefile logic grows into a complex Bash script
-  with substantial control flow, helpers, traps, or heavy `$$` escaping, extract
-  it into a separate shell script and let Make prepare variables and call that
-  script. Avoid `define`/`eval` target templates when they require nested
-  Make/shell escaping such as `$$($(1)_VAR)`; prefer explicit targets with
-  ordinary recursive Make variables so command-line overrides stay dynamic.
-- `make test-integration` runs container-backed integration tests;
-  `make test-integration-all` runs every target (Isaac, drone-articulation, and
-  the two PX4 takeoff scenarios) with isolated transient containers and prints an
-  aggregate passed/failed summary. Targets are defined in
-  `make/integration-tests.mk`; their standalone Isaac scripts live under
-  `isaac/runtime/standalone/tests/` (see its `README.md` for scenario notes).
-- The integration harness internals -- `INTEGRATION_TEST_JOBS` concurrency
-  (default 1, serial; raise it only when the host can sustain more), the
-  warm-Isaac-cache pre-stage, shared cache mounts vs per-run artifact isolation
-  under `.build/docker/integration/<target>.<run-id>/`, the `SCENE`
-  default/override, the structured timing-line formats, and the standalone
-  `_runtime.py` ENU pos/vel state logging -- are documented in
-  `docs/INTEGRATION_TEST_ARCHITECTURE.md`; read it before changing the harness.
-- `make test-integration-px4-takeoff` starts a temporary PX4 SITL container,
-  runs the standalone Isaac PX4 arm/takeoff stability scenario, preserves
-  isolated artifacts under `.build/docker/integration/<target>.<run-id>/`, and
-  removes the temporary PX4 container.
-- `make test-integration-px4-takeoff-instability` runs the same scenario with
-  a test-local PX4 rotor mapping fault and passes only when the stability
-  envelope detects the resulting instability.
-- `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
-  scenario from the `takeoff_quad_quad` experiment (the target
-  sets `HYDRA_CONFIG` itself): it starts one PX4 SITL container per
-  resolved `vehicles` entry whose `px4.enabled` is true, in one shared network
-  namespace (instance 0 owns it; instance `i>0` joins via
-  `--network container:` and runs PX4 `-i i` so it listens on simulator TCP
-  `4560 + i` / GCS UDP `14550 + i` with a per-instance rootfs), and passes only
-  when *every* drone holds its takeoff/hover envelope.
-  `PX4_INSTANCE` is the per-container index threaded into `run_px4_sitl_ci.sh` /
-  `reset_px4_state.sh` (see `px4/docker/README.md`). The runner injects a
-  `px4.debug_log_path` override carrying the `{vehicle}` token so the per-vehicle
-  bridge logs never collide (config validation rejects two vehicles resolving to
-  the same template). Every instance (including `0`) is launched uniformly by
-  `px4_sitl_common.sh::launch_px4_sitl`: the prebuilt binary run with
-  `-i ${PX4_INSTANCE}` and an interactive `pxh>` console (no `-d`), from its own
-  per-instance rootfs subdir, with no `instance == 0` special case in the launch,
-  reset, or mount logic. A divergent instance-0 launch (`make px4_sitl_default
-  none_x500_v2` for instance 0 vs. additional instances started with the binary's
-  `-d` "no pxh shell" daemon flag) is exactly how the extra instances silently
-  lost their console, so `commander takeoff` could only be entered for PX4[0].
-  PX4's `-d` is confirmed against the live image (`px4 -h`: "daemon mode, don't
-  start pxh shell"); keep the launch interactive (`-d` omitted) so every
-  per-vehicle terminal accepts commands.
-- `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
-  navigation routine as **one multi-drone scene**
-  (`configs/navigate_quad_hex.yaml`, scene via `@config`): a quad
-  (id 0, x500) and a hexacopter (id 1, `hexacopter_s550.usda`) fly the same
-  routine **concurrently** in parallel lanes (the hex `goto` waypoints offset +4
-  in x by its spawn, so the absolute world-ENU waypoints never converge), each on
-  its own PX4 SITL instance with the per-asset airframe derived from its USD asset
-  (the quad's `none_x500_v2`/`4019` and the hex's generated Hex X
-  `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
-  `goto` -> `hover` transition and passes only when **both** drones hold their
-  envelope. It reuses the generic multi-PX4 launch path
-  (`run_px4_integration_test.sh` over `get_enabled_px4_launch_configs()`, like
-  the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
-  whose
-  `_assert_navigation_routine_config` validates the `goto`/`goto -> hover` config
-  per flying vehicle before running the strict takeoff scenario.
-- The persistent Isaac container (`make run-isaac` / `make run-all`) is named
-  `vv-isaac-sim-custom` (`ISAAC_CONTAINER_NAME`) and is **retained after it
-  exits**, so the quickest way to inspect the last manual run is
-  `docker logs vv-isaac-sim-custom`. That console stream is also the **only**
-  place the shell-level scene-resolution step in `runapp_custom.sh` (the
-  `get_config().scene` subprocess that picks the stage) reports its errors -- they
-  never reach the Kit log file, so a blank stage with no `open_stage` exec is
-  diagnosed here, not in the structured log. Kit's own log is written **inside the
-  container** at
-  `/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/<ver>/kit_<timestamp>.log`
-  (container `HOME` is `/root`); it is **not** on the host, because the
-  `isaac/isaac-sim/logs` host mount maps to `/isaac-sim/.nvidia-omniverse/logs`, a
-  different path than `/root/...`. Copy it out with
-  `docker cp 'vv-isaac-sim-custom:/root/.nvidia-omniverse/logs/Kit/' <dest>` when
-  you need the structured Kit log rather than the console stream. (The
-  `isaac/isaac-sim/logs/test_*.log` files there are integration-test output, which
-  redirects explicitly; manual runs do not land there.)
-- Every top-level config is an *experiment* (sibling of `base.yaml`), loaded
-  identically; there is no system distinction between a runtime experiment and a
-  test experiment, and **every** experiment is uniformly runnable both through the
-  standalone workflow and the extension workflow (`make run-all`). Each experiment
-  sets a top-level `scene` (the USD stage; `@`-prefixed is repo-relative). The
-  flight routine *and its verification* (command-flow timeouts, takeoff target,
-  flight-envelope gates) live in the Hydra `routine` group (`RoutineConfig`,
-  always composed onto `EnvConfig`); there is **no** separate `integration_test`
-  group -- the integration test is just a routine experiment driven in strict mode
-  (the standalone runner's `--strict`, set by `STRICT=1` in the Make target). The
-  GCS link baseport is in the `px4` group (`px4.gcs_baseport`). The standalone
-  runner's `--scene` is optional and overrides the experiment scene; the
-  multi-drone target passes the `@config` sentinel so the scene comes from the
-  experiment `scene`. Experiment variants are selected with the `HYDRA_CONFIG`
-  Make variable. The top-level experiment configs are independent and live
-  directly under `configs/`; `configs/base.yaml` is shared defaults only and does
-  not carry `scene` or `vehicles`. The takeoff experiments are
-  `configs/takeoff_quad.yaml` (one drone) and `configs/takeoff_quad_quad.yaml`
-  (two drones) -- both select the same `routine` `takeoff` variant and declare
-  their own scene/fleet. The composable group building blocks they select (`sim`,
-  `drone`, `switches`, `px4`, `press`, `routine`, `driver`) live under
-  `configs/experiment/` and are referenced as `experiment/<group>@<group>`. The
-  `routine` group is composed by `configs/base.yaml` itself (so every experiment
-  that inherits `base` carries it; `EnvConfig.routine` is never `None`), and
-  `routine.steps` is empty by default (manual operation) -- see the Commanding
-  section for the routine switch and the `takeoff` variant
-  (`configs/experiment/routine/takeoff.yaml`). The persistent
-  runtime entrypoint `isaac/runtime/standalone/runapp_custom.sh` reads its stage
-  from the experiment `scene` too.
-
-### PX4
-- `make run-px4` derives the number of PX4 SITL containers from the active Hydra
-  `vehicles` list and opens one terminal per PX4-enabled vehicle. Each
-  persistent PX4 container attaches to a `px4` tmux session with the interactive
-  PX4 console selected, so manual commands such as `commander arm` and
-  `commander takeoff` can be entered directly. Every persistent PX4 instance runs
-  on host networking (`--network=host`, like the Isaac container), so all
-  instances share the host namespace and the PX4 `-i` index keeps each one's
-  simulator TCP `4560 + i` / GCS UDP `14550 + i` ports distinct. The
-  shared-private-namespace `--network container:<primary>` model is specific to
-  the integration harness (where instance 0 owns a private namespace that the
-  other instances and the ephemeral Isaac container join); do not use it for the
-  host-networked persistent path.
-- Persistent and integration Make targets accept `HYDRA_CONFIG=<path>` to select
-  a top-level Hydra experiment config for both host-side PX4 counting and Isaac
-  runtime config composition, for example
-  `make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml`.
-
-### Flight log analysis and PX4 bridge debugging
-- `flight_analysis/README.md` is the single source for the repeatable flight-log
-  workflow. Read it when you start investigating an unstable flight, a diverging
-  takeoff, or a sim-to-real comparison; do not reconstruct the procedure from
-  this file. It documents the helper tools (`list_pairs.py`, `bridge_summary.py`,
-  `ulog_timeline.py`, `compare_logs.py`), the bridge-log fields, the minimum
-  ULog topic set and required real-drone SDLOG profile, the NED / aiding-source
-  caveats, and the step-by-step order for deciding whether PX4 commanded the bad
-  motion or the bridge applied it incorrectly.
-- Make targets in `make/flight-analysis.mk` run those tools through a throwaway
-  `uv run --no-project --with pyulog --with numpy` environment, so pyulog/numpy
-  never enter the project `.venv`: `make compare-logs A=<log_a.ulg> B=<log_b.ulg>`
-  prints a per-metric divergence table, and
-  `make ulog-timeline ULOG=<log.ulg> [SAMPLES=...]` prints a single-log timeline.
-- Debug from the persisted logs, not `docker logs` (PX4 terminal scrollback has
-  repeated starts and ANSI redraw noise; use it only for high-level warnings).
-  PX4 ULogs and bridge logs are persisted under `px4/logs/<yyyy-mm-dd>/` for
-  manual runs and under `.build/docker/integration/<target>.<run-id>/` for
-  integration tests; pair a ULog and bridge log by date directory and `HH_MM_SS`
-  stem.
+## Runtime and integration entrypoints
+- Run ROS 2, Isaac Sim, and PX4 through the Docker Make targets, not directly on
+  the host. Runtime command details live in `docs/RUNTIME_OPERATIONS.md`.
+- Key persistent targets: `make build`, `make run-isaac`, `make run-ros`,
+  `make run-px4`, `make stop`, and `make destroy`.
+- Integration targets are defined in `make/integration-tests.mk`. Read
+  `docs/INTEGRATION_TEST_ARCHITECTURE.md` before changing the harness,
+  standalone integration scripts, or targets such as `make test-integration`,
+  `make test-integration-all`, `make test-integration-press-hover-goto`,
+  `make test-integration-press-policy`, `make test-integration-px4-takeoff`,
+  `make test-integration-px4-navigation`,
+  `make test-integration-px4-takeoff-instability`, or
+  `make test-integration-px4-multi-drone-takeoff`.
 
 ## Hard rules
 - Do NOT commit binary files.
@@ -804,63 +236,38 @@ the host. They are meant to be used in the Dockerized environment.
   Add a matching field (a bare annotation with no default) to the relevant
   `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
   through. A library constructor may keep a neutral fallback default, but it must
-  not duplicate the project value (for example `lockstep_timeout_s` is `0.1` in
-  the `LockstepSettings` default but `1.0` at
-  `px4.lockstep.lockstep_timeout_s` in `configs/experiment/px4/default.yaml`).
+  not duplicate the project value.
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.
 - Invalid configuration or unexpected runtime state must not fail silently.
-  Raise an error for wrong configuration; log a warning for recoverable runtime fallbacks.
+  Raise an error for wrong configuration; log a warning for recoverable runtime
+  fallbacks.
 - Avoid overly defensive code. Use the minimal checks needed for correctness,
   and otherwise let code fail naturally. Add explicit checks only when the code
   would otherwise fail silently, continue with an incorrect result without
   notice, or when a genuinely distinct state must be represented. Do not wrap a
   value in `Optional`/`None`, add routine `is not None` checks, or carry a
-  `<= 0 disables` special case when a plain concrete default works. A numerical
-  runtime parameter must carry a concrete default in its library constructor and
-  a value in the Hydra YAML, and be used directly (the `*Config` dataclass field
-  still stays a bare annotation per the configs rule above). Reserve
-  `None`/optional handling and disable branches for states that are required for
-  correctness (for example "no actuator received yet" before any timestamp
-  exists), not as routine safety padding.
-- Every behavior change must be reflected in this file when it changes project conventions,
-  error handling policy, runtime assumptions, public behavior, or developer workflow expectations.
-- Per-area README and doc files are on-demand context: read a task's relevant doc
-  (for example `PX4_BRIDGE_CONTRACTS.md`, the Pegasus `PROVENANCE.md`,
-  `flight_analysis/README.md`, the standalone-test README, or
-  `docs/INTEGRATION_TEST_ARCHITECTURE.md`) only when the task actually touches
-  that area, not
-  preemptively. If a doc has diverged from the actual code, correct the doc as
-  part of the same task -- a doc fix is in scope whenever you change the code it
-  documents.
-- After implementing a task, run `uv run pre-commit run --all-files` and fix any
-  issues it reports before considering the task complete.
+  `<= 0 disables` special case when a plain concrete default works.
+- Every behavior change must be reflected in `AGENTS.md` or the relevant
+  referenced doc when it changes project conventions, error handling policy,
+  runtime assumptions, public behavior, or developer workflow expectations.
+- Per-area README and doc files are on-demand context: read a task's relevant
+  doc only when the task actually touches that area, not preemptively. If a doc
+  has diverged from the actual code, correct the doc as part of the same task.
 - Do NOT ignore pre-existing issues. When a quality gate (`pre-commit`, lint,
   type check, test) reports a failure -- even in a file the current task did not
   touch, or one that predates it -- fix it along with the current task rather
   than dismissing it as out of scope or a false positive. If a flagged line is
-  genuinely correct, silence it narrowly and on purpose (a scoped inline
-  suppression such as `# shellcheck disable=...` / `# noqa: <code>` with a brief
-  reason), so the gate stays green for the next change.
+  genuinely correct, silence it narrowly and on purpose.
+- Do NOT add new lint/type ignores to `pyproject.toml` to get past quality
+  gates. If a suppression is genuinely necessary, use the narrowest inline
+  ignore at the offending line with a brief reason.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.
-- In the standalone Isaac scripts (`isaac/runtime/standalone/tests/`,
-  `isaac/runtime/standalone/`), import ordering is load-bearing: `SimulationApp`
-  (or Isaac Lab's `AppLauncher`) must be constructed before any Kit-app-dependent
-  module is imported. Keep those imports function-scoped (deferred until after the
-  app starts) -- `omni.*`, `carb`, `pxr`, `robotics_experiments.drone` (imports
-  `isaacsim`), `robotics_experiments.runtime` (imports `omni.physx`/`carb`), and
-  `robotics_experiments.workflows.isaac_lab` / `isaaclab` -- with a one-line
-  comment on the first deferred import in each file noting why. Only
-  app-independent imports belong at module top: stdlib, `numpy`, `torch`, and the
-  pure `robotics_experiments` packages (`config`, `simulation`, `commanding`,
-  `px4_bridge` -- its `__init__` defers all `omni`/`carb` internally). These files
-  carry `from __future__ import annotations`, and ruff lints them but mypy does
-  not (its scope is `src tests`), so annotate parameters/returns precisely using
-  `TYPE_CHECKING` imports for the Kit-app-only types (never a runtime import just
-  for a hint). Do not convert the deferred imports to module top to "remove
-  redundancy" -- that breaks the scripts at import time before the app boots.
+- Standalone Isaac scripts must construct `SimulationApp` or Isaac Lab's
+  `AppLauncher` before any Kit-dependent imports. The full import-order contract
+  lives in `isaac/runtime/standalone/README.md`.
 
 ## Docker assumptions
 - Containers often run with `--network=host`.

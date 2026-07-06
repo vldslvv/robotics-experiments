@@ -1,7 +1,8 @@
 # Integration-test architecture
 
 This is the architecture and rationale for the container-backed integration
-tests. `AGENTS.md` keeps the command entrypoints; the orchestration, caching,
+tests. Use the Make targets as the public entrypoints; run harness scripts
+directly only when debugging the harness itself. The orchestration, caching,
 artifact-isolation, and timing details live here. The authoritative definitions
 are `make/integration-tests.mk`, `make/config.mk`,
 `make/scripts/run_isaac_integration_test.sh`,
@@ -36,6 +37,10 @@ scenario-specific notes.
   `ISAAC_INTEGRATION_COMMON_ENV` expands it at recipe time, so the rest of the
   runner is unchanged. Build the image first with `make build-isaac-lab` (or
   `make build`).
+- `make test-integration-press-policy` runs the F2b trained-policy gate on the
+  Isaac Lab image. It needs a prior `make train-rl`, so it is deliberately not
+  part of `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy
+  artifact contract and routine config.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.
@@ -43,9 +48,26 @@ scenario-specific notes.
   test-local PX4 rotor mapping fault and passes only when the stability envelope
   detects the resulting instability.
 - `make test-integration-px4-multi-drone-takeoff` runs the multi-drone takeoff
-  scenario from the active Hydra config. It starts one PX4 SITL container per
-  PX4-enabled vehicle, shares one network namespace, and passes only when every
-  drone holds its takeoff/hover envelope. See "Multi-instance PX4" below.
+  scenario from `configs/takeoff_quad_quad.yaml` (the target sets
+  `HYDRA_CONFIG` itself). It starts one PX4 SITL container per PX4-enabled
+  vehicle, shares one network namespace, and passes only when every drone holds
+  its takeoff/hover envelope. See "Multi-instance PX4" below.
+- `make test-integration-px4-navigation` runs the absolute-waypoint `goto`
+  navigation routine as **one multi-drone scene**
+  (`configs/navigate_quad_hex.yaml`, scene via `@config`): a quad (id 0, x500)
+  and a hexacopter (id 1, `hexacopter_s550.usda`) fly the same routine
+  **concurrently** in parallel lanes (the hex `goto` waypoints offset +4 in x by
+  its spawn, so the absolute world-ENU waypoints never converge), each on its
+  own PX4 SITL instance with the per-asset airframe derived from its USD asset
+  (the quad's `none_x500_v2`/`4019` and the hex's generated Hex X
+  `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
+  `goto` -> `hover` transition and passes only when **both** drones hold their
+  envelope. It reuses the generic multi-PX4 launch path
+  (`run_px4_integration_test.sh` over `get_enabled_px4_launch_configs()`, like
+  the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
+  whose
+  `_assert_navigation_routine_config` validates the `goto`/`goto -> hover`
+  config per flying vehicle before running the strict takeoff scenario.
 
 ## Concurrency
 
@@ -136,6 +158,16 @@ long passing flight, the trap captures only the last `INTEGRATION_LOG_TAIL_LINES
 of the PX4 console on **success** (the scrollback is ANSI redraw noise; the real
 artifacts are the persisted ULog/bridge logs) and the **full** console only on
 failure or with `INTEGRATION_VERBOSE=1`. The active Hydra config must carry
-a `{vehicle}` token in `px4.debug_log_path` for multi-vehicle bridge logs. Keep
+a `{vehicle}` token in `px4.debug_log_path` for multi-vehicle bridge logs (the
+multi-drone runner injects a `px4.debug_log_path` override carrying the token;
+config validation rejects two vehicles resolving to the same template). Keep
 `INTEGRATION_TEST_JOBS=1`: a 2-drone run already loads the host with two PX4
 boots and two serial lockstep exchanges per tick.
+
+`PX4_INSTANCE` is the per-container index threaded into `run_px4_sitl_ci.sh` /
+`reset_px4_state.sh` (see `px4/docker/README.md`). Every instance (including
+`0`) is launched uniformly by `px4_sitl_common.sh::launch_px4_sitl`: the
+prebuilt binary run with `-i ${PX4_INSTANCE}` and an interactive `pxh>` console
+(no `-d`), from its own per-instance rootfs subdir, with no `instance == 0`
+special case in the launch, reset, or mount logic. Keep the launch interactive
+(`-d` omitted) so every per-vehicle terminal accepts commands.

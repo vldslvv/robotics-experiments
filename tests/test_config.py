@@ -325,7 +325,9 @@ def test_resolve_fleet_merges_per_vehicle_routine_override():
 
     reset_config()
     env = get_config()
-    global_routine = OmegaConf.merge(OmegaConf.structured(RoutineConfig), _group_defaults("routine"))
+    global_routine = OmegaConf.merge(
+        OmegaConf.structured(RoutineConfig), _group_defaults("routine")
+    )
     cfg = OmegaConf.create(
         {
             "drone": env.drone,

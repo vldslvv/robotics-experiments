@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 from robotics_experiments.rl.press import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
@@ -17,7 +18,6 @@ from robotics_experiments.rl.press import (
     to_vector,
     world_switch_to_contact_frame,
 )
-from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _IDENTITY_WXYZ = np.array([1.0, 0.0, 0.0, 0.0])
 # Rotation of pi about world Z (switch outward normal facing world -X).

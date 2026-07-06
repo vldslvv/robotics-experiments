@@ -34,10 +34,9 @@ import omni.usd
 from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 
+from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.runtime import FleetDriverEnv, FleetOrchestrator
-
-from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
 
 __all__ = ["Extension"]
 

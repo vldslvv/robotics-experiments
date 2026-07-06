@@ -48,7 +48,6 @@ from robotics_experiments.commanding import (
     RoutineObservation,
 )
 from robotics_experiments.config.types import EnvConfig, ResolvedVehicle
-
 from robotics_experiments.runtime._bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
 from robotics_experiments.runtime._scene import resolve_scene_path
 

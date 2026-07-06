@@ -12,6 +12,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float32MultiArray
 
+from LightSwitch_python.global_variables import EXTENSION_TITLE
 from robotics_experiments.config import get_config as _get_experiment_config
 from robotics_experiments.environment import (
     SwitchState,
@@ -21,8 +22,6 @@ from robotics_experiments.environment import (
     step_switches,
     validate_switches,
 )
-
-from LightSwitch_python.global_variables import EXTENSION_TITLE
 
 __all__ = ["LightSwitchExtension", "LightSwitchNode"]
 
