@@ -24,6 +24,11 @@ Only app-independent imports belong at module top: stdlib, `numpy`, `torch`, and
 the pure `robotics_experiments` packages (`config`, `simulation`, `commanding`,
 `px4_bridge`; its `__init__` defers all `omni`/`carb` internally).
 
+`build_copter_usd_standalone.py` is the USD-authoring and CLI shell. Its pure
+airframe dataclasses, Hydra parsing, and mass-property calculations live in
+`robotics_experiments.drone._airframe`, which can be tested on the host without
+OpenUSD bindings.
+
 These files carry `from __future__ import annotations`, and ruff lints them but
 mypy does not (its scope is `src tests`), so annotate parameters/returns
 precisely using `TYPE_CHECKING` imports for Kit-app-only types. Never add a

@@ -9,7 +9,7 @@ from robotics_experiments.px4_bridge import (
     VehicleState,
     vehicle_log_context,
 )
-from tests.support.fakes import (
+from tests.support.bridge_fakes import (
     _MAV_MODE_FLAG_SAFETY_ARMED_PLUS_ONE,
     _FakeConnection,
     _install_fake_pegasus,

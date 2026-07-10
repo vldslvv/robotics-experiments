@@ -27,17 +27,17 @@ from enum import Enum, auto
 from typing import Any, Optional, Protocol
 
 from robotics_experiments.commanding._commander import _VehicleCommander
-from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
-from robotics_experiments.commanding.port import AbstractCommandPort
-from robotics_experiments.commanding.routine import (
+from robotics_experiments.commanding._routine_builder import build_vehicle_routine
+from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
-    EnvelopeGates,
     FailureKind,
     PolicyStepFn,
     VehicleRoutine,
-    build_vehicle_routine,
 )
+from robotics_experiments.commanding._routine_predicates import EnvelopeGates
+from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
+from robotics_experiments.commanding.port import AbstractCommandPort
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,

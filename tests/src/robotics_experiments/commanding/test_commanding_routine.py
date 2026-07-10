@@ -44,7 +44,7 @@ from robotics_experiments.commanding import (
     takeoff,
     tilt_below,
 )
-from tests.support.fakes import make_routine_observation
+from tests.support.commanding_fakes import make_routine_observation
 
 _GATES = EnvelopeGates(
     max_tilt_deg=35.0,

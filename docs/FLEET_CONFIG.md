@@ -67,8 +67,8 @@ allocation share one source.
 
 The airframe YAML authors only **cited per-component leaves** (each physical
 value carries an inline vendor/BOM citation): the body
-`total_mass`/`center_of_mass`/`diagonal_inertia` are **computed** by the USD
-builder (`build_copter_usd_standalone.compute_body_mass_properties`, summing
+`total_mass`/`center_of_mass`/`diagonal_inertia` are **computed** by the pure
+airframe module (`robotics_experiments.drone._airframe.compute_body_mass_properties`, summing
 the component box/cylinder inertias + parallel-axis, excluding the separate
 pusher pad) and the bridge `rotor_constant` is **computed** by the config
 package from the cited `max_thrust_per_rotor_g` +

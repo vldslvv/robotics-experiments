@@ -135,31 +135,20 @@ therefore receive composition coverage automatically, including
 
 Priority: medium
 
-Several files remain cohesive today but are large enough that new features will
-raise review cost and conflict frequency:
+Status: completed
 
-- `src/robotics_experiments/config/types.py` contains schemas for simulation,
-  ROS, switches, PX4, fleet, RL, routines, and drivers.
-- `src/robotics_experiments/commanding/routine.py` contains the routine model,
-  decision state machine, predicates, envelope gates, geodetic helpers, and a
-  long descriptor-to-step builder.
-- `isaac/runtime/standalone/build_copter_usd_standalone.py` combines builder
-  config parsing, mass-property calculations, USD authoring, and CLI wiring.
-- `tests/support/fakes.py` contains fakes for several unrelated subsystems.
+Config schemas now live in private simulation, scene/ROS, PX4/fleet, RL,
+commanding, and environment modules. `config/types.py` is a compatibility
+aggregator and `robotics_experiments.config` remains the only public facade.
 
-Recommended change:
-
-- Split config schemas into private domain-oriented modules while preserving
-  `robotics_experiments.config` as the only public facade.
-- Separate routine state/decisions, predicates/gates, and descriptor builders
-  behind the existing commanding facade.
-- Move pure airframe parsing and mass-property calculations away from the
-  standalone USD-authoring shell.
-- Split test fakes by subsystem, retaining only genuinely cross-cutting helpers
-  in the shared module.
-
-These changes should preserve public exports and behavior. The purpose is
-smaller ownership units, not a broader API.
+The commanding routine implementation is divided into private model, stepper,
+predicate/gate, and descriptor-builder modules; `commanding/routine.py` keeps
+the existing internal compatibility facade and the package-root public exports
+are unchanged. Pure airframe dataclasses, Hydra parsing, and body mass-property
+calculations live in `robotics_experiments.drone._airframe`, leaving the
+standalone script responsible for USD authoring, batch generation, and CLI
+wiring. Test support now has commanding and PX4-bridge fake modules, while the
+shared fake module contains only quaternion data helpers used by both suites.
 
 ### 7. Reduce configuration global-state coupling
 
@@ -224,7 +213,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
    checkout-only packaging contract.
 5. [x] Make integration dependency installation hermetic and split minimal container
    stages from interactive development stages.
-6. [ ] Refactor the large modules incrementally, one subsystem at a time, with no
+6. [x] Refactor the large modules incrementally, one subsystem at a time, with no
    public API changes.
 7. [ ] Isolate config composition and make resolved configuration immutable.
 8. [ ] Reconcile binary-asset, README, and backlog documentation with the resulting

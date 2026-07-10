@@ -29,8 +29,8 @@ to the BOM, and split every airframe value into authored **cited leaves** vs
   inline `-- BOM x.y` / vendor citation. Faithful values: 0.25 m motor radius
   (500 mm diagonal wheelbase, 354 mm adjacent), MN4006 EVO KV380 (68 g),
   P134.4 13x4.4 (0.16510 m), Tattu 4S 5000 mAh (460 g), ~2.251 kg AUW.
-- **Computed body mass properties**: the USD builder
-  (`build_copter_usd_standalone.compute_body_mass_properties`) computes
+- **Computed body mass properties**: the pure airframe module
+  (`robotics_experiments.drone._airframe.compute_body_mass_properties`) computes
   `total_mass` / `center_of_mass` / `diagonal_inertia` from the component
   masses + geometry (box/cylinder principal inertia + parallel-axis to the CoM,
   excluding the separate pusher pad). These fields are removed from the YAML and

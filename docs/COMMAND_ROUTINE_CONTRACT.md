@@ -41,7 +41,11 @@ one drone's routine. There is no fleet object - drones are independent
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
   int constants; `CommandAck.from_result` derives `accepted`.
-- **`routine.py`** -- the pure plan and stepper. `RoutineStep` (an **optional**
+- **Routine facade** -- `routine.py` preserves the internal compatibility
+  surface, while `_routine_model.py`, `_routine_stepper.py`,
+  `_routine_predicates.py`, and `_routine_builder.py` separately own the pure
+  model, decision state machine, predicates/gates, and descriptor assembly.
+  `RoutineStep` (an **optional**
   command -- `None` for a verification-only step such as `hover`; a completion
   predicate `_StepPredicate = Callable[[RoutineObservation, baseline], bool]`; a
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`

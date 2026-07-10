@@ -50,7 +50,7 @@ def _make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationC
                 enable_gyroscopic_forces=True,
             ),
             # No mass override: the USD carries the computed body mass/inertia/CoM
-            # (build_copter_usd_standalone.compute_body_mass_properties).
+            # (robotics_experiments.drone._airframe.compute_body_mass_properties).
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.0, 0.0, 1.0),

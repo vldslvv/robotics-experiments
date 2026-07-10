@@ -10,10 +10,12 @@ from robotics_experiments.px4_bridge import (
     VehicleState,
     tilt_angle_deg,
 )
-from tests.support.fakes import (
+from tests.support.bridge_fakes import (
     _CapturingThrustModel,
     _FakeArticulationIO,
     _FakeFlightStack,
+)
+from tests.support.fakes import (
     _quat_pitch_deg,
     _quat_yaw_deg,
 )

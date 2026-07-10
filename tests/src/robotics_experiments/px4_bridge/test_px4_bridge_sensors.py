@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.px4_bridge import LockstepSettings, Px4MavlinkPort, VehicleState
-from tests.support.fakes import (
+from tests.support.bridge_fakes import (
     _PX4_BRIDGE_EXTENSION_ROOT,
     _FakeConnection,
     _install_fake_pegasus,
