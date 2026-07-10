@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, List
 
 from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
+from robotics_experiments.config._immutability import _FreezableConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import RlConfig
 from robotics_experiments.config._scene import DroneConfig, LightSwitchConfig
@@ -11,7 +12,7 @@ __all__ = ["EnvConfig"]
 
 
 @dataclass
-class EnvConfig:
+class EnvConfig(_FreezableConfig):
     """Composite experiment config consumed by the Isaac Sim extensions.
 
     Attributes:
@@ -31,8 +32,8 @@ class EnvConfig:
             Typing note: the annotation is intentionally ``List[Any]`` so Hydra's
             structured-config validation accepts the *partial* YAML entries
             during ``compose()``. The loader replaces the raw dicts with a
-            fully enriched, validated ``list[ResolvedVehicle]``, which is the
-            public/runtime type.
+            fully enriched, validated ``tuple[ResolvedVehicle, ...]`` and
+            freezes the complete graph before returning it.
         routine: High-level flight routine plus its verification gates (see
             :class:`RoutineConfig`). Always present; an empty ``routine.steps``
             means manual operation, a non-empty list makes every workflow

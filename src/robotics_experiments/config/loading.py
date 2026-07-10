@@ -4,10 +4,13 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
 
-from hydra import compose, initialize_config_dir
-from hydra.core.global_hydra import GlobalHydra
-from omegaconf import OmegaConf
+from hydra._internal.config_loader_impl import ConfigLoaderImpl
+from hydra._internal.hydra import Hydra
+from hydra._internal.utils import create_config_search_path
+from hydra.types import RunMode
+from omegaconf import OmegaConf, open_dict
 
+from robotics_experiments.config._immutability import _freeze_config_graph
 from robotics_experiments.config._schemas import _register_schemas
 from robotics_experiments.config.types import (
     DroneConfig,
@@ -21,6 +24,7 @@ from robotics_experiments.config.types import (
 __all__ = [
     "get_config",
     "get_enabled_px4_launch_configs",
+    "load_config",
     "reset_config_cache",
     "resolve_drone_bridge_config",
 ]
@@ -28,20 +32,19 @@ __all__ = [
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
 _DEFAULT_CONFIG_NAME = "takeoff_quad"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
-_AIRFRAME_CONFIG_DIR = _DEFAULT_CONF_DIR / "airframes"
 
 
 @functools.cache
-def _airframes_by_output_filename() -> dict[str, dict]:
+def _airframes_by_output_filename(airframe_config_dir: Path) -> dict[str, dict]:
     airframes: dict[str, dict] = {}
-    for path in sorted(_AIRFRAME_CONFIG_DIR.glob("*.yaml")):
+    for path in sorted(airframe_config_dir.glob("*.yaml")):
         data = cast(dict, OmegaConf.to_container(OmegaConf.load(path), resolve=True))
         airframes[str(data["output_filename"])] = data
     return airframes
 
 
-def _airframe_for_drone_asset(usd_path: str) -> dict | None:
-    return _airframes_by_output_filename().get(Path(usd_path).name)
+def _airframe_for_drone_asset(usd_path: str, airframe_config_dir: Path) -> dict | None:
+    return _airframes_by_output_filename(airframe_config_dir).get(Path(usd_path).name)
 
 
 # Standard gravity for the grams-force -> Newton unit conversion of the cited
@@ -185,7 +188,7 @@ def _ros_frame_prefix_from_namespace(namespace: str) -> str:
     return namespace.removeprefix("/").replace("/", "_")
 
 
-def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
+def _resolve_fleet(cfg, airframe_config_dir: Path) -> list[ResolvedVehicle]:
     """Enrich the composed config's ``vehicles`` into a resolved fleet.
 
     The single enrichment step from authored Hydra data to a self-describing
@@ -195,14 +198,15 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
     rejects unknown keys) into a pure resolved config, from which the derived
     runtime fields (``mavlink_port``, ``px4_instance_index``, the
     ``px4.gcs_baseport + id`` GCS port, the rendered ``debug_log_path``,
-    ``prim_name``) are computed once. An empty list is a valid empty fleet
-    (0..N is handled uniformly).
+    ``prim_name``) are computed once. An empty authored list is a valid empty
+    fleet; the final graph exposes an immutable tuple (0..N is handled
+    uniformly).
     """
     raw = list(cfg.get("vehicles") or [])
     resolved: list[ResolvedVehicle] = []
     for entry in raw:
         drone = OmegaConf.merge(cfg.drone, entry.get("drone", {}))
-        airframe = _airframe_for_drone_asset(str(drone.usd_path))
+        airframe = _airframe_for_drone_asset(str(drone.usd_path), airframe_config_dir)
         px4_airframe_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
         px4 = OmegaConf.merge(cfg.px4, px4_airframe_defaults, entry.get("px4", {}))
         # rotor_constant is not authored: derive it from the cited per-rotor max
@@ -238,6 +242,58 @@ def _resolve_fleet(cfg) -> list[ResolvedVehicle]:
     return resolved
 
 
+def _compose_config(config_path: Path):
+    """Compose with an isolated Hydra loader, leaving ``GlobalHydra`` untouched."""
+
+    search_path = create_config_search_path(f"file://{config_path.parent}")
+    loader = ConfigLoaderImpl(config_search_path=search_path)
+    hydra = Hydra(task_name="robotics_experiments", config_loader=loader)
+    cfg = hydra.compose_config(
+        config_name=config_path.stem,
+        overrides=[],
+        run_mode=RunMode.RUN,
+        from_shell=False,
+    )
+    with open_dict(cfg):
+        cfg.pop("hydra")
+    return cfg
+
+
+def load_config(path: str | os.PathLike[str]) -> EnvConfig:
+    """Compose, enrich, validate, and freeze one explicit experiment config.
+
+    ``path`` is the core boundary and does not read an environment variable or
+    mutate Hydra's process-global singleton. Relative paths resolve from the
+    repository root, matching the runtime's ``HYDRA_CONFIG=configs/...`` form.
+    The returned dataclass graph rejects attribute mutation, and all nested
+    lists and mappings are converted to immutable tuples and mapping proxies.
+    """
+
+    config_path = Path(path)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).resolve().parents[3] / config_path
+    config_path = config_path.resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(f"experiment config does not exist: {config_path}")
+
+    _register_schemas()
+    cfg = _compose_config(config_path)
+    airframe_config_dir = config_path.parent / "airframes"
+
+    # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
+    # them with the enriched, validated resolved fleet before freezing.
+    env = cast(EnvConfig, OmegaConf.to_object(cfg))
+    # Derive rotor_constant for the global default px4 too (the per-vehicle
+    # resolution does the same for each fleet entry), so the authored config
+    # never duplicates the computed thrust coefficient.
+    env.px4.rotor_constant = _compute_rotor_constants(
+        env.px4.max_thrust_per_rotor_g,
+        env.px4.max_rotor_velocity,
+    )
+    env.vehicles = _resolve_fleet(cfg, airframe_config_dir)
+    return _freeze_config_graph(env)
+
+
 @functools.cache
 def get_config() -> EnvConfig:
     """Return the process-wide composed :class:`EnvConfig`, loading once.
@@ -250,29 +306,12 @@ def get_config() -> EnvConfig:
     Returns:
         The composed ``EnvConfig`` instance.
     """
-    _register_schemas()
-
-    if GlobalHydra.instance().is_initialized():
-        GlobalHydra.instance().clear()
-    config_path = _resolve_config_path()
-    with initialize_config_dir(config_dir=str(config_path.parent), version_base=None):
-        cfg = compose(config_name=config_path.stem)
-
-    # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
-    # them with the enriched, validated resolved fleet before caching/returning.
-    env = cast(EnvConfig, OmegaConf.to_object(cfg))
-    # Derive rotor_constant for the global default px4 too (the per-vehicle
-    # resolution does the same for each fleet entry), so the authored config
-    # never duplicates the computed thrust coefficient.
-    env.px4.rotor_constant = _compute_rotor_constants(
-        env.px4.max_thrust_per_rotor_g,
-        env.px4.max_rotor_velocity,
-    )
-    env.vehicles = _resolve_fleet(cfg)
-    return env
+    return load_config(_resolve_config_path())
 
 
-def _resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchConfig:
+def _resolve_px4_sitl_launch_config(
+    vehicle: ResolvedVehicle, airframe_config_dir: Path
+) -> Px4SitlLaunchConfig:
     """Derive the PX4 SITL launch airframe for one resolved vehicle.
 
     The drone USD asset name selects the airframe record in ``configs/airframes``,
@@ -283,7 +322,7 @@ def _resolve_px4_sitl_launch_config(vehicle: ResolvedVehicle) -> Px4SitlLaunchCo
     (naming the asset and prim) rather than silently flying the wrong airframe.
     """
     asset = Path(vehicle.drone.usd_path).name
-    airframe = _airframe_for_drone_asset(vehicle.drone.usd_path)
+    airframe = _airframe_for_drone_asset(vehicle.drone.usd_path, airframe_config_dir)
     if airframe is None:
         raise ValueError(
             f"no PX4 SITL airframe mapping for drone asset {vehicle.drone.usd_path!r} "
@@ -315,14 +354,14 @@ def resolve_drone_bridge_config(usd_path: str) -> Px4BridgeConfig:
     global ``px4`` defaults for an asset with no airframe mapping.
     """
     global_px4 = get_config().px4
-    airframe = _airframe_for_drone_asset(usd_path)
+    airframe = _airframe_for_drone_asset(usd_path, _resolve_config_path().parent / "airframes")
     bridge_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
     px4 = OmegaConf.merge(global_px4, bridge_defaults)
     px4.rotor_constant = _compute_rotor_constants(
         float(px4.max_thrust_per_rotor_g),
         list(px4.max_rotor_velocity),
     )
-    return cast(Px4BridgeConfig, OmegaConf.to_object(px4))
+    return _freeze_config_graph(cast(Px4BridgeConfig, OmegaConf.to_object(px4)))
 
 
 def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
@@ -334,7 +373,12 @@ def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
     ``PX4_SYS_AUTOSTART`` so each container launches the airframe matching its
     drone asset.
     """
-    return [_resolve_px4_sitl_launch_config(v) for v in get_config().vehicles if v.px4.enabled]
+    airframe_config_dir = _resolve_config_path().parent / "airframes"
+    return [
+        _resolve_px4_sitl_launch_config(v, airframe_config_dir)
+        for v in get_config().vehicles
+        if v.px4.enabled
+    ]
 
 
 def reset_config_cache() -> None:

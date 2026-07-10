@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from robotics_experiments.config._commanding import RoutineConfig
+from robotics_experiments.config._immutability import _FreezableConfig
 from robotics_experiments.config._scene import DroneConfig, RosVehicleConfig
 
 __all__ = [
@@ -14,7 +15,7 @@ __all__ = [
 
 
 @dataclass
-class LockstepConfig:
+class LockstepConfig(_FreezableConfig):
     """Tunables for the PX4 lockstep exchange (the ``px4.lockstep`` group).
 
     Maps onto the library
@@ -74,7 +75,7 @@ class LockstepConfig:
 
 
 @dataclass
-class Px4BridgeConfig:
+class Px4BridgeConfig(_FreezableConfig):
     """Configuration for the PX4 SITL bridge.
 
     Attributes:
@@ -185,7 +186,7 @@ class Px4BridgeConfig:
 
 
 @dataclass
-class VehicleConfig:
+class VehicleConfig(_FreezableConfig):
     """One drone instance: its asset/spawn and its PX4 bridge config.
 
     The pure authored config object. ``drone`` and ``px4`` are fully resolved

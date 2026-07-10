@@ -154,25 +154,19 @@ shared fake module contains only quaternion data helpers used by both suites.
 
 Priority: medium
 
-`get_config()` caches a mutable `EnvConfig`, clears process-global Hydra state
-before composition, and returns shallowly immutable resolved vehicles whose
-nested config objects remain mutable. This is convenient in a single-owner
-process but creates avoidable coupling in an extension host where other
-components may also use Hydra.
+Status: completed
 
-Recommended change:
+`load_config(path)` is the explicit core operation: it resolves a supplied
+experiment path, composes it with an isolated Hydra loader, enriches and
+validates the fleet, and never reads the environment or clears `GlobalHydra`.
+`get_config()` remains the process-cached production adapter and delegates its
+environment-selected path to `load_config`.
 
-- Introduce an explicit `load_config(path)` operation that performs composition
-  and resolution without depending on an environment variable at its core
-  boundary.
-- Retain `get_config()` as the process-cached adapter used by production shells.
-- Avoid clearing Hydra state owned by unrelated consumers where Hydra's context
-  APIs permit isolated composition.
-- Return an immutable resolved configuration graph, or clearly constrain
-  mutation to a private construction phase before the object is cached.
-
-This also simplifies tests, which currently reset global caches and environment
-selection repeatedly.
+Configuration dataclasses stay mutable only during Hydra construction and the
+private enrichment phase. Before return, the loader freezes every config node,
+converts nested lists to tuples, and converts authored step mappings to read-only
+mapping proxies. The cached `EnvConfig`, global defaults, resolved vehicles,
+per-vehicle overrides, and nested tunables therefore form one immutable graph.
 
 ### 8. Reconcile documentation policy with repository enforcement
 
@@ -215,7 +209,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
    stages from interactive development stages.
 6. [x] Refactor the large modules incrementally, one subsystem at a time, with no
    public API changes.
-7. [ ] Isolate config composition and make resolved configuration immutable.
+7. [x] Isolate config composition and make resolved configuration immutable.
 8. [ ] Reconcile binary-asset, README, and backlog documentation with the resulting
    workflow.
 

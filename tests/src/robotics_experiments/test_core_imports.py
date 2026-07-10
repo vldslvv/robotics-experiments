@@ -307,6 +307,7 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
         "VehicleConfig",
         "get_config",
         "get_enabled_px4_launch_configs",
+        "load_config",
         "reset_config_cache",
         "resolve_drone_bridge_config",
     ]

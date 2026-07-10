@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import List
 
+from robotics_experiments.config._immutability import _FreezableConfig
+
 __all__ = [
     "PressActionConfig",
     "PressHandoffConfig",
@@ -12,7 +14,7 @@ __all__ = [
 
 
 @dataclass
-class PressActionConfig:
+class PressActionConfig(_FreezableConfig):
     """RL action-level (``kind``) selection plus its controller tunables.
 
     The ``kind`` picks the in-Lab actuation model (see
@@ -62,7 +64,7 @@ class PressActionConfig:
 
 
 @dataclass
-class PressHoverTaskConfig:
+class PressHoverTaskConfig(_FreezableConfig):
     """The hover task definition: reward weights, termination, and reset ranges.
 
     The task half of the ``task definition -> policy`` contract for the hover
@@ -97,7 +99,7 @@ class PressHoverTaskConfig:
 
 
 @dataclass
-class PressHandoffConfig:
+class PressHandoffConfig(_FreezableConfig):
     """Thresholds for the nav -> contact handoff gate (``rl.press.handoff_ready``).
 
     All checks are over the task-relative :class:`PressObservation` (contact
@@ -125,7 +127,7 @@ class PressHandoffConfig:
 
 
 @dataclass
-class RlTrainingConfig:
+class RlTrainingConfig(_FreezableConfig):
     """PPO training hyperparameters + task selection for ``make train-rl``.
 
     Consumed by the ``rl.training`` adapter (rsl_rl today); no hyperparameter
@@ -180,7 +182,7 @@ class RlTrainingConfig:
 
 
 @dataclass
-class PressTaskConfig:
+class PressTaskConfig(_FreezableConfig):
     """Press-task-specific RL config.
 
     Attributes:
@@ -193,7 +195,7 @@ class PressTaskConfig:
 
 
 @dataclass
-class RlConfig:
+class RlConfig(_FreezableConfig):
     """Shared Isaac Lab RL scale + the pluggable action level.
 
     Replaces the retired ``isaac_lab`` group as the single source of truth for

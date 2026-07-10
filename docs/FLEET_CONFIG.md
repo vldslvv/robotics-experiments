@@ -44,9 +44,11 @@ The enrichment step validates the resolved fleet (missing/invalid/duplicate ROS
 namespace or derived frame prefix, duplicate id/endpoint/`prim_name`, bad
 `spawn_xy`, negative id, or colliding `debug_log_path` raise a `ValueError` at
 resolution time).
-`get_config().vehicles` is `list[ResolvedVehicle]`. `EnvConfig.vehicles` is
-annotated `List[Any]` for Hydra compose-time tolerance of partial entries; the
-runtime value is `list[ResolvedVehicle]`.
+`get_config().vehicles` is `tuple[ResolvedVehicle, ...]`. `EnvConfig.vehicles`
+remains annotated `List[Any]` for Hydra compose-time tolerance of partial
+entries; the loader freezes the runtime value and every nested config sequence
+after enrichment. Resolved vehicles and their nested drone, PX4, and routine
+configs are immutable.
 
 ## PX4 SITL launch configs and generated airframes
 

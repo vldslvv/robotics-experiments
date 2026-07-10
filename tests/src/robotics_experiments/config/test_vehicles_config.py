@@ -89,7 +89,7 @@ def test_config_accepts_empty_vehicle_list(tmp_path, monkeypatch):
     monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", str(config_path))
     reset_config()
 
-    assert get_config().vehicles == []
+    assert get_config().vehicles == ()
     reset_config()
 
 

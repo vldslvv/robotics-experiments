@@ -26,6 +26,16 @@ Experiment variants are selected with `HYDRA_CONFIG=<path>`, for example:
 make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
 ```
 
+Library callers use `robotics_experiments.config.load_config(path)` when they
+need an explicit, uncached composition. That operation does not consult
+`ROBOTICS_EXPERIMENT_CONFIG_PATH` or clear process-global Hydra state.
+Production shells use the cached `get_config()` adapter, which resolves the
+environment-selected path once and delegates to `load_config`.
+
+Both entrypoints return the same immutable resolved graph. Dataclass attributes
+cannot be reassigned, resolved sequences are tuples, and routine step mappings
+are read-only; construction-time mutation is confined to the private loader.
+
 The standalone runner's `--scene` is optional and overrides the experiment
 scene. Integration targets that need the experiment's authored scene use the
 `@config` sentinel.

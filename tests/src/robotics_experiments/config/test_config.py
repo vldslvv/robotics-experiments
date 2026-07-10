@@ -1,4 +1,5 @@
 import shutil
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -10,6 +11,31 @@ _ROOT_CONFIG_DIR = REPO_ROOT / "configs"
 _EXPERIMENT_CONFIGS = sorted(
     path for path in _ROOT_CONFIG_DIR.glob("*.yaml") if path.name != "base.yaml"
 )
+
+
+def test_load_config_is_explicit_isolated_and_immutable(monkeypatch):
+    from hydra import initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
+
+    from robotics_experiments.config import load_config
+
+    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/does-not-exist.yaml")
+    config_path = _ROOT_CONFIG_DIR / "takeoff_quad.yaml"
+
+    with initialize_config_dir(config_dir=str(_ROOT_CONFIG_DIR), version_base=None):
+        foreign_hydra = GlobalHydra.instance().hydra
+        config = load_config(config_path)
+        assert GlobalHydra.instance().hydra is foreign_hydra
+
+    assert config.scene == "@isaac/assets/TestScenes/MinimalIntegration.usda"
+    with pytest.raises(FrozenInstanceError):
+        config.scene = "different.usda"
+    with pytest.raises(FrozenInstanceError):
+        config.px4.lockstep.lockstep_timeout_s = 99.0
+    with pytest.raises(TypeError):
+        config.px4.input_scaling[0] = 0.0
+    with pytest.raises(TypeError):
+        config.routine.steps[0]["kind"] = "land"
 
 
 def _group_defaults(group_name, file_stem="default"):
@@ -28,7 +54,7 @@ def _airframe_config(file_stem):
 
 def _expected_rotor_constants(max_thrust_per_rotor_g, max_rotor_velocity):
     max_thrust_n = max_thrust_per_rotor_g / 1000.0 * 9.80665
-    return [max_thrust_n / (float(v) * float(v)) for v in max_rotor_velocity]
+    return tuple(max_thrust_n / (float(v) * float(v)) for v in max_rotor_velocity)
 
 
 def _write_experiment(
@@ -135,8 +161,8 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.px4.gps_enabled is True
     assert config.px4.gps_send_rate_hz == 250.0
     assert config.px4.sensor_noise_enabled is True
-    assert config.px4.input_scaling == [1000.0, 1000.0, 1000.0, 1000.0]
-    assert config.px4.zero_position_armed == [100.0, 100.0, 100.0, 100.0]
+    assert config.px4.input_scaling == (1000.0, 1000.0, 1000.0, 1000.0)
+    assert config.px4.zero_position_armed == (100.0, 100.0, 100.0, 100.0)
     assert config.px4.max_thrust_per_rotor_g == 1054.0
     # rotor_constant is not authored: it is derived from max_thrust_per_rotor_g +
     # max_rotor_velocity by the config package (here the global default fallback).
@@ -144,7 +170,7 @@ def test_default_config_loads_from_root_experiment_config():
         config.px4.max_thrust_per_rotor_g, config.px4.max_rotor_velocity
     )
     assert not hasattr(config.px4, "rot_dir")
-    assert config.px4.linear_drag == [0.50, 0.30, 0.0]
+    assert config.px4.linear_drag == (0.50, 0.30, 0.0)
     assert config.px4.debug_log_path == (
         "/isaac-sim/proj/px4/logs/{date}/{time}_v{vehicle}_bridge.log"
     )
@@ -158,7 +184,7 @@ def test_default_config_loads_from_root_experiment_config():
     assert config.rl.training.policy_name == expected_rl.training.policy_name == "hover"
     assert config.rl.action.kind == expected_rl.action.kind
     assert config.rl.action.action_dim == expected_rl.action.action_dim
-    assert config.rl.action.controller_kp_vel == list(expected_rl.action.controller_kp_vel)
+    assert config.rl.action.controller_kp_vel == tuple(expected_rl.action.controller_kp_vel)
     # The hover task definition is config (task definition = one YAML block).
     assert config.rl.press.hover_task.reward_alive == expected_press.hover_task.reward_alive
     assert config.rl.press.hover_task.min_altitude_m == expected_press.hover_task.min_altitude_m
@@ -270,7 +296,7 @@ def test_forward_quad_config_composes(monkeypatch):
     reset_config()
 
     config = get_config()
-    assert config.routine.steps == []
+    assert config.routine.steps == ()
     assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
         (0, (0.0, -2.0), "Drone0"),
     ]
@@ -293,7 +319,7 @@ def test_circle_land_quad_quad_config_composes(monkeypatch):
     reset_config()
 
     config = get_config()
-    assert config.routine.steps == []
+    assert config.routine.steps == ()
     assert [(vehicle.id, vehicle.spawn_xy, vehicle.prim_name) for vehicle in config.vehicles] == [
         (0, (0.0, -2.0), "Drone0"),
         (1, (0.0, 2.0), "Drone1"),
@@ -356,19 +382,19 @@ def test_hexacopter_airframe_config_supplies_px4_bridge_and_sitl_defaults(monkey
     vehicle = config.vehicles[1]
 
     assert vehicle.drone.usd_path.endswith(f"/{airframe.output_filename}")
-    assert vehicle.px4.input_offset == list(airframe.px4.bridge.input_offset)
-    assert vehicle.px4.input_scaling == list(airframe.px4.bridge.input_scaling)
-    assert vehicle.px4.zero_position_armed == list(airframe.px4.bridge.zero_position_armed)
+    assert vehicle.px4.input_offset == tuple(airframe.px4.bridge.input_offset)
+    assert vehicle.px4.input_scaling == tuple(airframe.px4.bridge.input_scaling)
+    assert vehicle.px4.zero_position_armed == tuple(airframe.px4.bridge.zero_position_armed)
     assert vehicle.px4.max_thrust_per_rotor_g == airframe.px4.bridge.max_thrust_per_rotor_g
     # rotor_constant is derived (not authored) from the airframe's cited thrust.
     assert vehicle.px4.rotor_constant == _expected_rotor_constants(
         airframe.px4.bridge.max_thrust_per_rotor_g, airframe.px4.bridge.max_rotor_velocity
     )
-    assert vehicle.px4.rolling_moment_coefficient == list(
+    assert vehicle.px4.rolling_moment_coefficient == tuple(
         airframe.px4.bridge.rolling_moment_coefficient
     )
-    assert vehicle.px4.min_rotor_velocity == list(airframe.px4.bridge.min_rotor_velocity)
-    assert vehicle.px4.max_rotor_velocity == list(airframe.px4.bridge.max_rotor_velocity)
+    assert vehicle.px4.min_rotor_velocity == tuple(airframe.px4.bridge.min_rotor_velocity)
+    assert vehicle.px4.max_rotor_velocity == tuple(airframe.px4.bridge.max_rotor_velocity)
     assert [
         (c.instance_index, c.sim_model, c.sys_autostart) for c in get_enabled_px4_launch_configs()
     ] == [
@@ -415,7 +441,7 @@ def test_config_merges_per_vehicle_routine_override(tmp_path, monkeypatch):
 
     config = get_config()
     fleet = config.vehicles
-    assert fleet[0].routine.steps == []  # inherited empty global -> manual
+    assert fleet[0].routine.steps == ()  # inherited empty global -> manual
     assert [s["kind"] for s in fleet[1].routine.steps] == ["arm", "takeoff"]
     # The per-vehicle override changed only the named keys; the rest inherits.
     assert fleet[1].routine.max_tilt_deg == 20.0

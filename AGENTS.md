@@ -91,6 +91,9 @@ the current contents and the intended home for that kind of code.
   root. Code outside `src/robotics_experiments/config` must import config
   dataclasses and loader functions from `robotics_experiments.config`, not from
   config submodules.
+- `load_config(path)` is the explicit, uncached, environment-independent config
+  boundary; `get_config()` is the cached production adapter. Both return a
+  fully immutable resolved graph after private construction and enrichment.
 - Keep public API minimal. Public exports are for production consumers outside
   the module or package boundary; tests alone do not justify public API. If a
   top-level symbol is only used by tests or internal implementation, make it

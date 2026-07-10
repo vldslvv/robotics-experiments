@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from robotics_experiments.config._immutability import _FreezableConfig
+
 __all__ = [
     "BoundingBox",
     "DroneConfig",
@@ -12,7 +14,7 @@ __all__ = [
 
 
 @dataclass
-class DroneConfig:
+class DroneConfig(_FreezableConfig):
     """Configuration for the drone spawner extension.
 
     Attributes:
@@ -45,7 +47,7 @@ class DroneConfig:
 
 
 @dataclass
-class BoundingBox:
+class BoundingBox(_FreezableConfig):
     """Axis-aligned world-space region, authored as corner tuples.
 
     Used instead of ``pxr.Gf.Range3d`` so the value is serializable by
@@ -61,7 +63,7 @@ class BoundingBox:
 
 
 @dataclass
-class RosQosConfig:
+class RosQosConfig(_FreezableConfig):
     """ROS 2 QoS settings for a publisher or subscription.
 
     Attributes:
@@ -78,7 +80,7 @@ class RosQosConfig:
 
 
 @dataclass
-class RosVehicleConfig:
+class RosVehicleConfig(_FreezableConfig):
     """Per-vehicle ROS graph identity.
 
     Attributes:
@@ -91,7 +93,7 @@ class RosVehicleConfig:
 
 
 @dataclass
-class LightSwitchStatePublisherConfig:
+class LightSwitchStatePublisherConfig(_FreezableConfig):
     """ROS publisher configuration for light-switch state events.
 
     Attributes:
@@ -104,7 +106,7 @@ class LightSwitchStatePublisherConfig:
 
 
 @dataclass
-class LightSwitchConfig:
+class LightSwitchConfig(_FreezableConfig):
     """Configuration for the light-switch spawner extension.
 
     Attributes:

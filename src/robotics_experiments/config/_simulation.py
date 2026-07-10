@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from typing import Tuple
 
+from robotics_experiments.config._immutability import _FreezableConfig
+
 __all__ = ["SimSettings"]
 
 
 @dataclass
-class SimSettings:
+class SimSettings(_FreezableConfig):
     """Simulation settings applied by the fleet orchestrator's ``apply_settings``.
 
     Attributes:

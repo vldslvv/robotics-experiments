@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from typing import Any, List
 
+from robotics_experiments.config._immutability import _FreezableConfig
+
 __all__ = ["DriverConfig", "RoutineConfig"]
 
 
 @dataclass
-class RoutineConfig:
+class RoutineConfig(_FreezableConfig):
     """High-level flight routine flown in every workflow over the GCS link.
 
     The single source of truth for whether and what is flown, and how a good
@@ -38,9 +40,10 @@ class RoutineConfig:
             ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty means manual
             (no routine driver). Typed ``List[Any]`` so Hydra's
             structured-config validation accepts the partial per-step mappings
-            during ``compose()`` (the same escape hatch as ``vehicles``); the
-            driver maps them to a pure routine object through private
-            command-layer implementation.
+            during ``compose()`` (the same escape hatch as ``vehicles``). The
+            resolved graph exposes a tuple of read-only mappings; the driver
+            maps them to a pure routine object through private command-layer
+            implementation.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
@@ -104,7 +107,7 @@ class RoutineConfig:
 
 
 @dataclass
-class DriverConfig:
+class DriverConfig(_FreezableConfig):
     """Routine-execution driver heuristics, separate from the routine itself.
 
     The ``routine`` group says *what* is flown and how a good flight is
