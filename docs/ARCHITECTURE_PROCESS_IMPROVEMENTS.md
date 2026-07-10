@@ -172,29 +172,20 @@ per-vehicle overrides, and nested tunables therefore form one immutable graph.
 
 Priority: medium
 
-The repository instructions prohibit committing binary files, but the tree
-already contains binary USD crates. The current pre-commit configuration checks
-file size but does not enforce a binary-file policy.
+Status: completed
 
-Recommended change:
+The three existing LightSwitchWarehouse binary USD crates are explicitly
+grandfathered in `.binary-asset-allowlist` and documented in
+`docs/BINARY_ASSETS.md`. A pre-commit hook rejects binary content at every other
+path, while generated drone assets remain text USDA and runtime artifacts stay
+untracked. `AGENTS.md` now states the same narrow exception instead of an
+absolute rule contradicted by the tree.
 
-- Decide whether the existing USD crates are intentional grandfathered assets.
-- If they are, document a narrow allowlist and add a check that rejects new
-  binary files outside it.
-- If binary assets are not allowed at all, replace or remove the existing
-  exceptions so the repository matches its stated policy.
-
-The root README should also include:
-
-- A compact architecture map from config through domains, orchestrator, and
-  host shells.
-- A test matrix distinguishing host checks, Isaac-only integration, PX4
-  integration, and RL gates.
-- The canonical contributor command once `make check` becomes complete.
-
-Finally, periodically groom `TODO.txt`. Some entries describe work already
-represented in current tests or architecture, while other items are durable
-backlog candidates that would be easier to track in `docs/backlog/` or issues.
+The root README now contains the config-to-domain-to-orchestrator architecture
+map, the canonical `make check` contributor gate, a host/Isaac/PX4/RL test
+matrix, and the fresh-checkout sequence. Completed observations were removed
+with `TODO.txt`; the remaining durable drone-platform ideas are curated in
+`docs/backlog/drone_platform_followups.md`.
 
 ## Suggested implementation sequence
 
@@ -210,7 +201,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
 6. [x] Refactor the large modules incrementally, one subsystem at a time, with no
    public API changes.
 7. [x] Isolate config composition and make resolved configuration immutable.
-8. [ ] Reconcile binary-asset, README, and backlog documentation with the resulting
+8. [x] Reconcile binary-asset, README, and backlog documentation with the resulting
    workflow.
 
 ## Review validation

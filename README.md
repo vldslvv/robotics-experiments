@@ -21,6 +21,28 @@ core package used by experiments.
   `px4-sitl` launch path so each run starts from fresh PX4 state.
 - `docs`: design and usage docs.
 
+## Architecture
+
+```text
+Hydra experiment config
+        |
+        v
+config -> domain contracts (drone, environment, simulation, commanding, PX4 bridge)
+        |                                      |
+        +--------------> FleetOrchestrator <---+
+                               |
+                 +-------------+-------------+
+                 v                           v
+        live Isaac extension        standalone / integration shell
+                 |                           |
+                 +---- Isaac + ROS 2 + PX4 --+
+```
+
+`robotics_experiments.config` is the configuration facade. Domain packages are
+import-clean without Isaac where practical, `FleetOrchestrator` owns runtime
+composition, and the live extension and standalone runner remain thin host
+shells. Detailed contracts are routed from [AGENTS.md](AGENTS.md).
+
 ## Running
 
 Build all Docker images:
@@ -67,17 +89,36 @@ example:
 make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
 ```
 
-Run host Python tests:
+Run the canonical CPU-only contributor gate:
 
 ```bash
-make test
+uv sync --extra dev
+make check
 ```
 
-Run container-backed integration tests:
+`make check` verifies the lock, formatting, lint, types, dead code, and the full
+host pytest suite. Run container-backed integration tests separately:
 
 ```bash
-make test-integration
+make test-integration-all
 ```
+
+### Test matrix
+
+| Gate | Coverage | Requirements |
+|---|---|---|
+| `make check` | Complete host suite and static quality checks | CPU, `uv sync --extra dev` |
+| `make test-integration-isaac`, `make test-integration-drone-articulation` | Isaac settings, stage, spawn, and articulation I/O | Docker, NVIDIA runtime |
+| `make test-integration-press-hover-goto` | Isaac Lab hover/goto and handoff gate | Isaac Lab image, NVIDIA runtime |
+| `make test-integration-px4-takeoff`, `make test-integration-px4-navigation`, instability and multi-drone variants | PX4 lockstep, routines, flight envelopes, and fleet isolation | Isaac/PX4 images, NVIDIA runtime |
+| `make test-integration-press-policy` | Trained policy artifact deployment | Training artifact plus Isaac Lab image |
+| `make test-integration-all` | Seven stable Isaac, RL, and PX4 integration targets | Built runtime images, NVIDIA runtime |
+
+For a fresh checkout, install the host environment with `uv sync --extra dev`,
+run `make check`, build the pinned execution images with `make build`, then run
+`make test-integration-all`. Runtime details and narrower targets are documented
+in [Runtime operations](docs/RUNTIME_OPERATIONS.md) and
+[Integration test architecture](docs/INTEGRATION_TEST_ARCHITECTURE.md).
 
 Destroy containers and images:
 
@@ -198,5 +239,5 @@ For simple physical scenes:
 - Leave static objects such as walls or heavy fixed objects non-kinematic.
 - Add colliders and a ground plane.
 
-Do not commit USD assets or other generated binary assets unless explicitly
-requested.
+New binary assets are rejected. Three pre-existing LightSwitchWarehouse USD
+crates are narrowly grandfathered; see [Binary asset policy](docs/BINARY_ASSETS.md).

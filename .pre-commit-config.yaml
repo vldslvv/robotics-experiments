@@ -39,6 +39,12 @@ repos:
   # `make check`, which also runs in the CPU-only pull-request workflow.
   - repo: local
     hooks:
+      - id: binary-asset-policy
+        name: reject unlisted binary assets
+        entry: uv run python make/scripts/check_binary_files.py
+        language: system
+        types: [file]
+
       - id: pytest
         name: pytest (uv run pytest)
         entry: uv run pytest

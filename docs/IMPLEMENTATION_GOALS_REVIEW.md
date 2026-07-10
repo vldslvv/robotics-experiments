@@ -234,9 +234,9 @@ Choose and document one honest state:
 - Reconcile the binary-asset rule with the tracked binary USD crates by either
   documenting a narrow asset exception or replacing the crates with an allowed
   distribution workflow.
-- Groom `TODO.txt`. Several items are already complete, including config-driven
-  airframes, normal-flow USD generation, public-behavior test conventions,
-  regular routine-based integration configs, and quad/hexa navigation coverage.
+- The former `TODO.txt` has been groomed: completed observations were removed
+  and durable drone-platform ideas now live in
+  `docs/backlog/drone_platform_followups.md`.
 - Verify a fresh-clone bootstrap and document the shortest sequence for the host
   environment, image build, asset generation, host tests, and one integration
   test.

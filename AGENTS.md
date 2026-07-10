@@ -235,7 +235,10 @@ the current contents and the intended home for that kind of code.
   `make test-integration-px4-multi-drone-takeoff`.
 
 ## Hard rules
-- Do NOT commit binary files.
+- Do NOT commit new binary files. The three pre-existing LightSwitchWarehouse
+  USD crates listed in `.binary-asset-allowlist` are grandfathered source
+  assets; do not modify/regenerate them or expand the allowlist unless a task
+  explicitly requests an asset-policy change. See `docs/BINARY_ASSETS.md`.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in

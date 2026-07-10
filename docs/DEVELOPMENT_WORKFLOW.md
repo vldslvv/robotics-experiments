@@ -59,8 +59,9 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   such as Isaac runtime helpers, PX4 scripts, and Make launch wiring live under
   matching `tests/isaac/...`, `tests/px4/...`, and `tests/make/...` paths.
 - Shared unit-test fakes/helpers live in `tests/support/`. Define each fake
-  once there rather than inline per test file, and import helpers by package
-  path such as `from tests.support.fakes import ...`. Use
+  once there rather than inline per test file, keep subsystem fakes in their
+  named modules (`commanding_fakes`, `bridge_fakes`), and reserve `fakes` for
+  genuinely cross-cutting data helpers. Use
   `tests.support.paths.REPO_ROOT` for repository-root path lookups instead of
   deriving parent depth from a test file location.
 - Tests assert on public behavior, not internals: prefer public properties,
@@ -89,8 +90,10 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   `uv run pre-commit run --all-files`. Mirror hooks may modify staged Python
   files, while `make check` never modifies the working tree.
 - The hook list and the per-tool tunables (`.hadolint.yaml`, `.codespellrc`,
-  `.yamllint.yaml`, `.taplo.toml`) live in `.pre-commit-config.yaml` and those
-  dotfiles at the repo root.
+  `.yamllint.yaml`, `.taplo.toml`, `.binary-asset-allowlist`) live in
+  `.pre-commit-config.yaml` and those dotfiles at the repo root. The binary
+  asset hook rejects new binary content outside the documented grandfathered
+  USD crates in `docs/BINARY_ASSETS.md`.
 - For large-scope changes, especially public API, module-name, or runtime
   behavior changes, run `uv run pytest`, `make test-integration-all`, and
   `uv run pre-commit run --all-files` before completion.
