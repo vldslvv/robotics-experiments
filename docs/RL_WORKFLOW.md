@@ -15,9 +15,11 @@ The Isaac Lab image (`make build-isaac-lab`, `ISAAC_LAB_IMAGE` =
 `FROM isaac-sim`: Isaac Lab shares the same kit python (`/isaac-sim/python.sh`),
 USD, and PhysX and cannot run standalone, so it is a superset image, not a
 separate container. It is built from `isaac-sim/IsaacLab` pinned by the
-`ISAACLAB_REF` build ARG / Make variable (default `v2.3.2`, the Isaac Lab
-release built on Isaac Sim 5.1) via `./isaaclab.sh --install` (all RL
-frameworks). Only the RL workflow needs it -- the
+`ISAACLAB_REF` build ARG / Make variable (the immutable `v2.3.2` commit for
+Isaac Sim 5.1). The image installs only the Isaac Lab base package, its rsl_rl
+adapter, and the pinned closure in
+`isaac/docker/lab-runtime-requirements.txt`; unused RL frameworks and device
+retargeting stacks are excluded. Only the RL workflow needs it -- the
 `test-integration-press-hover-goto` and `test-integration-press-policy` gates
 and `make train-rl` run on `ISAAC_LAB_IMAGE`; every other integration target
 and the persistent containers stay on the leaner `isaac-sim` image
@@ -93,8 +95,8 @@ unchanged apart from injecting the artifact-loader factory into
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
   image) writes the artifact under `.build/training/<policy-name>/<run-id>/`
   and updates the named `.build/training/<policy-name>/latest` symlink;
-  `TRAIN_ARGS='--max-iterations 5'` is the smoke run. rsl_rl comes from the Lab
-  image (`isaaclab.sh --install`); the host `training` extra (`rsl-rl-lib`)
+  `TRAIN_ARGS='--max-iterations 5'` is the smoke run. rsl_rl comes from the
+  pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
   exists for tooling only.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
   version/dim, action kind/dim, action scales). `build_policy_step_fn` raises

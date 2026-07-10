@@ -58,7 +58,6 @@ do
     require_env "${name}"
 done
 
-: "${ISAAC_TEST_PIP_PACKAGES:=hydra-core omegaconf}"
 # STRICT=1 runs the scenario as an asserting integration test (--strict); unset
 # or empty runs it forgiving (a flight-envelope breach is logged, not fatal).
 : "${STRICT:=}"
@@ -78,18 +77,6 @@ fi
 SCRIPT_START_MS="$(now_ms)"
 cd /isaac-sim
 rm -f "${ISAAC_TEST_LOG}"
-
-stage_start_ms="$(now_ms)"
-# shellcheck disable=SC2086
-if PIP_ROOT_USER_ACTION=ignore "${ISAAC_PYTHON}" -m pip install \
-    --quiet --disable-pip-version-check ${ISAAC_TEST_PIP_PACKAGES} \
-    >>"${ISAAC_TEST_LOG}" 2>&1; then
-    integration_timing "pip_install" "${stage_start_ms}"
-else
-    integration_timing "pip_install" "${stage_start_ms}" "fail"
-    grep -E "${ISAAC_TEST_ERROR_FILTER}" "${ISAAC_TEST_LOG}" || true
-    exit 1
-fi
 
 stage_start_ms="$(now_ms)"
 if "${ISAAC_PYTHON}" "${ISAAC_TEST_SCRIPT}" --scene "${SCENE}" "${strict_args[@]}" "${extra_args[@]}" \

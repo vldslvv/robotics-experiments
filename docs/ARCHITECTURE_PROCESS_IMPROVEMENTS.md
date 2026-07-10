@@ -96,30 +96,21 @@ checkout resources, matching the loader and container runtime contracts.
 
 Priority: high
 
-The Isaac and ROS image chains inherit interactive editor and AI-tool layers.
-Integration tests therefore depend on tools that are unrelated to runtime
-execution. Several image inputs are also obtained through mutable branches,
-unpinned installers, or `curl | bash`. The Neovim version is derived from the
-host when Make is evaluated, further coupling image reproducibility to the
-developer machine.
+Status: completed
 
-Integration containers also run an unpinned pip install at test time. This adds
-network dependence, makes repeated runs slower, and permits two runs of the same
-image to execute with different Python dependency versions.
+The default Isaac and ROS targets now build minimal runtime/integration stages
+from a small shared shell base. Neovim, Node.js, Codex, and Claude Code are
+isolated in opt-in `isaac-sim-dev` and `ros-dev` stages with separate Make
+targets; runtime images no longer inherit them. Development tool versions,
+source checkouts, Isaac Lab/PX4 refs, and the Isaac/ROS/Ubuntu base manifests are
+pinned. Image construction no longer reads the host's Neovim version and no
+installer is piped directly into a shell. The ROS build excludes the unused
+upstream humanoid example's mutable PyTorch/CUDA rosdep closure.
 
-Recommended change:
-
-- Build minimal runtime/integration stages containing only execution
-  dependencies.
-- Layer optional interactive development stages on top for Neovim, shells, and
-  assistant tools.
-- Pin source checkouts to immutable commits or release tags and pin important
-  base images by digest where operationally practical.
-- Remove the dependency on the host's Neovim version from the default image
-  build.
-- Bake integration Python dependencies into the appropriate image, or install
-  them from lock-derived constraints rather than unconstrained package names at
-  test time.
+Hydra, OmegaConf, pymavlink, and their exact transitive versions are baked into
+the Isaac image from `isaac/docker/runtime-requirements.txt`. Cache warm-up and
+integration scenario scripts perform no package installation, eliminating
+test-time network access and dependency drift.
 
 ### 5. Mechanically enforce package dependency direction
 
@@ -231,7 +222,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
    test.
 4. [x] Reorganize Python dependency groups and decide the installable versus
    checkout-only packaging contract.
-5. [ ] Make integration dependency installation hermetic and split minimal container
+5. [x] Make integration dependency installation hermetic and split minimal container
    stages from interactive development stages.
 6. [ ] Refactor the large modules incrementally, one subsystem at a time, with no
    public API changes.

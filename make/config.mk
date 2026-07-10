@@ -12,19 +12,21 @@ export PYTHONPATH
 # Isaac custom image
 ISAAC_BASE_IMAGE ?= nvcr.io/nvidia/isaac-sim
 ISAAC_BASE_TAG   ?= 5.1.0
+ISAAC_BASE_DIGEST ?= sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623d6bee484fa54
 
 ISAAC_IMAGE_NAME     ?= vv-isaac-sim-custom
 ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
+ISAAC_DEV_IMAGE      = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-dev
 ISAAC_CACHE_IMAGE    = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
 
 # Isaac Lab image (Dockerfile `isaac-lab` stage, FROM isaac-sim). Only the Phase F
 # RL workflow uses it (the test-integration-press-hover-goto gate; future F2/F3
-# training). ISAACLAB_REF pins the Isaac Lab release: v2.3.2 is built on Isaac
-# Sim 5.1. Keep it in sync with the Dockerfile ARG default.
-ISAACLAB_REF         ?= v2.3.2
+# training). ISAACLAB_REF is the immutable v2.3.2 commit for Isaac Sim 5.1.
+# Keep it in sync with the Dockerfile ARG default.
+ISAACLAB_REF         ?= 37ddf626871758333d6ed89cf64ad702aef127d0
 ISAAC_LAB_IMAGE_NAME ?= vv-isaac-lab-custom
 ISAAC_LAB_IMAGE      = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_LAB_CACHE_IMAGE = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
@@ -100,11 +102,15 @@ ISAAC_RUNTIME_DIRS = \
 ROS_DISTRO         ?= jazzy
 ROS_BASE_IMAGE     ?= ros
 ROS_BASE_TAG       ?= $(ROS_DISTRO)
+ROS_BASE_DIGEST    ?= sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f
 ROS_IMAGE_NAME     ?= vv-ros-$(ROS_DISTRO)-custom
 ROS_IMAGE_TAG      ?= $(ROS_DISTRO)
 ROS_IMAGE          = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
+ROS_DEV_IMAGE      = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)-dev
 ROS_CACHE_IMAGE    = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)-buildcache
 ROS_CONTAINER_NAME ?= vv-ros-$(ROS_DISTRO)-custom
+TOPIC_BASED_ROS2_CONTROL_REF ?= 6bd8d55e1c4ad3188770fe5c8b93b942bcede4a2
+ISAAC_ROS_WORKSPACES_REF ?= dd3eeede7912755996a18f4884285d9f50843f79
 
 # These paths have to be relative to be inside docker build context.
 ROS_WS_DIR         = ros/ros2_ws
@@ -120,6 +126,7 @@ FASTRTPS_DEFAULT_PROFILES_FILE ?= /etc/ros/fastdds.xml
 
 # PX4 SITL image / container (stands in for the flight controller)
 PX4_TAG            ?= v1.14.3
+PX4_REF            ?= 1dacb4cdef2d7145754fc788fa8dc482eed74b40
 PX4_IMAGE_NAME     ?= vv-px4-sitl
 PX4_IMAGE_TAG      ?= $(PX4_TAG)
 PX4_IMAGE          = $(PX4_IMAGE_NAME):$(PX4_IMAGE_TAG)
@@ -138,6 +145,3 @@ PX4_EEPROM         = $(PX4_HOME)/eeprom
 
 # Paths inside the container (under PX4 SITL rootfs).
 PX4_ROOTFS         = /opt/PX4-Autopilot/build/px4_sitl_default/rootfs
-
-# Make neovim version same a host's.
-NVIM_VERSION := $(shell nvim --version | awk 'NR==1 {print $$2}')

@@ -5,115 +5,49 @@
 # isaac/ros chains override these via --build-arg.
 ARG DOCKER_REPO=ubuntu
 ARG DOCKER_TAG=22.04
-FROM ${DOCKER_REPO}:${DOCKER_TAG} AS base
+ARG DOCKER_DIGEST=sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
+FROM ${DOCKER_REPO}:${DOCKER_TAG}@${DOCKER_DIGEST} AS base
 
 # Run as root (need this due to NVML/Vulkan permissions)
 USER 0
 ENV HOME=/root
 
-# Versions are not pinned because this logic can run on both Ubuntu 22 and 24
-# TODO: consider separate sets of versions for each version (ROS2 jazzy or humble)
-# TODO: upgrade packages
 RUN apt-get update && \
   apt-get install --no-install-recommends -y \
-  tmux \
-  ranger \
-  htop \
-  vim \
-  ca-certificates \
-  git \
-  ripgrep \
-  file \
-  less \
-  tree \
-  fd-find \
-  python3-pip \
-  python3-virtualenv
+    ca-certificates \
+    curl \
+    git \
+    less \
+    tmux \
+    zsh \
+ && rm -rf /var/lib/apt/lists/*
 
-
-FROM base AS zsh
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    zsh git curl ca-certificates \
-    zsh-syntax-highlighting
-
-# Cache location
 ENV ZSH_CACHE_DIR=/cache/zsh
-
-# Create cache dir
 RUN mkdir -p /cache/zsh
-
-# Installs into $HOME/.oh-my-zsh and creates $HOME/.zshrc (we'll overwrite)
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-
-# Enable autosuggestions
-RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
-    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
-
-# Enable VI mode
-RUN git clone https://github.com/jeffreytse/zsh-vi-mode \
-    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-vi-mode"
-
-# --- write a deterministic .zshrc ---
-# Enables completion, autosuggestions, syntax highlighting, and uses persistent cache paths.
 RUN cat > /root/.zshrc <<'EOF'
-export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME="robbyrussell"
-
-# Where zsh writes caches (compdump, etc.)
 export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-$HOME/.cache/zsh}"
 mkdir -p "$ZSH_CACHE_DIR"
-
-# Keep history in the mounted cache dir
 export HISTFILE="$ZSH_CACHE_DIR/zsh_history"
 export HISTSIZE=50000
 export SAVEHIST=50000
 setopt HIST_IGNORE_ALL_DUPS
 setopt HIST_FIND_NO_DUPS
 setopt SHARE_HISTORY
-
-plugins=(
-  git
-  zsh-autosuggestions
-  zsh-vi-mode
-)
-
-# Ensure completion cache dir is secure
-export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-/cache/zsh}"
-mkdir -p "$ZSH_CACHE_DIR"
-
-# Only attempt chown if we can (may fail on some bind mounts)
-if command -v chown >/dev/null 2>&1; then
-  chown -R "$(id -u)":"$(id -g)" "$ZSH_CACHE_DIR" 2>/dev/null || true
-fi
-
-chmod -R go-w "$ZSH_CACHE_DIR" 2>/dev/null || true
-
-source "$ZSH/oh-my-zsh.sh"
-
-# --- completions ---
 autoload -Uz compinit
-# -d forces compdump location (persisted)
 compinit -d "$ZSH_CACHE_DIR/zcompdump"
-
-# --- extras installed via apt ---
-source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-
-# Make completion faster / reduce disk churn
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$ZSH_CACHE_DIR"
-
-# Useful defaults
 setopt AUTO_CD
 setopt INTERACTIVE_COMMENTS
 EOF
 
 ENV SHELL=/usr/bin/zsh
-RUN chmod 755 /usr/local/share/zsh
+COPY docker/tmux.conf /root/.tmux.conf
 
 
-# If neovim is not needed, this step can be skipped
-FROM zsh AS nvim
+# Optional interactive tools. Runtime and integration images never inherit this
+# stage; the explicit *-dev targets copy its pinned /usr/local payload.
+FROM base AS development-tools
 SHELL ["/bin/bash", "-o", "pipefail", "-lc"]
 
 RUN apt-get update && \
@@ -125,48 +59,33 @@ RUN apt-get update && \
   curl \
   git \
   build-essential \
-  ca-certificates && \
-  update-ca-certificates
+  xz-utils && \
+  rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-ARG NVIM_TAG=stable
-RUN git clone --depth 1 --branch ${NVIM_TAG} https://github.com/neovim/neovim.git && \
+ARG NVIM_REF=cec0ecabd8f47ff81dcb52e8fc9003e365563a84
+RUN git clone https://github.com/neovim/neovim.git && \
     cd neovim && \
-    echo "Building Neovim tag: ${NVIM_TAG}" && \
+    git checkout "${NVIM_REF}" && \
     make CMAKE_BUILD_TYPE=RelWithDebInfo && \
     make install && \
-    cd ..&& \
-    rm -rf neovim && \
     rm -rf /opt/neovim
 
-# Install nvm and Node.js v25 before cloning Neovim
-# Reference: https://github.com/nvm-sh/nvm
-# Note: We use bash SHELL; ensure nvm is sourced in the same RUN where needed
-RUN export NVM_DIR="${HOME}/.nvm" && \
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-  source "$NVM_DIR/nvm.sh" && \
-  nvm install 25 && \
-  nvm alias default 25
+ARG NODE_VERSION=22.17.0
+ARG NODE_SHA256=325c0f1261e0c61bcae369a1274028e9cfb7ab7949c05512c5b1e630f7e80e12
+RUN curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" && \
+    echo "${NODE_SHA256}  node-v${NODE_VERSION}-linux-x64.tar.xz" | sha256sum -c - && \
+    tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" --strip-components=1 -C /usr/local && \
+    rm "node-v${NODE_VERSION}-linux-x64.tar.xz"
 
-# For escape delay, see if there are any issues
-# https://superuser.com/questions/942677/consequences-of-escape-time-0-tmux-setting
-COPY docker/tmux.conf /root/.tmux.conf
-RUN echo "alias vim='nvim'" >> "${HOME}/.bashrc"
-
-
-FROM nvim AS ai-tools
-SHELL ["/bin/bash", "-o", "pipefail", "-lc"]
-
-# hadolint ignore=SC2016
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-
-RUN export NVM_DIR="${HOME}/.nvm" && \
-    source "$NVM_DIR/nvm.sh" && \
-    npm install -g @openai/codex
+ARG CODEX_VERSION=0.142.5
+ARG CLAUDE_CODE_VERSION=2.1.205
+RUN npm install -g \
+    "@openai/codex@${CODEX_VERSION}" \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 
-FROM ai-tools AS isaac-sim
+FROM base AS isaac-sim
 
 # Fix for wrong characters being displayed in Neovim, and possible other issues
 RUN apt-get update && apt-get install -y --no-install-recommends locales \
@@ -179,7 +98,7 @@ ENV LC_ALL=en_US.UTF-8
 
 WORKDIR /isaac-sim
 
-# Install hydra/omegaconf and their full runtime closure into the kit python's
+# Install the pinned config and MAVLink runtime closure into the kit python's
 # OWN site-packages. --ignore-installed is load-bearing: Isaac bundles several of
 # these deps (PyYAML, packaging, antlr4) only on the kit-app augmented sys.path
 # (omni.pip.compute pip_prebundle), so a plain install sees them already
@@ -188,29 +107,30 @@ WORKDIR /isaac-sim
 # import them. That failure silently empties SCENE_PATH and launches Isaac with
 # no stage. Forcing the whole closure in keeps the standalone interpreter
 # self-sufficient.
+COPY isaac/docker/runtime-requirements.txt /tmp/isaac-runtime-requirements.txt
 RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \
     --no-cache-dir \
     --disable-pip-version-check \
     --ignore-installed \
-    "hydra-core>=1.3" \
-    "omegaconf>=2.3"
+    -r /tmp/isaac-runtime-requirements.txt && \
+    rm /tmp/isaac-runtime-requirements.txt && \
+    ./python.sh -c "import hydra, omegaconf, pymavlink"
 
-# The problem being solved:
-# https://forums.developer.nvidia.com/t/python-autocomplete-not-working-in-isaacsim-vscode-extension/329010
-# Uses custom environment script to be able to use LSP properly
-RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> "${HOME}/.bashrc"
-RUN echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" >> "${HOME}/.zshrc"
-
-# This script will populate symlinks for editor's LSP to work
-ARG SCRIPTS_DIR
-COPY ${SCRIPTS_DIR}/make_symlinks.sh make_symlinks.sh
-RUN chmod +x make_symlinks.sh
-
-# If zsh setup is skipped, just use /bin/bash here
-ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
+ENTRYPOINT ["/usr/bin/zsh", "-lc", "exec tmux \"$@\"", "tmux"]
 CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
 
-FROM ai-tools AS ros-base
+FROM isaac-sim AS isaac-sim-dev
+COPY --from=development-tools /usr/local/ /usr/local/
+ARG SCRIPTS_DIR
+COPY ${SCRIPTS_DIR}/make_symlinks.sh make_symlinks.sh
+RUN chmod +x make_symlinks.sh && \
+    echo "alias vim='nvim'" >> "${HOME}/.zshrc" && \
+    echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" \
+      >> "${HOME}/.zshrc"
+ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
+
+
+FROM base AS ros-base
 
 ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
@@ -226,6 +146,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
   python3-colcon-common-extensions
 
 WORKDIR /topic_based_ros2_control_ws
+ARG TOPIC_BASED_ROS2_CONTROL_REF=6bd8d55e1c4ad3188770fe5c8b93b942bcede4a2
 # We have to install topic_based_ros2_control from source, for jazzy it's mandatory as there's no
 # apt package for it, ros-jazzy-topic-based-ros2-control
 # Used as reference: https://github.com/PickNikRobotics/topic_based_ros2_control/blob/main/doc/installation.md
@@ -236,12 +157,16 @@ RUN source "/opt/ros/${ROS_DISTRO}/setup.bash" && \
   mkdir -p "${COLCON_WS}/src" && \
   cd "${COLCON_WS}/src" && \
   git clone https://github.com/PickNikRobotics/topic_based_ros2_control && \
+  cd topic_based_ros2_control && git checkout "${TOPIC_BASED_ROS2_CONTROL_REF}" && cd .. && \
   rosdep install --ignore-src --from-paths . -y && \
   cd "${COLCON_WS}" && \
   colcon build --symlink-install --event-handlers log-
 
 WORKDIR /
+ARG ISAAC_ROS_WORKSPACES_REF=dd3eeede7912755996a18f4884285d9f50843f79
 RUN git clone https://github.com/isaac-sim/IsaacSim-ros_workspaces.git isaacsim_ros_workspaces && \
+  cd isaacsim_ros_workspaces && git checkout "${ISAAC_ROS_WORKSPACES_REF}" && \
+  cd / && \
   cd isaacsim_ros_workspaces/${ROS_DISTRO}_ws && \
   git submodule update --init --recursive
 
@@ -250,7 +175,8 @@ WORKDIR /isaacsim_ros_workspaces/${ROS_DISTRO}_ws
 # First, source two workspaces, ros base and topic_based_ros2_control
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
   source /topic_based_ros2_control_ws/install/setup.bash && \
-  PIP_BREAK_SYSTEM_PACKAGES=1 rosdep install -i --from-path src --rosdistro jazzy -y && \
+  rosdep install -i --from-path src --rosdistro jazzy -y \
+    --skip-keys python3-pytorch-pip && \
   colcon build
 
 
@@ -275,6 +201,9 @@ ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
 ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
 
+FROM ros AS ros-dev
+COPY --from=development-tools /usr/local/ /usr/local/
+
 
 # Isaac Lab layers on top of Isaac Sim: it shares the same kit python
 # (/isaac-sim/python.sh), USD, and PhysX and cannot run standalone, so it is a
@@ -286,7 +215,7 @@ CMD ["tmux", "new-session", "-A", "-s", "ros"]
 # Override with --build-arg ISAACLAB_REF=... when moving Isaac Sim versions.
 FROM isaac-sim AS isaac-lab
 
-ARG ISAACLAB_REF=v2.3.2
+ARG ISAACLAB_REF=37ddf626871758333d6ed89cf64ad702aef127d0
 # Build prerequisites: cmake/build-essential for the source packages / RL
 # frameworks the full install resolves (some compile), and ncurses-term for the
 # full terminfo DB. isaaclab.sh starts with `tabs 4`, which resolves the
@@ -296,39 +225,31 @@ ARG ISAACLAB_REF=v2.3.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake build-essential ncurses-term \
  && rm -rf /var/lib/apt/lists/*
-# The _isaac_sim -> /isaac-sim symlink makes isaaclab.sh target the container's
-# kit python (its kit-installation resolution path is _isaac_sim/python.sh), so
-# `--install` (no arg = all RL frameworks) lands the isaaclab* packages in the
-# exact interpreter the standalone gate runs under. TERM=xterm is forced inline so
-# isaaclab.sh's `tabs 4` has a valid terminal regardless of the login-shell
-# profile; advice.detachedHead quiets the pinned-tag checkout.
-#
-# Isaac Lab depends on flatdict 4.0.1, whose sdist setup imports
-# pkg_resources. pip build isolation can pull a setuptools build backend without
-# pkg_resources and abort before isaaclab.sh finishes, so install that leaf in
-# the Kit Python environment first and build it against Kit's setuptools.
-# The explicit base-package install after isaaclab.sh is also load-bearing: the
-# base `source/isaaclab` is the only extension with a setup.py, and isaaclab.sh's
-# find -exec loop can swallow a failed editable install. Re-installing base with
-# --no-build-isolation registers the editable path, and the final imports fail
-# the image loudly if either flatdict or isaaclab is missing.
+# Install only the project-used Isaac Lab base and rsl_rl adapter. The upstream
+# `isaaclab.sh --install` default installs every RL framework and resolves broad
+# dependency ranges at build time. The pinned requirements file plus --no-deps
+# editable installs keep this image reproducible and omit unused frameworks and
+# device-retargeting stacks.
+COPY isaac/docker/lab-runtime-requirements.txt /tmp/isaac-lab-requirements.txt
 RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
  && cd /isaac-lab \
  && git -c advice.detachedHead=false checkout "${ISAACLAB_REF}" \
  && ln -s /isaac-sim _isaac_sim \
- && (/isaac-sim/python.sh -c "import pkg_resources" \
-     || /isaac-sim/python.sh -m pip install --disable-pip-version-check "setuptools<80" wheel) \
- && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-build-isolation "flatdict==4.0.1" \
- && TERM=xterm ./isaaclab.sh --install \
- && /isaac-sim/python.sh -m pip install --no-build-isolation -e source/isaaclab \
- && /isaac-sim/python.sh -c "import flatdict, isaaclab; print('isaaclab OK:', isaaclab.__file__)"
+ && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-deps \
+      --no-build-isolation \
+      -r /tmp/isaac-lab-requirements.txt \
+ && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-deps \
+      --no-build-isolation -e source/isaaclab -e source/isaaclab_rl \
+ && rm /tmp/isaac-lab-requirements.txt \
+ && /isaac-sim/python.sh -c \
+      "import flatdict, gymnasium, isaaclab, isaaclab_rl, rsl_rl; print('isaaclab OK:', isaaclab.__file__)"
 
 
 # PX4 SITL stands in for the flight controller on a real drone; kept in its own
 # container (not in isaac-sim or ros) to mirror the hardware split.
-FROM ubuntu:22.04 AS px4
+FROM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 AS px4
 
-ARG PX4_TAG=v1.14.3
+ARG PX4_REF=1dacb4cdef2d7145754fc788fa8dc482eed74b40
 ENV PX4_DIR=/opt/PX4-Autopilot
 ENV PX4_AIRFRAME_MANIFEST=/usr/local/share/robotics-experiments/px4-airframes.json
 ENV DEBIAN_FRONTEND=noninteractive
@@ -339,7 +260,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
       python3-future python3-jsonschema python3-packaging \
       python3-setuptools python3-wheel python3-yaml \
       lsb-release sudo gosu \
-      tmux ranger less vim \
+      tmux less \
  && rm -rf /var/lib/apt/lists/*
 
 COPY docker/tmux.conf /root/.tmux.conf
@@ -349,10 +270,10 @@ RUN printf '%s\n' \
       >> /root/.bashrc
 
 RUN pip3 install --no-cache-dir \
-      kconfiglib empy==3.3.4 pyros-genmsg
+      kconfiglib==14.1.0 empy==3.3.4 pyros-genmsg==0.5.8
 
 RUN git clone https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} && \
-    cd ${PX4_DIR} && git checkout ${PX4_TAG} && \
+    cd ${PX4_DIR} && git checkout ${PX4_REF} && \
     git submodule update --init --recursive
 
 # Generate the repo-managed posix airframes from configs/airframes before the

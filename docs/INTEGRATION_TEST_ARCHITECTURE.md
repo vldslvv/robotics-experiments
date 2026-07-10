@@ -85,10 +85,12 @@ a host that can keep up.
 `make test-integration-all` depends on `test-integration-warm-isaac-cache`, which
 runs first via `make/scripts/warm_isaac_cache.sh`. In host mode, that script
 creates the isolated run root and starts the Isaac container; in container mode,
-it does a one-off `pip install` of the test deps and a headless `SimulationApp`
-start/stop inside the Isaac image. This makes cold or cleared shared-cache
-initialization single-writer, then lets the real test fan-out use warmed caches
-instead of each parallel target racing to initialize identical caches.
+it performs a headless `SimulationApp` start/stop. Hydra, OmegaConf, pymavlink,
+and their pinned closures are baked into the Isaac image, so neither cache
+warm-up nor individual scenarios install packages or require network access at
+test time. This makes cold or cleared shared-cache initialization single-writer,
+then lets the real test fan-out use warmed caches instead of each parallel
+target racing to initialize identical caches.
 
 ## Shared cache vs isolated artifacts
 

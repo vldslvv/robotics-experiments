@@ -82,17 +82,6 @@ if [ "${WARM_ISAAC_CACHE_IN_CONTAINER:-0}" = "1" ]; then
     rm -f "${warm_log}"
 
     stage_start_ms="$(now_ms)"
-    if PIP_ROOT_USER_ACTION=ignore "${ISAAC_PYTHON}" -m pip install \
-        --quiet --disable-pip-version-check hydra-core omegaconf \
-        >>"${warm_log}" 2>&1; then
-        integration_timing "pip_install" "${stage_start_ms}"
-    else
-        integration_timing "pip_install" "${stage_start_ms}" "fail"
-        grep -E "${ISAAC_TEST_ERROR_FILTER}" "${warm_log}" || true
-        exit 1
-    fi
-
-    stage_start_ms="$(now_ms)"
     if "${ISAAC_PYTHON}" -c \
         'from isaacsim import SimulationApp; app = SimulationApp({"headless": True, "hide_ui": True}); app.update(); app.close()' \
         >>"${warm_log}" 2>&1; then

@@ -101,6 +101,8 @@ done
 
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=px4_airframe_manifest_check.sh
+# The hook may lint this changed runner without passing its unchanged helper.
+# shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/px4_airframe_manifest_check.sh"
 # PX4_IMAGE is a required env var (validated above), not the helper's local px4_image.
 # shellcheck disable=SC2153
@@ -338,7 +340,6 @@ if docker run --rm \
     -e "ISAAC_TEST_FAILURE_FILTER=${ISAAC_TEST_FAILURE_FILTER}" \
     -e "ISAAC_TEST_LOG=${ISAAC_TEST_LOG}" \
     -e "ISAAC_TEST_LOG_FILTER=${ISAAC_TEST_LOG_FILTER}" \
-    -e "ISAAC_TEST_PIP_PACKAGES=hydra-core omegaconf pymavlink" \
     -e "ISAAC_TEST_SCRIPT=${ISAAC_TEST_SCRIPT}" \
     -e "PX4_TEST_CONTAINER_NAME=${PRIMARY_PX4_CONTAINER}" \
     -e "PX4_TEST_LOGS_DIR=${PX4_TEST_LOGS_DIR}" \

@@ -17,7 +17,7 @@ build-isaac:
 		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
-		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
+		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
@@ -37,12 +37,26 @@ build-isaac-lab:
 		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
-		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
+		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--build-arg ISAACLAB_REF="$(ISAACLAB_REF)" \
 		--target isaac-lab \
 		-t $(ISAAC_LAB_IMAGE) \
 		-t $(ISAAC_LAB_CACHE_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
+
+.PHONY: build-isaac-dev
+build-isaac-dev:
+	@echo "Building optional Isaac development image: $(ISAAC_DEV_IMAGE)"
+	docker buildx build \
+		--progress=plain \
+		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
+		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
+		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
+		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
+		--target isaac-sim-dev \
+		-t $(ISAAC_DEV_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -55,10 +69,27 @@ build-ros:
 		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
-		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
+		--build-arg DOCKER_DIGEST="$(ROS_BASE_DIGEST)" \
+		--build-arg TOPIC_BASED_ROS2_CONTROL_REF="$(TOPIC_BASED_ROS2_CONTROL_REF)" \
+		--build-arg ISAAC_ROS_WORKSPACES_REF="$(ISAAC_ROS_WORKSPACES_REF)" \
 		--target ros \
 		-t $(ROS_IMAGE) \
 		-t $(ROS_CACHE_IMAGE) \
+		-f Dockerfile \
+		$(CURDIR)
+
+.PHONY: build-ros-dev
+build-ros-dev:
+	@echo "Building optional ROS development image: $(ROS_DEV_IMAGE)"
+	docker buildx build \
+		--progress=plain \
+		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
+		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
+		--build-arg DOCKER_DIGEST="$(ROS_BASE_DIGEST)" \
+		--build-arg TOPIC_BASED_ROS2_CONTROL_REF="$(TOPIC_BASED_ROS2_CONTROL_REF)" \
+		--build-arg ISAAC_ROS_WORKSPACES_REF="$(ISAAC_ROS_WORKSPACES_REF)" \
+		--target ros-dev \
+		-t $(ROS_DEV_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 
@@ -74,7 +105,7 @@ build-px4:
 		--progress=plain \
 		$(call docker_cache_from,$(PX4_CACHE_IMAGE)) \
 		--cache-to type=inline \
-		--build-arg PX4_TAG="$(PX4_TAG)" \
+		--build-arg PX4_REF="$(PX4_REF)" \
 		--target px4 \
 		-t $(PX4_IMAGE) \
 		-t $(PX4_CACHE_IMAGE) \
