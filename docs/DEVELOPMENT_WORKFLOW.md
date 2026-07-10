@@ -11,16 +11,24 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   `.python-version` (3.11). Dependencies and the resolver index (including the
   NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
   are locked in `uv.lock`. Do not edit `uv.lock` by hand.
+- This repository is a checkout-only application, not an installable wheel.
+  `[tool.uv] package = false` encodes that boundary, and the Make entrypoints
+  expose the checkout's `src/` through `PYTHONPATH`. Configuration and assets
+  remain repository resources resolved from the checkout. Run Python commands
+  from the repository root through the documented Make or `uv` entrypoints.
 - The project uses a repo-local uv-managed Python install under `.uv-python/`
   so sandboxed tools do not need access to user-level Python installs under
   `/home/vv/.local` or `/home/vv/.pyenv`. `.uv-python/` is local machine state
   and must not be committed.
-- Initialize or repair the environment with `uv sync --extra dev`. The `dev`
-  extra (ruff, mypy, pre-commit, debugpy) is optional, so a plain `uv sync`
-  intentionally omits it; pass `--extra dev` when you need the tooling. The
-  `training` extra (`rsl-rl-lib`, pulls torch) exists for host-side tooling
-  only; actual training runs in the Isaac Lab image, which already ships
-  rsl_rl.
+- Initialize or repair the core development environment with
+  `uv sync --extra dev`. The default dependency set contains only reusable-core
+  runtime dependencies. The `dev` extra adds pytest and quality tools; the
+  `simulation` extra adds Isaac Sim and USD for host-side asset/simulator work;
+  and the `training` extra adds `rsl-rl-lib` (and torch) for host-side training
+  tooling only. Actual training runs in the Isaac Lab image, which already
+  ships rsl_rl. Flight-analysis tools deliberately use the documented
+  throwaway `uv --no-project --with pyulog --with numpy` environment instead of
+  a project extra.
 - If `.venv` is missing, points outside the repository, or cannot be read from
   the sandbox, recreate it with the repo-local interpreter:
   `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then
@@ -34,7 +42,8 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   `pyproject.toml` and running `uv lock`), never with ad hoc `pip install`. Keep
   `uv.lock` committed and in sync; `uv lock --check` must pass.
 - Host-side Isaac Sim, ROS 2, and PX4 work that does not run inside their Docker
-  containers still goes through this venv. Throwaway
+  containers still goes through this venv. Sync or invoke with
+  `--extra simulation` when host-side code imports Isaac or USD. Throwaway
   `uv run --no-project ...` invocations are deliberate exceptions for one-off
   tooling that must not touch the project environment.
 

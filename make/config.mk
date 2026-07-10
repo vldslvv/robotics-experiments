@@ -6,6 +6,8 @@ BUILD_ROOT             = $(CURDIR)/.build/docker
 SRC_DIR                = $(CURDIR)/src
 VENV_DIR               = $(CURDIR)/.venv
 VENV_ACTIVATE          = $(VENV_DIR)/bin/activate
+PYTHONPATH              := $(SRC_DIR)$(if $(PYTHONPATH),:$(PYTHONPATH))
+export PYTHONPATH
 
 # Isaac custom image
 ISAAC_BASE_IMAGE ?= nvcr.io/nvidia/isaac-sim

@@ -1,25 +1,17 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "robotics-experiments"
 version = "0.0.0"
-description = "Robotics experiments integrating Isaac Sim and ROS 2."
+description = "Checkout-only robotics experiments integrating Isaac Sim, ROS 2, and PX4."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Unknown" }]
 
 dependencies = [
-  "isaacsim==5.1.0.0",
-  "isaacsim-core==5.1.0.0",
   "numpy==1.26.0",
+  "scipy>=1.11,<2",
   "hydra-core>=1.3",
   "omegaconf>=2.3",
-  "usd-core>=25.11,<27",
-  "pyulog>=1.2.2",
-  "pytest>=9.0.3",
 ]
 
 [project.optional-dependencies]
@@ -32,17 +24,14 @@ dev = [
   "vulture==2.16",
   "types-requests",
 ]
-training = [
-    "rsl-rl-lib>=3.1.2,<4",
+simulation = [
+  "isaacsim==5.1.0.0",
+  "isaacsim-core==5.1.0.0",
+  "usd-core>=25.11,<27",
 ]
-
-[tool.setuptools]
-package-dir = { "" = "src" }
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["robotics_experiments*"]
-exclude = ["ros2_ws*", "scans*", "docs*", "scripts*"]
+training = [
+  "rsl-rl-lib>=3.1.2,<4",
+]
 
 [tool.ruff]
 line-length = 100
@@ -117,6 +106,7 @@ norecursedirs = [
 ]
 
 [tool.uv]
+package = false
 override-dependencies = [
   "pywin32==306; sys_platform == 'win32'",
 ]

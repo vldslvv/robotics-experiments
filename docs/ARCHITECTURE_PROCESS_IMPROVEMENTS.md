@@ -76,32 +76,21 @@ without weakening either gate.
 
 Priority: high
 
-The default project dependencies include Isaac Sim, pytest, and pyulog even
-though the package architecture deliberately keeps many modules independent of
-Isaac. Pytest already belongs to the development dependency set, and
-`flight_analysis/README.md` says pyulog should be supplied through a throwaway
-`uv --with` environment rather than become a permanent project dependency.
+Status: completed
 
-Recommended change:
+The default dependency set now contains only reusable-core requirements:
+NumPy, SciPy (required by the vendored Pegasus bridge), Hydra, and OmegaConf.
+Pytest and quality tools live in `dev`; Isaac Sim and USD live in `simulation`;
+and `rsl-rl-lib` remains isolated in `training`. Pyulog is not a project
+dependency or extra: flight analysis continues to use the documented throwaway
+`uv --no-project --with` environment.
 
-- Keep only dependencies required by the reusable core in the default set.
-- Move simulator/USD dependencies to an Isaac or simulation extra.
-- Keep pytest and quality tools in the development set.
-- Keep analysis-only dependencies in a dedicated analysis extra or continue to
-  use the documented throwaway environment, but not both.
-- Keep training dependencies isolated from runtime and host-test dependencies.
-
-The repository should also explicitly choose between two packaging models:
-
-1. Installable package: package Hydra configs and other required resources with
-   the wheel and resolve them through package resources.
-2. Checkout-only application: document and encode that assumption rather than
-   presenting a package that appears relocatable.
-
-At present, config loading derives `configs/` through
-`Path(__file__).resolve().parents[3]`, while setuptools does not package that
-directory. An installed wheel therefore does not have the same runtime contract
-as a source checkout.
+The repository is explicitly a checkout-only application. It has no build
+backend or setuptools package-discovery configuration, and
+`[tool.uv] package = false` prevents uv from installing it as an editable
+package. Make exports the checkout's `src/` on `PYTHONPATH`, while pytest keeps
+its existing source-root configuration. Hydra configs and assets remain
+checkout resources, matching the loader and container runtime contracts.
 
 ### 4. Make container builds hermetic and split development from execution images
 
@@ -240,7 +229,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
 2. [x] Expand `make check` and add CPU-only CI.
 3. [x] Add dynamic experiment-config coverage and the package dependency-direction
    test.
-4. [ ] Reorganize Python dependency groups and decide the installable versus
+4. [x] Reorganize Python dependency groups and decide the installable versus
    checkout-only packaging contract.
 5. [ ] Make integration dependency installation hermetic and split minimal container
    stages from interactive development stages.
