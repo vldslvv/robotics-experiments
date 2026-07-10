@@ -7,6 +7,9 @@ from tests.support.paths import REPO_ROOT
 _CONFIG_DIR = REPO_ROOT / "configs" / "experiment"
 _AIRFRAME_CONFIG_DIR = REPO_ROOT / "configs" / "airframes"
 _ROOT_CONFIG_DIR = REPO_ROOT / "configs"
+_EXPERIMENT_CONFIGS = sorted(
+    path for path in _ROOT_CONFIG_DIR.glob("*.yaml") if path.name != "base.yaml"
+)
 
 
 def _group_defaults(group_name, file_stem="default"):
@@ -184,6 +187,24 @@ def test_base_config_is_shared_defaults_only():
 
     assert "scene" not in cfg
     assert "vehicles" not in cfg
+
+
+@pytest.mark.parametrize("config_path", _EXPERIMENT_CONFIGS, ids=lambda path: path.stem)
+def test_every_shipped_experiment_composes(config_path, monkeypatch):
+    pytest.importorskip("hydra")
+    pytest.importorskip("omegaconf")
+    from robotics_experiments.config import EnvConfig, get_config
+    from robotics_experiments.config import reset_config_cache as reset_config
+
+    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", str(config_path))
+    reset_config()
+    try:
+        config = get_config()
+        assert isinstance(config, EnvConfig)
+        assert config.scene
+        assert config.vehicles
+    finally:
+        reset_config()
 
 
 def test_press_training_policy_name_is_required_by_schema():

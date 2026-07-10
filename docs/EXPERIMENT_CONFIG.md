@@ -12,6 +12,10 @@ no system distinction between a runtime experiment and a test experiment: every
 experiment is runnable through the standalone workflow and the extension
 workflow (`make run-all`).
 
+The host test suite discovers every one of these top-level experiment files and
+composes it through the public config facade. Adding an experiment therefore
+automatically adds a configuration-composition regression case.
+
 Each experiment sets a top-level `scene` (the USD stage; `@`-prefixed paths are
 repo-relative) and a top-level `vehicles:` list. `configs/base.yaml` is shared
 defaults only and does not carry `scene` or `vehicles`.

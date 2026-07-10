@@ -136,27 +136,20 @@ Recommended change:
 
 Priority: high
 
-`tests/src/robotics_experiments/test_core_imports.py` is a useful regression
-guard for lazy imports and public facades. It verifies that simulator and
-training dependencies do not load on lightweight imports, but it does not
-prevent a future module from introducing a reverse dependency between project
-packages.
+Status: completed
 
-Recommended change:
+An AST-based architecture test discovers every top-level package under
+`robotics_experiments`, requires each package to have an explicit dependency
+policy, and rejects imports outside the allowed lower-level edges. The policy
+keeps config at the base, pure/domain packages above it, runtime above the
+domains, and host workflows at the outer edge. Same-package imports remain
+allowed. The separate lightweight-import tests continue to enforce dependency
+weight and lazy loading.
 
-- Add a small AST-based architecture test that defines the allowed package
-  dependency edges and rejects forbidden imports.
-- Keep the test local and dependency-free; a new architecture-analysis tool is
-  not necessary for the current repository size.
-- Cover the intended direction from config and pure domains through runtime and
-  finally host-specific shells.
-- Continue testing lazy dependency absence separately, because import direction
-  and import weight are different contracts.
-
-Also add a parametrized test that discovers and composes every top-level
-experiment YAML. Most shipped experiments have direct config tests, but dynamic
-discovery ensures a newly added experiment cannot be forgotten and currently
-would add uniform coverage for `policy_hover_quad.yaml`.
+The config suite also discovers every top-level YAML sibling of `base.yaml` and
+composes each experiment through the public config facade. New experiment files
+therefore receive composition coverage automatically, including
+`policy_hover_quad.yaml`.
 
 ### 6. Split the main growth hotspots by responsibility
 
@@ -245,7 +238,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
 1. [x] Correct pytest discovery and make the 47 previously omitted tests part
    of the default gate.
 2. [x] Expand `make check` and add CPU-only CI.
-3. [ ] Add dynamic experiment-config coverage and the package dependency-direction
+3. [x] Add dynamic experiment-config coverage and the package dependency-direction
    test.
 4. [ ] Reorganize Python dependency groups and decide the installable versus
    checkout-only packaging contract.
