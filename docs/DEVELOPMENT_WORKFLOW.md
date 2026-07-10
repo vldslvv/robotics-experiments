@@ -72,18 +72,22 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 
 ## Quality gates
 
-- pre-commit is the local quality gate; there is no CI pipeline (local-only for
-  now). Install it once with `uv run pre-commit install` and run it with
-  `uv run pre-commit run --all-files`.
-- The mirror hooks (ruff, mypy) only see staged files. For a full sweep run
-  `uv run ruff check`, `uv run ruff format --check`, and
-  `uv run mypy src tests`.
+- `make check` is the canonical non-mutating host gate. It validates `uv.lock`,
+  checks lint and formatting, runs mypy and vulture, and executes the complete
+  host pytest suite. The CPU-only pull-request workflow runs this same target.
+- Pre-commit remains the formatting and commit-time convenience layer. Install
+  it once with `uv run pre-commit install` and run a whole-repository sweep with
+  `uv run pre-commit run --all-files`. Mirror hooks may modify staged Python
+  files, while `make check` never modifies the working tree.
 - The hook list and the per-tool tunables (`.hadolint.yaml`, `.codespellrc`,
   `.yamllint.yaml`, `.taplo.toml`) live in `.pre-commit-config.yaml` and those
   dotfiles at the repo root.
 - For large-scope changes, especially public API, module-name, or runtime
   behavior changes, run `uv run pytest`, `make test-integration-all`, and
   `uv run pre-commit run --all-files` before completion.
+- GPU/container integration is intentionally separate from the pull-request
+  host workflow. Run it locally with `make test-integration-all` or on a
+  scheduled, manually triggered, or self-hosted runner with an NVIDIA runtime.
 - When a quality gate reports a failure, fix it along with the current task. If a
   flagged line is genuinely correct, silence it narrowly and on purpose with a
   scoped inline suppression such as `# shellcheck disable=...` or

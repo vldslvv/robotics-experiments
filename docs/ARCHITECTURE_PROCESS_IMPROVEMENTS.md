@@ -53,26 +53,21 @@ Completed change:
 
 Priority: immediate
 
-`make check` currently delegates only to `make test`, while the documented host
-gate also includes lock validation, linting, formatting, type checking, unused
-code detection, and repository-format checks. Pre-commit is explicitly described
-as a local-only gate, so correctness depends on every contributor running the
-same commands manually.
+Status: completed
 
-Recommended change:
+`make check` is the canonical non-mutating host gate and runs:
 
-- Make `make check` a non-mutating aggregate of:
-  - `uv lock --check`
-  - `uv run ruff check`
-  - `uv run ruff format --check`
-  - `uv run mypy src tests`
-  - `uv run --extra dev vulture --config pyproject.toml`
-  - the complete host pytest suite
-- Keep `pre-commit` as the formatting and commit-time convenience layer, but do
-  not make it the only gate of record.
-- Add a CPU-only pull-request workflow for the canonical host gate.
-- Run GPU/container integration on a scheduled, manually triggered, or
-  self-hosted workflow where the required NVIDIA runtime is available.
+- `uv lock --check`
+- `uv run ruff check`
+- `uv run ruff format --check`
+- `uv run mypy src tests`
+- `uv run --extra dev vulture --config pyproject.toml`
+- `uv run pytest`
+
+The CPU-only GitHub Actions pull-request workflow installs the locked development
+environment and invokes the same `make check` target. Pre-commit remains the
+formatting and commit-time convenience layer. GPU/container integration stays a
+separate local or NVIDIA-runner gate and is not weakened by the host workflow.
 
 This separates fast deterministic feedback from expensive simulator validation
 without weakening either gate.
@@ -249,7 +244,7 @@ backlog candidates that would be easier to track in `docs/backlog/` or issues.
 
 1. [x] Correct pytest discovery and make the 47 previously omitted tests part
    of the default gate.
-2. [ ] Expand `make check` and add CPU-only CI.
+2. [x] Expand `make check` and add CPU-only CI.
 3. [ ] Add dynamic experiment-config coverage and the package dependency-direction
    test.
 4. [ ] Reorganize Python dependency groups and decide the installable versus

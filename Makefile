@@ -34,6 +34,7 @@ help:
 		'  make destroy               Stop containers and remove containers/runnable image tags' \
 		'' \
 		'  make test                  Run host Python tests' \
+		'  make check                 Run the complete non-mutating host quality gate' \
 		'  make test-integration      Run container-backed integration tests' \
 		'  make test-integration-all  Run all integration tests in parallel with a summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \

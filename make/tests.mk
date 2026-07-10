@@ -14,4 +14,10 @@ test: require-venv
 	@. "$(VENV_ACTIVATE)" && python -m pytest
 
 .PHONY: check
-check: test
+check: require-venv
+	@uv lock --check
+	@uv run ruff check
+	@uv run ruff format --check
+	@uv run mypy src tests
+	@uv run --extra dev vulture --config pyproject.toml
+	@uv run pytest

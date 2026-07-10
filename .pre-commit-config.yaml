@@ -35,8 +35,8 @@ repos:
         args: ["--ignore-missing-imports"]
 
   # pytest has no per-file notion, so it runs locally through the project venv
-  # over the whole suite on every commit. There is no CI pipeline; this is the
-  # local-only test gate of record.
+  # over the whole suite on every commit. The canonical non-mutating gate is
+  # `make check`, which also runs in the CPU-only pull-request workflow.
   - repo: local
     hooks:
       - id: pytest
