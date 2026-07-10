@@ -114,9 +114,6 @@ norecursedirs = [
   ".build",
   ".cache",
   ".venv",
-  "isaac",
-  "ros",
-  "px4",
 ]
 
 [tool.uv]
