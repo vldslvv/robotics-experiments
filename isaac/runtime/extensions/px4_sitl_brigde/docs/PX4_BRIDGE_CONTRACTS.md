@@ -318,6 +318,15 @@ class Px4MavlinkPort:
     def poll(self) -> ActuatorCommands: ...  # block, recv <- PX4 (only after send returned None)
     def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send-then-poll; single-vehicle convenience
 
+# Public annotation type plus its supported construction boundary. Coefficient
+# arrays stay private; the factory validates their shapes, copies caller inputs,
+# and marks the copies read-only before constructing the frozen model.
+@dataclass(frozen=True)
+class PegasusQuadraticThrustModel(RotorThrustModel):
+    num_rotors: int
+
+def create_pegasus_thrust_model(...) -> PegasusQuadraticThrustModel: ...
+
 # The Isaac seam behavior: read state in, apply a full rotor-model result out.
 # Implemented by IsaacArticulationIO; the local structural protocol is private.
 class _ArticulationIO(Protocol):

@@ -23,11 +23,12 @@ surfaces. Tests exercise the same root contract as production consumers.
 | `commands_to_dynamics` (pure transform) | `decide(...)` (pure stepper) |
 | `RotorDynamics` (pure output) | `RoutineDecision` (pure output) |
 | `Px4MavlinkPort` lockstep seam | `MavlinkCommandPort` (GCS control seam) |
-| `Px4BridgeState` / `BridgeHost` | `RoutineDriverState` |
+| `Px4BridgeState` / `BridgeHost` | `DriverContext` + `RoutineDriverState` |
 
-Like the bridge, the command layer is **per drone**: one frozen
-`RoutineDriverState` is advanced by `tick_routine_driver`. There is no command
-fleet object - drones are independent
+Like the bridge, the command layer is **per drone**: one frozen `DriverContext`
+holds immutable parameters and resource adapters, while one frozen
+`RoutineDriverState` holds progress and is advanced by
+`tick_routine_driver(context=..., state=...)`. There is no command fleet object - drones are independent
 (cross-drone synchronization is deliberately deferred).
 
 - **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
@@ -142,8 +143,10 @@ fleet object - drones are independent
   `robotics_experiments.rl.press.press_action_to_offboard`; the `{kind: policy}` routine step
   streams them in production (F2b), and the handoff-gated contact behavior
   (`{kind: press}`) is F3b on the same mechanism.
-- **`driver.py`** -- the frozen, per-drone `RoutineDriverState` and stateless
-  `create_routine_driver` / `tick_routine_driver` transition functions: a phase
+- **`driver.py`** -- the frozen, per-drone `DriverContext` (parameters, port,
+  environment, label, and monotonic clock), progress-only `RoutineDriverState`,
+  and stateless `create_routine_driver` / `tick_routine_driver` transition
+  functions: a phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
   `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
@@ -164,7 +167,8 @@ observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
 pymavlink). The only side effects in the layer are the port's send methods
 (`send`, `send_setpoint`, `send_velocity_setpoint`, `send_attitude_target` --
 MAVLink out) and the port's connect/heartbeat/drain. `tick_routine_driver`
-stores `RoutineState` directly, runs pure `decide`, then performs the one side
+receives context and state separately, stores `RoutineState` directly in the
+progress state, runs pure `decide`, then performs the one side
 effect (`SEND` -> `send`, `STREAM` -> the matching send method). A `policy`
 step's network forward pass runs
 inside `decide` as an injected deterministic callable (numpy in/out, no I/O),
@@ -184,9 +188,9 @@ subscription), never from the bridge's physics send/recv legs.
 
 ## Where the executor lives: functional fleet state, two thin shells
 
-The frozen `RoutineDriverState` is the single executor state, and the
-host-agnostic `FleetState` lifecycle is the single place that builds one driver
-per flying drone. Stateless functions own the pipeline (open scene -> apply
+The frozen `DriverContext` plus progress-only `RoutineDriverState` is the single
+executor composition, and the host-agnostic `FleetState` lifecycle is the
+single place that builds one composition per flying drone. Stateless functions own the pipeline (open scene -> apply
 settings -> spawn fleet -> start the lockstep bridge group -> build drivers ->
 teardown); a thin per-host **shell** explicitly rebinds every returned state and supplies
 tick source and the failure reaction. The reaction is injected as a `make_env`
@@ -229,7 +233,8 @@ the hover step's envelope catches the resulting instability.
 `RoutineConfig` beneath every `vehicles.<label>` node. It carries typed `steps`,
 control-flow tunables, and flight-envelope gates. There is no root routine or
 separate integration-test group: strict mode drives the same per-vehicle routine.
-Every bridge-enabled drone gets a `RoutineDriverState`. Non-empty `routine.steps`
+Every bridge-enabled drone gets one `DriverContext` and one
+`RoutineDriverState`. Non-empty `routine.steps`
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
@@ -289,5 +294,5 @@ it.
 > `hold_s` -- the "hover stable for N seconds" model.
 
 **Still deferred:** cross-drone synchronization (today every drone's
-`RoutineDriverState` runs independently; a barrier/fleet-sync layer can be
+context/state pair runs independently; a barrier/fleet-sync layer can be
 re-introduced over the per-drone drivers when a use case needs it).

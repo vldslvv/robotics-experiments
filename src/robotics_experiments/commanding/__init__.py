@@ -49,6 +49,7 @@ from robotics_experiments.commanding.commands import (
     takeoff,
 )
 from robotics_experiments.commanding.driver import (
+    DriverContext,
     DriverEnvironment,
     DriverParams,
     DriverPhase,
@@ -73,6 +74,7 @@ __all__ = [
     "CommandAck",
     "CommandPortStatus",
     "DecisionKind",
+    "DriverContext",
     "DriverEnvironment",
     "DriverParams",
     "DriverPhase",

@@ -6,10 +6,10 @@ The bridge is layered so each component is usable on its own — see
 Typical wiring (done by the drone-spawning host, not by this extension):
 
 >>> from Px4SitlBridge_python import (
-...     Px4MavlinkPort, PegasusQuadraticThrustModel, create_px4_bridge,
+...     Px4MavlinkPort, create_pegasus_thrust_model, create_px4_bridge,
 ... )
 >>> port = Px4MavlinkPort(num_rotors=4)
->>> model = PegasusQuadraticThrustModel(num_rotors=4)
+>>> model = create_pegasus_thrust_model(num_rotors=4)
 >>> bridge = create_px4_bridge(
 ...     articulation_path="/World/DroneSpawned",
 ...     rotor_link_paths=[...4 paths in PX4 motor order...],
@@ -36,6 +36,7 @@ from robotics_experiments.px4_bridge import (  # noqa: F401  # noqa: F401
     PegasusQuadraticThrustModel,
     Px4BridgeState,  # noqa: F401
     Px4MavlinkPort,  # noqa: F401
+    create_pegasus_thrust_model,
     create_px4_bridge,
     discover_px4_rotor_mapping,
     start_px4_bridge,
@@ -50,6 +51,7 @@ __all__ = [
     "Px4BridgeState",
     "Px4MavlinkPort",
     "create_px4_bridge",
+    "create_pegasus_thrust_model",
     "discover_px4_rotor_mapping",
     "start_px4_bridge",
     "stop_px4_bridge",

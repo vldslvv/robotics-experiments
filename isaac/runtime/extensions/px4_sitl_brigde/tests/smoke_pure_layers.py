@@ -30,8 +30,8 @@ from robotics_experiments.px4_bridge import (  # noqa: E402
     DEFAULT_HOME_LAT_DEG,
     DEFAULT_HOME_LON_DEG,
     ActuatorCommands,
-    PegasusQuadraticThrustModel,
     VehicleState,
+    create_pegasus_thrust_model,
     synth_gps_from_enu,
     synth_magnetometer_body_flu,
 )
@@ -74,7 +74,7 @@ def main() -> int:
         abs(gps["altitude"] - (DEFAULT_HOME_ALT_M + 1.0)) < 1e-6,
     )
 
-    model = PegasusQuadraticThrustModel(num_rotors=4)
+    model = create_pegasus_thrust_model(num_rotors=4)
     commands = np.array([0.0, 500.0, 1100.0, 1500.0])
     forces = model.commands_to_forces(ActuatorCommands(commands))
     expected_forces = 8.54858e-6 * np.square(np.clip(commands, 0.0, 1100.0))

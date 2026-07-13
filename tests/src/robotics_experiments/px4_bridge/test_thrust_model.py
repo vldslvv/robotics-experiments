@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from robotics_experiments.px4_bridge import ActuatorCommands, PegasusQuadraticThrustModel
+from robotics_experiments.px4_bridge import ActuatorCommands, create_pegasus_thrust_model
 
 
 @pytest.mark.parametrize(
@@ -13,7 +13,7 @@ from robotics_experiments.px4_bridge import ActuatorCommands, PegasusQuadraticTh
     ],
 )
 def test_pegasus_quadratic_model_matches_rotor_force_curve(commands):
-    model = PegasusQuadraticThrustModel(num_rotors=4)
+    model = create_pegasus_thrust_model(num_rotors=4)
 
     forces = model.commands_to_forces(ActuatorCommands(commands))
 
@@ -30,7 +30,7 @@ def test_pegasus_quadratic_model_matches_rotor_force_curve(commands):
     ],
 )
 def test_pegasus_quadratic_model_matches_reaction_torque_formula(commands):
-    model = PegasusQuadraticThrustModel(num_rotors=4)
+    model = create_pegasus_thrust_model(num_rotors=4)
 
     dynamics = model.commands_to_dynamics(
         ActuatorCommands(commands),
@@ -44,7 +44,7 @@ def test_pegasus_quadratic_model_matches_reaction_torque_formula(commands):
 
 
 def test_pegasus_quadratic_model_reports_clipped_omega():
-    model = PegasusQuadraticThrustModel(num_rotors=4)
+    model = create_pegasus_thrust_model(num_rotors=4)
 
     commands = np.array([-50.0, 500.0, 1100.0, 1500.0])
     dynamics = model.commands_to_dynamics(ActuatorCommands(commands))
@@ -57,7 +57,7 @@ def test_pegasus_quadratic_model_reports_clipped_omega():
 
 
 def test_pegasus_quadratic_model_drag_opposes_body_velocity():
-    model = PegasusQuadraticThrustModel(num_rotors=4)
+    model = create_pegasus_thrust_model(num_rotors=4)
 
     dynamics = model.commands_to_dynamics(
         ActuatorCommands(np.zeros(4)),
@@ -65,3 +65,40 @@ def test_pegasus_quadratic_model_drag_opposes_body_velocity():
     )
 
     np.testing.assert_allclose(dynamics.body_drag_n, [-2.0, -1.5, 0.0])
+
+
+@pytest.mark.parametrize(
+    ("argument", "values", "message"),
+    [
+        ("rotor_constant", [1.0, 1.0, 1.0], r"rotor_constant expects shape \(4,\)"),
+        ("linear_drag", [0.5, 0.3], r"linear_drag expects shape \(3,\)"),
+    ],
+)
+def test_pegasus_quadratic_model_rejects_invalid_coefficient_shapes(argument, values, message):
+    with pytest.raises(ValueError, match=message):
+        create_pegasus_thrust_model(num_rotors=4, **{argument: values})
+
+
+def test_pegasus_quadratic_model_copies_coefficient_inputs():
+    rotor_constant = np.full(4, 8.54858e-6)
+    linear_drag = np.array([0.5, 0.3, 0.0])
+    model = create_pegasus_thrust_model(
+        num_rotors=4,
+        rotor_constant=rotor_constant,
+        linear_drag=linear_drag,
+    )
+    commands = ActuatorCommands(np.full(4, 500.0))
+    baseline = model.commands_to_dynamics(
+        commands,
+        linear_body_velocity_flu=np.array([2.0, -3.0, 1.0]),
+    )
+
+    rotor_constant[:] = 1.0
+    linear_drag[:] = 100.0
+    after_mutation = model.commands_to_dynamics(
+        commands,
+        linear_body_velocity_flu=np.array([2.0, -3.0, 1.0]),
+    )
+
+    np.testing.assert_array_equal(after_mutation.forces_n, baseline.forces_n)
+    np.testing.assert_array_equal(after_mutation.body_drag_n, baseline.body_drag_n)

@@ -200,10 +200,12 @@ the current contents and the intended home for that kind of code.
 - `decide` and completion/invariant predicates are pure. The port is the only
   MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
   bridge simulator port.
-- `RoutineDriverState` plus `tick_routine_driver` is the only executor, one per
-  bridge-enabled drone. Empty `routine.steps` follows the same driver lifecycle
-  and completes without commands. Live and standalone workflows stay thin shells
-  that differ only in tick source and failure reaction.
+- `DriverContext` plus `RoutineDriverState` and `tick_routine_driver` is the only
+  executor composition, one per bridge-enabled drone. The frozen context owns
+  resources and immutable parameters; the frozen state owns progress only.
+  Empty `routine.steps` follows the same driver lifecycle and completes without
+  commands. Live and standalone workflows stay thin shells that differ only in
+  tick source and failure reaction.
 - In `runtime`, `commanding`, and `px4_bridge`, project-owned evolving state is
   represented by frozen dataclasses and replaced by stateless transition
   functions. Mutable classes are limited to external resource adapters (MAVLink,

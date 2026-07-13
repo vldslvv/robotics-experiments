@@ -24,6 +24,7 @@ from robotics_experiments.px4_bridge import (
     Px4MavlinkPort,
     advance_sim_clock,
     bridge_time_us,
+    create_pegasus_thrust_model,
     create_px4_bridge,
     create_sim_clock,
     discover_px4_rotor_mapping,
@@ -128,7 +129,7 @@ def _bridge_components(
         debug_log_level=cfg.debug_log_level,
         sensor_debug_log_interval=cfg.sensor_debug_log_interval,
     )
-    thrust_model = PegasusQuadraticThrustModel(
+    thrust_model = create_pegasus_thrust_model(
         num_rotors=rotor_count,
         rotor_constant=cfg.rotor_constant,
         rolling_moment_coefficient=cfg.rolling_moment_coefficient,

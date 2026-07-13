@@ -15,6 +15,7 @@ import carb
 
 from robotics_experiments.commanding import (
     CommandAck,
+    DriverContext,
     DriverEnvironment,
     DriverParams,
     EnvelopeGates,
@@ -81,7 +82,7 @@ class FlyingDrone:
     """One bridge-enabled drone's immutable driver composition."""
 
     spawned: SpawnedDrone
-    port: MavlinkCommandPort
+    context: DriverContext
     driver: RoutineDriverState
 
 
@@ -274,7 +275,7 @@ def build_drivers(
             heartbeat_period_s=spawned.vehicle.routine.gcs_heartbeat_period_s,
             label=spawned.label,
         )
-        driver = create_routine_driver(
+        context = DriverContext(
             params=DriverParams(
                 steps=routine.steps,
                 gates=EnvelopeGates(
@@ -313,7 +314,8 @@ def build_drivers(
             env=make_env(spawned, port),
             label=spawned.label,
         )
-        flying.append(FlyingDrone(spawned=spawned, port=port, driver=driver))
+        driver = create_routine_driver(context=context)
+        flying.append(FlyingDrone(spawned=spawned, context=context, driver=driver))
     return replace(state, flying=tuple(flying))
 
 
@@ -326,7 +328,7 @@ def tick_drivers(
     advanced: list[FlyingDrone] = []
     for flying in state.flying:
         try:
-            driver = tick_routine_driver(state=flying.driver)
+            driver = tick_routine_driver(context=flying.context, state=flying.driver)
         except Exception as exc:
             if on_error is None:
                 raise
@@ -347,7 +349,7 @@ def teardown(*, state: FleetState) -> FleetState:
 
     state.group.stop()
     for flying in state.flying:
-        flying.port.disconnect()
+        flying.context.port.disconnect()
     for spawned in state.drones:
         if spawned.observer is not None:
             spawned.observer.shutdown()

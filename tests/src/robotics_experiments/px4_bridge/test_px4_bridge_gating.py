@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 from robotics_experiments.px4_bridge import (
-    PegasusQuadraticThrustModel,
     VehicleState,
+    create_pegasus_thrust_model,
     create_px4_bridge,
     start_px4_bridge,
     stop_px4_bridge,
@@ -298,7 +298,7 @@ def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
     bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
+        thrust_model=create_pegasus_thrust_model(num_rotors=4),
         port=port,
         articulation_io=io,
     )
@@ -321,7 +321,7 @@ def test_bridge_visual_spin_uses_airframe_max_rotor_velocity():
     bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=PegasusQuadraticThrustModel(
+        thrust_model=create_pegasus_thrust_model(
             num_rotors=4,
             max_rotor_velocity=[525.0, 525.0, 525.0, 525.0],
         ),
@@ -349,7 +349,7 @@ def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
     bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
-        thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
+        thrust_model=create_pegasus_thrust_model(num_rotors=4),
         port=port,
         articulation_io=io,
         max_tilt_angle_deg=60.0,

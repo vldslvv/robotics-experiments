@@ -12,7 +12,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from robotics_experiments.px4_bridge import ActuatorCommands, PegasusQuadraticThrustModel
+from robotics_experiments.px4_bridge import (
+    ActuatorCommands,
+    PegasusQuadraticThrustModel,
+    create_pegasus_thrust_model,
+)
 from robotics_experiments.rl.press import (
     ActuationState,
     MixerGeometry,
@@ -54,7 +58,7 @@ def _quad_geometry() -> MixerGeometry:
 
 
 def _thrust_model() -> PegasusQuadraticThrustModel:
-    return PegasusQuadraticThrustModel(
+    return create_pegasus_thrust_model(
         num_rotors=4,
         rotor_constant=(_ROTOR_CONSTANT,) * 4,
         rolling_moment_coefficient=(_ROLLING_MOMENT,) * 4,

@@ -8,8 +8,9 @@ functional core with small Isaac/MAVLink resource boundaries.
 
 - `FleetState`, `SpawnedDrone`, and `FlyingDrone` are frozen values. Lifecycle
   functions return successor state; callers must explicitly rebind it.
-- `RoutineDriverState`, `Px4BridgeState`, and `SimClockState` follow the same
-  rule in their owning packages.
+- `DriverContext`, `RoutineDriverState`, `Px4BridgeState`, and `SimClockState`
+  follow the same rule in their owning packages. The driver context carries
+  immutable parameters and resources; the driver state carries progress only.
 - `BridgeHost` and `BridgeHostGroup` remain mutable only because PhysX callback
   return values are ignored and Kit subscriptions are lifetime-managed handles.
   Each host retains one latest frozen bridge-host state and replaces it after a
@@ -51,7 +52,8 @@ earlier `OPENED` event is therefore not a valid cross-event identity guarantee.
 `spawn_fleet` iterates `ExperimentConfig.vehicles` in authored order. Every
 vehicle is spawned. A bridge-enabled vehicle also receives one `BridgeHost` and
 one state-only `IsaacArticulationIO` observer sharing the same resolved
-articulation path, one GCS `MavlinkCommandPort`, and one frozen driver state.
+articulation path, one frozen `DriverContext` containing the GCS
+`MavlinkCommandPort` and environment, and one frozen progress-only driver state.
 Empty routine steps use that same composition and complete without commands.
 PX4-disabled vehicles have no bridge or driver composition.
 

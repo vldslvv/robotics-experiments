@@ -63,6 +63,7 @@ from robotics_experiments.px4_bridge.thrust_model import (
     PegasusQuadraticThrustModel,
     RotorDynamics,
     RotorThrustModel,
+    create_pegasus_thrust_model,
 )
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
@@ -91,6 +92,7 @@ __all__ = [
     "bridge_time_us",
     "compute_root_body_pose_diagnostics",
     "create_px4_bridge",
+    "create_pegasus_thrust_model",
     "create_sim_clock",
     "discover_px4_rotor_mapping",
     "normalize_quat_wxyz",

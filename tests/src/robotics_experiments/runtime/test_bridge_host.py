@@ -109,8 +109,11 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             return SimpleNamespace(is_connected=self.connected, is_armed=False)
 
     class PegasusQuadraticThrustModel:
-        def __init__(self, **kwargs):
-            calls.append(("thrust", kwargs))
+        pass
+
+    def create_pegasus_thrust_model(**kwargs):
+        calls.append(("thrust", kwargs))
+        return PegasusQuadraticThrustModel()
 
     def create_px4_bridge(
         *,
@@ -170,6 +173,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.advance_sim_clock = advance_sim_clock
     fake_px4_bridge.bridge_time_us = bridge_time_us
     fake_px4_bridge.create_px4_bridge = create_px4_bridge
+    fake_px4_bridge.create_pegasus_thrust_model = create_pegasus_thrust_model
     fake_px4_bridge.create_sim_clock = create_sim_clock
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
     fake_px4_bridge.recv_and_apply = recv_and_apply

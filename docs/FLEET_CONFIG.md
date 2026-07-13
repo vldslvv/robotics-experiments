@@ -52,8 +52,9 @@ derived fields and never recompute ports.
 
 The `FleetState` lifecycle functions iterate the mapping in authored order.
 `spawn_fleet` spawns each `vehicle.spawn` and creates a bridge resource for each
-`vehicle.bridge.enabled`; `build_drivers` creates a frozen driver state for each
-bridge-enabled vehicle, including those with empty `vehicle.routine.steps`.
+`vehicle.bridge.enabled`; `build_drivers` creates one frozen driver context and
+one frozen progress state for each bridge-enabled vehicle, including those with
+empty `vehicle.routine.steps`.
 Shells explicitly rebind every returned state.
 
 One `BridgeHostGroup` runs every send leg before every poll leg. Each PX4 instance

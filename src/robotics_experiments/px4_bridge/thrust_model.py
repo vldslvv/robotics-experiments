@@ -16,7 +16,12 @@ import numpy as np
 
 from robotics_experiments.px4_bridge.contract import ActuatorCommands
 
-__all__ = ["PegasusQuadraticThrustModel", "RotorDynamics", "RotorThrustModel"]
+__all__ = [
+    "PegasusQuadraticThrustModel",
+    "RotorDynamics",
+    "RotorThrustModel",
+    "create_pegasus_thrust_model",
+]
 
 # Per-motor iris defaults, identical across all four rotors. These are
 # library-default fallbacks only; the Hydra px4 config is the runtime source
@@ -100,7 +105,7 @@ class _LinearThrustModel(RotorThrustModel):
         return c * self.max_force_n
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class PegasusQuadraticThrustModel(RotorThrustModel):
     """Pegasus-compatible instantaneous quadratic rotor model.
 
@@ -108,7 +113,8 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
     velocity references. Its multirotor then clips those references, computes
     ``T = k * omega^2`` per rotor, adds rotor reaction torque around body Z,
     and applies linear body drag. This class mirrors that behavior without
-    taking ownership of the scene.
+    taking ownership of the scene. Use :func:`create_pegasus_thrust_model` to
+    construct it with validated, non-aliased coefficients.
     """
 
     num_rotors: int
@@ -118,51 +124,6 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
     _min_rotor_velocity: np.ndarray
     _max_rotor_velocity: np.ndarray
     _linear_drag: np.ndarray
-
-    def __init__(
-        self,
-        *,
-        num_rotors: int = 4,
-        rotor_constant: Sequence[float] = (_IRIS_ROTOR_CONSTANT,) * 4,
-        rolling_moment_coefficient: Sequence[float] = (_IRIS_ROLLING_MOMENT,) * 4,
-        rot_dir: Sequence[float] = (-1.0, -1.0, 1.0, 1.0),
-        min_rotor_velocity: Sequence[float] = (_IRIS_MIN_ROTOR_VELOCITY,) * 4,
-        max_rotor_velocity: Sequence[float] = (_IRIS_MAX_ROTOR_VELOCITY,) * 4,
-        linear_drag: Sequence[float] = (0.50, 0.30, 0.0),
-    ):
-        object.__setattr__(self, "num_rotors", int(num_rotors))
-        object.__setattr__(
-            self,
-            "_rotor_constant",
-            self._as_vector("rotor_constant", rotor_constant),
-        )
-        object.__setattr__(
-            self,
-            "_rolling_moment_coefficient",
-            self._as_vector(
-                "rolling_moment_coefficient",
-                rolling_moment_coefficient,
-            ),
-        )
-        object.__setattr__(self, "_rot_dir", self._as_vector("rot_dir", rot_dir))
-        object.__setattr__(
-            self, "_min_rotor_velocity", self._as_vector("min_rotor_velocity", min_rotor_velocity)
-        )
-        object.__setattr__(
-            self, "_max_rotor_velocity", self._as_vector("max_rotor_velocity", max_rotor_velocity)
-        )
-        drag = np.asarray(linear_drag, dtype=np.float64)
-        if drag.shape != (3,):
-            raise ValueError(f"linear_drag expects shape (3,), got {drag.shape}")
-        drag.setflags(write=False)
-        object.__setattr__(self, "_linear_drag", drag)
-
-    def _as_vector(self, label: str, values: Sequence[float]) -> np.ndarray:
-        array = np.asarray(values, dtype=np.float64)
-        if array.shape != (self.num_rotors,):
-            raise ValueError(f"{label} expects shape ({self.num_rotors},), got {array.shape}")
-        array.setflags(write=False)
-        return array
 
     def _rotor_velocity(self, commands: ActuatorCommands) -> np.ndarray:
         omega_ref = np.asarray(commands.controls, dtype=np.float64)
@@ -205,3 +166,61 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
             body_drag_n=drag,
             rotor_omega_rad_s=omega,
         )
+
+
+def _readonly_array(
+    *, label: str, values: Sequence[float], expected_shape: tuple[int, ...]
+) -> np.ndarray:
+    array = np.array(values, dtype=np.float64, copy=True)
+    if array.shape != expected_shape:
+        raise ValueError(f"{label} expects shape {expected_shape}, got {array.shape}")
+    array.setflags(write=False)
+    return array
+
+
+def create_pegasus_thrust_model(
+    *,
+    num_rotors: int = 4,
+    rotor_constant: Sequence[float] = (_IRIS_ROTOR_CONSTANT,) * 4,
+    rolling_moment_coefficient: Sequence[float] = (_IRIS_ROLLING_MOMENT,) * 4,
+    rot_dir: Sequence[float] = (-1.0, -1.0, 1.0, 1.0),
+    min_rotor_velocity: Sequence[float] = (_IRIS_MIN_ROTOR_VELOCITY,) * 4,
+    max_rotor_velocity: Sequence[float] = (_IRIS_MAX_ROTOR_VELOCITY,) * 4,
+    linear_drag: Sequence[float] = (0.50, 0.30, 0.0),
+) -> PegasusQuadraticThrustModel:
+    """Create a Pegasus-compatible model with copied, read-only coefficients."""
+    rotor_count = int(num_rotors)
+    rotor_shape = (rotor_count,)
+    return PegasusQuadraticThrustModel(
+        num_rotors=rotor_count,
+        _rotor_constant=_readonly_array(
+            label="rotor_constant",
+            values=rotor_constant,
+            expected_shape=rotor_shape,
+        ),
+        _rolling_moment_coefficient=_readonly_array(
+            label="rolling_moment_coefficient",
+            values=rolling_moment_coefficient,
+            expected_shape=rotor_shape,
+        ),
+        _rot_dir=_readonly_array(
+            label="rot_dir",
+            values=rot_dir,
+            expected_shape=rotor_shape,
+        ),
+        _min_rotor_velocity=_readonly_array(
+            label="min_rotor_velocity",
+            values=min_rotor_velocity,
+            expected_shape=rotor_shape,
+        ),
+        _max_rotor_velocity=_readonly_array(
+            label="max_rotor_velocity",
+            values=max_rotor_velocity,
+            expected_shape=rotor_shape,
+        ),
+        _linear_drag=_readonly_array(
+            label="linear_drag",
+            values=linear_drag,
+            expected_shape=(3,),
+        ),
+    )

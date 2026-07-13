@@ -50,16 +50,9 @@ class _FakePort:
 
 
 class _FakeDriver:
-    def __init__(self, params, port, env, *, label=""):
-        self.params = params
-        self.port = port
-        self.env = env
-        self.label = label
+    def __init__(self):
         self.is_done = False
         self.ticks = 0
-
-    def tick(self):
-        self.ticks += 1
 
 
 def _import_orchestrator(monkeypatch):
@@ -86,6 +79,7 @@ def _import_orchestrator(monkeypatch):
 
     fake_commanding = types.ModuleType("robotics_experiments.commanding")
     fake_commanding.CommandAck = object
+    fake_commanding.DriverContext = SimpleNamespace
     fake_commanding.DriverEnvironment = object
     fake_commanding.DriverParams = SimpleNamespace
     fake_commanding.EnvelopeGates = SimpleNamespace
@@ -93,13 +87,12 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.MavlinkCommandPort = _FakePort
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
-    fake_commanding.create_routine_driver = (
-        lambda *, params, port, env, label="", monotonic=None: _FakeDriver(
-            params, port, env, label=label
-        )
-    )
+    fake_commanding.create_routine_driver = lambda *, context: _FakeDriver()
     fake_commanding.routine_driver_is_done = lambda *, state: state.is_done
-    fake_commanding.tick_routine_driver = lambda *, state: state
+    driver_ticks = []
+    fake_commanding.tick_routine_driver = (
+        lambda *, context, state: driver_ticks.append((context, state)) or state
+    )
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
 
     for name in list(sys.modules):
@@ -122,7 +115,11 @@ def _import_orchestrator(monkeypatch):
     px4_bridge = importlib.import_module("robotics_experiments.px4_bridge")
     monkeypatch.setattr(px4_bridge, "IsaacArticulationIO", _FakeObserver)
 
-    return module, SimpleNamespace(spawned=spawned, despawned=despawned)
+    return module, SimpleNamespace(
+        spawned=spawned,
+        despawned=despawned,
+        driver_ticks=driver_ticks,
+    )
 
 
 def _vehicle(vid, prim, xy, *, enabled, steps=()):
@@ -248,8 +245,23 @@ def test_build_drivers_for_every_bridge_enabled_drone(monkeypatch):
     fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
 
     assert [f.spawned.label for f in fleet.flying] == ["drone0", "drone1"]
-    assert fleet.flying[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
-    assert fleet.flying[1].driver.params.steps == []
+    assert fleet.flying[0].context.port.gcs_endpoint == "udp:127.0.0.1:14550"
+    assert fleet.flying[1].context.params.steps == []
+    assert not hasattr(fleet.flying[0], "port")
+
+
+def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+    env = _env(_vehicle(0, "D0", (0.0, 0.0), enabled=True))
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
+    flying = fleet.flying[0]
+
+    fleet = module.tick_drivers(state=fleet)
+
+    assert rec.driver_ticks == [(flying.context, flying.driver)]
+    assert fleet.flying[0].context is flying.context
 
 
 def test_all_done_reflects_flying_drivers(monkeypatch):
@@ -287,7 +299,7 @@ def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
     fleet = replace(module.create_fleet(config=env), stage=object())
     fleet = module.spawn_fleet(state=fleet)
     fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
-    ports = [flying.port for flying in fleet.flying]
+    ports = [flying.context.port for flying in fleet.flying]
     observer = fleet.drones[0].observer
 
     fleet = module.teardown(state=fleet)
