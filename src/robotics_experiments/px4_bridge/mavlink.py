@@ -1,13 +1,12 @@
-"""Flight-stack port interface and the PX4 MAVLink adapter.
+"""PX4 simulator MAVLink port.
 
-The port is the seam between the bridge and whatever flight stack is on the
-other side. Components above the port (``Px4Bridge``) speak only
-``VehicleState`` in / rotor references out, so they can be paired with a fake
-port for staged testing without PX4 running.
+The port is the PX4-specific lockstep seam: ``Px4Bridge`` passes
+``VehicleState`` in and receives rotor references out. Tests subclass it with
+an inert fake so bridge orchestration can be staged without PX4 running.
 
-The concrete ``Px4MavlinkPort`` wraps Pegasus' ``PX4MavlinkBackend`` for the
-heavy lifting (socket, MAVLink packing, PX4 launch, actuator scaling) while
-preserving custom timeout and sim-time handling.
+``Px4MavlinkPort`` wraps Pegasus' ``PX4MavlinkBackend`` for the heavy lifting
+(socket, MAVLink packing, PX4 launch, actuator scaling) while preserving custom
+timeout and sim-time handling.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from typing import Optional
 import numpy as np
 
 import robotics_experiments.px4_bridge.frames as frames
-from robotics_experiments.px4_bridge._flight_stack import _AbstractFlightStackBridge
 from robotics_experiments.px4_bridge._pegasus_sensors import (
     _DEFAULT_SENSOR_RATE_HZ,
     _PegasusSensorSuite,
@@ -104,7 +102,7 @@ def _configure_file_logging(
     return resolved
 
 
-class Px4MavlinkPort(_AbstractFlightStackBridge):
+class Px4MavlinkPort:
     """PX4 SITL adapter over Pegasus' ``PX4MavlinkBackend``.
 
     Differences from a raw ``PX4MavlinkBackend.update(dt)`` call:
@@ -372,8 +370,7 @@ class Px4MavlinkPort(_AbstractFlightStackBridge):
         heartbeat, or on a sensor-cadence failure.
 
         ``send`` strictly precedes its paired ``poll`` within a vehicle; see
-        :meth:`_AbstractFlightStackBridge.exchange` for the single-vehicle
-        send-then-poll composition.
+        :meth:`exchange` for the single-vehicle send-then-poll composition.
         """
         if not self.is_connected:
             return self._zeros()
@@ -406,6 +403,16 @@ class Px4MavlinkPort(_AbstractFlightStackBridge):
         if not self._actuator_phase(self._pending_poll_sim_time_us):
             return self._zeros()
         return self._references()
+
+    def exchange(self, state: VehicleState) -> ActuatorCommands:
+        """Send sensors derived from ``state``, then poll for the actuator.
+
+        This is the single-vehicle convenience that composes one causal tick.
+        Multi-vehicle callers drive :meth:`send` and :meth:`poll` separately so
+        every vehicle sends before any vehicle blocks for its actuator response.
+        """
+        result = self.send(state)
+        return self.poll() if result is None else result
 
     # ---- Internals ---------------------------------------------------------
 

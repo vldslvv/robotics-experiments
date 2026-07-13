@@ -191,7 +191,8 @@ the current contents and the intended home for that kind of code.
   `{kind: goto}` / `{kind: policy}` behavior, or driver orchestration.
 - `commanding` mirrors the PX4 bridge as a pure contract
   (`RoutineObservation` -> `decide(...)` -> `RoutineDecision` over
-  `AbstractCommandPort`) and must stay import-clean with Isaac/pymavlink absent.
+  the PX4-specific `MavlinkCommandPort`) and must stay import-clean with
+  Isaac/pymavlink absent.
 - `decide` and completion/invariant predicates are pure. The port is the only
   MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
   bridge simulator port.

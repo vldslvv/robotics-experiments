@@ -21,8 +21,9 @@ Add `robotics_experiments.commanding` as the high-level control layer, built as 
 
 - `RoutineObservation` (pure input) -> `decide(routine, state, observation)`
   (pure stepper) -> `RoutineDecision` (`SEND`/`STREAM`/`WAIT`/`ADVANCE`/`DONE`/
-  `FAIL`) across the `AbstractCommandPort` seam, with `VehicleCommander` and the
-  per-drone `RoutineDriver` as orchestrators (analogues of `commands_to_dynamics`
+  `FAIL`) across the PX4-specific `MavlinkCommandPort` seam, with
+  `VehicleCommander` and the per-drone `RoutineDriver` as orchestrators
+  (analogues of `commands_to_dynamics`
   / the `Px4MavlinkPort` lockstep seam / `BridgeHost`).
 - It is a **domain leaf on the core import path**: no module imports Isaac or
   pymavlink at module scope (the concrete `MavlinkCommandPort` imports `pymavlink`

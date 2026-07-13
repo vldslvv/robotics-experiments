@@ -1,7 +1,7 @@
 """The pure per-drone routine driver - one driver executes one drone's routine.
 
 :class:`RoutineDriver` is a non-blocking, tick-driven phase machine that takes a
-single drone's routine plus a :class:`AbstractCommandPort` and drives it from
+single drone's routine plus a :class:`MavlinkCommandPort` and drives it from
 fresh GCS link to a completed (or stopped) routine. It knows only its own drone:
 there is no fleet object and no cross-drone synchronization. Both workflows run
 the *same* driver - the live extension ticks it from the Kit app-update stream,
@@ -37,7 +37,7 @@ from robotics_experiments.commanding._routine_model import (
 )
 from robotics_experiments.commanding._routine_predicates import EnvelopeGates
 from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
-from robotics_experiments.commanding.port import AbstractCommandPort
+from robotics_experiments.commanding.port import MavlinkCommandPort
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,
@@ -192,7 +192,7 @@ class RoutineDriver:
     """Drives one drone's routine across one port via a tick-driven phase machine.
 
     Construct with the per-drone :class:`DriverParams`, an
-    :class:`AbstractCommandPort` (not yet connected; the driver connects it), and
+    :class:`MavlinkCommandPort` (not yet connected; the driver connects it), and
     a :class:`DriverEnvironment`. Call :meth:`tick` once per control frame; the
     adapter owns the shared sim/tick cadence (a blocking ``simulation_app.update()``
     loop or the Kit app-update stream) and never the bridge's physics legs.
@@ -201,7 +201,7 @@ class RoutineDriver:
     def __init__(
         self,
         params: DriverParams,
-        port: AbstractCommandPort,
+        port: MavlinkCommandPort,
         env: DriverEnvironment,
         *,
         label: str = "",

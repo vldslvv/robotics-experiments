@@ -24,9 +24,9 @@ from typing import Optional, Sequence
 import numpy as np
 
 import robotics_experiments.px4_bridge.frames as frames
-from robotics_experiments.px4_bridge._flight_stack import _AbstractFlightStackBridge
 from robotics_experiments.px4_bridge._simulator import _ArticulationIO
 from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
+from robotics_experiments.px4_bridge.mavlink import Px4MavlinkPort
 from robotics_experiments.px4_bridge.thrust_model import RotorDynamics, RotorThrustModel
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
@@ -61,7 +61,7 @@ class Px4Bridge:
         articulation_path: str,
         rotor_link_paths,
         thrust_model: RotorThrustModel,
-        port: _AbstractFlightStackBridge,
+        port: Px4MavlinkPort,
         articulation_io: Optional[_ArticulationIO] = None,
         max_tilt_angle_deg: float = 180.0,
         rotor_spin_visual_scale: float = 0.03,

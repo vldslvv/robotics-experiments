@@ -34,7 +34,7 @@ from robotics_experiments.commanding.observation import (
     CommandAck,
     RoutineObservation,
 )
-from robotics_experiments.commanding.port import AbstractCommandPort, MavlinkCommandPort
+from robotics_experiments.commanding.port import MavlinkCommandPort
 from robotics_experiments.commanding.routine import (
     DecisionKind,
     EnvelopeGates,
@@ -61,7 +61,6 @@ from robotics_experiments.commanding.routine import (
 )
 
 __all__ = [
-    "AbstractCommandPort",
     "AttitudeRateSetpoint",
     "CommandAck",
     "DecisionKind",

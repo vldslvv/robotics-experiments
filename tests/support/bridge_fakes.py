@@ -9,6 +9,7 @@ import numpy as np
 from robotics_experiments.px4_bridge import (
     ActuatorCommands,
     BridgeStatus,
+    Px4MavlinkPort,
     RotorDynamics,
     VehicleState,
 )
@@ -52,7 +53,7 @@ class _FakeArticulationIO:
         self.spin_updates.append((np.asarray(rotor_omega_rad_s, dtype=np.float64), float(dt)))
 
 
-class _FakeFlightStack:
+class _FakeFlightStack(Px4MavlinkPort):
     def __init__(self, commands):
         self.commands = np.asarray(commands, dtype=np.float64)
         self.started = False

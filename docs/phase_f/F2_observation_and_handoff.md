@@ -17,7 +17,8 @@ Why this exists: the policy must observe a normalized, task-relative observation
 never raw sensors and never simulator internals -- so the data source can change
 (ground truth -> synthetic noise in F5 -> sensors in Phase G) without changing the
 policy input. This is the same pattern as the bridge/command seam (pure `decide`
-over `AbstractCommandPort`); see `docs/COMMAND_ROUTINE_CONTRACT.md`.
+over the PX4-specific `MavlinkCommandPort`); see
+`docs/COMMAND_ROUTINE_CONTRACT.md`.
 
 ---
 

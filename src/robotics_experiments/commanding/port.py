@@ -1,11 +1,11 @@
 """The side-effecting command seam (mirrors the ``Px4MavlinkPort`` lockstep seam).
 
-:class:`AbstractCommandPort` is the swappable boundary the orchestrators talk
-across: the private commander only ever calls :meth:`send`, and the driver pumps
-heartbeats and drains feedback. :class:`MavlinkCommandPort` is the
-PX4 implementation over a GCS MAVLink link (the resolved ``vehicle.gcs_port``);
-its ``pymavlink`` import is function-scoped so importing ``commanding`` never
-pulls in the MAVLink runtime, exactly as the standalone scenario did inline.
+:class:`MavlinkCommandPort` is the PX4-specific boundary the orchestrators talk
+across: the private commander sends MAVLink commands and OFFBOARD setpoints, and
+the driver pumps GCS heartbeats and drains feedback. It uses the resolved
+``vehicle.gcs_port``; its ``pymavlink`` import is function-scoped so importing
+``commanding`` never pulls in the MAVLink runtime, exactly as the standalone
+scenario did inline.
 
 The command port is a separate *control* layer by design: it talks the GCS link,
 never the bridge's simulator MAVLink port. The bridge contract forbids the
@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import math
 import time
-from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from robotics_experiments.commanding.commands import (
@@ -30,7 +29,7 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["AbstractCommandPort", "MavlinkCommandPort"]
+__all__ = ["MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,65 +67,7 @@ _ARM_ACCEPTED_STATUSTEXT = "Armed by external command"
 _FAILSAFE_SYSTEM_STATUS = frozenset({5, 6, 8})
 
 
-class AbstractCommandPort(ABC):
-    """Stage-able seam between the command orchestrators and a flight stack link.
-
-    Lifecycle: :meth:`connect` opens the link, :meth:`disconnect` closes it. Per
-    tick the driver calls :meth:`pump_heartbeat` (throttled GCS heartbeat) and
-    :meth:`poll_feedback` (drain inbound MAVLink, return the latest ack), while
-    the commander calls :meth:`send` when a routine step begins.
-    """
-
-    @abstractmethod
-    def connect(self) -> None: ...
-
-    @abstractmethod
-    def disconnect(self) -> None: ...
-
-    @abstractmethod
-    def pump_heartbeat(self, *, force: bool = False) -> None: ...
-
-    @abstractmethod
-    def send(self, command: MavlinkCommand) -> None: ...
-
-    @abstractmethod
-    def send_setpoint(self, setpoint: PositionSetpoint) -> None:
-        """Stream one OFFBOARD position-plus-yaw setpoint to the flight stack."""
-
-    @abstractmethod
-    def send_velocity_setpoint(self, setpoint: VelocitySetpoint) -> None:
-        """Stream one OFFBOARD body-velocity setpoint (the ``velocity`` deploy path)."""
-
-    @abstractmethod
-    def send_attitude_target(self, setpoint: AttitudeRateSetpoint) -> None:
-        """Stream one OFFBOARD collective-thrust + body-rate setpoint (``ctbr`` deploy)."""
-
-    @abstractmethod
-    def poll_feedback(self) -> Optional[CommandAck]:
-        """Drain inbound MAVLink and return the most recent ack this tick."""
-
-    @property
-    @abstractmethod
-    def is_handshaked(self) -> bool:
-        """Whether the target system/component has been learned from a heartbeat."""
-
-    @property
-    @abstractmethod
-    def failsafe(self) -> bool:
-        """Whether the last drained heartbeat reported a failsafe system status."""
-
-    @property
-    @abstractmethod
-    def failsafe_system_status(self) -> int:
-        """The last heartbeat ``system_status`` value (for failsafe diagnostics)."""
-
-    @property
-    @abstractmethod
-    def latest_global_position(self) -> Optional[tuple[float, float, float]]:
-        """Latest ``(latitude_deg, longitude_deg, altitude_m)`` telemetry, or ``None``."""
-
-
-class MavlinkCommandPort(AbstractCommandPort):
+class MavlinkCommandPort:
     """PX4 command port over a GCS MAVLink (UDP) endpoint.
 
     Absorbs the GCS-link concerns previously inline in the standalone takeoff

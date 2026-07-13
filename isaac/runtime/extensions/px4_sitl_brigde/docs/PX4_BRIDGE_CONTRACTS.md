@@ -300,9 +300,8 @@ class LockstepSettings:
     first_actuator_timeout_s; max_sustained_actuator_lag_s
     heartbeat_rate_hz; physics_rate_hz
 
-# The flight-stack port behavior: the lockstep seam (Pegasus stays hidden behind it).
-# Implemented by Px4MavlinkPort; the local structural protocol is private.
-class _AbstractFlightStackBridge:
+# The PX4 flight-stack port: the lockstep seam (Pegasus stays hidden behind it).
+class Px4MavlinkPort:
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
@@ -333,7 +332,7 @@ class Px4Bridge:
         articulation_path: str,         # USD path to drone root
         rotor_link_paths: list[str],    # discovered rotor marker paths in PX4 motor-index order
         thrust_model: RotorThrustModel,
-        port: _AbstractFlightStackBridge,
+        port: Px4MavlinkPort,
         articulation_io: _ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
         max_tilt_angle_deg: float = 180.0,              # zeros forces past this tilt; 180 = disabled
         rotor_spin_visual_scale: float = 0.03,          # cosmetic-only spin scale; passed to the default IsaacArticulationIO

@@ -222,7 +222,6 @@ def test_commanding_public_api_contract_is_explicit():
     commanding = importlib.import_module("robotics_experiments.commanding")
 
     assert commanding.__all__ == [
-        "AbstractCommandPort",
         "AttitudeRateSetpoint",
         "CommandAck",
         "DecisionKind",

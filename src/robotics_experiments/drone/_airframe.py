@@ -6,7 +6,7 @@ import math
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import numpy as np
 from hydra import compose, initialize_config_dir
@@ -257,7 +257,10 @@ def load_builder_config(
         GlobalHydra.instance().clear()
     with initialize_config_dir(config_dir=str(hydra_config_dir), version_base=None):
         cfg = compose(config_name=config_name, overrides=overrides or [])
-    return _builder_config(OmegaConf.to_container(cfg, resolve=True))
+    data = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(data, dict) or not all(isinstance(key, str) for key in data):
+        raise TypeError("USD builder config root must be a string-keyed mapping")
+    return _builder_config(cast(dict[str, Any], data))
 
 
 def _airframe_config_dir(config_dir: str | os.PathLike[str] = CONFIG_DIR) -> Path:

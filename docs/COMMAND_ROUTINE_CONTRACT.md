@@ -24,7 +24,7 @@ the package `__init__` because `RoutineDriver` is the public executor.
 | `VehicleState` (pure input) | `RoutineObservation` (pure input) |
 | `commands_to_dynamics` (pure transform) | `decide(...)` (pure stepper) |
 | `RotorDynamics` (pure output) | `RoutineDecision` (pure output) |
-| `Px4MavlinkPort` lockstep seam | `AbstractCommandPort` (seam) |
+| `Px4MavlinkPort` lockstep seam | `MavlinkCommandPort` (GCS control seam) |
 | `Px4Bridge` / `BridgeHost` (orchestrators) | `RoutineDriver` |
 
 Like the bridge, the command layer is **per drone**: one `RoutineDriver` drives
@@ -126,10 +126,10 @@ one drone's routine. There is no fleet object - drones are independent
   reacts in kind: the strict driver maps `ENVELOPE` to its instability error,
   `FAILSAFE` to `Px4FailsafeDetected`, and the rest to a plain assertion; a
   forgiving driver logs any of them and stops.
-- **`port.py`** -- `AbstractCommandPort` (the seam: `connect`, `disconnect`,
-  `pump_heartbeat`, `send`, `send_setpoint`, `send_velocity_setpoint`,
-  `send_attitude_target`, `poll_feedback`) and the PX4
-  `MavlinkCommandPort`, whose `pymavlink` import is function-scoped. The port
+- **`port.py`** -- the PX4-specific `MavlinkCommandPort` (the side-effect seam:
+  `connect`, `disconnect`, `pump_heartbeat`, `send`, `send_setpoint`,
+  `send_velocity_setpoint`, `send_attitude_target`, `poll_feedback`), whose
+  `pymavlink` import is function-scoped. The port
   absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
   send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
   `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes `is_handshaked`,
@@ -152,7 +152,7 @@ one drone's routine. There is no fleet object - drones are independent
 - **`driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
-  `AbstractCommandPort` and a `DriverEnvironment` (the injected seam: bridge
+  `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
   connectivity, sim time, observation assembly, `log`, `on_failure`,
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
   stopped) routine. It imports no Isaac/pymavlink; the wall-clock backstop uses an

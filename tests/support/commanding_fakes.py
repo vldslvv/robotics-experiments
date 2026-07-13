@@ -2,14 +2,15 @@
 
 import numpy as np
 
+from robotics_experiments.commanding import MavlinkCommandPort
 from robotics_experiments.px4_bridge import BridgeStatus, VehicleState
 from tests.support.fakes import _quat_pitch_deg, _quat_yaw_deg
 
 __all__ = ["FakeCommandPort", "FakeDriverEnvironment", "make_routine_observation"]
 
 
-class FakeCommandPort:
-    """An :class:`AbstractCommandPort` for the pure command-layer / driver tests.
+class FakeCommandPort(MavlinkCommandPort):
+    """An inert :class:`MavlinkCommandPort` for command-layer / driver tests.
 
     Captures the ``MavlinkCommand``s emitted on ``SEND`` and lets a test script
     the control-feedback the driver reads through the seam: queue acks via
