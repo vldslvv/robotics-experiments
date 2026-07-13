@@ -1,0 +1,2 @@
+defaults: [base]
+spawn: {usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda}

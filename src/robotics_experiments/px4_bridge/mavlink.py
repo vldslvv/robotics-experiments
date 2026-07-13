@@ -146,7 +146,7 @@ class Px4MavlinkPort:
         """Initialize the port. No socket is opened until :meth:`start`.
 
         ``port`` is the fully resolved simulator MAVLink TCP port (the caller
-        passes ``ResolvedVehicle.mavlink_port``); it is handed to the vendored
+        passes ``VehicleConfig.mavlink_port``); it is handed to the vendored
         Pegasus backend as its ``connection_baseport`` with a zero ``vehicle_id``
         offset, so no ``baseport + id`` arithmetic happens here. ``vehicle_id``
         is the resolved vehicle ``id`` used only as the per-vehicle log identity.

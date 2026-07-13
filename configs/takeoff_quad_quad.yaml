@@ -1,26 +1,29 @@
 defaults:
   - base
-  - override experiment/routine@routine: takeoff
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - experiment/vehicle@vehicles.x500_02: holybro_x500_v2
+  - override experiment/routine@vehicles.x500_01.routine: takeoff
+  - override experiment/routine@vehicles.x500_02.routine: takeoff
   - _self_
 
 # Dual-PX4 multi-drone takeoff experiment. Selects the shared `takeoff` routine
-# (scene + flight-envelope gates) and overrides the vehicles list below.
+# (scene + flight-envelope gates) independently for both vehicles below.
 #
 # Two drones, each bound to its own PX4 SITL instance: id 0/1 -> derived
-# simulator ports 4560/4561, GCS links px4.gcs_baseport + id (14550/14551).
+# simulator ports 4560/4561, GCS links bridge.gcs_baseport + id (14550/14551).
 # id is the PX4 numeric identity; the ports and the per-vehicle {vehicle} log
 # token are all derived from it. ros.namespace is the explicit ROS identity.
-# Distinct prim_name avoids prim collisions; the px4 default debug_log_path
+# Distinct prim_name avoids prim collisions; the bridge debug_log_path
 # carries the {vehicle} token so the two bridge logs never collide. Spawned ~4m
 # apart so the drones never cross within the hover envelope.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 vehicles:
-  - id: 0
+  x500_01:
+    id: 0
     ros: {namespace: /x500_01}
-    spawn_xy: [0.0, 0.0]
-    drone: {prim_name: Drone0}
-  - id: 1
+    spawn: {position_xy: [0.0, 0.0], prim_name: Drone0}
+  x500_02:
+    id: 1
     ros: {namespace: /x500_02}
-    spawn_xy: [4.0, 0.0]
-    drone: {prim_name: Drone1}
+    spawn: {position_xy: [4.0, 0.0], prim_name: Drone1}

@@ -285,8 +285,8 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     assert config.__all__ == [
         "BoundingBox",
         "DriverConfig",
-        "DroneConfig",
-        "EnvConfig",
+        "DroneSpawnConfig",
+        "ExperimentConfig",
         "LightSwitchConfig",
         "LightSwitchStatePublisherConfig",
         "LockstepConfig",
@@ -296,19 +296,18 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
         "PressTaskConfig",
         "Px4BridgeConfig",
         "Px4SitlLaunchConfig",
-        "ResolvedVehicle",
         "RlConfig",
         "RlTrainingConfig",
         "RosQosConfig",
         "RosVehicleConfig",
         "RoutineConfig",
+        "RoutineStepConfig",
         "SimSettings",
         "VehicleConfig",
         "get_config",
         "get_enabled_px4_launch_configs",
         "load_config",
         "reset_config_cache",
-        "resolve_drone_bridge_config",
     ]
 
     simulation = importlib.import_module("robotics_experiments.simulation")

@@ -58,6 +58,10 @@ reproduces the commanded wrench.
 
 Shared RL training scale and the RL action level live in the Hydra `rl` group
 with matching bare annotations in `src/robotics_experiments/config/types.py`.
+`rl.training.vehicle_id` selects the experiment vehicle whose spawn asset and
+airframe-enriched bridge dynamics configure the Lab task; selection fails when
+the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
+because Lab deliberately bypasses PX4.
 The physics decimation is derived as
 `round(sim.physics_hz / rl.policy_rate_hz)`, not authored, and the hover task's
 reward/termination/reset values are the `rl.press.hover_task` block (task

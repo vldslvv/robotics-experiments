@@ -61,7 +61,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
     `physics_decimation: int`, `policy_rate_hz: float`). Later plans append
     `observation`, `handoff`, `reward`, `reset`, `curriculum`, `randomization`,
     `perception`.
-  - Add `press: RlConfig` to `EnvConfig` and to its `__all__`-adjacent field
+  - Add `press: RlConfig` to `ExperimentConfig` and to its `__all__`-adjacent field
     list; add `RlConfig`, `PressActionConfig` to the module `__all__`.
 - Action: edit `src/robotics_experiments/config/_schemas.py::_register_schemas`:
   add `cs.store(group="experiment/rl", name="base_press", node=RlConfig)`.

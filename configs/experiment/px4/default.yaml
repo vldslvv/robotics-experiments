@@ -4,7 +4,7 @@ defaults:
 # Enabled by default for the custom Isaac bridge workflow.
 enabled: true
 
-# Empty -> drone_spawner derives the path as <default_prim>/<drone.prim_name>.
+# Empty -> the orchestrator uses <default_prim>/<spawn.prim_name>.
 articulation_path: ""
 
 # Pegasus actuator scaling: PX4 controls -> rotor angular velocity references.
@@ -27,12 +27,12 @@ linear_drag: [0.50, 0.30, 0.0]
 connection_type: tcpin
 connection_ip: localhost
 # Base port; the per-vehicle simulator port is connection_baseport + vehicle.id
-# (derived in config.loading._resolve_fleet). There is no per-vehicle vehicle_id
+# (derived during config loading). There is no per-vehicle vehicle_id
 # knob: id is the PX4 numeric identity.
 connection_baseport: 4560
 # Base UDP port for the per-vehicle GCS MAVLink link; the resolved per-vehicle
-# port is gcs_baseport + vehicle.id (derived in config.loading._resolve_fleet onto
-# ResolvedVehicle.gcs_port), parallel to connection_baseport. Used by
+# port is gcs_baseport + vehicle.id (derived onto VehicleConfig.gcs_port),
+# parallel to connection_baseport. Used by
 # control/test code (the standalone takeoff GCS endpoint); the bridge does not
 # use it.
 gcs_baseport: 14550

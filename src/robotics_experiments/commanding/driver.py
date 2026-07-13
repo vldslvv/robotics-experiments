@@ -118,7 +118,7 @@ class DriverParams:
 
         Both are duck-typed (fields read by name) so the pure ``commanding``
         layer never imports ``config``; both Isaac-side adapters call this with
-        a per-vehicle ``ResolvedVehicle.routine`` and the global ``driver``
+        a per-vehicle ``VehicleConfig.routine`` and the global ``driver``
         execution-heuristics group. The home anchor comes from the per-vehicle
         ``px4`` group (passed by the orchestrator), not the routine.
         """

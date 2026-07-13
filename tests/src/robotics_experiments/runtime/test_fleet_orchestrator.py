@@ -108,12 +108,10 @@ def _import_orchestrator(monkeypatch):
     despawned: list = []
     fake_drone = types.ModuleType("robotics_experiments.drone")
     fake_drone.spawn_drone = (
-        lambda stage, config=None, *, position=None, yaw=0.0: spawned.append(
-            (config.prim_name, position)
-        )
+        lambda *, stage, config: spawned.append((config.prim_name, config.position_xy))
         or f"/World/{config.prim_name}"
     )
-    fake_drone.despawn_drone = lambda stage, config=None: despawned.append(config.prim_name)
+    fake_drone.despawn_drone = lambda *, stage, config: despawned.append(config.prim_name)
     monkeypatch.setitem(sys.modules, "robotics_experiments.drone", fake_drone)
 
     fake_px4 = types.ModuleType("robotics_experiments.px4_bridge")
@@ -127,10 +125,8 @@ def _import_orchestrator(monkeypatch):
 def _vehicle(vid, prim, xy, *, enabled, steps=()):
     return SimpleNamespace(
         id=vid,
-        prim_name=prim,
-        spawn_xy=xy,
-        drone=SimpleNamespace(prim_name=prim),
-        px4=SimpleNamespace(
+        spawn=SimpleNamespace(prim_name=prim, position_xy=xy),
+        bridge=SimpleNamespace(
             enabled=enabled,
             articulation_path=None,
             connection_type="tcpin",
@@ -154,7 +150,7 @@ def _env(*vehicles):
     return SimpleNamespace(
         scene="@scene.usd",
         sim=SimpleNamespace(physics_hz=250.0),
-        vehicles=list(vehicles),
+        vehicles={f"drone{vehicle.id}": vehicle for vehicle in vehicles},
         driver=SimpleNamespace(
             goto_min_heading_dist_m=0.25,
             prearm_backstop_floor_s=20.0,
@@ -183,7 +179,7 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
     # The host receives the bridge config as one component plus the derived
     # identity straight from the resolved vehicle (never recomputed).
     params = orch.bridged[0].host.params
-    assert params.px4 is env.vehicles[0].px4
+    assert params.bridge is env.vehicles["drone0"].bridge
     assert params.vehicle_id == 0
     assert params.mavlink_port == 4560
     assert params.debug_log_path == "/logs/0_bridge.log"

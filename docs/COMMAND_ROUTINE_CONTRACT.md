@@ -181,7 +181,7 @@ its own wall-clock backstop for a fully stalled sim.
 ## `gcs_port` is control, not bridge
 
 The command port talks the per-drone GCS MAVLink link
-(`ResolvedVehicle.gcs_port = px4.gcs_baseport + id`) **only**. It never touches
+(`VehicleConfig.gcs_port = bridge.gcs_baseport + id`) **only**. It never touches
 the bridge's simulator MAVLink port or its sensor/actuator lockstep, and
 symmetrically the bridge contract forbids the bridge touching `gcs_port`. The
 commander/driver is a separate control layer by design; it is ticked from the
@@ -232,22 +232,17 @@ the live path. The `post_takeoff_hook` (negative-test fault injection) is wired 
 the first drone's `on_step_advanced` and fires when the takeoff step completes, so
 the hover step's envelope catches the resulting instability.
 
-**Config is the single source of truth, per drone.** The Hydra `routine` group
-(`RoutineConfig`, always composed onto `EnvConfig`) carries `steps` plus the
-control-flow tunables **and the flight-envelope gates** (`max_*` / `hover_max_*`,
-the takeoff target/timeout, and the hover settle). There is no separate
-`integration_test` group: the integration test is just this routine driven with
-`--strict`. The routine is **per vehicle**: each `vehicles[]` entry may carry a
-`routine` partial, merged over the global `routine` exactly like `drone`/`px4` in
-the config package's fleet resolution (the resolved `RoutineConfig` lands on
-`ResolvedVehicle.routine`). `routine.steps` is the per-drone on/off switch: a
-drone whose resolved `steps` is non-empty
+**Config is the single source of truth, per drone.** Hydra composes a complete
+`RoutineConfig` beneath every `vehicles.<label>` node. It carries typed `steps`,
+control-flow tunables, and flight-envelope gates. There is no root routine or
+separate integration-test group: strict mode drives the same per-vehicle routine.
+`routine.steps` is the per-drone on/off switch: a drone whose steps are non-empty
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
 `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
 `{kind: land, timeout_s}`)
-gets a `RoutineDriver`; empty (the global default) means manual. Mixed fleets are
+gets a `RoutineDriver`; empty means manual. Mixed fleets are
 allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,

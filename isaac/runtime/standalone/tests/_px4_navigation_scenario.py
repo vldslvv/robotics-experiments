@@ -48,7 +48,7 @@ def _has_goto_hover_transition(steps: list[Any]) -> bool:
 
 def _assert_navigation_routine_config(context: SceneTestContext, test_name: str) -> None:
     env = get_config()
-    flying = [vehicle for vehicle in env.vehicles if vehicle.routine.steps]
+    flying = [vehicle for vehicle in env.vehicles.values() if vehicle.routine.steps]
     if not flying:
         raise AssertionError(f"{test_name}: active Hydra config has no flying vehicles")
 

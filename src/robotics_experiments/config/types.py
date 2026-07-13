@@ -5,14 +5,12 @@ Internal config modules may import this aggregator when they need the complete
 schema graph; individual schema ownership lives in the private modules.
 """
 
-from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
-from robotics_experiments.config._environment import EnvConfig
+from robotics_experiments.config._commanding import DriverConfig, RoutineConfig, RoutineStepConfig
+from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import (
     LockstepConfig,
     Px4BridgeConfig,
     Px4SitlLaunchConfig,
-    ResolvedVehicle,
-    VehicleConfig,
 )
 from robotics_experiments.config._rl import (
     PressActionConfig,
@@ -24,7 +22,7 @@ from robotics_experiments.config._rl import (
 )
 from robotics_experiments.config._scene import (
     BoundingBox,
-    DroneConfig,
+    DroneSpawnConfig,
     LightSwitchConfig,
     LightSwitchStatePublisherConfig,
     RosQosConfig,
@@ -35,8 +33,8 @@ from robotics_experiments.config._simulation import SimSettings
 __all__ = [
     "BoundingBox",
     "DriverConfig",
-    "DroneConfig",
-    "EnvConfig",
+    "DroneSpawnConfig",
+    "ExperimentConfig",
     "LightSwitchConfig",
     "LightSwitchStatePublisherConfig",
     "LockstepConfig",
@@ -46,12 +44,12 @@ __all__ = [
     "PressTaskConfig",
     "Px4BridgeConfig",
     "Px4SitlLaunchConfig",
-    "ResolvedVehicle",
     "RlConfig",
     "RlTrainingConfig",
     "RosQosConfig",
     "RosVehicleConfig",
     "RoutineConfig",
+    "RoutineStepConfig",
     "SimSettings",
     "VehicleConfig",
 ]

@@ -160,6 +160,7 @@ class RlTrainingConfig(_FreezableConfig):
     """
 
     task_id: str
+    vehicle_id: int
     policy_name: str
     max_iterations: int
     num_steps_per_env: int

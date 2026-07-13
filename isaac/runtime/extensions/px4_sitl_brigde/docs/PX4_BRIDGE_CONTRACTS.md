@@ -394,10 +394,10 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 | Connections per vehicle | 1 |
 
 **Multi-vehicle:** a scene may host N vehicles (the top-level `vehicles:` config
-list). `id` is the sole authored identity; one pure enrichment step
+mapping). `id` is the sole numeric identity; one enrichment step
 derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
-into an immutable `ResolvedVehicle`. The fleet runtime (`FleetOrchestrator`) then
+on the immutable `VehicleConfig`. The fleet runtime (`FleetOrchestrator`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
 simulator port (the resolved `mavlink_port = 4560 + id`) and its own `SimClock`.
 The `Px4MavlinkPort` takes that resolved `port` directly (handed to the vendored

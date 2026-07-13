@@ -1,6 +1,7 @@
 defaults:
   - base
-  - override experiment/routine@routine: policy_hover
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - override experiment/routine@vehicles.x500_01.routine: policy_hover
   - _self_
 
 # Single-drone F2b task->policy pipeline experiment: arm -> takeoff -> trained
@@ -14,6 +15,7 @@ defaults:
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 vehicles:
-  - id: 0
+  x500_01:
+    id: 0
     ros: {namespace: /x500_01}
-    spawn_xy: [0.0, 0.0]
+    spawn: {position_xy: [0.0, 0.0]}

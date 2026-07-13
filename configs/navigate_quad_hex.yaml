@@ -1,5 +1,7 @@
 defaults:
   - base
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - experiment/vehicle@vehicles.s550_01: hexacopter_s550
   - _self_
 
 # Dual-PX4 multi-drone absolute-waypoint navigation experiment. A quad (id 0,
@@ -19,14 +21,11 @@ defaults:
 
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
-routine:
-  steps: []
-
 vehicles:
-  - id: 0
+  x500_01:
+    id: 0
     ros: {namespace: /x500_01}
-    spawn_xy: [0.0, -2.0]
-    drone: {prim_name: Drone0}
+    spawn: {position_xy: [0.0, -2.0], prim_name: Drone0}
     routine:
       steps:
         - kind: arm
@@ -49,11 +48,11 @@ vehicles:
           hold_s: 2.0
         - kind: land
           timeout_s: 30.0
-  - id: 1
+  s550_01:
+    id: 1
     ros: {namespace: /s550_01}
-    spawn_xy: [4.0, -2.0]
-    drone:
-      usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda
+    spawn:
+      position_xy: [4.0, -2.0]
       prim_name: Hexacopter0
     routine:
       steps:

@@ -1,55 +1,43 @@
-from dataclasses import dataclass
-from typing import Any, List
+from dataclasses import dataclass, field
+from typing import Dict
 
 from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
 from robotics_experiments.config._immutability import _FreezableConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import RlConfig
-from robotics_experiments.config._scene import DroneConfig, LightSwitchConfig
+from robotics_experiments.config._scene import (
+    DroneSpawnConfig,
+    LightSwitchConfig,
+    RosVehicleConfig,
+)
 from robotics_experiments.config._simulation import SimSettings
 
-__all__ = ["EnvConfig"]
+__all__ = ["ExperimentConfig", "VehicleConfig"]
 
 
 @dataclass
-class EnvConfig(_FreezableConfig):
-    """Composite experiment config consumed by the Isaac Sim extensions.
+class VehicleConfig(_FreezableConfig):
+    """Complete authored and derived configuration for one vehicle."""
 
-    Attributes:
-        sim: Simulation-level settings (physics, rendering, gravity).
-        drone: Drone spawner configuration.
-        switches: Light-switch spawner configuration.
-        px4: PX4 SITL bridge configuration.
-        rl: Shared RL training/scale/action config plus nested task config.
-        scene: USD scene to load for this experiment. ``@``-prefixed paths are
-            repository-relative. Every experiment (test or not) sets a scene;
-            the standalone runner uses it when not given an explicit ``--scene``.
-        vehicles: Multi-vehicle scaffolding. Each entry merges its ``drone`` /
-            ``px4`` partial over the global ``drone`` / ``px4`` defaults above.
-            The list is the only spawn path (one vehicle = a one-element list;
-            an empty list is a valid empty fleet).
+    id: int
+    ros: RosVehicleConfig
+    spawn: DroneSpawnConfig
+    bridge: Px4BridgeConfig
+    routine: RoutineConfig
+    mavlink_port: int = field(init=False, default=0)
+    px4_instance_index: int = field(init=False, default=0)
+    gcs_port: int = field(init=False, default=0)
+    ros_frame_prefix: str = field(init=False, default="")
+    debug_log_path: str = field(init=False, default="")
 
-            Typing note: the annotation is intentionally ``List[Any]`` so Hydra's
-            structured-config validation accepts the *partial* YAML entries
-            during ``compose()``. The loader replaces the raw dicts with a
-            fully enriched, validated ``tuple[ResolvedVehicle, ...]`` and
-            freezes the complete graph before returning it.
-        routine: High-level flight routine plus its verification gates (see
-            :class:`RoutineConfig`). Always present; an empty ``routine.steps``
-            means manual operation, a non-empty list makes every workflow
-            arm/take-off/verify the fleet. The integration test is just this
-            routine driven in strict mode.
-        driver: Routine-execution driver heuristics (see :class:`DriverConfig`):
-            the ``goto`` heading epsilon and the driver's wall-clock backstops.
-            Global (not merged per vehicle).
-    """
+
+@dataclass
+class ExperimentConfig(_FreezableConfig):
+    """Complete configuration for one orchestrator execution."""
 
     sim: SimSettings
-    drone: DroneConfig
     switches: LightSwitchConfig
-    px4: Px4BridgeConfig
     rl: RlConfig
     scene: str
-    vehicles: List[Any]
-    routine: RoutineConfig
+    vehicles: Dict[str, VehicleConfig]
     driver: DriverConfig

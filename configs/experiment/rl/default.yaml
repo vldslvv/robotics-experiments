@@ -14,6 +14,7 @@ policy_rate_hz: 50.0
 # Gymnasium task the entrypoint trains.
 training:
   task_id: Isaac-Drone-Hover-Direct-v0
+  vehicle_id: 0
   policy_name: hover
   max_iterations: 1500
   num_steps_per_env: 24

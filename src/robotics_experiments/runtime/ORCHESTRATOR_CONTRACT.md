@@ -55,7 +55,7 @@ layering this design removed.
   stage and sim settings in the runtime workflow. The live boot does not use Kit's
   `--exec open_stage.py`, and there is no separate settings extension.
 - **A disabled PX4 builds no bridge.** `spawn_fleet` constructs a `BridgeHost` and
-  observer only for `px4.enabled` vehicles (mirrors the bridge contract). Disabled
+  observer only for `bridge.enabled` vehicles (mirrors the bridge contract). Disabled
   vehicles are spawned but carry no `host`/`observer`.
 - **Per-drone state is staged and immutable.** Each phase produces frozen state
   objects and a later phase composes the earlier one's output instead of mutating
@@ -64,10 +64,10 @@ layering this design removed.
   (composes its `SpawnedDrone` with the port and driver). Config components arrive separated: a
   `BridgeHost` is constructed from a frozen `BridgeHostParams` (the vehicle's
   `px4` config composed with the derived identity/endpoint/path), constructed
-  directly by `spawn_fleet` -- never from the whole `ResolvedVehicle`.
+  directly by `spawn_fleet` -- never from the whole `VehicleConfig`.
 - **A driver is built only for a flying drone.** `build_drivers` builds a
   `MavlinkCommandPort` + `RoutineDriver` only where the resolved `routine.steps`
-  is non-empty *and* the vehicle is `px4.enabled`. A routine on a disabled vehicle
+  is non-empty *and* the vehicle is `bridge.enabled`. A routine on a disabled vehicle
   is left manual with a warning.
 - **Control tick is separate from the bridge legs.** The drivers are ticked from
   the shell's own control tick (a Kit app-update subscription live; the blocking
@@ -111,7 +111,7 @@ The orchestrator does NOT:
 | Open scene | `open_scene(scene_override=None)` | Resolve the scene (`env.scene`, or an override; `@` = repo-relative) and fire the USD `open_stage`. |
 | Adopt stage | `adopt_current_stage()` | Bind `self.stage` once the stage has finished loading (after a pump in standalone, or on the `OPENED` event live). |
 | Apply settings | `apply_settings()` | `simulation.apply_settings(stage, env.sim)`. |
-| Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle into a frozen `SpawnedDrone`; a `BridgeHost` (from a frozen `BridgeHostParams`) + state-only `IsaacArticulationIO` observer per `px4.enabled` vehicle; build the one `BridgeHostGroup`. |
+| Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle into a frozen `SpawnedDrone`; a `BridgeHost` (from a frozen `BridgeHostParams`) + state-only `IsaacArticulationIO` observer per `bridge.enabled` vehicle; build the one `BridgeHostGroup`. |
 | Start bridges | `start_bridges()` | `group.start()` (its hosts + the single physics-step subscription). |
 | Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(spawned, port)`, composed into a frozen private flying-driver state. |
 | (tick) | -- | The shell ticks `orchestrator.flying[i].driver.tick()` from its own tick source until `orchestrator.all_done`. |
@@ -123,7 +123,7 @@ Read-only views the shells use: `drones` (all `SpawnedDrone`s), `bridged`
 
 The per-vehicle seams the shells read are the staged frozen states:
 `SpawnedDrone` (`vehicle, label, articulation_path, host?, observer?`; the `?`
-fields exist only for `px4.enabled` vehicles). The private flying-driver state
+fields exist only for `bridge.enabled` vehicles). The private flying-driver state
 (`spawned, port, driver`) is built only for flying drones, so its `spawned`
 always carries a host and observer.
 

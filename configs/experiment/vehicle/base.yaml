@@ -1,0 +1,17 @@
+defaults:
+  - base_vehicle
+  - /experiment/px4@bridge: default
+  - /experiment/routine@routine: default
+  - _self_
+
+id: ???
+ros: {namespace: "???"}
+spawn:
+  usd_path: ???
+  prim_name: DroneSpawned
+  position_xy: ???
+  yaw_rad: 0.0
+  spawn_stationary: true
+  stationary_ground_z: 0.0
+  stationary_ground_clearance_m: 0.05
+  stationary_spawn_z_fallback: 0.07

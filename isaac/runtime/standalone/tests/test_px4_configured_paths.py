@@ -22,11 +22,12 @@ def _run_test(context: SceneTestContext) -> None:
     from robotics_experiments.drone import despawn_drone, spawn_drone
 
     env = get_config()
-    spawn_drone(context.stage, env.drone)
+    vehicle = next(iter(env.vehicles.values()))
+    spawn_drone(stage=context.stage, config=vehicle.spawn)
 
     default_prim = context.stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
-    articulation_path = env.px4.articulation_path or f"{parent}/{env.drone.prim_name}"
+    articulation_path = vehicle.bridge.articulation_path or f"{parent}/{vehicle.spawn.prim_name}"
     articulation_prim = context.stage.GetPrimAtPath(articulation_path)
     if not articulation_prim.IsValid():
         raise AssertionError(f"Configured articulation path is invalid: {articulation_path}")
@@ -38,7 +39,7 @@ def _run_test(context: SceneTestContext) -> None:
         if not context.stage.GetPrimAtPath(path).IsValid()
     ]
 
-    despawn_drone(context.stage, env.drone)
+    despawn_drone(stage=context.stage, config=vehicle.spawn)
     if missing:
         raise AssertionError(f"Configured PX4 rotor paths are invalid: {missing}")
 

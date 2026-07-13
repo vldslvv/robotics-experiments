@@ -94,6 +94,15 @@ def _experiment_config():
     return get_config()
 
 
+def _training_vehicle():
+    config = _experiment_config()
+    vehicle_id = config.rl.training.vehicle_id
+    try:
+        return next(vehicle for vehicle in config.vehicles.values() if vehicle.id == vehicle_id)
+    except StopIteration as exc:
+        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
+
+
 def _physics_dt() -> float:
     return 1.0 / _experiment_config().sim.physics_hz
 
@@ -115,7 +124,7 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
 
     sim: SimulationCfg = SimulationCfg(dt=_physics_dt(), render_interval=decimation)
     drone_cfg: ArticulationCfg = _make_drone_articulation_cfg(
-        _experiment_config().drone.usd_path, _DRONE_PRIM_PATH
+        _training_vehicle().spawn.usd_path, _DRONE_PRIM_PATH
     )
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs=_experiment_config().rl.num_envs,
@@ -163,13 +172,12 @@ class DroneHoverEnv(DirectRLEnv):
         """
         import omni.usd
 
-        from robotics_experiments.config import resolve_drone_bridge_config
         from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
 
         stage = omni.usd.get_context().get_stage()
         env0_path = _DRONE_PRIM_PATH.replace("env_.*", "env_0")
         rotors = discover_px4_rotor_mapping(stage, env0_path)
-        bridge = resolve_drone_bridge_config(_experiment_config().drone.usd_path)
+        bridge = _training_vehicle().bridge
 
         masses = self.drone.root_physx_view.get_masses()
         total_mass = float(masses[0].sum().item())

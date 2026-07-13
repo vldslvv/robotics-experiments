@@ -1,9 +1,9 @@
 """Standalone Isaac/PX4 takeoff scenario runner (single- or multi-drone).
 
-The scenario is driven by the Hydra ``vehicles`` list: one entry is the
+The scenario is driven by the Hydra ``vehicles`` mapping: one entry is the
 single-vehicle baseline, N entries drive N drones each bound to its own PX4 SITL
 instance (the resolved simulator port ``mavlink_port = connection_baseport + id``,
-GCS link the resolved ``vehicle.gcs_port = px4.gcs_baseport + id``).
+GCS link the resolved ``vehicle.gcs_port = bridge.gcs_baseport + id``).
 
 This module is the **strict/forgiving standalone shell** over the host-agnostic
 :class:`~robotics_experiments.runtime.FleetOrchestrator`. The orchestrator owns
@@ -38,7 +38,6 @@ from robotics_experiments.config import get_config
 from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
-    from robotics_experiments.config import RoutineConfig
     from robotics_experiments.runtime import (
         BridgeHost,
         FleetDriverEnv,
@@ -280,7 +279,6 @@ def _build_make_env(
 def _drive_to_done(
     context: SceneTestContext,
     orchestrator: FleetOrchestrator,
-    fleet_routine: RoutineConfig,
 ) -> None:
     """Tick physics and every per-drone driver until all routines are done.
 
@@ -293,12 +291,16 @@ def _drive_to_done(
     """
     active = orchestrator.flying
     context.report(f"driving the routine for {len(active)} drone(s)")
-    deadline_s = time.monotonic() + (
-        fleet_routine.takeoff_timeout_s
-        + fleet_routine.command_ack_timeout_s
-        + fleet_routine.handshake_timeout_s
-        + fleet_routine.prearm_settle_s
-    ) * 6.0 * len(active)
+    deadline_s = time.monotonic() + sum(
+        (
+            flying.spawned.vehicle.routine.takeoff_timeout_s
+            + flying.spawned.vehicle.routine.command_ack_timeout_s
+            + flying.spawned.vehicle.routine.handshake_timeout_s
+            + flying.spawned.vehicle.routine.prearm_settle_s
+        )
+        * 6.0
+        for flying in active
+    )
     while not orchestrator.all_done:
         if time.monotonic() > deadline_s:
             raise AssertionError("Timed out driving the routine to completion")
@@ -318,14 +320,15 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     timing = TimingReporter(options.test_name, emit=context.report)
 
     env = get_config()
-    if not any(vehicle.routine.steps for vehicle in env.vehicles):
+    active_routines = [
+        vehicle.routine for vehicle in env.vehicles.values() if vehicle.routine.steps
+    ]
+    if not active_routines:
         raise ValueError(
             f"{options.test_name}: no vehicle has a non-empty routine.steps; run this scenario "
             "under a takeoff experiment (e.g. configs/takeoff_quad.yaml)"
         )
-    # Fleet-level infra knobs come from the global routine default (ground settle
-    # and the bridge-heartbeat infra wait apply uniformly before any drone flies).
-    fleet_routine = env.routine
+    ground_settle_s = max(routine.ground_settle_s for routine in active_routines)
 
     context.report(f"{options.test_name}: running in {'strict' if strict else 'forgiving'} mode")
     orchestrator = FleetOrchestrator(env)
@@ -358,13 +361,10 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
             timeline.play()
 
         context.report(
-            f"{options.test_name}: settling drones on ground for "
-            f"{fleet_routine.ground_settle_s:.1f}s"
+            f"{options.test_name}: settling drones on ground for " f"{ground_settle_s:.1f}s"
         )
         with timing.timed_stage("ground_settle", sim_clock=clock):
-            _advance_sim_time(
-                context, orchestrator, seconds=fleet_routine.ground_settle_s, wall_timeout_s=20.0
-            )
+            _advance_sim_time(context, orchestrator, seconds=ground_settle_s, wall_timeout_s=20.0)
 
         with timing.timed_stage("bridge_heartbeat_wait", sim_clock=clock):
             for handle in orchestrator.bridged:
@@ -372,7 +372,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
                     context,
                     orchestrator,
                     handle,
-                    timeout_s=fleet_routine.bridge_heartbeat_timeout_s,
+                    timeout_s=handle.vehicle.routine.bridge_heartbeat_timeout_s,
                 )
 
         for handle in orchestrator.bridged:
@@ -407,7 +407,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
             orchestrator.build_drivers(make_env)
 
         with timing.timed_stage("drive_routine", sim_clock=clock):
-            _drive_to_done(context, orchestrator, fleet_routine)
+            _drive_to_done(context, orchestrator)
 
         bridge_logs = [(h.label, _bridge_debug_log_path(h.host)) for h in orchestrator.bridged]
     finally:

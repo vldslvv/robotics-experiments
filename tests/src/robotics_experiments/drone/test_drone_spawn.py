@@ -230,9 +230,8 @@ def _config(**overrides):
     values = {
         "usd_path": "/assets/drone.usda",
         "prim_name": "Drone",
-        "spawn_volume_prim_name": "DroneSpawnVolume",
-        "spawn_volume_center": (1.0, 2.0, 3.0),
-        "spawn_volume_half_extents": (0.0, 0.0, 0.5),
+        "position_xy": (1.0, 2.0),
+        "yaw_rad": 0.0,
         "spawn_stationary": True,
         "stationary_ground_z": 0.0,
         "stationary_ground_clearance_m": 0.01,
@@ -254,7 +253,7 @@ def _world_position(stage):
 def test_stationary_spawn_computes_z_from_composed_bounds(monkeypatch):
     drone, stage, _carb, _references = _import_drone_package(monkeypatch, min_z=-0.06)
 
-    drone.spawn_drone(stage, _config())
+    drone.spawn_drone(stage=stage, config=_config())
 
     assert _world_position(stage) == pytest.approx((1.0, 2.0, 0.07))
 
@@ -262,18 +261,15 @@ def test_stationary_spawn_computes_z_from_composed_bounds(monkeypatch):
 def test_stationary_spawn_uses_fallback_when_bounds_are_invalid(monkeypatch):
     drone, stage, carb, _references = _import_drone_package(monkeypatch, empty_bound=True)
 
-    drone.spawn_drone(stage, _config(stationary_spawn_z_fallback=0.123))
+    drone.spawn_drone(stage=stage, config=_config(stationary_spawn_z_fallback=0.123))
 
     assert _world_position(stage) == (1.0, 2.0, 0.123)
     assert any("using fallback z=0.123" in message for _level, message in carb.logs)
 
 
-def test_volume_spawn_keeps_randomized_z_when_stationary_disabled(monkeypatch):
-    import random
-
+def test_nonstationary_spawn_uses_configured_xy(monkeypatch):
     drone, stage, _carb, _references = _import_drone_package(monkeypatch)
-    monkeypatch.setattr(random, "uniform", lambda low, high: high)
 
-    drone.spawn_drone(stage, _config(spawn_stationary=False))
+    drone.spawn_drone(stage=stage, config=_config(spawn_stationary=False))
 
-    assert _world_position(stage) == (1.0, 2.0, 3.5)
+    assert _world_position(stage) == (1.0, 2.0, 0.0)

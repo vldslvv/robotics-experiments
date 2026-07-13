@@ -1,9 +1,28 @@
 from dataclasses import dataclass
-from typing import Any, List
+from typing import List, Literal, NotRequired, Required, TypedDict
 
 from robotics_experiments.config._immutability import _FreezableConfig
 
-__all__ = ["DriverConfig", "RoutineConfig"]
+__all__ = ["DriverConfig", "RoutineConfig", "RoutineStepConfig"]
+
+
+class RoutineStepConfig(TypedDict, total=False):
+    """Typed YAML descriptor for one high-level routine step."""
+
+    kind: Required[Literal["arm", "takeoff", "hover", "forward", "goto", "policy", "land"]]
+    climb_m: NotRequired[float]
+    min_climb_m: NotRequired[float]
+    hold_s: NotRequired[float]
+    distance_m: NotRequired[float]
+    timeout_s: NotRequired[float]
+    x: NotRequired[float]
+    y: NotRequired[float]
+    z: NotRequired[float]
+    position_tol_m: NotRequired[float]
+    heading_tol_deg: NotRequired[float]
+    artifact: NotRequired[str]
+    name: NotRequired[str]
+    target: NotRequired[List[float]]
 
 
 @dataclass
@@ -11,8 +30,8 @@ class RoutineConfig(_FreezableConfig):
     """High-level flight routine flown in every workflow over the GCS link.
 
     The single source of truth for whether and what is flown, and how a good
-    flight is verified. It is composed into every experiment (always present on
-    :class:`EnvConfig`), and the rule is simply: a **non-empty** ``steps`` list
+    flight is verified. It is composed beneath every :class:`VehicleConfig`,
+    and the rule is simply: a **non-empty** ``steps`` list
     makes a control driver arm/take-off/verify the fleet, while an **empty**
     ``steps`` list means purely manual operation (no driver is constructed).
     There is no separate enable flag -- ``steps`` is the switch.
@@ -26,10 +45,10 @@ class RoutineConfig(_FreezableConfig):
     below are wired by the command driver's private routine builder onto the
     flight steps as continuous invariants whose breach fails the routine.
 
-    This is the *control* layer's config, parallel to the bridge's ``px4`` group:
-    the GCS link baseport lives in the ``px4`` group
+    This is the control layer's config, parallel to the vehicle's ``bridge`` group:
+    the GCS link baseport lives in that bridge config
     (:attr:`Px4BridgeConfig.gcs_baseport`); the per-vehicle ``gcs_port`` the driver
-    talks is derived from it (see :class:`ResolvedVehicle`).
+    talks is derived from it (see :class:`VehicleConfig`).
 
     Attributes:
         steps: Ordered step descriptors authored in YAML, each a mapping with a
@@ -38,12 +57,7 @@ class RoutineConfig(_FreezableConfig):
             ``timeout_s``; ``goto`` carrying absolute world-ENU ``x`` + ``y`` +
             ``z`` + ``timeout_s`` and optional ``position_tol_m`` /
             ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty means manual
-            (no routine driver). Typed ``List[Any]`` so Hydra's
-            structured-config validation accepts the partial per-step mappings
-            during ``compose()`` (the same escape hatch as ``vehicles``). The
-            resolved graph exposes a tuple of read-only mappings; the driver
-            maps them to a pure routine object through private command-layer
-            implementation.
+            (no routine driver). The resolved graph exposes read-only typed mappings.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
@@ -83,7 +97,7 @@ class RoutineConfig(_FreezableConfig):
             mode is engaged (PX4 rejects OFFBOARD until a setpoint stream flows).
     """
 
-    steps: List[Any]
+    steps: List[RoutineStepConfig]
     gcs_heartbeat_period_s: float
     command_ack_timeout_s: float
     bridge_heartbeat_timeout_s: float

@@ -10,14 +10,13 @@ public API (``spawn_drone`` / ``despawn_drone``) lazily via ``__getattr__``, so
 """
 
 import math
-import random
 from typing import Optional
 
 import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
-from robotics_experiments.config import DroneConfig, get_config
+from robotics_experiments.config import DroneSpawnConfig
 
 __all__ = ["spawn_drone", "despawn_drone"]
 
@@ -44,50 +43,6 @@ def _resolve_parent(stage: Usd.Stage) -> str:
     return parent
 
 
-def _ensure_guide_cube(stage: Usd.Stage, parent: str, config: DroneConfig) -> None:
-    """Create a guide-purpose cube that visualizes the spawn volume.
-
-    Idempotent: returns immediately if the cube prim already exists. The cube
-    is marked with USD ``guide`` purpose so it does not render in ``default``
-    or ``render`` passes.
-
-    Args:
-        stage: USD stage to mutate.
-        parent: Absolute prim path under which to place the cube.
-        config: Provides the cube name, center, and half-extents.
-    """
-    path = f"{parent}/{config.spawn_volume_prim_name}"
-    if stage.GetPrimAtPath(path).IsValid():
-        return
-    cube = UsdGeom.Cube.Define(stage, path)
-    cx, cy, cz = config.spawn_volume_center
-    hx, hy, hz = config.spawn_volume_half_extents
-    xform = UsdGeom.Xformable(cube)
-    xform.ClearXformOpOrder()
-    xform.AddTranslateOp().Set(Gf.Vec3d(cx, cy, cz))
-    xform.AddScaleOp().Set(Gf.Vec3f(hx, hy, hz))
-    UsdGeom.Imageable(cube).CreatePurposeAttr(UsdGeom.Tokens.guide)
-
-
-def _random_pose(config: DroneConfig):
-    """Sample a uniform random pose inside the configured spawn volume.
-
-    Args:
-        config: Provides the spawn volume center and half-extents.
-
-    Returns:
-        Tuple ``((x, y, z), yaw)`` where the position is in world units and
-        ``yaw`` is an angle in radians on ``[-pi, pi]``.
-    """
-    cx, cy, cz = config.spawn_volume_center
-    hx, hy, hz = config.spawn_volume_half_extents
-    x = cx + random.uniform(-hx, hx)
-    y = cy + random.uniform(-hy, hy)
-    z = cz + random.uniform(-hz, hz)
-    yaw = random.uniform(-math.pi, math.pi)
-    return (x, y, z), yaw
-
-
 def _apply_pose(stage: Usd.Stage, prim_path: str, pos, yaw: float) -> None:
     """Overwrite a prim's xform ops with a translate and Z-rotation.
 
@@ -107,7 +62,7 @@ def _apply_pose(stage: Usd.Stage, prim_path: str, pos, yaw: float) -> None:
     xform.AddRotateZOp().Set(math.degrees(yaw))
 
 
-def _computed_stationary_z(stage: Usd.Stage, prim_path: str, config: DroneConfig) -> float:
+def _computed_stationary_z(stage: Usd.Stage, prim_path: str, config: DroneSpawnConfig) -> float:
     """Compute root Z that places the drone's lower bound above the ground.
 
     The caller must first apply the desired X/Y/yaw with Z set to zero. The
@@ -175,50 +130,20 @@ def _clear_rigid_body_velocities(stage: Usd.Stage, prim_path: str) -> None:
 
 
 def spawn_drone(
-    stage: Usd.Stage,
-    config: DroneConfig | None = None,
     *,
-    position: tuple[float, float] | None = None,
-    yaw: float = 0.0,
+    stage: Usd.Stage,
+    config: DroneSpawnConfig,
 ) -> str:
-    """Spawn (or re-pose) the drone prim and return its prim path.
-
-    Adds the drone's USD asset as a reference under the stage default prim on
-    first call, then assigns a translation and yaw.
-
-    When ``position`` is given (the multi-vehicle path), the drone is placed at
-    that explicit world X/Y with the given ``yaw`` (no random sampling, no guide
-    cube). When ``position`` is ``None`` (the legacy single-drone path), X/Y/yaw
-    are sampled inside the configured spawn volume and the guide cube is ensured.
-    In both cases, when ``config.spawn_stationary`` is true, Z is computed from
-    the referenced asset bounds so PX4 starts from a stationary ground pose and
-    velocities are cleared.
-
-    Args:
-        stage: Target USD stage. Must be non-None and writable.
-        config: Drone spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-        position: Explicit world ``(x, y)`` spawn position, or ``None`` to sample
-            randomly inside the spawn volume.
-        yaw: Fixed yaw (radians) used when ``position`` is given; ignored when
-            sampling randomly.
-
-    Returns:
-        The drone prim path (``<parent>/<config.prim_name>``).
-    """
-    config = config if config is not None else get_config().drone
+    """Spawn or re-pose one configured drone and return its prim path."""
     parent = _resolve_parent(stage)
 
     drone_path = f"{parent}/{config.prim_name}"
     if not stage.GetPrimAtPath(drone_path).IsValid():
         add_reference_to_stage(config.usd_path, drone_path)
 
-    if position is not None:
-        pos = (float(position[0]), float(position[1]), 0.0)
-        yaw = float(yaw)
-    else:
-        _ensure_guide_cube(stage, parent, config)
-        pos, yaw = _random_pose(config)
+    x, y = config.position_xy
+    pos = (float(x), float(y), 0.0)
+    yaw = float(config.yaw_rad)
 
     if config.spawn_stationary:
         # Place X/Y/yaw with Z=0 so the world bound gives a root-relative lower
@@ -233,26 +158,16 @@ def spawn_drone(
         mode = "stationary"
     else:
         _apply_pose(stage, drone_path, pos, yaw)
-        mode = "volume"
+        mode = "configured"
 
     carb.log_info(f"[DroneSpawner] Spawned mode={mode} at pos={pos} yaw={math.degrees(yaw):.1f}deg")
     return drone_path
 
 
-def despawn_drone(stage: Usd.Stage, config: DroneConfig | None = None) -> None:
-    """Remove the drone prim from the stage if present.
-
-    Safe to call when the stage is ``None`` or the prim does not exist; the
-    guide cube is intentionally left in place.
-
-    Args:
-        stage: USD stage to mutate, or ``None`` for a no-op.
-        config: Drone spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
-    """
+def despawn_drone(*, stage: Usd.Stage, config: DroneSpawnConfig) -> None:
+    """Remove the configured drone prim if it exists."""
     if stage is None:
         return
-    config = config if config is not None else get_config().drone
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
     drone_path = f"{parent}/{config.prim_name}"

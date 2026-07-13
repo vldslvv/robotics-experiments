@@ -13,12 +13,9 @@ from omegaconf import OmegaConf, open_dict
 from robotics_experiments.config._immutability import _freeze_config_graph
 from robotics_experiments.config._schemas import _register_schemas
 from robotics_experiments.config.types import (
-    DroneConfig,
-    EnvConfig,
-    Px4BridgeConfig,
+    ExperimentConfig,
     Px4SitlLaunchConfig,
-    ResolvedVehicle,
-    RoutineConfig,
+    VehicleConfig,
 )
 
 __all__ = [
@@ -26,7 +23,6 @@ __all__ = [
     "get_enabled_px4_launch_configs",
     "load_config",
     "reset_config_cache",
-    "resolve_drone_bridge_config",
 ]
 
 _DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
@@ -91,7 +87,7 @@ def _resolve_config_path() -> Path:
     return path.resolve()
 
 
-def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
+def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
     """Raise ``ValueError`` on any structurally invalid resolved fleet.
 
     Operates on the derived runtime fields (``mavlink_port`` / ``debug_log_path``)
@@ -105,31 +101,33 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
     log_paths: set[str] = set()
     ros_namespaces: set[str] = set()
     ros_frame_prefixes: set[str] = set()
-    for v in vehicles:
-        if len(v.spawn_xy) != 2:
-            raise ValueError(f"vehicle id={v.id} spawn_xy must have length 2, got {v.spawn_xy!r}")
+    for label, v in vehicles.items():
+        if len(v.spawn.position_xy) != 2:
+            raise ValueError(
+                f"vehicle {label!r} position_xy must have length 2, got {v.spawn.position_xy!r}"
+            )
         if v.id < 0:
             raise ValueError(f"vehicle id must be non-negative, got {v.id}")
         if v.id in ids:
             raise ValueError(f"duplicate vehicle id={v.id}")
         ids.add(v.id)
 
-        endpoint = (v.px4.connection_type, v.px4.connection_ip, v.mavlink_port)
+        endpoint = (v.bridge.connection_type, v.bridge.connection_ip, v.mavlink_port)
         if endpoint in endpoints:
             raise ValueError(f"duplicate vehicle MAVLink endpoint {endpoint} (vehicle id={v.id})")
         endpoints.add(endpoint)
 
-        if v.prim_name in prim_names:
+        if v.spawn.prim_name in prim_names:
             raise ValueError(
-                f"duplicate vehicle drone.prim_name {v.prim_name!r} (vehicle id={v.id})"
+                f"duplicate vehicle spawn.prim_name {v.spawn.prim_name!r} (vehicle id={v.id})"
             )
-        prim_names.add(v.prim_name)
+        prim_names.add(v.spawn.prim_name)
 
-        if v.ros_namespace in ros_namespaces:
+        if v.ros.namespace in ros_namespaces:
             raise ValueError(
-                f"duplicate vehicle ros.namespace {v.ros_namespace!r} (vehicle id={v.id})"
+                f"duplicate vehicle ros.namespace {v.ros.namespace!r} (vehicle id={v.id})"
             )
-        ros_namespaces.add(v.ros_namespace)
+        ros_namespaces.add(v.ros.namespace)
 
         if v.ros_frame_prefix in ros_frame_prefixes:
             raise ValueError(
@@ -144,18 +142,13 @@ def _validate_fleet(vehicles: list[ResolvedVehicle]) -> None:
         if v.debug_log_path:
             if v.debug_log_path in log_paths:
                 raise ValueError(
-                    f"colliding vehicle debug_log_path {v.px4.debug_log_path!r} "
+                    f"colliding vehicle debug_log_path {v.bridge.debug_log_path!r} "
                     f"(vehicle id={v.id}); add a {{vehicle}} token to disambiguate"
                 )
             log_paths.add(v.debug_log_path)
 
 
-def _resolve_ros_namespace(entry, *, vehicle_id: int) -> str:
-    ros = entry.get("ros")
-    if ros is None or "namespace" not in ros:
-        raise ValueError(f"vehicle id={vehicle_id} must define ros.namespace")
-
-    namespace = ros["namespace"]
+def _resolve_ros_namespace(namespace, *, vehicle_id: int) -> str:
     if not isinstance(namespace, str):
         raise ValueError(
             f"vehicle id={vehicle_id} ros.namespace must be a string, "
@@ -188,58 +181,23 @@ def _ros_frame_prefix_from_namespace(namespace: str) -> str:
     return namespace.removeprefix("/").replace("/", "_")
 
 
-def _resolve_fleet(cfg, airframe_config_dir: Path) -> list[ResolvedVehicle]:
-    """Enrich the composed config's ``vehicles`` into a resolved fleet.
-
-    The single enrichment step from authored Hydra data to a self-describing
-    runtime fleet. Each ``vehicles`` entry is a *partial* override; its
-    ``drone`` / ``px4`` partials are merged over the structured global
-    ``cfg.drone`` / ``cfg.px4`` (``OmegaConf.merge`` both fills defaults and
-    rejects unknown keys) into a pure resolved config, from which the derived
-    runtime fields (``mavlink_port``, ``px4_instance_index``, the
-    ``px4.gcs_baseport + id`` GCS port, the rendered ``debug_log_path``,
-    ``prim_name``) are computed once. An empty authored list is a valid empty
-    fleet; the final graph exposes an immutable tuple (0..N is handled
-    uniformly).
-    """
-    raw = list(cfg.get("vehicles") or [])
-    resolved: list[ResolvedVehicle] = []
-    for entry in raw:
-        drone = OmegaConf.merge(cfg.drone, entry.get("drone", {}))
-        airframe = _airframe_for_drone_asset(str(drone.usd_path), airframe_config_dir)
+def _enrich_fleet(cfg, airframe_config_dir: Path) -> None:
+    """Fill the derived fields on each already structured vehicle."""
+    for entry in cfg.vehicles.values():
+        airframe = _airframe_for_drone_asset(str(entry.spawn.usd_path), airframe_config_dir)
         px4_airframe_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
-        px4 = OmegaConf.merge(cfg.px4, px4_airframe_defaults, entry.get("px4", {}))
-        # rotor_constant is not authored: derive it from the cited per-rotor max
-        # thrust + max_rotor_velocity + standard gravity, so a datasheet thrust change
-        # is a single-line edit (see _compute_rotor_constants).
-        px4.rotor_constant = _compute_rotor_constants(
-            float(px4.max_thrust_per_rotor_g),
-            list(px4.max_rotor_velocity),
+        entry.bridge = OmegaConf.merge(entry.bridge, px4_airframe_defaults)
+        entry.bridge.rotor_constant = _compute_rotor_constants(
+            float(entry.bridge.max_thrust_per_rotor_g),
+            list(entry.bridge.max_rotor_velocity),
         )
-        routine = OmegaConf.merge(cfg.routine, entry.get("routine", {}))
-        drone_cfg = cast(DroneConfig, OmegaConf.to_object(drone))
-        px4_cfg = cast(Px4BridgeConfig, OmegaConf.to_object(px4))
-        routine_cfg = cast(RoutineConfig, OmegaConf.to_object(routine))
         vehicle_id = int(entry["id"])
-        ros_namespace = _resolve_ros_namespace(entry, vehicle_id=vehicle_id)
-        resolved.append(
-            ResolvedVehicle(
-                id=vehicle_id,
-                spawn_xy=tuple(entry["spawn_xy"]),
-                drone=drone_cfg,
-                px4=px4_cfg,
-                routine=routine_cfg,
-                mavlink_port=px4_cfg.connection_baseport + vehicle_id,
-                px4_instance_index=vehicle_id,
-                gcs_port=px4_cfg.gcs_baseport + vehicle_id,
-                ros_namespace=ros_namespace,
-                ros_frame_prefix=_ros_frame_prefix_from_namespace(ros_namespace),
-                debug_log_path=px4_cfg.debug_log_path.replace("{vehicle}", str(vehicle_id)),
-                prim_name=drone_cfg.prim_name,
-            )
-        )
-    _validate_fleet(resolved)
-    return resolved
+        ros_namespace = _resolve_ros_namespace(entry.ros.namespace, vehicle_id=vehicle_id)
+        entry.mavlink_port = entry.bridge.connection_baseport + vehicle_id
+        entry.px4_instance_index = vehicle_id
+        entry.gcs_port = entry.bridge.gcs_baseport + vehicle_id
+        entry.ros_frame_prefix = _ros_frame_prefix_from_namespace(ros_namespace)
+        entry.debug_log_path = entry.bridge.debug_log_path.replace("{vehicle}", str(vehicle_id))
 
 
 def _compose_config(config_path: Path):
@@ -259,7 +217,7 @@ def _compose_config(config_path: Path):
     return cfg
 
 
-def load_config(path: str | os.PathLike[str]) -> EnvConfig:
+def load_config(path: str | os.PathLike[str]) -> ExperimentConfig:
     """Compose, enrich, validate, and freeze one explicit experiment config.
 
     ``path`` is the core boundary and does not read an environment variable or
@@ -280,23 +238,15 @@ def load_config(path: str | os.PathLike[str]) -> EnvConfig:
     cfg = _compose_config(config_path)
     airframe_config_dir = config_path.parent / "airframes"
 
-    # to_object turns the loosely typed cfg.vehicles into raw dicts; replace
-    # them with the enriched, validated resolved fleet before freezing.
-    env = cast(EnvConfig, OmegaConf.to_object(cfg))
-    # Derive rotor_constant for the global default px4 too (the per-vehicle
-    # resolution does the same for each fleet entry), so the authored config
-    # never duplicates the computed thrust coefficient.
-    env.px4.rotor_constant = _compute_rotor_constants(
-        env.px4.max_thrust_per_rotor_g,
-        env.px4.max_rotor_velocity,
-    )
-    env.vehicles = _resolve_fleet(cfg, airframe_config_dir)
-    return _freeze_config_graph(env)
+    _enrich_fleet(cfg, airframe_config_dir)
+    experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
+    _validate_fleet(experiment.vehicles)
+    return _freeze_config_graph(experiment)
 
 
 @functools.cache
-def get_config() -> EnvConfig:
-    """Return the process-wide composed :class:`EnvConfig`, loading once.
+def get_config() -> ExperimentConfig:
+    """Return the process-wide composed :class:`ExperimentConfig`, loading once.
 
     The first call composes Hydra against the selected top-level experiment
     config and caches the resulting dataclass.
@@ -304,13 +254,13 @@ def get_config() -> EnvConfig:
     ``on_startup`` and from per-step hot paths.
 
     Returns:
-        The composed ``EnvConfig`` instance.
+        The composed ``ExperimentConfig`` instance.
     """
     return load_config(_resolve_config_path())
 
 
 def _resolve_px4_sitl_launch_config(
-    vehicle: ResolvedVehicle, airframe_config_dir: Path
+    vehicle: VehicleConfig, airframe_config_dir: Path
 ) -> Px4SitlLaunchConfig:
     """Derive the PX4 SITL launch airframe for one resolved vehicle.
 
@@ -321,12 +271,12 @@ def _resolve_px4_sitl_launch_config(
     asset raises ``ValueError``
     (naming the asset and prim) rather than silently flying the wrong airframe.
     """
-    asset = Path(vehicle.drone.usd_path).name
-    airframe = _airframe_for_drone_asset(vehicle.drone.usd_path, airframe_config_dir)
+    asset = Path(vehicle.spawn.usd_path).name
+    airframe = _airframe_for_drone_asset(vehicle.spawn.usd_path, airframe_config_dir)
     if airframe is None:
         raise ValueError(
-            f"no PX4 SITL airframe mapping for drone asset {vehicle.drone.usd_path!r} "
-            f"(prim {vehicle.prim_name!r}); add it to configs/airframes"
+            f"no PX4 SITL airframe mapping for drone asset {vehicle.spawn.usd_path!r} "
+            f"(prim {vehicle.spawn.prim_name!r}); add it to configs/airframes"
         )
     sitl = airframe.get("px4", {}).get("sitl")
     if not sitl:
@@ -341,29 +291,6 @@ def _resolve_px4_sitl_launch_config(
     )
 
 
-def resolve_drone_bridge_config(usd_path: str) -> Px4BridgeConfig:
-    """Resolve the per-asset PX4 bridge config for a drone USD asset.
-
-    The same airframe enrichment used for fleet resolution applies per vehicle
-    (global ``px4`` merged with the asset's ``configs/airframes`` bridge defaults,
-    then ``rotor_constant`` computed from the cited thrust), exposed for consumers
-    that spawn a drone outside the fleet path -- notably the Isaac Lab press env,
-    which needs the airframe's thrust constants (``rotor_constant`` /
-    ``max_rotor_velocity`` / ``rolling_moment_coefficient`` / ``linear_drag``) for
-    its in-Lab actuation instead of the global iris fallback. Falls back to the
-    global ``px4`` defaults for an asset with no airframe mapping.
-    """
-    global_px4 = get_config().px4
-    airframe = _airframe_for_drone_asset(usd_path, _resolve_config_path().parent / "airframes")
-    bridge_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
-    px4 = OmegaConf.merge(global_px4, bridge_defaults)
-    px4.rotor_constant = _compute_rotor_constants(
-        float(px4.max_thrust_per_rotor_g),
-        list(px4.max_rotor_velocity),
-    )
-    return _freeze_config_graph(cast(Px4BridgeConfig, OmegaConf.to_object(px4)))
-
-
 def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
     """Return PX4 SITL launch specs for the PX4-enabled vehicles, in fleet order.
 
@@ -376,8 +303,8 @@ def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
     airframe_config_dir = _resolve_config_path().parent / "airframes"
     return [
         _resolve_px4_sitl_launch_config(v, airframe_config_dir)
-        for v in get_config().vehicles
-        if v.px4.enabled
+        for v in get_config().vehicles.values()
+        if v.bridge.enabled
     ]
 
 

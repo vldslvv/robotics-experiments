@@ -1,16 +1,12 @@
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List
 
-from robotics_experiments.config._commanding import RoutineConfig
 from robotics_experiments.config._immutability import _FreezableConfig
-from robotics_experiments.config._scene import DroneConfig, RosVehicleConfig
 
 __all__ = [
     "LockstepConfig",
     "Px4BridgeConfig",
     "Px4SitlLaunchConfig",
-    "ResolvedVehicle",
-    "VehicleConfig",
 ]
 
 
@@ -84,7 +80,7 @@ class Px4BridgeConfig(_FreezableConfig):
             until PX4 is wired up end-to-end.
         articulation_path: USD path of the drone root articulation. When
             empty (default), the host derives it from the drone-spawner
-            config (``<default_prim>/<drone.prim_name>``).
+            config (``<default_prim>/<spawn.prim_name>``).
         input_offset, input_scaling, zero_position_armed: Pegasus MAVLink
             actuator scaling from PX4 controls to rotor angular velocity
             references.
@@ -98,8 +94,7 @@ class Px4BridgeConfig(_FreezableConfig):
             drone asset.
         rotor_constant: Pegasus quadratic thrust coefficient per rotor
             (``T_i = rotor_constant_i * omega_i^2``). NOT authored -- it is
-            computed during config package loading (and for the global default
-            in :func:`robotics_experiments.config.get_config`) from
+            computed during per-vehicle config enrichment from
             ``max_thrust_per_rotor_g``, ``max_rotor_velocity``, and standard
             gravity, so a datasheet thrust change is a single-line edit.
         linear_drag: Pegasus body-frame linear drag coefficients.
@@ -107,11 +102,11 @@ class Px4BridgeConfig(_FreezableConfig):
         connection_ip: Address used by ``connection_type``.
         connection_baseport: Base TCP port for the simulator MAVLink API. The
             resolved per-vehicle port is ``connection_baseport + vehicle.id``
-            (see :class:`ResolvedVehicle.mavlink_port`); this base is shared by
+            (see :class:`VehicleConfig.mavlink_port`); this base is inherited by
             every vehicle and the per-vehicle offset is derived from ``id``.
         gcs_baseport: Base UDP port for the per-drone GCS MAVLink link. The
             resolved per-vehicle port is ``gcs_baseport + vehicle.id`` (see
-            :class:`ResolvedVehicle.gcs_port`), parallel to
+            :class:`VehicleConfig.gcs_port`), parallel to
             ``connection_baseport``. Used by control/test code (the standalone
             takeoff scenario's GCS endpoint); the bridge itself does not use it.
         lockstep: Lockstep exchange tunables (timeouts, bootstrap priming,
@@ -185,96 +180,11 @@ class Px4BridgeConfig(_FreezableConfig):
     rotor_constant: List[float] = field(default_factory=list)
 
 
-@dataclass
-class VehicleConfig(_FreezableConfig):
-    """One drone instance: its asset/spawn and its PX4 bridge config.
-
-    The pure authored config object. ``drone`` and ``px4`` are fully resolved
-    (the global ``EnvConfig`` defaults merged with the per-vehicle override).
-    ``spawn_xy`` is the world X/Y; Z is computed from asset bounds at spawn; yaw
-    is 0. ``id`` is the PX4 numeric identity: the MAVLink port, PX4 ``-i``
-    index, and per-vehicle log token are all derived from it (see
-    :class:`ResolvedVehicle`), never hand-set. ``ros.namespace`` is the explicit
-    operator-facing ROS identity.
-
-    Attributes:
-        id: Stable, unique numeric vehicle identifier within the scene; the
-            source of the derived PX4 runtime values.
-        spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
-        drone: Fully resolved per-vehicle drone spawner configuration.
-        px4: Fully resolved per-vehicle PX4 bridge configuration.
-        ros: Per-vehicle ROS identity.
-        routine: Fully resolved per-vehicle flight routine (the global
-            ``routine`` with this vehicle's partial merged over it). A non-empty
-            ``routine.steps`` makes this drone fly; empty means manual.
-    """
-
-    id: int
-    spawn_xy: Tuple[float, float]
-    drone: DroneConfig
-    px4: Px4BridgeConfig
-    ros: RosVehicleConfig
-    routine: "RoutineConfig"
-
-
-@dataclass(frozen=True)
-class ResolvedVehicle:
-    """One fully resolved vehicle: pure config plus derived runtime fields.
-
-    Produced by the config package's single enrichment step from a
-    :class:`VehicleConfig`. Every consumer (Isaac orchestration, the bridge, and
-    the host-side PX4 launch) reads the derived fields here instead of
-    recomputing ``connection_baseport + id`` ad hoc. ``id`` drives the PX4
-    numeric runtime values; ``ros_namespace`` is the ROS graph identity.
-
-    Attributes:
-        id: Stable, unique numeric vehicle identifier.
-        spawn_xy: World ``(x, y)`` spawn position; Z comes from asset bounds.
-        drone: Fully resolved per-vehicle drone spawner configuration.
-        px4: Fully resolved per-vehicle PX4 bridge configuration.
-        routine: Fully resolved per-vehicle flight routine; a non-empty
-            ``routine.steps`` makes this drone fly its routine, empty = manual.
-        mavlink_port: Simulator MAVLink TCP port for this vehicle, derived as
-            ``px4.connection_baseport + id``.
-        px4_instance_index: PX4 ``-i`` instance index, equal to ``id`` (so the
-            PX4-side port shift matches ``mavlink_port`` by construction).
-        gcs_port: Per-drone GCS MAVLink link UDP port, derived as
-            ``px4.gcs_baseport + id``. Used by control/test code (the
-            standalone takeoff scenario's GCS endpoint); the bridge itself does
-            not use it. Folding it here keeps ``ResolvedVehicle`` the single home
-            for every port the project derives from ``id``.
-        ros_namespace: Authored absolute ROS namespace for per-drone topics,
-            nodes, services, actions, and parameters.
-        ros_frame_prefix: Relative frame prefix derived from
-            ``ros_namespace`` for future per-drone TF/message frame IDs. Nested
-            namespaces use underscores here (``/fleet_a/x500_01`` ->
-            ``fleet_a_x500_01``).
-        debug_log_path: ``px4.debug_log_path`` with the ``{vehicle}`` token
-            rendered to ``id``; ``{date}`` / ``{time}`` tokens stay for runtime.
-        prim_name: ``drone.prim_name`` passthrough; the full USD ``prim_path``
-            stays runtime-derived from the live stage default prim in
-            ``spawn_drone`` and flows to the bridge as ``articulation_path``.
-    """
-
-    id: int
-    spawn_xy: Tuple[float, float]
-    drone: DroneConfig
-    px4: Px4BridgeConfig
-    routine: "RoutineConfig"
-    mavlink_port: int
-    px4_instance_index: int
-    gcs_port: int
-    ros_namespace: str
-    ros_frame_prefix: str
-    debug_log_path: str
-    prim_name: str
-
-
 @dataclass(frozen=True)
 class Px4SitlLaunchConfig:
     """PX4 SITL launch airframe derived from a resolved vehicle's config.
 
-    Produced by the config loader from a :class:`ResolvedVehicle`. The drone USD
+    Produced by the config loader from a :class:`VehicleConfig`. The drone USD
     asset selects the PX4 simulator airframe so each asset launches the PX4
     control allocation generated from the same ``configs/airframes`` source as
     the USD. Threaded by the host-side launch scripts into

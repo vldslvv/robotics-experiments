@@ -215,25 +215,16 @@ def _config(**overrides):
 
 
 def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_overrides):
-    """Build a ResolvedVehicle-shaped object around a PX4 config.
-
-    ``BridgeHostParams`` carries only ``id`` / ``px4`` / ``mavlink_port`` /
-    ``debug_log_path`` of the resolved vehicle; the rest mirror the production
-    shape for completeness. Derived fields follow ``id``.
-    """
     px4 = _config(**px4_overrides)
     return SimpleNamespace(
         id=vehicle_id,
-        spawn_xy=spawn_xy,
-        drone=SimpleNamespace(prim_name=prim_name),
-        px4=px4,
+        spawn=SimpleNamespace(prim_name=prim_name, position_xy=spawn_xy),
+        bridge=px4,
         mavlink_port=px4.connection_baseport + vehicle_id,
         px4_instance_index=vehicle_id,
         gcs_port=14550 + vehicle_id,
-        ros_namespace=f"/x500_{vehicle_id + 1:02d}",
         ros_frame_prefix=f"x500_{vehicle_id + 1:02d}",
         debug_log_path=px4.debug_log_path.replace("{vehicle}", str(vehicle_id)),
-        prim_name=prim_name,
     )
 
 
@@ -241,11 +232,11 @@ def _make_host(module, vehicle, *, spawned_path="/World/Drone", physics_hz=250.0
     """Construct a BridgeHost from the vehicle's params, as the orchestrator does."""
     return module.BridgeHost(
         module.BridgeHostParams(
-            px4=vehicle.px4,
+            bridge=vehicle.bridge,
             vehicle_id=vehicle.id,
             mavlink_port=vehicle.mavlink_port,
             debug_log_path=vehicle.debug_log_path,
-            articulation_path=vehicle.px4.articulation_path or spawned_path,
+            articulation_path=vehicle.bridge.articulation_path or spawned_path,
             physics_hz=physics_hz,
         )
     )

@@ -46,7 +46,7 @@ from robotics_experiments.commanding import (
     RoutineDriver,
     RoutineObservation,
 )
-from robotics_experiments.config import EnvConfig, ResolvedVehicle
+from robotics_experiments.config import ExperimentConfig, VehicleConfig
 from robotics_experiments.runtime._scene import resolve_scene_path
 from robotics_experiments.runtime.bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
 
@@ -64,13 +64,13 @@ def _repo_root() -> Path:
 class SpawnedDrone:
     """One vehicle's spawn-phase state, produced by :meth:`FleetOrchestrator.spawn_fleet`.
 
-    ``host``/``observer`` exist only for ``px4.enabled`` vehicles (a disabled PX4
+    ``host``/``observer`` exist only for ``bridge.enabled`` vehicles (a disabled PX4
     must not construct a ``BridgeHost``). ``articulation_path`` is the
     override-resolved body path shared by the host and the observer, so both read
     the same body the bridge actuates.
     """
 
-    vehicle: ResolvedVehicle
+    vehicle: VehicleConfig
     label: str
     articulation_path: str
     host: Optional[BridgeHost]
@@ -82,7 +82,7 @@ class _FlyingDrone:
     """One flying drone's driver-phase state, composing its spawn-phase state.
 
     Produced by :meth:`FleetOrchestrator.build_drivers` only for flying drones
-    (non-empty resolved ``routine.steps`` on a ``px4.enabled`` vehicle), so
+    (non-empty resolved ``routine.steps`` on a ``bridge.enabled`` vehicle), so
     ``spawned.host``/``spawned.observer`` are always present here.
     """
 
@@ -152,7 +152,7 @@ class FleetDriverEnv:
 class FleetOrchestrator:
     """Composes the fleet runtime pipeline; driven by a thin per-host shell."""
 
-    def __init__(self, env: EnvConfig) -> None:
+    def __init__(self, env: ExperimentConfig) -> None:
         self.env = env
         self.stage: Any = None
         self._group: BridgeHostGroup = BridgeHostGroup([])
@@ -166,7 +166,7 @@ class FleetOrchestrator:
 
     @property
     def bridged(self) -> list[SpawnedDrone]:
-        """Spawned states with a PX4 bridge host (``px4.enabled`` vehicles)."""
+        """Spawned states with a PX4 bridge host (``bridge.enabled`` vehicles)."""
         return [s for s in self._spawned if s.host is not None]
 
     @property
@@ -219,7 +219,7 @@ class FleetOrchestrator:
         """Spawn every vehicle into a frozen :class:`SpawnedDrone` per vehicle.
 
         A bridge host (from a frozen :class:`BridgeHostParams`) and a state-only
-        observer are built only for ``px4.enabled`` vehicles; the one
+        observer are built only for ``bridge.enabled`` vehicles; the one
         :class:`BridgeHostGroup` coordinates all hosts.
         """
         from robotics_experiments.drone import spawn_drone
@@ -228,24 +228,25 @@ class FleetOrchestrator:
         if self.stage is None:
             raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
         summary = ", ".join(
-            f"id={v.id} prim={v.prim_name} px4_enabled={v.px4.enabled} "
-            f"endpoint={v.mavlink_port} spawn_xy={tuple(v.spawn_xy)}"
-            for v in self.env.vehicles
+            f"{label}: id={v.id} prim={v.spawn.prim_name} "
+            f"px4_enabled={v.bridge.enabled} endpoint={v.mavlink_port} "
+            f"position_xy={tuple(v.spawn.position_xy)}"
+            for label, v in self.env.vehicles.items()
         )
         carb.log_info(f"{_LOG_PREFIX} spawning {len(self.env.vehicles)} vehicle(s): {summary}")
         self._spawned = []
-        for vehicle in self.env.vehicles:
-            path = spawn_drone(self.stage, vehicle.drone, position=tuple(vehicle.spawn_xy), yaw=0.0)
+        for label, vehicle in self.env.vehicles.items():
+            path = spawn_drone(stage=self.stage, config=vehicle.spawn)
             host: Optional[BridgeHost] = None
             observer: Any = None
             # The observer reads the same body the bridge actuates (honoring any
             # px4.articulation_path override) so it never samples a stale frame;
             # the params resolve that path once for both.
-            articulation_path = vehicle.px4.articulation_path or path
-            if vehicle.px4.enabled:
+            articulation_path = vehicle.bridge.articulation_path or path
+            if vehicle.bridge.enabled:
                 host = BridgeHost(
                     BridgeHostParams(
-                        px4=vehicle.px4,
+                        bridge=vehicle.bridge,
                         vehicle_id=vehicle.id,
                         mavlink_port=vehicle.mavlink_port,
                         debug_log_path=vehicle.debug_log_path,
@@ -261,7 +262,7 @@ class FleetOrchestrator:
             self._spawned.append(
                 SpawnedDrone(
                     vehicle=vehicle,
-                    label=f"drone{vehicle.id}",
+                    label=label,
                     articulation_path=articulation_path,
                     host=host,
                     observer=observer,
@@ -321,9 +322,9 @@ class FleetOrchestrator:
                 DriverParams.from_routine_config(
                     spawned.vehicle.routine,
                     driver=self.env.driver,
-                    home_lat_deg=spawned.vehicle.px4.home_lat_deg,
-                    home_lon_deg=spawned.vehicle.px4.home_lon_deg,
-                    home_alt_m=spawned.vehicle.px4.home_alt_m,
+                    home_lat_deg=spawned.vehicle.bridge.home_lat_deg,
+                    home_lon_deg=spawned.vehicle.bridge.home_lon_deg,
+                    home_alt_m=spawned.vehicle.bridge.home_alt_m,
                     policy_fn_factory=self._policy_fn_factory,
                 ),
                 port,
@@ -343,7 +344,7 @@ class FleetOrchestrator:
             if spawned.observer is not None:
                 spawned.observer.shutdown()
             if self.stage is not None:
-                despawn_drone(self.stage, spawned.vehicle.drone)
+                despawn_drone(stage=self.stage, config=spawned.vehicle.spawn)
         self._group = BridgeHostGroup([])
         self._spawned = []
         self._flying = []

@@ -168,7 +168,7 @@ environment-selected path to `load_config`.
 Configuration dataclasses stay mutable only during Hydra construction and the
 private enrichment phase. Before return, the loader freezes every config node,
 converts nested lists to tuples, and converts authored step mappings to read-only
-mapping proxies. The cached `EnvConfig`, global defaults, resolved vehicles,
+mapping proxies. The cached `ExperimentConfig` and its complete vehicle mapping,
 per-vehicle overrides, and nested tunables therefore form one immutable graph.
 
 ### 8. Reconcile documentation policy with repository enforcement

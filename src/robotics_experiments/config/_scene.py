@@ -5,7 +5,7 @@ from robotics_experiments.config._immutability import _FreezableConfig
 
 __all__ = [
     "BoundingBox",
-    "DroneConfig",
+    "DroneSpawnConfig",
     "LightSwitchConfig",
     "LightSwitchStatePublisherConfig",
     "RosQosConfig",
@@ -14,32 +14,13 @@ __all__ = [
 
 
 @dataclass
-class DroneConfig(_FreezableConfig):
-    """Configuration for the drone spawner extension.
-
-    Attributes:
-        usd_path: Absolute path to the drone USD asset referenced on spawn.
-        prim_name: Child name used under the stage default prim for the drone.
-        spawn_volume_prim_name: Child name used for the guide cube that
-            visualizes the spawn volume.
-        spawn_volume_center: World-space center of the spawn volume.
-        spawn_volume_half_extents: Per-axis half-extents of the spawn volume.
-        spawn_stationary: When true, spawn at sampled X/Y and yaw but compute
-            Z from the referenced drone bounds so the vehicle starts resting
-            near the ground instead of falling through PX4 startup.
-        stationary_ground_z: World Z coordinate of the ground plane used for
-            stationary placement.
-        stationary_ground_clearance_m: Clearance added above the computed
-            lower bound to avoid initial interpenetration.
-        stationary_spawn_z_fallback: Root Z used if composed bounds cannot be
-            computed for the referenced drone.
-    """
+class DroneSpawnConfig(_FreezableConfig):
+    """Asset and world pose for one spawned vehicle."""
 
     usd_path: str
     prim_name: str
-    spawn_volume_prim_name: str
-    spawn_volume_center: Tuple[float, float, float]
-    spawn_volume_half_extents: Tuple[float, float, float]
+    position_xy: Tuple[float, float]
+    yaw_rad: float
     spawn_stationary: bool
     stationary_ground_z: float
     stationary_ground_clearance_m: float

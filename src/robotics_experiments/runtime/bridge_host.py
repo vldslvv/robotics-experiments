@@ -10,9 +10,9 @@ A host is configured through :class:`BridgeHostParams`, a frozen composition of
 the vehicle's bridge behavior config (``px4``) with the derived per-vehicle
 runtime state the host needs (identity, endpoint, resolved articulation path),
 constructed by the orchestrator when it spawns the vehicle. The host never sees
-the rest of the ``ResolvedVehicle`` (spawn, routine, ROS identity).
+the rest of the ``VehicleConfig`` (spawn, routine, ROS identity).
 
-The host is opt-in: when the experiment config has ``px4.enabled = false``
+The host is opt-in: when the vehicle config has ``bridge.enabled = false``
 (the default), no bridge is built and no callbacks are registered. This lets
 the bridge layers be tested in stages (port alone, articulation_io alone,
 full bridge) by flipping the flag.
@@ -66,7 +66,7 @@ def _bridge_components(params: BridgeHostParams, rotor_mapping: Any) -> tuple[An
         Px4MavlinkPort,
     )
 
-    cfg = params.px4
+    cfg = params.bridge
     lockstep_cfg = cfg.lockstep
     lockstep = LockstepSettings(
         lockstep_timeout_s=lockstep_cfg.lockstep_timeout_s,
@@ -115,13 +115,13 @@ class BridgeHostParams:
 
     ``px4`` is the vehicle's bridge behavior config; the remaining fields are the
     derived per-vehicle runtime state, taken straight from the
-    :class:`~robotics_experiments.config.ResolvedVehicle` (never
+    :class:`~robotics_experiments.config.VehicleConfig` (never
     recomputed here) plus the spawn result. ``articulation_path`` is resolved
     exactly once (the ``px4.articulation_path`` override, else the spawned prim
     path), so the host and the state observer read the same body.
     """
 
-    px4: Px4BridgeConfig
+    bridge: Px4BridgeConfig
     vehicle_id: int
     mavlink_port: int
     debug_log_path: str
@@ -139,7 +139,7 @@ class BridgeHost:
 
     def __init__(self, params: BridgeHostParams):
         self._params = params
-        self._cfg = params.px4
+        self._cfg = params.bridge
         self._bridge: Any | None = None
         self._clock: Any = None
         self._start_attempted: bool = False

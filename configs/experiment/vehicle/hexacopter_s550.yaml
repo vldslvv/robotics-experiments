@@ -1,0 +1,2 @@
+defaults: [base]
+spawn: {usd_path: /isaac-sim/proj/isaac/assets/LightSwitchWarehouse/hexacopter_s550.usda}

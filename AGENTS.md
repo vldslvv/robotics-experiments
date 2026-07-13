@@ -25,7 +25,7 @@ Read area docs on demand when a task touches that area:
 - Experiment config: `docs/EXPERIMENT_CONFIG.md` for top-level Hydra
   experiments, `scene`, `HYDRA_CONFIG`, `configs/experiment/`, and strict-mode
   routine test relationships.
-- Fleet config: `docs/FLEET_CONFIG.md` for `vehicles:`, `ResolvedVehicle`,
+- Fleet config: `docs/FLEET_CONFIG.md` for `vehicles:`, `VehicleConfig`,
   per-vehicle PX4 launch, config-generated airframes, and multi-vehicle runtime
   behavior.
 - Command/routine: `docs/COMMAND_ROUTINE_CONTRACT.md` for
@@ -92,8 +92,9 @@ the current contents and the intended home for that kind of code.
   dataclasses and loader functions from `robotics_experiments.config`, not from
   config submodules.
 - `load_config(path)` is the explicit, uncached, environment-independent config
-  boundary; `get_config()` is the cached production adapter. Both return a
-  fully immutable resolved graph after private construction and enrichment.
+  boundary; `get_config()` is the cached production adapter. Both return an
+  immutable `ExperimentConfig` whose ordered `vehicles` mapping contains complete
+  per-vehicle `spawn`, `bridge`, and `routine` configs.
 - Keep public API minimal. Public exports are for production consumers outside
   the module or package boundary; tests alone do not justify public API. If a
   top-level symbol is only used by tests or internal implementation, make it
@@ -181,7 +182,8 @@ the current contents and the intended home for that kind of code.
   rotor-spin non-physics seam aligned with that doc. `apply_dynamics` remains
   the sole physics sink.
 - Fleet invariants: read `docs/FLEET_CONFIG.md` before touching fleet config or
-  runtime behavior. `vehicles:` is the only spawn path; identity, ports, frame
+  runtime behavior. `vehicles:` is an ordered mapping and the only spawn path;
+  identity, ports, frame
   prefixes, log paths, and airframes are resolved once from config; multi-vehicle
   lockstep runs all sends before all polls while isolating each vehicle.
 
@@ -247,6 +249,12 @@ the current contents and the intended home for that kind of code.
   so no argument can be specified by name.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
+- A refactor that adds no new functionality must reduce implementation bloat or,
+  at minimum, leave it unchanged. Prefer deleting or merging redundant code,
+  abstractions, tests, and documentation while preserving behavior and coverage;
+  do not add wrappers, compatibility layers, helpers, or parallel models that
+  increase the maintenance surface. Judge bloat by maintenance cost, not line
+  count alone.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
   the Hydra `configs/` YAML as the single source of truth, not hardcoded in code.
   Add a matching field (a bare annotation with no default) to the relevant

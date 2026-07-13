@@ -25,7 +25,7 @@ from robotics_experiments.simulation import apply_settings
 if TYPE_CHECKING:
     from pxr import Usd
 
-    from robotics_experiments.config import EnvConfig
+    from robotics_experiments.config import ExperimentConfig
     from robotics_experiments.px4_bridge import VehicleState
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
@@ -42,10 +42,11 @@ def _assert_finite_array(value: Any, shape: tuple[int, ...], label: str) -> None
         raise AssertionError(f"{label}: expected finite values, got {array}")
 
 
-def _resolve_drone_paths(stage: Usd.Stage, env: EnvConfig) -> tuple[str, list[str]]:
+def _resolve_drone_paths(stage: Usd.Stage, env: ExperimentConfig) -> tuple[str, list[str]]:
+    vehicle = next(iter(env.vehicles.values()))
     default_prim = stage.GetDefaultPrim()
     parent = default_prim.GetPath().pathString if default_prim else "/World"
-    articulation_path = env.px4.articulation_path or f"{parent}/{env.drone.prim_name}"
+    articulation_path = vehicle.bridge.articulation_path or f"{parent}/{vehicle.spawn.prim_name}"
     rotor_mapping = discover_px4_rotor_mapping(stage, articulation_path)
     return articulation_path, rotor_mapping.rotor_link_paths
 
@@ -92,13 +93,14 @@ def _run_test(context: SceneTestContext) -> None:
     from robotics_experiments.drone import despawn_drone, spawn_drone
 
     env = get_config()
+    vehicle = next(iter(env.vehicles.values()))
     context.report(f"{TEST_NAME}: applying configured simulation settings")
     apply_settings(context.stage)
 
     articulation_io = None
     timeline = omni.timeline.get_timeline_interface()
     context.report(f"{TEST_NAME}: spawning configured drone")
-    spawn_drone(context.stage, env.drone)
+    spawn_drone(stage=context.stage, config=vehicle.spawn)
     try:
         articulation_path, rotor_paths = _resolve_drone_paths(context.stage, env)
         context.report(f"{TEST_NAME}: using drone articulation path {articulation_path}")
@@ -142,7 +144,7 @@ def _run_test(context: SceneTestContext) -> None:
         timeline.stop()
         if articulation_io is not None:
             articulation_io.shutdown()
-        despawn_drone(context.stage, env.drone)
+        despawn_drone(stage=context.stage, config=vehicle.spawn)
 
     context.report(f"{TEST_NAME}: verified real drone articulation read/write path")
 

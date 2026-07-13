@@ -9,8 +9,8 @@ exported here.
 from robotics_experiments.config.types import (
     BoundingBox,
     DriverConfig,
-    DroneConfig,
-    EnvConfig,
+    DroneSpawnConfig,
+    ExperimentConfig,
     LightSwitchConfig,
     LightSwitchStatePublisherConfig,
     LockstepConfig,
@@ -20,12 +20,12 @@ from robotics_experiments.config.types import (
     PressTaskConfig,
     Px4BridgeConfig,
     Px4SitlLaunchConfig,
-    ResolvedVehicle,
     RlConfig,
     RlTrainingConfig,
     RosQosConfig,
     RosVehicleConfig,
     RoutineConfig,
+    RoutineStepConfig,
     SimSettings,
     VehicleConfig,
 )
@@ -33,8 +33,8 @@ from robotics_experiments.config.types import (
 __all__ = [
     "BoundingBox",
     "DriverConfig",
-    "DroneConfig",
-    "EnvConfig",
+    "DroneSpawnConfig",
+    "ExperimentConfig",
     "LightSwitchConfig",
     "LightSwitchStatePublisherConfig",
     "LockstepConfig",
@@ -44,19 +44,18 @@ __all__ = [
     "PressTaskConfig",
     "Px4BridgeConfig",
     "Px4SitlLaunchConfig",
-    "ResolvedVehicle",
     "RlConfig",
     "RlTrainingConfig",
     "RosQosConfig",
     "RosVehicleConfig",
     "RoutineConfig",
+    "RoutineStepConfig",
     "SimSettings",
     "VehicleConfig",
     "get_config",
     "get_enabled_px4_launch_configs",
     "load_config",
     "reset_config_cache",
-    "resolve_drone_bridge_config",
 ]
 
 
@@ -66,14 +65,12 @@ def __getattr__(name: str):
         "get_enabled_px4_launch_configs",
         "load_config",
         "reset_config_cache",
-        "resolve_drone_bridge_config",
     }:
         from robotics_experiments.config.loading import (
             get_config,
             get_enabled_px4_launch_configs,
             load_config,
             reset_config_cache,
-            resolve_drone_bridge_config,
         )
 
         return {
@@ -81,6 +78,5 @@ def __getattr__(name: str):
             "get_enabled_px4_launch_configs": get_enabled_px4_launch_configs,
             "load_config": load_config,
             "reset_config_cache": reset_config_cache,
-            "resolve_drone_bridge_config": resolve_drone_bridge_config,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
