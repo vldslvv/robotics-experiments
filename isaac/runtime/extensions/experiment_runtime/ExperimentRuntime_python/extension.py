@@ -12,10 +12,10 @@ extension):
   stage is adopted and settings applied on the ``OPENED`` event, once the stage
   has finished loading (``lightswitch_spawner`` reacts to the same event).
 - Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group,
-  builds one ``RoutineDriverState`` per bridge-enabled drone, and ticks them
-  from a separate Kit app-update subscription (never the bridge's physics legs).
-  Spawn stays gated on PLAY so the persisted stage is not mutated with drones
-  until the user presses Play.
+  builds one ``DriverContext`` plus one progress-only ``RoutineDriverState`` per
+  bridge-enabled drone, and ticks them from a separate Kit app-update
+  subscription (never the bridge's physics legs). Spawn stays gated on PLAY so
+  the persisted stage is not mutated with drones until the user presses Play.
 - ``STOP`` / ``PAUSE`` and ``on_shutdown`` drop the control tick and tear down.
 
 It is always *forgiving*: a routine ``FAIL``, a PX4 failsafe, or a phase timeout

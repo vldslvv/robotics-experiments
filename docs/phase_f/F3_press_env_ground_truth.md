@@ -131,13 +131,13 @@ those).
   assembled from the live bridge state + provider and emits the F1 action, which
   maps to a PX4 OFFBOARD setpoint stream (velocity or attitude/rate per the F1
   choice). The deploy mechanism (the routine-step plug-in over the widened
-  `STREAM` payload, through the unchanged `FleetOrchestrator`) exists from F2b
-  Step 6; the press-specific integration (handoff-gated `{kind: press}` step,
-  scripted press + policy behind one contact-behavior seam, the baseline eval)
-  is F3b (`F3b_contact_behavior_seam.md`), which starts only after this plan's
-  exit gate. Full mission sequencing, retry, and abort are Phase H (mission
-  manager). Keep F3 focused on training; the deploy seam needs no stubbing --
-  it is already proven on the hover task.
+  `STREAM` payload, through the unchanged frozen `FleetState` lifecycle) exists
+  from F2b Step 6; the press-specific integration (handoff-gated `{kind: press}`
+  step, scripted press + policy behind one contact-behavior seam, the baseline
+  eval) is F3b (`F3b_contact_behavior_seam.md`), which starts only after this
+  plan's exit gate. Full mission sequencing, retry, and abort are Phase H
+  (mission manager). Keep F3 focused on training; the deploy seam needs no
+  stubbing -- it is already proven on the hover task.
 - Done when: this boundary is documented; no mission-manager code is added in F3.
 
 ## Files touched by F3

@@ -11,9 +11,10 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
   `sim_settings` extension). The stage is adopted and sim settings applied on the
   `OPENED` event.
 - Timeline `PLAY`: spawn the fleet, start the PX4 lockstep bridge group, build
-  one frozen `RoutineDriverState` per bridge-enabled drone, and advance them
-  with `tick_drivers` from a separate app-update subscription. Empty routines
-  follow the same driver path and complete without commands.
+  one frozen `DriverContext` plus one progress-only `RoutineDriverState` per
+  bridge-enabled drone, and advance them with `tick_drivers` from a separate
+  app-update subscription. Empty routines follow the same driver path and
+  complete without commands.
 - `STOP` / `PAUSE` / `on_shutdown`: stop the control tick and tear down.
 
 Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged and

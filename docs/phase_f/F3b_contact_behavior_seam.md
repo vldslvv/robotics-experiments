@@ -16,15 +16,15 @@ still moving.
 
 Why this exists: F2b already ships the generic deploy mechanism -- the
 `{kind: policy}` routine step, the widened `STREAM` setpoint payload, the
-validated artifact loader, all flowing through the unchanged `FleetOrchestrator`
-(the orchestrator is not touched here either). What F2b does NOT cover is
-contact: phases, the handoff gate, and a scripted baseline. This plan adds the
-explicit contact-behavior contract on top of that mechanism, symmetric with the
-command-routine contract (`docs/COMMAND_ROUTINE_CONTRACT.md`): a pure decision
-surface over an injected side-effect seam. It also delivers the scripted press
-as the first production behavior -- it closes the Phase D loop end-to-end,
-exercises the handoff gate, pusher, latch, and deploy path ahead of the policy,
-and becomes the metric floor the learned policy must beat.
+validated artifact loader, all flowing through the unchanged frozen `FleetState`
+lifecycle (the runtime orchestrator module is not touched here either). What F2b
+does NOT cover is contact: phases, the handoff gate, and a scripted baseline.
+This plan adds the explicit contact-behavior contract on top of that mechanism,
+symmetric with the command-routine contract (`docs/COMMAND_ROUTINE_CONTRACT.md`):
+a pure decision surface over an injected side-effect seam. It also delivers the
+scripted press as the first production behavior -- it closes the Phase D loop
+end-to-end, exercises the handoff gate, pusher, latch, and deploy path ahead of
+the policy, and becomes the metric floor the learned policy must beat.
 
 ---
 
@@ -103,9 +103,9 @@ and becomes the metric floor the learned policy must beat.
   chain): the press step differs by entering only when F2's `handoff_ready`
   gate passes and by ticking the configured `ContactBehavior` in place of the
   direct policy call, completing on `DONE` (-> ADVANCE) or `ABORT` (-> FAIL).
-  Keep `decide` pure, exactly as in F2b Step 6. The orchestrator remains
-  untouched: `FleetOrchestrator.build_drivers` already runs any routine step
-  through the per-drone `RoutineDriver`.
+  Keep `decide` pure, exactly as in F2b Step 6. The runtime remains untouched:
+  `build_drivers` already builds the per-drone `DriverContext` and
+  `RoutineDriverState`, and `tick_routine_driver` runs any routine step.
 - Test: extend `tests/test_commanding_routine.py` /
   `tests/test_commanding_driver.py` with the press step over fakes: gate blocks
   entry, `DONE` advances, `ABORT` fails with `FailureKind.COMMAND` semantics.

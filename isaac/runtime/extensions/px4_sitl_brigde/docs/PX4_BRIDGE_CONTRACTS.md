@@ -161,7 +161,7 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 
 | Layer | Owns | Must not own |
 |-------|------|--------------|
-| `robotics_experiments.runtime.FleetState` functions | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine states, teardown. Driven by a thin per-host shell that rebinds each returned state | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
+| `robotics_experiments.runtime.FleetState` functions | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build one `DriverContext` plus one `RoutineDriverState` per bridge-enabled drone, teardown. Driven by a thin per-host shell that rebinds each returned state | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
 | `robotics_experiments.drone` (`spawn_drone` / `despawn_drone`) | Public stage-authoring contract for USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn; backed by an Isaac-only private implementation | Physics callbacks, PX4 bridge construction |
 | `BridgeHostGroup` (`robotics_experiments.runtime.BridgeHostGroup`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
 | `BridgeHost` (`robotics_experiments.runtime.BridgeHost`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
@@ -272,9 +272,11 @@ the package.
 
 The contract is expressed as frozen state values and stateless transitions over
 mutable MAVLink/Isaac resource adapters. Adapter state is read only through
-one public method on each adapter: `Px4MavlinkPort.read_status()` returns an
-immutable `BridgeStatus`, and `IsaacArticulationIO.is_initialized()` returns the
-immutable lifecycle flag needed by the bridge.
+public methods returning immutable values: `Px4MavlinkPort.read_status()` returns
+the full `BridgeStatus`, `Px4MavlinkPort.is_connected()` is the narrow hot-path
+probe used to avoid constructing that snapshot every physics tick, and
+`IsaacArticulationIO.is_initialized()` returns the lifecycle flag needed by the
+bridge.
 
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
@@ -344,6 +346,7 @@ class Px4BridgeState:
     articulation_io: _ArticulationIO
     max_tilt_angle_deg: float
     tick_count: int
+    dynamics_debug_interval: int
     tilt_cutoff_count: int
     pending: _PendingTick | None
 

@@ -36,7 +36,7 @@ must not silently swallow core errors.
 ## Consequences
 
 - Cross-component composition later moved *above* the extensions into the
-  host-agnostic `FleetOrchestrator`, with extensions kept single-responsibility --
-  a direct extension of this layering (see AGENTS.md).
+  host-agnostic frozen `FleetState` lifecycle transitions, with extensions kept
+  single-responsibility -- a direct extension of this layering (see AGENTS.md).
 - The dependency direction this implies is enforced by a regression guard in
   ADR 0004.

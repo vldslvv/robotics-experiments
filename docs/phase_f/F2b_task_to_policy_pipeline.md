@@ -5,13 +5,14 @@ the Isaac Lab image) converged the hover task from mean reward 1.15 to 92.12
 with mean episode length 249/250, and `make test-integration-press-policy`
 passed strict on the first attempt: arm -> takeoff -> the exported artifact
 holding the hover for 5 s of continuous in-envelope OFFBOARD velocity
-streaming over PX4 SITL -> land, through the unchanged `FleetOrchestrator`.
+streaming over PX4 SITL -> land, through the unchanged frozen `FleetState`
+lifecycle.
 The sim-to-PX4 fidelity caveat (Step 7) did not bite for the hover hold; it
 remains the watch item for aggressive maneuvers.
 
 Goal served: the durable RL contract itself -- `task definition (Hydra YAML) ->
-train -> exported policy artifact -> {kind: policy} routine step ->
-FleetOrchestrator`. Depends on: F1 (done). Parallel with F2 (the hover
+train -> exported policy artifact -> {kind: policy} routine step -> frozen
+FleetState lifecycle`. Depends on: F1 (done). Parallel with F2 (the hover
 observation is assemblable from `VehicleState` alone, so this plan does not need
 `PressObservation`; conversely the hover env keeps THIS plan's 13-dim layout as
 its training observation -- F2's `PressObservation` is validated as a gate side
@@ -28,12 +29,13 @@ end-to-end on the simplest task that already exists and flies
 YAML, "train" is one make target, and "deploy" is one routine step; F3 only adds
 the press task on top.
 
-Orchestrator plug point (load-bearing, state it once): `runtime/orchestrator.py`
-requires NO code change. `FleetOrchestrator.build_drivers` already constructs a
-`RoutineDriver` per drone with non-empty `routine.steps`; the policy plugs in as
-a new routine step kind executed by that driver, reusing the existing OFFBOARD
-streaming, envelope invariants, timeouts, and `on_failure` machinery. The seam
-is the routine step, not the orchestrator.
+Runtime plug point (load-bearing, state it once): `runtime/orchestrator.py`
+requires NO code change. Its `build_drivers` transition already constructs one
+`DriverContext` plus one `RoutineDriverState` per bridge-enabled drone; empty
+routines use the same lifecycle. The policy plugs in as a new routine step kind
+executed by `tick_routine_driver`, reusing the existing OFFBOARD streaming,
+envelope invariants, timeouts, and `on_failure` machinery. The seam is the
+routine step, not the fleet runtime.
 
 ---
 
@@ -190,9 +192,9 @@ is the routine step, not the orchestrator.
 
 - Action: run the routine `[arm, takeoff, policy (hover hold), land]` with a
   Step-5-trained hover artifact over PX4 SITL through the standalone scenario
-  in strict mode -- the same orchestrator phases and `RoutineDriver` tick loop
-  as every other routine, proving a Lab-trained artifact flies through the
-  unchanged `FleetOrchestrator`.
+  in strict mode -- the same `FleetState` phases and
+  `tick_routine_driver(context=..., state=...)` loop as every other routine,
+  proving a Lab-trained artifact flies through the unchanged runtime pipeline.
 - Measured (2026-07-05): first strict run passed -- takeoff at ~2.5 m climb,
   the policy streamed body-velocity OFFBOARD setpoints for the full 5 s hold
   with no envelope breach, then landed and disarmed inside the 30 s budget

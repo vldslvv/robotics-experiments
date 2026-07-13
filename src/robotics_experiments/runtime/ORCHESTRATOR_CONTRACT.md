@@ -16,10 +16,12 @@ functional core with small Isaac/MAVLink resource boundaries.
   Each host retains one latest frozen bridge-host state and replaces it after a
   callback transition.
 - MAVLink sockets and Isaac articulation handles remain mutable adapters.
-  Consumers read them through immutable snapshots returned by the adapter's
-  single public status method (`read_status()` or `is_initialized()`). The
-  project-owned `BridgeHost` keeps the module-level `read_bridge_host_status`
-  boundary. Runtime code does not use live state-reading properties.
+  Consumers read them through immutable values returned by public status methods
+  (`read_status()` or `is_initialized()`). The PX4 simulator port additionally
+  exposes the narrow `is_connected()` hot-path probe so the physics send leg does
+  not construct a full `BridgeStatus`. The project-owned `BridgeHost` keeps the
+  module-level `read_bridge_host_status` boundary. Runtime code does not use live
+  state-reading properties.
 
 ## Ordered lifecycle
 
