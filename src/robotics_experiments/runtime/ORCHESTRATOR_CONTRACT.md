@@ -81,6 +81,9 @@ Invalid lifecycle order or configuration raises. Recoverable runtime bridge
 errors are logged by `BridgeHost` without taking down other vehicles. Driver
 failure reaction is injected through `FleetDriverEnv`: strict environments
 raise, while forgiving environments log and leave manual control available.
+If a bridge send or receive leg raises, `BridgeHost` abandons both its host-level
+poll marker and the frozen bridge state's pending tick before the next physics
+step.
 
 The runtime modules are Isaac-only lazy leaves. `robotics_experiments.runtime`
 must remain importable without Isaac; importing a lazy runtime symbol may load

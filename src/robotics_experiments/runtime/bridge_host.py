@@ -324,7 +324,7 @@ def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _Bri
             f"[{host.tag}] send_sensors error at tick={clock.tick_count} "
             f"sim_time_us={sim_time_us}: {exc}"
         )
-        return current
+        return replace(current, bridge=replace(bridge_state, pending=None))
     return replace(
         current,
         bridge=bridge,
@@ -352,6 +352,8 @@ def _recv_phase(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostStat
             f"[{host.tag}] recv_and_apply error at tick={pending.tick} "
             f"sim_time_us={pending.bridge_sim_time_us}: {exc}"
         )
+        bridge = replace(bridge, pending=None)
+        current = replace(current, bridge=bridge)
     block_s = time.monotonic() - pending.block_start
     current = replace(
         current,

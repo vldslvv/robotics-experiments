@@ -148,7 +148,11 @@ def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4Br
 
 
 def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
-    """Run the paired actuator leg and return state with no pending poll."""
+    """Run the paired actuator leg and return state with no pending poll.
+
+    An exception returns no successor, so a stateful split-leg caller must
+    discard the input state's pending tick before continuing.
+    """
     pending = state.pending
     if pending is None:
         raise RuntimeError(

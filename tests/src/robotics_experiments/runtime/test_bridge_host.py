@@ -1,6 +1,7 @@
 import importlib
 import sys
 import types
+from dataclasses import dataclass, replace
 from enum import IntEnum
 from types import SimpleNamespace
 
@@ -111,6 +112,13 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     class PegasusQuadraticThrustModel:
         pass
 
+    @dataclass(frozen=True)
+    class Px4BridgeState:
+        connected: bool
+        port: Px4MavlinkPort
+        thrust_model: PegasusQuadraticThrustModel
+        pending: object | None = None
+
     def create_pegasus_thrust_model(**kwargs):
         calls.append(("thrust", kwargs))
         return PegasusQuadraticThrustModel()
@@ -135,23 +143,21 @@ def _install_fake_px4_bridge(monkeypatch, calls):
                 rotor_spin_signs,
             )
         )
-        return SimpleNamespace(connected=False, port=port, thrust_model=thrust_model)
+        return Px4BridgeState(connected=False, port=port, thrust_model=thrust_model)
 
     def start_px4_bridge(*, state):
-        state.connected = True
         state.port.connected = True
-        return state
+        return replace(state, connected=True, pending=None)
 
     def stop_px4_bridge(*, state):
-        state.connected = False
         state.port.connected = False
-        return state
+        return replace(state, connected=False, pending=None)
 
     def send_sensors(*, state, dt, sim_time_us):
-        return state
+        return replace(state, pending=(float(dt), int(sim_time_us)))
 
     def recv_and_apply(*, state):
-        return state
+        return replace(state, pending=None)
 
     def discover_px4_rotor_mapping(stage, articulation_path):
         calls.append(("discover", stage, articulation_path))
@@ -322,6 +328,65 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     _step(host, 0.004)
 
     assert module.read_bridge_host_status(host=host).sim_time_us == 4000
+
+
+def test_bridge_host_discards_bridge_pending_after_receive_error(monkeypatch):
+    _install_fake_isaac(monkeypatch)
+    _install_fake_px4_bridge(monkeypatch, [])
+    module = _import_bridge_host(monkeypatch)
+    host = _make_host(module, _vehicle(startup_settle_time_s=0.0))
+    host.start()
+    host.send_phase(0.004)
+
+    bridge_host_module = importlib.import_module("robotics_experiments.runtime.bridge_host")
+    receive_calls = 0
+
+    def fail_receive(*, state):
+        nonlocal receive_calls
+        receive_calls += 1
+        raise RuntimeError("injected receive failure")
+
+    monkeypatch.setattr(bridge_host_module, "recv_and_apply", fail_receive)
+
+    host.recv_phase()
+    host.recv_phase()
+
+    retained_bridge = host._state.bridge  # noqa: SLF001 - verify discarded transition state
+    assert retained_bridge is not None
+    assert retained_bridge.pending is None
+    assert receive_calls == 1
+
+
+def test_bridge_host_discards_bridge_pending_after_send_error(monkeypatch):
+    _install_fake_isaac(monkeypatch)
+    _install_fake_px4_bridge(monkeypatch, [])
+    module = _import_bridge_host(monkeypatch)
+    host = _make_host(module, _vehicle(startup_settle_time_s=0.0))
+    host.start()
+    host.send_phase(0.004)
+
+    bridge_host_module = importlib.import_module("robotics_experiments.runtime.bridge_host")
+
+    def fail_send(*, state, dt, sim_time_us):
+        raise RuntimeError("injected send failure")
+
+    receive_calls = 0
+
+    def record_receive(*, state):
+        nonlocal receive_calls
+        receive_calls += 1
+        return state
+
+    monkeypatch.setattr(bridge_host_module, "send_sensors", fail_send)
+    monkeypatch.setattr(bridge_host_module, "recv_and_apply", record_receive)
+
+    host.send_phase(0.004)
+    host.recv_phase()
+
+    retained_bridge = host._state.bridge  # noqa: SLF001 - verify discarded transition state
+    assert retained_bridge is not None
+    assert retained_bridge.pending is None
+    assert receive_calls == 0
 
 
 def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):

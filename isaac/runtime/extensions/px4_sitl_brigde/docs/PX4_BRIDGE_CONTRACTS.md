@@ -370,6 +370,14 @@ calls every vehicle's send leg before any vehicle's poll leg, so the flight
 stacks compute concurrently and one stalled PX4 cannot freeze the others; the
 causal per-vehicle order (send before its own poll) is preserved.
 
+**Exception ownership:** a frozen transition that raises returns no successor,
+so its input state remains unchanged. A stateful split-leg caller must abandon
+that tick rather than run `recv_and_apply` again on its retained pending value.
+`BridgeHost` does this after either leg raises by clearing both its host-level
+poll marker and the bridge state's pending tick. The single-vehicle
+`tick_px4_bridge` composition instead propagates the exception, leaving its
+caller's pre-send state untouched.
+
 **Cosmetic rotor spin (separate seam):** the visual spinning of the propellers
 is *not* part of the four-part contract above and must never feed back into it.
 `commands_to_dynamics` stays pure -- it only adds the `rotor_omega_rad_s` field

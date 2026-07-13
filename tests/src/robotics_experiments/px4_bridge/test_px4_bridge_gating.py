@@ -8,6 +8,8 @@ from robotics_experiments.px4_bridge import (
     VehicleState,
     create_pegasus_thrust_model,
     create_px4_bridge,
+    recv_and_apply,
+    send_sensors,
     start_px4_bridge,
     stop_px4_bridge,
     tick_px4_bridge,
@@ -72,6 +74,47 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     assert io.shutdown_called is True
     assert port.states[0].sim_time_us == 4_000
     assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])
+
+
+def test_recv_and_apply_rejects_state_without_paired_send():
+    io = _FakeArticulationIO(VehicleState.hover_at(sim_time_us=0))
+    bridge = create_px4_bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=_FakeFlightStack([0.0, 0.25, 0.5, 1.0]),
+        articulation_io=io,
+    )
+
+    with pytest.raises(RuntimeError, match="without a paired send_sensors"):
+        recv_and_apply(state=bridge)
+
+    assert io.applied_dynamics == []
+
+
+def test_receive_exception_leaves_frozen_input_for_caller_to_discard(monkeypatch):
+    io = _FakeArticulationIO(VehicleState.hover_at(sim_time_us=0))
+    port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
+    bridge = create_px4_bridge(
+        articulation_path="/World/Drone",
+        rotor_link_paths=["m1", "m2", "m3", "m4"],
+        thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
+        port=port,
+        articulation_io=io,
+    )
+    bridge = start_px4_bridge(state=bridge)
+    sent = send_sensors(state=bridge, dt=0.004, sim_time_us=4_000)
+
+    def fail_poll():
+        raise RuntimeError("injected poll failure")
+
+    monkeypatch.setattr(port, "poll", fail_poll)
+
+    with pytest.raises(RuntimeError, match="injected poll failure"):
+        recv_and_apply(state=sent)
+
+    assert sent.pending is not None
+    assert io.applied_dynamics == []
 
 
 def test_px4_bridge_derives_drag_velocity_from_world_velocity():
