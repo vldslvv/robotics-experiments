@@ -258,6 +258,26 @@ def test_build_vehicle_routine_forward_and_land():
     assert land_step.timeout_s == pytest.approx(30.0)
 
 
+def test_build_vehicle_routine_consecutive_forward_steps_preserve_target_state():
+    routine = _build(
+        [
+            {"kind": "takeoff", "climb_m": 2.0, "min_climb_m": 1.0},
+            {"kind": "forward", "distance_m": 1.0, "timeout_s": 20.0},
+            {"kind": "forward", "distance_m": 2.0, "timeout_s": 20.0},
+        ],
+        target_altitude_m=488.0,
+    )
+
+    first_forward = routine.steps[1].command
+    second_forward = routine.steps[2].command
+    first_longitude_offset = first_forward.params[5] - 8.0
+    second_longitude_offset = second_forward.params[5] - first_forward.params[5]
+
+    assert second_longitude_offset == pytest.approx(2.0 * first_longitude_offset)
+    assert first_forward.params[6] == pytest.approx(490.0)
+    assert second_forward.params[6] == pytest.approx(490.0)
+
+
 def test_build_vehicle_routine_empty_steps_is_empty_routine():
     assert _build([]).steps == ()
 

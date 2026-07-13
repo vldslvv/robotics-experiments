@@ -240,6 +240,11 @@ the current contents and the intended home for that kind of code.
   USD crates listed in `.binary-asset-allowlist` are grandfathered source
   assets; do not modify/regenerate them or expand the allowlist unless a task
   explicitly requests an asset-policy change. See `docs/BINARY_ASSETS.md`.
+- Do not mix positional and keyword-only parameters in a Python function
+  signature. Excluding an implicit `self` or `cls` receiver, choose one calling
+  convention for all parameters: either make every parameter keyword-only so
+  every argument is specified by name, or make every parameter positional-only
+  so no argument can be specified by name.
 - Do NOT regenerate assets unless explicitly asked.
 - Do NOT hardcode absolute paths.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
