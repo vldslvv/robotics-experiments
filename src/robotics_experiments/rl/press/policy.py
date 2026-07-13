@@ -150,7 +150,8 @@ def build_policy_step_fn(
     Loads the artifact against the hover observation layout and returns
     ``(vehicle_state, target_enu) -> OFFBOARD setpoint payload``: pack the
     hover observation, run the policy, clip to [-1, 1] (the env-side clamp),
-    and map through :func:`robotics_experiments.rl.press_action_to_offboard`.
+    and map through
+    :func:`robotics_experiments.rl.press.press_action_to_offboard`.
 
     Raises:
         ValueError: propagated from the internal artifact loader on a missing or

@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from robotics_experiments.px4_bridge import VehicleState
-from robotics_experiments.rl import (
+from robotics_experiments.rl.press import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     OBSERVATION_SCHEMA_VERSION,

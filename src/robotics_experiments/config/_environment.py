@@ -25,10 +25,10 @@ class VehicleConfig(_FreezableConfig):
     bridge: Px4BridgeConfig
     routine: RoutineConfig
     mavlink_port: int = field(init=False, default=0)
-    px4_instance_index: int = field(init=False, default=0)
     gcs_port: int = field(init=False, default=0)
-    ros_frame_prefix: str = field(init=False, default="")
     debug_log_path: str = field(init=False, default="")
+    px4_sim_model: str = field(init=False, default="")
+    px4_sys_autostart: int = field(init=False, default=0)
 
 
 @dataclass

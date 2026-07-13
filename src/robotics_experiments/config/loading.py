@@ -1,6 +1,6 @@
 import functools
-import os
 from collections.abc import Iterable
+from os import PathLike
 from pathlib import Path
 from typing import cast
 
@@ -10,24 +10,11 @@ from hydra._internal.utils import create_config_search_path
 from hydra.types import RunMode
 from omegaconf import OmegaConf, open_dict
 
+from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._immutability import _freeze_config_graph
 from robotics_experiments.config._schemas import _register_schemas
-from robotics_experiments.config.types import (
-    ExperimentConfig,
-    Px4SitlLaunchConfig,
-    VehicleConfig,
-)
 
-__all__ = [
-    "get_config",
-    "get_enabled_px4_launch_configs",
-    "load_config",
-    "reset_config_cache",
-]
-
-_DEFAULT_CONF_DIR = Path(__file__).resolve().parents[3] / "configs"
-_DEFAULT_CONFIG_NAME = "takeoff_quad"
-_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+__all__ = ["load_config"]
 
 
 @functools.cache
@@ -76,17 +63,6 @@ def _compute_rotor_constants(
     return [max_thrust_n / (v * v) for v in max_velocities]
 
 
-def _resolve_config_path() -> Path:
-    raw_path = os.environ.get(_CONFIG_PATH_ENV)
-    if raw_path is None:
-        return _DEFAULT_CONF_DIR / f"{_DEFAULT_CONFIG_NAME}.yaml"
-
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = Path(__file__).resolve().parents[3] / path
-    return path.resolve()
-
-
 def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
     """Raise ``ValueError`` on any structurally invalid resolved fleet.
 
@@ -129,11 +105,12 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
             )
         ros_namespaces.add(v.ros.namespace)
 
-        if v.ros_frame_prefix in ros_frame_prefixes:
+        ros_frame_prefix = _ros_frame_prefix_from_namespace(v.ros.namespace)
+        if ros_frame_prefix in ros_frame_prefixes:
             raise ValueError(
-                f"duplicate vehicle ROS frame prefix {v.ros_frame_prefix!r} " f"(vehicle id={v.id})"
+                f"duplicate vehicle ROS frame prefix {ros_frame_prefix!r} " f"(vehicle id={v.id})"
             )
-        ros_frame_prefixes.add(v.ros_frame_prefix)
+        ros_frame_prefixes.add(ros_frame_prefix)
 
         # debug_log_path already has the {vehicle} token rendered to id; the
         # date/time tokens stay literal here. Two vehicles whose template lacks
@@ -148,7 +125,7 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
             log_paths.add(v.debug_log_path)
 
 
-def _resolve_ros_namespace(namespace, *, vehicle_id: int) -> str:
+def _resolve_ros_namespace(*, namespace, vehicle_id: int) -> str:
     if not isinstance(namespace, str):
         raise ValueError(
             f"vehicle id={vehicle_id} ros.namespace must be a string, "
@@ -192,12 +169,25 @@ def _enrich_fleet(cfg, airframe_config_dir: Path) -> None:
             list(entry.bridge.max_rotor_velocity),
         )
         vehicle_id = int(entry["id"])
-        ros_namespace = _resolve_ros_namespace(entry.ros.namespace, vehicle_id=vehicle_id)
+        _resolve_ros_namespace(namespace=entry.ros.namespace, vehicle_id=vehicle_id)
         entry.mavlink_port = entry.bridge.connection_baseport + vehicle_id
-        entry.px4_instance_index = vehicle_id
         entry.gcs_port = entry.bridge.gcs_baseport + vehicle_id
-        entry.ros_frame_prefix = _ros_frame_prefix_from_namespace(ros_namespace)
         entry.debug_log_path = entry.bridge.debug_log_path.replace("{vehicle}", str(vehicle_id))
+        if entry.bridge.enabled:
+            asset = Path(str(entry.spawn.usd_path)).name
+            if airframe is None:
+                raise ValueError(
+                    f"no PX4 SITL airframe mapping for drone asset {entry.spawn.usd_path!r} "
+                    f"(prim {entry.spawn.prim_name!r}); add it to configs/airframes"
+                )
+            sitl = airframe.get("px4", {}).get("sitl")
+            if not sitl:
+                raise ValueError(
+                    f"airframe config for drone asset {asset!r} has no px4.sitl mapping; "
+                    "add px4.sitl.sim_model and px4.sitl.sys_autostart"
+                )
+            entry.px4_sim_model = str(sitl["sim_model"])
+            entry.px4_sys_autostart = int(sitl["sys_autostart"])
 
 
 def _compose_config(config_path: Path):
@@ -217,7 +207,8 @@ def _compose_config(config_path: Path):
     return cfg
 
 
-def load_config(path: str | os.PathLike[str]) -> ExperimentConfig:
+@functools.cache
+def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     """Compose, enrich, validate, and freeze one explicit experiment config.
 
     ``path`` is the core boundary and does not read an environment variable or
@@ -242,77 +233,3 @@ def load_config(path: str | os.PathLike[str]) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     return _freeze_config_graph(experiment)
-
-
-@functools.cache
-def get_config() -> ExperimentConfig:
-    """Return the process-wide composed :class:`ExperimentConfig`, loading once.
-
-    The first call composes Hydra against the selected top-level experiment
-    config and caches the resulting dataclass.
-    Subsequent calls return the cached instance - safe to call from any extension's
-    ``on_startup`` and from per-step hot paths.
-
-    Returns:
-        The composed ``ExperimentConfig`` instance.
-    """
-    return load_config(_resolve_config_path())
-
-
-def _resolve_px4_sitl_launch_config(
-    vehicle: VehicleConfig, airframe_config_dir: Path
-) -> Px4SitlLaunchConfig:
-    """Derive the PX4 SITL launch airframe for one resolved vehicle.
-
-    The drone USD asset name selects the airframe record in ``configs/airframes``,
-    whose ``px4.sitl`` block supplies the PX4 ``PX4_SIM_MODEL`` /
-    ``PX4_SYS_AUTOSTART`` pair so each asset launches its generated PX4 control
-    allocation instead of falling back to a stock quad. An unknown PX4-flyable
-    asset raises ``ValueError``
-    (naming the asset and prim) rather than silently flying the wrong airframe.
-    """
-    asset = Path(vehicle.spawn.usd_path).name
-    airframe = _airframe_for_drone_asset(vehicle.spawn.usd_path, airframe_config_dir)
-    if airframe is None:
-        raise ValueError(
-            f"no PX4 SITL airframe mapping for drone asset {vehicle.spawn.usd_path!r} "
-            f"(prim {vehicle.spawn.prim_name!r}); add it to configs/airframes"
-        )
-    sitl = airframe.get("px4", {}).get("sitl")
-    if not sitl:
-        raise ValueError(
-            f"airframe config for drone asset {asset!r} has no px4.sitl mapping; "
-            "add px4.sitl.sim_model and px4.sitl.sys_autostart"
-        )
-    return Px4SitlLaunchConfig(
-        instance_index=vehicle.px4_instance_index,
-        sim_model=str(sitl["sim_model"]),
-        sys_autostart=int(sitl["sys_autostart"]),
-    )
-
-
-def get_enabled_px4_launch_configs() -> list[Px4SitlLaunchConfig]:
-    """Return PX4 SITL launch specs for the PX4-enabled vehicles, in fleet order.
-
-    The host-side launch scripts iterate these to start one PX4 container per
-    vehicle, threading each spec's ``instance_index`` / ``sim_model`` /
-    ``sys_autostart`` in as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
-    ``PX4_SYS_AUTOSTART`` so each container launches the airframe matching its
-    drone asset.
-    """
-    airframe_config_dir = _resolve_config_path().parent / "airframes"
-    return [
-        _resolve_px4_sitl_launch_config(v, airframe_config_dir)
-        for v in get_config().vehicles.values()
-        if v.bridge.enabled
-    ]
-
-
-def reset_config_cache() -> None:
-    """Drop the cached config so the next :func:`get_config` recomposes.
-
-    Intended for tests and interactive reload workflows; production extensions
-    should not need to call this.
-    """
-    get_config.cache_clear()
-    _airframes_by_output_filename.cache_clear()

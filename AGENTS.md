@@ -91,10 +91,11 @@ the current contents and the intended home for that kind of code.
   root. Code outside `src/robotics_experiments/config` must import config
   dataclasses and loader functions from `robotics_experiments.config`, not from
   config submodules.
-- `load_config(path)` is the explicit, uncached, environment-independent config
-  boundary; `get_config()` is the cached production adapter. Both return an
-  immutable `ExperimentConfig` whose ordered `vehicles` mapping contains complete
-  per-vehicle `spawn`, `bridge`, and `routine` configs.
+- `load_config(path)` is the cached, explicit, environment-independent config
+  boundary. It returns an immutable `ExperimentConfig` whose ordered `vehicles`
+  mapping contains complete per-vehicle `spawn`, `bridge`, and `routine` configs.
+  Runtime roots resolve `ROBOTICS_EXPERIMENT_CONFIG_PATH` themselves and pass the
+  resolved config downward.
 - Keep public API minimal. Public exports are for production consumers outside
   the module or package boundary; tests alone do not justify public API. If a
   top-level symbol is only used by tests or internal implementation, make it
@@ -258,8 +259,9 @@ the current contents and the intended home for that kind of code.
 - Tunable thresholds, timeouts, rates, and similar runtime parameters belong in
   the Hydra `configs/` YAML as the single source of truth, not hardcoded in code.
   Add a matching field (a bare annotation with no default) to the relevant
-  `*Config` dataclass in `src/robotics_experiments/config/types.py` and plumb it
-  through. A library constructor may keep a neutral fallback default, but it must
+  `*Config` dataclass in the owning private module under
+  `src/robotics_experiments/config/` and plumb it through. A library constructor
+  may keep a neutral fallback default, but it must
   not duplicate the project value.
 - Prefer modifying existing files over adding new entrypoints.
 - Avoid using Unicode symbols.

@@ -123,8 +123,8 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
     stage = _FakeStage()
 
     apply_settings(
-        stage,
-        SimSettings(
+        stage=stage,
+        settings=SimSettings(
             physics_hz=500.9,
             rendering_hz=60.9,
             solver_type="TGS",
@@ -149,8 +149,8 @@ def test_apply_settings_rejects_zero_magnitude_gravity(simulation_api):
 
     with pytest.raises(ValueError, match="Gravity vector must have positive magnitude"):
         apply_settings(
-            _FakeStage(),
-            SimSettings(
+            stage=_FakeStage(),
+            settings=SimSettings(
                 physics_hz=500.0,
                 rendering_hz=60.0,
                 solver_type="TGS",
@@ -165,8 +165,8 @@ def test_apply_settings_rejects_non_positive_physics_rate(simulation_api, physic
 
     with pytest.raises(ValueError, match="physics_hz must be positive"):
         apply_settings(
-            _FakeStage(),
-            SimSettings(
+            stage=_FakeStage(),
+            settings=SimSettings(
                 physics_hz=physics_hz,
                 rendering_hz=60.0,
                 solver_type="TGS",
@@ -181,8 +181,8 @@ def test_apply_settings_rejects_non_positive_render_rate(simulation_api, renderi
 
     with pytest.raises(ValueError, match="rendering_hz must be positive"):
         apply_settings(
-            _FakeStage(),
-            SimSettings(
+            stage=_FakeStage(),
+            settings=SimSettings(
                 physics_hz=500.0,
                 rendering_hz=rendering_hz,
                 solver_type="TGS",

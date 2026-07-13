@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.config import get_config
 from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
@@ -21,7 +20,7 @@ def _run_test(context: SceneTestContext) -> None:
     # running Kit app and stay deferred here.
     from robotics_experiments.drone import despawn_drone, spawn_drone
 
-    env = get_config()
+    env = context.config
     vehicle = next(iter(env.vehicles.values()))
     spawn_drone(stage=context.stage, config=vehicle.spawn)
 

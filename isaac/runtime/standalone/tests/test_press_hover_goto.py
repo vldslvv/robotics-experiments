@@ -19,15 +19,16 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from robotics_experiments.config import get_config
+from robotics_experiments.config import ExperimentConfig, load_config
 
 if TYPE_CHECKING:
     from robotics_experiments.config import PressActionConfig
@@ -48,6 +49,7 @@ _GOTO_TOLERANCE_M = 0.2
 _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
 # target along +X, outward plate normal facing the approaching drone, so the
@@ -181,9 +183,14 @@ def _reset_env(env: DroneHoverEnv, seed: int) -> None:
 
 
 def _make_env(
-    env_cfg_cls: type[DroneHoverEnvCfg], seed: int, num_envs: int | None
+    *,
+    experiment_config: ExperimentConfig,
+    seed: int,
+    num_envs: int | None,
 ) -> DroneHoverEnvCfg:
-    cfg = env_cfg_cls()
+    from robotics_experiments.workflows.isaac_lab import make_drone_hover_env_cfg
+
+    cfg = make_drone_hover_env_cfg(experiment_config=experiment_config)
     cfg.episode_length_s = _HOVER_SETTLE_S + _GOTO_SETTLE_S + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
         cfg.seed = seed
@@ -204,17 +211,25 @@ def _ctbr_hover_action(
 
 
 def _run_ctbr_sanity(
+    *,
     args: argparse.Namespace,
+    config: ExperimentConfig,
     action_cfg: PressActionConfig,
     env_cls: type[DroneHoverEnv],
-    env_cfg_cls: type[DroneHoverEnvCfg],
 ) -> None:
     # Isaac Lab workflow code is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab import compute_lab_rotor_omega
 
     _seed_everything(args.seed)
     num_envs = args.num_envs if args.num_envs is not None else 1
-    env = env_cls(_make_env(env_cfg_cls, seed=args.seed, num_envs=num_envs))
+    env = env_cls(
+        cfg=_make_env(
+            experiment_config=config,
+            seed=args.seed,
+            num_envs=num_envs,
+        ),
+        experiment_config=config,
+    )
     try:
         _reset_env(env, args.seed)
         hover_action, hover_fraction = _ctbr_hover_action(env, action_cfg)
@@ -263,7 +278,7 @@ def _run_ctbr_sanity(
         env.close()
 
 
-def _setup_press_side_channel(goto_target_env0: np.ndarray):
+def _setup_press_side_channel(*, goto_target_env0: np.ndarray, switch_usd_path: str):
     """Place the F2 validation switch prim and return its ground-truth provider.
 
     The prim's world pose is what the provider reads; its authored orientation
@@ -275,11 +290,11 @@ def _setup_press_side_channel(goto_target_env0: np.ndarray):
     import omni.usd
     from pxr import Gf, UsdGeom
 
-    from robotics_experiments.rl import GroundTruthPoseProvider
+    from robotics_experiments.rl.press import GroundTruthPoseProvider
 
     stage = omni.usd.get_context().get_stage()
     prim = stage.DefinePrim(_SWITCH_PRIM_PATH, "Xform")
-    prim.GetReferences().AddReference(get_config().switches.switch_usd_path)
+    prim.GetReferences().AddReference(switch_usd_path)
     xform = UsdGeom.Xformable(prim)
     xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
         Gf.Vec3d(*(float(v) for v in goto_target_env0))
@@ -295,7 +310,7 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     touches the env's training observation.
     """
     from robotics_experiments.px4_bridge import quat_wxyz_to_xyzw, world_enu_to_body_flu
-    from robotics_experiments.rl import (
+    from robotics_experiments.rl.press import (
         PressObservation,
         to_vector,
         world_switch_to_contact_frame,
@@ -336,9 +351,9 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     return observation
 
 
-def _validate_press_side_channel(start_obs, end_obs) -> None:
+def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
     """F2 exit-gate checks over the start/end side-channel observations."""
-    from robotics_experiments.rl import HandoffGate, handoff_ready
+    from robotics_experiments.rl.press import HandoffGate, handoff_ready
 
     start_range = float(start_obs.relative_switch_pos_m[0])
     end_range = float(end_obs.relative_switch_pos_m[0])
@@ -348,7 +363,7 @@ def _validate_press_side_channel(start_obs, end_obs) -> None:
             f"relative switch range did not shrink across the goto: "
             f"{start_range:.3f} m -> {end_range:.3f} m"
         )
-    gate = HandoffGate.from_config(get_config().rl.press.handoff)
+    gate = HandoffGate.from_config(handoff_config)
     start_result = handoff_ready(start_obs, gate)
     if start_result.ready:
         raise AssertionError("handoff gate was already ready 2 m from the switch")
@@ -363,19 +378,23 @@ def _validate_press_side_channel(start_obs, end_obs) -> None:
         )
 
 
-def _run(args: argparse.Namespace) -> None:
-    action_cfg = get_config().rl.action
+def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    action_cfg = config.rl.action
     if args.ctbr_sanity:
-        action_cfg.kind = "ctbr"
+        action_cfg = replace(action_cfg, kind="ctbr")
 
     # DroneHoverEnv is Isaac Lab task code, so it is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
-        DroneHoverEnvCfg,
     )
 
     if args.ctbr_sanity:
-        _run_ctbr_sanity(args, action_cfg, DroneHoverEnv, DroneHoverEnvCfg)
+        _run_ctbr_sanity(
+            args=args,
+            config=config,
+            action_cfg=action_cfg,
+            env_cls=DroneHoverEnv,
+        )
         return
 
     if action_cfg.kind != "velocity":
@@ -390,7 +409,14 @@ def _run(args: argparse.Namespace) -> None:
     if num_envs is None and args.diag:
         num_envs = 1
 
-    env = DroneHoverEnv(_make_env(DroneHoverEnvCfg, seed=args.seed, num_envs=num_envs))
+    env = DroneHoverEnv(
+        cfg=_make_env(
+            experiment_config=config,
+            seed=args.seed,
+            num_envs=num_envs,
+        ),
+        experiment_config=config,
+    )
     try:
         _reset_env(env, args.seed)
         # The hover target is the (un-randomized) spawn pose per env.
@@ -424,7 +450,10 @@ def _run(args: argparse.Namespace) -> None:
         switch_pos_env0 = goto_target[0].cpu().numpy().astype(np.float64) + np.array(
             [_SWITCH_BEYOND_GOTO_M, 0.0, 0.0]
         )
-        provider = _setup_press_side_channel(switch_pos_env0)
+        provider = _setup_press_side_channel(
+            goto_target_env0=switch_pos_env0,
+            switch_usd_path=config.switches.switch_usd_path,
+        )
         action_dim = int(env.cfg.action_space)
         press_start_obs = _press_observation_sample(env, provider, action_dim)
         goto = _drive_to(
@@ -449,7 +478,11 @@ def _run(args: argparse.Namespace) -> None:
             )
 
         press_end_obs = _press_observation_sample(env, provider, action_dim)
-        _validate_press_side_channel(press_start_obs, press_end_obs)
+        _validate_press_side_channel(
+            start_obs=press_start_obs,
+            end_obs=press_end_obs,
+            handoff_config=config.rl.press.handoff,
+        )
     finally:
         env.close()
 
@@ -485,7 +518,11 @@ def main() -> None:
     app_launcher = AppLauncher(headless=True)
     simulation_app = app_launcher.app
     try:
-        _run(args)
+        try:
+            config_path = os.environ[_CONFIG_PATH_ENV]
+        except KeyError as exc:
+            raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
+        _run(args=args, config=load_config(config_path))
         if args.ctbr_sanity:
             _report("ctbr sanity validation PASSED")
         else:

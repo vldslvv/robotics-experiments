@@ -84,7 +84,7 @@ those).
   from `press.reset` (close to the switch, calm). Curriculum ranges come in F4.
 - Config: add `PressRewardConfig` (all term weights) and `PressResetConfig`
   (start-pose ranges, easy switch scale/stiffness/threshold overrides) to
-  `config/types.py` + `configs/experiment/rl/default.yaml`; add to `RlConfig`.
+  `config/_rl.py` + `configs/experiment/rl/default.yaml`; add to `RlConfig`.
 - Test: `tests/test_press_reward.py`, `tests/test_press_termination.py` (pure):
   each term fires only in its phase; toggle reward is one-shot; timeout terminates;
   generic contact without toggle earns no toggle reward.
@@ -105,7 +105,7 @@ those).
 ## Step 6 -- Inference contract (exists from F2b)
 
 - The validated artifact format (TorchScript + metadata sidecar) and
-  `robotics_experiments.rl.build_policy_step_fn` exists from F2b Step 4; the runtime press
+  `robotics_experiments.rl.press.build_policy_step_fn` exists from F2b Step 4; the runtime press
   behavior depends only on that seam, never on the training library. Nothing to
   add here; the F2b metadata validation (obs schema version, action kind, dims,
   scales) applies to press artifacts identically -- the press observation's
@@ -144,7 +144,7 @@ those).
 
 - add `.../tasks/switch_press_env.py`; edit `.../isaac_lab/registration.py`
 - add `press/_reward.py`, `press/_termination.py`, `press/_latch.py`
-- edit `config/types.py` (`PressRewardConfig`, `PressResetConfig`),
+- edit `config/_rl.py` (`PressRewardConfig`, `PressResetConfig`),
   `configs/experiment/rl/default.yaml` (press values in the F2b `training:`
   block)
 - add the eval script + `make eval-press` (the training entrypoint, adapter,

@@ -1,7 +1,7 @@
 """Static checks that the host-side PX4 launch wiring threads the airframe.
 
 The per-vehicle PX4 SITL airframe (``PX4_SIM_MODEL`` / ``PX4_SYS_AUTOSTART``,
-derived from the drone asset by ``config.get_enabled_px4_launch_configs``) must
+resolved onto each enabled ``VehicleConfig`` by ``config.load_config``) must
 reach every PX4 container. These assert the persistent and integration launch
 scripts propagate both env vars rather than relying on the old hard-coded
 stale persistent container env, which silently flew hexacopters as quads.
@@ -20,7 +20,8 @@ def test_persistent_launch_derives_and_propagates_airframe():
     containers = _read("make/scripts/run_px4_persistent_containers.sh")
     helper = _read("make/scripts/px4_airframe_manifest_check.sh")
     # Derives the per-vehicle airframe from the resolved fleet, not a bare index.
-    assert "get_enabled_px4_launch_configs" in containers
+    assert "load_config" in containers
+    assert "vehicle.px4_sim_model" in containers
     # Threads both airframe env vars into the per-instance launch.
     assert "PX4_SIM_MODEL=" in containers
     assert "PX4_SYS_AUTOSTART=" in containers
@@ -50,7 +51,8 @@ def test_persistent_launch_derives_and_propagates_airframe():
 
 def test_integration_launch_derives_and_propagates_airframe():
     integration = _read("make/scripts/run_px4_integration_test.sh")
-    assert "get_enabled_px4_launch_configs" in integration
+    assert "load_config" in integration
+    assert "vehicle.px4_sim_model" in integration
     assert '-e "PX4_SIM_MODEL=${sim_model}"' in integration
     assert '-e "PX4_SYS_AUTOSTART=${sys_autostart}"' in integration
     assert "px4_airframe_manifest_check.sh" in integration

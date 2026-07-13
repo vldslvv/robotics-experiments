@@ -34,7 +34,6 @@ import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
 
 from robotics_experiments.commanding import FailureKind, MavlinkCommandPort
-from robotics_experiments.config import get_config
 from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
@@ -319,7 +318,7 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     strict = context.strict
     timing = TimingReporter(options.test_name, emit=context.report)
 
-    env = get_config()
+    env = context.config
     active_routines = [
         vehicle.routine for vehicle in env.vehicles.values() if vehicle.routine.steps
     ]

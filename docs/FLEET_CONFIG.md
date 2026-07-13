@@ -35,12 +35,14 @@ The loader enriches each `VehicleConfig` once:
 
 - the spawn asset selects `configs/airframes/<asset>.yaml` bridge values;
 - `rotor_constant` is computed from cited thrust and maximum rotor velocity;
-- MAVLink port, GCS port, PX4 instance, ROS frame prefix, and bridge log path are
-  derived from the vehicle identity and nested configs.
+- MAVLink port, GCS port, bridge log path, PX4 simulator model, and PX4 autostart
+  id are derived from the vehicle identity, spawn asset, and nested configs.
 
 Airframe physical values are authoritative over the generic bridge fallback.
-Unknown enabled assets fail PX4 launch resolution instead of selecting the wrong
-airframe.
+Unknown enabled assets fail configuration loading instead of selecting the wrong
+airframe. PX4 instance identity and ROS frame prefixes are derived at their
+consuming boundaries from `vehicle.id` and `vehicle.ros.namespace`; they are not
+stored as parallel fields.
 
 Validation rejects invalid or duplicate IDs, ROS identities/frame prefixes,
 spawn prim names, MAVLink endpoints, and rendered log paths. Consumers use the

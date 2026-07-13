@@ -38,7 +38,7 @@ config -> domain contracts (drone, environment, simulation, commanding, PX4 brid
                  +---- Isaac + ROS 2 + PX4 --+
 ```
 
-`robotics_experiments.config` is the configuration facade. Domain packages are
+`robotics_experiments.config` is the configuration boundary. Domain packages are
 import-clean without Isaac where practical, `FleetOrchestrator` owns runtime
 composition, and the live extension and standalone runner remain thin host
 shells. Detailed contracts are routed from [AGENTS.md](AGENTS.md).

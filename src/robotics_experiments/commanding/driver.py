@@ -64,10 +64,10 @@ class DriverPhase(Enum):
 class DriverParams:
     """The per-drone routine knobs the driver needs (a subset of ``RoutineConfig``).
 
-    Built by the Isaac-side adapter from a (per-vehicle) ``RoutineConfig`` plus
-    the global ``DriverConfig``-shaped execution heuristics, so ``commanding``
-    never imports ``config``. ``steps`` and ``gates`` plus the takeoff target
-    are mapped to a :class:`VehicleRoutine` at the ``BUILD`` phase via
+    Constructed by the runtime from one vehicle's routine plus the global driver
+    execution heuristics, so ``commanding`` never imports ``config``. ``steps``
+    and ``gates`` plus the takeoff target are mapped to a
+    :class:`VehicleRoutine` at the ``BUILD`` phase via
     :func:`build_vehicle_routine`; the timeouts arm the per-phase wall-clock
     backstops and the step budgets.
     """
@@ -99,60 +99,9 @@ class DriverParams:
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
     # The injected artifact-loading seam for ``policy`` steps (built by the
-    # runtime from ``robotics_experiments.rl.build_policy_step_fn``); ``None`` means a
+    # runtime from ``robotics_experiments.rl.press.build_policy_step_fn``); ``None`` means a
     # routine with a policy step fails loudly at BUILD.
     policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None
-
-    @classmethod
-    def from_routine_config(
-        cls,
-        rc: Any,
-        *,
-        driver: Any,
-        home_lat_deg: float = DEFAULT_HOME_LAT_DEG,
-        home_lon_deg: float = DEFAULT_HOME_LON_DEG,
-        home_alt_m: float = DEFAULT_HOME_ALT_M,
-        policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None,
-    ) -> "DriverParams":
-        """Build from ``RoutineConfig``- and ``DriverConfig``-shaped objects.
-
-        Both are duck-typed (fields read by name) so the pure ``commanding``
-        layer never imports ``config``; both Isaac-side adapters call this with
-        a per-vehicle ``VehicleConfig.routine`` and the global ``driver``
-        execution-heuristics group. The home anchor comes from the per-vehicle
-        ``px4`` group (passed by the orchestrator), not the routine.
-        """
-        return cls(
-            steps=rc.steps,
-            gates=EnvelopeGates(
-                max_tilt_deg=rc.max_tilt_deg,
-                max_lateral_drift_m=rc.max_lateral_drift_m,
-                max_vertical_speed_m_s=rc.max_vertical_speed_m_s,
-                max_downward_speed_m_s=rc.max_downward_speed_m_s,
-                max_angular_speed_rad_s=rc.max_angular_speed_rad_s,
-                hover_max_abs_vertical_speed_m_s=rc.hover_max_abs_vertical_speed_m_s,
-                hover_max_abs_horizontal_speed_m_s=rc.hover_max_abs_horizontal_speed_m_s,
-            ),
-            command_ack_timeout_s=rc.command_ack_timeout_s,
-            bridge_heartbeat_timeout_s=rc.bridge_heartbeat_timeout_s,
-            handshake_timeout_s=rc.handshake_timeout_s,
-            prearm_settle_s=rc.prearm_settle_s,
-            takeoff_target_timeout_s=rc.takeoff_target_timeout_s,
-            takeoff_timeout_s=rc.takeoff_timeout_s,
-            hover_settle_s=rc.hover_settle_s,
-            goto_position_tol_m=rc.goto_position_tol_m,
-            goto_heading_tol_deg=rc.goto_heading_tol_deg,
-            goto_cross_track_m=rc.goto_cross_track_m,
-            goto_offboard_prime_ticks=rc.goto_offboard_prime_ticks,
-            home_lat_deg=home_lat_deg,
-            home_lon_deg=home_lon_deg,
-            home_alt_m=home_alt_m,
-            goto_min_heading_dist_m=driver.goto_min_heading_dist_m,
-            prearm_backstop_floor_s=driver.prearm_backstop_floor_s,
-            prearm_backstop_multiplier=driver.prearm_backstop_multiplier,
-            drive_budget_multiplier=driver.drive_budget_multiplier,
-            policy_fn_factory=policy_fn_factory,
-        )
 
 
 class DriverEnvironment(Protocol):
@@ -294,7 +243,25 @@ class RoutineDriver:
         assert self._target is not None
         latitude_deg, longitude_deg, altitude_m = self._target
         try:
-            self._routine = self._build_routine(latitude_deg, longitude_deg, altitude_m)
+            self._routine = build_vehicle_routine(
+                self._params.steps,
+                target_latitude_deg=latitude_deg,
+                target_longitude_deg=longitude_deg,
+                target_altitude_m=altitude_m,
+                command_ack_timeout_s=self._params.command_ack_timeout_s,
+                gates=self._params.gates,
+                takeoff_timeout_s=self._params.takeoff_timeout_s,
+                hover_settle_s=self._params.hover_settle_s,
+                home_lat_deg=self._params.home_lat_deg,
+                home_lon_deg=self._params.home_lon_deg,
+                home_alt_m=self._params.home_alt_m,
+                goto_position_tol_m=self._params.goto_position_tol_m,
+                goto_heading_tol_deg=self._params.goto_heading_tol_deg,
+                goto_cross_track_m=self._params.goto_cross_track_m,
+                goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
+                goto_min_heading_dist_m=self._params.goto_min_heading_dist_m,
+                policy_fn_factory=self._params.policy_fn_factory,
+            )
         except ValueError as exc:
             # A bad routine config (unknown kind, missing field, unloadable
             # policy artifact) is a terminal command failure, routed through
@@ -305,29 +272,6 @@ class RoutineDriver:
         self._prev_cursor = 0
         self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
         self._enter(DriverPhase.DRIVE)
-
-    def _build_routine(
-        self, latitude_deg: float, longitude_deg: float, altitude_m: float
-    ) -> VehicleRoutine:
-        return build_vehicle_routine(
-            self._params.steps,
-            target_latitude_deg=latitude_deg,
-            target_longitude_deg=longitude_deg,
-            target_altitude_m=altitude_m,
-            command_ack_timeout_s=self._params.command_ack_timeout_s,
-            gates=self._params.gates,
-            takeoff_timeout_s=self._params.takeoff_timeout_s,
-            hover_settle_s=self._params.hover_settle_s,
-            home_lat_deg=self._params.home_lat_deg,
-            home_lon_deg=self._params.home_lon_deg,
-            home_alt_m=self._params.home_alt_m,
-            goto_position_tol_m=self._params.goto_position_tol_m,
-            goto_heading_tol_deg=self._params.goto_heading_tol_deg,
-            goto_cross_track_m=self._params.goto_cross_track_m,
-            goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
-            goto_min_heading_dist_m=self._params.goto_min_heading_dist_m,
-            policy_fn_factory=self._params.policy_fn_factory,
-        )
 
     def _tick_drive(self) -> None:
         assert self._commander is not None and self._routine is not None

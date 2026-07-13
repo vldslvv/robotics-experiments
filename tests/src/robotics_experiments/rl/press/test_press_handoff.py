@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from robotics_experiments.rl import (
+from robotics_experiments.rl.press import (
     HandoffGate,
     HandoffReason,
     PressObservation,

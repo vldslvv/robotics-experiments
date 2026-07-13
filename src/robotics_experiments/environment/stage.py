@@ -15,7 +15,7 @@ from typing import List
 import carb
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
-from robotics_experiments.config import BoundingBox, LightSwitchConfig, get_config
+from robotics_experiments.config import BoundingBox, LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState
 
 __all__ = ["spawn_switches", "despawn_switches", "validate_switches"]
@@ -195,19 +195,17 @@ def _spawn_lamps(
     return prim_paths
 
 
-def spawn_switches(stage: Usd.Stage, config: LightSwitchConfig | None = None) -> List[SwitchState]:
+def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> List[SwitchState]:
     """Spawn switches and their paired lamps at randomly sampled positions.
 
     Args:
         stage: USD stage to mutate.
-        config: Spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
+        config: Spawner configuration.
 
     Returns:
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
-    config = config if config is not None else get_config().switches
     positions = _sample_positions(
         config.num_switches,
         [_to_range(b) for b in config.spawn_bounds],

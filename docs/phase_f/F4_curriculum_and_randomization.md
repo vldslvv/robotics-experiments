@@ -24,7 +24,7 @@ are config (single source of truth), never hardcoded.
   - `advance(stage_index, recent_metrics, stages) -> new_stage_index` (pure):
     promote when the window metrics clear the stage's `promote_when`.
 - Action: add `PressCurriculumConfig` (ordered `stages` list + window size) to
-  `config/types.py` and a `curriculum:` block to
+  `config/_rl.py` and a `curriculum:` block to
   `configs/experiment/rl/default.yaml`. Author the ordered stages:
   1. stabilization: free hover -> wall approach (no switch) -> stable contact ->
      randomized wall tilt/contact point (the ROADMAP1 stabilization curriculum);
@@ -64,7 +64,7 @@ are config (single source of truth), never hardcoded.
   - safety harness tether: configured anchor + slack length, zero force while
     slack, spring-damper pull when taut (contact stage onward; model and
     rationale in `docs/SAFETY_HARNESS_PLAN.md` Step 4).
-- Action: add `PressRandomizationConfig` to `config/types.py` and a
+- Action: add `PressRandomizationConfig` to `config/_rl.py` and a
   `randomization:` block to `configs/experiment/rl/default.yaml`. Each randomized
   parameter carries a record: `name`, `units`, `nominal`, `train_range`,
   `acceptance_range`, `sampling_law`, `stage_introduced` (so DR is
@@ -92,7 +92,7 @@ are config (single source of truth), never hardcoded.
 
 - add `src/robotics_experiments/rl/press/_curriculum.py`
 - edit `.../tasks/switch_press_env.py` (EventCfg, stage apply, curriculum hook)
-- edit `config/types.py` (`PressCurriculumConfig`, `PressRandomizationConfig`),
+- edit `config/_rl.py` (`PressCurriculumConfig`, `PressRandomizationConfig`),
   `configs/experiment/rl/default.yaml`
 - add `tests/test_press_curriculum.py`, `tests/test_press_randomization.py`
 

@@ -18,12 +18,12 @@ Verified against `vv-px4-sitl:v1.14.3`: `make px4_sitl_default` embeds only the
 
 ## Decision
 
-Derive the SITL airframe from each resolved drone/PX4 config via a pure seam:
+Derive the SITL airframe onto each resolved vehicle configuration:
 
-- Frozen `Px4SitlLaunchConfig(instance_index, sim_model, sys_autostart)` produced
-  by the config loader (no FS/Docker/subprocess reads per vehicle); unknown
-  PX4-enabled asset raises `ValueError`.
-- `get_enabled_px4_launch_configs()` returns launch specs in fleet order.
+- `load_config(path)` stores `px4_sim_model` and `px4_sys_autostart` on each
+  enabled `VehicleConfig`; an unknown PX4-enabled asset raises `ValueError`.
+- Launch scripts iterate enabled vehicles in fleet order and use `vehicle.id` as
+  the PX4 instance.
 - Persistent and integration launch flows export `PX4_INSTANCE`, `PX4_SIM_MODEL`,
   `PX4_SYS_AUTOSTART`; the common launch script defaults
   `PX4_SIM_MODEL=${PX4_SIM_MODEL:-none_iris}` only for manual/unset launches.

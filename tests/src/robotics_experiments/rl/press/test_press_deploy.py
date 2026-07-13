@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from robotics_experiments.rl import press_action_to_offboard
+from robotics_experiments.rl.press import press_action_to_offboard
 
 
 def _velocity_cfg():

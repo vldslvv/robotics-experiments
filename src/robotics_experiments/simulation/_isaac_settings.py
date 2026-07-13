@@ -9,7 +9,7 @@ the package without loading simulator-only modules.
 import carb
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
-from robotics_experiments.config import SimSettings, get_config
+from robotics_experiments.config import SimSettings
 
 __all__: list[str] = []
 
@@ -90,7 +90,7 @@ def _apply_render_rate(rendering_hz: float) -> None:
     carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
 
 
-def _apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None) -> None:
+def _apply_isaac_settings(*, stage: Usd.Stage, settings: SimSettings) -> None:
     """Apply gravity, PhysX, and render-rate settings to a stage.
 
     Ensures a ``UsdPhysics.Scene`` exists, updates its gravity and PhysX
@@ -99,10 +99,8 @@ def _apply_isaac_settings(stage: Usd.Stage, settings: SimSettings | None = None)
 
     Args:
         stage: USD stage to configure.
-        settings: Simulation settings to apply; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
+        settings: Simulation settings to apply.
     """
-    settings = settings if settings is not None else get_config().sim
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
     _apply_physx(scene, settings.physics_hz, settings.solver_type)

@@ -115,9 +115,11 @@ check_px4_airframe_manifest_current "${PX4_IMAGE}"
 # "<instance> <sim_model> <sys_autostart>"; split into parallel arrays.
 mapfile -t PX4_LAUNCH_SPECS < <(
     uv run python -c \
-        'from robotics_experiments.config import get_enabled_px4_launch_configs
-for c in get_enabled_px4_launch_configs():
-    print(c.instance_index, c.sim_model, c.sys_autostart)'
+        'import os
+from robotics_experiments.config import load_config
+for vehicle in load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).vehicles.values():
+    if vehicle.bridge.enabled:
+        print(vehicle.id, vehicle.px4_sim_model, vehicle.px4_sys_autostart)'
 )
 PX4_INSTANCE_INDICES=()
 PX4_SIM_MODELS=()

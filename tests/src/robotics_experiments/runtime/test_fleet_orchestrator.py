@@ -58,12 +58,6 @@ class _FakeDriver:
         self.ticks += 1
 
 
-class _FakeDriverParams:
-    @classmethod
-    def from_routine_config(cls, routine, **_kwargs):
-        return routine
-
-
 def _import_orchestrator(monkeypatch):
     """Import the runtime contract with fake upstream collaborators wired in.
 
@@ -90,7 +84,8 @@ def _import_orchestrator(monkeypatch):
     fake_commanding = types.ModuleType("robotics_experiments.commanding")
     fake_commanding.CommandAck = object
     fake_commanding.DriverEnvironment = object
-    fake_commanding.DriverParams = _FakeDriverParams
+    fake_commanding.DriverParams = SimpleNamespace
+    fake_commanding.EnvelopeGates = SimpleNamespace
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
     fake_commanding.RoutineDriver = _FakeDriver
@@ -139,7 +134,28 @@ def _vehicle(vid, prim, xy, *, enabled, steps=()):
             home_lon_deg=8.5456,
             home_alt_m=488.0,
         ),
-        routine=SimpleNamespace(steps=list(steps), gcs_heartbeat_period_s=1.0),
+        routine=SimpleNamespace(
+            steps=list(steps),
+            gcs_heartbeat_period_s=1.0,
+            max_tilt_deg=35.0,
+            max_lateral_drift_m=2.0,
+            max_vertical_speed_m_s=8.0,
+            max_downward_speed_m_s=-4.0,
+            max_angular_speed_rad_s=8.0,
+            hover_max_abs_vertical_speed_m_s=0.35,
+            hover_max_abs_horizontal_speed_m_s=0.3,
+            command_ack_timeout_s=10.0,
+            bridge_heartbeat_timeout_s=30.0,
+            handshake_timeout_s=30.0,
+            prearm_settle_s=1.0,
+            takeoff_target_timeout_s=10.0,
+            takeoff_timeout_s=30.0,
+            hover_settle_s=2.0,
+            goto_position_tol_m=0.5,
+            goto_heading_tol_deg=25.0,
+            goto_cross_track_m=2.0,
+            goto_offboard_prime_ticks=3,
+        ),
         gcs_port=14550 + vid,
         mavlink_port=4560 + vid,
         debug_log_path=f"/logs/{vid}_bridge.log",

@@ -43,7 +43,7 @@ The harness changes three things at once:
 ## Step 2 -- Geofence sized to the harness volume
 
 - Action: add a geofence invariant to the routine layer, in the existing
-  envelope-gate style (`commanding/routine.py` invariant helpers): a
+  envelope-gate style (`commanding/_routine_predicates.py` invariant helpers): a
   `within_bounds(...)` continuous gate over world-ENU position, with bounds in
   the Hydra `routine` group (a `geofence` block: x/y/z min/max). Sim default is
   a box comfortably larger than every existing scene, so behavior is unchanged;

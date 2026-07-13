@@ -46,14 +46,6 @@ def _vehicle(vehicle_id, namespace, x, *, prim_name=None, **extra):
     }
 
 
-def _load_selected(monkeypatch, path):
-    from robotics_experiments.config import get_config, reset_config_cache
-
-    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", str(path))
-    reset_config_cache()
-    return get_config()
-
-
 def test_load_config_is_isolated_and_immutable(monkeypatch):
     from hydra import initialize_config_dir
     from hydra.core.global_hydra import GlobalHydra
@@ -76,6 +68,21 @@ def test_load_config_is_isolated_and_immutable(monkeypatch):
         config.vehicles["other"] = vehicle
 
 
+def test_load_config_caches_by_explicit_path():
+    from robotics_experiments.config import load_config
+
+    path = _ROOT / "takeoff_quad.yaml"
+    assert load_config(path) is load_config(path)
+
+
+def test_load_config_rejects_missing_path(tmp_path):
+    from robotics_experiments.config import load_config
+
+    missing = tmp_path / "missing.yaml"
+    with pytest.raises(FileNotFoundError, match=str(missing)):
+        load_config(missing)
+
+
 @pytest.mark.parametrize("path", _EXPERIMENTS, ids=lambda path: path.stem)
 def test_every_shipped_experiment_composes(path):
     from robotics_experiments.config import ExperimentConfig, load_config
@@ -87,10 +94,9 @@ def test_every_shipped_experiment_composes(path):
 
 
 def test_default_experiment_has_only_global_root_config():
-    from robotics_experiments.config import get_config, reset_config_cache
+    from robotics_experiments.config import load_config
 
-    reset_config_cache()
-    config = get_config()
+    config = load_config(_ROOT / "takeoff_quad.yaml")
     assert set(vars(config)) - {"_config_frozen"} == {
         "sim",
         "switches",
@@ -108,10 +114,11 @@ def test_default_experiment_has_only_global_root_config():
 
 
 def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():
-    from robotics_experiments.config import ExperimentConfig, RoutineConfig
+    from robotics_experiments.config import ExperimentConfig, VehicleConfig
 
     assert "VehicleConfig" in str(get_type_hints(ExperimentConfig)["vehicles"])
-    assert "RoutineStepConfig" in str(get_type_hints(RoutineConfig)["steps"])
+    routine_type = get_type_hints(VehicleConfig)["routine"]
+    assert "RoutineStepConfig" in str(get_type_hints(routine_type)["steps"])
 
 
 def test_empty_fleet_is_valid(tmp_path):
@@ -131,9 +138,8 @@ def test_vehicle_order_and_derived_identity(tmp_path):
     config = load_config(_write_experiment(tmp_path, "ordered", vehicles))
     assert list(config.vehicles) == ["lead", "wing"]
     lead, wing = config.vehicles.values()
-    assert (lead.mavlink_port, lead.gcs_port, lead.px4_instance_index) == (4565, 14555, 5)
-    assert (wing.mavlink_port, wing.gcs_port, wing.px4_instance_index) == (4561, 14551, 1)
-    assert lead.ros_frame_prefix == "fleet_lead"
+    assert (lead.mavlink_port, lead.gcs_port) == (4565, 14555)
+    assert (wing.mavlink_port, wing.gcs_port) == (4561, 14551)
     assert lead.debug_log_path != wing.debug_log_path
 
 
@@ -207,23 +213,23 @@ def test_per_vehicle_routines_are_independent(tmp_path):
     assert config.vehicles["flying"].routine.max_tilt_deg == 20.0
 
 
-def test_mixed_airframes_drive_bridge_and_px4_launch(monkeypatch):
-    from robotics_experiments.config import get_enabled_px4_launch_configs
+def test_mixed_airframes_drive_bridge_and_px4_launch():
+    from robotics_experiments.config import load_config
 
-    config = _load_selected(monkeypatch, "configs/navigate_quad_hex.yaml")
+    config = load_config("configs/navigate_quad_hex.yaml")
     quad = config.vehicles["x500_01"]
     hexa = config.vehicles["s550_01"]
     assert hexa.spawn.usd_path.endswith("/hexacopter_s550.usda")
     assert len(quad.bridge.max_rotor_velocity) == 4
     assert len(hexa.bridge.max_rotor_velocity) == 6
-    assert [(item.instance_index, item.sim_model) for item in get_enabled_px4_launch_configs()] == [
+    assert [(vehicle.id, vehicle.px4_sim_model) for vehicle in config.vehicles.values()] == [
         (0, "none_x500_v2"),
         (1, "none_hexa_x"),
     ]
 
 
-def test_disabled_and_unknown_assets_affect_px4_launch(tmp_path, monkeypatch):
-    from robotics_experiments.config import get_enabled_px4_launch_configs
+def test_disabled_and_unknown_assets_affect_px4_launch(tmp_path):
+    from robotics_experiments.config import load_config
 
     vehicles = {
         "disabled": _vehicle(
@@ -237,10 +243,10 @@ def test_disabled_and_unknown_assets_affect_px4_launch(tmp_path, monkeypatch):
             },
         )
     }
-    _load_selected(monkeypatch, _write_experiment(tmp_path, "disabled", vehicles))
-    assert get_enabled_px4_launch_configs() == []
+    config = load_config(_write_experiment(tmp_path, "disabled", vehicles))
+    vehicle = config.vehicles["disabled"]
+    assert (vehicle.px4_sim_model, vehicle.px4_sys_autostart) == ("", 0)
 
     vehicles["disabled"]["bridge"] = {"enabled": True}
-    _load_selected(monkeypatch, _write_experiment(tmp_path, "unknown", vehicles))
     with pytest.raises(ValueError, match="unknown.usda"):
-        get_enabled_px4_launch_configs()
+        load_config(_write_experiment(tmp_path, "unknown", vehicles))

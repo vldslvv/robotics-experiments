@@ -6,7 +6,6 @@ from robotics_experiments.config._immutability import _FreezableConfig
 __all__ = [
     "LockstepConfig",
     "Px4BridgeConfig",
-    "Px4SitlLaunchConfig",
 ]
 
 
@@ -178,30 +177,3 @@ class Px4BridgeConfig(_FreezableConfig):
     # max_rotor_velocity + standard gravity in the config loader. Kept last so the
     # authored fields above stay required. See the class docstring.
     rotor_constant: List[float] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class Px4SitlLaunchConfig:
-    """PX4 SITL launch airframe derived from a resolved vehicle's config.
-
-    Produced by the config loader from a :class:`VehicleConfig`. The drone USD
-    asset selects the PX4 simulator airframe so each asset launches the PX4
-    control allocation generated from the same ``configs/airframes`` source as
-    the USD. Threaded by the host-side launch scripts into
-    each PX4 container as ``PX4_INSTANCE`` / ``PX4_SIM_MODEL`` /
-    ``PX4_SYS_AUTOSTART``.
-
-    Attributes:
-        instance_index: PX4 ``-i`` instance index (the resolved
-            ``px4_instance_index``); the per-container port offset.
-        sim_model: ``PX4_SIM_MODEL`` selecting the external-MAVLink SITL
-            airframe (``none_quad_x`` for the generic Quad X asset,
-            ``none_hexa_x`` for the Hex X asset); both still start
-            ``simulator_mavlink``.
-        sys_autostart: ``PX4_SYS_AUTOSTART`` canonical PX4 copter airframe id
-            (``4001`` for generic Quad X, ``6001`` for Hex X).
-    """
-
-    instance_index: int
-    sim_model: str
-    sys_autostart: int

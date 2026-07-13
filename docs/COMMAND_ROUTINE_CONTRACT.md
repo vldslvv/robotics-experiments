@@ -41,8 +41,7 @@ one drone's routine. There is no fleet object - drones are independent
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
   int constants; `CommandAck.from_result` derives `accepted`.
-- **Routine facade** -- `routine.py` preserves the internal compatibility
-  surface, while `_routine_model.py`, `_routine_stepper.py`,
+- **Pure routine implementation** -- `_routine_model.py`, `_routine_stepper.py`,
   `_routine_predicates.py`, and `_routine_builder.py` separately own the pure
   model, decision state machine, predicates/gates, and descriptor assembly.
   `RoutineStep` (an **optional**
@@ -100,7 +99,7 @@ one drone's routine. There is no fleet object - drones are independent
   streamed payload is `policy_fn(observation.vehicle_state, target_enu)` -- a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
   The `PolicyStepFn` is composed at the runtime layer
-  (`robotics_experiments.rl.build_policy_step_fn`: validated artifact load + hover
+  (`robotics_experiments.rl.press.build_policy_step_fn`: validated artifact load + hover
   observation packing + `press_action_to_offboard`) and injected as
   `DriverParams.policy_fn_factory`; `build_vehicle_routine` calls the factory
   per `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` descriptor
@@ -140,7 +139,7 @@ one drone's routine. There is no fleet object - drones are independent
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `robotics_experiments.rl.press_action_to_offboard`; the `{kind: policy}` routine step
+  `robotics_experiments.rl.press.press_action_to_offboard`; the `{kind: policy}` routine step
   streams them in production (F2b), and the handoff-gated contact behavior
   (`{kind: press}`) is F3b on the same mechanism.
 - **`_commander.py`** -- `_VehicleCommander` (one routine + one port + the
@@ -156,9 +155,9 @@ one drone's routine. There is no fleet object - drones are independent
   connectivity, sim time, observation assembly, `log`, `on_failure`,
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
   stopped) routine. It imports no Isaac/pymavlink; the wall-clock backstop uses an
-  injectable `monotonic`, so it is unit-testable with fakes. `DriverParams`
-  (`DriverParams.from_routine_config(rc, driver=..., home_*=...)`) is the
-  per-drone subset of `RoutineConfig` it needs plus the global `driver`
+  injectable `monotonic`, so it is unit-testable with fakes. `DriverParams` is
+  constructed directly by the runtime from the per-drone subset of
+  `RoutineConfig` it needs plus the global `driver`
   execution heuristics (the `goto` heading epsilon and the wall-clock backstop
   floor/multipliers from the Hydra `driver` group). The strict-vs-forgiving
   reaction lives entirely in the env's `on_failure` (raise vs log).
@@ -272,14 +271,13 @@ last OFFBOARD setpoint stream while the sustained hover gate is being measured.
 The home anchor the `goto` builder
 needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
 (`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by the orchestrator
-into `DriverParams.from_routine_config`. The routine-execution heuristics are
+into the directly constructed `DriverParams`. The routine-execution heuristics are
 also not routine knobs: the Hydra `driver` group (`DriverConfig`, global, not
 merged per vehicle) carries `goto_min_heading_dist_m` (below this horizontal
 baseline-to-target distance a `goto` leg holds heading and the alignment
 predicate passes trivially) and the driver wall-clock backstops
 (`prearm_backstop_floor_s`, `prearm_backstop_multiplier`,
-`drive_budget_multiplier`), passed as `driver=` into
-`DriverParams.from_routine_config`.
+`drive_budget_multiplier`), copied into that same `DriverParams` construction.
 `configs/experiment/routine/takeoff.yaml` is the shared takeoff routine;
 `configs/takeoff_quad.yaml` demos it headless via
 `make run-all HYDRA_CONFIG=...`, `configs/navigate_quad_hex.yaml` demos an

@@ -1,7 +1,7 @@
 """The nav -> contact handoff gate: a pure predicate over the observation.
 
 Mirrors the command layer's continuous envelope invariants
-(`commanding/routine.py`: ``tilt_below``, drift/speed gates) in style -- pure,
+(`commanding/_routine_predicates.py`: ``tilt_below``, drift/speed gates) in style -- pure,
 config-built thresholds, no magic numbers -- but is a separate predicate: the
 handoff decides whether the contact behavior may START (different thresholds,
 contact frame), while the envelope gates a flight in progress.

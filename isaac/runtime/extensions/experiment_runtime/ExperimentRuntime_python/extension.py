@@ -24,6 +24,7 @@ control bug is caught per driver so it never spams Kit or stalls the others. The
 strict, asserting counterpart is the standalone scenario's adapter.
 """
 
+import os
 from typing import Any
 
 import carb
@@ -35,12 +36,13 @@ from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 
 from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
-from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.config import load_config
 from robotics_experiments.runtime import FleetDriverEnv, FleetOrchestrator
 
 __all__ = ["Extension"]
 
 _LOG_PREFIX = f"[{EXTENSION_TITLE}]"
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 
 class Extension(omni.ext.IExt):
@@ -53,7 +55,11 @@ class Extension(omni.ext.IExt):
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         carb.log_info(f"{_LOG_PREFIX} starting")
-        self._orchestrator = FleetOrchestrator(_get_experiment_config())
+        try:
+            config_path = os.environ[_CONFIG_PATH_ENV]
+        except KeyError as exc:
+            raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
+        self._orchestrator = FleetOrchestrator(load_config(config_path))
         self._scene_opened = False
         self._scene_open_sub: Any = None
         self._update_sub: Any = None

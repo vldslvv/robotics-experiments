@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 import carb
@@ -13,7 +14,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from std_msgs.msg import Float32MultiArray
 
 from LightSwitch_python.global_variables import EXTENSION_TITLE
-from robotics_experiments.config import get_config as _get_experiment_config
+from robotics_experiments.config import load_config
 from robotics_experiments.environment import (
     SwitchState,
     despawn_switches,
@@ -24,6 +25,8 @@ from robotics_experiments.environment import (
 )
 
 __all__ = ["LightSwitchExtension", "LightSwitchNode"]
+
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 _DURABILITY_POLICIES = {
     "transient_local": DurabilityPolicy.TRANSIENT_LOCAL,
@@ -75,6 +78,11 @@ class LightSwitchExtension(omni.ext.IExt):
             ext_id: Extension identifier assigned by the Kit runtime.
         """
         carb.log_info(f"[{EXTENSION_TITLE}] Extension starting...")
+        try:
+            config_path = os.environ[_CONFIG_PATH_ENV]
+        except KeyError as exc:
+            raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
+        self._config = load_config(config_path).switches
 
         usd_context = omni.usd.get_context()
         self._stage = usd_context.get_stage()
@@ -86,9 +94,7 @@ class LightSwitchExtension(omni.ext.IExt):
         self._owns_rclpy = not rclpy.ok()
         if self._owns_rclpy:
             rclpy.init()
-        self._ros_node: LightSwitchNode | None = LightSwitchNode(
-            _get_switch_config().state_publisher
-        )
+        self._ros_node: LightSwitchNode | None = LightSwitchNode(self._config.state_publisher)
 
         stage_events = usd_context.get_stage_event_stream()
         self._stage_event_sub = stage_events.create_subscription_to_pop(
@@ -182,7 +188,7 @@ class LightSwitchExtension(omni.ext.IExt):
 
         if not self._switches_spawned:
             self._teardown_switches()
-            self._switch_state = spawn_switches(self._stage)
+            self._switch_state = spawn_switches(stage=self._stage, config=self._config)
 
             if not validate_switches(self._stage, self._switch_state):
                 carb.log_error(
@@ -243,7 +249,12 @@ class LightSwitchExtension(omni.ext.IExt):
         if self._stage is None:
             carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
             return
-        step_switches(self._stage, self._switch_state, on_toggle=self._publish_toggle)
+        step_switches(
+            stage=self._stage,
+            switch_state=self._switch_state,
+            config=self._config,
+            on_toggle=self._publish_toggle,
+        )
 
     def _publish_toggle(self, index: int, state: bool) -> None:
         """Publish a ``(switch_index, state)`` toggle event on the ROS topic.
@@ -256,11 +267,6 @@ class LightSwitchExtension(omni.ext.IExt):
             carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
         self._ros_node.publish_toggle(index, state)
-
-
-def _get_switch_config():
-    """Return the lightswitch portion of the shared experiment config."""
-    return _get_experiment_config().switches
 
 
 def _normalize_qos_name(name: str, *, field_name: str) -> str:

@@ -24,8 +24,8 @@ Single-source every PX4 SITL airframe (and the asset->airframe mapping) from
   hand-authored), register them in PX4's airframe CMake list, write an image
   manifest, then `make px4_sitl_default`. A host freshness check compares the
   manifest against the configs.
-- `get_enabled_px4_launch_configs()` maps each enabled vehicle's drone USD asset
-  basename to the generated airframe (`holybro_x500_v2.usda` ->
+- `load_config(path)` maps each enabled vehicle's drone USD asset basename onto
+  its resolved PX4 fields (`holybro_x500_v2.usda` ->
   `none_x500_v2`/`4019`; `hexacopter_s550.usda` -> `none_hexa_x`/`6001`).
 - **`SYS_AUTOSTART` ids must be FREE in the posix set:** `rcS` globs
   `airframes/<id>_*` and sources the last match, so a stock `<id>_*` would shadow

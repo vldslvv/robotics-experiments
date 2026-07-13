@@ -59,42 +59,10 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "FleetOrchestrator",
             "SpawnedDrone",
         ]
-        # The RL package root is the public facade and must import with Isaac,
-        # torch, rsl_rl, and Isaac Lab absent.
+        # RL owning packages must import with Isaac, torch, rsl_rl, and Isaac
+        # Lab absent; the parent package provides no forwarding facade.
         rl = importlib.import_module("robotics_experiments.rl")
-        assert rl.__all__ == [
-            "AbstractPoseProvider",
-            "ActuationParams",
-            "ActuationState",
-            "GroundTruthPoseProvider",
-            "HOVER_OBSERVATION_DIM",
-            "HOVER_OBSERVATION_SCHEMA_VERSION",
-            "HandoffGate",
-            "HandoffReason",
-            "HandoffResult",
-            "METADATA_FILENAME",
-            "MixerGeometry",
-            "OBSERVATION_SCHEMA_VERSION",
-            "POLICY_FILENAME",
-            "PoseSample",
-            "PressObservation",
-            "TrainingResult",
-            "action_to_rotor_omega",
-            "build_actuation_params",
-            "build_policy_step_fn",
-            "build_runner",
-            "export_policy",
-            "handoff_ready",
-            "hover_action",
-            "hover_observation_from_state",
-            "pack_hover_observation",
-            "policy_metadata",
-            "press_action_to_offboard",
-            "rotor_forces_to_body_wrench",
-            "train",
-            "to_vector",
-            "world_switch_to_contact_frame",
-        ]
+        assert rl.__all__ == []
         press = importlib.import_module("robotics_experiments.rl.press")
         assert press.__all__ == [
             "AbstractPoseProvider",
@@ -126,13 +94,14 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "world_switch_to_contact_frame",
         ]
         training = importlib.import_module("robotics_experiments.rl.training")
-        assert training.__all__ == ["TrainingResult", "build_runner", "export_policy", "train"]
+        assert training.__all__ == []
         isaac_lab = importlib.import_module("robotics_experiments.workflows.isaac_lab")
         assert isaac_lab.__all__ == [
             "DRONE_HOVER_TASK_ID",
             "DroneHoverEnv",
             "DroneHoverEnvCfg",
             "compute_lab_rotor_omega",
+            "make_drone_hover_env_cfg",
             "register_isaac_lab_tasks",
         ]
 
@@ -284,41 +253,25 @@ def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
     config = importlib.import_module("robotics_experiments.config")
     assert config.__all__ == [
         "BoundingBox",
-        "DriverConfig",
         "DroneSpawnConfig",
         "ExperimentConfig",
         "LightSwitchConfig",
-        "LightSwitchStatePublisherConfig",
-        "LockstepConfig",
         "PressActionConfig",
-        "PressHandoffConfig",
-        "PressHoverTaskConfig",
-        "PressTaskConfig",
         "Px4BridgeConfig",
-        "Px4SitlLaunchConfig",
-        "RlConfig",
-        "RlTrainingConfig",
-        "RosQosConfig",
-        "RosVehicleConfig",
-        "RoutineConfig",
-        "RoutineStepConfig",
         "SimSettings",
         "VehicleConfig",
-        "get_config",
-        "get_enabled_px4_launch_configs",
         "load_config",
-        "reset_config_cache",
     ]
 
     simulation = importlib.import_module("robotics_experiments.simulation")
     assert simulation.__all__ == ["apply_settings"]
 
     try:
-        _ = config.get_config
+        _ = config.load_config
     except ModuleNotFoundError as exc:
         assert exc.name == "hydra" or exc.name.startswith("hydra.")
     else:
-        raise AssertionError("Expected lazy get_config access to require hydra")
+        raise AssertionError("Expected lazy load_config access to require hydra")
 
 
 def test_experiment_runtime_manifest_exposes_extension_module():

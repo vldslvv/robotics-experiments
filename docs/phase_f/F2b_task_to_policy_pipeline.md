@@ -45,7 +45,7 @@ is the routine step, not the orchestrator.
   `_REWARD_ALIVE`, `_CRASH_TILT_COS` / `_MIN_ALTITUDE_M` /
   `_MAX_POSITION_ERROR_M`, `_RESET_XY_HALF_M` / `_RESET_Z_HALF_M`.
 - Action: add `@dataclass class PressHoverTaskConfig` (bare annotations, per the
-  configs rule) to `config/types.py`; add `hover_task: PressHoverTaskConfig` to
+  configs rule) to `config/_rl.py`; add `hover_task: PressHoverTaskConfig` to
   `RlConfig`; author a `hover_task:` block in
   `configs/experiment/rl/default.yaml` with the current values.
 - The env reads `cfg.rl.press.hover_task`; no reward/termination/reset literal
@@ -53,7 +53,7 @@ is the routine step, not the orchestrator.
   half of the contract, established before the press task repeats the pattern
   (F3's `PressRewardConfig` etc. follow it).
 - Test: extend the config resolution test to assert
-  `get_config().rl.press.hover_task` resolves with the expected fields.
+  `load_config(path).rl.press.hover_task` resolves with the expected fields.
 - Done when: the F1 hover+goto gate still passes with the constants sourced
   from YAML and the env module contains no task-tuning literals.
 
@@ -98,7 +98,7 @@ is the routine step, not the orchestrator.
   `tests/test_core_imports.py` guards it.
 - Config: add `RlTrainingConfig` (PPO hyperparameters: lr,
   num_steps_per_env, max_iterations, gamma, lam, entropy_coef, actor/critic
-  hidden dims, seed) to `config/types.py` + a `training:` block in
+  hidden dims, seed) to `config/_rl.py` + a `training:` block in
   `configs/experiment/rl/default.yaml`. No hyperparameter hardcoded in
   Python.
 - Dependency: add `rsl_rl` to an optional `training` extra in `pyproject.toml`
@@ -118,7 +118,7 @@ is the routine step, not the orchestrator.
   scale values (`max_body_velocity_mps` / `max_yaw_rate_radps` /
   `max_body_rate_radps` / `hover_thrust_fraction` as applicable to the kind).
   The artifact = module + metadata; a bare checkpoint is not a valid artifact.
-- Action: create the press policy-artifact loader behind the `robotics_experiments.rl` facade
+- Action: create the press policy-artifact loader at `robotics_experiments.rl.press`
   (implemented in `src/robotics_experiments/rl/press/policy.py`; imports
   torch only inside functions, like `MavlinkCommandPort` imports pymavlink
   inside methods). Provide
@@ -156,12 +156,12 @@ is the routine step, not the orchestrator.
 
 ## Step 6 -- `{kind: policy}` routine step (the orchestrator plug-in)
 
-- Action: add a `policy` routine step in `commanding/routine.py`. `decide`
+- Action: add a `policy` routine step in `commanding/_routine_stepper.py`. `decide`
   stays pure: the loaded policy is an injected pure callable
   (`Callable[[np.ndarray], np.ndarray]`, deterministic, no I/O) carried by the
   step, so the per-tick chain inside `decide` is pure end-to-end:
   pack the Step-2 layout from `RoutineObservation.vehicle_state` (+ the step's
-  target position) -> `policy(obs)` -> `robotics_experiments.rl.press_action_to_offboard`
+  target position) -> `policy(obs)` -> `robotics_experiments.rl.press.press_action_to_offboard`
   -> a `STREAM` decision carrying the setpoint payload.
 - Action: extend the `STREAM` decision payload from `PositionSetpoint`-only to
   a union also carrying `VelocitySetpoint` / `AttitudeRateSetpoint` (the wire
@@ -214,11 +214,11 @@ is the routine step, not the orchestrator.
 - add the pure hover-observation layout module under `press/`;
   add `rl/press/policy.py`, `rl/training/__init__.py`,
   `rl/training/rsl_rl.py`; edit `rl/__init__.py` (re-exports)
-- edit `config/types.py` (`PressHoverTaskConfig`, `RlTrainingConfig`),
+- edit `config/_rl.py` (`PressHoverTaskConfig`, `RlTrainingConfig`),
   `configs/experiment/rl/default.yaml`
 - add `isaac/runtime/standalone/train_rl.py`; add the `train-rl` make
   target (Isaac Lab image)
-- edit `commanding/routine.py` (+ commander/driver for the widened `STREAM`
+- edit the commanding routine implementation (+ commander/driver for the widened `STREAM`
   payload), `docs/COMMAND_ROUTINE_CONTRACT.md`
 - add `tests/test_press_policy.py` + the layout test; extend the commanding
   tests, the config test, `tests/test_core_imports.py`

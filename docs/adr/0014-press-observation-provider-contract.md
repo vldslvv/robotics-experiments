@@ -17,10 +17,10 @@ make every swap a retrain-plus-rewire.
 
 ## Decision
 
-Three load-bearing seams in `robotics_experiments.rl` (pure, core import
+Three load-bearing seams in `robotics_experiments.rl.press` (pure, core import
 path):
 
-1. **Versioned observation layouts** (`robotics_experiments.rl` facade,
+1. **Versioned observation layouts** (`robotics_experiments.rl.press`,
    implemented in `rl/press/observation.py`). Each layout is a
    documented field order packed by a pure function and stamped with a schema
    version (`HOVER_OBSERVATION_SCHEMA_VERSION`, `OBSERVATION_SCHEMA_VERSION`).
@@ -34,7 +34,7 @@ path):
    `world_switch_to_contact_frame` so every provider agrees on the frame, with
    the relative quaternion canonicalized to non-negative w.
 
-2. **Pose-provider seam** (`robotics_experiments.rl` facade; implementation in
+2. **Pose-provider seam** (`robotics_experiments.rl.press`; implementation in
    `rl/press/provider.py`). `AbstractPoseProvider.sample
    (sim_time_s) -> PoseSample` (pos, quat, confidence, age, valid) is the single
    swap point for the switch pose source. The provider owns only the switch
@@ -43,7 +43,7 @@ path):
    Perception uncertainty is explicit policy input
    (`pose_confidence`/`pose_age_s`/`detection_valid`), never hidden failure.
 
-3. **Handoff gate** (`robotics_experiments.rl` facade; implementation in
+3. **Handoff gate** (`robotics_experiments.rl.press`; implementation in
    `rl/press/handoff.py`). `handoff_ready(obs, gate)` is a pure
    predicate over the observation with config-built thresholds
    (`rl.press.handoff`), returning the first violated check as a typed reason. It

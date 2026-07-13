@@ -47,7 +47,7 @@ and becomes the metric floor the learned policy must beat.
 - `__all__`: `ContactBehavior`, `ContactDecision`, `ContactPhase`.
 - Test: `tests/test_press_behavior.py` (pure): the protocol is satisfied by a
   trivial fake; `ContactDecision.action` shape matches `action_dim`.
-- Done when: `import robotics_experiments.rl` still succeeds without
+- Done when: `import robotics_experiments.rl.press` still succeeds without
   torch/Isaac and exposes the contract.
 
 ## Step 2 -- Policy behavior (wrap the F3 policy)
@@ -82,7 +82,7 @@ and becomes the metric floor the learned policy must beat.
     retries.
 - Config: add `PressScriptedConfig` (stand-off distances, approach/press speed
   caps, alignment thresholds, compression cap, confirm window, retry bound) to
-  `config/types.py` (bare annotations) and a `scripted:` block to
+  `config/_rl.py` (bare annotations) and a `scripted:` block to
   `configs/experiment/rl/default.yaml`. No literal thresholds in Python.
 - Test: `tests/test_press_scripted.py` (pure): a synthetic observation sequence
   (approach -> contact -> compression -> lamp toggle) walks the phases in order;
@@ -98,7 +98,7 @@ and becomes the metric floor the learned policy must beat.
   kind raises `ValueError` at resolution time.
 - Action: add the `{kind: press}` routine step in the commanding layer,
   building on F2b's `{kind: policy}` step mechanism (the per-tick
-  observation -> action -> `robotics_experiments.rl.press_action_to_offboard` mapping ->
+  observation -> action -> `robotics_experiments.rl.press.press_action_to_offboard` mapping ->
   `STREAM` setpoint
   chain): the press step differs by entering only when F2's `handoff_ready`
   gate passes and by ticking the configured `ContactBehavior` in place of the
@@ -128,7 +128,7 @@ and becomes the metric floor the learned policy must beat.
 
 - add `src/robotics_experiments/rl/press/_behavior.py`; edit `rl/press/__init__.py`
   (re-exports)
-- edit `config/types.py` (`PressScriptedConfig`, behavior selector),
+- edit `config/_rl.py` (`PressScriptedConfig`, behavior selector),
   `configs/experiment/rl/default.yaml`
 - edit the commanding layer for the `{kind: press}` step (+ the routine builder
   and `docs/COMMAND_ROUTINE_CONTRACT.md`)

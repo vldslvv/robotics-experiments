@@ -26,10 +26,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from robotics_experiments.config import get_config
+from robotics_experiments.config import ExperimentConfig, load_config
 
 _LATEST_LINK = "latest"
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 
 def _report(message: str) -> None:
@@ -79,7 +80,13 @@ def _update_latest_symlink(out_root: Path, run_dir: Path) -> None:
     temp.replace(link)
 
 
-def _build_env(task_id: str, seed: int, num_envs: int | None):
+def _build_env(
+    *,
+    task_id: str,
+    seed: int,
+    num_envs: int | None,
+    experiment_config: ExperimentConfig,
+):
     # Isaac Lab task code; imported after AppLauncher.
     import gymnasium as gym
 
@@ -88,19 +95,25 @@ def _build_env(task_id: str, seed: int, num_envs: int | None):
     if not register_isaac_lab_tasks():
         raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
     cfg_entry = gym.spec(task_id).kwargs["env_cfg_entry_point"]
-    module_name, class_name = cfg_entry.split(":")
-    env_cfg = getattr(importlib.import_module(module_name), class_name)()
+    module_name, _class_name = cfg_entry.split(":")
+    env_cfg = importlib.import_module(module_name).make_drone_hover_env_cfg(
+        experiment_config=experiment_config
+    )
     if hasattr(env_cfg, "seed"):
         env_cfg.seed = seed
     if num_envs is not None:
         env_cfg.scene.num_envs = num_envs
-    return gym.make(task_id, cfg=env_cfg).unwrapped, env_cfg
+    return gym.make(
+        task_id,
+        cfg=env_cfg,
+        experiment_config=experiment_config,
+    ).unwrapped, env_cfg
 
 
-def _run(args: argparse.Namespace) -> None:
-    import robotics_experiments.rl as rl
+def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    import robotics_experiments.rl.press as press
+    import robotics_experiments.rl.training.rsl_rl as training
 
-    config = get_config()
     training_cfg = config.rl.training
     seed = args.seed if args.seed is not None else int(training_cfg.seed)
     iterations = (
@@ -116,16 +129,26 @@ def _run(args: argparse.Namespace) -> None:
         f"(policy={training_cfg.policy_name}, seed={seed}, device={device}) -> {run_dir}"
     )
 
-    env, env_cfg = _build_env(training_cfg.task_id, seed=seed, num_envs=args.num_envs)
+    env, env_cfg = _build_env(
+        task_id=training_cfg.task_id,
+        seed=seed,
+        num_envs=args.num_envs,
+        experiment_config=config,
+    )
     try:
-        runner = rl.build_runner(env, training_cfg, log_dir=str(run_dir / "logs"), device=device)
-        result = rl.train(runner, iterations)
-        metadata = rl.policy_metadata(
+        runner = training.build_runner(
+            env,
+            training_cfg,
+            log_dir=str(run_dir / "logs"),
+            device=device,
+        )
+        result = training.train(runner, iterations)
+        metadata = press.policy_metadata(
             config.rl.action,
-            obs_schema_version=rl.HOVER_OBSERVATION_SCHEMA_VERSION,
+            obs_schema_version=press.HOVER_OBSERVATION_SCHEMA_VERSION,
             obs_dim=int(env_cfg.observation_space),
         )
-        rl.export_policy(runner, run_dir, metadata=metadata)
+        training.export_policy(runner, run_dir, metadata=metadata)
     finally:
         env.close()
 
@@ -161,7 +184,11 @@ def main() -> None:
     app_launcher = AppLauncher(headless=True)
     simulation_app = app_launcher.app
     try:
-        _run(args)
+        try:
+            config_path = os.environ[_CONFIG_PATH_ENV]
+        except KeyError as exc:
+            raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
+        _run(args=args, config=load_config(config_path))
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

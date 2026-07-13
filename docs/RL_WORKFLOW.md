@@ -39,7 +39,7 @@ eager-importing Isaac Lab task modules during host-side package imports.
 Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
 for direct-workflow environments. The first task is
 `Isaac-Drone-Hover-Direct-v0`; it flies N parallel drones through the
-pluggable in-Lab actuation seam (`robotics_experiments.rl`), which maps a
+pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
 normalized RL action to per-rotor angular-velocity references (and thence to
 forces) without a PX4 lockstep per env. The action level is a config switch
 (`rl.action.kind`): `velocity` (default; cascaded PD tracking body-frame
@@ -50,19 +50,21 @@ precomputing the allocation pseudoinverse), behavior in pure functions
 (`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
 a future pipeline composes it as plain functions with the RL policy as one
 stage. The public single-env reference contract is exported only from
-`robotics_experiments.rl` (implemented in `rl/press/actuation.py`; numpy, the
+`robotics_experiments.rl.press` (implemented in `rl/press/actuation.py`; numpy, the
 test oracle) and the Lab package exposes the env diagnostic entry point as
 `robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega`; both mirror
 the PX4 bridge's `PegasusQuadraticThrustModel` allocation so an action
 reproduces the commanded wrench.
 
 Shared RL training scale and the RL action level live in the Hydra `rl` group
-with matching bare annotations in `src/robotics_experiments/config/types.py`.
+with matching bare annotations in `src/robotics_experiments/config/_rl.py`.
 `rl.training.vehicle_id` selects the experiment vehicle whose spawn asset and
 airframe-enriched bridge dynamics configure the Lab task; selection fails when
 the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
 because Lab deliberately bypasses PX4.
-The physics decimation is derived as
+The standalone training root passes the resolved `ExperimentConfig` into
+`make_drone_hover_env_cfg`; the Isaac Lab leaf never reloads global config. The
+physics decimation is derived as
 `round(sim.physics_hz / rl.policy_rate_hz)`, not authored, and the hover task's
 reward/termination/reset values are the `rl.press.hover_task` block (task
 definition = one YAML block; no task-tuning literal in the env module). The RL
@@ -77,7 +79,7 @@ The pipeline is `task YAML -> make train-rl -> policy artifact ->
 unchanged apart from injecting the artifact-loader factory into
 `DriverParams`). Pieces:
 
-- **Observation layouts** (exported from `robotics_experiments.rl`, pure,
+- **Observation layouts** (exported from `robotics_experiments.rl.press`, pure,
   versioned): the
   13-dim hover layout (`HOVER_OBSERVATION_SCHEMA_VERSION`,
   `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
@@ -90,9 +92,9 @@ unchanged apart from injecting the artifact-loader factory into
   `AbstractPoseProvider` / `PoseSample`; ground truth is the lazy Isaac-only
   `GroundTruthPoseProvider`, and the nav->contact handoff is the pure
   `handoff_ready` gate (thresholds in `rl.press.handoff`). See ADR 0014.
-- **Training** (`rl/training/`, lazy; `rsl_rl.py` is the only rsl_rl
-  importer): import `build_runner`/`train`/`export_policy`/`TrainingResult`
-  from the `robotics_experiments.rl` package root. The contract runs
+- **Training** (`rl/training/`; `rsl_rl.py` is the only rsl_rl importer): import
+  `build_runner`/`train`/`export_policy`/`TrainingResult` from
+  `robotics_experiments.rl.training.rsl_rl`. The contract runs
   over `RlTrainingConfig` (the `rl.training` block, incl. explicit `task_id`
   and `policy_name`).
   `make train-rl` (thin target in `make/training.mk`, runs

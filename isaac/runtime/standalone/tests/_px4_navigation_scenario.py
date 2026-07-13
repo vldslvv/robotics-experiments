@@ -21,8 +21,6 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext
 
-from robotics_experiments.config import get_config
-
 __all__ = ["run_px4_navigation_scenario"]
 
 
@@ -47,7 +45,7 @@ def _has_goto_hover_transition(steps: list[Any]) -> bool:
 
 
 def _assert_navigation_routine_config(context: SceneTestContext, test_name: str) -> None:
-    env = get_config()
+    env = context.config
     flying = [vehicle for vehicle in env.vehicles.values() if vehicle.routine.steps]
     if not flying:
         raise AssertionError(f"{test_name}: active Hydra config has no flying vehicles")

@@ -63,7 +63,8 @@ scenario-specific notes.
   `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
   `goto` -> `hover` transition and passes only when **both** drones hold their
   envelope. It reuses the generic multi-PX4 launch path
-  (`run_px4_integration_test.sh` over `get_enabled_px4_launch_configs()`, like
+  (`run_px4_integration_test.sh` over the enabled vehicles returned by
+  `load_config(path)`, like
   the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
   whose
   `_assert_navigation_routine_config` validates the `goto`/`goto -> hover`
@@ -144,8 +145,8 @@ tunables come from the active Hydra experiment.
 paths, starts one PX4 SITL container per PX4-enabled vehicle in the active Hydra
 config, and delegates the Isaac-side test body to
 `make/scripts/run_isaac_test_in_container.sh` inside the Isaac container. It
-iterates the resolved `get_enabled_px4_launch_configs()` (each entry carries the
-vehicle's derived `instance_index = id`) rather than a blind `0..count` loop, so
+iterates the enabled vehicles from `load_config(path)` and uses each
+`vehicle.id` as the instance index rather than a blind `0..count` loop, so
 non-contiguous ids keep their derived ports. The first instance in that list owns
 the network namespace. Each additional instance `i` joins that namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so

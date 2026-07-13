@@ -168,7 +168,7 @@ runs the strict bridge-log scan. `--strict` selects the strict reaction.
 ## Lifecycle (ASCII)
 
 ```
-[Shell builds FleetOrchestrator(get_config())]
+[Shell resolves config path, then builds FleetOrchestrator(load_config(path))]
         |
         v
 live app update / standalone sequence

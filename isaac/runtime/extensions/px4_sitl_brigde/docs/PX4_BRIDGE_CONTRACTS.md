@@ -617,7 +617,15 @@ These are independent peer-level connections. The bridge owns 4560 only. The sta
 
 If using uXRCE-DDS instead of offboard MAVLink, that becomes a third connection (UDP 8888 by default), also independent of the bridge.
 
-**Per-instance ports (multi-vehicle).** The PX4 instance index equals the vehicle `id` (`px4_instance_index = id`), and PX4 instance `i` shifts every port by `i`: the bridge-owned simulator API is `4560 + id` (the resolved `mavlink_port`), the offboard/GCS link is `14540 / 14550 + id`, and uXRCE-DDS is `8888 + id`. The bridge still owns only its own `mavlink_port`; the GCS/offboard ports are owned by PX4 and addressed by control/test code (the multi-drone integration test connects a separate GCS link to the resolved `gcs_port = px4.gcs_baseport + id` per drone, each resolving to that PX4 instance's system id).
+**Per-instance ports (multi-vehicle).** The PX4 instance index is the vehicle
+`id`, derived at launch rather than stored as a parallel config field. PX4
+instance `i` shifts every port by `i`: the bridge-owned simulator API is
+`4560 + id` (the resolved `mavlink_port`), the offboard/GCS link is
+`14540 / 14550 + id`, and uXRCE-DDS is `8888 + id`. The bridge still owns only
+its own `mavlink_port`; the GCS/offboard ports are owned by PX4 and addressed by
+control/test code (the multi-drone integration test connects a separate GCS
+link to the resolved `gcs_port = px4.gcs_baseport + id` per drone, each
+resolving to that PX4 instance's system id).
 
 ---
 

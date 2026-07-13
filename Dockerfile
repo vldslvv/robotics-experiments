@@ -143,9 +143,8 @@ WORKDIR /isaac-sim
 # these deps (PyYAML, packaging, antlr4) only on the kit-app augmented sys.path
 # (omni.pip.compute pip_prebundle), so a plain install sees them already
 # satisfied and skips them -- leaving the bare /isaac-sim/kit/python/bin/python3
-# interpreter that runapp_custom.sh uses to resolve get_config().scene unable to
-# import them. That failure silently empties SCENE_PATH and launches Isaac with
-# no stage. Forcing the whole closure in keeps the standalone interpreter
+# interpreter used by runtime configuration checks unable to import them.
+# Forcing the whole closure in keeps the standalone interpreter
 # self-sufficient.
 COPY isaac/docker/runtime-requirements.txt /tmp/isaac-runtime-requirements.txt
 RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \

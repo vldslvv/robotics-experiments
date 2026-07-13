@@ -15,7 +15,7 @@ import carb
 from isaacsim.core.prims import SingleArticulation
 from pxr import Sdf, Usd, UsdLux, UsdShade
 
-from robotics_experiments.config import LightSwitchConfig, get_config
+from robotics_experiments.config import LightSwitchConfig
 from robotics_experiments.environment.switches import SwitchState, apply_button_sample
 
 __all__ = ["init_articulations", "step_switches"]
@@ -86,10 +86,11 @@ def init_articulations(switch_state: List[SwitchState]) -> bool:
 
 
 def step_switches(
+    *,
     stage: Usd.Stage,
     switch_state: List[SwitchState],
+    config: LightSwitchConfig,
     on_toggle: Callable[[int, bool], None] | None = None,
-    config: LightSwitchConfig | None = None,
 ) -> None:
     """Detect confirmed button presses and toggle the paired lamps.
 
@@ -105,10 +106,8 @@ def step_switches(
             ``toggle_latched`` are updated in place.
         on_toggle: Optional callback receiving ``(index, new_state)`` on every
             successful toggle.
-        config: Spawner configuration; when ``None``, resolved via
-            :func:`.config.get_config` at call time.
+        config: Spawner configuration.
     """
-    config = config if config is not None else get_config().switches
     for i, sw in enumerate(switch_state):
         if sw.articulation is None:
             carb.log_error(f"[LightSwitch] No articulation set for switch with index {i}")

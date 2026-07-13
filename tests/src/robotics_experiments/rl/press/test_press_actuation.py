@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.px4_bridge import ActuatorCommands, PegasusQuadraticThrustModel
-from robotics_experiments.rl import (
+from robotics_experiments.rl.press import (
     ActuationState,
     MixerGeometry,
     action_to_rotor_omega,

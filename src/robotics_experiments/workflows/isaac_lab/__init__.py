@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
+        make_drone_hover_env_cfg,
     )
     from robotics_experiments.workflows.isaac_lab.tasks.flight import _FlightActuationParams
 
@@ -29,18 +30,24 @@ __all__ = [
     "DroneHoverEnv",
     "DroneHoverEnvCfg",
     "compute_lab_rotor_omega",
+    "make_drone_hover_env_cfg",
     "register_isaac_lab_tasks",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"DroneHoverEnv", "DroneHoverEnvCfg"}:
+    if name in {"DroneHoverEnv", "DroneHoverEnvCfg", "make_drone_hover_env_cfg"}:
         from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
             DroneHoverEnv,
             DroneHoverEnvCfg,
+            make_drone_hover_env_cfg,
         )
 
-        return {"DroneHoverEnv": DroneHoverEnv, "DroneHoverEnvCfg": DroneHoverEnvCfg}[name]
+        return {
+            "DroneHoverEnv": DroneHoverEnv,
+            "DroneHoverEnvCfg": DroneHoverEnvCfg,
+            "make_drone_hover_env_cfg": make_drone_hover_env_cfg,
+        }[name]
     if name == "compute_lab_rotor_omega":
         from robotics_experiments.workflows.isaac_lab.tasks.flight import action_to_rotor_omega
 

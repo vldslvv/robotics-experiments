@@ -130,6 +130,7 @@ def _drone_with_steps(steps):
 
 
 def _install_fake_modules(monkeypatch, usd_context, timeline, app):
+    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/takeoff_quad.yaml")
     carb = types.ModuleType("carb")
     carb.log_info = lambda *a, **k: None
     carb.log_warn = lambda *a, **k: None
@@ -156,7 +157,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     omni.usd = omni_usd
 
     fake_config = types.ModuleType("robotics_experiments.config")
-    fake_config.get_config = lambda: SimpleNamespace()
+    fake_config.load_config = lambda path: SimpleNamespace()
 
     fake_runtime = types.ModuleType("robotics_experiments.runtime")
     fake_runtime.FleetOrchestrator = _FakeOrchestrator

@@ -16,7 +16,7 @@ from robotics_experiments.config import SimSettings
 __all__ = ["apply_settings"]
 
 
-def apply_settings(stage, settings: SimSettings | None = None) -> None:
+def apply_settings(*, stage, settings: SimSettings) -> None:
     """Apply simulation settings to an already available USD stage.
 
     The caller is responsible for owning the Isaac workflow that produced the
@@ -25,4 +25,4 @@ def apply_settings(stage, settings: SimSettings | None = None) -> None:
     """
     from robotics_experiments.simulation._isaac_settings import _apply_isaac_settings
 
-    _apply_isaac_settings(stage, settings)
+    _apply_isaac_settings(stage=stage, settings=settings)

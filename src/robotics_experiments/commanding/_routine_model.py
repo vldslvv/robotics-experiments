@@ -47,7 +47,7 @@ StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
 # vehicle state and the step's world-ENU target to the OFFBOARD setpoint
 # payload to stream (composed at the runtime layer from the observation
 # packing, the loaded policy, and the deploy action mapping -- see
-# ``robotics_experiments.rl.build_policy_step_fn``).
+# ``robotics_experiments.rl.press.build_policy_step_fn``).
 PolicyStepFn = Callable[["VehicleState", np.ndarray], StreamSetpoint]
 
 

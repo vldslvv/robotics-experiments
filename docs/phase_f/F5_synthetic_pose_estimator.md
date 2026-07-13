@@ -45,7 +45,7 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 ## Step 3 -- Config
 
 - Action: add `PressPerceptionConfig` (provider selector + the synthetic-estimator
-  parameters) to `config/types.py` and a `perception:` block to
+  parameters) to `config/_rl.py` and a `perception:` block to
   `configs/experiment/rl/default.yaml`, authored from ROADMAP1's appendix YAML:
   `publish_rate_hz`, `position_noise_std_m`, `orientation_noise_std_deg`,
   `latency` (base/jitter/max), `dropout` (bernoulli_p, burst enter p, burst
@@ -93,7 +93,7 @@ providers are Phase G (decision recorded 2026-07-01), plugged into the same seam
 
 - add `src/robotics_experiments/rl/press/_synthetic_pose.py`; edit `.../provider.py`
   (or a new `SyntheticPoseProvider`), `rl/press/__init__.py`
-- edit `config/types.py` (`PressPerceptionConfig`),
+- edit `config/_rl.py` (`PressPerceptionConfig`),
   `configs/experiment/rl/default.yaml`
 - edit the env to select the provider by config + the bounded retry stub
 - add `tests/test_press_synthetic_pose.py`; extend `tests/test_press_handoff.py`

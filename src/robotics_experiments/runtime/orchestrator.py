@@ -41,6 +41,7 @@ from robotics_experiments.commanding import (
     CommandAck,
     DriverEnvironment,
     DriverParams,
+    EnvelopeGates,
     FailureKind,
     MavlinkCommandPort,
     RoutineDriver,
@@ -211,7 +212,7 @@ class FleetOrchestrator:
         """Apply the configured physics/render settings to the adopted stage."""
         from robotics_experiments.simulation import apply_settings
 
-        apply_settings(self.stage, self.env.sim)
+        apply_settings(stage=self.stage, settings=self.env.sim)
 
     # ---- fleet -------------------------------------------------------------
 
@@ -280,12 +281,12 @@ class FleetOrchestrator:
         """Load a ``{kind: policy}`` step's artifact into its pure step function.
 
         Injected into every driver's params: composes
-        ``robotics_experiments.rl.build_policy_step_fn`` (validated artifact load +
+        ``robotics_experiments.rl.press.build_policy_step_fn`` (validated artifact load +
         observation packing + OFFBOARD mapping) over the global ``rl.action``
         config. A repo-relative ``artifact`` path (the committed configs use
         ``.build/training/<policy-name>/latest``) resolves against the repo root.
         """
-        from robotics_experiments.rl import build_policy_step_fn
+        from robotics_experiments.rl.press import build_policy_step_fn
 
         artifact = Path(str(descriptor["artifact"]))
         if not artifact.is_absolute():
@@ -319,12 +320,39 @@ class FleetOrchestrator:
                 label=spawned.label,
             )
             driver = RoutineDriver(
-                DriverParams.from_routine_config(
-                    spawned.vehicle.routine,
-                    driver=self.env.driver,
+                DriverParams(
+                    steps=spawned.vehicle.routine.steps,
+                    gates=EnvelopeGates(
+                        max_tilt_deg=spawned.vehicle.routine.max_tilt_deg,
+                        max_lateral_drift_m=spawned.vehicle.routine.max_lateral_drift_m,
+                        max_vertical_speed_m_s=spawned.vehicle.routine.max_vertical_speed_m_s,
+                        max_downward_speed_m_s=spawned.vehicle.routine.max_downward_speed_m_s,
+                        max_angular_speed_rad_s=spawned.vehicle.routine.max_angular_speed_rad_s,
+                        hover_max_abs_vertical_speed_m_s=(
+                            spawned.vehicle.routine.hover_max_abs_vertical_speed_m_s
+                        ),
+                        hover_max_abs_horizontal_speed_m_s=(
+                            spawned.vehicle.routine.hover_max_abs_horizontal_speed_m_s
+                        ),
+                    ),
+                    command_ack_timeout_s=spawned.vehicle.routine.command_ack_timeout_s,
+                    bridge_heartbeat_timeout_s=(spawned.vehicle.routine.bridge_heartbeat_timeout_s),
+                    handshake_timeout_s=spawned.vehicle.routine.handshake_timeout_s,
+                    prearm_settle_s=spawned.vehicle.routine.prearm_settle_s,
+                    takeoff_target_timeout_s=(spawned.vehicle.routine.takeoff_target_timeout_s),
+                    takeoff_timeout_s=spawned.vehicle.routine.takeoff_timeout_s,
+                    hover_settle_s=spawned.vehicle.routine.hover_settle_s,
+                    goto_position_tol_m=spawned.vehicle.routine.goto_position_tol_m,
+                    goto_heading_tol_deg=spawned.vehicle.routine.goto_heading_tol_deg,
+                    goto_cross_track_m=spawned.vehicle.routine.goto_cross_track_m,
+                    goto_offboard_prime_ticks=(spawned.vehicle.routine.goto_offboard_prime_ticks),
                     home_lat_deg=spawned.vehicle.bridge.home_lat_deg,
                     home_lon_deg=spawned.vehicle.bridge.home_lon_deg,
                     home_alt_m=spawned.vehicle.bridge.home_alt_m,
+                    goto_min_heading_dist_m=self.env.driver.goto_min_heading_dist_m,
+                    prearm_backstop_floor_s=self.env.driver.prearm_backstop_floor_s,
+                    prearm_backstop_multiplier=self.env.driver.prearm_backstop_multiplier,
+                    drive_budget_multiplier=self.env.driver.drive_budget_multiplier,
                     policy_fn_factory=self._policy_fn_factory,
                 ),
                 port,

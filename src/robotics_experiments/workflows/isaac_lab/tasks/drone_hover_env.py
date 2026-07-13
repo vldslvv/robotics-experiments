@@ -15,6 +15,8 @@ for the F1 validation gate; F3 replaces it with the switch-press reward.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import MISSING
+from typing import Any, cast
 
 import torch
 from isaaclab.assets import Articulation, ArticulationCfg
@@ -24,6 +26,7 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
+from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     action_to_rotor_omega,
@@ -32,7 +35,7 @@ from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     rotor_omega_to_body_wrench,
 )
 
-__all__ = ["DroneHoverEnvCfg", "DroneHoverEnv"]
+__all__ = ["DroneHoverEnvCfg", "DroneHoverEnv", "make_drone_hover_env_cfg"]
 
 _DRONE_PRIM_PATH = "/World/envs/env_.*/Drone"
 
@@ -88,14 +91,7 @@ def _hover_terminated(
     return tilted | too_low | out_of_bounds
 
 
-def _experiment_config():
-    from robotics_experiments.config import get_config
-
-    return get_config()
-
-
-def _training_vehicle():
-    config = _experiment_config()
+def _training_vehicle(config, /):
     vehicle_id = config.rl.training.vehicle_id
     try:
         return next(vehicle for vehicle in config.vehicles.values() if vehicle.id == vehicle_id)
@@ -103,34 +99,46 @@ def _training_vehicle():
         raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
 
 
-def _physics_dt() -> float:
-    return 1.0 / _experiment_config().sim.physics_hz
-
-
-def _decimation() -> int:
-    cfg = _experiment_config()
-    return max(1, round(cfg.sim.physics_hz / cfg.rl.policy_rate_hz))
-
-
 @configclass
 class DroneHoverEnvCfg(DirectRLEnvCfg):
     """Configuration for the flyable drone-hover DirectRLEnv."""
 
-    decimation = _decimation()
-    episode_length_s = _experiment_config().rl.episode_length_s
-    action_space = _experiment_config().rl.action.action_dim
+    # Isaac Lab's configclass requires the dataclasses.MISSING sentinel for
+    # explicitly supplied fields; the cast keeps their consumer-facing types.
+    decimation: int = cast(Any, MISSING)
+    episode_length_s: float = cast(Any, MISSING)
+    action_space: int = cast(Any, MISSING)
     observation_space = 13
     state_space = 0
+    sim: SimulationCfg = cast(Any, MISSING)
+    drone_cfg: ArticulationCfg = cast(Any, MISSING)
+    scene: InteractiveSceneCfg = cast(Any, MISSING)
 
-    sim: SimulationCfg = SimulationCfg(dt=_physics_dt(), render_interval=decimation)
-    drone_cfg: ArticulationCfg = _make_drone_articulation_cfg(
-        _training_vehicle().spawn.usd_path, _DRONE_PRIM_PATH
+
+def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
+    """Build the Isaac Lab task config from one resolved experiment."""
+    vehicle = _training_vehicle(experiment_config)
+    decimation = max(
+        1,
+        round(experiment_config.sim.physics_hz / experiment_config.rl.policy_rate_hz),
     )
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=_experiment_config().rl.num_envs,
-        env_spacing=_experiment_config().rl.env_spacing,
-        replicate_physics=True,
-        clone_in_fabric=True,
+    return DroneHoverEnvCfg(
+        decimation=decimation,
+        episode_length_s=experiment_config.rl.episode_length_s,
+        action_space=experiment_config.rl.action.action_dim,
+        observation_space=13,
+        state_space=0,
+        sim=SimulationCfg(
+            dt=1.0 / experiment_config.sim.physics_hz,
+            render_interval=decimation,
+        ),
+        drone_cfg=_make_drone_articulation_cfg(vehicle.spawn.usd_path, _DRONE_PRIM_PATH),
+        scene=InteractiveSceneCfg(
+            num_envs=experiment_config.rl.num_envs,
+            env_spacing=experiment_config.rl.env_spacing,
+            replicate_physics=True,
+            clone_in_fabric=True,
+        ),
     )
 
 
@@ -148,11 +156,19 @@ class DroneHoverEnv(DirectRLEnv):
 
     cfg: DroneHoverEnvCfg
 
-    def __init__(self, cfg: DroneHoverEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        cfg: DroneHoverEnvCfg,
+        experiment_config: ExperimentConfig,
+        render_mode: str | None = None,
+        **kwargs,
+    ):
         super().__init__(cfg, render_mode, **kwargs)
+        self._experiment_config = experiment_config
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._hover_target_w = torch.zeros((self.num_envs, 3), device=self.device)
-        self._task = _experiment_config().rl.press.hover_task
+        self._task = self._experiment_config.rl.press.hover_task
         self._setup_actuation()
 
     def _setup_scene(self) -> None:
@@ -177,7 +193,7 @@ class DroneHoverEnv(DirectRLEnv):
         stage = omni.usd.get_context().get_stage()
         env0_path = _DRONE_PRIM_PATH.replace("env_.*", "env_0")
         rotors = discover_px4_rotor_mapping(stage, env0_path)
-        bridge = _training_vehicle().bridge
+        bridge = _training_vehicle(self._experiment_config).bridge
 
         masses = self.drone.root_physx_view.get_masses()
         total_mass = float(masses[0].sum().item())
@@ -185,7 +201,7 @@ class DroneHoverEnv(DirectRLEnv):
         self._linear_drag = torch.as_tensor(
             bridge.linear_drag, dtype=torch.float32, device=self.device
         )
-        action_cfg = _experiment_config().rl.action
+        action_cfg = self._experiment_config.rl.action
         self.actuation_params = build_flight_actuation_params(
             kind=action_cfg.kind,
             positions_body=rotors.positions_body,

@@ -28,9 +28,11 @@ check_px4_airframe_manifest_current "${PX4_IMAGE}"
 # line is "<instance> <sim_model> <sys_autostart>".
 mapfile -t launch_specs < <(
     ROBOTICS_EXPERIMENT_CONFIG_PATH="${HYDRA_CONFIG_HOST_PATH}" \
-        uv run python -c 'from robotics_experiments.config import get_enabled_px4_launch_configs
-for c in get_enabled_px4_launch_configs():
-    print(c.instance_index, c.sim_model, c.sys_autostart)'
+        uv run python -c 'import os
+from robotics_experiments.config import load_config
+for vehicle in load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).vehicles.values():
+    if vehicle.bridge.enabled:
+        print(vehicle.id, vehicle.px4_sim_model, vehicle.px4_sys_autostart)'
 )
 
 count="${#launch_specs[@]}"

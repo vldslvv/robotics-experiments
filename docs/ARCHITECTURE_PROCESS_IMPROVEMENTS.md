@@ -130,7 +130,7 @@ allowed. The separate lightweight-import tests continue to enforce dependency
 weight and lazy loading.
 
 The config suite also discovers every top-level YAML sibling of `base.yaml` and
-composes each experiment through the public config facade. New experiment files
+composes each experiment through the public config boundary. New experiment files
 therefore receive composition coverage automatically, including
 `policy_hover_quad.yaml`.
 
@@ -141,13 +141,13 @@ Priority: medium
 Status: completed
 
 Config schemas now live in private simulation, scene/ROS, PX4/fleet, RL,
-commanding, and environment modules. `config/types.py` is a compatibility
-aggregator and `robotics_experiments.config` remains the only public facade.
+commanding, and environment modules. The private domain modules own their
+schemas and `robotics_experiments.config` remains the only public boundary.
 
 The commanding routine implementation is divided into private model, stepper,
-predicate/gate, and descriptor-builder modules; `commanding/routine.py` keeps
-the existing internal compatibility facade and the package-root public exports
-are unchanged. Pure airframe dataclasses, Hydra parsing, and body mass-property
+predicate/gate, and descriptor-builder modules; the package-root public exports
+import those owning modules directly. Pure airframe dataclasses, Hydra parsing,
+and body mass-property
 calculations live in `robotics_experiments.drone._airframe`, leaving the
 standalone script responsible for USD authoring, batch generation, and CLI
 wiring. Test support now has commanding and PX4-bridge fake modules, while the
@@ -159,11 +159,11 @@ Priority: medium
 
 Status: completed
 
-`load_config(path)` is the explicit core operation: it resolves a supplied
+`load_config(path)` is the cached explicit core operation: it resolves a supplied
 experiment path, composes it with an isolated Hydra loader, enriches and
 validates the fleet, and never reads the environment or clears `GlobalHydra`.
-`get_config()` remains the process-cached production adapter and delegates its
-environment-selected path to `load_config`.
+Runtime roots resolve the required `ROBOTICS_EXPERIMENT_CONFIG_PATH` themselves
+and pass the immutable result downward.
 
 Configuration dataclasses stay mutable only during Hydra construction and the
 private enrichment phase. Before return, the loader freezes every config node,

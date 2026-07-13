@@ -12,8 +12,8 @@ every per-vehicle terminal), from its own per-instance rootfs subdir
 (`build/px4_sitl_default/rootfs/${PX4_INSTANCE}`). The airframe is selected by
 `PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART` (defaulting to the repo's X500 V2 quad
 `none_x500_v2`/`4019` if unset): the host-side launch scripts derive the
-per-vehicle pair from the drone USD asset via
-`config.get_enabled_px4_launch_configs()` (`none_x500_v2`/`4019` for the X500 V2
+per-vehicle pair resolved by `config.load_config(path)` onto each enabled
+`VehicleConfig` (`none_x500_v2`/`4019` for the X500 V2
 quad asset, `none_hexa_x`/`6001` for the Hex X asset) and thread it into each
 container. These repo-managed `none_*` airframes are generated from
 `configs/airframes` and baked into the PX4 image by the Dockerfile's px4 stage

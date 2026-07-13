@@ -11,7 +11,7 @@ Action-level decision: resolved in ADR 0013. `rl.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
 frozen params dataclasses + pure functions (`build_actuation_params` /
-`action_to_rotor_omega` exported by `robotics_experiments.rl` and implemented in
+`action_to_rotor_omega` exported by `robotics_experiments.rl.press` and implemented in
 `rl/press/actuation.py`, mirrored in `flight.py`); same
 math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
@@ -36,12 +36,12 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Rule: this package is on the core import path. It must import only stdlib +
   numpy. The torch/isaaclab env code lives in `workflows/isaac_lab/tasks/`, not
   here.
-- Done when: `python -c "import robotics_experiments.rl"` works in a plain
+- Done when: `python -c "import robotics_experiments.rl.press"` works in a plain
   `.venv` (no Isaac/torch).
 
 ## Step 2 -- Add the `press` Hydra config group (scaffold only)
 
-- Action: edit `src/robotics_experiments/config/types.py`.
+- Action: edit `src/robotics_experiments/config/_rl.py`.
   - Add `@dataclass class PressActionConfig` with bare annotations:
     `kind: str` (the deferred action level, see Step 6),
     `action_dim: int`,
@@ -70,10 +70,11 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
   `sim.physics_hz` / `policy_rate_hz`, `policy_rate_hz: 50`, action gains).
 - Action: edit `configs/base.yaml` defaults to add
   `experiment/rl@press: default`.
-- Test: extend `tests/` with a config test asserting `get_config().rl.action`
+- Test: extend `tests/` with a config test asserting
+  `load_config("configs/takeoff_quad.yaml").rl.action`
   resolves and `rl.num_envs > 0`.
-- Done when: `uv run python -c "from robotics_experiments.config import get_config;
-  print(get_config().rl)"` prints the resolved config.
+- Done when: `uv run python -c "from robotics_experiments.config import load_config;
+  print(load_config('configs/takeoff_quad.yaml').rl)"` prints the resolved config.
 
 ## Step 3 -- Add a vectorized force sink for Isaac Lab
 
@@ -203,7 +204,7 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 - add `src/robotics_experiments/rl/press/__init__.py`, `.../rl/press/actuation.py`
 - add `src/robotics_experiments/workflows/isaac_lab/tasks/flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
-- edit `src/robotics_experiments/config/types.py`, `.../config/_schemas.py`
+- edit `src/robotics_experiments/config/_rl.py`, `.../config/_schemas.py`
 - add `configs/experiment/rl/default.yaml`; edit `configs/base.yaml`
 - move/adopt `isaac/runtime/lab/drone_cfg.py` into the tasks package (or import it)
 - add `tests/test_pressactuation.py`; extend a config test; extend

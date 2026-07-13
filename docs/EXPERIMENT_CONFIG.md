@@ -1,8 +1,10 @@
 # Experiment configuration
 
 Every top-level YAML sibling of `configs/base.yaml` is a runnable experiment.
-`load_config(path)` composes one explicitly; cached production callers use
-`get_config()`. Both return the same immutable `ExperimentConfig`.
+`load_config(path)` composes and process-caches one explicitly, returning an
+immutable `ExperimentConfig`. It never reads the environment. Runtime roots read
+the required `ROBOTICS_EXPERIMENT_CONFIG_PATH` variable once and pass the
+resolved configuration to downstream consumers.
 
 ## Root structure
 

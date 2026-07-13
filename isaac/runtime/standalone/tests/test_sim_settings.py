@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.config import get_config
 from robotics_experiments.simulation import apply_settings
 
 if TYPE_CHECKING:
@@ -51,7 +50,7 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
     import carb
     from pxr import PhysxSchema
 
-    expected = get_config().sim
+    expected = context.config.sim
     scenes = _find_physics_scenes(context.stage)
     if not scenes:
         raise AssertionError("Expected at least one UsdPhysics.Scene after applying settings")
@@ -127,7 +126,7 @@ def _run_test(context: SceneTestContext) -> None:
         f"{original_scene_paths if original_scene_paths else 'none'}"
     )
     context.report(f"{TEST_NAME}: calling robotics_experiments.simulation.apply_settings(stage)")
-    apply_settings(context.stage)
+    apply_settings(stage=context.stage, settings=context.config.sim)
     _assert_settings_applied(context, original_scene_paths)
 
 

@@ -1,8 +1,8 @@
 """Shared runtime helpers for standalone Isaac Sim integration tests.
 
-These helpers intentionally use the real Isaac standalone workflow: start a
-``SimulationApp``, load a real USD stage through ``omni.usd``, reset the Hydra
-config cache, and hand the loaded stage to an extension-specific test body.
+These helpers intentionally use the real Isaac standalone workflow: resolve one
+experiment config, start a ``SimulationApp``, load a real USD stage through
+``omni.usd``, and hand both to an extension-specific test body.
 Mocks should stay out of these tests unless a future extension dependency
 cannot reasonably run inside standalone Isaac.
 """
@@ -10,6 +10,7 @@ cannot reasonably run inside standalone Isaac.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from collections.abc import Callable, Iterable
@@ -20,10 +21,10 @@ from typing import Any, Iterator
 
 from isaacsim import SimulationApp
 
-from robotics_experiments.config import get_config
-from robotics_experiments.config import reset_config_cache as reset_config
+from robotics_experiments.config import ExperimentConfig, load_config
 
 TEST_OUTPUT_PREFIX = "[isaac-standalone-test]"
+_CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 # Sentinel ``--scene`` value meaning "load the scene from the Hydra ``scene``
 # config" rather than an explicit path. The integration harness always injects
@@ -75,6 +76,7 @@ class SceneTestContext:
 
     simulation_app: SimulationApp
     report: Callable[[str], None]
+    config: ExperimentConfig
     stage: object | None = None
     scene_path: Path | None = None
     scene_override: str | None = None
@@ -189,19 +191,6 @@ def _parse_scene_args(description: str, default_scene: str | None) -> argparse.N
     return parser.parse_args()
 
 
-def _resolve_scene_from_config(test_name: str) -> str:
-    """Return the experiment ``scene`` from the composed Hydra config.
-
-    Used when no explicit ``--scene`` is given (or the sentinel is passed). The
-    config composes without Isaac, so this is safe before ``SimulationApp``
-    starts; the test body later resets and recomposes the cache.
-    """
-    reset_config()
-    scene = get_config().scene
-    report(f"{test_name}: scene from scene config: {scene}")
-    return scene
-
-
 def run_scene_test(
     test_name: str,
     test_body: Callable[[SceneTestContext], None],
@@ -223,14 +212,19 @@ def run_scene_test(
         manage_stage: When ``True`` (default) the harness resolves and opens the
             stage and passes it on the context (the non-fleet scene tests). When
             ``False`` the fleet scenario's :class:`FleetOrchestrator` owns
-            scene-open: the harness only starts the ``SimulationApp`` and resets
-            the config, and passes the requested ``--scene`` as
+            scene-open: the harness only starts the ``SimulationApp`` and passes
+            the requested ``--scene`` as
             ``context.scene_override`` (``None`` => use the experiment config).
         extra_python_paths: Repo-relative or absolute paths to prepend to
             ``sys.path`` for this standalone process. PX4 scenarios use this to
             mirror Kit extension module discovery for vendored Pegasus.
     """
     _prepend_python_paths(extra_python_paths)
+    try:
+        config_path = os.environ[_CONFIG_PATH_ENV]
+    except KeyError as exc:
+        raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
+    config = load_config(config_path)
 
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
@@ -239,7 +233,8 @@ def run_scene_test(
     scene_path: Path | None = None
     if manage_stage:
         if scene in (None, SCENE_FROM_CONFIG):
-            scene = _resolve_scene_from_config(test_name)
+            scene = config.scene
+            report(f"{test_name}: scene from experiment config: {scene}")
         scene_path = _resolve_scene_path(scene)
         report(f"{test_name}: scene argument: {scene}")
         report(f"{test_name}: resolved scene path: {scene_path}")
@@ -265,11 +260,6 @@ def run_scene_test(
 
         timing.report_stage("import_omni_usd", stage_start_s)
 
-        stage_start_s = timing.start()
-        report(f"{test_name}: resetting Hydra config cache")
-        reset_config()
-        timing.report_stage("hydra_reset", stage_start_s)
-
         stage: object | None = None
         if manage_stage:
             assert scene_path is not None
@@ -294,6 +284,7 @@ def run_scene_test(
                 scene_override=scene_override,
                 simulation_app=simulation_app,
                 report=report,
+                config=config,
                 strict=strict,
             )
         )

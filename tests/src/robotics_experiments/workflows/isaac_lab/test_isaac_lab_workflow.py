@@ -35,6 +35,7 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "DroneHoverEnv",
         "DroneHoverEnvCfg",
         "compute_lab_rotor_omega",
+        "make_drone_hover_env_cfg",
         "register_isaac_lab_tasks",
     ]
     assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v0"
@@ -86,13 +87,15 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     pytest.importorskip("gymnasium")
 
     module = importlib.import_module("robotics_experiments.workflows.isaac_lab")
+    from robotics_experiments.config import load_config
     from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
+        make_drone_hover_env_cfg,
     )
 
     assert module.DroneHoverEnv is DroneHoverEnv
     assert module.DroneHoverEnvCfg is DroneHoverEnvCfg
-    cfg = DroneHoverEnvCfg()
+    cfg = make_drone_hover_env_cfg(experiment_config=load_config("configs/takeoff_quad.yaml"))
     assert cfg.action_space == 4
     assert cfg.observation_space == 13

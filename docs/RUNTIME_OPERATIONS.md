@@ -65,11 +65,12 @@ The persistent Isaac container (`make run-isaac` / `make run-all`) is named
 the quickest way to inspect the last manual run is
 `docker logs vv-isaac-sim-custom`.
 
-That console stream is the only place the shell-level scene-resolution step in
-`runapp_custom.sh` (the `get_config().scene` subprocess that picks the stage)
-reports its errors. Those errors never reach the Kit log file, so a blank stage
-with no `open_stage` exec is diagnosed from `docker logs`, not from the
-structured Kit log.
+That console stream is where extension startup and configuration-loading errors
+are reported. The `experiment_runtime` extension reads the required
+`ROBOTICS_EXPERIMENT_CONFIG_PATH`, calls `load_config(path)`, and opens the
+resolved `scene`; `runapp_custom.sh` does not run a separate scene-resolution
+subprocess. Startup failures may precede structured Kit logging, so diagnose a
+blank stage from `docker logs` first.
 
 Kit's own log is written inside the container at
 `/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/<ver>/kit_<timestamp>.log`

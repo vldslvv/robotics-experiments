@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.config import get_config
 from robotics_experiments.px4_bridge import IsaacArticulationIO, discover_px4_rotor_mapping
 from robotics_experiments.simulation import apply_settings
 
@@ -92,10 +91,10 @@ def _run_test(context: SceneTestContext) -> None:
 
     from robotics_experiments.drone import despawn_drone, spawn_drone
 
-    env = get_config()
+    env = context.config
     vehicle = next(iter(env.vehicles.values()))
     context.report(f"{TEST_NAME}: applying configured simulation settings")
-    apply_settings(context.stage)
+    apply_settings(stage=context.stage, settings=env.sim)
 
     articulation_io = None
     timeline = omni.timeline.get_timeline_interface()
