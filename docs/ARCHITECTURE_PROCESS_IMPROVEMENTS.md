@@ -92,20 +92,23 @@ package. Make exports the checkout's `src/` on `PYTHONPATH`, while pytest keeps
 its existing source-root configuration. Hydra configs and assets remain
 checkout resources, matching the loader and container runtime contracts.
 
-### 4. Make container builds hermetic and split development from execution images
+### 4. Harden container inputs while preserving the host editor environment
 
 Priority: high
 
 Status: completed
 
-The default Isaac and ROS targets now build minimal runtime/integration stages
-from a small shared shell base. Neovim, Node.js, Codex, and Claude Code are
-isolated in opt-in `isaac-sim-dev` and `ros-dev` stages with separate Make
-targets; runtime images no longer inherit them. Development tool versions,
-source checkouts, Isaac Lab/PX4 refs, and the Isaac/ROS/Ubuntu base manifests are
-pinned. Image construction no longer reads the host's Neovim version and no
-installer is piped directly into a shell. The ROS build excludes the unused
-upstream humanoid example's mutable PyTorch/CUDA rosdep closure.
+The default Isaac and ROS targets include the interactive environment used for
+container development: Oh My Zsh, common terminal utilities, Neovim, Node.js,
+Codex, and Claude Code. Neovim is host-derived: Make reads the host version,
+builds that exact tag, and the persistent containers mount an additively
+synchronized snapshot of the host LazyVim configuration, Copilot configuration,
+data, state, and cache. The interactive Zsh framework and plugins intentionally
+follow their upstream default branches to refresh the shell experience when an
+image is rebuilt. Node.js and the assistant tools remain pinned, as do runtime
+source checkouts, Isaac Lab/PX4 refs, and the Isaac/ROS/Ubuntu base manifests.
+The ROS build excludes the unused upstream humanoid example's mutable
+PyTorch/CUDA rosdep closure.
 
 Hydra, OmegaConf, pymavlink, and their exact transitive versions are baked into
 the Isaac image from `isaac/docker/runtime-requirements.txt`. Cache warm-up and
@@ -196,8 +199,8 @@ with `TODO.txt`; the remaining durable drone-platform ideas are curated in
    test.
 4. [x] Reorganize Python dependency groups and decide the installable versus
    checkout-only packaging contract.
-5. [x] Make integration dependency installation hermetic and split minimal container
-   stages from interactive development stages.
+5. [x] Make integration dependency installation hermetic, pin external image
+   inputs, and preserve the host-matched interactive editor environment.
 6. [x] Refactor the large modules incrementally, one subsystem at a time, with no
    public API changes.
 7. [x] Isolate config composition and make resolved configuration immutable.

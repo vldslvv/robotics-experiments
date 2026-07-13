@@ -17,7 +17,6 @@ ISAAC_BASE_DIGEST ?= sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623
 ISAAC_IMAGE_NAME     ?= vv-isaac-sim-custom
 ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
 ISAAC_IMAGE          = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
-ISAAC_DEV_IMAGE      = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-dev
 ISAAC_CACHE_IMAGE    = $(ISAAC_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
 ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
@@ -106,7 +105,6 @@ ROS_BASE_DIGEST    ?= sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12c
 ROS_IMAGE_NAME     ?= vv-ros-$(ROS_DISTRO)-custom
 ROS_IMAGE_TAG      ?= $(ROS_DISTRO)
 ROS_IMAGE          = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)
-ROS_DEV_IMAGE      = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)-dev
 ROS_CACHE_IMAGE    = $(ROS_IMAGE_NAME):$(ROS_IMAGE_TAG)-buildcache
 ROS_CONTAINER_NAME ?= vv-ros-$(ROS_DISTRO)-custom
 TOPIC_BASED_ROS2_CONTROL_REF ?= 6bd8d55e1c4ad3188770fe5c8b93b942bcede4a2
@@ -145,3 +143,6 @@ PX4_EEPROM         = $(PX4_HOME)/eeprom
 
 # Paths inside the container (under PX4 SITL rootfs).
 PX4_ROOTFS         = /opt/PX4-Autopilot/build/px4_sitl_default/rootfs
+
+# Keep the container editor aligned with the host configuration and caches.
+NVIM_VERSION := $(shell command -v nvim >/dev/null 2>&1 && nvim --version 2>/dev/null | awk 'NR == 1 {print $$2}')

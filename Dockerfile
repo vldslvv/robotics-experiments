@@ -19,13 +19,44 @@ RUN apt-get update && \
     git \
     less \
     tmux \
-    zsh \
  && rm -rf /var/lib/apt/lists/*
 
+COPY docker/tmux.conf /root/.tmux.conf
+
+
+# Terminal environment used by the interactive Isaac and ROS images. These
+# shell customizations intentionally follow their upstream default branches so
+# rebuilding an image refreshes the interactive experience.
+FROM base AS terminal-tools
+
+RUN apt-get update && \
+  apt-get install --no-install-recommends -y \
+    fd-find \
+    file \
+    htop \
+    ranger \
+    ripgrep \
+    tree \
+    zsh \
+    zsh-syntax-highlighting \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV SHELL=/usr/bin/zsh
 ENV ZSH_CACHE_DIR=/cache/zsh
 RUN mkdir -p /cache/zsh
+
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+    "" --unattended
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
+    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
+  git clone https://github.com/jeffreytse/zsh-vi-mode \
+    "${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-vi-mode"
+
 RUN cat > /root/.zshrc <<'EOF'
-export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-$HOME/.cache/zsh}"
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+
+export ZSH_CACHE_DIR="${ZSH_CACHE_DIR:-/cache/zsh}"
 mkdir -p "$ZSH_CACHE_DIR"
 export HISTFILE="$ZSH_CACHE_DIR/zsh_history"
 export HISTSIZE=50000
@@ -33,21 +64,28 @@ export SAVEHIST=50000
 setopt HIST_IGNORE_ALL_DUPS
 setopt HIST_FIND_NO_DUPS
 setopt SHARE_HISTORY
-autoload -Uz compinit
-compinit -d "$ZSH_CACHE_DIR/zcompdump"
+
+plugins=(
+  git
+  zsh-autosuggestions
+  zsh-vi-mode
+)
+
+export ZSH_COMPDUMP="$ZSH_CACHE_DIR/zcompdump"
+source "$ZSH/oh-my-zsh.sh"
 zstyle ':completion:*' use-cache on
 zstyle ':completion:*' cache-path "$ZSH_CACHE_DIR"
 setopt AUTO_CD
 setopt INTERACTIVE_COMMENTS
+
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 EOF
 
-ENV SHELL=/usr/bin/zsh
-COPY docker/tmux.conf /root/.tmux.conf
 
-
-# Optional interactive tools. Runtime and integration images never inherit this
-# stage; the explicit *-dev targets copy its pinned /usr/local payload.
-FROM base AS development-tools
+# Interactive tools shared by the Isaac and ROS images. Neovim follows the host
+# version supplied by Make so the mounted host configuration and caches run
+# against the same editor release.
+FROM terminal-tools AS development-tools
 SHELL ["/bin/bash", "-o", "pipefail", "-lc"]
 
 RUN apt-get update && \
@@ -63,10 +101,10 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-ARG NVIM_REF=cec0ecabd8f47ff81dcb52e8fc9003e365563a84
-RUN git clone https://github.com/neovim/neovim.git && \
+ARG NVIM_TAG
+RUN test -n "${NVIM_TAG}" && \
+    git clone --depth 1 --branch "${NVIM_TAG}" https://github.com/neovim/neovim.git && \
     cd neovim && \
-    git checkout "${NVIM_REF}" && \
     make CMAKE_BUILD_TYPE=RelWithDebInfo && \
     make install && \
     rm -rf /opt/neovim
@@ -82,10 +120,12 @@ ARG CODEX_VERSION=0.142.5
 ARG CLAUDE_CODE_VERSION=2.1.205
 RUN npm install -g \
     "@openai/codex@${CODEX_VERSION}" \
-    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+    echo "alias vim='nvim'" >> "${HOME}/.bashrc" && \
+    echo "alias vim='nvim'" >> "${HOME}/.zshrc"
 
 
-FROM base AS isaac-sim
+FROM development-tools AS isaac-sim
 
 # Fix for wrong characters being displayed in Neovim, and possible other issues
 RUN apt-get update && apt-get install -y --no-install-recommends locales \
@@ -116,21 +156,18 @@ RUN PIP_ROOT_USER_ACTION=ignore ./python.sh -m pip install \
     rm /tmp/isaac-runtime-requirements.txt && \
     ./python.sh -c "import hydra, omegaconf, pymavlink"
 
-ENTRYPOINT ["/usr/bin/zsh", "-lc", "exec tmux \"$@\"", "tmux"]
-CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
-
-FROM isaac-sim AS isaac-sim-dev
-COPY --from=development-tools /usr/local/ /usr/local/
 ARG SCRIPTS_DIR
 COPY ${SCRIPTS_DIR}/make_symlinks.sh make_symlinks.sh
 RUN chmod +x make_symlinks.sh && \
-    echo "alias vim='nvim'" >> "${HOME}/.zshrc" && \
+    echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" \
+      >> "${HOME}/.bashrc" && \
     echo "alias pyvim='source /isaac-sim/proj/isaac/runtime/standalone/set_python_env.sh && nvim'" \
       >> "${HOME}/.zshrc"
 ENTRYPOINT ["/usr/bin/zsh", "-lc", "/isaac-sim/make_symlinks.sh || true; exec tmux \"$@\"", "tmux"]
+CMD ["new-session", "/usr/bin/zsh", "-l", ";", "split-window", "-h", "/usr/bin/zsh", "-l", ";", "attach"]
 
 
-FROM base AS ros-base
+FROM development-tools AS ros-base
 
 ARG ROS_DISTRO="jazzy"
 # Use bash for RUN so that sourcing setup.bash works
@@ -200,10 +237,6 @@ ENTRYPOINT ["/usr/bin/zsh", "-lc", "\
   exec \"$@\" \
 ", "--"]
 CMD ["tmux", "new-session", "-A", "-s", "ros"]
-
-FROM ros AS ros-dev
-COPY --from=development-tools /usr/local/ /usr/local/
-
 
 # Isaac Lab layers on top of Isaac Sim: it shares the same kit python
 # (/isaac-sim/python.sh), USD, and PhysX and cannot run standalone, so it is a

@@ -9,15 +9,42 @@ def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text()
 
 
-def test_runtime_images_do_not_inherit_development_tools() -> None:
+def test_runtime_images_inherit_development_tools() -> None:
     dockerfile = _read("Dockerfile")
+    images = _read("make/images.mk")
 
-    assert "FROM base AS isaac-sim" in dockerfile
-    assert "FROM isaac-sim AS isaac-sim-dev" in dockerfile
-    assert "FROM base AS ros-base" in dockerfile
-    assert "FROM ros AS ros-dev" in dockerfile
-    assert "FROM ai-tools" not in dockerfile
+    assert "FROM development-tools AS isaac-sim" in dockerfile
+    assert "FROM development-tools AS ros-base" in dockerfile
+    assert "isaac-sim-dev" not in dockerfile + images
+    assert "ros-dev" not in dockerfile + images
     assert "| bash" not in dockerfile
+
+
+def test_isaac_and_ros_restore_the_interactive_terminal_environment() -> None:
+    dockerfile = _read("Dockerfile")
+    terminal_stage = dockerfile.split("FROM base AS terminal-tools", maxsplit=1)[1]
+    terminal_stage = terminal_stage.split("FROM terminal-tools AS development-tools", maxsplit=1)[0]
+
+    for package in (
+        "fd-find",
+        "file",
+        "htop",
+        "ranger",
+        "ripgrep",
+        "tree",
+        "zsh",
+        "zsh-syntax-highlighting",
+    ):
+        assert f"    {package} " in terminal_stage
+
+    assert "ohmyzsh/ohmyzsh/master/tools/install.sh" in terminal_stage
+    assert "git clone https://github.com/zsh-users/zsh-autosuggestions" in terminal_stage
+    assert "git clone https://github.com/jeffreytse/zsh-vi-mode" in terminal_stage
+    assert 'ZSH_THEME="robbyrussell"' in terminal_stage
+    assert "  git\n  zsh-autosuggestions\n  zsh-vi-mode" in terminal_stage
+    assert 'export ZSH_COMPDUMP="$ZSH_CACHE_DIR/zcompdump"' in terminal_stage
+    assert "source /usr/share/zsh-syntax-highlighting/" in terminal_stage
+    assert "FROM terminal-tools AS development-tools" in dockerfile
 
 
 def test_container_inputs_are_pinned() -> None:
@@ -27,9 +54,13 @@ def test_container_inputs_are_pinned() -> None:
 
     assert "@${DOCKER_DIGEST} AS base" in dockerfile
     assert re.search(r"FROM ubuntu:22\.04@sha256:[0-9a-f]{64} AS px4", dockerfile)
-    assert "NVIM_VERSION" not in config + images
-    assert "build-isaac-dev" in images
-    assert "build-ros-dev" in images
+    assert "NVIM_VERSION := $(shell command -v nvim" in config
+    assert "ARG NVIM_TAG" in dockerfile
+    assert 'git clone --depth 1 --branch "${NVIM_TAG}"' in dockerfile
+    assert images.count('--build-arg NVIM_TAG="$(NVIM_VERSION)"') == 3
+    assert "build-isaac: require-host-nvim" in images
+    assert "build-isaac-lab: require-host-nvim" in images
+    assert "build-ros: require-host-nvim" in images
     for variable in (
         "ISAACLAB_REF",
         "PX4_REF",
@@ -37,6 +68,26 @@ def test_container_inputs_are_pinned() -> None:
         "ISAAC_ROS_WORKSPACES_REF",
     ):
         assert re.search(rf"^{variable}\s+\?=\s+[0-9a-f]{{40}}$", config, re.MULTILINE)
+
+
+def test_host_neovim_setup_is_mounted_with_additive_sync() -> None:
+    dockerfile = _read("Dockerfile")
+    docker_make = _read("make/docker.mk")
+
+    assert dockerfile.count("alias vim='nvim'") == 2
+    assert dockerfile.count("alias pyvim=") == 2
+    assert "/isaac-sim/make_symlinks.sh || true" in dockerfile
+    for host_path, container_path in (
+        ("${HOME}/code/lazyvim-starter", "/root/.config/nvim"),
+        ("${HOME}/.config/github-copilot", "/root/.config/github-copilot"),
+        ("${HOME}/.local/share/nvim", "/root/.local/share/nvim"),
+        ("${HOME}/.local/state/nvim", "/root/.local/state/nvim"),
+        ("${HOME}/.cache/nvim", "/root/.cache/nvim"),
+    ):
+        assert host_path in docker_make
+        assert container_path in docker_make
+    assert "rsync -a --exclude='**/.git/**'" in docker_make
+    assert "rsync -a --delete" not in docker_make
 
 
 def test_integration_dependencies_are_baked_into_image() -> None:

@@ -4,12 +4,19 @@
 
 docker_cache_from = $(if $(shell docker image inspect $(1) >/dev/null 2>&1 && printf yes),--cache-from $(1),)
 
+.PHONY: require-host-nvim
+require-host-nvim:
+	@test -n "$(NVIM_VERSION)" || { \
+		echo "Host Neovim is required to build the Isaac and ROS images." >&2; \
+		exit 1; \
+	}
+
 .PHONY: build
 build: build-isaac build-isaac-lab build-ros build-px4
 	@echo "All images built/pulled."
 
 .PHONY: build-isaac
-build-isaac:
+build-isaac: require-host-nvim
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
 		--progress=plain \
@@ -18,6 +25,7 @@ build-isaac:
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
 		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--target isaac-sim \
 		-t $(ISAAC_IMAGE) \
@@ -29,7 +37,7 @@ build-isaac:
 # Only the Phase F RL workflow (test-integration-press-hover-goto; future
 # training) runs on it.
 .PHONY: build-isaac-lab
-build-isaac-lab:
+build-isaac-lab: require-host-nvim
 	@echo "Building Isaac Lab image: $(ISAAC_LAB_IMAGE) (ISAACLAB_REF=$(ISAACLAB_REF))"
 	docker buildx build \
 		--progress=plain \
@@ -38,6 +46,7 @@ build-isaac-lab:
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
 		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
 		--build-arg ISAACLAB_REF="$(ISAACLAB_REF)" \
 		--target isaac-lab \
@@ -46,22 +55,8 @@ build-isaac-lab:
 		-f Dockerfile \
 		$(CURDIR)
 
-.PHONY: build-isaac-dev
-build-isaac-dev:
-	@echo "Building optional Isaac development image: $(ISAAC_DEV_IMAGE)"
-	docker buildx build \
-		--progress=plain \
-		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
-		--build-arg DOCKER_TAG="$(ISAAC_BASE_TAG)" \
-		--build-arg DOCKER_DIGEST="$(ISAAC_BASE_DIGEST)" \
-		--build-arg SCRIPTS_DIR="$(ISAAC_DOCKER_DIR)" \
-		--target isaac-sim-dev \
-		-t $(ISAAC_DEV_IMAGE) \
-		-f Dockerfile \
-		$(CURDIR)
-
 .PHONY: build-ros
-build-ros:
+build-ros: require-host-nvim
 	@echo "Pulling ROS image: $(ROS_IMAGE)"
 	docker buildx build \
 		--progress=plain \
@@ -70,26 +65,12 @@ build-ros:
 		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
 		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
 		--build-arg DOCKER_DIGEST="$(ROS_BASE_DIGEST)" \
+		--build-arg NVIM_TAG="$(NVIM_VERSION)" \
 		--build-arg TOPIC_BASED_ROS2_CONTROL_REF="$(TOPIC_BASED_ROS2_CONTROL_REF)" \
 		--build-arg ISAAC_ROS_WORKSPACES_REF="$(ISAAC_ROS_WORKSPACES_REF)" \
 		--target ros \
 		-t $(ROS_IMAGE) \
 		-t $(ROS_CACHE_IMAGE) \
-		-f Dockerfile \
-		$(CURDIR)
-
-.PHONY: build-ros-dev
-build-ros-dev:
-	@echo "Building optional ROS development image: $(ROS_DEV_IMAGE)"
-	docker buildx build \
-		--progress=plain \
-		--build-arg DOCKER_REPO="$(ROS_BASE_IMAGE)" \
-		--build-arg DOCKER_TAG="$(ROS_BASE_TAG)" \
-		--build-arg DOCKER_DIGEST="$(ROS_BASE_DIGEST)" \
-		--build-arg TOPIC_BASED_ROS2_CONTROL_REF="$(TOPIC_BASED_ROS2_CONTROL_REF)" \
-		--build-arg ISAAC_ROS_WORKSPACES_REF="$(ISAAC_ROS_WORKSPACES_REF)" \
-		--target ros-dev \
-		-t $(ROS_DEV_IMAGE) \
 		-f Dockerfile \
 		$(CURDIR)
 

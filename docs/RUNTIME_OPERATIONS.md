@@ -10,13 +10,21 @@ the host. They are meant to be used in the Dockerized environment.
 
 ## Docker targets
 
-- `make build` builds the minimal Isaac Sim, Isaac Lab, ROS 2, and PX4
-  runtime/integration images. These images contain execution dependencies but
-  no editor or assistant tooling.
-- `make build-isaac-dev` and `make build-ros-dev` build opt-in development
-  variants with pinned Neovim, Node.js, Codex, and Claude Code versions. Run a
-  persistent development variant by overriding the image, for example
-  `make run-isaac ISAAC_IMAGE=vv-isaac-sim-custom:5.1.0-dev`.
+- `make build` builds the Isaac Sim, Isaac Lab, ROS 2, and PX4 images. The Isaac
+  and ROS image chains include Oh My Zsh, common terminal utilities, Neovim,
+  Node.js, Codex, and Claude Code for interactive container development. The
+  shell uses the `robbyrussell` theme with git, autosuggestions, vi-mode, and
+  syntax-highlighting support. Isaac Lab inherits this environment; PX4 keeps
+  its separate Bash/tmux runtime.
+- Isaac and ROS builds require Neovim on the host. Make passes the version from
+  `nvim --version` into the Docker build so the container editor matches the
+  host. Node.js, Codex, and Claude Code use the pinned Dockerfile versions.
+- Before starting a persistent Isaac or ROS container, Make additively
+  synchronizes `$HOME/code/lazyvim-starter`, the GitHub Copilot configuration,
+  and the host Neovim data, state, and cache into `.build/docker`. Those staged
+  paths are mounted under `/root` so the container uses the host setup without
+  modifying the host files directly. Files deleted on the host are not removed
+  from the staged snapshot automatically.
 - The Isaac Lab image is for RL training and RL-specific gates; see
   `docs/RL_WORKFLOW.md` before changing `build-isaac-lab`, `ISAAC_LAB_IMAGE`,
   `ISAACLAB_REF`, or `make train-rl`.
@@ -39,10 +47,12 @@ the host. They are meant to be used in the Dockerized environment.
 - Legacy targets such as `build-all`, `run-all`, and `clean-all` are
   compatibility aliases.
 
-The Isaac, ROS, Ubuntu/PX4 base images are pinned by manifest digest. Source
-checkouts used by the images are pinned to immutable commits, while the
+The Isaac, ROS, Ubuntu/PX4 base images are pinned by manifest digest. Runtime
+source checkouts used by the images are pinned to immutable commits, while the
 human-readable release tags remain in comments or image tags. Update the digest
-and corresponding tag together when intentionally upgrading a base image.
+and corresponding tag together when intentionally upgrading a base image. The
+interactive shell is an intentional exception: Oh My Zsh, zsh-autosuggestions,
+and zsh-vi-mode follow their upstream default branches when an image is built.
 The ROS workspace deliberately skips the upstream humanoid example's
 `python3-pytorch-pip` rosdep key: that example is outside this project's runtime
 and allowing rosdep to install it would resolve a mutable, multi-gigabyte CUDA
