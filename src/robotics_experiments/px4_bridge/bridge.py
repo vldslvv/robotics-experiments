@@ -131,16 +131,15 @@ def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4Br
             f"into the PX4 lockstep exchange"
         )
 
-    force_cutoff = (
-        frames.tilt_angle_deg(vehicle_state.orientation_flu_enu_wxyz) > state.max_tilt_angle_deg
-    )
+    tilt = frames.tilt_angle_deg(vehicle_state.orientation_flu_enu_wxyz)
+    force_cutoff = tilt > state.max_tilt_angle_deg
     cutoff_count = state.tilt_cutoff_count + int(force_cutoff)
     if force_cutoff and (cutoff_count <= 10 or cutoff_count % 250 == 0):
         _LOGGER.warning(
             "PX4 bridge tilt cutoff: count=%d tilt=%.1f deg limit=%.1f deg; "
             "zeroing rotor forces",
             cutoff_count,
-            frames.tilt_angle_deg(vehicle_state.orientation_flu_enu_wxyz),
+            tilt,
             state.max_tilt_angle_deg,
         )
     pending = _PendingTick(

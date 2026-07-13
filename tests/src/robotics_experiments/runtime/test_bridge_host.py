@@ -97,6 +97,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     class Px4MavlinkPort:
         def __init__(self, **kwargs):
             self.debug_log_path = kwargs["debug_log_path"]
+            self.connected = False
             calls.append(("port", kwargs))
 
     class PegasusQuadraticThrustModel:
@@ -123,17 +124,23 @@ def _install_fake_px4_bridge(monkeypatch, calls):
                 rotor_spin_signs,
             )
         )
-        return SimpleNamespace(connected=True, port=port, thrust_model=thrust_model)
+        return SimpleNamespace(connected=False, port=port, thrust_model=thrust_model)
 
     def read_px4_bridge_status(*, state):
         return SimpleNamespace(is_connected=state.connected, is_armed=False)
 
     def start_px4_bridge(*, state):
+        state.connected = True
+        state.port.connected = True
         return state
 
     def stop_px4_bridge(*, state):
         state.connected = False
+        state.port.connected = False
         return state
+
+    def port_is_connected(*, port):
+        return port.connected
 
     def send_sensors(*, state, dt, sim_time_us):
         return state
@@ -163,6 +170,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.create_px4_bridge = create_px4_bridge
     fake_px4_bridge.create_sim_clock = create_sim_clock
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
+    fake_px4_bridge.port_is_connected = port_is_connected
     fake_px4_bridge.read_px4_bridge_status = read_px4_bridge_status
     fake_px4_bridge.recv_and_apply = recv_and_apply
     fake_px4_bridge.send_sensors = send_sensors

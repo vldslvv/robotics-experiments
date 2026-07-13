@@ -52,7 +52,11 @@ from robotics_experiments.px4_bridge.isaac_articulation import (
     read_articulation_io_status,
 )
 from robotics_experiments.px4_bridge.logging import vehicle_log_context
-from robotics_experiments.px4_bridge.mavlink import Px4MavlinkPort, read_bridge_status
+from robotics_experiments.px4_bridge.mavlink import (
+    Px4MavlinkPort,
+    port_is_connected,
+    read_bridge_status,
+)
 from robotics_experiments.px4_bridge.rotor_discovery import (
     DiscoveredRotorMapping,
     discover_px4_rotor_mapping,
@@ -100,6 +104,7 @@ __all__ = [
     "create_sim_clock",
     "discover_px4_rotor_mapping",
     "normalize_quat_wxyz",
+    "port_is_connected",
     "quat_conjugate_wxyz",
     "quat_multiply_wxyz",
     "quat_wxyz_to_xyzw",

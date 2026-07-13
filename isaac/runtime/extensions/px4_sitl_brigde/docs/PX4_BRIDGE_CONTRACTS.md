@@ -245,13 +245,14 @@ Isaac session — common during development when pressing Play repeatedly.
 | TCP disconnect mid-flight | Set `is_connected = False`, return zero commands | Drone loses thrust; state machine sees flag flip and triggers ABORT |
 | Lockstep response timeout (PX4 not replying within deadline) | Same as above | Same as above |
 | Articulation handle still `None` on `start()` | Defer one tick, then raise | Scene wiring bug — loud failure is correct |
-| Non-finite (NaN/Inf) articulation state | Log the offending state and raise `RuntimeError` | `on_physics_step` raises; `BridgeHost`'s per-tick `try/except` keeps the sim loop alive; persistent corruption surfaces loudly |
+| Non-finite (NaN/Inf) articulation state | Log the offending state and raise `RuntimeError` | `send_sensors` raises; `BridgeHost`'s per-tick `try/except` keeps the sim loop alive; persistent corruption surfaces loudly |
 
 **Deferred:** last-good-state caching (cache the last finite `VehicleState` and,
 on a non-finite tick, send `HIL_SENSOR` from it with a bumped `sim_time_us`
 while applying zero forces) is *not* implemented. The bridge currently raises on
-the first non-finite tick. The breadcrumb design lives in the comment block in
-`bridge.py::send_sensors`.
+the first non-finite tick. The logged `position_enu` and
+`orientation_flu_enu_wxyz` values at the `send_sensors` error site are the
+breadcrumbs needed to implement that fallback.
 
 **Principle:** the bridge never silently corrupts the simulation. It either
 succeeds or surfaces a clean error the surrounding system can interpret — a flag

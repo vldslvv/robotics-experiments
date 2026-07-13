@@ -397,8 +397,6 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
                 )
 
         for handle in _bridged(fleet):
-            from robotics_experiments.runtime import read_bridge_host_status
-
             if read_bridge_host_status(host=handle.host).bridge_status is None:
                 raise AssertionError(
                     f"[{handle.label}] PX4 bridge host stopped before command flow"

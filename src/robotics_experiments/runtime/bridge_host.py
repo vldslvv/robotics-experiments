@@ -2,7 +2,9 @@
 
 This Isaac-only leaf keeps callback return values at the imperative boundary:
 each callback runs a module-level transition and replaces the host's single
-frozen state value.
+frozen state value. Its PX4 bridge dependencies are imported at module scope so
+the physics callbacks do not repeat cached imports; the lazy runtime package
+keeps this Isaac-coupled module off the core import path.
 """
 
 from __future__ import annotations
@@ -17,15 +19,30 @@ import carb
 import omni.physx
 
 from robotics_experiments.config import Px4BridgeConfig
+from robotics_experiments.px4_bridge import (
+    LockstepSettings,
+    PegasusQuadraticThrustModel,
+    Px4MavlinkPort,
+    advance_sim_clock,
+    bridge_time_us,
+    create_px4_bridge,
+    create_sim_clock,
+    discover_px4_rotor_mapping,
+    port_is_connected,
+    read_px4_bridge_status,
+    recv_and_apply,
+    send_sensors,
+    sim_clock_is_settling,
+    start_px4_bridge,
+    stop_px4_bridge,
+    vehicle_log_context,
+)
 
 if TYPE_CHECKING:
     from robotics_experiments.px4_bridge import (
         BridgeStatus,
         DiscoveredRotorMapping,
-        LockstepSettings,
-        PegasusQuadraticThrustModel,
         Px4BridgeState,
-        Px4MavlinkPort,
         RotorThrustModel,
         SimClockState,
     )
@@ -84,12 +101,6 @@ class _BridgeHostState:
 def _bridge_components(
     *, params: BridgeHostParams, rotor_mapping: DiscoveredRotorMapping
 ) -> tuple[LockstepSettings, Px4MavlinkPort, PegasusQuadraticThrustModel]:
-    from robotics_experiments.px4_bridge import (
-        LockstepSettings,
-        PegasusQuadraticThrustModel,
-        Px4MavlinkPort,
-    )
-
     cfg = params.bridge
     lockstep_cfg = cfg.lockstep
     lockstep = LockstepSettings(
@@ -169,8 +180,6 @@ class BridgeHost:
 
 def read_bridge_host_status(*, host: BridgeHost) -> BridgeHostStatus:
     """Read one immutable host status without exposing transition state."""
-    from robotics_experiments.px4_bridge import read_px4_bridge_status
-
     state = host._read_state()  # noqa: SLF001 - module status boundary
     return BridgeHostStatus(
         sim_time_us=state.clock.total_us if state.clock is not None else 0,
@@ -203,7 +212,6 @@ def _replace_thrust_model_for_test(
 def _start_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     if state.bridge is not None or not host.params.bridge.enabled:
         return state
-    from robotics_experiments.px4_bridge import create_sim_clock
 
     settle_time_s = max(0.0, float(host.params.bridge.startup_settle_time_s))
     started = replace(
@@ -228,7 +236,6 @@ def _start_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostStat
 def _start_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     if state.bridge is not None or state.start_attempted:
         return state
-    from robotics_experiments.px4_bridge import vehicle_log_context
 
     attempted = replace(
         state,
@@ -241,12 +248,6 @@ def _start_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
 
 def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     import omni.usd
-
-    from robotics_experiments.px4_bridge import (
-        create_px4_bridge,
-        discover_px4_rotor_mapping,
-        start_px4_bridge,
-    )
 
     stage = omni.usd.get_context().get_stage()
     if stage is None:
@@ -300,8 +301,6 @@ def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
 
 def _stop_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     if state.bridge is not None:
-        from robotics_experiments.px4_bridge import stop_px4_bridge
-
         log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)
         try:
             with log_context(host.params.vehicle_id):
@@ -312,14 +311,6 @@ def _stop_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState
 
 
 def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _BridgeHostState:
-    from robotics_experiments.px4_bridge import (
-        advance_sim_clock,
-        bridge_time_us,
-        read_px4_bridge_status,
-        send_sensors,
-        sim_clock_is_settling,
-    )
-
     clock = advance_sim_clock(
         state=cast("SimClockState", state.clock),
         dt=dt,
@@ -343,11 +334,10 @@ def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _Bri
     clock, sim_time_us = bridge_time_us(state=clock)
     current = replace(current, clock=clock)
     bridge_state = cast("Px4BridgeState", current.bridge)
-    bridge_status = read_px4_bridge_status(state=bridge_state)
     if (
-        not bridge_status.is_connected
-        and not current.disconnect_warned
+        not current.disconnect_warned
         and clock.tick_count >= host.first_connect_tick_budget
+        and not port_is_connected(port=bridge_state.port)
     ):
         current = replace(current, disconnect_warned=True)
         carb.log_warn(
@@ -385,7 +375,6 @@ def _recv_phase(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostStat
     pending = state.pending
     if pending is None or state.bridge is None:
         return state
-    from robotics_experiments.px4_bridge import read_px4_bridge_status, recv_and_apply
 
     current = replace(state, pending=None)
     log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)

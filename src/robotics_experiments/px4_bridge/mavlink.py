@@ -33,12 +33,12 @@ from robotics_experiments.px4_bridge.logging import _VehicleLogFilter, vehicle_l
 from robotics_experiments.px4_bridge.sim_clock import _physics_tick_us
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["Px4MavlinkPort", "read_bridge_status"]
+__all__ = ["Px4MavlinkPort", "port_is_connected", "read_bridge_status"]
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _port_is_connected(*, port: Px4MavlinkPort) -> bool:
+def port_is_connected(*, port: Px4MavlinkPort) -> bool:
     return port._is_connected and port._backend._connection is not None
 
 
@@ -56,7 +56,7 @@ def _read_port_status(*, port: Px4MavlinkPort) -> BridgeStatus:
     if port._last_sensor_send_us is not None and port._last_actuator_receive_us is not None:
         actuator_lag_us = port._last_sensor_send_us - port._last_actuator_receive_us
     return BridgeStatus(
-        is_connected=_port_is_connected(port=port),
+        is_connected=port_is_connected(port=port),
         is_armed=_port_is_armed(port=port),
         first_heartbeat_received=bool(port._backend._received_first_hearbeat),
         sensor_send_count=port._sensor_send_count,
@@ -373,7 +373,7 @@ class Px4MavlinkPort:
         ``send`` strictly precedes its paired ``poll`` within a vehicle; see
         :meth:`exchange` for the single-vehicle send-then-poll composition.
         """
-        if not _port_is_connected(port=self):
+        if not port_is_connected(port=self):
             return self._zeros()
 
         sim_time_us = int(state.sim_time_us)
@@ -496,7 +496,7 @@ class Px4MavlinkPort:
                     sim_time_us,
                     self._last_actuator_receive_us,
                     actuator_lag_us,
-                    _port_is_connected(port=self),
+                    port_is_connected(port=self),
                 )
             gps_due = (
                 self._last_gps_send_us is None

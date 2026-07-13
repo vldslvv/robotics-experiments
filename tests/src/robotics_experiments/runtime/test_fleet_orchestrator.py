@@ -118,10 +118,8 @@ def _import_orchestrator(monkeypatch):
     fake_drone.despawn_drone = lambda *, stage, config: despawned.append(config.prim_name)
     monkeypatch.setitem(sys.modules, "robotics_experiments.drone", fake_drone)
 
-    fake_px4 = types.ModuleType("robotics_experiments.px4_bridge")
-    fake_px4.__path__ = []
-    fake_px4.IsaacArticulationIO = _FakeObserver
-    monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4)
+    px4_bridge = importlib.import_module("robotics_experiments.px4_bridge")
+    monkeypatch.setattr(px4_bridge, "IsaacArticulationIO", _FakeObserver)
 
     return module, SimpleNamespace(spawned=spawned, despawned=despawned)
 
@@ -215,9 +213,8 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
     assert params.physics_hz == 250.0
 
 
-def test_spawn_fleet_with_all_bridges_disabled_does_not_import_px4_bridge(monkeypatch):
+def test_spawn_fleet_with_all_bridges_disabled_builds_no_bridge_resources(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
-    monkeypatch.delitem(sys.modules, "robotics_experiments.px4_bridge", raising=False)
     fleet = replace(
         module.create_fleet(config=_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=False))),
         stage=object(),
@@ -225,7 +222,6 @@ def test_spawn_fleet_with_all_bridges_disabled_does_not_import_px4_bridge(monkey
 
     fleet = module.spawn_fleet(state=fleet)
 
-    assert "robotics_experiments.px4_bridge" not in sys.modules
     assert fleet.drones[0].host is None
     assert fleet.drones[0].observer is None
 
