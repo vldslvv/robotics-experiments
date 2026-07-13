@@ -10,10 +10,10 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
   live boot does not use Kit's `--exec open_stage.py` or a separate
   `sim_settings` extension). The stage is adopted and sim settings applied on the
   `OPENED` event.
-- Timeline `PLAY`: spawn the fleet, start the PX4 lockstep bridge group, and -- if
-  any drone's resolved `routine.steps` is non-empty -- build one frozen
-  `RoutineDriverState` per flying drone and advance them with `tick_drivers`
-  from a separate app-update subscription.
+- Timeline `PLAY`: spawn the fleet, start the PX4 lockstep bridge group, build
+  one frozen `RoutineDriverState` per bridge-enabled drone, and advance them
+  with `tick_drivers` from a separate app-update subscription. Empty routines
+  follow the same driver path and complete without commands.
 - `STOP` / `PAUSE` / `on_shutdown`: stop the control tick and tear down.
 
 Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged and

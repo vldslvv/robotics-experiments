@@ -229,14 +229,15 @@ the hover step's envelope catches the resulting instability.
 `RoutineConfig` beneath every `vehicles.<label>` node. It carries typed `steps`,
 control-flow tunables, and flight-envelope gates. There is no root routine or
 separate integration-test group: strict mode drives the same per-vehicle routine.
-`routine.steps` is the per-drone on/off switch: a drone whose steps are non-empty
+Every bridge-enabled drone gets a `RoutineDriverState`. Non-empty `routine.steps`
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
 `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
 `{kind: land, timeout_s}`)
-gets a `RoutineDriverState`; empty means manual. Mixed fleets are
-allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
+drive the authored commands; empty steps traverse the same phase machine,
+complete without commands, and retain terminal GCS servicing for manual control.
+The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,

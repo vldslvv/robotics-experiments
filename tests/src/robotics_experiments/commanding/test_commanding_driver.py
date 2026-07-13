@@ -143,6 +143,37 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
     assert env.failures == []
 
 
+def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    env.connected = True
+    port.set_handshaked()
+    port.set_global_position((47.0, 8.0, 488.0))
+    driver = create_routine_driver(
+        params=_params([]), port=port, env=env, label="d0", monotonic=lambda: 0.0
+    )
+
+    phases = []
+    for _ in range(7):
+        driver = tick_routine_driver(state=driver)
+        phases.append(driver.phase)
+
+    assert phases == [
+        DriverPhase.CONNECT,
+        DriverPhase.HANDSHAKE,
+        DriverPhase.PREARM_SETTLE,
+        DriverPhase.FETCH_TARGET,
+        DriverPhase.BUILD,
+        DriverPhase.DRIVE,
+        DriverPhase.DONE,
+    ]
+    assert port.sent == port.setpoints == port.velocity_setpoints == port.attitude_targets == []
+    servicing = (port.heartbeats, port.feedback_polls)
+    terminal = tick_routine_driver(state=driver)
+    assert terminal is driver
+    assert (port.heartbeats, port.feedback_polls) == (servicing[0] + 1, servicing[1] + 1)
+
+
 def _drive_to_takeoff(driver, port, env):
     """Advance a fresh driver to the takeoff SEND in the DRIVE phase."""
     env.connected = True

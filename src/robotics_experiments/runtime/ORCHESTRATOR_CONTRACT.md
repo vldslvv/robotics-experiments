@@ -51,9 +51,9 @@ earlier `OPENED` event is therefore not a valid cross-event identity guarantee.
 `spawn_fleet` iterates `ExperimentConfig.vehicles` in authored order. Every
 vehicle is spawned. A bridge-enabled vehicle also receives one `BridgeHost` and
 one state-only `IsaacArticulationIO` observer sharing the same resolved
-articulation path. A non-empty routine receives one GCS `MavlinkCommandPort` and
-one frozen driver state; a routine on a PX4-disabled vehicle is warned and left
-manual.
+articulation path, one GCS `MavlinkCommandPort`, and one frozen driver state.
+Empty routine steps use that same composition and complete without commands.
+PX4-disabled vehicles have no bridge or driver composition.
 
 The one `BridgeHostGroup` owns the PhysX subscription. Each tick runs every
 host's sensor-send leg before any actuator-poll leg. This ordering preserves

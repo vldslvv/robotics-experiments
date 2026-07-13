@@ -11,11 +11,11 @@ extension):
   callback that opens the configured scene once Kit reports the app is ready. The
   stage is adopted and settings applied on the ``OPENED`` event, once the stage
   has finished loading (``lightswitch_spawner`` reacts to the same event).
-- Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group, and
-  -- if any drone has a routine -- builds one ``RoutineDriverState`` per flying drone
-  and ticks them from a separate Kit app-update subscription (never the bridge's
-  physics legs). Spawn stays gated on PLAY so the persisted stage is not mutated
-  with drones until the user presses Play.
+- Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group,
+  builds one ``RoutineDriverState`` per bridge-enabled drone, and ticks them
+  from a separate Kit app-update subscription (never the bridge's physics legs).
+  Spawn stays gated on PLAY so the persisted stage is not mutated with drones
+  until the user presses Play.
 - ``STOP`` / ``PAUSE`` and ``on_shutdown`` drop the control tick and tear down.
 
 It is always *forgiving*: a routine ``FAIL``, a PX4 failsafe, or a phase timeout
@@ -146,18 +146,17 @@ class Extension(omni.ext.IExt):
         # scene/timeline transition. A wrapper retained from OPENED then raises
         # Boost.Python.ArgumentError even though the context has a valid stage.
         # Re-adopt at the imperative PLAY boundary before any stage mutation.
+        # Adoption replaces only FleetState.stage, retaining the existing fleet
+        # resources; teardown must follow it so despawning uses the valid wrapper.
         self._fleet = adopt_current_stage(state=self._fleet)
         self._fleet = teardown(state=self._fleet)
         self._fleet = spawn_fleet(state=self._fleet)
         self._fleet = start_bridges(state=self._fleet)
-        # routine.steps is the per-drone on/off switch: build drivers only when at
-        # least one drone has a routine to fly.
-        if any(drone.vehicle.routine.steps for drone in self._fleet.drones):
-            self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
-            app = omni.kit.app.get_app()
-            self._update_sub = app.get_update_event_stream().create_subscription_to_pop(
-                self._on_update, name="experiment_runtime_control"
-            )
+        self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
+        app = omni.kit.app.get_app()
+        self._update_sub = app.get_update_event_stream().create_subscription_to_pop(
+            self._on_update, name="experiment_runtime_control"
+        )
 
     def _stop_control(self):
         """Drop the control tick subscription (the orchestrator owns the ports)."""

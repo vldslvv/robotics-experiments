@@ -78,7 +78,7 @@ class SpawnedDrone:
 
 @dataclass(frozen=True)
 class FlyingDrone:
-    """One routine-enabled drone's immutable driver composition."""
+    """One bridge-enabled drone's immutable driver composition."""
 
     spawned: SpawnedDrone
     port: MavlinkCommandPort
@@ -87,7 +87,7 @@ class FlyingDrone:
 
 @dataclass(frozen=True)
 class FleetState:
-    """Immutable progress through the fleet lifecycle."""
+    """Immutable progress, with one ``flying`` composition per bridged drone."""
 
     config: ExperimentConfig
     stage: Optional[Usd.Stage]
@@ -263,23 +263,17 @@ def build_drivers(
     state: FleetState,
     make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment],
 ) -> FleetState:
-    """Compose one frozen routine driver state per eligible drone."""
+    """Compose one frozen routine driver state per bridge-enabled drone."""
     flying: list[FlyingDrone] = []
     for spawned in state.drones:
-        if not spawned.vehicle.routine.steps:
-            continue
         if spawned.host is None:
-            carb.log_warn(
-                f"{_LOG_PREFIX} [{spawned.label}] has a routine but px4 is disabled; "
-                "no bridge to fly it -- left manual"
-            )
             continue
+        routine = spawned.vehicle.routine
         port = MavlinkCommandPort(
             gcs_endpoint=f"udp:127.0.0.1:{spawned.vehicle.gcs_port}",
             heartbeat_period_s=spawned.vehicle.routine.gcs_heartbeat_period_s,
             label=spawned.label,
         )
-        routine = spawned.vehicle.routine
         driver = create_routine_driver(
             params=DriverParams(
                 steps=routine.steps,
@@ -343,7 +337,7 @@ def tick_drivers(
 
 
 def fleet_is_done(*, state: FleetState) -> bool:
-    """Return whether every configured routine reached DONE."""
+    """Return whether every composed driver reached DONE."""
     return all(routine_driver_is_done(state=flying.driver) for flying in state.flying)
 
 

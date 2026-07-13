@@ -28,10 +28,10 @@ scene paths are repository-relative.
 
 ## Routine behavior
 
-Every vehicle owns a complete `RoutineConfig`. Empty `steps` means manual
-operation; non-empty steps create exactly one `RoutineDriverState` for that vehicle.
-Routine descriptors use the typed `RoutineStepConfig` mapping and are validated
-by the routine builder.
+Every vehicle owns a complete `RoutineConfig`. Every bridge-enabled vehicle gets
+exactly one `RoutineDriverState`; empty `steps` follows the normal driver
+lifecycle, sends no commands, and completes. Routine descriptors use the typed
+`RoutineStepConfig` mapping and are validated by the routine builder.
 
 Strict integration runs execute the same routines as live runs; only failure
 reaction differs. Fleet-wide waits derive from the active per-vehicle routines,

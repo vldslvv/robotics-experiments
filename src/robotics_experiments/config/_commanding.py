@@ -29,12 +29,10 @@ class RoutineStepConfig(TypedDict, total=False):
 class RoutineConfig(_FreezableConfig):
     """High-level flight routine flown in every workflow over the GCS link.
 
-    The single source of truth for whether and what is flown, and how a good
-    flight is verified. It is composed beneath every :class:`VehicleConfig`,
-    and the rule is simply: a **non-empty** ``steps`` list
-    makes a control driver arm/take-off/verify the fleet, while an **empty**
-    ``steps`` list means purely manual operation (no driver is constructed).
-    There is no separate enable flag -- ``steps`` is the switch.
+    The single source of truth for what is flown and how a good flight is
+    verified. It is composed beneath every :class:`VehicleConfig`. Every
+    bridge-enabled vehicle receives a control driver; an empty ``steps`` list
+    completes without sending commands and leaves manual control available.
 
     The *same* routine runs in the live extension (``make run-all``), a regular
     standalone run, and the strict standalone integration test; only the driver's
@@ -56,8 +54,8 @@ class RoutineConfig(_FreezableConfig):
             ``hover`` carrying ``hold_s``; ``forward`` carrying ``distance_m`` +
             ``timeout_s``; ``goto`` carrying absolute world-ENU ``x`` + ``y`` +
             ``z`` + ``timeout_s`` and optional ``position_tol_m`` /
-            ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty means manual
-            (no routine driver). The resolved graph exposes read-only typed mappings.
+            ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty sends no
+            flight commands. The resolved graph exposes read-only typed mappings.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge

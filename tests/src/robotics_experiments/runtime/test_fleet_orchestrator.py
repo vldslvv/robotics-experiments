@@ -5,9 +5,9 @@ The orchestrator is the single production pipeline (open scene -> apply settings
 -> teardown). These tests fake the Isaac collaborators (``BridgeHost``,
 ``IsaacArticulationIO``, ``spawn_drone``/``despawn_drone``, the command port and
 driver) and assert the pipeline's structure: a bridge host + observer only for
-``px4.enabled`` vehicles, a driver only for flying drones (non-empty
-``routine.steps`` on an enabled vehicle), and a teardown that disconnects ports,
-shuts observers, stops bridge hosts, and despawns everything.
+``px4.enabled`` vehicles, a driver for every bridge-enabled drone, and a teardown
+that disconnects ports, shuts observers, stops bridge hosts, and despawns
+everything.
 """
 
 import importlib
@@ -69,7 +69,6 @@ def _import_orchestrator(monkeypatch):
     """
     carb = types.ModuleType("carb")
     carb.log_info = lambda *a, **k: None
-    carb.log_warn = lambda *a, **k: None
     carb.log_error = lambda *a, **k: None
     omni = types.ModuleType("omni")
     omni.__path__ = []
@@ -235,22 +234,22 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
         module.spawn_fleet(state=fleet)
 
 
-def test_build_drivers_only_for_enabled_with_steps(monkeypatch):
+def test_build_drivers_for_every_bridge_enabled_drone(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     env = _env(
-        _vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]),  # flies
-        _vehicle(1, "D1", (2.0, 0.0), enabled=True),  # manual (no steps)
-        _vehicle(2, "D2", (4.0, 0.0), enabled=False, steps=[{"kind": "arm"}]),  # no bridge -> skip
+        _vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]),
+        _vehicle(1, "D1", (2.0, 0.0), enabled=True),
+        _vehicle(2, "D2", (4.0, 0.0), enabled=False, steps=[{"kind": "arm"}]),
+        _vehicle(3, "D3", (6.0, 0.0), enabled=False),
     )
     fleet = replace(module.create_fleet(config=env), stage=object())
     fleet = module.spawn_fleet(state=fleet)
 
     fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
 
-    assert [f.spawned.label for f in fleet.flying] == ["drone0"]
+    assert [f.spawned.label for f in fleet.flying] == ["drone0", "drone1"]
     assert fleet.flying[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
-    # The manual drone (no steps) and the disabled one (no bridge) fly nothing.
-    assert len(fleet.flying) == 1
+    assert fleet.flying[1].driver.params.steps == []
 
 
 def test_all_done_reflects_flying_drivers(monkeypatch):
@@ -265,10 +264,10 @@ def test_all_done_reflects_flying_drivers(monkeypatch):
     assert module.fleet_is_done(state=fleet) is True
 
 
-def test_all_done_true_when_no_drone_flies(monkeypatch):
+def test_all_done_true_when_no_bridge_enabled_drone_flies(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     fleet = replace(
-        module.create_fleet(config=_env(_vehicle(0, "D0", (0.0, 0.0), enabled=True))),
+        module.create_fleet(config=_env(_vehicle(0, "D0", (0.0, 0.0), enabled=False))),
         stage=object(),
     )
     fleet = module.spawn_fleet(state=fleet)
@@ -282,19 +281,20 @@ def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
     env = _env(
         _vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]),
-        _vehicle(1, "D1", (2.0, 0.0), enabled=False),
+        _vehicle(1, "D1", (2.0, 0.0), enabled=True),
+        _vehicle(2, "D2", (4.0, 0.0), enabled=False),
     )
     fleet = replace(module.create_fleet(config=env), stage=object())
     fleet = module.spawn_fleet(state=fleet)
     fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
-    port = fleet.flying[0].port
+    ports = [flying.port for flying in fleet.flying]
     observer = fleet.drones[0].observer
 
     fleet = module.teardown(state=fleet)
 
-    assert port.disconnected is True
+    assert all(port.disconnected for port in ports)
     assert observer.shut is True
-    assert sorted(rec.despawned) == ["D0", "D1"]
+    assert sorted(rec.despawned) == ["D0", "D1", "D2"]
     assert fleet.drones == ()
 
 

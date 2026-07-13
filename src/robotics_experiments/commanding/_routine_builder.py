@@ -345,8 +345,8 @@ def build_vehicle_routine(
     - ``land`` (requires ``timeout_s``): commands a landing at the current
       position and completes once PX4 disarms.
 
-    An empty ``steps`` yields an empty routine (the manual case). Pure: no Isaac,
-    no pymavlink, no sockets.
+    An empty ``steps`` yields an empty routine. Pure: no Isaac, no pymavlink, no
+    sockets.
 
     Raises:
         ValueError: on an unknown ``kind``, a required descriptor field missing,

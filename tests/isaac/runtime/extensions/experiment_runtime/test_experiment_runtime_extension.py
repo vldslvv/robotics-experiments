@@ -85,7 +85,7 @@ class _App:
 
 
 class _FakeOrchestrator:
-    """Records the phase calls the shell makes; configurable fleet."""
+    """Record the phase calls made by the shell."""
 
     last: "list[_FakeOrchestrator]" = []
 
@@ -93,9 +93,6 @@ class _FakeOrchestrator:
         self.env = env
         self.stage = None
         self.calls: list[str] = []
-        # Public on the real orchestrator (a read-only property there); a plain
-        # attribute here so a test can configure the fleet without private access.
-        self.drones: list = []
         type(self).last.append(self)
 
     def open_scene(self, scene_override=None):
@@ -119,14 +116,6 @@ class _FakeOrchestrator:
 
     def teardown(self):
         self.calls.append("teardown")
-
-    @property
-    def flying(self):
-        return []
-
-
-def _drone_with_steps(steps):
-    return SimpleNamespace(vehicle=SimpleNamespace(routine=SimpleNamespace(steps=list(steps))))
 
 
 def _install_fake_modules(monkeypatch, usd_context, timeline, app):
@@ -270,15 +259,16 @@ def test_opened_adopts_stage_and_applies_settings(monkeypatch):
     assert orch.stage is not None
 
 
-def test_play_spawns_and_builds_drivers_when_routine_present(monkeypatch):
+def test_play_re_adopts_stage_builds_drivers_and_subscribes(monkeypatch):
     _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
     app.ready = True
     _fire_app_update(app)
     _fire_stage_opened(usd_context)
-    orch.drones = [_drone_with_steps([{"kind": "arm"}])]
+    opened_stage = orch.stage
 
     _fire_timeline(timeline, _TimelineEventType.PLAY)
 
+    assert orch.stage is not opened_stage
     assert orch.calls[-5:] == [
         "adopt_current_stage",
         "teardown",
@@ -299,44 +289,11 @@ def test_play_before_stage_open_does_not_spawn(monkeypatch):
     assert orch.calls == []
 
 
-def test_play_without_routine_builds_no_drivers(monkeypatch):
-    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
-    app.ready = True
-    _fire_app_update(app)
-    _fire_stage_opened(usd_context)
-    orch.drones = [_drone_with_steps([])]  # manual drone -> no driver
-
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    assert "build_drivers" not in orch.calls
-    # No control tick is armed (and the one-shot scene-open already released).
-    assert app.updates.callbacks == []
-
-
-def test_play_re_adopts_current_stage_before_stage_mutation(monkeypatch):
-    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
-    app.ready = True
-    _fire_app_update(app)
-    _fire_stage_opened(usd_context)
-    opened_stage = orch.stage
-
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    assert orch.stage is not opened_stage
-    assert orch.calls[-4:] == [
-        "adopt_current_stage",
-        "teardown",
-        "spawn_fleet",
-        "start_bridges",
-    ]
-
-
 def test_stop_drops_control_and_tears_down(monkeypatch):
     _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
     app.ready = True
     _fire_app_update(app)
     _fire_stage_opened(usd_context)
-    orch.drones = [_drone_with_steps([{"kind": "arm"}])]
     _fire_timeline(timeline, _TimelineEventType.PLAY)
     assert app.updates.callbacks  # control tick armed by PLAY
 
