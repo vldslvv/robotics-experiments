@@ -36,7 +36,7 @@ from Px4SitlBridge_python import (  # noqa: E402
     Px4MavlinkPort,
 )
 
-from robotics_experiments.px4_bridge import VehicleState, read_bridge_status  # noqa: E402
+from robotics_experiments.px4_bridge import VehicleState  # noqa: E402
 
 
 def main() -> int:
@@ -74,7 +74,7 @@ def main() -> int:
 
             state = VehicleState.hover_at(sim_time_us=sim_time_us)
             commands = port.exchange(state)
-            status = read_bridge_status(port=port)
+            status = port.read_status()
             if not status.is_connected:
                 disconnected = True
 

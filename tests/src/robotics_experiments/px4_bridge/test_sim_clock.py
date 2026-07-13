@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from robotics_experiments.px4_bridge import (
-    SimClockState,
     advance_sim_clock,
     bridge_time_us,
     create_sim_clock,
@@ -40,8 +39,7 @@ def test_sim_clock_accumulates_and_reports_tick():
     clock = advance_sim_clock(state=clock, dt=0.004)
     assert clock.total_us == 8000
     assert clock.tick_count == 2
-    clock, current = bridge_time_us(state=clock)
-    assert current == 8000
+    assert bridge_time_us(state=clock) == 8000
 
 
 def test_sim_clock_without_settle_is_never_settling():
@@ -66,25 +64,13 @@ def test_sim_clock_settle_window_and_post_settle_offset():
 
     # The bridge-facing time subtracts the settle offset, so it is near zero
     # on the first post-settle tick.
-    clock, current = bridge_time_us(state=clock)
-    assert current == 0
+    assert bridge_time_us(state=clock) == 0
     clock = advance_sim_clock(state=clock, dt=0.004)  # 16000
-    clock, current = bridge_time_us(state=clock)
-    assert current == 4000
+    assert bridge_time_us(state=clock) == 4000
 
 
-def test_sim_clock_bridge_time_must_not_go_backwards():
-    # advance() is the only way to move time, so monotonicity normally holds;
-    # the assertion guards against a regression that mutates state out of band.
-    clock = advance_sim_clock(state=create_sim_clock(physics_hz=250.0), dt=0.004)
-    clock, current = bridge_time_us(state=clock)
-    assert current == 4000
-    clock = SimClockState(
-        tick_us=clock.tick_us,
-        settle_time_us=clock.settle_time_us,
-        total_us=1000,
-        tick_count=clock.tick_count,
-        last_bridge_us=clock.last_bridge_us,
-    )
-    with pytest.raises(AssertionError, match="went backwards"):
-        bridge_time_us(state=clock)
+@pytest.mark.parametrize("dt", [-0.004, 0.0, 0.0000004])
+def test_sim_clock_rejects_dt_that_does_not_advance_integer_microseconds(dt):
+    clock = create_sim_clock(physics_hz=250.0)
+    with pytest.raises(ValueError, match="at least one microsecond"):
+        advance_sim_clock(state=clock, dt=dt)

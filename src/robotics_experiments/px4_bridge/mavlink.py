@@ -33,39 +33,9 @@ from robotics_experiments.px4_bridge.logging import _VehicleLogFilter, vehicle_l
 from robotics_experiments.px4_bridge.sim_clock import _physics_tick_us
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["Px4MavlinkPort", "port_is_connected", "read_bridge_status"]
+__all__ = ["Px4MavlinkPort"]
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def port_is_connected(*, port: Px4MavlinkPort) -> bool:
-    return port._is_connected and port._backend._connection is not None
-
-
-def _port_is_armed(*, port: Px4MavlinkPort) -> bool:
-    return any(value != 0.0 for value in port._backend.input_reference())
-
-
-def read_bridge_status(*, port: Px4MavlinkPort) -> BridgeStatus:
-    """Return the immutable lockstep status of a mutable MAVLink adapter."""
-    return port._read_status()
-
-
-def _read_port_status(*, port: Px4MavlinkPort) -> BridgeStatus:
-    actuator_lag_us = None
-    if port._last_sensor_send_us is not None and port._last_actuator_receive_us is not None:
-        actuator_lag_us = port._last_sensor_send_us - port._last_actuator_receive_us
-    return BridgeStatus(
-        is_connected=port_is_connected(port=port),
-        is_armed=_port_is_armed(port=port),
-        first_heartbeat_received=bool(port._backend._received_first_hearbeat),
-        sensor_send_count=port._sensor_send_count,
-        actuator_receive_count=port._actuator_receive_count,
-        last_sensor_send_us=port._last_sensor_send_us,
-        last_actuator_receive_us=port._last_actuator_receive_us,
-        actuator_lag_us=actuator_lag_us,
-        last_disconnect_reason=port._last_disconnect_reason,
-    )
 
 
 _HIL_SENSOR_ACCEL_UPDATED = 0b0000000000111
@@ -354,8 +324,29 @@ class Px4MavlinkPort:
             self._last_disconnect_reason,
         )
 
-    def _read_status(self) -> BridgeStatus:
-        return _read_port_status(port=self)
+    def is_connected(self) -> bool:
+        """Return whether the simulator MAVLink connection is currently live."""
+        return self._is_connected and self._backend._connection is not None
+
+    def _is_armed(self) -> bool:
+        return any(value != 0.0 for value in self._backend.input_reference())
+
+    def read_status(self) -> BridgeStatus:
+        """Return an immutable snapshot of the current lockstep state."""
+        actuator_lag_us = None
+        if self._last_sensor_send_us is not None and self._last_actuator_receive_us is not None:
+            actuator_lag_us = self._last_sensor_send_us - self._last_actuator_receive_us
+        return BridgeStatus(
+            is_connected=self.is_connected(),
+            is_armed=self._is_armed(),
+            first_heartbeat_received=bool(self._backend._received_first_hearbeat),
+            sensor_send_count=self._sensor_send_count,
+            actuator_receive_count=self._actuator_receive_count,
+            last_sensor_send_us=self._last_sensor_send_us,
+            last_actuator_receive_us=self._last_actuator_receive_us,
+            actuator_lag_us=actuator_lag_us,
+            last_disconnect_reason=self._last_disconnect_reason,
+        )
 
     # ---- Per-tick ----------------------------------------------------------
 
@@ -373,7 +364,7 @@ class Px4MavlinkPort:
         ``send`` strictly precedes its paired ``poll`` within a vehicle; see
         :meth:`exchange` for the single-vehicle send-then-poll composition.
         """
-        if not port_is_connected(port=self):
+        if not self.is_connected():
             return self._zeros()
 
         sim_time_us = int(state.sim_time_us)
@@ -496,7 +487,7 @@ class Px4MavlinkPort:
                     sim_time_us,
                     self._last_actuator_receive_us,
                     actuator_lag_us,
-                    port_is_connected(port=self),
+                    self.is_connected(),
                 )
             gps_due = (
                 self._last_gps_send_us is None

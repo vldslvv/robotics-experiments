@@ -12,6 +12,7 @@ Isaac:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -82,8 +83,6 @@ class _RotorFailureFault(RotorThrustModel):
 
 
 def _inject_one_rotor_fault(context: SceneTestContext, host: BridgeHost) -> None:
-    from robotics_experiments.runtime.bridge_host import _replace_thrust_model_for_test
-
     def inject(thrust_model):
         if FAULTED_ROTOR_INDEX >= thrust_model.num_rotors:
             raise AssertionError(
@@ -97,7 +96,16 @@ def _inject_one_rotor_fault(context: SceneTestContext, host: BridgeHost) -> None
             body_torque_bias_n_m=FAULT_BODY_TORQUE_BIAS_N_M,
         )
 
-    _replace_thrust_model_for_test(host=host, transform=inject)
+    state = host._state
+    if state.bridge is None:
+        raise AssertionError("PX4 bridge was not constructed before fault injection")
+    host._state = replace(
+        state,
+        bridge=replace(
+            state.bridge,
+            thrust_model=inject(state.bridge.thrust_model),
+        ),
+    )
     context.report(
         f"{TEST_NAME}: injected rotor {FAULTED_ROTOR_INDEX} command scale fault "
         f"after accepted takeoff command: scale={FAULTED_ROTOR_COMMAND_SCALE:.2f} "

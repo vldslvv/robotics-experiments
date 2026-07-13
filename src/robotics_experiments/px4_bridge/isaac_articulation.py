@@ -11,8 +11,7 @@ articulation handles cannot be opened before the physics scene exists.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, Sequence
+from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
@@ -25,25 +24,9 @@ from robotics_experiments.px4_bridge.rotor_discovery import _resolve_body_path
 from robotics_experiments.px4_bridge.thrust_model import RotorDynamics
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["ArticulationIOStatus", "IsaacArticulationIO", "read_articulation_io_status"]
+__all__ = ["IsaacArticulationIO"]
 
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ArticulationIOStatus:
-    """Immutable lifecycle status of an Isaac articulation adapter."""
-
-    is_initialized: bool
-
-
-class _StatusReadableIO(Protocol):
-    initialized: bool
-
-
-def read_articulation_io_status(*, io: _StatusReadableIO) -> ArticulationIOStatus:
-    """Read adapter lifecycle state without exposing its mutable handles."""
-    return ArticulationIOStatus(is_initialized=io.initialized)
 
 
 class IsaacArticulationIO:
@@ -71,7 +54,7 @@ class IsaacArticulationIO:
         self._articulation_path = str(articulation_path)
         self._rotor_link_paths: List[str] = [str(p) for p in rotor_link_paths]
         self.num_rotors = len(self._rotor_link_paths)
-        self.initialized = False
+        self._initialized = False
         self._root_body_pose_diagnostics = (
             root_body_pose_diagnostics
             if root_body_pose_diagnostics is not None
@@ -114,6 +97,10 @@ class IsaacArticulationIO:
         return signs
 
     # ---- Lifecycle ---------------------------------------------------------
+
+    def is_initialized(self) -> bool:
+        """Return whether all articulation handles were acquired successfully."""
+        return self._initialized
 
     def initialize(self) -> None:
         """Acquire the articulation body and rotor thrust marker poses.
@@ -165,7 +152,7 @@ class IsaacArticulationIO:
 
         self._rotor_positions_body = self._resolve_rotor_positions_body(stage, body_path)
         self._resolve_rotor_spin_ops(stage)
-        self.initialized = True
+        self._initialized = True
 
     def _resolve_rotor_spin_ops(self, stage) -> None:
         """Acquire the cosmetic RotateZ xformOp authored on each rotor marker.
@@ -260,7 +247,7 @@ class IsaacArticulationIO:
         self._rotor_spin_ops = []
         self._rotor_angle_deg = None
         self._rotor_spin_signs = None
-        self.initialized = False
+        self._initialized = False
 
     # ---- Per-tick I/O ------------------------------------------------------
 

@@ -10,10 +10,9 @@ keeps this Isaac-coupled module off the core import path.
 from __future__ import annotations
 
 import time
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 import carb
 import omni.physx
@@ -28,8 +27,6 @@ from robotics_experiments.px4_bridge import (
     create_px4_bridge,
     create_sim_clock,
     discover_px4_rotor_mapping,
-    port_is_connected,
-    read_px4_bridge_status,
     recv_and_apply,
     send_sensors,
     sim_clock_is_settling,
@@ -43,7 +40,6 @@ if TYPE_CHECKING:
         BridgeStatus,
         DiscoveredRotorMapping,
         Px4BridgeState,
-        RotorThrustModel,
         SimClockState,
     )
 
@@ -93,7 +89,6 @@ class _BridgeHostState:
     bridge: Optional[Px4BridgeState] = None
     start_attempted: bool = False
     pending: Optional[_PendingPoll] = None
-    log_context: Optional[Callable[[int], AbstractContextManager[None]]] = None
     disconnect_warned: bool = False
     max_tick_block_s: float = 0.0
 
@@ -171,41 +166,15 @@ class BridgeHost:
     def recv_phase(self) -> None:
         self._state = _recv_phase(host=self, state=self._state)
 
-    def _read_state(self) -> _BridgeHostState:
-        return self._state
-
-    def _store_state(self, state: _BridgeHostState) -> None:
-        self._state = state
-
 
 def read_bridge_host_status(*, host: BridgeHost) -> BridgeHostStatus:
     """Read one immutable host status without exposing transition state."""
-    state = host._read_state()  # noqa: SLF001 - module status boundary
+    state = host._state  # noqa: SLF001 - module status boundary
     return BridgeHostStatus(
         sim_time_us=state.clock.total_us if state.clock is not None else 0,
-        bridge_status=(
-            read_px4_bridge_status(state=state.bridge) if state.bridge is not None else None
-        ),
+        bridge_status=state.bridge.port.read_status() if state.bridge is not None else None,
         start_attempted=state.start_attempted,
         debug_log_path=(state.bridge.port.debug_log_path if state.bridge is not None else None),
-    )
-
-
-def _replace_thrust_model_for_test(
-    *, host: BridgeHost, transform: Callable[[RotorThrustModel], RotorThrustModel]
-) -> None:
-    """Narrow integration-only fault seam for the instability scenario."""
-    state = host._read_state()  # noqa: SLF001 - narrow fault-injection seam
-    if state.bridge is None:
-        raise AssertionError("PX4 bridge was not constructed before fault injection")
-    host._store_state(  # noqa: SLF001 - narrow fault-injection seam
-        replace(
-            state,
-            bridge=replace(
-                state.bridge,
-                thrust_model=transform(state.bridge.thrust_model),
-            ),
-        )
     )
 
 
@@ -237,11 +206,7 @@ def _start_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
     if state.bridge is not None or state.start_attempted:
         return state
 
-    attempted = replace(
-        state,
-        start_attempted=True,
-        log_context=vehicle_log_context,
-    )
+    attempted = replace(state, start_attempted=True)
     with vehicle_log_context(host.params.vehicle_id):
         return _build_bridge(host=host, state=attempted)
 
@@ -301,9 +266,8 @@ def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
 
 def _stop_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     if state.bridge is not None:
-        log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)
         try:
-            with log_context(host.params.vehicle_id):
+            with vehicle_log_context(host.params.vehicle_id):
                 stop_px4_bridge(state=state.bridge)
         except Exception as exc:
             carb.log_warn(f"[{host.tag}] bridge stop raised: {exc}")
@@ -311,10 +275,10 @@ def _stop_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState
 
 
 def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _BridgeHostState:
-    clock = advance_sim_clock(
-        state=cast("SimClockState", state.clock),
-        dt=dt,
-    )
+    clock = state.clock
+    if clock is None:
+        raise RuntimeError(f"[{host.tag}] send_phase called before start")
+    clock = advance_sim_clock(state=clock, dt=dt)
     current = replace(state, clock=clock, pending=None)
     if current.bridge is None:
         if not sim_clock_is_settling(state=clock):
@@ -331,13 +295,12 @@ def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _Bri
             )
         return current
 
-    clock, sim_time_us = bridge_time_us(state=clock)
-    current = replace(current, clock=clock)
-    bridge_state = cast("Px4BridgeState", current.bridge)
+    sim_time_us = bridge_time_us(state=clock)
+    bridge_state = current.bridge
     if (
         not current.disconnect_warned
         and clock.tick_count >= host.first_connect_tick_budget
-        and not port_is_connected(port=bridge_state.port)
+        and not bridge_state.port.is_connected()
     ):
         current = replace(current, disconnect_warned=True)
         carb.log_warn(
@@ -345,10 +308,11 @@ def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _Bri
             f"(>{host.first_connect_tick_budget}); this PX4 will stall in lockstep. "
             f"Check that a PX4 SITL instance is reachable on {host.endpoint}."
         )
+    # Start before the send so the diagnostic spans this vehicle's send through
+    # its paired poll, including any intervening fleet sends.
     block_start = time.monotonic()
-    log_context = cast(Callable[[int], AbstractContextManager[None]], current.log_context)
     try:
-        with log_context(host.params.vehicle_id):
+        with vehicle_log_context(host.params.vehicle_id):
             bridge = send_sensors(
                 state=bridge_state,
                 dt=dt,
@@ -373,14 +337,14 @@ def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _Bri
 
 def _recv_phase(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
     pending = state.pending
-    if pending is None or state.bridge is None:
+    bridge = state.bridge
+    if pending is None or bridge is None:
         return state
 
     current = replace(state, pending=None)
-    log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)
     try:
-        with log_context(host.params.vehicle_id):
-            bridge = recv_and_apply(state=state.bridge)
+        with vehicle_log_context(host.params.vehicle_id):
+            bridge = recv_and_apply(state=bridge)
         current = replace(current, bridge=bridge)
     except Exception as exc:
         carb.log_warn(
@@ -400,7 +364,7 @@ def _recv_phase(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostStat
             "this bounds the fleet tick rate"
         )
     if pending.tick == 1 or pending.tick % 250 == 0:
-        status = read_px4_bridge_status(state=cast("Px4BridgeState", current.bridge))
+        status = bridge.port.read_status()
         carb.log_info(
             f"[{host.tag}] physics tick={pending.tick} "
             f"sim_time_us={pending.bridge_sim_time_us} "

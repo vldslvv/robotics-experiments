@@ -7,7 +7,6 @@ from robotics_experiments.px4_bridge import (
     LockstepSettings,
     Px4MavlinkPort,
     VehicleState,
-    read_bridge_status,
     vehicle_log_context,
 )
 from tests.support.bridge_fakes import (
@@ -104,10 +103,10 @@ def test_mavlink_port_skips_duplicate_sim_time_in_lockstep(monkeypatch):
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
     assert len(backend._connection.recv_calls) == 2
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
-    assert read_bridge_status(port=port).is_connected is True
-    assert read_bridge_status(port=port).last_disconnect_reason is None
-    assert read_bridge_status(port=port).sensor_send_count == 1
-    assert read_bridge_status(port=port).actuator_receive_count == 1
+    assert port.read_status().is_connected is True
+    assert port.read_status().last_disconnect_reason is None
+    assert port.read_status().sensor_send_count == 1
+    assert port.read_status().actuator_receive_count == 1
 
 
 def test_mavlink_port_send_pushes_sensors_without_blocking_then_poll_returns_actuator(monkeypatch):
@@ -132,17 +131,17 @@ def test_mavlink_port_send_pushes_sensors_without_blocking_then_poll_returns_act
 
     assert result is None
     assert [args[0] for args in connection.hil_sensor_sends] == [100_000]
-    assert read_bridge_status(port=port).sensor_send_count == 1
+    assert port.read_status().sensor_send_count == 1
     assert connection.recv_calls == []
-    assert read_bridge_status(port=port).actuator_receive_count == 0
+    assert port.read_status().actuator_receive_count == 0
 
     # The poll leg performs the blocking recv and returns the paired actuator.
     commands = port.poll().controls
 
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
-    assert read_bridge_status(port=port).actuator_receive_count == 1
-    assert read_bridge_status(port=port).is_connected is True
-    assert read_bridge_status(port=port).last_disconnect_reason is None
+    assert port.read_status().actuator_receive_count == 1
+    assert port.read_status().is_connected is True
+    assert port.read_status().last_disconnect_reason is None
 
 
 def test_mavlink_port_send_returns_zeros_without_poll_when_disconnected(monkeypatch):
@@ -155,7 +154,7 @@ def test_mavlink_port_send_returns_zeros_without_poll_when_disconnected(monkeypa
 
     assert result is not None
     assert np.allclose(result.controls, np.zeros(4))
-    assert read_bridge_status(port=port).sensor_send_count == 0
+    assert port.read_status().sensor_send_count == 0
 
 
 def test_mavlink_port_send_returns_references_without_poll_on_non_increasing_time(monkeypatch):
@@ -181,7 +180,7 @@ def test_mavlink_port_send_returns_references_without_poll_on_non_increasing_tim
 
     assert result is not None
     assert np.allclose(result.controls, [200.0, 300.0, 400.0, 500.0])
-    assert read_bridge_status(port=port).sensor_send_count == 1
+    assert port.read_status().sensor_send_count == 1
 
 
 def test_mavlink_port_status_snapshots_lockstep_state(monkeypatch):
@@ -199,12 +198,12 @@ def test_mavlink_port_status_snapshots_lockstep_state(monkeypatch):
     backend._received_first_actuator = True
 
     port.start()
-    assert read_bridge_status(port=port).sensor_send_count == 0
-    assert read_bridge_status(port=port).actuator_lag_us is None
+    assert port.read_status().sensor_send_count == 0
+    assert port.read_status().actuator_lag_us is None
 
     lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
 
-    status = read_bridge_status(port=port)
+    status = port.read_status()
     assert status.is_connected is True
     assert status.is_armed is True
     assert status.first_heartbeat_received is True
@@ -244,9 +243,9 @@ def test_mavlink_port_first_heartbeat_timeout_marks_disconnected(monkeypatch):
 
     assert np.allclose(commands, np.zeros(4))
     assert backend.first_heartbeat_waits == 1
-    assert read_bridge_status(port=port).is_connected is False
+    assert port.read_status().is_connected is False
     assert backend.stopped is True
-    assert read_bridge_status(port=port).last_disconnect_reason == "first heartbeat timeout"
+    assert port.read_status().last_disconnect_reason == "first heartbeat timeout"
 
 
 def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
@@ -268,12 +267,12 @@ def test_mavlink_port_blocks_for_lockstep_actuator(monkeypatch):
     commands = lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
 
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
-    assert read_bridge_status(port=port).is_connected is True
+    assert port.read_status().is_connected is True
     assert backend.stopped is False
     assert backend._connection is connection
-    assert read_bridge_status(port=port).actuator_receive_count == 1
+    assert port.read_status().actuator_receive_count == 1
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
-    assert read_bridge_status(port=port).last_disconnect_reason is None
+    assert port.read_status().last_disconnect_reason is None
 
 
 def test_mavlink_port_lockstep_sends_current_sensor_before_wait(monkeypatch):
@@ -298,9 +297,9 @@ def test_mavlink_port_lockstep_sends_current_sensor_before_wait(monkeypatch):
     assert connection.events[1][0:2] == ("recv_match", True)
     assert connection.events[1][2] <= 1.0
     assert connection.events[1][2] > 0.0
-    assert read_bridge_status(port=port).last_actuator_receive_us == 100_000
+    assert port.read_status().last_actuator_receive_us == 100_000
     assert np.allclose(commands, [200.0, 300.0, 400.0, 500.0])
-    assert read_bridge_status(port=port).is_connected is True
+    assert port.read_status().is_connected is True
 
 
 def test_mavlink_port_does_not_wait_before_first_lockstep_actuator(monkeypatch):
@@ -315,12 +314,12 @@ def test_mavlink_port_does_not_wait_before_first_lockstep_actuator(monkeypatch):
     commands = lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
 
     assert np.allclose(commands, np.zeros(4))
-    assert read_bridge_status(port=port).is_connected is True
+    assert port.read_status().is_connected is True
     assert backend.stopped is False
-    assert read_bridge_status(port=port).actuator_receive_count == 0
-    assert read_bridge_status(port=port).last_actuator_receive_us is None
+    assert port.read_status().actuator_receive_count == 0
+    assert port.read_status().last_actuator_receive_us is None
     assert connection.recv_calls == [(False, 0.0)]
-    assert read_bridge_status(port=port).last_disconnect_reason is None
+    assert port.read_status().last_disconnect_reason is None
 
 
 def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
@@ -335,11 +334,11 @@ def test_mavlink_port_lockstep_timeout_marks_disconnected(monkeypatch):
     commands = lockstep_exchange(port, VehicleState.hover_at(sim_time_us=300_000))
 
     assert np.allclose(commands, np.zeros(4))
-    assert read_bridge_status(port=port).is_connected is False
+    assert port.read_status().is_connected is False
     assert backend.stopped is True
     assert backend._connection is None
     assert len(connection.recv_calls) == 1
     assert (
-        read_bridge_status(port=port).last_disconnect_reason
+        port.read_status().last_disconnect_reason
         == "actuator polling timed out after 0.000 seconds"
     )

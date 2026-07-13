@@ -66,7 +66,6 @@ from robotics_experiments.commanding.observation import (
 from robotics_experiments.commanding.port import (
     CommandPortStatus,
     MavlinkCommandPort,
-    read_command_port_status,
 )
 
 __all__ = [
@@ -115,7 +114,6 @@ __all__ = [
     "moved_forward_at_least",
     "reached_world_position",
     "reposition",
-    "read_command_port_status",
     "routine_driver_is_done",
     "set_offboard_mode",
     "takeoff",

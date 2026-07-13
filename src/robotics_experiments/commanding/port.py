@@ -30,7 +30,7 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["CommandPortStatus", "MavlinkCommandPort", "read_command_port_status"]
+__all__ = ["CommandPortStatus", "MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,11 +43,6 @@ class CommandPortStatus:
     failsafe: bool
     failsafe_system_status: int
     latest_global_position: Optional[tuple[float, float, float]]
-
-
-def read_command_port_status(*, port: MavlinkCommandPort) -> CommandPortStatus:
-    """Read the current control-link state without exposing mutable internals."""
-    return port._read_status()  # noqa: SLF001 - package status boundary
 
 
 # SET_POSITION_TARGET type mask: use position + yaw, ignore velocity (bits 3-5),
@@ -142,7 +137,8 @@ class MavlinkCommandPort:
                 pass
             self._mav = None
 
-    def _read_status(self) -> CommandPortStatus:
+    def read_status(self) -> CommandPortStatus:
+        """Return an immutable snapshot of the current control-link state."""
         return CommandPortStatus(
             is_handshaked=self._target_known,
             failsafe=self._failsafe,

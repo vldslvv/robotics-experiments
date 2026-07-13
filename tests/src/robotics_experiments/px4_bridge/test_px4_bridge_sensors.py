@@ -10,7 +10,6 @@ from robotics_experiments.px4_bridge import (
     LockstepSettings,
     Px4MavlinkPort,
     VehicleState,
-    read_bridge_status,
 )
 from tests.support.bridge_fakes import (
     _PX4_BRIDGE_EXTENSION_ROOT,
@@ -133,7 +132,7 @@ def test_mavlink_port_uses_sim_time_and_gates_gps(monkeypatch):
         300_000,
     ]
     # The public status agrees with the HIL_SENSOR wiring seam on the send count.
-    assert read_bridge_status(port=port).sensor_send_count == 3
+    assert port.read_status().sensor_send_count == 3
     assert backend.gps_times == [100_000, 300_000]
     assert len(backend.imu_updates) == 3
     assert len(backend.mag_updates) == 3
@@ -290,9 +289,9 @@ def test_mavlink_port_imu_fresh_every_tick_at_physics_rate(
     # skip at the 333 Hz float boundary, and the link stays connected.
     assert len(backend.imu_updates) == len(timestamps)
     assert all(send[14] & (7 | 56) for send in backend._connection.hil_sensor_sends)
-    assert read_bridge_status(port=port).sensor_send_count == len(timestamps)
-    assert read_bridge_status(port=port).is_connected is True
-    assert read_bridge_status(port=port).last_disconnect_reason is None
+    assert port.read_status().sensor_send_count == len(timestamps)
+    assert port.read_status().is_connected is True
+    assert port.read_status().last_disconnect_reason is None
 
 
 def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypatch):
@@ -312,12 +311,12 @@ def test_mavlink_port_disconnects_when_physics_faster_than_sensor_rate(monkeypat
     commands = lockstep_exchange(port, VehicleState.hover_at(sim_time_us=101_000))
 
     assert np.allclose(commands, np.zeros(4))
-    assert read_bridge_status(port=port).is_connected is False
+    assert port.read_status().is_connected is False
     assert backend.stopped is True
-    assert "sensor cadence mismatch" in read_bridge_status(port=port).last_disconnect_reason
+    assert "sensor cadence mismatch" in port.read_status().last_disconnect_reason
     # Only the first (fresh) tick was sent before the guard tripped.
     assert [args[0] for args in connection.hil_sensor_sends] == [100_000]
-    assert read_bridge_status(port=port).sensor_send_count == 1
+    assert port.read_status().sensor_send_count == 1
 
 
 def test_mavlink_port_requires_positive_physics_rate(monkeypatch):

@@ -4,6 +4,8 @@ import types
 from enum import IntEnum
 from types import SimpleNamespace
 
+import pytest
+
 
 class _TimelineEventType(IntEnum):
     PLAY = 1
@@ -100,6 +102,12 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             self.connected = False
             calls.append(("port", kwargs))
 
+        def is_connected(self):
+            return self.connected
+
+        def read_status(self):
+            return SimpleNamespace(is_connected=self.connected, is_armed=False)
+
     class PegasusQuadraticThrustModel:
         def __init__(self, **kwargs):
             calls.append(("thrust", kwargs))
@@ -126,9 +134,6 @@ def _install_fake_px4_bridge(monkeypatch, calls):
         )
         return SimpleNamespace(connected=False, port=port, thrust_model=thrust_model)
 
-    def read_px4_bridge_status(*, state):
-        return SimpleNamespace(is_connected=state.connected, is_armed=False)
-
     def start_px4_bridge(*, state):
         state.connected = True
         state.port.connected = True
@@ -138,9 +143,6 @@ def _install_fake_px4_bridge(monkeypatch, calls):
         state.connected = False
         state.port.connected = False
         return state
-
-    def port_is_connected(*, port):
-        return port.connected
 
     def send_sensors(*, state, dt, sim_time_us):
         return state
@@ -170,8 +172,6 @@ def _install_fake_px4_bridge(monkeypatch, calls):
     fake_px4_bridge.create_px4_bridge = create_px4_bridge
     fake_px4_bridge.create_sim_clock = create_sim_clock
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
-    fake_px4_bridge.port_is_connected = port_is_connected
-    fake_px4_bridge.read_px4_bridge_status = read_px4_bridge_status
     fake_px4_bridge.recv_and_apply = recv_and_apply
     fake_px4_bridge.send_sensors = send_sensors
     fake_px4_bridge.sim_clock_is_settling = sim_clock_is_settling
@@ -291,6 +291,16 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
     assert module.read_bridge_host_status(host=host).sim_time_us == 16000
     host.stop()
     assert module.read_bridge_host_status(host=host).sim_time_us == 16000
+
+
+def test_bridge_host_rejects_send_before_start(monkeypatch):
+    _install_fake_isaac(monkeypatch)
+    _install_fake_px4_bridge(monkeypatch, [])
+    module = _import_bridge_host(monkeypatch)
+    host = _make_host(module, _vehicle())
+
+    with pytest.raises(RuntimeError, match="send_phase called before start"):
+        host.send_phase(0.004)
 
 
 def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):

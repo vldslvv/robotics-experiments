@@ -23,7 +23,6 @@ from robotics_experiments.commanding import (
     RoutineDriverState,
     RoutineObservation,
     create_routine_driver,
-    read_command_port_status,
     routine_driver_is_done,
     tick_routine_driver,
 )
@@ -37,6 +36,8 @@ from robotics_experiments.runtime.bridge_host import (
 )
 
 if TYPE_CHECKING:
+    from pxr import Usd
+
     from robotics_experiments.commanding import PolicyStepFn
     from robotics_experiments.px4_bridge import IsaacArticulationIO
 
@@ -89,7 +90,7 @@ class FleetState:
     """Immutable progress through the fleet lifecycle."""
 
     config: ExperimentConfig
-    stage: Any
+    stage: Optional[Usd.Stage]
     group: BridgeHostGroup
     drones: tuple[SpawnedDrone, ...]
     flying: tuple[FlyingDrone, ...]
@@ -136,7 +137,7 @@ class FleetDriverEnv:
             vehicle_state=self._observer.read_state(sim_time_us=sim_time_us),
             bridge_status=host_status,
             last_ack=last_ack,
-            failsafe=read_command_port_status(port=self._port).failsafe,
+            failsafe=self._port.read_status().failsafe,
             sim_time_us=sim_time_us,
         )
 

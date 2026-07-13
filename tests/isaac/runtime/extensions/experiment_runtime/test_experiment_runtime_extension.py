@@ -279,10 +279,24 @@ def test_play_spawns_and_builds_drivers_when_routine_present(monkeypatch):
 
     _fire_timeline(timeline, _TimelineEventType.PLAY)
 
-    assert orch.calls[-4:] == ["teardown", "spawn_fleet", "start_bridges", "build_drivers"]
+    assert orch.calls[-5:] == [
+        "adopt_current_stage",
+        "teardown",
+        "spawn_fleet",
+        "start_bridges",
+        "build_drivers",
+    ]
     # A control tick subscription is armed (the one-shot scene-open already
     # released, so the lone remaining update callback is the control tick).
     assert app.updates.callbacks
+
+
+def test_play_before_stage_open_does_not_spawn(monkeypatch):
+    _module, _extension, orch, _usd_context, timeline, _app = _started_extension(monkeypatch)
+
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+
+    assert orch.calls == []
 
 
 def test_play_without_routine_builds_no_drivers(monkeypatch):
@@ -297,6 +311,24 @@ def test_play_without_routine_builds_no_drivers(monkeypatch):
     assert "build_drivers" not in orch.calls
     # No control tick is armed (and the one-shot scene-open already released).
     assert app.updates.callbacks == []
+
+
+def test_play_re_adopts_current_stage_before_stage_mutation(monkeypatch):
+    _module, _extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    opened_stage = orch.stage
+
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+
+    assert orch.stage is not opened_stage
+    assert orch.calls[-4:] == [
+        "adopt_current_stage",
+        "teardown",
+        "spawn_fleet",
+        "start_bridges",
+    ]
 
 
 def test_stop_drops_control_and_tears_down(monkeypatch):

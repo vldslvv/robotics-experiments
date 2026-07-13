@@ -15,9 +15,10 @@ functional core with small Isaac/MAVLink resource boundaries.
   Each host retains one latest frozen bridge-host state and replaces it after a
   callback transition.
 - MAVLink sockets and Isaac articulation handles remain mutable adapters.
-  Consumers read them through `read_command_port_status`, `read_bridge_status`,
-  `read_articulation_io_status`, or `read_bridge_host_status`; runtime code does
-  not use state-reading properties.
+  Consumers read them through immutable snapshots returned by the adapter's
+  single public status method (`read_status()` or `is_initialized()`). The
+  project-owned `BridgeHost` keeps the module-level `read_bridge_host_status`
+  boundary. Runtime code does not use live state-reading properties.
 
 ## Ordered lifecycle
 
@@ -39,6 +40,11 @@ observers, and only then despawns vehicles. This order is load-bearing.
 `open_scene` requests an asynchronous stage open and leaves state unchanged.
 `adopt_current_stage` binds the completed stage. `spawn_fleet` rejects a missing
 stage. An empty vehicle mapping and an empty bridge group are valid.
+
+The live Kit shell re-adopts the context's current stage at every `PLAY` event
+before teardown or spawn. Kit can replace the Python `Usd.Stage` wrapper while
+finishing a scene or timeline transition; retaining the wrapper captured by the
+earlier `OPENED` event is therefore not a valid cross-event identity guarantee.
 
 ## Per-vehicle composition
 

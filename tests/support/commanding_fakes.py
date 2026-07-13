@@ -13,9 +13,9 @@ class FakeCommandPort(MavlinkCommandPort):
     """An inert :class:`MavlinkCommandPort` for command-layer / driver tests.
 
     Captures the ``MavlinkCommand``s emitted on ``SEND`` and lets a test script
-    the control-feedback the driver reads through the seam: queue acks via
-    :attr:`feedback`, and set :attr:`handshaked` / :attr:`failsafe_flag` /
-    :attr:`global_position`. Heartbeat/connect calls are counted but inert.
+    the control feedback the driver reads through the seam: queue acks via
+    :attr:`feedback`, then use :meth:`set_handshaked`, :meth:`set_failsafe`, and
+    :meth:`set_global_position`. Heartbeat/connect calls are counted but inert.
     """
 
     def __init__(self):
@@ -28,10 +28,10 @@ class FakeCommandPort(MavlinkCommandPort):
         self.feedback_polls = 0
         # Scriptable feedback for the driver tests.
         self.feedback = []  # acks popped (FIFO) by poll_feedback
-        self._target_known = False
-        self._failsafe = False
-        self._failsafe_system_status = 0
-        self._latest_global_position = None
+        self._handshaked = False
+        self._failsafe_active = False
+        self._system_status = 0
+        self._global_position = None
 
     def connect(self):
         self.connected = True
@@ -59,23 +59,23 @@ class FakeCommandPort(MavlinkCommandPort):
         return self.feedback.pop(0) if self.feedback else None
 
     def set_handshaked(self, value=True):
-        self._target_known = value
+        self._handshaked = value
 
     def set_failsafe(self, *, active, system_status=0):
-        self._failsafe = active
-        self._failsafe_system_status = system_status
+        self._failsafe_active = active
+        self._system_status = system_status
 
     def set_global_position(self, value):
-        self._latest_global_position = value
+        self._global_position = value
 
-    def _read_status(self):
+    def read_status(self):
         from robotics_experiments.commanding import CommandPortStatus
 
         return CommandPortStatus(
-            is_handshaked=self._target_known,
-            failsafe=self._failsafe,
-            failsafe_system_status=self._failsafe_system_status,
-            latest_global_position=self._latest_global_position,
+            is_handshaked=self._handshaked,
+            failsafe=self._failsafe_active,
+            failsafe_system_status=self._system_status,
+            latest_global_position=self._global_position,
         )
 
 

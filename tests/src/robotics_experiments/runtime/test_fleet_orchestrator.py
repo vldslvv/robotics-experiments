@@ -45,6 +45,9 @@ class _FakePort:
     def disconnect(self):
         self.disconnected = True
 
+    def read_status(self):
+        return SimpleNamespace(failsafe=False)
+
 
 class _FakeDriver:
     def __init__(self, params, port, env, *, label=""):
@@ -96,7 +99,6 @@ def _import_orchestrator(monkeypatch):
             params, port, env, label=label
         )
     )
-    fake_commanding.read_command_port_status = lambda *, port: SimpleNamespace(failsafe=False)
     fake_commanding.routine_driver_is_done = lambda *, state: state.is_done
     fake_commanding.tick_routine_driver = lambda *, state: state
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)

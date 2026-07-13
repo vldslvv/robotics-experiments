@@ -63,11 +63,12 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
     assert bridge is not started
     assert started.tick_count == 0 and started.pending is None
+    assert io.is_initialized() is True
     bridge = stop_px4_bridge(state=bridge)
 
     assert port.started is True
     assert port.stopped is True
-    assert io.initialized is True
+    assert io.is_initialized() is False
     assert io.shutdown_called is True
     assert port.states[0].sim_time_us == 4_000
     assert np.allclose(io.applied_forces[0], [0.0, 2.0, 4.0, 8.0])

@@ -21,7 +21,6 @@ from _runtime import SceneTestContext, run_scene_test
 from robotics_experiments.px4_bridge import (
     IsaacArticulationIO,
     discover_px4_rotor_mapping,
-    read_articulation_io_status,
 )
 from robotics_experiments.simulation import apply_settings
 
@@ -119,7 +118,7 @@ def _run_test(context: SceneTestContext) -> None:
             rotor_link_paths=rotor_paths,
         )
         articulation_io.initialize()
-        if not read_articulation_io_status(io=articulation_io).is_initialized:
+        if not articulation_io.is_initialized():
             raise AssertionError("Isaac articulation I/O did not initialize")
         if articulation_io.num_rotors != len(rotor_paths):
             raise AssertionError(

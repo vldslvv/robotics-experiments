@@ -206,8 +206,9 @@ the current contents and the intended home for that kind of code.
 - In `runtime`, `commanding`, and `px4_bridge`, project-owned evolving state is
   represented by frozen dataclasses and replaced by stateless transition
   functions. Mutable classes are limited to external resource adapters (MAVLink,
-  Isaac, Kit, and PhysX); callers read them through free functions returning
-  immutable status values, not properties.
+  Isaac, Kit, and PhysX); callers read them through immutable status snapshots:
+  one public `read_status()`-style method per external adapter, or a module free
+  function for a project-owned host. Do not expose live state-reading properties.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under

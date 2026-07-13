@@ -249,7 +249,6 @@ def test_commanding_public_api_contract_is_explicit():
         "moved_forward_at_least",
         "reached_world_position",
         "reposition",
-        "read_command_port_status",
         "routine_driver_is_done",
         "set_offboard_mode",
         "takeoff",

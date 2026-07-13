@@ -10,16 +10,14 @@ import numpy as np
 
 import robotics_experiments.px4_bridge.frames as frames
 from robotics_experiments.px4_bridge._simulator import _ArticulationIO
-from robotics_experiments.px4_bridge.contract import ActuatorCommands, BridgeStatus
-from robotics_experiments.px4_bridge.isaac_articulation import read_articulation_io_status
-from robotics_experiments.px4_bridge.mavlink import Px4MavlinkPort, read_bridge_status
+from robotics_experiments.px4_bridge.contract import ActuatorCommands
+from robotics_experiments.px4_bridge.mavlink import Px4MavlinkPort
 from robotics_experiments.px4_bridge.thrust_model import RotorDynamics, RotorThrustModel
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 __all__ = [
     "Px4BridgeState",
     "create_px4_bridge",
-    "read_px4_bridge_status",
     "recv_and_apply",
     "send_sensors",
     "start_px4_bridge",
@@ -104,15 +102,10 @@ def stop_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState:
     return replace(state, pending=None)
 
 
-def read_px4_bridge_status(*, state: Px4BridgeState) -> BridgeStatus:
-    """Read the bridge's immutable lockstep status."""
-    return read_bridge_status(port=state.port)
-
-
 def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4BridgeState:
     """Run the non-blocking sensor leg and return its pending poll state."""
     io = state.articulation_io
-    if not read_articulation_io_status(io=io).is_initialized:
+    if not io.is_initialized():
         io.initialize()
     vehicle_state = io.read_state(int(sim_time_us))
     if not np.all(np.isfinite(vehicle_state.position_enu)) or not np.all(
@@ -132,6 +125,8 @@ def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4Br
         )
 
     tilt = frames.tilt_angle_deg(vehicle_state.orientation_flu_enu_wxyz)
+    # The cutoff gates only applied dynamics; the sensor/actuator exchange must
+    # continue every tick so HIL_SENSOR.time_usec and PX4 lockstep keep advancing.
     force_cutoff = tilt > state.max_tilt_angle_deg
     cutoff_count = state.tilt_cutoff_count + int(force_cutoff)
     if force_cutoff and (cutoff_count <= 10 or cutoff_count % 250 == 0):
@@ -181,7 +176,7 @@ def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
 
     tick_count = state.tick_count + 1
     if tick_count <= 10 or tick_count % state.dynamics_debug_interval == 0:
-        status = read_px4_bridge_status(state=state)
+        status = state.port.read_status()
         _LOGGER.debug(
             "PX4 bridge dynamics: tick=%d sim_time_us=%d connected=%s armed=%s "
             "commands=%s forces_n=%s body_torque_n_m=%s body_drag_n=%s "

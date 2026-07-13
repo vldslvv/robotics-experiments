@@ -24,7 +24,7 @@ _PX4_BRIDGE_EXTENSION_ROOT = REPO_ROOT / "isaac/runtime/extensions/px4_sitl_brig
 class _FakeArticulationIO:
     def __init__(self, state: VehicleState):
         self.state = state
-        self.initialized = False
+        self._initialized = False
         self.shutdown_called = False
         self.applied_forces: list[np.ndarray] = []
         self.applied_dynamics: list[RotorDynamics] = []
@@ -32,10 +32,14 @@ class _FakeArticulationIO:
         self.spin_updates: list[tuple[np.ndarray, float]] = []
 
     def initialize(self):
-        self.initialized = True
+        self._initialized = True
+
+    def is_initialized(self):
+        return self._initialized
 
     def shutdown(self):
         self.shutdown_called = True
+        self._initialized = False
 
     def read_state(self, sim_time_us: int):
         self.state = replace(self.state, sim_time_us=sim_time_us)
@@ -61,9 +65,12 @@ class _FakeFlightStack(Px4MavlinkPort):
         # show the last value.
         self.sim_times = []
 
-    def _read_status(self):
+    def is_connected(self):
+        return self.started and not self.stopped
+
+    def read_status(self):
         return BridgeStatus(
-            is_connected=self.started and not self.stopped,
+            is_connected=self.is_connected(),
             is_armed=bool(np.any(self.commands)),
             first_heartbeat_received=self.started,
             sensor_send_count=len(self.sim_times),

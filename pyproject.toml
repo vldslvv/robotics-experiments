@@ -75,8 +75,6 @@ ignore = []
 # Focused private-helper unit tests over fixture-/importorskip-gated modules
 # (the modules cannot be imported at top level to bind the helpers by name).
 "tests/isaac/runtime/standalone/test_usd_builder_config.py" = ["SLF001"]
-# Deliberate time-base corruption guard (writes a private to force the failure).
-"tests/src/robotics_experiments/px4_bridge/test_sim_clock.py" = ["SLF001"]
 # Negative-test fault injection: swaps the bridge's thrust model for a faulty one.
 "isaac/runtime/standalone/tests/test_px4_takeoff_instability_detection.py" = ["SLF001"]
 

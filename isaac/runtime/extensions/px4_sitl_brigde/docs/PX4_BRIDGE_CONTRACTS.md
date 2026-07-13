@@ -272,7 +272,9 @@ the package.
 
 The contract is expressed as frozen state values and stateless transitions over
 mutable MAVLink/Isaac resource adapters. Adapter state is read only through
-`read_bridge_status` and `read_articulation_io_status` immutable snapshots.
+one public method on each adapter: `Px4MavlinkPort.read_status()` returns an
+immutable `BridgeStatus`, and `IsaacArticulationIO.is_initialized()` returns the
+immutable lifecycle flag needed by the bridge.
 
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
@@ -310,16 +312,16 @@ class Px4MavlinkPort:
     num_rotors: int
     def start(self) -> None: ...
     def stop(self) -> None: ...
+    def is_connected(self) -> bool: ...
+    def read_status(self) -> BridgeStatus: ...
     def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
     def poll(self) -> ActuatorCommands: ...  # block, recv <- PX4 (only after send returned None)
     def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send-then-poll; single-vehicle convenience
 
-def read_bridge_status(*, port: Px4MavlinkPort) -> BridgeStatus: ...
-
 # The Isaac seam behavior: read state in, apply a full rotor-model result out.
 # Implemented by IsaacArticulationIO; the local structural protocol is private.
 class _ArticulationIO(Protocol):
-    initialized: bool
+    def is_initialized(self) -> bool: ...
     def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
     def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac (physics sink)
     def update_rotor_spin(self, rotor_omega_rad_s, dt) -> None: ...  # cosmetic-only visual rotor spin; never touches forces/lockstep
@@ -548,6 +550,11 @@ the bridge is about to send (Isaac stepping faster than the configured sensor
 rate), that is a fatal misconfiguration, not a recoverable state: the bridge
 disconnects with the distinct **"sensor cadence mismatch"** reason and returns
 zero rotor commands.
+
+`advance_sim_clock` quantizes each physics `dt` to integer microseconds and
+rejects any value whose quantized increment is not positive. This prevents a
+zero, negative, or sub-microsecond tick from repeating or regressing
+`HIL_SENSOR.time_usec` at the source.
 
 **Prime-then-block startup (no actuator backlog).** PX4 needs a few priming
 `HIL_SENSOR` packets while it boots before it emits its first actuator. If Isaac

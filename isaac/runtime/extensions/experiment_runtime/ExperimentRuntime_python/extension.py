@@ -142,6 +142,11 @@ class Extension(omni.ext.IExt):
         if self._fleet.stage is None:
             carb.log_error(f"{_LOG_PREFIX} no stage adopted yet; cannot spawn fleet")
             return
+        # Kit may replace the context's Usd.Stage wrapper while completing a
+        # scene/timeline transition. A wrapper retained from OPENED then raises
+        # Boost.Python.ArgumentError even though the context has a valid stage.
+        # Re-adopt at the imperative PLAY boundary before any stage mutation.
+        self._fleet = adopt_current_stage(state=self._fleet)
         self._fleet = teardown(state=self._fleet)
         self._fleet = spawn_fleet(state=self._fleet)
         self._fleet = start_bridges(state=self._fleet)

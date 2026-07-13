@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional
 
 __all__ = [
     "SimClockState",
@@ -28,7 +27,6 @@ class SimClockState:
     settle_time_us: int
     total_us: int = 0
     tick_count: int = 0
-    last_bridge_us: Optional[int] = None
 
 
 def create_sim_clock(*, physics_hz: float, settle_time_s: float = 0.0) -> SimClockState:
@@ -41,9 +39,15 @@ def create_sim_clock(*, physics_hz: float, settle_time_s: float = 0.0) -> SimClo
 
 def advance_sim_clock(*, state: SimClockState, dt: float) -> SimClockState:
     """Return the state after one physics step."""
+    delta_us = int(round(dt * 1_000_000))
+    if delta_us <= 0:
+        raise ValueError(
+            f"dt must advance sim time by at least one microsecond, got dt={dt} "
+            f"delta_us={delta_us}"
+        )
     return replace(
         state,
-        total_us=state.total_us + int(round(dt * 1_000_000)),
+        total_us=state.total_us + delta_us,
         tick_count=state.tick_count + 1,
     )
 
@@ -53,12 +57,6 @@ def sim_clock_is_settling(*, state: SimClockState) -> bool:
     return state.total_us < state.settle_time_us
 
 
-def bridge_time_us(*, state: SimClockState) -> tuple[SimClockState, int]:
-    """Return a state recording and the current bridge-facing timestamp."""
-    current = state.total_us - state.settle_time_us
-    if state.last_bridge_us is not None and current < state.last_bridge_us:
-        raise AssertionError(
-            f"SimClockState bridge time went backwards: current={current} "
-            f"last={state.last_bridge_us}"
-        )
-    return replace(state, last_bridge_us=current), current
+def bridge_time_us(*, state: SimClockState) -> int:
+    """Return the current bridge-facing timestamp."""
+    return state.total_us - state.settle_time_us

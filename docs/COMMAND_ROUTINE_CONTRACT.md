@@ -130,7 +130,8 @@ fleet object - drones are independent
   `pymavlink` import is function-scoped. The port
   absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
   send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
-  `HEARTBEAT` / `STATUSTEXT` / position telemetry) and exposes `is_handshaked`,
+  `HEARTBEAT` / `STATUSTEXT` / position telemetry). Its `read_status()` method
+  returns the immutable `CommandPortStatus` snapshot containing `is_handshaked`,
   `failsafe`, `failsafe_system_status`, and `latest_global_position`. The
   velocity / attitude-rate senders are the **deploy-time seam for the F1 RL
   action levels**: `send_velocity_setpoint` serializes a `VelocitySetpoint` to

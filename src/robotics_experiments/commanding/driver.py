@@ -33,7 +33,6 @@ from robotics_experiments.commanding.commands import (
 from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
 from robotics_experiments.commanding.port import (
     MavlinkCommandPort,
-    read_command_port_status,
 )
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
@@ -208,7 +207,7 @@ def _fail(*, state: RoutineDriverState, kind: FailureKind, message: str) -> Rout
 def _abort_on_failsafe(
     *, state: RoutineDriverState, phase_description: str
 ) -> Optional[RoutineDriverState]:
-    status = read_command_port_status(port=state.port)
+    status = state.port.read_status()
     if not status.failsafe:
         return None
     return _fail(
@@ -291,7 +290,7 @@ def tick_routine_driver(*, state: RoutineDriverState) -> RoutineDriverState:
         return _enter(state=state, phase=DriverPhase.HANDSHAKE)
     if state.phase is DriverPhase.HANDSHAKE:
         _pump_and_poll(state=state)
-        if read_command_port_status(port=state.port).is_handshaked:
+        if state.port.read_status().is_handshaked:
             state.env.log(f"[{state.label}] GCS handshake complete; settling PX4 before arm")
             settled = replace(
                 state,
@@ -316,8 +315,8 @@ def tick_routine_driver(*, state: RoutineDriverState) -> RoutineDriverState:
         )
         if failed is not None:
             return failed
-        target = read_command_port_status(port=state.port).latest_global_position
-        if target:
+        target = state.port.read_status().latest_global_position
+        if target is not None:
             return _enter(
                 state=replace(state, target=target),
                 phase=DriverPhase.BUILD,
