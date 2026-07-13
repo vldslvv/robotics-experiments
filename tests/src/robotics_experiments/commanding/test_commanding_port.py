@@ -17,6 +17,7 @@ from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     MavlinkCommandPort,
     PositionSetpoint,
+    read_command_port_status,
 )
 
 _MAV_FRAME_GLOBAL_INT = 5
@@ -94,14 +95,14 @@ def test_active_heartbeat_is_not_failsafe_and_handshakes():
     # MAV_STATE_ACTIVE (4) is the normal armed/flying state, not a failsafe.
     port = _port_with([_msg("HEARTBEAT", system_status=4, src_system=1, src_component=1)])
     port.poll_feedback()
-    assert port.failsafe is False
-    assert port.is_handshaked is True
+    assert read_command_port_status(port=port).failsafe is False
+    assert read_command_port_status(port=port).is_handshaked is True
 
 
 def test_standby_heartbeat_is_not_failsafe():
     port = _port_with([_msg("HEARTBEAT", system_status=3)])
     port.poll_feedback()
-    assert port.failsafe is False
+    assert read_command_port_status(port=port).failsafe is False
 
 
 def test_critical_emergency_termination_heartbeats_are_failsafe():
@@ -109,8 +110,9 @@ def test_critical_emergency_termination_heartbeats_are_failsafe():
     for status in (5, 6, 8):
         port = _port_with([_msg("HEARTBEAT", system_status=status)])
         port.poll_feedback()
-        assert port.failsafe is True, f"system_status={status} should be failsafe"
-        assert port.failsafe_system_status == status
+        port_status = read_command_port_status(port=port)
+        assert port_status.failsafe is True, f"system_status={status} should be failsafe"
+        assert port_status.failsafe_system_status == status
 
 
 def test_command_ack_is_parsed():
@@ -139,7 +141,7 @@ def test_arm_statustext_synthesizes_accepted_ack():
 def test_global_position_is_surfaced():
     port = _port_with([_msg("GLOBAL_POSITION_INT", lat=473977000, lon=85456000, alt=488000)])
     port.poll_feedback()
-    position = port.latest_global_position
+    position = read_command_port_status(port=port).latest_global_position
     assert position is not None
     latitude_deg, longitude_deg, altitude_m = position
     assert abs(latitude_deg - 47.3977) < 1e-4
@@ -150,7 +152,7 @@ def test_global_position_is_surfaced():
 def test_zero_global_position_is_ignored_until_fix():
     port = _port_with([_msg("GLOBAL_POSITION_INT", lat=0, lon=0, alt=0)])
     port.poll_feedback()
-    assert port.latest_global_position is None
+    assert read_command_port_status(port=port).latest_global_position is None
 
 
 def test_send_setpoint_emits_global_position_target_with_yaw():

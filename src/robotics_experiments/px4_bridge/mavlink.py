@@ -1,6 +1,6 @@
 """PX4 simulator MAVLink port.
 
-The port is the PX4-specific lockstep seam: ``Px4Bridge`` passes
+The port is the PX4-specific lockstep seam: bridge transitions pass
 ``VehicleState`` in and receives rotor references out. Tests subclass it with
 an inert fake so bridge orchestration can be staged without PX4 running.
 
@@ -33,9 +33,40 @@ from robotics_experiments.px4_bridge.logging import _VehicleLogFilter, vehicle_l
 from robotics_experiments.px4_bridge.sim_clock import _physics_tick_us
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
-__all__ = ["Px4MavlinkPort"]
+__all__ = ["Px4MavlinkPort", "read_bridge_status"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _port_is_connected(*, port: Px4MavlinkPort) -> bool:
+    return port._is_connected and port._backend._connection is not None
+
+
+def _port_is_armed(*, port: Px4MavlinkPort) -> bool:
+    return any(value != 0.0 for value in port._backend.input_reference())
+
+
+def read_bridge_status(*, port: Px4MavlinkPort) -> BridgeStatus:
+    """Return the immutable lockstep status of a mutable MAVLink adapter."""
+    return port._read_status()
+
+
+def _read_port_status(*, port: Px4MavlinkPort) -> BridgeStatus:
+    actuator_lag_us = None
+    if port._last_sensor_send_us is not None and port._last_actuator_receive_us is not None:
+        actuator_lag_us = port._last_sensor_send_us - port._last_actuator_receive_us
+    return BridgeStatus(
+        is_connected=_port_is_connected(port=port),
+        is_armed=_port_is_armed(port=port),
+        first_heartbeat_received=bool(port._backend._received_first_hearbeat),
+        sensor_send_count=port._sensor_send_count,
+        actuator_receive_count=port._actuator_receive_count,
+        last_sensor_send_us=port._last_sensor_send_us,
+        last_actuator_receive_us=port._last_actuator_receive_us,
+        actuator_lag_us=actuator_lag_us,
+        last_disconnect_reason=port._last_disconnect_reason,
+    )
+
 
 _HIL_SENSOR_ACCEL_UPDATED = 0b0000000000111
 _HIL_SENSOR_GYRO_UPDATED = 0b0000000111000
@@ -151,9 +182,9 @@ class Px4MavlinkPort:
         offset, so no ``baseport + id`` arithmetic happens here. ``vehicle_id``
         is the resolved vehicle ``id`` used only as the per-vehicle log identity.
         """
-        self._debug_log_path = _configure_file_logging(debug_log_path, debug_log_level, vehicle_id)
+        self.debug_log_path = _configure_file_logging(debug_log_path, debug_log_level, vehicle_id)
         self._sensor_debug_log_interval = max(1, int(sensor_debug_log_interval))
-        self._num_rotors = int(num_rotors)
+        self.num_rotors = int(num_rotors)
         self._lockstep_timeout_s = float(lockstep.lockstep_timeout_s)
         self._first_heartbeat_timeout_s = float(lockstep.first_heartbeat_timeout_s)
         # Bound the pre-first-actuator free-run: allow this many priming
@@ -189,14 +220,14 @@ class Px4MavlinkPort:
         # accel/gyro bits on half the HIL_SENSOR packets).
         physics_rate_hz = lockstep.physics_rate_hz
         # _physics_tick_us is the single source of the integer tick (shared with
-        # SimClock); it raises on a non-positive rate.
+        # SimClockState construction); it raises on a non-positive rate.
         self._physics_tick_us = _physics_tick_us(physics_rate_hz)
         self._sensor_rate_hz = 1_000_000 / self._physics_tick_us
         self._sensor_suite = self._make_sensor_suite()
-        input_offset = [0.0] * self._num_rotors if input_offset is None else input_offset
-        input_scaling = [1000.0] * self._num_rotors if input_scaling is None else input_scaling
+        input_offset = [0.0] * self.num_rotors if input_offset is None else input_offset
+        input_scaling = [1000.0] * self.num_rotors if input_scaling is None else input_scaling
         zero_position_armed = (
-            [100.0] * self._num_rotors if zero_position_armed is None else zero_position_armed
+            [100.0] * self.num_rotors if zero_position_armed is None else zero_position_armed
         )
 
         # Lazy-construct the Pegasus backend so importing this module does
@@ -209,7 +240,7 @@ class Px4MavlinkPort:
         self._backend = PX4MavlinkBackend(
             PX4MavlinkBackendConfig(
                 {
-                    "num_rotors": self._num_rotors,
+                    "num_rotors": self.num_rotors,
                     "connection_type": connection_type,
                     "connection_ip": connection_ip,
                     # The resolved per-vehicle port is passed straight through as
@@ -260,7 +291,7 @@ class Px4MavlinkPort:
                 connection_ip,
                 port,
                 vehicle_id,
-                self._num_rotors,
+                self.num_rotors,
                 self._lockstep_timeout_s,
                 self._first_heartbeat_timeout_s,
                 self._bootstrap_prime_ticks,
@@ -272,7 +303,7 @@ class Px4MavlinkPort:
                 self._gps_enabled,
                 gps_send_rate_hz,
                 self._sensor_noise_enabled,
-                self._debug_log_path,
+                self.debug_log_path,
                 self._sensor_debug_log_interval,
             )
 
@@ -305,7 +336,7 @@ class Px4MavlinkPort:
         self._last_actuator_receive_us = None
         self._sensor_payload_debug_count = 0
         self._is_connected = True
-        _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self._debug_log_path)
+        _LOGGER.info("PX4 MAVLink port started; debug_log=%s", self.debug_log_path)
 
     def stop(self) -> None:
         try:
@@ -323,38 +354,8 @@ class Px4MavlinkPort:
             self._last_disconnect_reason,
         )
 
-    # ---- Properties --------------------------------------------------------
-
-    @property
-    def num_rotors(self) -> int:
-        return self._num_rotors
-
-    @property
-    def is_connected(self) -> bool:
-        return self._is_connected and self._backend._connection is not None
-
-    @property
-    def is_armed(self) -> bool:
-        # The Pegasus backend zeroes input_reference when disarmed; expose
-        # the most reliable signal we have: nonzero rotor reference.
-        return any(v != 0.0 for v in self._backend.input_reference())
-
-    @property
-    def status(self) -> BridgeStatus:
-        actuator_lag_us = None
-        if self._last_sensor_send_us is not None and self._last_actuator_receive_us is not None:
-            actuator_lag_us = self._last_sensor_send_us - self._last_actuator_receive_us
-        return BridgeStatus(
-            is_connected=self.is_connected,
-            is_armed=self.is_armed,
-            first_heartbeat_received=bool(self._backend._received_first_hearbeat),
-            sensor_send_count=self._sensor_send_count,
-            actuator_receive_count=self._actuator_receive_count,
-            last_sensor_send_us=self._last_sensor_send_us,
-            last_actuator_receive_us=self._last_actuator_receive_us,
-            actuator_lag_us=actuator_lag_us,
-            last_disconnect_reason=self._last_disconnect_reason,
-        )
+    def _read_status(self) -> BridgeStatus:
+        return _read_port_status(port=self)
 
     # ---- Per-tick ----------------------------------------------------------
 
@@ -372,7 +373,7 @@ class Px4MavlinkPort:
         ``send`` strictly precedes its paired ``poll`` within a vehicle; see
         :meth:`exchange` for the single-vehicle send-then-poll composition.
         """
-        if not self.is_connected:
+        if not _port_is_connected(port=self):
             return self._zeros()
 
         sim_time_us = int(state.sim_time_us)
@@ -420,7 +421,7 @@ class Px4MavlinkPort:
         return ActuatorCommands(np.asarray(self._backend.input_reference(), dtype=np.float64))
 
     def _zeros(self) -> ActuatorCommands:
-        return ActuatorCommands(np.zeros(self._num_rotors, dtype=np.float64))
+        return ActuatorCommands(np.zeros(self.num_rotors, dtype=np.float64))
 
     def _heartbeat_phase(self, now: float) -> bool:
         """Send the paced heartbeat and gate on PX4's first heartbeat.
@@ -495,7 +496,7 @@ class Px4MavlinkPort:
                     sim_time_us,
                     self._last_actuator_receive_us,
                     actuator_lag_us,
-                    self.is_connected,
+                    _port_is_connected(port=self),
                 )
             gps_due = (
                 self._last_gps_send_us is None

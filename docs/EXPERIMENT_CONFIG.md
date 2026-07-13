@@ -29,7 +29,7 @@ scene paths are repository-relative.
 ## Routine behavior
 
 Every vehicle owns a complete `RoutineConfig`. Empty `steps` means manual
-operation; non-empty steps create exactly one `RoutineDriver` for that vehicle.
+operation; non-empty steps create exactly one `RoutineDriverState` for that vehicle.
 Routine descriptors use the typed `RoutineStepConfig` mapping and are validated
 by the routine builder.
 

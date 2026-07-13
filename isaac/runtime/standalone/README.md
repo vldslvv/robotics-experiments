@@ -36,3 +36,8 @@ runtime import only for a hint.
 
 Do not convert deferred imports to module top to remove redundancy; that breaks
 the scripts at import time before the app boots.
+
+The fleet runner uses the same frozen `FleetState` lifecycle as the live
+extension. Rebind every lifecycle, bridge, and driver transition result. Helpers
+that report simulated elapsed time receive a sim-time callable; they must not
+depend on mutable resource properties.

@@ -19,10 +19,6 @@ class DiscoveredRotorMapping:
     rot_dir: list[float]
     positions_body: np.ndarray
 
-    @property
-    def num_rotors(self) -> int:
-        return len(self.rotor_link_paths)
-
 
 def discover_px4_rotor_mapping(stage, articulation_path: str) -> DiscoveredRotorMapping:
     """Scan a spawned USD articulation for PX4 rotor marker metadata.

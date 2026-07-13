@@ -1,32 +1,16 @@
-"""PX4 bridge wiring owned by the fleet runtime.
+"""Mutable PhysX resource adapters around frozen PX4 bridge-host state.
 
-The :class:`~robotics_experiments.runtime.FleetOrchestrator`
-constructs each :class:`Px4Bridge` (through a ``BridgeHost``) and the single
-fleet-wide physics-step subscription (through :class:`BridgeHostGroup`). The
-bridge itself owns no scene state; keeping this wiring out of the bridge keeps
-the bridge single-responsibility.
-
-A host is configured through :class:`BridgeHostParams`, a frozen composition of
-the vehicle's bridge behavior config (``px4``) with the derived per-vehicle
-runtime state the host needs (identity, endpoint, resolved articulation path),
-constructed by the orchestrator when it spawns the vehicle. The host never sees
-the rest of the ``VehicleConfig`` (spawn, routine, ROS identity).
-
-The host is opt-in: when the vehicle config has ``bridge.enabled = false``
-(the default), no bridge is built and no callbacks are registered. This lets
-the bridge layers be tested in stages (port alone, articulation_io alone,
-full bridge) by flipping the flag.
-
-Isaac-coupled domain leaf: this module imports ``carb``/``omni.physx`` at module
-scope, so it stays off the core import path behind the lazy package
-``__init__`` (see ``robotics_experiments.runtime``).
+This Isaac-only leaf keeps callback return values at the imperative boundary:
+each callback runs a module-level transition and replaces the host's single
+frozen state value.
 """
 
 from __future__ import annotations
 
 import time
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional, cast
 
 import carb
@@ -40,40 +24,66 @@ if TYPE_CHECKING:
         DiscoveredRotorMapping,
         LockstepSettings,
         PegasusQuadraticThrustModel,
-        Px4Bridge,
+        Px4BridgeState,
         Px4MavlinkPort,
-        SimClock,
+        RotorThrustModel,
+        SimClockState,
     )
 
-__all__ = ["BridgeHost", "BridgeHostGroup", "BridgeHostParams"]
+__all__ = [
+    "BridgeHost",
+    "BridgeHostGroup",
+    "BridgeHostParams",
+    "BridgeHostStatus",
+    "read_bridge_host_status",
+]
 
 _LOG_PREFIX = "FleetRuntime.BridgeHost"
 
 
 @dataclass(frozen=True)
 class _PendingPoll:
-    """Send-leg state of one physics tick, consumed by the matching poll leg.
-
-    Produced by :meth:`BridgeHost.send_phase` only when this tick's sensors went
-    out, so ``BridgeHost._pending is None`` is the distinct "nothing to poll this
-    tick" state (settling, or a send-leg error).
-    """
-
     tick: int
     bridge_sim_time_us: int
     block_start: float
 
 
-def _bridge_components(
-    params: BridgeHostParams, rotor_mapping: DiscoveredRotorMapping
-) -> tuple[LockstepSettings, Px4MavlinkPort, PegasusQuadraticThrustModel]:
-    """Pure config -> bridge-component mapping: ``(lockstep, port, thrust_model)``.
+@dataclass(frozen=True)
+class BridgeHostParams:
+    """Immutable construction data for one vehicle's bridge host."""
 
-    Everything here is derived from the frozen params plus the discovered rotor
-    mapping; the effects (stage lookup, discovery, ``Px4Bridge`` construction and
-    start) stay in :meth:`BridgeHost._build_bridge`. Imports lazily so a disabled
-    bridge pays no ``px4_bridge`` import cost.
-    """
+    bridge: Px4BridgeConfig
+    vehicle_id: int
+    mavlink_port: int
+    debug_log_path: str
+    articulation_path: str
+    physics_hz: float
+
+
+@dataclass(frozen=True)
+class BridgeHostStatus:
+    """Immutable runtime read model for one bridge host."""
+
+    sim_time_us: int
+    bridge_status: Optional[BridgeStatus]
+    start_attempted: bool
+    debug_log_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class _BridgeHostState:
+    clock: Optional[SimClockState] = None
+    bridge: Optional[Px4BridgeState] = None
+    start_attempted: bool = False
+    pending: Optional[_PendingPoll] = None
+    log_context: Optional[Callable[[int], AbstractContextManager[None]]] = None
+    disconnect_warned: bool = False
+    max_tick_block_s: float = 0.0
+
+
+def _bridge_components(
+    *, params: BridgeHostParams, rotor_mapping: DiscoveredRotorMapping
+) -> tuple[LockstepSettings, Px4MavlinkPort, PegasusQuadraticThrustModel]:
     from robotics_experiments.px4_bridge import (
         LockstepSettings,
         PegasusQuadraticThrustModel,
@@ -91,8 +101,9 @@ def _bridge_components(
         heartbeat_rate_hz=lockstep_cfg.heartbeat_rate_hz,
         physics_rate_hz=params.physics_hz,
     )
+    rotor_count = len(rotor_mapping.rotor_link_paths)
     port = Px4MavlinkPort(
-        num_rotors=rotor_mapping.num_rotors,
+        num_rotors=rotor_count,
         connection_type=cfg.connection_type,
         connection_ip=cfg.connection_ip,
         port=params.mavlink_port,
@@ -112,7 +123,7 @@ def _bridge_components(
         sensor_debug_log_interval=cfg.sensor_debug_log_interval,
     )
     thrust_model = PegasusQuadraticThrustModel(
-        num_rotors=rotor_mapping.num_rotors,
+        num_rotors=rotor_count,
         rotor_constant=cfg.rotor_constant,
         rolling_moment_coefficient=cfg.rolling_moment_coefficient,
         rot_dir=rotor_mapping.rot_dir,
@@ -123,364 +134,313 @@ def _bridge_components(
     return lockstep, port, thrust_model
 
 
-@dataclass(frozen=True)
-class BridgeHostParams:
-    """Everything one :class:`BridgeHost` needs, separated by responsibility.
-
-    ``px4`` is the vehicle's bridge behavior config; the remaining fields are the
-    derived per-vehicle runtime state, taken straight from the
-    :class:`~robotics_experiments.config.VehicleConfig` (never
-    recomputed here) plus the spawn result. ``articulation_path`` is resolved
-    exactly once (the ``px4.articulation_path`` override, else the spawned prim
-    path), so the host and the state observer read the same body.
-    """
-
-    bridge: Px4BridgeConfig
-    vehicle_id: int
-    mavlink_port: int
-    debug_log_path: str
-    articulation_path: str
-    physics_hz: float
-
-
 class BridgeHost:
-    """Lifecycle owner for a single ``Px4Bridge`` instance.
-
-    Constructed once per Play session by the fleet orchestrator from a frozen
-    :class:`BridgeHostParams`. Builds the bridge from those params, registers a
-    physics-step callback that ticks it, and tears everything down on stop.
-    """
+    """Minimal mutable adapter required because PhysX ignores callback returns."""
 
     def __init__(self, params: BridgeHostParams):
-        self._params = params
-        self._cfg = params.bridge
-        self._bridge: Optional[Px4Bridge] = None
-        self._clock: Optional[SimClock] = None
-        self._start_attempted: bool = False
-        # Send-leg state consumed by the poll leg of the same tick (the
-        # coordinator runs all sends before all polls); None = nothing to poll.
-        self._pending: Optional[_PendingPoll] = None
-        # Cached px4_bridge.vehicle_log_context, bound lazily when the bridge is
-        # built (kept off the module top to preserve the lazy import contract).
-        self._log_ctx: Callable[[int], AbstractContextManager[None]]
-        # Per-vehicle log tag so the two BridgeHosts in a multi-drone scene are
-        # distinguishable in the shared Isaac console.
-        self._endpoint = (
-            f"{self._cfg.connection_type}:{self._cfg.connection_ip}:{params.mavlink_port}"
+        self.params = params
+        cfg = params.bridge
+        self.endpoint = f"{cfg.connection_type}:{cfg.connection_ip}:{params.mavlink_port}"
+        self.tag = f"{_LOG_PREFIX} v{params.vehicle_id} {self.endpoint}"
+        self.first_connect_tick_budget = int(
+            cfg.lockstep.first_heartbeat_timeout_s * params.physics_hz
         )
-        self._tag = f"{_LOG_PREFIX} v{params.vehicle_id} {self._endpoint}"
-        # Tick budget after which a started-but-never-connected bridge is loud:
-        # the first PX4 heartbeat must arrive within first_heartbeat_timeout_s.
-        self._first_connect_tick_budget = int(
-            self._cfg.lockstep.first_heartbeat_timeout_s * params.physics_hz
-        )
-        self._disconnect_warned = False
-        # The hosts tick serially on the single PhysX thread and each bridge tick
-        # blocks on its PX4 lockstep recv, so a slow tick here stalls every other
-        # vehicle's lockstep too. Warn when one tick blocks the shared thread for
-        # a large fraction of the lockstep timeout (derived, not a new knob).
-        self._slow_tick_warn_s = 0.5 * float(self._cfg.lockstep.lockstep_timeout_s)
-        self._max_tick_block_s = 0.0
-
-    @property
-    def params(self) -> BridgeHostParams:
-        """The frozen runtime parameters this host was constructed from."""
-        return self._params
-
-    @property
-    def is_running(self) -> bool:
-        return self._bridge is not None
-
-    @property
-    def is_connected(self) -> bool:
-        """Whether the bridge has a live PX4 lockstep connection.
-
-        ``False`` before :meth:`start` or while the bridge is still settling.
-        Read by the control driver to gate the routine on a connected bridge.
-        """
-        return self._bridge is not None and bool(self._bridge.is_connected)
-
-    @property
-    def status(self) -> BridgeStatus:
-        """The bridge lockstep status snapshot (``BridgeStatus``).
-
-        The control driver folds this into each ``RoutineObservation`` so the
-        pure command layer never reaches into the bridge. Only valid once the
-        host is running.
-
-        Raises:
-            RuntimeError: if read before the bridge is constructed.
-        """
-        if self._bridge is None:
-            raise RuntimeError(f"[{self._tag}] bridge status read before the bridge started")
-        return self._bridge.status
-
-    @property
-    def sim_time_us(self) -> int:
-        """Total accumulated sim time in microseconds since the clock started.
-
-        Zero before :meth:`start`. This is the host-side counter (pre settle
-        offset); the bridge-facing timestamp the host feeds the bridge is
-        derived from it via the clock. Exposed for diagnostics and test
-        scenarios that drive physics and wait on simulated time.
-        """
-        return int(self._clock.total_us) if self._clock is not None else 0
+        self.slow_tick_warn_s = 0.5 * float(cfg.lockstep.lockstep_timeout_s)
+        self._state = _BridgeHostState()
 
     def start(self) -> None:
-        """Set up the sim clock and (when no settle delay) construct the bridge.
-
-        The owning :class:`BridgeHostGroup` owns the single physics-step
-        subscription and drives this host's per-leg :meth:`send_phase` /
-        :meth:`recv_phase`. Idempotent: a second call while running is a no-op.
-        """
-        if self._bridge is not None:
-            return
-        if not self._cfg.enabled:
-            return
-
-        # SimClock is pure Python (no Isaac deps); import it here so a disabled
-        # bridge does not pay the px4_bridge import cost.
-        from robotics_experiments.px4_bridge import SimClock
-
-        settle_time_s = max(0.0, float(self._cfg.startup_settle_time_s))
-        self._clock = SimClock(physics_hz=self._params.physics_hz, settle_time_s=settle_time_s)
-        self._start_attempted = False
-        if settle_time_s > 0.0:
-            carb.log_info(
-                f"[{self._tag}] delaying PX4 bridge start for "
-                f"startup_settle_time_s={settle_time_s:.3f}"
-            )
-            return
-
-        self._start_bridge()
-
-    def _start_bridge(self) -> None:
-        """Construct the bridge after any configured startup settle delay."""
-        if self._bridge is not None or self._start_attempted:
-            return
-        self._start_attempted = True
-
-        # Late import so a disabled bridge does not pay the import cost
-        # (and does not require the bridge extension to be loaded).
-        from robotics_experiments.px4_bridge import vehicle_log_context
-
-        # Tag every bridge log record produced while building this vehicle's
-        # bridge so it lands only in this vehicle's debug log file, not the
-        # last-constructed vehicle's. See px4_bridge.logging.
-        self._log_ctx = vehicle_log_context
-        with vehicle_log_context(self._params.vehicle_id):
-            self._build_bridge()
-
-    def _build_bridge(self) -> None:
-        """Discover rotors and construct the bridge for this vehicle.
-
-        Owns the effects (stage lookup, rotor discovery, bridge construction and
-        start); the pure params -> component mapping lives in
-        :func:`_bridge_components`. Runs inside the vehicle's log context (see
-        :meth:`_start_bridge`).
-        """
-        import omni.usd
-
-        from robotics_experiments.px4_bridge import Px4Bridge, discover_px4_rotor_mapping
-
-        articulation_path = self._params.articulation_path
-        stage = omni.usd.get_context().get_stage()
-        if stage is None:
-            carb.log_error(
-                f"[{self._tag}] cannot discover PX4 rotors without an open USD stage. "
-                "Bridge not started."
-            )
-            return
-        try:
-            rotor_mapping = discover_px4_rotor_mapping(stage, articulation_path)
-        except Exception as exc:
-            carb.log_error(f"[{self._tag}] PX4 rotor discovery failed: {exc}")
-            return
-
-        lockstep, port, thrust_model = _bridge_components(self._params, rotor_mapping)
-        carb.log_info(
-            f"[{self._tag}] starting PX4 bridge "
-            f"articulation={articulation_path} rotor_paths={rotor_mapping.rotor_link_paths} "
-            f"rot_dir={rotor_mapping.rot_dir} "
-            f"lockstep_timeout_s={lockstep.lockstep_timeout_s} "
-            f"first_heartbeat_timeout_s={lockstep.first_heartbeat_timeout_s} "
-            f"bootstrap_prime_ticks={lockstep.bootstrap_prime_ticks} "
-            f"first_actuator_timeout_s={lockstep.first_actuator_timeout_s} "
-            f"max_sustained_actuator_lag_s={lockstep.max_sustained_actuator_lag_s} "
-            f"physics_rate_hz={self._params.physics_hz} "
-            f"gps_enabled={self._cfg.gps_enabled} gps_rate_hz={self._cfg.gps_send_rate_hz} "
-            f"sensor_noise_enabled={self._cfg.sensor_noise_enabled} "
-            f"debug_log_path={self._params.debug_log_path}"
-        )
-        self._bridge = Px4Bridge(
-            articulation_path=articulation_path,
-            rotor_link_paths=rotor_mapping.rotor_link_paths,
-            thrust_model=thrust_model,
-            port=port,
-            max_tilt_angle_deg=self._cfg.max_tilt_angle_deg,
-            rotor_spin_visual_scale=self._cfg.rotor_spin_visual_scale,
-            rotor_spin_signs=rotor_mapping.rot_dir,
-        )
-
-        try:
-            self._bridge.start()
-        except Exception as exc:
-            carb.log_error(f"[{self._tag}] bridge.start() failed: {exc}")
-            self._bridge = None
-            return
-
-        carb.log_info(f"[{self._tag}] PX4 bridge started")
+        self._state = _start_host(host=self, state=self._state)
 
     def stop(self) -> None:
-        """Tear down the bridge. The group owns and drops the subscription."""
-        if self._bridge is not None:
-            try:
-                with self._log_ctx(self._params.vehicle_id):
-                    self._bridge.stop()
-            except Exception as exc:
-                carb.log_warn(f"[{self._tag}] bridge.stop() raised: {exc}")
-            self._bridge = None
+        self._state = _stop_host(host=self, state=self._state)
 
     def send_phase(self, dt: float) -> None:
-        """Send leg of one physics tick: advance the clock and publish sensors.
-
-        Runs before any vehicle's poll leg. Advances the sim clock, handles the
-        startup-settle gating (lazily constructing the bridge once settle
-        completes), and, when the bridge is running, sends this tick's sensors to
-        PX4 without blocking. Leaves the :class:`_PendingPoll` for
-        :meth:`recv_phase` when a poll is owed this tick.
-        """
-        clock = cast("SimClock", self._clock)
-        self._pending = None
-        total_us = clock.advance(dt)
-        tick = clock.tick_count
-        if self._bridge is None:
-            if not clock.is_settling:
-                carb.log_info(
-                    f"[{self._tag}] startup settle complete at "
-                    f"tick={tick} sim_time_us={total_us}; "
-                    f"starting PX4 bridge"
-                )
-                self._start_bridge()
-                return
-            elif tick == 1 or tick % 250 == 0:
-                carb.log_info(
-                    f"[{self._tag}] waiting for startup settle "
-                    f"tick={tick} dt={dt:.6f} "
-                    f"sim_time_us={total_us} target_us={clock.settle_time_us}"
-                )
-            return
-
-        bridge_sim_time_us = clock.bridge_time_us()
-        # A bridge that never connects starves its PX4 of sensor data, so that
-        # PX4's lockstep stalls and the GCS hangs (e.g. on `commander arm`).
-        # Make that obvious instead of leaving it to a 250-tick info heartbeat.
-        if not self._bridge.is_connected and not self._disconnect_warned:
-            if tick >= self._first_connect_tick_budget:
-                self._disconnect_warned = True
-                carb.log_warn(
-                    f"[{self._tag}] PX4 still not connected after "
-                    f"tick={tick} (>{self._first_connect_tick_budget}); this PX4 "
-                    f"will stall in lockstep. Check that a PX4 SITL instance is "
-                    f"reachable on {self._endpoint}."
-                )
-        # The meaningful block is the poll in recv_phase; start the timer here so
-        # the diagnostic spans this vehicle's full send-then-poll contribution.
-        block_start = time.monotonic()
-        try:
-            with self._log_ctx(self._params.vehicle_id):
-                self._bridge.send_sensors(dt, bridge_sim_time_us)
-            self._pending = _PendingPoll(
-                tick=tick, bridge_sim_time_us=bridge_sim_time_us, block_start=block_start
-            )
-        except Exception as exc:
-            # One bad tick must not crash the simulator. Log and continue;
-            # persistent failure will be visible via is_connected.
-            carb.log_warn(
-                f"[{self._tag}] send_sensors error at tick={tick} "
-                f"sim_time_us={bridge_sim_time_us}: {exc}"
-            )
+        self._state = _send_phase(host=self, state=self._state, dt=dt)
 
     def recv_phase(self) -> None:
-        """Poll leg of one physics tick: block for the actuator and apply forces.
+        self._state = _recv_phase(host=self, state=self._state)
 
-        Runs after every vehicle's send leg, so the PX4 instances compute
-        concurrently and one stalled PX4 disconnects only its own vehicle. A
-        no-op when this tick did not send (settling, or a send-leg error).
-        """
-        pending = self._pending
-        if pending is None or self._bridge is None:
-            return
-        self._pending = None
+    def _read_state(self) -> _BridgeHostState:
+        return self._state
+
+    def _store_state(self, state: _BridgeHostState) -> None:
+        self._state = state
+
+
+def read_bridge_host_status(*, host: BridgeHost) -> BridgeHostStatus:
+    """Read one immutable host status without exposing transition state."""
+    from robotics_experiments.px4_bridge import read_px4_bridge_status
+
+    state = host._read_state()  # noqa: SLF001 - module status boundary
+    return BridgeHostStatus(
+        sim_time_us=state.clock.total_us if state.clock is not None else 0,
+        bridge_status=(
+            read_px4_bridge_status(state=state.bridge) if state.bridge is not None else None
+        ),
+        start_attempted=state.start_attempted,
+        debug_log_path=(state.bridge.port.debug_log_path if state.bridge is not None else None),
+    )
+
+
+def _replace_thrust_model_for_test(
+    *, host: BridgeHost, transform: Callable[[RotorThrustModel], RotorThrustModel]
+) -> None:
+    """Narrow integration-only fault seam for the instability scenario."""
+    state = host._read_state()  # noqa: SLF001 - narrow fault-injection seam
+    if state.bridge is None:
+        raise AssertionError("PX4 bridge was not constructed before fault injection")
+    host._store_state(  # noqa: SLF001 - narrow fault-injection seam
+        replace(
+            state,
+            bridge=replace(
+                state.bridge,
+                thrust_model=transform(state.bridge.thrust_model),
+            ),
+        )
+    )
+
+
+def _start_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
+    if state.bridge is not None or not host.params.bridge.enabled:
+        return state
+    from robotics_experiments.px4_bridge import create_sim_clock
+
+    settle_time_s = max(0.0, float(host.params.bridge.startup_settle_time_s))
+    started = replace(
+        state,
+        clock=create_sim_clock(
+            physics_hz=host.params.physics_hz,
+            settle_time_s=settle_time_s,
+        ),
+        bridge=None,
+        start_attempted=False,
+        pending=None,
+    )
+    if settle_time_s > 0.0:
+        carb.log_info(
+            f"[{host.tag}] delaying PX4 bridge start for "
+            f"startup_settle_time_s={settle_time_s:.3f}"
+        )
+        return started
+    return _start_bridge(host=host, state=started)
+
+
+def _start_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
+    if state.bridge is not None or state.start_attempted:
+        return state
+    from robotics_experiments.px4_bridge import vehicle_log_context
+
+    attempted = replace(
+        state,
+        start_attempted=True,
+        log_context=vehicle_log_context,
+    )
+    with vehicle_log_context(host.params.vehicle_id):
+        return _build_bridge(host=host, state=attempted)
+
+
+def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
+    import omni.usd
+
+    from robotics_experiments.px4_bridge import (
+        create_px4_bridge,
+        discover_px4_rotor_mapping,
+        start_px4_bridge,
+    )
+
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        carb.log_error(
+            f"[{host.tag}] cannot discover PX4 rotors without an open USD stage. "
+            "Bridge not started."
+        )
+        return state
+    try:
+        rotor_mapping = discover_px4_rotor_mapping(stage, host.params.articulation_path)
+    except Exception as exc:
+        carb.log_error(f"[{host.tag}] PX4 rotor discovery failed: {exc}")
+        return state
+
+    lockstep, port, thrust_model = _bridge_components(
+        params=host.params,
+        rotor_mapping=rotor_mapping,
+    )
+    cfg = host.params.bridge
+    carb.log_info(
+        f"[{host.tag}] starting PX4 bridge "
+        f"articulation={host.params.articulation_path} "
+        f"rotor_paths={rotor_mapping.rotor_link_paths} rot_dir={rotor_mapping.rot_dir} "
+        f"lockstep_timeout_s={lockstep.lockstep_timeout_s} "
+        f"first_heartbeat_timeout_s={lockstep.first_heartbeat_timeout_s} "
+        f"bootstrap_prime_ticks={lockstep.bootstrap_prime_ticks} "
+        f"first_actuator_timeout_s={lockstep.first_actuator_timeout_s} "
+        f"max_sustained_actuator_lag_s={lockstep.max_sustained_actuator_lag_s} "
+        f"physics_rate_hz={host.params.physics_hz} gps_enabled={cfg.gps_enabled} "
+        f"gps_rate_hz={cfg.gps_send_rate_hz} "
+        f"sensor_noise_enabled={cfg.sensor_noise_enabled} "
+        f"debug_log_path={host.params.debug_log_path}"
+    )
+    bridge = create_px4_bridge(
+        articulation_path=host.params.articulation_path,
+        rotor_link_paths=rotor_mapping.rotor_link_paths,
+        thrust_model=thrust_model,
+        port=port,
+        max_tilt_angle_deg=cfg.max_tilt_angle_deg,
+        rotor_spin_visual_scale=cfg.rotor_spin_visual_scale,
+        rotor_spin_signs=rotor_mapping.rot_dir,
+    )
+    try:
+        bridge = start_px4_bridge(state=bridge)
+    except Exception as exc:
+        carb.log_error(f"[{host.tag}] bridge start failed: {exc}")
+        return state
+    carb.log_info(f"[{host.tag}] PX4 bridge started")
+    return replace(state, bridge=bridge)
+
+
+def _stop_host(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
+    if state.bridge is not None:
+        from robotics_experiments.px4_bridge import stop_px4_bridge
+
+        log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)
         try:
-            with self._log_ctx(self._params.vehicle_id):
-                self._bridge.recv_and_apply()
+            with log_context(host.params.vehicle_id):
+                stop_px4_bridge(state=state.bridge)
         except Exception as exc:
-            carb.log_warn(
-                f"[{self._tag}] recv_and_apply error at tick={pending.tick} "
-                f"sim_time_us={pending.bridge_sim_time_us}: {exc}"
-            )
-        block_s = time.monotonic() - pending.block_start
-        self._max_tick_block_s = max(self._max_tick_block_s, block_s)
-        # A tick that blocks for a large fraction of the lockstep timeout is the
-        # poll waiting on this vehicle's PX4. With the two-phase pipeline that no
-        # longer starves the other vehicles' sends, but a chronically slow poll
-        # still bounds the fleet tick rate; surface the offending vehicle.
-        if block_s >= self._slow_tick_warn_s:
-            carb.log_warn(
-                f"[{self._tag}] slow bridge tick blocked for {block_s:.3f}s "
-                f"at tick={pending.tick} "
-                f"(lockstep_timeout_s={self._cfg.lockstep.lockstep_timeout_s}); "
-                f"this bounds the fleet tick rate"
-            )
-        if pending.tick == 1 or pending.tick % 250 == 0:
+            carb.log_warn(f"[{host.tag}] bridge stop raised: {exc}")
+    return replace(state, bridge=None, pending=None)
+
+
+def _send_phase(*, host: BridgeHost, state: _BridgeHostState, dt: float) -> _BridgeHostState:
+    from robotics_experiments.px4_bridge import (
+        advance_sim_clock,
+        bridge_time_us,
+        read_px4_bridge_status,
+        send_sensors,
+        sim_clock_is_settling,
+    )
+
+    clock = advance_sim_clock(
+        state=cast("SimClockState", state.clock),
+        dt=dt,
+    )
+    current = replace(state, clock=clock, pending=None)
+    if current.bridge is None:
+        if not sim_clock_is_settling(state=clock):
             carb.log_info(
-                f"[{self._tag}] physics tick={pending.tick} "
-                f"sim_time_us={pending.bridge_sim_time_us} "
-                f"connected={self._bridge.is_connected} "
-                f"tick_block_s={block_s:.4f} max_tick_block_s={self._max_tick_block_s:.4f}"
+                f"[{host.tag}] startup settle complete at tick={clock.tick_count} "
+                f"sim_time_us={clock.total_us}; starting PX4 bridge"
             )
+            return _start_bridge(host=host, state=current)
+        if clock.tick_count == 1 or clock.tick_count % 250 == 0:
+            carb.log_info(
+                f"[{host.tag}] waiting for startup settle tick={clock.tick_count} "
+                f"dt={dt:.6f} sim_time_us={clock.total_us} "
+                f"target_us={clock.settle_time_us}"
+            )
+        return current
+
+    clock, sim_time_us = bridge_time_us(state=clock)
+    current = replace(current, clock=clock)
+    bridge_state = cast("Px4BridgeState", current.bridge)
+    bridge_status = read_px4_bridge_status(state=bridge_state)
+    if (
+        not bridge_status.is_connected
+        and not current.disconnect_warned
+        and clock.tick_count >= host.first_connect_tick_budget
+    ):
+        current = replace(current, disconnect_warned=True)
+        carb.log_warn(
+            f"[{host.tag}] PX4 still not connected after tick={clock.tick_count} "
+            f"(>{host.first_connect_tick_budget}); this PX4 will stall in lockstep. "
+            f"Check that a PX4 SITL instance is reachable on {host.endpoint}."
+        )
+    block_start = time.monotonic()
+    log_context = cast(Callable[[int], AbstractContextManager[None]], current.log_context)
+    try:
+        with log_context(host.params.vehicle_id):
+            bridge = send_sensors(
+                state=bridge_state,
+                dt=dt,
+                sim_time_us=sim_time_us,
+            )
+    except Exception as exc:
+        carb.log_warn(
+            f"[{host.tag}] send_sensors error at tick={clock.tick_count} "
+            f"sim_time_us={sim_time_us}: {exc}"
+        )
+        return current
+    return replace(
+        current,
+        bridge=bridge,
+        pending=_PendingPoll(
+            tick=clock.tick_count,
+            bridge_sim_time_us=sim_time_us,
+            block_start=block_start,
+        ),
+    )
+
+
+def _recv_phase(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostState:
+    pending = state.pending
+    if pending is None or state.bridge is None:
+        return state
+    from robotics_experiments.px4_bridge import read_px4_bridge_status, recv_and_apply
+
+    current = replace(state, pending=None)
+    log_context = cast(Callable[[int], AbstractContextManager[None]], state.log_context)
+    try:
+        with log_context(host.params.vehicle_id):
+            bridge = recv_and_apply(state=state.bridge)
+        current = replace(current, bridge=bridge)
+    except Exception as exc:
+        carb.log_warn(
+            f"[{host.tag}] recv_and_apply error at tick={pending.tick} "
+            f"sim_time_us={pending.bridge_sim_time_us}: {exc}"
+        )
+    block_s = time.monotonic() - pending.block_start
+    current = replace(
+        current,
+        max_tick_block_s=max(current.max_tick_block_s, block_s),
+    )
+    if block_s >= host.slow_tick_warn_s:
+        carb.log_warn(
+            f"[{host.tag}] slow bridge tick blocked for {block_s:.3f}s "
+            f"at tick={pending.tick} "
+            f"(lockstep_timeout_s={host.params.bridge.lockstep.lockstep_timeout_s}); "
+            "this bounds the fleet tick rate"
+        )
+    if pending.tick == 1 or pending.tick % 250 == 0:
+        status = read_px4_bridge_status(state=cast("Px4BridgeState", current.bridge))
+        carb.log_info(
+            f"[{host.tag}] physics tick={pending.tick} "
+            f"sim_time_us={pending.bridge_sim_time_us} "
+            f"connected={status.is_connected} tick_block_s={block_s:.4f} "
+            f"max_tick_block_s={current.max_tick_block_s:.4f}"
+        )
+    return current
 
 
 class BridgeHostGroup:
-    """Coordinator that drives a set of :class:`BridgeHost`s in two phases.
-
-    Owns the single physics-step subscription for the whole group (one host for
-    the default single-drone config). On each PhysX step it runs every host's
-    send leg first -- sensors out to every PX4, no blocking -- then every host's
-    poll leg -- block for each actuator. The PX4 instances therefore compute
-    concurrently: a single stalled PX4 disconnects only its own vehicle instead
-    of holding the shared physics thread and freezing the rest. Per-tick latency
-    drops from the sum of the per-vehicle blocking waits to ~their max. A
-    one-host group is exactly the old send-then-poll-per-tick behavior.
-
-    Uses ``omni.physx`` and so must stay off the core import path (it lives
-    behind the lazy ``robotics_experiments.runtime`` package ``__init__``).
-    """
+    """Mutable owner of the single fleet-wide PhysX subscription."""
 
     def __init__(self, hosts: list[BridgeHost]):
-        self._hosts = list(hosts)
+        self.hosts = list(hosts)
         self._physx_sub = None
 
-    @property
-    def hosts(self) -> list[BridgeHost]:
-        return self._hosts
-
     def start(self) -> None:
-        """Start every host, then subscribe once to physics steps."""
-        for host in self._hosts:
+        for host in self.hosts:
             host.start()
         physx = omni.physx.get_physx_interface()
         self._physx_sub = physx.subscribe_physics_step_events(self._on_physics_step)
 
     def stop(self) -> None:
-        """Drop the subscription and stop every host."""
         self._physx_sub = None
-        for host in self._hosts:
+        for host in self.hosts:
             host.stop()
 
     def _on_physics_step(self, dt: float) -> None:
-        for host in self._hosts:
+        for host in self.hosts:
             host.send_phase(dt)
-        for host in self._hosts:
+        for host in self.hosts:
             host.recv_phase()

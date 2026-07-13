@@ -36,7 +36,7 @@ from Px4SitlBridge_python import (  # noqa: E402
     Px4MavlinkPort,
 )
 
-from robotics_experiments.px4_bridge import VehicleState  # noqa: E402
+from robotics_experiments.px4_bridge import VehicleState, read_bridge_status  # noqa: E402
 
 
 def main() -> int:
@@ -74,14 +74,15 @@ def main() -> int:
 
             state = VehicleState.hover_at(sim_time_us=sim_time_us)
             commands = port.exchange(state)
-            if not port.is_connected:
+            status = read_bridge_status(port=port)
+            if not status.is_connected:
                 disconnected = True
 
             now = time.time()
             if now - last_print > 1.0:
                 print(
                     f"t={sim_time_us/1e6:7.3f}s  "
-                    f"connected={port.is_connected}  armed={port.is_armed}  "
+                    f"connected={status.is_connected}  armed={status.is_armed}  "
                     f"heartbeat={getattr(port, '_first_heartbeat_received_s', None) is not None}  "
                     f"sensors={getattr(port, '_sensor_send_count', 0)}  "
                     f"actuators={getattr(port, '_actuator_receive_count', 0)}  "

@@ -28,10 +28,10 @@ class FakeCommandPort(MavlinkCommandPort):
         self.feedback_polls = 0
         # Scriptable feedback for the driver tests.
         self.feedback = []  # acks popped (FIFO) by poll_feedback
-        self.handshaked = False
-        self.failsafe_flag = False
-        self.system_status = 0
-        self.global_position = None
+        self._target_known = False
+        self._failsafe = False
+        self._failsafe_system_status = 0
+        self._latest_global_position = None
 
     def connect(self):
         self.connected = True
@@ -58,21 +58,25 @@ class FakeCommandPort(MavlinkCommandPort):
         self.feedback_polls += 1
         return self.feedback.pop(0) if self.feedback else None
 
-    @property
-    def is_handshaked(self):
-        return self.handshaked
+    def set_handshaked(self, value=True):
+        self._target_known = value
 
-    @property
-    def failsafe(self):
-        return self.failsafe_flag
+    def set_failsafe(self, *, active, system_status=0):
+        self._failsafe = active
+        self._failsafe_system_status = system_status
 
-    @property
-    def failsafe_system_status(self):
-        return self.system_status
+    def set_global_position(self, value):
+        self._latest_global_position = value
 
-    @property
-    def latest_global_position(self):
-        return self.global_position
+    def _read_status(self):
+        from robotics_experiments.commanding import CommandPortStatus
+
+        return CommandPortStatus(
+            is_handshaked=self._target_known,
+            failsafe=self._failsafe,
+            failsafe_system_status=self._failsafe_system_status,
+            latest_global_position=self._latest_global_position,
+        )
 
 
 def make_routine_observation(
@@ -125,7 +129,7 @@ def make_routine_observation(
 
 
 class FakeDriverEnvironment:
-    """A scriptable :class:`DriverEnvironment` for the per-drone RoutineDriver tests.
+    """A scriptable :class:`DriverEnvironment` for per-drone driver-state tests.
 
     The test sets :attr:`connected`, :attr:`sim_us`, and :attr:`observation`
     (the kinematic snapshot the driver reads each tick); ``read_observation``

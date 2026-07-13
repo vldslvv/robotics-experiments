@@ -95,7 +95,7 @@ def test_valid_hexa_metadata_returns_px4_order_and_rot_dir():
 
     mapping = discover_px4_rotor_mapping(stage, "/World/Drone")
 
-    assert mapping.num_rotors == 6
+    assert len(mapping.rotor_link_paths) == 6
     assert mapping.rotor_link_paths == [
         f"/World/Drone/body/propulsion/motor_{index}/prop" for index in range(6)
     ]

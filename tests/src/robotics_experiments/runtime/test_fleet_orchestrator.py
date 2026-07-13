@@ -1,4 +1,4 @@
-"""Unit tests for the host-agnostic :class:`FleetOrchestrator`.
+"""Unit tests for the host-agnostic functional fleet lifecycle.
 
 The orchestrator is the single production pipeline (open scene -> apply settings
 -> spawn fleet -> start lockstep bridge group -> build per-drone routine drivers
@@ -13,6 +13,7 @@ shuts observers, stops bridge hosts, and despawns everything.
 import importlib
 import sys
 import types
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -88,8 +89,16 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.EnvelopeGates = SimpleNamespace
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
-    fake_commanding.RoutineDriver = _FakeDriver
+    fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
+    fake_commanding.create_routine_driver = (
+        lambda *, params, port, env, label="", monotonic=None: _FakeDriver(
+            params, port, env, label=label
+        )
+    )
+    fake_commanding.read_command_port_status = lambda *, port: SimpleNamespace(failsafe=False)
+    fake_commanding.routine_driver_is_done = lambda *, state: state.is_done
+    fake_commanding.tick_routine_driver = lambda *, state: state
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
 
     for name in list(sys.modules):
@@ -182,19 +191,22 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
         _vehicle(0, "Drone", (0.0, 0.0), enabled=True),
         _vehicle(1, "Drone1", (2.0, 0.0), enabled=False),
     )
-    orch = module.FleetOrchestrator(env)
-    orch.stage = object()
+    fleet = replace(module.create_fleet(config=env), stage=object())
 
-    orch.spawn_fleet()
+    empty = fleet
+    fleet = module.spawn_fleet(state=fleet)
+    assert fleet is not empty
+    assert empty.drones == ()
 
-    assert len(orch.drones) == 2
-    assert [h.label for h in orch.bridged] == ["drone0"]
-    assert orch.drones[1].host is None and orch.drones[1].observer is None
+    bridged = [drone for drone in fleet.drones if drone.host is not None]
+    assert len(fleet.drones) == 2
+    assert [drone.label for drone in bridged] == ["drone0"]
+    assert fleet.drones[1].host is None and fleet.drones[1].observer is None
     assert rec.spawned == [("Drone", (0.0, 0.0)), ("Drone1", (2.0, 0.0))]
-    assert len(orch.bridged) == 1
+    assert len(bridged) == 1
     # The host receives the bridge config as one component plus the derived
     # identity straight from the resolved vehicle (never recomputed).
-    params = orch.bridged[0].host.params
+    params = bridged[0].host.params
     assert params.bridge is env.vehicles["drone0"].bridge
     assert params.vehicle_id == 0
     assert params.mavlink_port == 4560
@@ -206,21 +218,23 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
 def test_spawn_fleet_with_all_bridges_disabled_does_not_import_px4_bridge(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     monkeypatch.delitem(sys.modules, "robotics_experiments.px4_bridge", raising=False)
-    orch = module.FleetOrchestrator(_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=False)))
-    orch.stage = object()
+    fleet = replace(
+        module.create_fleet(config=_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=False))),
+        stage=object(),
+    )
 
-    orch.spawn_fleet()
+    fleet = module.spawn_fleet(state=fleet)
 
     assert "robotics_experiments.px4_bridge" not in sys.modules
-    assert orch.drones[0].host is None
-    assert orch.drones[0].observer is None
+    assert fleet.drones[0].host is None
+    assert fleet.drones[0].observer is None
 
 
 def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
-    orch = module.FleetOrchestrator(_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=True)))
+    fleet = module.create_fleet(config=_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=True)))
     with pytest.raises(RuntimeError):
-        orch.spawn_fleet()
+        module.spawn_fleet(state=fleet)
 
 
 def test_build_drivers_only_for_enabled_with_steps(monkeypatch):
@@ -230,40 +244,40 @@ def test_build_drivers_only_for_enabled_with_steps(monkeypatch):
         _vehicle(1, "D1", (2.0, 0.0), enabled=True),  # manual (no steps)
         _vehicle(2, "D2", (4.0, 0.0), enabled=False, steps=[{"kind": "arm"}]),  # no bridge -> skip
     )
-    orch = module.FleetOrchestrator(env)
-    orch.stage = object()
-    orch.spawn_fleet()
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
 
-    orch.build_drivers(lambda spawned, port: object())
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
 
-    assert [f.spawned.label for f in orch.flying] == ["drone0"]
-    assert orch.flying[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
+    assert [f.spawned.label for f in fleet.flying] == ["drone0"]
+    assert fleet.flying[0].port.gcs_endpoint == "udp:127.0.0.1:14550"
     # The manual drone (no steps) and the disabled one (no bridge) fly nothing.
-    assert len(orch.flying) == 1
+    assert len(fleet.flying) == 1
 
 
 def test_all_done_reflects_flying_drivers(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     env = _env(_vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]))
-    orch = module.FleetOrchestrator(env)
-    orch.stage = object()
-    orch.spawn_fleet()
-    orch.build_drivers(lambda spawned, port: object())
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
 
-    assert orch.all_done is False
-    orch.flying[0].driver.is_done = True
-    assert orch.all_done is True
+    assert module.fleet_is_done(state=fleet) is False
+    fleet.flying[0].driver.is_done = True
+    assert module.fleet_is_done(state=fleet) is True
 
 
 def test_all_done_true_when_no_drone_flies(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
-    orch = module.FleetOrchestrator(_env(_vehicle(0, "D0", (0.0, 0.0), enabled=True)))
-    orch.stage = object()
-    orch.spawn_fleet()
-    orch.build_drivers(lambda spawned, port: object())
+    fleet = replace(
+        module.create_fleet(config=_env(_vehicle(0, "D0", (0.0, 0.0), enabled=True))),
+        stage=object(),
+    )
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
 
-    assert orch.flying == []
-    assert orch.all_done is True
+    assert fleet.flying == ()
+    assert module.fleet_is_done(state=fleet) is True
 
 
 def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
@@ -272,19 +286,18 @@ def test_teardown_stops_group_disconnects_and_despawns(monkeypatch):
         _vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]),
         _vehicle(1, "D1", (2.0, 0.0), enabled=False),
     )
-    orch = module.FleetOrchestrator(env)
-    orch.stage = object()
-    orch.spawn_fleet()
-    orch.build_drivers(lambda spawned, port: object())
-    port = orch.flying[0].port
-    observer = orch.drones[0].observer
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
+    port = fleet.flying[0].port
+    observer = fleet.drones[0].observer
 
-    orch.teardown()
+    fleet = module.teardown(state=fleet)
 
     assert port.disconnected is True
     assert observer.shut is True
     assert sorted(rec.despawned) == ["D0", "D1"]
-    assert orch.drones == []
+    assert fleet.drones == ()
 
 
 def test_apply_settings_uses_simulation_api(monkeypatch):
@@ -294,10 +307,9 @@ def test_apply_settings_uses_simulation_api(monkeypatch):
     fake_sim.apply_settings = lambda stage, settings: applied.append((stage, settings))
     monkeypatch.setitem(sys.modules, "robotics_experiments.simulation", fake_sim)
     env = _env()
-    orch = module.FleetOrchestrator(env)
     stage = object()
-    orch.stage = stage
+    fleet = replace(module.create_fleet(config=env), stage=stage)
 
-    orch.apply_settings()
+    fleet = module.apply_settings(state=fleet)
 
     assert applied == [(stage, env.sim)]

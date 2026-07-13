@@ -52,7 +52,10 @@ from robotics_experiments.commanding.driver import (
     DriverEnvironment,
     DriverParams,
     DriverPhase,
-    RoutineDriver,
+    RoutineDriverState,
+    create_routine_driver,
+    routine_driver_is_done,
+    tick_routine_driver,
 )
 from robotics_experiments.commanding.observation import (
     MAV_RESULT_ACCEPTED,
@@ -60,11 +63,16 @@ from robotics_experiments.commanding.observation import (
     CommandAck,
     RoutineObservation,
 )
-from robotics_experiments.commanding.port import MavlinkCommandPort
+from robotics_experiments.commanding.port import (
+    CommandPortStatus,
+    MavlinkCommandPort,
+    read_command_port_status,
+)
 
 __all__ = [
     "AttitudeRateSetpoint",
     "CommandAck",
+    "CommandPortStatus",
     "DecisionKind",
     "DriverEnvironment",
     "DriverParams",
@@ -84,7 +92,7 @@ __all__ = [
     "PolicyStepFn",
     "PositionSetpoint",
     "RoutineDecision",
-    "RoutineDriver",
+    "RoutineDriverState",
     "RoutineObservation",
     "RoutineState",
     "RoutineStep",
@@ -96,6 +104,7 @@ __all__ = [
     "armed",
     "build_vehicle_routine",
     "climbed_at_least",
+    "create_routine_driver",
     "cross_track_drift_below",
     "cross_track_to_segment_below",
     "decide",
@@ -106,7 +115,10 @@ __all__ = [
     "moved_forward_at_least",
     "reached_world_position",
     "reposition",
+    "read_command_port_status",
+    "routine_driver_is_done",
     "set_offboard_mode",
     "takeoff",
     "tilt_below",
+    "tick_routine_driver",
 ]

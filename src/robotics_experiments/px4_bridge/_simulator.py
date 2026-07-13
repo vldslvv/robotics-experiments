@@ -11,8 +11,7 @@ __all__: list[str] = []
 
 
 class _ArticulationIO(Protocol):
-    @property
-    def is_initialized(self) -> bool: ...
+    initialized: bool
 
     def initialize(self) -> None: ...
 

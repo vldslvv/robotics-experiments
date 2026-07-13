@@ -2,8 +2,8 @@
 
 Per the contract, this extension does not own the scene, the drone, or the
 physics callback. The fleet runtime
-(``robotics_experiments.runtime.FleetOrchestrator``, via a ``BridgeHost``)
-constructs the ``Px4Bridge`` and ticks it. This shell exists only so Kit imports
+(``robotics_experiments.runtime.FleetState``, via a ``BridgeHost``)
+creates ``Px4BridgeState`` and advances it. This shell exists only so Kit imports
 the package and the public API in ``__init__.py`` is available to consumers; it
 announces its own load/unload for parity with the other extensions but performs
 no flight or scene work.

@@ -1,104 +1,64 @@
-"""Sim-time clock for the PX4 bridge.
-
-The bridge-facing ``sim_time_us`` is the most fragile invariant in the bridge:
-it must be monotonic, expressed in integer microseconds, and derived from sim
-time rather than wall clock (PX4 advances its own clock from
-``HIL_SENSOR.time_usec``). It is also the value the MAVLink port pins its sensor
-cadence to. Historically the counter, the settle offset, and the integer-tick
-derivation lived as loose arithmetic in two places. This module owns all three
-so the invariant is defined and enforced once.
-
-Pure Python with no Isaac/MAVLink/Pegasus dependency, so it is importable and
-unit-testable without a simulator.
-"""
+"""Frozen simulation-clock state and pure transitions."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from typing import Optional
 
-__all__ = ["SimClock"]
+__all__ = [
+    "SimClockState",
+    "advance_sim_clock",
+    "bridge_time_us",
+    "create_sim_clock",
+    "sim_clock_is_settling",
+]
 
 
 def _physics_tick_us(physics_hz: float) -> int:
-    """Return the integer-microsecond physics tick for a physics rate.
-
-    This is the single source of the integer tick. Deriving the sensor rate as
-    ``1e6 / tick_us`` (rather than trusting ``1 / physics_hz``) keeps the
-    per-tick dt computed from integer-microsecond sim-time deltas exactly equal
-    to the sensor period, which the MAVLink port relies on (see ``mavlink.py``).
-    """
     if physics_hz <= 0:
         raise ValueError(f"physics_hz must be positive, got {physics_hz}")
     return int(round(1_000_000 / float(physics_hz)))
 
 
-class SimClock:
-    """Accumulates sim time in integer microseconds and guards monotonicity.
+@dataclass(frozen=True)
+class SimClockState:
+    """Immutable integer-microsecond clock progress for one bridge session."""
 
-    One instance is created per bridge session by the scene-owning host. Each
-    physics step calls :meth:`advance`; the host reads :meth:`is_settling` to
-    decide whether the optional startup settle delay has elapsed, then takes
-    :meth:`bridge_time_us` as the bridge-facing timestamp.
-    """
+    tick_us: int
+    settle_time_us: int
+    total_us: int = 0
+    tick_count: int = 0
+    last_bridge_us: Optional[int] = None
 
-    def __init__(self, *, physics_hz: float, settle_time_s: float = 0.0):
-        """Build the clock.
 
-        Args:
-            physics_hz: Isaac physics cadence; sets :attr:`tick_us`.
-            settle_time_s: Sim-time delay before the bridge-facing clock starts.
-                The bridge-facing time is the total accumulated time minus this
-                offset, so it is near zero on the first post-settle tick.
-        """
-        self._tick_us = _physics_tick_us(physics_hz)
-        self._settle_time_us = int(round(max(0.0, settle_time_s) * 1_000_000))
-        self._total_us = 0
-        self._tick_count = 0
-        self._last_bridge_us: Optional[int] = None
+def create_sim_clock(*, physics_hz: float, settle_time_s: float = 0.0) -> SimClockState:
+    """Create a clock at time zero."""
+    return SimClockState(
+        tick_us=_physics_tick_us(physics_hz),
+        settle_time_us=int(round(max(0.0, settle_time_s) * 1_000_000)),
+    )
 
-    @property
-    def tick_us(self) -> int:
-        """Canonical integer-microsecond physics tick."""
-        return self._tick_us
 
-    @property
-    def tick_count(self) -> int:
-        """Number of physics steps advanced so far."""
-        return self._tick_count
+def advance_sim_clock(*, state: SimClockState, dt: float) -> SimClockState:
+    """Return the state after one physics step."""
+    return replace(
+        state,
+        total_us=state.total_us + int(round(dt * 1_000_000)),
+        tick_count=state.tick_count + 1,
+    )
 
-    @property
-    def total_us(self) -> int:
-        """Total accumulated sim time since construction, in microseconds."""
-        return self._total_us
 
-    @property
-    def settle_time_us(self) -> int:
-        """Configured startup settle offset, in microseconds."""
-        return self._settle_time_us
+def sim_clock_is_settling(*, state: SimClockState) -> bool:
+    """Return whether accumulated time remains inside the settle window."""
+    return state.total_us < state.settle_time_us
 
-    @property
-    def is_settling(self) -> bool:
-        """True while the accumulated time is still inside the settle window."""
-        return self._total_us < self._settle_time_us
 
-    def advance(self, dt: float) -> int:
-        """Advance by one physics step of ``dt`` seconds; return total sim time."""
-        self._total_us += int(round(dt * 1_000_000))
-        self._tick_count += 1
-        return self._total_us
-
-    def bridge_time_us(self) -> int:
-        """Return the bridge-facing timestamp (total minus the settle offset).
-
-        Asserts the value never goes backwards, catching a time-base regression
-        at the source instead of relying on a defensive check downstream in the
-        MAVLink port.
-        """
-        bridge_us = self._total_us - self._settle_time_us
-        if self._last_bridge_us is not None and bridge_us < self._last_bridge_us:
-            raise AssertionError(
-                f"SimClock bridge time went backwards: current={bridge_us} "
-                f"last={self._last_bridge_us}"
-            )
-        self._last_bridge_us = bridge_us
-        return bridge_us
+def bridge_time_us(*, state: SimClockState) -> tuple[SimClockState, int]:
+    """Return a state recording and the current bridge-facing timestamp."""
+    current = state.total_us - state.settle_time_us
+    if state.last_bridge_us is not None and current < state.last_bridge_us:
+        raise AssertionError(
+            f"SimClockState bridge time went backwards: current={current} "
+            f"last={state.last_bridge_us}"
+        )
+    return replace(state, last_bridge_us=current), current

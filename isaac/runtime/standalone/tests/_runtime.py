@@ -69,7 +69,7 @@ class SceneTestContext:
 
     ``stage``/``scene_path`` are populated for the default harness-managed-stage
     tests. When ``run_scene_test`` is called with ``manage_stage=False`` (the
-    fleet scenario, where the ``FleetOrchestrator`` owns scene-open), they are
+    fleet scenario, where the fleet lifecycle owns scene-open), they are
     ``None`` and ``scene_override`` carries the requested ``--scene`` (``None``
     means "use the experiment ``scene`` config").
     """
@@ -107,10 +107,12 @@ class TimingReporter:
         )
 
     @contextmanager
-    def timed_stage(self, stage: str, sim_clock: object | None = None) -> Iterator[None]:
+    def timed_stage(
+        self, stage: str, sim_time_us: Callable[[], int] | None = None
+    ) -> Iterator[None]:
         """Report one timed stage, optionally including simulated elapsed time."""
         start_s = time.monotonic()
-        start_us = int(getattr(sim_clock, "sim_time_us", 0)) if sim_clock is not None else None
+        start_us = int(sim_time_us()) if sim_time_us is not None else None
         status = "ok"
         try:
             yield
@@ -128,7 +130,7 @@ class TimingReporter:
                 f"status={status}",
             ]
             if start_us is not None:
-                end_us = int(getattr(sim_clock, "sim_time_us", 0))
+                end_us = int(sim_time_us())
                 parts.append(f"sim_elapsed_s={(end_us - start_us) * 1e-6:.3f}")
             self._emit(" ".join(parts))
 
@@ -211,7 +213,7 @@ def run_scene_test(
             sentinel), the scene is read from the Hydra ``scene`` config.
         manage_stage: When ``True`` (default) the harness resolves and opens the
             stage and passes it on the context (the non-fleet scene tests). When
-            ``False`` the fleet scenario's :class:`FleetOrchestrator` owns
+            ``False`` the fleet scenario's functional runtime owns
             scene-open: the harness only starts the ``SimulationApp`` and passes
             the requested ``--scene`` as
             ``context.scene_override`` (``None`` => use the experiment config).

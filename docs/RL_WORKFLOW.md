@@ -75,7 +75,7 @@ setpoint seams).
 ## Task->policy pipeline (F2b)
 
 The pipeline is `task YAML -> make train-rl -> policy artifact ->
-{kind: policy} routine step -> FleetOrchestrator` (the orchestrator itself is
+{kind: policy} routine step -> FleetState lifecycle` (the runtime itself is
 unchanged apart from injecting the artifact-loader factory into
 `DriverParams`). Pieces:
 

@@ -9,6 +9,7 @@ import pytest
 from robotics_experiments.px4_bridge import (
     RootBodyPoseDiagnosticParams,
     compute_root_body_pose_diagnostics,
+    root_body_pose_has_mismatch,
     validate_root_body_pose,
 )
 
@@ -92,7 +93,7 @@ def test_coincident_root_body_has_identity_relative_pose():
 
     diagnostics = compute_root_body_pose_diagnostics(stage, "/World/Drone", "/World/Drone/body")
 
-    assert not diagnostics.has_mismatch
+    assert not root_body_pose_has_mismatch(diagnostics=diagnostics)
     np.testing.assert_allclose(diagnostics.body_relative_to_root_pose[0], [0.0, 0.0, 0.0])
     np.testing.assert_allclose(diagnostics.body_relative_to_root_pose[1], [1.0, 0.0, 0.0, 0.0])
 
@@ -107,7 +108,7 @@ def test_translated_body_reports_translation_delta():
 
     diagnostics = compute_root_body_pose_diagnostics(stage, "/World/Drone", "/World/Drone/body")
 
-    assert diagnostics.has_mismatch
+    assert root_body_pose_has_mismatch(diagnostics=diagnostics)
     assert diagnostics.translation_delta_m == pytest.approx(0.25)
     np.testing.assert_allclose(diagnostics.body_relative_to_root_pose[0], [0.0, 0.0, 0.25])
 
@@ -126,7 +127,7 @@ def test_rotated_body_reports_angular_delta():
 
     diagnostics = compute_root_body_pose_diagnostics(stage, "/World/Drone", "/World/Drone/body")
 
-    assert diagnostics.has_mismatch
+    assert root_body_pose_has_mismatch(diagnostics=diagnostics)
     assert diagnostics.orientation_delta_rad == pytest.approx(angle)
     np.testing.assert_allclose(
         diagnostics.body_relative_to_root_pose[1],
@@ -147,7 +148,7 @@ def test_warn_policy_logs_warning_and_does_not_raise(caplog):
             logger=logging.getLogger("px4-diagnostics-test"),
         )
 
-    assert diagnostics is not None and diagnostics.has_mismatch
+    assert diagnostics is not None and root_body_pose_has_mismatch(diagnostics=diagnostics)
     assert "PX4 root/body pose diagnostic" in caplog.text
     assert "PX4 root/body pose mismatch" in caplog.text
     assert "articulation=/World/Drone" in caplog.text

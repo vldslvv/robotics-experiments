@@ -43,7 +43,8 @@ def _run_test(context: SceneTestContext) -> None:
         raise AssertionError(f"Configured PX4 rotor paths are invalid: {missing}")
 
     context.report(
-        f"{TEST_NAME}: verified articulation and {rotor_mapping.num_rotors} discovered rotors"
+        f"{TEST_NAME}: verified articulation and "
+        f"{len(rotor_mapping.rotor_link_paths)} discovered rotors"
     )
 
 

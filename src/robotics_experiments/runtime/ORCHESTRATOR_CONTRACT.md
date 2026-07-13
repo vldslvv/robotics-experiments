@@ -1,225 +1,77 @@
-# Fleet Runtime Orchestrator -- Interface Contract
+# Fleet runtime contract
 
-## Purpose
+`robotics_experiments.runtime` is the single composition layer above config,
+drone spawning, simulation settings, the PX4 bridge, and commanding. It uses a
+functional core with small Isaac/MAVLink resource boundaries.
 
-This document specifies the contract of
-`robotics_experiments.runtime.FleetOrchestrator`, the single host-agnostic
-pipeline that composes a runnable experiment from its parts. The public runtime
-contract is exported from `robotics_experiments.runtime`; submodules are internal
-implementation layout. It is the top of the
-runtime layering and the place where every high-level component is wired together:
+## State and resource boundary
 
-```
-config  ->  (drone / simulation / px4_bridge / commanding)  ->  FleetOrchestrator  ->  thin per-host shell
-```
+- `FleetState`, `SpawnedDrone`, and `FlyingDrone` are frozen values. Lifecycle
+  functions return successor state; callers must explicitly rebind it.
+- `RoutineDriverState`, `Px4BridgeState`, and `SimClockState` follow the same
+  rule in their owning packages.
+- `BridgeHost` and `BridgeHostGroup` remain mutable only because PhysX callback
+  return values are ignored and Kit subscriptions are lifetime-managed handles.
+  Each host retains one latest frozen bridge-host state and replaces it after a
+  callback transition.
+- MAVLink sockets and Isaac articulation handles remain mutable adapters.
+  Consumers read them through `read_command_port_status`, `read_bridge_status`,
+  `read_articulation_io_status`, or `read_bridge_host_status`; runtime code does
+  not use state-reading properties.
 
-The orchestrator turns the resolved experiment config into a live, ticking fleet
-through a fixed sequence of discrete phases. A thin per-host **shell** drives those
-phases and supplies only what genuinely differs between hosts: the tick source and
-the failure reaction. There are two shells today:
+## Ordered lifecycle
 
-- **Live** -- the `experiment_runtime` Kit extension
-  (`isaac/runtime/extensions/experiment_runtime/`), the path for `make run-all` /
-  `make run-isaac`.
-- **Standalone** -- the scenario runner
-  (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`), which the
-  integration tests drive under `--strict`.
+The two shells drive the same sequence:
 
-This contract is the analogue, one layer up, of the two it composes: the PX4
-bridge contract
-(`isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`) and the
-command/routine contract (`docs/COMMAND_ROUTINE_CONTRACT.md`). Read those for the
-per-vehicle bridge tick and the per-drone routine machine; read this for how a
-whole experiment is assembled and driven.
+1. `create_fleet(config=...)`
+2. `open_scene(state=...)`
+3. after stage load, `adopt_current_stage(state=...)`
+4. `apply_settings(state=...)`
+5. on Play, `spawn_fleet(state=...)`
+6. `start_bridges(state=...)`
+7. `build_drivers(state=..., make_env=...)`
+8. repeatedly `tick_drivers(state=...)` until `fleet_is_done(state=...)`
+9. `teardown(state=...)`
 
-## Invariants (MUST)
+Teardown stops the bridge group first, disconnects command ports, shuts down
+observers, and only then despawns vehicles. This order is load-bearing.
 
-The load-bearing rules. Breaking any of them re-introduces the kitchen-sink
-layering this design removed.
+`open_scene` requests an asynchronous stage open and leaves state unchanged.
+`adopt_current_stage` binds the completed stage. `spawn_fleet` rejects a missing
+stage. An empty vehicle mapping and an empty bridge group are valid.
 
-- **One orchestrator, thin shells.** The runtime composition (open scene -> apply
-  settings -> spawn fleet -> start the lockstep bridge group -> build per-drone
-  routine drivers -> teardown) lives only in `FleetOrchestrator`. A shell wires
-  events/loop and reaction; it owns no flight, scene, spawn, or bridge logic.
-- **Host-agnostic core.** The orchestrator holds no `SimulationApp`, Kit,
-  timeline, or event-subscription state. It cannot import a host loop. The shell
-  owns the SimApp/Kit lifecycle and the tick source.
-- **Production logic only.** Integration-test-only checks (ground-settle wait,
-  bridge first-heartbeat wait, the pre-arm start-tilt check, the bridge-log scan)
-  live in the standalone shell and read the per-drone `SpawnedDrone` /
-  flying-driver states. They do not enter the orchestrator. Verification that is part of *flight* (a real
-  climb, a sustained stable hover, the continuous envelope gates) belongs to the
-  routine/driver, not here.
-- **Scene + settings are orchestrator-owned, uniformly.** `open_scene` /
-  `adopt_current_stage` / `apply_settings` are the single source of truth for the
-  stage and sim settings in the runtime workflow. The live boot does not use Kit's
-  `--exec open_stage.py`, and there is no separate settings extension.
-- **A disabled PX4 builds no bridge.** `spawn_fleet` constructs a `BridgeHost` and
-  observer only for `bridge.enabled` vehicles (mirrors the bridge contract). Disabled
-  vehicles are spawned but carry no `host`/`observer`.
-- **Per-drone state is staged and immutable.** Each phase produces frozen state
-  objects and a later phase composes the earlier one's output instead of mutating
-  it: `spawn_fleet` -> `SpawnedDrone` (vehicle, label, resolved articulation path,
-  optional host/observer), `build_drivers` -> a private flying-driver state
-  (composes its `SpawnedDrone` with the port and driver). Config components arrive separated: a
-  `BridgeHost` is constructed from a frozen `BridgeHostParams` (the vehicle's
-  `px4` config composed with the derived identity/endpoint/path), constructed
-  directly by `spawn_fleet` -- never from the whole `VehicleConfig`.
-- **A driver is built only for a flying drone.** `build_drivers` builds a
-  `MavlinkCommandPort` + `RoutineDriver` only where the resolved `routine.steps`
-  is non-empty *and* the vehicle is `bridge.enabled`. A routine on a disabled vehicle
-  is left manual with a warning.
-- **Control tick is separate from the bridge legs.** The drivers are ticked from
-  the shell's own control tick (a Kit app-update subscription live; the blocking
-  loop standalone), never from the bridge's physics-step send/recv legs (the same
-  rule the command/routine contract states from the other side).
-- **Reaction lives in `make_env`, not the orchestrator.** Strict (raise) vs
-  forgiving (log and idle) is entirely the injected `make_env`'s `on_failure`. The
-  orchestrator never branches on it.
-- **Spawn is gated on PLAY (live).** The live shell opens the scene after Kit
-  reports the app is ready and applies settings on the stage `OPENED` event, but
-  spawns the fleet only on timeline PLAY, so the persisted stage is not mutated
-  with drones until the user presses Play.
-- **Isaac-coupled leaf, off the core import path.** `orchestrator.py` and
-  `bridge_host.py` import `carb`/`omni` at module scope; the `runtime` package
-  `__init__` is lazy so `import robotics_experiments.runtime` succeeds with Isaac
-  absent. `tests/test_core_imports.py` is the regression guard.
+## Per-vehicle composition
 
-## Scope and non-scope
+`spawn_fleet` iterates `ExperimentConfig.vehicles` in authored order. Every
+vehicle is spawned. A bridge-enabled vehicle also receives one `BridgeHost` and
+one state-only `IsaacArticulationIO` observer sharing the same resolved
+articulation path. A non-empty routine receives one GCS `MavlinkCommandPort` and
+one frozen driver state; a routine on a PX4-disabled vehicle is warned and left
+manual.
 
-The orchestrator's one responsibility is to assemble and tear down the runtime
-pipeline for a resolved experiment config, exposing per-drone handles and progress
-so a shell can drive it.
+The one `BridgeHostGroup` owns the PhysX subscription. Each tick runs every
+host's sensor-send leg before any actuator-poll leg. This ordering preserves
+multi-vehicle isolation and bounds lockstep latency by the slowest PX4 rather
+than serially starving later sends.
 
-The orchestrator does NOT:
+## Shell responsibilities
 
-- Own the `SimulationApp` / Kit app / timeline lifecycle (the shell does).
-- Decide when to tick, or own the tick loop/subscription (the shell does).
-- Choose the strict-vs-forgiving failure reaction (the injected `make_env` does).
-- Run any integration-test-only check (the standalone shell does).
-- Implement the per-vehicle bridge tick (the `Px4Bridge` / `BridgeHost` do) or the
-  per-drone routine machine (the `RoutineDriver` does).
-- Apply MAVLink, thrust math, or USD authoring directly (it calls `spawn_drone`,
-  `BridgeHost`, `MavlinkCommandPort`, `apply_settings`).
+The live `experiment_runtime` extension owns Kit stage/timeline/update event
+wiring and forgiving per-driver error logging. The standalone runner owns the
+blocking `SimulationApp.update()` loop, strict-versus-forgiving failure
+reaction, and integration-only checks such as ground settling, first-heartbeat
+waiting, pre-arm tilt, fault injection, and bridge-log validation.
 
-## The pipeline
+Neither shell owns scene, flight, bridge, or routine logic. Timing helpers take
+a sim-time callable so they do not depend on resource properties.
 
-`FleetOrchestrator(env)` then, in order:
+## Failure contract
 
-| Phase | Method | Does |
-|-------|--------|------|
-| Open scene | `open_scene(scene_override=None)` | Resolve the scene (`env.scene`, or an override; `@` = repo-relative) and fire the USD `open_stage`. |
-| Adopt stage | `adopt_current_stage()` | Bind `self.stage` once the stage has finished loading (after a pump in standalone, or on the `OPENED` event live). |
-| Apply settings | `apply_settings()` | `simulation.apply_settings(stage, env.sim)`. |
-| Spawn fleet | `spawn_fleet()` | `spawn_drone` per vehicle into a frozen `SpawnedDrone`; a `BridgeHost` (from a frozen `BridgeHostParams`) + state-only `IsaacArticulationIO` observer per `bridge.enabled` vehicle; build the one `BridgeHostGroup`. |
-| Start bridges | `start_bridges()` | `group.start()` (its hosts + the single physics-step subscription). |
-| Build drivers | `build_drivers(make_env)` | Per flying drone: a `MavlinkCommandPort` and a `RoutineDriver` wired through `make_env(spawned, port)`, composed into a frozen private flying-driver state. |
-| (tick) | -- | The shell ticks `orchestrator.flying[i].driver.tick()` from its own tick source until `orchestrator.all_done`. |
-| Teardown | `teardown()` | `group.stop()`, disconnect ports, shut down observers, despawn every vehicle. |
+Invalid lifecycle order or configuration raises. Recoverable runtime bridge
+errors are logged by `BridgeHost` without taking down other vehicles. Driver
+failure reaction is injected through `FleetDriverEnv`: strict environments
+raise, while forgiving environments log and leave manual control available.
 
-Read-only views the shells use: `drones` (all `SpawnedDrone`s), `bridged`
-(spawned states with a host), `flying` (the private flying-driver states),
-`all_done` (every flying driver done; vacuously true when none).
-
-The per-vehicle seams the shells read are the staged frozen states:
-`SpawnedDrone` (`vehicle, label, articulation_path, host?, observer?`; the `?`
-fields exist only for `bridge.enabled` vehicles). The private flying-driver state
-(`spawned, port, driver`) is built only for flying drones, so its `spawned`
-always carries a host and observer.
-
-## The injected reaction seam: `make_env`
-
-`build_drivers` takes
-`make_env: (SpawnedDrone, MavlinkCommandPort) -> DriverEnvironment`. The
-orchestrator ships one generic implementation, `FleetDriverEnv`, that provides the
-production reads every host shares (`is_bridge_connected` / `sim_time_us` /
-`read_observation` over the spawned state's `host` + `observer` and the port) and
-forwards three injected callables:
-
-- `log(message)` -- where routine progress goes (`carb` live, the runner's
-  `report` standalone).
-- `on_failure(kind, message)` -- the reaction. Forgiving: log and let the driver
-  idle. Strict: raise (`ExpectedInstabilityDetected` for `FailureKind.ENVELOPE`,
-  `Px4FailsafeDetected` for a `"failsafe"`, `AssertionError` otherwise).
-- `on_step_advanced(step_label)` -- a per-step hook (the negative test's
-  post-takeoff fault injection wires here on the first drone).
-
-A shell builds its `make_env` as a closure over these three; nothing else differs
-between strict and forgiving runs.
-
-## The two shells
-
-**Live (`experiment_runtime` Kit extension).** `on_startup` builds the
-orchestrator and subscribes to Kit events. An app-update callback waits until
-`IApp.is_app_ready()` and then calls `open_scene` once; on the `OPENED` event it
-`adopt_current_stage` + `apply_settings`. On timeline PLAY it `spawn_fleet` +
-`start_bridges` + (if any drone flies) `build_drivers` with a **forgiving**
-`make_env`, then ticks every flying driver from one Kit app-update subscription
-(guarded per driver so one bug neither stops the others nor spams Kit).
-STOP/PAUSE and `on_shutdown` drop the tick and `teardown`.
-
-**Standalone (`_px4_takeoff_scenario.py`).** A blocking runner that calls the same
-phases in sequence, interleaving the integration-test-only checks between them,
-builds a **strict-or-forgiving** `make_env`, and ticks the flying drivers raw
-(unguarded, so a strict exception propagates and fails the test) in
-`while not orchestrator.all_done: simulation_app.update(); for d: d.tick()`, then
-runs the strict bridge-log scan. `--strict` selects the strict reaction.
-
-## Lifecycle (ASCII)
-
-```
-[Shell resolves config path, then builds FleetOrchestrator(load_config(path))]
-        |
-        v
-live app update / standalone sequence
-        |
-        v
-open_scene() --> (host pumps / OPENED) --> adopt_current_stage() --> apply_settings()
-        |
-        v
-[Play (live) | next in sequence (standalone)]
-        |
-        v
-spawn_fleet() --> start_bridges()
-        |
-        v
-build_drivers(make_env)     # only when a drone flies
-        |
-        v
-[shell control tick]  for f in flying: f.driver.tick()
-        |   (live: Kit app-update sub, guarded; standalone: blocking loop, raw)
-        v
-[Stop / done / shutdown]  teardown()
-```
-
-## Adding a new high-level component
-
-This is the rule the layering exists to enforce: **a new high-level runtime
-component is planned and integrated in the context of this orchestrator, not bolted
-onto an extension.** Concretely:
-
-1. Decide where it sits in the phase order and what it owns for its full lifecycle
-   (construction in a phase, teardown in `teardown`). If it is per-drone state, add
-   a field to the frozen state of the phase that constructs it (`SpawnedDrone` /
-   the private flying-driver state), or introduce a new frozen stage state that composes the previous
-   one -- do not mutate an earlier stage's state; if it is fleet-wide, hold it on
-   the orchestrator. If it needs config plus derived values, compose them into a
-   frozen params object constructed at the phase that owns them (the
-   `BridgeHostParams` pattern) -- without a separate builder function unless the
-   construction carries real logic.
-2. Express it as an orchestrator phase (or an extension of an existing one), not as
-   new lifecycle logic in a shell. The shells stay thin: they only drive phases,
-   choose the tick source, and inject the reaction.
-3. Keep host-specific concerns (SimApp/Kit/timeline, the tick source, the reaction)
-   on the shell side through a seam (a `make_env`-style injected callable or a
-   handle field), so both shells reuse the component unchanged.
-4. Separate production from test-only: production composition goes in the
-   orchestrator; checks that only an integration test needs stay in the standalone
-   shell and read the handles.
-5. Preserve the import-isolation rule: anything Isaac-coupled stays in
-   `runtime/` behind the lazy package `__init__`, and `tests/test_core_imports.py`
-   must still pass.
-
-If a proposed component cannot be expressed as an orchestrator phase + handle field
-driven by the thin shells, that is a signal the design is putting composition in
-the wrong layer -- revisit it before implementing.
+The runtime modules are Isaac-only lazy leaves. `robotics_experiments.runtime`
+must remain importable without Isaac; importing a lazy runtime symbol may load
+the Isaac dependencies.

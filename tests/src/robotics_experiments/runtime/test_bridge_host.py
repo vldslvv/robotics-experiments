@@ -80,63 +80,66 @@ def _install_fake_isaac(monkeypatch):
 
 
 def _install_fake_px4_bridge(monkeypatch, calls):
-    # SimClock is pure Python with no Isaac deps and the host's sim-time
+    # SimClockState transitions are pure Python with no Isaac deps and the host's sim-time
     # behavior is exercised here, so the fake reuses the real implementation.
     # Import it before the module is replaced in sys.modules below.
-    from robotics_experiments.px4_bridge import SimClock, vehicle_log_context
+    from robotics_experiments.px4_bridge import (
+        advance_sim_clock,
+        bridge_time_us,
+        create_sim_clock,
+        sim_clock_is_settling,
+        vehicle_log_context,
+    )
 
     fake_px4_bridge = types.ModuleType("robotics_experiments.px4_bridge")
     fake_px4_bridge.__path__ = []
 
     class Px4MavlinkPort:
         def __init__(self, **kwargs):
+            self.debug_log_path = kwargs["debug_log_path"]
             calls.append(("port", kwargs))
 
     class PegasusQuadraticThrustModel:
         def __init__(self, **kwargs):
             calls.append(("thrust", kwargs))
 
-    class Px4Bridge:
-        # The host's observable behavior is exposed through its own public
-        # properties (is_running / is_connected / status / sim_time_us), so the
-        # fake bridge exposes the state those read and does NOT record send/recv
-        # interactions. Only the construction kwargs are recorded, for the
-        # config-to-bridge wiring-contract tests.
-        def __init__(
-            self,
-            *,
-            articulation_path,
-            rotor_link_paths,
-            thrust_model,
-            port,
-            max_tilt_angle_deg=180.0,
-            rotor_spin_visual_scale=0.03,
-            rotor_spin_signs=None,
-        ):
-            self.is_connected = True
-            self.status = SimpleNamespace(connected=True)
-            calls.append(
-                (
-                    "bridge",
-                    articulation_path,
-                    rotor_link_paths,
-                    max_tilt_angle_deg,
-                    rotor_spin_visual_scale,
-                    rotor_spin_signs,
-                )
+    def create_px4_bridge(
+        *,
+        articulation_path,
+        rotor_link_paths,
+        thrust_model,
+        port,
+        max_tilt_angle_deg=180.0,
+        rotor_spin_visual_scale=0.03,
+        rotor_spin_signs=None,
+    ):
+        calls.append(
+            (
+                "bridge",
+                articulation_path,
+                rotor_link_paths,
+                max_tilt_angle_deg,
+                rotor_spin_visual_scale,
+                rotor_spin_signs,
             )
+        )
+        return SimpleNamespace(connected=True, port=port, thrust_model=thrust_model)
 
-        def start(self):
-            pass
+    def read_px4_bridge_status(*, state):
+        return SimpleNamespace(is_connected=state.connected, is_armed=False)
 
-        def stop(self):
-            pass
+    def start_px4_bridge(*, state):
+        return state
 
-        def send_sensors(self, dt, sim_time_us):
-            pass
+    def stop_px4_bridge(*, state):
+        state.connected = False
+        return state
 
-        def recv_and_apply(self):
-            pass
+    def send_sensors(*, state, dt, sim_time_us):
+        return state
+
+    def recv_and_apply(*, state):
+        return state
 
     def discover_px4_rotor_mapping(stage, articulation_path):
         calls.append(("discover", stage, articulation_path))
@@ -146,7 +149,6 @@ def _install_fake_px4_bridge(monkeypatch, calls):
                 "/World/Drone/body/propulsion/motor_2/prop",
             ],
             rot_dir=[-1.0, 1.0],
-            num_rotors=2,
         )
 
     class LockstepSettings:
@@ -155,10 +157,18 @@ def _install_fake_px4_bridge(monkeypatch, calls):
 
     fake_px4_bridge.LockstepSettings = LockstepSettings
     fake_px4_bridge.PegasusQuadraticThrustModel = PegasusQuadraticThrustModel
-    fake_px4_bridge.Px4Bridge = Px4Bridge
     fake_px4_bridge.Px4MavlinkPort = Px4MavlinkPort
-    fake_px4_bridge.SimClock = SimClock
+    fake_px4_bridge.advance_sim_clock = advance_sim_clock
+    fake_px4_bridge.bridge_time_us = bridge_time_us
+    fake_px4_bridge.create_px4_bridge = create_px4_bridge
+    fake_px4_bridge.create_sim_clock = create_sim_clock
     fake_px4_bridge.discover_px4_rotor_mapping = discover_px4_rotor_mapping
+    fake_px4_bridge.read_px4_bridge_status = read_px4_bridge_status
+    fake_px4_bridge.recv_and_apply = recv_and_apply
+    fake_px4_bridge.send_sensors = send_sensors
+    fake_px4_bridge.sim_clock_is_settling = sim_clock_is_settling
+    fake_px4_bridge.start_px4_bridge = start_px4_bridge
+    fake_px4_bridge.stop_px4_bridge = stop_px4_bridge
     fake_px4_bridge.vehicle_log_context = vehicle_log_context
     monkeypatch.setitem(sys.modules, "robotics_experiments.px4_bridge", fake_px4_bridge)
 
@@ -255,24 +265,24 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
 
     # Observable through the public surface: not running / not connected while
     # settling, and no sim time accrues into the bridge before it starts.
-    assert host.is_running is False
-    assert host.is_connected is False
+    assert module.read_bridge_host_status(host=host).bridge_status is None
 
     _step(host, 0.004)
     _step(host, 0.004)
 
-    assert host.is_running is False
+    assert module.read_bridge_host_status(host=host).bridge_status is None
 
     _step(host, 0.004)
 
     # Settle window elapsed: the bridge is now built and connected.
-    assert host.is_running is True
-    assert host.is_connected is True
+    assert module.read_bridge_host_status(host=host).bridge_status.is_connected is True
 
     _step(host, 0.004)
 
     # The host-side clock keeps advancing once running.
-    assert host.sim_time_us == 16000
+    assert module.read_bridge_host_status(host=host).sim_time_us == 16000
+    host.stop()
+    assert module.read_bridge_host_status(host=host).sim_time_us == 16000
 
 
 def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
@@ -285,18 +295,16 @@ def test_bridge_host_starts_immediately_when_settle_time_is_zero(monkeypatch):
     host.start()
 
     # No settle delay: the bridge is up immediately, observable via public state.
-    assert host.is_running is True
-    assert host.is_connected is True
-    assert host.status.connected is True
+    assert module.read_bridge_host_status(host=host).bridge_status.is_connected is True
 
     _step(host, 0.004)
 
-    assert host.sim_time_us == 4000
+    assert module.read_bridge_host_status(host=host).sim_time_us == 4000
 
 
 def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
     # Wiring-contract test. BridgeHost is an adapter: its observable output is
-    # the Px4Bridge it constructs from config + discovered rotors. There is no
+    # the Px4BridgeState it constructs from config + discovered rotors. There is no
     # public getter for those construction params (and adding one only for tests
     # is disallowed), so this asserts on the collaborator's construction kwargs.
     _install_fake_isaac(monkeypatch)
@@ -352,11 +360,12 @@ def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):
     bridge_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "bridge"]
     assert [c[1] for c in bridge_calls] == ["/World/Drone", "/World/Drone1"]
 
-    assert host0.is_running
-    assert host1.is_running
+    assert module.read_bridge_host_status(host=host0).bridge_status is not None
+    assert module.read_bridge_host_status(host=host1).bridge_status is not None
     host0.stop()
-    assert not host0.is_running
-    assert host1.is_running
+    assert module.read_bridge_host_status(host=host0).bridge_status is None
+    assert module.read_bridge_host_status(host=host1).bridge_status is not None
+    assert module.read_bridge_host_status(host=host0).sim_time_us == 0
 
 
 def test_bridge_host_group_runs_all_sends_before_all_polls(monkeypatch):

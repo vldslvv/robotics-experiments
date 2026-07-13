@@ -1,8 +1,8 @@
 """Unit tests for the live ``experiment_runtime`` Kit shell.
 
 The shell owns no flight logic: it wires Kit events to the host-agnostic
-:class:`FleetOrchestrator` phases. These tests replace the orchestrator with a
-recording fake and assert the event -> phase mapping (the orchestrator's own
+:class:`FleetState` transitions. These tests replace the runtime with a
+recording fake and assert the event -> transition mapping (the runtime's own
 logic is covered by ``test_fleet_orchestrator.py``).
 """
 
@@ -160,8 +160,16 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     fake_config.load_config = lambda path: SimpleNamespace()
 
     fake_runtime = types.ModuleType("robotics_experiments.runtime")
-    fake_runtime.FleetOrchestrator = _FakeOrchestrator
     fake_runtime.FleetDriverEnv = lambda *a, **k: object()
+    fake_runtime.create_fleet = lambda *, config: _FakeOrchestrator(config)
+    fake_runtime.open_scene = lambda *, state: state.open_scene() or state
+    fake_runtime.adopt_current_stage = lambda *, state: state.adopt_current_stage() or state
+    fake_runtime.apply_settings = lambda *, state: state.apply_settings() or state
+    fake_runtime.spawn_fleet = lambda *, state: state.spawn_fleet() or state
+    fake_runtime.start_bridges = lambda *, state: state.start_bridges() or state
+    fake_runtime.build_drivers = lambda *, state, make_env: state.build_drivers(make_env) or state
+    fake_runtime.teardown = lambda *, state: state.teardown() or state
+    fake_runtime.tick_drivers = lambda *, state, on_error: state
 
     modules = {
         "carb": carb,

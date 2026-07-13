@@ -84,7 +84,7 @@ class LockstepSettings:
 class BridgeStatus:
     """Read-only snapshot of the lockstep exchange at a point in time.
 
-    Surfaced by the port (and forwarded by :class:`Px4Bridge`) so consuming
+    Surfaced by `read_bridge_status` (and the bridge status reader) so consuming
     logic - state machines, RL rollouts, diagnostics - can observe the bridge
     without reaching into private MAVLink state.
 

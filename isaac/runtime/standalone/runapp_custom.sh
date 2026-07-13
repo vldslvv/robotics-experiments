@@ -5,7 +5,7 @@
 PROJECT_DIR="/isaac-sim/proj"
 EXT_FOLDER="$PROJECT_DIR/isaac/runtime/extensions"
 
-# Scene-open is owned by the experiment_runtime extension's FleetOrchestrator
+# Scene-open is owned by the experiment_runtime extension's fleet lifecycle
 # (which reads the active Hydra experiment's `scene` field), so there is no
 # `--exec open_stage.py` here and no host-side scene resolution: the orchestrator
 # is the single source of truth for scene + sim settings.

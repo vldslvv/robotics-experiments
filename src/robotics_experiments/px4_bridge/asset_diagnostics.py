@@ -21,6 +21,7 @@ __all__ = [
     "RootBodyPoseDiagnosticParams",
     "RootBodyPoseDiagnostics",
     "compute_root_body_pose_diagnostics",
+    "root_body_pose_has_mismatch",
     "validate_root_body_pose",
 ]
 
@@ -51,7 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 #      translation offset.
 #   2. Make policy + thresholds configurable through the Hydra `px4` group
 #      (add fields to Px4BridgeConfig + configs/experiment/px4/default.yaml and
-#      thread RootBodyPoseDiagnosticParams from bridge_host -> Px4Bridge ->
+#      thread RootBodyPoseDiagnosticParams from bridge_host -> create_px4_bridge ->
 #      IsaacArticulationIO, which already accepts it) so a scene can escalate or
 #      ignore as needed.
 #   3. Fix the asset so the articulation root coincides with the body (offset 0).
@@ -79,12 +80,13 @@ class RootBodyPoseDiagnostics:
     translation_threshold_m: float
     orientation_threshold_rad: float
 
-    @property
-    def has_mismatch(self) -> bool:
-        return (
-            self.translation_delta_m > self.translation_threshold_m
-            or self.orientation_delta_rad > self.orientation_threshold_rad
-        )
+
+def root_body_pose_has_mismatch(*, diagnostics: RootBodyPoseDiagnostics) -> bool:
+    """Return whether either root/body pose delta exceeds its threshold."""
+    return (
+        diagnostics.translation_delta_m > diagnostics.translation_threshold_m
+        or diagnostics.orientation_delta_rad > diagnostics.orientation_threshold_rad
+    )
 
 
 def validate_root_body_pose(
@@ -116,7 +118,7 @@ def validate_root_body_pose(
     )
     message = _format_root_body_pose_diagnostics(diagnostics)
     logger.info("PX4 root/body pose diagnostic: %s", message)
-    if diagnostics.has_mismatch:
+    if root_body_pose_has_mismatch(diagnostics=diagnostics):
         if params.policy == "warn":
             logger.warning("PX4 root/body pose mismatch: %s", message)
         else:

@@ -31,10 +31,6 @@ class _FakeArticulationIO:
         # (rotor_omega_rad_s, dt) pairs recorded from the cosmetic spin seam.
         self.spin_updates: list[tuple[np.ndarray, float]] = []
 
-    @property
-    def is_initialized(self):
-        return self.initialized
-
     def initialize(self):
         self.initialized = True
 
@@ -56,6 +52,7 @@ class _FakeArticulationIO:
 class _FakeFlightStack(Px4MavlinkPort):
     def __init__(self, commands):
         self.commands = np.asarray(commands, dtype=np.float64)
+        self.num_rotors = self.commands.shape[0]
         self.started = False
         self.stopped = False
         self.states = []
@@ -64,23 +61,10 @@ class _FakeFlightStack(Px4MavlinkPort):
         # show the last value.
         self.sim_times = []
 
-    @property
-    def num_rotors(self):
-        return self.commands.shape[0]
-
-    @property
-    def is_connected(self):
-        return self.started and not self.stopped
-
-    @property
-    def is_armed(self):
-        return bool(np.any(self.commands))
-
-    @property
-    def status(self):
+    def _read_status(self):
         return BridgeStatus(
-            is_connected=self.is_connected,
-            is_armed=self.is_armed,
+            is_connected=self.started and not self.stopped,
+            is_armed=bool(np.any(self.commands)),
             first_heartbeat_received=self.started,
             sensor_send_count=len(self.sim_times),
             actuator_receive_count=len(self.sim_times),
@@ -111,15 +95,11 @@ class _FakeFlightStack(Px4MavlinkPort):
 
 class _CapturingThrustModel:
     def __init__(self, num_rotors=4):
-        self._num_rotors = num_rotors
+        self.num_rotors = num_rotors
         self.captured_body_velocity_flu = None
 
-    @property
-    def num_rotors(self):
-        return self._num_rotors
-
     def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
-        return np.zeros(self._num_rotors, dtype=np.float64)
+        return np.zeros(self.num_rotors, dtype=np.float64)
 
     def commands_to_dynamics(self, commands, *, linear_body_velocity_flu=None):
         self.captured_body_velocity_flu = np.asarray(
@@ -127,10 +107,10 @@ class _CapturingThrustModel:
             dtype=np.float64,
         )
         return RotorDynamics(
-            forces_n=np.zeros(self._num_rotors, dtype=np.float64),
+            forces_n=np.zeros(self.num_rotors, dtype=np.float64),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),
-            rotor_omega_rad_s=np.zeros(self._num_rotors, dtype=np.float64),
+            rotor_omega_rad_s=np.zeros(self.num_rotors, dtype=np.float64),
         )
 
 
@@ -335,7 +315,7 @@ def _install_fake_pegasus(monkeypatch):
 def lockstep_exchange(port, state: VehicleState) -> np.ndarray:
     """Run one lockstep tick and return the raw rotor-command array.
 
-    Mirrors how ``Px4Bridge`` drives the port each physics step (send sensors
+    Mirrors how bridge transitions drive the port each physics step (send sensors
     out, block for the paired actuator). Unwraps the ``ActuatorCommands`` to its
     ``controls`` array so the port-test assertions can compare directly; kept in
     one place for the port test suite.

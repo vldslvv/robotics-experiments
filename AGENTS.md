@@ -59,8 +59,9 @@ Read area docs on demand when a task touches that area:
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
-- `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: the
-  `FleetOrchestrator` (the one runtime pipeline) and the PX4 `BridgeHost` /
+- `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
+  `FleetState` lifecycle transitions (the one runtime pipeline) and the PX4
+  `BridgeHost` /
   `BridgeHostGroup` lockstep wiring. Isaac-coupled domain leaf (lazy package
   `__init__`, off the core import path); driven by the thin per-host shells
   (the live `experiment_runtime` extension and the standalone runner).
@@ -159,7 +160,7 @@ the current contents and the intended home for that kind of code.
   direct feature state in private attributes such as `self._stage` instead of
   broad handles such as `self._usd_context`.
 - Use `experiment_runtime` as the extension pattern: a thin Kit shell that wires
-  Isaac/Kit events to the host-agnostic `robotics_experiments.runtime.FleetOrchestrator`
+  Isaac/Kit events to the host-agnostic `robotics_experiments.runtime.FleetState`
   and owns no flight/scene logic itself. Cross-component runtime composition
   belongs in the orchestrator (`src/robotics_experiments/runtime/`), a layer
   above the extensions; an extension stays single-responsibility (event wiring).
@@ -199,9 +200,14 @@ the current contents and the intended home for that kind of code.
 - `decide` and completion/invariant predicates are pure. The port is the only
   MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
   bridge simulator port.
-- `RoutineDriver` is the only executor, one per drone whose resolved
-  `routine.steps` is non-empty. Live and standalone workflows stay thin shells
-  that differ only in tick source and failure reaction.
+- `RoutineDriverState` plus `tick_routine_driver` is the only executor, one per
+  drone whose resolved `routine.steps` is non-empty. Live and standalone
+  workflows stay thin shells that differ only in tick source and failure reaction.
+- In `runtime`, `commanding`, and `px4_bridge`, project-owned evolving state is
+  represented by frozen dataclasses and replaced by stateless transition
+  functions. Mutable classes are limited to external resource adapters (MAVLink,
+  Isaac, Kit, and PhysX); callers read them through free functions returning
+  immutable status values, not properties.
 
 ## Pegasus vendoring policy
 - The Pegasus Simulator under

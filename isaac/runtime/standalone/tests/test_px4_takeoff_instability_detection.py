@@ -22,7 +22,7 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.px4_bridge import ActuatorCommands
+from robotics_experiments.px4_bridge import ActuatorCommands, RotorThrustModel
 
 if TYPE_CHECKING:
     from robotics_experiments.runtime import BridgeHost
@@ -36,7 +36,7 @@ FAULTED_ROTOR_COMMAND_SCALE = 0.0
 FAULT_BODY_TORQUE_BIAS_N_M = np.array([4.0, 0.0, 0.0], dtype=np.float64)
 
 
-class _RotorFailureFault:
+class _RotorFailureFault(RotorThrustModel):
     def __init__(
         self,
         base_model: Any,
@@ -45,6 +45,7 @@ class _RotorFailureFault:
         body_torque_bias_n_m: np.ndarray,
     ) -> None:
         self._base_model = base_model
+        self.num_rotors = base_model.num_rotors
         self._rotor_index = int(rotor_index)
         self._command_scale = float(command_scale)
         self._body_torque_bias_n_m = np.asarray(body_torque_bias_n_m, dtype=np.float64)
@@ -52,10 +53,6 @@ class _RotorFailureFault:
             raise ValueError(
                 f"Body torque fault expects shape (3,), got {self._body_torque_bias_n_m.shape}"
             )
-
-    @property
-    def num_rotors(self) -> int:
-        return self._base_model.num_rotors
 
     def _faulted_commands(self, commands: ActuatorCommands) -> ActuatorCommands:
         faulted = np.asarray(commands.controls, dtype=np.float64).copy()
@@ -80,28 +77,27 @@ class _RotorFailureFault:
                 np.asarray(dynamics.body_torque_n_m, dtype=np.float64) + self._body_torque_bias_n_m
             ),
             body_drag_n=dynamics.body_drag_n,
+            rotor_omega_rad_s=dynamics.rotor_omega_rad_s,
         )
 
 
 def _inject_one_rotor_fault(context: SceneTestContext, host: BridgeHost) -> None:
-    bridge = getattr(host, "_bridge", None)
-    if bridge is None:
-        raise AssertionError("PX4 bridge was not constructed before fault injection")
-    thrust_model = getattr(bridge, "_thrust_model", None)
-    if thrust_model is None:
-        raise AssertionError("PX4 bridge has no thrust model to fault")
-    if FAULTED_ROTOR_INDEX >= thrust_model.num_rotors:
-        raise AssertionError(
-            f"Faulted rotor index {FAULTED_ROTOR_INDEX} is outside "
-            f"thrust model size {thrust_model.num_rotors}"
+    from robotics_experiments.runtime.bridge_host import _replace_thrust_model_for_test
+
+    def inject(thrust_model):
+        if FAULTED_ROTOR_INDEX >= thrust_model.num_rotors:
+            raise AssertionError(
+                f"Faulted rotor index {FAULTED_ROTOR_INDEX} is outside "
+                f"thrust model size {thrust_model.num_rotors}"
+            )
+        return _RotorFailureFault(
+            thrust_model,
+            rotor_index=FAULTED_ROTOR_INDEX,
+            command_scale=FAULTED_ROTOR_COMMAND_SCALE,
+            body_torque_bias_n_m=FAULT_BODY_TORQUE_BIAS_N_M,
         )
 
-    bridge._thrust_model = _RotorFailureFault(
-        thrust_model,
-        rotor_index=FAULTED_ROTOR_INDEX,
-        command_scale=FAULTED_ROTOR_COMMAND_SCALE,
-        body_torque_bias_n_m=FAULT_BODY_TORQUE_BIAS_N_M,
-    )
+    _replace_thrust_model_for_test(host=host, transform=inject)
     context.report(
         f"{TEST_NAME}: injected rotor {FAULTED_ROTOR_INDEX} command scale fault "
         f"after accepted takeoff command: scale={FAULTED_ROTOR_COMMAND_SCALE:.2f} "

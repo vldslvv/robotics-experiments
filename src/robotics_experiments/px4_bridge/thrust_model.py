@@ -57,9 +57,7 @@ class RotorThrustModel(ABC):
     them as normalized force fractions.
     """
 
-    @property
-    @abstractmethod
-    def num_rotors(self) -> int: ...
+    num_rotors: int
 
     @abstractmethod
     def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray: ...
@@ -83,6 +81,7 @@ class RotorThrustModel(ABC):
         )
 
 
+@dataclass(frozen=True)
 class _LinearThrustModel(RotorThrustModel):
     """Trivial uniform linear model: ``force_i = clip(c_i, 0, 1) * max_force``.
 
@@ -91,33 +90,17 @@ class _LinearThrustModel(RotorThrustModel):
     model once domain randomization is wired up.
     """
 
-    def __init__(self, *, num_rotors: int, max_force_n: float = 8.0):
-        """Initialize the model.
-
-        Args:
-            num_rotors: Number of rotors driven by this model.
-            max_force_n: Force in Newtons produced at command 1.0.
-        """
-        self._num_rotors = int(num_rotors)
-        self._max_force_n = float(max_force_n)
-
-    @property
-    def num_rotors(self) -> int:
-        return self._num_rotors
-
-    @property
-    def max_force_n(self) -> float:
-        return self._max_force_n
+    num_rotors: int
+    max_force_n: float = 8.0
 
     def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
         c = np.clip(np.asarray(commands.controls, dtype=np.float64), 0.0, 1.0)
-        if c.shape != (self._num_rotors,):
-            raise ValueError(
-                f"LinearThrustModel expects shape ({self._num_rotors},), got {c.shape}"
-            )
-        return c * self._max_force_n
+        if c.shape != (self.num_rotors,):
+            raise ValueError(f"LinearThrustModel expects shape ({self.num_rotors},), got {c.shape}")
+        return c * self.max_force_n
 
 
+@dataclass(frozen=True, init=False)
 class PegasusQuadraticThrustModel(RotorThrustModel):
     """Pegasus-compatible instantaneous quadratic rotor model.
 
@@ -127,6 +110,14 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
     and applies linear body drag. This class mirrors that behavior without
     taking ownership of the scene.
     """
+
+    num_rotors: int
+    _rotor_constant: np.ndarray
+    _rolling_moment_coefficient: np.ndarray
+    _rot_dir: np.ndarray
+    _min_rotor_velocity: np.ndarray
+    _max_rotor_velocity: np.ndarray
+    _linear_drag: np.ndarray
 
     def __init__(
         self,
@@ -139,35 +130,45 @@ class PegasusQuadraticThrustModel(RotorThrustModel):
         max_rotor_velocity: Sequence[float] = (_IRIS_MAX_ROTOR_VELOCITY,) * 4,
         linear_drag: Sequence[float] = (0.50, 0.30, 0.0),
     ):
-        self._num_rotors = int(num_rotors)
-        self._rotor_constant = self._as_vector("rotor_constant", rotor_constant)
-        self._rolling_moment_coefficient = self._as_vector(
-            "rolling_moment_coefficient",
-            rolling_moment_coefficient,
+        object.__setattr__(self, "num_rotors", int(num_rotors))
+        object.__setattr__(
+            self,
+            "_rotor_constant",
+            self._as_vector("rotor_constant", rotor_constant),
         )
-        self._rot_dir = self._as_vector("rot_dir", rot_dir)
-        self._min_rotor_velocity = self._as_vector("min_rotor_velocity", min_rotor_velocity)
-        self._max_rotor_velocity = self._as_vector("max_rotor_velocity", max_rotor_velocity)
+        object.__setattr__(
+            self,
+            "_rolling_moment_coefficient",
+            self._as_vector(
+                "rolling_moment_coefficient",
+                rolling_moment_coefficient,
+            ),
+        )
+        object.__setattr__(self, "_rot_dir", self._as_vector("rot_dir", rot_dir))
+        object.__setattr__(
+            self, "_min_rotor_velocity", self._as_vector("min_rotor_velocity", min_rotor_velocity)
+        )
+        object.__setattr__(
+            self, "_max_rotor_velocity", self._as_vector("max_rotor_velocity", max_rotor_velocity)
+        )
         drag = np.asarray(linear_drag, dtype=np.float64)
         if drag.shape != (3,):
             raise ValueError(f"linear_drag expects shape (3,), got {drag.shape}")
-        self._linear_drag = drag
-
-    @property
-    def num_rotors(self) -> int:
-        return self._num_rotors
+        drag.setflags(write=False)
+        object.__setattr__(self, "_linear_drag", drag)
 
     def _as_vector(self, label: str, values: Sequence[float]) -> np.ndarray:
         array = np.asarray(values, dtype=np.float64)
-        if array.shape != (self._num_rotors,):
-            raise ValueError(f"{label} expects shape ({self._num_rotors},), got {array.shape}")
+        if array.shape != (self.num_rotors,):
+            raise ValueError(f"{label} expects shape ({self.num_rotors},), got {array.shape}")
+        array.setflags(write=False)
         return array
 
     def _rotor_velocity(self, commands: ActuatorCommands) -> np.ndarray:
         omega_ref = np.asarray(commands.controls, dtype=np.float64)
-        if omega_ref.shape != (self._num_rotors,):
+        if omega_ref.shape != (self.num_rotors,):
             raise ValueError(
-                f"PegasusQuadraticThrustModel expects shape ({self._num_rotors},), "
+                f"PegasusQuadraticThrustModel expects shape ({self.num_rotors},), "
                 f"got {omega_ref.shape}"
             )
         return np.clip(omega_ref, self._min_rotor_velocity, self._max_rotor_velocity)

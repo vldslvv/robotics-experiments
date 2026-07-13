@@ -55,9 +55,22 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "BridgeHost",
             "BridgeHostGroup",
             "BridgeHostParams",
+            "BridgeHostStatus",
             "FleetDriverEnv",
-            "FleetOrchestrator",
+            "FleetState",
+            "FlyingDrone",
             "SpawnedDrone",
+            "adopt_current_stage",
+            "apply_settings",
+            "build_drivers",
+            "create_fleet",
+            "fleet_is_done",
+            "open_scene",
+            "read_bridge_host_status",
+            "spawn_fleet",
+            "start_bridges",
+            "teardown",
+            "tick_drivers",
         ]
         # RL owning packages must import with Isaac, torch, rsl_rl, and Isaac
         # Lab absent; the parent package provides no forwarding facade.
@@ -180,7 +193,7 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
         # The per-drone routine driver is pure too (its phase machine imports no
         # carb/omni/pymavlink); it must be importable with the deps blocked.
-        assert hasattr(commanding, "RoutineDriver")
+        assert hasattr(commanding, "RoutineDriverState")
         assert "pymavlink" not in sys.modules
     finally:
         sys.modules.clear()
@@ -193,6 +206,7 @@ def test_commanding_public_api_contract_is_explicit():
     assert commanding.__all__ == [
         "AttitudeRateSetpoint",
         "CommandAck",
+        "CommandPortStatus",
         "DecisionKind",
         "DriverEnvironment",
         "DriverParams",
@@ -212,7 +226,7 @@ def test_commanding_public_api_contract_is_explicit():
         "PolicyStepFn",
         "PositionSetpoint",
         "RoutineDecision",
-        "RoutineDriver",
+        "RoutineDriverState",
         "RoutineObservation",
         "RoutineState",
         "RoutineStep",
@@ -224,6 +238,7 @@ def test_commanding_public_api_contract_is_explicit():
         "armed",
         "build_vehicle_routine",
         "climbed_at_least",
+        "create_routine_driver",
         "cross_track_drift_below",
         "cross_track_to_segment_below",
         "decide",
@@ -234,9 +249,12 @@ def test_commanding_public_api_contract_is_explicit():
         "moved_forward_at_least",
         "reached_world_position",
         "reposition",
+        "read_command_port_status",
+        "routine_driver_is_done",
         "set_offboard_mode",
         "takeoff",
         "tilt_below",
+        "tick_routine_driver",
     ]
 
 

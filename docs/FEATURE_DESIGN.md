@@ -41,7 +41,7 @@ the layer that owns the behavior being changed.
   the physics scene, validating gravity and positive rates, applying PhysX
   attributes, setting the Kit render-rate limit, and logging the applied values.
 - The fleet runtime owns settings application: the live `experiment_runtime`
-  shell calls `FleetOrchestrator.apply_settings()` on stage-open (and the
+  shell rebinds `apply_settings(state=...)` on stage-open (and the
   standalone runner calls it after opening the scene), which delegates to the
   core `apply_settings(stage, settings)` API. (This replaced the former
   standalone `sim_settings` extension.) It does not duplicate USD mutation logic.

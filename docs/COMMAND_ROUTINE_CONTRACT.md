@@ -13,9 +13,7 @@ payloads, pure routine model, driver seam, and concrete PX4 GCS port from the
 package root. The public-concept implementation modules (`commands`,
 `observation`, `routine`, `port`, `driver`) use non-private names because they
 host symbols exported through the root; they are not separate supported import
-surfaces. Tests exercise the same root contract as production consumers. The
-private `_commander` module and its `_VehicleCommander` class remain absent from
-the package `__init__` because `RoutineDriver` is the public executor.
+surfaces. Tests exercise the same root contract as production consumers.
 
 ## The four-part contract
 
@@ -25,10 +23,11 @@ the package `__init__` because `RoutineDriver` is the public executor.
 | `commands_to_dynamics` (pure transform) | `decide(...)` (pure stepper) |
 | `RotorDynamics` (pure output) | `RoutineDecision` (pure output) |
 | `Px4MavlinkPort` lockstep seam | `MavlinkCommandPort` (GCS control seam) |
-| `Px4Bridge` / `BridgeHost` (orchestrators) | `RoutineDriver` |
+| `Px4BridgeState` / `BridgeHost` | `RoutineDriverState` |
 
-Like the bridge, the command layer is **per drone**: one `RoutineDriver` drives
-one drone's routine. There is no fleet object - drones are independent
+Like the bridge, the command layer is **per drone**: one frozen
+`RoutineDriverState` is advanced by `tick_routine_driver`. There is no command
+fleet object - drones are independent
 (cross-drone synchronization is deliberately deferred).
 
 - **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
@@ -142,13 +141,8 @@ one drone's routine. There is no fleet object - drones are independent
   `robotics_experiments.rl.press.press_action_to_offboard`; the `{kind: policy}` routine step
   streams them in production (F2b), and the handoff-gated contact behavior
   (`{kind: press}`) is F3b on the same mechanism.
-- **`_commander.py`** -- `_VehicleCommander` (one routine + one port + the
-  `RoutineState`: runs `decide` and performs the single side effect --
-  `port.send` on `SEND`; on `STREAM` the payload type selects the port method:
-  `PositionSetpoint` -> `send_setpoint`, `VelocitySetpoint` ->
-  `send_velocity_setpoint`, `AttitudeRateSetpoint` -> `send_attitude_target`).
-  One commander drives one drone; there is no fleet object or barrier.
-- **`driver.py`** -- the pure, per-drone `RoutineDriver`: a tick-driven phase
+- **`driver.py`** -- the frozen, per-drone `RoutineDriverState` and stateless
+  `create_routine_driver` / `tick_routine_driver` transition functions: a phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
   -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
   `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
@@ -168,10 +162,10 @@ one drone's routine. There is no fleet object - drones are independent
 observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
 pymavlink). The only side effects in the layer are the port's send methods
 (`send`, `send_setpoint`, `send_velocity_setpoint`, `send_attitude_target` --
-MAVLink out) and the port's connect/heartbeat/drain. `_VehicleCommander.step`
-runs the pure `decide`, then performs the one side effect (`SEND` -> `send`,
-`STREAM` -> the send method matching the payload type), keeping the decision
-and the I/O cleanly separated. A `policy` step's network forward pass runs
+MAVLink out) and the port's connect/heartbeat/drain. `tick_routine_driver`
+stores `RoutineState` directly, runs pure `decide`, then performs the one side
+effect (`SEND` -> `send`, `STREAM` -> the matching send method). A `policy`
+step's network forward pass runs
 inside `decide` as an injected deterministic callable (numpy in/out, no I/O),
 so it does not break the purity split. Step timeouts are measured in **sim time**
 (`observation.sim_time_us`) so the stepper stays pure; the driver pairs that with
@@ -183,23 +177,22 @@ The command port talks the per-drone GCS MAVLink link
 (`VehicleConfig.gcs_port = bridge.gcs_baseport + id`) **only**. It never touches
 the bridge's simulator MAVLink port or its sensor/actuator lockstep, and
 symmetrically the bridge contract forbids the bridge touching `gcs_port`. The
-commander/driver is a separate control layer by design; it is ticked from the
+driver is a separate control layer by design; it is ticked from the
 adapter's control loop (the standalone blocking loop or the live Kit app-update
 subscription), never from the bridge's physics send/recv legs.
 
-## Where the executor lives: one orchestrator, two thin shells
+## Where the executor lives: functional fleet state, two thin shells
 
-The pure `RoutineDriver` is the single executor, and the host-agnostic
-`robotics_experiments.runtime.FleetOrchestrator` is the single place that *builds*
-one driver per flying drone (only for drones whose resolved `routine.steps` is
-non-empty). The orchestrator owns the whole runtime pipeline (open scene -> apply
-settings -> spawn fleet -> start the lockstep bridge group -> `build_drivers` ->
-teardown); a thin per-host **shell** drives it, supplying only what differs: the
+The frozen `RoutineDriverState` is the single executor state, and the
+host-agnostic `FleetState` lifecycle is the single place that builds one driver
+per flying drone. Stateless functions own the pipeline (open scene -> apply
+settings -> spawn fleet -> start the lockstep bridge group -> build drivers ->
+teardown); a thin per-host **shell** explicitly rebinds every returned state and supplies
 tick source and the failure reaction. The reaction is injected as a `make_env`
 callable that builds the generic `FleetDriverEnv` (the `DriverEnvironment` seam,
 in `runtime/orchestrator.py`) per flying drone -- it reads connectivity/sim-time
 from the drone's `BridgeHost`, state from a state-only `IsaacArticulationIO`, and
-the bridge snapshot via `BridgeHost.status`, over each drone's
+the bridge snapshot via `read_bridge_host_status`, over each drone's
 `MavlinkCommandPort`, and forwards `log` / `on_failure` / `on_step_advanced` to
 the shell's callables. The phase machine and flight verification live in the
 driver/routine; the shells differ only in tick source and reaction.
@@ -207,8 +200,8 @@ driver/routine; the shells differ only in tick source and reaction.
 **Live `experiment_runtime` extension**
 (`isaac/runtime/extensions/experiment_runtime/ExperimentRuntime_python/extension.py`):
 the runtime path for `make run-all` / `make run-isaac`. On timeline PLAY it has
-the orchestrator spawn the fleet, start the bridge group, and build the drivers,
-then ticks every flying drone's driver from one **Kit app-update** subscription --
+the fleet functions spawn the fleet, start the bridge group, and build drivers,
+then calls `tick_drivers` from one **Kit app-update** subscription --
 a control tick separate from the bridge's physics-step subscription, never the
 bridge's send/recv legs. Its `make_env` is **forgiving**: `on_failure` (a `FAIL`,
 a PX4 failsafe, or a phase timeout) logs a warning and the driver idles (it never
@@ -218,11 +211,11 @@ tear down.
 
 **Standalone scenario**
 (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`):
-a blocking runner that drives the same orchestrator phases, adds the
-**integration-test-only** checks the orchestrator does not own (ground settle,
+a blocking runner that drives the same lifecycle functions, adds the
+**integration-test-only** checks the runtime does not own (ground settle,
 bridge first-heartbeat, the pre-arm start-tilt check), and ticks every flying
-driver in a `while not orchestrator.all_done: simulation_app.update(); for d:
-d.tick()` loop (raw ticks so a strict exception propagates), then runs the strict
+drivers in a `while not fleet_is_done(state=fleet): simulation_app.update();
+fleet = tick_drivers(state=fleet)` loop, then runs the strict
 bridge-log scan. Its `make_env` is **strict** under `--strict` (the integration
 test): `on_failure` raises `ExpectedInstabilityDetected` for a
 `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe, and
@@ -241,7 +234,7 @@ separate integration-test group: strict mode drives the same per-vehicle routine
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
 `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
 `{kind: land, timeout_s}`)
-gets a `RoutineDriver`; empty means manual. Mixed fleets are
+gets a `RoutineDriverState`; empty means manual. Mixed fleets are
 allowed (some drones fly, others stay manual). The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
@@ -270,7 +263,7 @@ verification-only from the config's perspective, but the stepper continues the
 last OFFBOARD setpoint stream while the sustained hover gate is being measured.
 The home anchor the `goto` builder
 needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
-(`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by the orchestrator
+(`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by `build_drivers`
 into the directly constructed `DriverParams`. The routine-execution heuristics are
 also not routine knobs: the Hydra `driver` group (`DriverConfig`, global, not
 merged per vehicle) carries `goto_min_heading_dist_m` (below this horizontal
@@ -294,5 +287,5 @@ it.
 > `hold_s` -- the "hover stable for N seconds" model.
 
 **Still deferred:** cross-drone synchronization (today every drone's
-`RoutineDriver` runs independently; a barrier/fleet-sync layer can be
+`RoutineDriverState` runs independently; a barrier/fleet-sync layer can be
 re-introduced over the per-drone drivers when a use case needs it).

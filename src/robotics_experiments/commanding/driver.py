@@ -1,50 +1,55 @@
-"""The pure per-drone routine driver - one driver executes one drone's routine.
+"""Functional per-drone routine driver over mutable resource seams.
 
-:class:`RoutineDriver` is a non-blocking, tick-driven phase machine that takes a
-single drone's routine plus a :class:`MavlinkCommandPort` and drives it from
-fresh GCS link to a completed (or stopped) routine. It knows only its own drone:
-there is no fleet object and no cross-drone synchronization. Both workflows run
-the *same* driver - the live extension ticks it from the Kit app-update stream,
-the standalone scenario ticks it in a blocking loop - differing only in the
-injected :class:`DriverEnvironment` (logging, the strict-vs-forgiving failure
-reaction, and the Isaac state reads).
-
-It is pure in the same sense as the rest of ``commanding``: it imports neither
-Isaac nor pymavlink. Every side effect crosses a seam - the port
-(`connect`/`pump_heartbeat`/`poll_feedback`/`send` plus the control-feedback
-properties) and the :class:`DriverEnvironment` (bridge connectivity, sim time,
-observation assembly, logging, and the failure/step callbacks). The wall-clock
-backstop uses an injectable ``monotonic`` so the machine is unit-testable with a
-fake clock.
+The frozen :class:`RoutineDriverState` carries project-owned progress. Stateless
+functions return its successor while MAVLink and environment effects remain at
+the imperative boundary.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from typing import Any, Optional, Protocol
 
-from robotics_experiments.commanding._commander import _VehicleCommander
 from robotics_experiments.commanding._routine_builder import build_vehicle_routine
 from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     FailureKind,
     PolicyStepFn,
+    RoutineDecision,
+    RoutineState,
     VehicleRoutine,
 )
 from robotics_experiments.commanding._routine_predicates import EnvelopeGates
+from robotics_experiments.commanding._routine_stepper import decide
+from robotics_experiments.commanding.commands import (
+    AttitudeRateSetpoint,
+    PositionSetpoint,
+    VelocitySetpoint,
+)
 from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
-from robotics_experiments.commanding.port import MavlinkCommandPort
+from robotics_experiments.commanding.port import (
+    MavlinkCommandPort,
+    read_command_port_status,
+)
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,
     DEFAULT_HOME_LON_DEG,
 )
 
-__all__ = ["DriverEnvironment", "DriverParams", "DriverPhase", "RoutineDriver"]
+__all__ = [
+    "DriverEnvironment",
+    "DriverParams",
+    "DriverPhase",
+    "RoutineDriverState",
+    "create_routine_driver",
+    "routine_driver_is_done",
+    "tick_routine_driver",
+]
 
 
 class DriverPhase(Enum):
@@ -62,15 +67,7 @@ class DriverPhase(Enum):
 
 @dataclass(frozen=True)
 class DriverParams:
-    """The per-drone routine knobs the driver needs (a subset of ``RoutineConfig``).
-
-    Constructed by the runtime from one vehicle's routine plus the global driver
-    execution heuristics, so ``commanding`` never imports ``config``. ``steps``
-    and ``gates`` plus the takeoff target are mapped to a
-    :class:`VehicleRoutine` at the ``BUILD`` phase via
-    :func:`build_vehicle_routine`; the timeouts arm the per-phase wall-clock
-    backstops and the step budgets.
-    """
+    """The per-drone routine knobs required by the command driver."""
 
     steps: Sequence[Mapping[str, Any]]
     gates: EnvelopeGates
@@ -85,34 +82,18 @@ class DriverParams:
     goto_heading_tol_deg: float
     goto_cross_track_m: float
     goto_offboard_prime_ticks: int
-    # The home geographic anchor (from the ``px4`` group) the ``goto`` builder
-    # converts world-ENU waypoints against; defaulted to the bridge's frame
-    # default so direct constructions and non-navigating routines need not set it.
     home_lat_deg: float = DEFAULT_HOME_LAT_DEG
     home_lon_deg: float = DEFAULT_HOME_LON_DEG
     home_alt_m: float = DEFAULT_HOME_ALT_M
-    # Execution heuristics (from the Hydra ``driver`` group): the goto heading
-    # epsilon and the wall-clock backstops; library-neutral fallbacks so direct
-    # constructions need not set them.
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
-    # The injected artifact-loading seam for ``policy`` steps (built by the
-    # runtime from ``robotics_experiments.rl.press.build_policy_step_fn``); ``None`` means a
-    # routine with a policy step fails loudly at BUILD.
     policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None
 
 
 class DriverEnvironment(Protocol):
-    """The injected seam for everything the pure driver cannot do itself.
-
-    The Isaac-side adapter implements this over the live drone (a
-    ``BridgeHost`` for connectivity, an ``IsaacArticulationIO`` for state, the
-    bridge clock for sim time) and chooses the failure reaction:
-    ``on_failure`` *raises* in the strict integration test and *logs* (then the
-    driver goes to ``DONE``) in a forgiving live/regular run.
-    """
+    """Mutable resource seam for simulator reads and lifecycle reactions."""
 
     def is_bridge_connected(self) -> bool: ...
 
@@ -124,228 +105,261 @@ class DriverEnvironment(Protocol):
 
     def log(self, message: str) -> None: ...
 
-    def on_failure(self, kind: FailureKind, message: str) -> None:
-        """React to a terminal failure of the given :class:`FailureKind`. Strict
-        implementations raise; forgiving ones log and return (the driver then
-        idles)."""
-        ...
+    def on_failure(self, kind: FailureKind, message: str) -> None: ...
 
-    def on_step_advanced(self, step_label: str) -> None:
-        """Called once per completed routine step (the label of the step that just
-        finished). Used by the negative test to inject a post-takeoff fault; a
-        no-op for normal runs."""
-        ...
+    def on_step_advanced(self, step_label: str) -> None: ...
 
 
-class RoutineDriver:
-    """Drives one drone's routine across one port via a tick-driven phase machine.
+@dataclass(frozen=True)
+class RoutineDriverState:
+    """Immutable progress plus explicit references to the driver's resources."""
 
-    Construct with the per-drone :class:`DriverParams`, an
-    :class:`MavlinkCommandPort` (not yet connected; the driver connects it), and
-    a :class:`DriverEnvironment`. Call :meth:`tick` once per control frame; the
-    adapter owns the shared sim/tick cadence (a blocking ``simulation_app.update()``
-    loop or the Kit app-update stream) and never the bridge's physics legs.
-    """
+    params: DriverParams
+    port: MavlinkCommandPort
+    env: DriverEnvironment
+    label: str
+    monotonic: Callable[[], float]
+    phase: DriverPhase
+    deadline_s: float
+    settle_target_us: int
+    target: Optional[tuple[float, float, float]]
+    routine: Optional[VehicleRoutine]
+    routine_state: RoutineState
+    previous_cursor: int
 
-    def __init__(
-        self,
-        params: DriverParams,
-        port: MavlinkCommandPort,
-        env: DriverEnvironment,
-        *,
-        label: str = "",
-        monotonic: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self._params = params
-        self._port = port
-        self._env = env
-        self._label = label
-        self._monotonic = monotonic
-        self._phase = DriverPhase.WAIT_BRIDGE
-        self._deadline_s = 0.0
-        self._settle_target_us = 0
-        self._target: Optional[tuple[float, float, float]] = None
-        self._routine: Optional[VehicleRoutine] = None
-        self._commander: Optional[_VehicleCommander] = None
-        self._prev_cursor = 0
-        self._enter(DriverPhase.WAIT_BRIDGE)
 
-    @property
-    def phase(self) -> DriverPhase:
-        return self._phase
-
-    @property
-    def is_done(self) -> bool:
-        return self._phase is DriverPhase.DONE
-
-    def tick(self) -> None:
-        """Advance the phase machine one control frame. Never advances physics."""
-        if self._phase is DriverPhase.DONE:
-            # Keep the GCS link warm in DONE (heartbeat + drain) without acting on acks.
-            self._pump_and_poll()
-            return
-        if self._deadline_s and self._monotonic() > self._deadline_s:
-            self._fail(FailureKind.TIMEOUT, f"phase {self._phase.name} timed out")
-            return
-        if self._phase is DriverPhase.WAIT_BRIDGE:
-            self._tick_wait_bridge()
-        elif self._phase is DriverPhase.CONNECT:
-            self._tick_connect()
-        elif self._phase is DriverPhase.HANDSHAKE:
-            self._tick_handshake()
-        elif self._phase is DriverPhase.PREARM_SETTLE:
-            self._tick_prearm_settle()
-        elif self._phase is DriverPhase.FETCH_TARGET:
-            self._tick_fetch_target()
-        elif self._phase is DriverPhase.BUILD:
-            self._tick_build()
-        elif self._phase is DriverPhase.DRIVE:
-            self._tick_drive()
-
-    # ---- phases ------------------------------------------------------------
-
-    def _tick_wait_bridge(self) -> None:
-        if self._env.is_bridge_connected():
-            self._env.log(f"[{self._label}] bridge connected; connecting GCS link")
-            self._enter(DriverPhase.CONNECT)
-
-    def _tick_connect(self) -> None:
-        self._port.connect()
-        self._port.pump_heartbeat(force=True)
-        self._enter(DriverPhase.HANDSHAKE)
-
-    def _tick_handshake(self) -> None:
-        self._pump_and_poll()
-        if self._port.is_handshaked:
-            self._env.log(f"[{self._label}] GCS handshake complete; settling PX4 before arm")
-            self._settle_target_us = self._env.sim_time_us() + int(
-                round(self._params.prearm_settle_s * 1_000_000)
+def _deadline_for_phase(*, state: RoutineDriverState, phase: DriverPhase) -> float:
+    params = state.params
+    now = state.monotonic()
+    if phase is DriverPhase.WAIT_BRIDGE:
+        return now + params.bridge_heartbeat_timeout_s
+    if phase is DriverPhase.HANDSHAKE:
+        return now + params.handshake_timeout_s
+    if phase is DriverPhase.PREARM_SETTLE:
+        return now + max(
+            params.prearm_backstop_floor_s,
+            params.prearm_settle_s * params.prearm_backstop_multiplier,
+        )
+    if phase is DriverPhase.FETCH_TARGET:
+        return now + params.takeoff_target_timeout_s
+    if phase is DriverPhase.DRIVE:
+        routine_budget_s = (
+            sum(step.timeout_s for step in state.routine.steps) if state.routine else 0.0
+        )
+        return (
+            now
+            + (
+                routine_budget_s
+                + params.takeoff_timeout_s
+                + params.command_ack_timeout_s
+                + params.handshake_timeout_s
             )
-            self._enter(DriverPhase.PREARM_SETTLE)
+            * params.drive_budget_multiplier
+        )
+    return 0.0
 
-    def _tick_prearm_settle(self) -> None:
-        self._pump_and_poll()
-        if self._abort_on_failsafe("while settling before arm"):
-            return
-        if self._env.sim_time_us() >= self._settle_target_us:
-            self._env.log(f"[{self._label}] prearm settle complete; waiting for takeoff telemetry")
-            self._enter(DriverPhase.FETCH_TARGET)
 
-    def _tick_fetch_target(self) -> None:
-        self._pump_and_poll()
-        if self._abort_on_failsafe("while waiting for altitude telemetry"):
-            return
-        self._target = self._port.latest_global_position
-        if self._target is not None:
-            self._enter(DriverPhase.BUILD)
+def _enter(*, state: RoutineDriverState, phase: DriverPhase) -> RoutineDriverState:
+    entered = replace(state, phase=phase)
+    return replace(entered, deadline_s=_deadline_for_phase(state=entered, phase=phase))
 
-    def _tick_build(self) -> None:
-        assert self._target is not None
-        latitude_deg, longitude_deg, altitude_m = self._target
+
+def create_routine_driver(
+    *,
+    params: DriverParams,
+    port: MavlinkCommandPort,
+    env: DriverEnvironment,
+    label: str = "",
+    monotonic: Callable[[], float] = time.monotonic,
+) -> RoutineDriverState:
+    """Create a fresh frozen driver state without opening its resources."""
+    state = RoutineDriverState(
+        params=params,
+        port=port,
+        env=env,
+        label=label,
+        monotonic=monotonic,
+        phase=DriverPhase.WAIT_BRIDGE,
+        deadline_s=0.0,
+        settle_target_us=0,
+        target=None,
+        routine=None,
+        routine_state=RoutineState(),
+        previous_cursor=0,
+    )
+    return _enter(state=state, phase=DriverPhase.WAIT_BRIDGE)
+
+
+def routine_driver_is_done(*, state: RoutineDriverState) -> bool:
+    """Return whether the driver reached its terminal phase."""
+    return state.phase is DriverPhase.DONE
+
+
+def _pump_and_poll(*, state: RoutineDriverState) -> Optional[CommandAck]:
+    state.port.pump_heartbeat()
+    return state.port.poll_feedback()
+
+
+def _fail(*, state: RoutineDriverState, kind: FailureKind, message: str) -> RoutineDriverState:
+    state.env.on_failure(kind, message)
+    return _enter(state=state, phase=DriverPhase.DONE)
+
+
+def _abort_on_failsafe(
+    *, state: RoutineDriverState, phase_description: str
+) -> Optional[RoutineDriverState]:
+    status = read_command_port_status(port=state.port)
+    if not status.failsafe:
+        return None
+    return _fail(
+        state=state,
+        kind=FailureKind.FAILSAFE,
+        message=(
+            f"[{state.label}] PX4 entered failsafe {phase_description}: "
+            f"system_status={status.failsafe_system_status}"
+        ),
+    )
+
+
+def _apply_decision(*, port: MavlinkCommandPort, decision: RoutineDecision) -> None:
+    """Perform the single MAVLink side effect described by a pure decision."""
+    if decision.kind is DecisionKind.SEND:
+        assert decision.command is not None
+        port.send(decision.command)
+        return
+    if decision.kind is not DecisionKind.STREAM:
+        return
+    setpoint = decision.setpoint
+    if isinstance(setpoint, PositionSetpoint):
+        port.send_setpoint(setpoint)
+    elif isinstance(setpoint, VelocitySetpoint):
+        port.send_velocity_setpoint(setpoint)
+    elif isinstance(setpoint, AttitudeRateSetpoint):
+        port.send_attitude_target(setpoint)
+    else:
+        raise TypeError(f"STREAM decision carried unsupported payload {setpoint!r}")
+
+
+def _tick_drive(*, state: RoutineDriverState) -> RoutineDriverState:
+    assert state.routine is not None
+    last_ack = _pump_and_poll(state=state)
+    failed = _abort_on_failsafe(state=state, phase_description="during the routine")
+    if failed is not None:
+        return failed
+    sim_time_us = state.env.sim_time_us()
+    observation = state.env.read_observation(sim_time_us=sim_time_us, last_ack=last_ack)
+    routine_state, decision = decide(state.routine, state.routine_state, observation)
+    _apply_decision(port=state.port, decision=decision)
+    advanced = replace(state, routine_state=routine_state)
+    if decision.kind is DecisionKind.FAIL:
+        assert decision.failure_kind is not None
+        return _fail(
+            state=advanced,
+            kind=decision.failure_kind,
+            message=f"[{state.label}] routine failed: {decision.reason}",
+        )
+    previous_cursor = state.previous_cursor
+    while previous_cursor < routine_state.cursor:
+        state.env.on_step_advanced(state.routine.steps[previous_cursor].label)
+        previous_cursor += 1
+    advanced = replace(advanced, previous_cursor=previous_cursor)
+    if routine_state.cursor >= len(state.routine.steps):
+        state.env.log(f"[{state.label}] routine complete; holding, manual control available")
+        return _enter(state=advanced, phase=DriverPhase.DONE)
+    return advanced
+
+
+def tick_routine_driver(*, state: RoutineDriverState) -> RoutineDriverState:
+    """Advance one control frame and return the successor driver state."""
+    if state.phase is DriverPhase.DONE:
+        _pump_and_poll(state=state)
+        return state
+    if state.deadline_s and state.monotonic() > state.deadline_s:
+        return _fail(
+            state=state,
+            kind=FailureKind.TIMEOUT,
+            message=f"phase {state.phase.name} timed out",
+        )
+    if state.phase is DriverPhase.WAIT_BRIDGE:
+        if state.env.is_bridge_connected():
+            state.env.log(f"[{state.label}] bridge connected; connecting GCS link")
+            return _enter(state=state, phase=DriverPhase.CONNECT)
+        return state
+    if state.phase is DriverPhase.CONNECT:
+        state.port.connect()
+        state.port.pump_heartbeat(force=True)
+        return _enter(state=state, phase=DriverPhase.HANDSHAKE)
+    if state.phase is DriverPhase.HANDSHAKE:
+        _pump_and_poll(state=state)
+        if read_command_port_status(port=state.port).is_handshaked:
+            state.env.log(f"[{state.label}] GCS handshake complete; settling PX4 before arm")
+            settled = replace(
+                state,
+                settle_target_us=state.env.sim_time_us()
+                + int(round(state.params.prearm_settle_s * 1_000_000)),
+            )
+            return _enter(state=settled, phase=DriverPhase.PREARM_SETTLE)
+        return state
+    if state.phase is DriverPhase.PREARM_SETTLE:
+        _pump_and_poll(state=state)
+        failed = _abort_on_failsafe(state=state, phase_description="while settling before arm")
+        if failed is not None:
+            return failed
+        if state.env.sim_time_us() >= state.settle_target_us:
+            state.env.log(f"[{state.label}] prearm settle complete; waiting for takeoff telemetry")
+            return _enter(state=state, phase=DriverPhase.FETCH_TARGET)
+        return state
+    if state.phase is DriverPhase.FETCH_TARGET:
+        _pump_and_poll(state=state)
+        failed = _abort_on_failsafe(
+            state=state, phase_description="while waiting for altitude telemetry"
+        )
+        if failed is not None:
+            return failed
+        target = read_command_port_status(port=state.port).latest_global_position
+        if target:
+            return _enter(
+                state=replace(state, target=target),
+                phase=DriverPhase.BUILD,
+            )
+        return state
+    if state.phase is DriverPhase.BUILD:
+        assert state.target is not None
+        latitude_deg, longitude_deg, altitude_m = state.target
         try:
-            self._routine = build_vehicle_routine(
-                self._params.steps,
+            routine = build_vehicle_routine(
+                state.params.steps,
                 target_latitude_deg=latitude_deg,
                 target_longitude_deg=longitude_deg,
                 target_altitude_m=altitude_m,
-                command_ack_timeout_s=self._params.command_ack_timeout_s,
-                gates=self._params.gates,
-                takeoff_timeout_s=self._params.takeoff_timeout_s,
-                hover_settle_s=self._params.hover_settle_s,
-                home_lat_deg=self._params.home_lat_deg,
-                home_lon_deg=self._params.home_lon_deg,
-                home_alt_m=self._params.home_alt_m,
-                goto_position_tol_m=self._params.goto_position_tol_m,
-                goto_heading_tol_deg=self._params.goto_heading_tol_deg,
-                goto_cross_track_m=self._params.goto_cross_track_m,
-                goto_offboard_prime_ticks=self._params.goto_offboard_prime_ticks,
-                goto_min_heading_dist_m=self._params.goto_min_heading_dist_m,
-                policy_fn_factory=self._params.policy_fn_factory,
+                command_ack_timeout_s=state.params.command_ack_timeout_s,
+                gates=state.params.gates,
+                takeoff_timeout_s=state.params.takeoff_timeout_s,
+                hover_settle_s=state.params.hover_settle_s,
+                home_lat_deg=state.params.home_lat_deg,
+                home_lon_deg=state.params.home_lon_deg,
+                home_alt_m=state.params.home_alt_m,
+                goto_position_tol_m=state.params.goto_position_tol_m,
+                goto_heading_tol_deg=state.params.goto_heading_tol_deg,
+                goto_cross_track_m=state.params.goto_cross_track_m,
+                goto_offboard_prime_ticks=state.params.goto_offboard_prime_ticks,
+                goto_min_heading_dist_m=state.params.goto_min_heading_dist_m,
+                policy_fn_factory=state.params.policy_fn_factory,
             )
         except ValueError as exc:
-            # A bad routine config (unknown kind, missing field, unloadable
-            # policy artifact) is a terminal command failure, routed through
-            # on_failure so the strict/forgiving reaction applies.
-            self._fail(FailureKind.COMMAND, f"[{self._label}] routine build failed: {exc}")
-            return
-        self._commander = _VehicleCommander(self._routine, self._port)
-        self._prev_cursor = 0
-        self._env.log(f"[{self._label}] driving routine ({len(self._routine.steps)} step(s))")
-        self._enter(DriverPhase.DRIVE)
-
-    def _tick_drive(self) -> None:
-        assert self._commander is not None and self._routine is not None
-        last_ack = self._pump_and_poll()
-        if self._abort_on_failsafe("during the routine"):
-            return
-        sim_time_us = self._env.sim_time_us()
-        observation = self._env.read_observation(sim_time_us=sim_time_us, last_ack=last_ack)
-        decision = self._commander.step(observation)
-        if decision.kind is DecisionKind.FAIL:
-            assert decision.failure_kind is not None  # always set on a FAIL decision
-            self._fail(decision.failure_kind, f"[{self._label}] routine failed: {decision.reason}")
-            return
-        cursor = self._commander.current_step_index
-        while self._prev_cursor < cursor:
-            self._env.on_step_advanced(self._routine.steps[self._prev_cursor].label)
-            self._prev_cursor += 1
-        if self._commander.is_done:
-            self._env.log(f"[{self._label}] routine complete; holding, manual control available")
-            self._enter(DriverPhase.DONE)
-
-    # ---- helpers -----------------------------------------------------------
-
-    def _enter(self, phase: DriverPhase) -> None:
-        """Transition to ``phase`` and arm its wall-clock backstop."""
-        self._phase = phase
-        params = self._params
-        if phase is DriverPhase.WAIT_BRIDGE:
-            self._deadline_s = self._monotonic() + params.bridge_heartbeat_timeout_s
-        elif phase is DriverPhase.HANDSHAKE:
-            self._deadline_s = self._monotonic() + params.handshake_timeout_s
-        elif phase is DriverPhase.PREARM_SETTLE:
-            self._deadline_s = self._monotonic() + max(
-                params.prearm_backstop_floor_s,
-                params.prearm_settle_s * params.prearm_backstop_multiplier,
+            return _fail(
+                state=state,
+                kind=FailureKind.COMMAND,
+                message=f"[{state.label}] routine build failed: {exc}",
             )
-        elif phase is DriverPhase.FETCH_TARGET:
-            self._deadline_s = self._monotonic() + params.takeoff_target_timeout_s
-        elif phase is DriverPhase.DRIVE:
-            # Wall-clock backstop generous enough for the whole routine: the sum
-            # of every step's sim-time budget (goto/forward legs can be long) plus
-            # the handshake/ack slack, with a safety multiplier.
-            routine_budget_s = (
-                sum(step.timeout_s for step in self._routine.steps) if self._routine else 0.0
-            )
-            self._deadline_s = (
-                self._monotonic()
-                + (
-                    routine_budget_s
-                    + params.takeoff_timeout_s
-                    + params.command_ack_timeout_s
-                    + params.handshake_timeout_s
-                )
-                * params.drive_budget_multiplier
-            )
-        else:
-            self._deadline_s = 0.0
-
-    def _fail(self, kind: FailureKind, message: str) -> None:
-        """Report a terminal failure (strict raises, forgiving logs) then idle."""
-        self._env.on_failure(kind, message)
-        self._enter(DriverPhase.DONE)
-
-    def _abort_on_failsafe(self, phase: str) -> bool:
-        """Fail the routine on a PX4 failsafe; return whether it did."""
-        if self._port.failsafe:
-            self._fail(
-                FailureKind.FAILSAFE,
-                f"[{self._label}] PX4 entered failsafe {phase}: "
-                f"system_status={self._port.failsafe_system_status}",
-            )
-            return True
-        return False
-
-    def _pump_and_poll(self) -> Optional[CommandAck]:
-        self._port.pump_heartbeat()
-        return self._port.poll_feedback()
+        state.env.log(f"[{state.label}] driving routine ({len(routine.steps)} step(s))")
+        built = replace(
+            state,
+            routine=routine,
+            routine_state=RoutineState(),
+            previous_cursor=0,
+        )
+        return _enter(state=built, phase=DriverPhase.DRIVE)
+    if state.phase is DriverPhase.DRIVE:
+        return _tick_drive(state=state)
+    return state

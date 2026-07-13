@@ -6,10 +6,10 @@ instance (the resolved simulator port ``mavlink_port = connection_baseport + id`
 GCS link the resolved ``vehicle.gcs_port = bridge.gcs_baseport + id``).
 
 This module is the **strict/forgiving standalone shell** over the host-agnostic
-:class:`~robotics_experiments.runtime.FleetOrchestrator`. The orchestrator owns
+:class:`~robotics_experiments.runtime.FleetState`. Runtime functions own
 the production pipeline (open scene -> apply settings -> spawn fleet -> start the
 lockstep bridge group -> build one per-drone
-:class:`~robotics_experiments.commanding.RoutineDriver` per flying drone ->
+:class:`~robotics_experiments.commanding.RoutineDriverState` per flying drone ->
 teardown); this runner only owns the SimApp host loop, the **integration-test-only
 checks** (bridge connectivity + first heartbeat, the pre-arm start-tilt check, and
 the bridge-log scan), and the failure reaction. In **strict** mode (the
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from robotics_experiments.runtime import (
         BridgeHost,
         FleetDriverEnv,
-        FleetOrchestrator,
+        FleetState,
         SpawnedDrone,
     )
 
@@ -100,22 +100,23 @@ def _latest_log_hint(px4_container_log_name: str) -> str:
 
 
 def _bridge_received_first_heartbeat(host: BridgeHost) -> bool:
-    bridge = getattr(host, "_bridge", None)
-    port = getattr(bridge, "_port", None)
-    backend = getattr(port, "_backend", None)
-    return bool(getattr(backend, "_received_first_hearbeat", False))
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    status = read_bridge_host_status(host=host).bridge_status
+    return status is not None and status.first_heartbeat_received
 
 
 def _bridge_disconnect_reason(host: BridgeHost) -> str | None:
-    bridge = getattr(host, "_bridge", None)
-    port = getattr(bridge, "_port", None)
-    return getattr(port, "_last_disconnect_reason", None)
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    status = read_bridge_host_status(host=host).bridge_status
+    return status.last_disconnect_reason if status is not None else None
 
 
 def _bridge_debug_log_path(host: BridgeHost) -> Path | None:
-    bridge = getattr(host, "_bridge", None)
-    port = getattr(bridge, "_port", None)
-    path = getattr(port, "_debug_log_path", None)
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    path = read_bridge_host_status(host=host).debug_log_path
     return Path(path) if path else None
 
 
@@ -128,63 +129,71 @@ def _raise_failsafe(message: str) -> None:
 
 
 def _require_bridge_connected(host: BridgeHost, label: str) -> None:
-    bridge = getattr(host, "_bridge", None)
-    if bridge is None:
-        if getattr(host, "_start_attempted", False):
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    host_status = read_bridge_host_status(host=host)
+    if host_status.bridge_status is None:
+        if host_status.start_attempted:
             raise AssertionError(
                 f"[{label}] PX4 bridge host attempted start but did not construct a bridge"
             )
         return
-    if not bridge.is_connected:
+    if not host_status.bridge_status.is_connected:
         reason = _bridge_disconnect_reason(host) or "unknown"
         raise AssertionError(f"[{label}] PX4 bridge disconnected during takeoff scenario: {reason}")
 
 
-def _sim_time_us(orchestrator: FleetOrchestrator) -> int:
+def _bridged(fleet: FleetState) -> tuple[SpawnedDrone, ...]:
+    return tuple(drone for drone in fleet.drones if drone.host is not None)
+
+
+def _sim_time_us(fleet: FleetState) -> int:
     # All bridges share the same PhysX steps, so any host's clock is the fleet
     # clock; use the first bridged host as the reference.
-    return int(orchestrator.bridged[0].host.sim_time_us)
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    return read_bridge_host_status(host=_bridged(fleet)[0].host).sim_time_us
 
 
-def _advance_once(context: SceneTestContext, orchestrator: FleetOrchestrator) -> None:
+def _advance_once(context: SceneTestContext, fleet: FleetState) -> None:
     """Advance PhysX one step (ticks every bridge) and assert all stay connected."""
     context.simulation_app.update()
-    for handle in orchestrator.bridged:
+    for handle in _bridged(fleet):
         _require_bridge_connected(handle.host, handle.label)
 
 
 def _advance_sim_time(
     context: SceneTestContext,
-    orchestrator: FleetOrchestrator,
+    fleet: FleetState,
     seconds: float,
     wall_timeout_s: float | None = None,
 ) -> None:
-    bridged = orchestrator.bridged
-    start_us = _sim_time_us(orchestrator)
+    bridged = _bridged(fleet)
+    start_us = _sim_time_us(fleet)
     target_us = start_us + int(round(float(seconds) * 1_000_000))
     base = wall_timeout_s if wall_timeout_s is not None else max(10.0, seconds * 5.0)
     deadline = time.monotonic() + base * len(bridged)
-    while _sim_time_us(orchestrator) < target_us:
+    while _sim_time_us(fleet) < target_us:
         if time.monotonic() > deadline:
-            actual_s = (_sim_time_us(orchestrator) - start_us) * 1e-6
+            actual_s = (_sim_time_us(fleet) - start_us) * 1e-6
             raise AssertionError(
                 f"Timed out advancing Isaac simulation: target={seconds:.2f}s "
                 f"actual={actual_s:.2f}s"
             )
-        _advance_once(context, orchestrator)
+        _advance_once(context, fleet)
 
 
 def _wait_for_bridge_heartbeat(
     context: SceneTestContext,
-    orchestrator: FleetOrchestrator,
+    fleet: FleetState,
     handle: SpawnedDrone,
     timeout_s: float,
 ) -> None:
     """Infra check: wait until the bridge received its first PX4 heartbeat."""
     context.report(f"[{handle.label}] waiting up to {timeout_s:.1f}s for PX4 bridge heartbeat")
-    deadline = time.monotonic() + timeout_s * len(orchestrator.bridged)
+    deadline = time.monotonic() + timeout_s * len(_bridged(fleet))
     while time.monotonic() < deadline:
-        _advance_once(context, orchestrator)
+        _advance_once(context, fleet)
         if _bridge_received_first_heartbeat(handle.host):
             context.report(f"[{handle.label}] PX4 bridge received first heartbeat")
             return
@@ -277,18 +286,20 @@ def _build_make_env(
 
 def _drive_to_done(
     context: SceneTestContext,
-    orchestrator: FleetOrchestrator,
-) -> None:
+    fleet: FleetState,
+) -> FleetState:
     """Tick physics and every per-drone driver until all routines are done.
 
-    Each per-drone :class:`RoutineDriver` owns its phase machine, flight
+    Each per-drone :class:`RoutineDriverState` carries its phase machine and flight
     verification, and (via its env) the strict/forgiving reaction; this loop only
     advances the shared sim and ticks the drivers. Ticks are raw (unguarded) so a
     strict env's typed exception propagates out and fails the integration test.
     The per-phase sim-time and wall-clock guards live in the drivers; this coarse
     wall budget is a final backstop against a sim that ticks but never finishes.
     """
-    active = orchestrator.flying
+    from robotics_experiments.runtime import fleet_is_done, tick_drivers
+
+    active = fleet.flying
     context.report(f"driving the routine for {len(active)} drone(s)")
     deadline_s = time.monotonic() + sum(
         (
@@ -300,20 +311,29 @@ def _drive_to_done(
         * 6.0
         for flying in active
     )
-    while not orchestrator.all_done:
+    while not fleet_is_done(state=fleet):
         if time.monotonic() > deadline_s:
             raise AssertionError("Timed out driving the routine to completion")
-        _advance_once(context, orchestrator)
-        for flying in active:
-            flying.driver.tick()
+        _advance_once(context, fleet)
+        fleet = tick_drivers(state=fleet)
+    return fleet
 
 
 def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions) -> None:
-    # omni.timeline and FleetOrchestrator (Isaac-coupled runtime) require the
+    # omni.timeline and the fleet runtime (Isaac-coupled) require the
     # running Kit app, so they are imported after SimulationApp has started.
     import omni.timeline
 
-    from robotics_experiments.runtime import FleetOrchestrator
+    from robotics_experiments.runtime import (
+        adopt_current_stage,
+        apply_settings,
+        build_drivers,
+        create_fleet,
+        open_scene,
+        spawn_fleet,
+        start_bridges,
+        teardown,
+    )
 
     strict = context.strict
     timing = TimingReporter(options.test_name, emit=context.report)
@@ -330,61 +350,65 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     ground_settle_s = max(routine.ground_settle_s for routine in active_routines)
 
     context.report(f"{options.test_name}: running in {'strict' if strict else 'forgiving'} mode")
-    orchestrator = FleetOrchestrator(env)
+    fleet = create_fleet(config=env)
 
     context.report(f"{options.test_name}: opening scene and applying simulation settings")
     with timing.timed_stage("open_scene"):
-        orchestrator.open_scene(context.scene_override)
+        fleet = open_scene(state=fleet, scene_override=context.scene_override)
         context.simulation_app.update()
-        orchestrator.adopt_current_stage()
+        fleet = adopt_current_stage(state=fleet)
     with timing.timed_stage("apply_settings"):
-        orchestrator.apply_settings()
+        fleet = apply_settings(state=fleet)
 
     with timing.timed_stage("spawn_drones"):
-        orchestrator.spawn_fleet()
-    drone_count = len(orchestrator.drones)
+        fleet = spawn_fleet(state=fleet)
+    drone_count = len(fleet.drones)
     context.report(f"{options.test_name}: built {drone_count} drone(s)")
-    if not orchestrator.bridged:
+    if not _bridged(fleet):
         raise AssertionError(f"{options.test_name}: no px4-enabled vehicle to drive")
 
     timeline = omni.timeline.get_timeline_interface()
-    clock = orchestrator.bridged[0].host
+    clock_host = _bridged(fleet)[0].host
+    from robotics_experiments.runtime import read_bridge_host_status
+
+    def sim_time_us() -> int:
+        return read_bridge_host_status(host=clock_host).sim_time_us
 
     bridge_logs: list[tuple[str, Path | None]] = []
     try:
-        context.report(
-            f"{options.test_name}: starting {len(orchestrator.bridged)} PX4 bridge host(s)"
-        )
-        with timing.timed_stage("bridge_host_start", sim_clock=clock):
-            orchestrator.start_bridges()
+        context.report(f"{options.test_name}: starting {len(_bridged(fleet))} PX4 bridge host(s)")
+        with timing.timed_stage("bridge_host_start", sim_time_us=sim_time_us):
+            fleet = start_bridges(state=fleet)
             timeline.play()
 
         context.report(
             f"{options.test_name}: settling drones on ground for " f"{ground_settle_s:.1f}s"
         )
-        with timing.timed_stage("ground_settle", sim_clock=clock):
-            _advance_sim_time(context, orchestrator, seconds=ground_settle_s, wall_timeout_s=20.0)
+        with timing.timed_stage("ground_settle", sim_time_us=sim_time_us):
+            _advance_sim_time(context, fleet, seconds=ground_settle_s, wall_timeout_s=20.0)
 
-        with timing.timed_stage("bridge_heartbeat_wait", sim_clock=clock):
-            for handle in orchestrator.bridged:
+        with timing.timed_stage("bridge_heartbeat_wait", sim_time_us=sim_time_us):
+            for handle in _bridged(fleet):
                 _wait_for_bridge_heartbeat(
                     context,
-                    orchestrator,
+                    fleet,
                     handle,
                     timeout_s=handle.vehicle.routine.bridge_heartbeat_timeout_s,
                 )
 
-        for handle in orchestrator.bridged:
-            if not bool(getattr(handle.host, "is_running", False)):
+        for handle in _bridged(fleet):
+            from robotics_experiments.runtime import read_bridge_host_status
+
+            if read_bridge_host_status(host=handle.host).bridge_status is None:
                 raise AssertionError(
                     f"[{handle.label}] PX4 bridge host stopped before command flow"
                 )
             _require_bridge_connected(handle.host, label=handle.label)
 
-        with timing.timed_stage("observer_initialize", sim_clock=clock):
-            for handle in orchestrator.bridged:
+        with timing.timed_stage("observer_initialize", sim_time_us=sim_time_us):
+            for handle in _bridged(fleet):
                 handle.observer.initialize()
-                start_sample = _sample_state(handle.observer, _sim_time_us(orchestrator))
+                start_sample = _sample_state(handle.observer, _sim_time_us(fleet))
                 context.report(
                     f"[{handle.label}] start position z={start_sample.position_enu[2]:.2f}m "
                     f"{format_vehicle_state_vectors(start_sample)} "
@@ -400,20 +424,20 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
             context,
             strict=strict,
             post_takeoff_hook=options.post_takeoff_hook,
-            first_label=orchestrator.drones[0].label,
+            first_label=fleet.drones[0].label,
         )
-        with timing.timed_stage("build_drivers", sim_clock=clock):
-            orchestrator.build_drivers(make_env)
+        with timing.timed_stage("build_drivers", sim_time_us=sim_time_us):
+            fleet = build_drivers(state=fleet, make_env=make_env)
 
-        with timing.timed_stage("drive_routine", sim_clock=clock):
-            _drive_to_done(context, orchestrator)
+        with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
+            fleet = _drive_to_done(context, fleet)
 
-        bridge_logs = [(h.label, _bridge_debug_log_path(h.host)) for h in orchestrator.bridged]
+        bridge_logs = [(h.label, _bridge_debug_log_path(h.host)) for h in _bridged(fleet)]
     finally:
         context.report(f"{options.test_name}: stopping timeline, bridge hosts, and drones")
-        with timing.timed_stage("teardown", sim_clock=clock):
+        with timing.timed_stage("teardown", sim_time_us=sim_time_us):
             timeline.stop()
-            orchestrator.teardown()
+            fleet = teardown(state=fleet)
 
     # Bridge-log scan is a strict-only assertion (the integration test's last check
     # that the bridge stayed healthy and clean across the flight).

@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This document specifies the two contracts implemented by the `Px4Bridge` component, which connects an Isaac Sim drone articulation to a network-attached PX4 SITL instance.
+This document specifies the two contracts implemented by frozen `Px4BridgeState`
+transitions, which connect an Isaac Sim drone articulation to a network-attached
+PX4 SITL instance.
 
 - **Contract 1** (Isaac Sim ↔ Bridge) is an in-process Python contract executed every physics step.
 - **Contract 2** (Bridge ↔ PX4 SITL) is a network protocol contract (MAVLink over TCP) using PX4's Simulator MAVLink API in lockstep mode.
@@ -16,7 +18,7 @@ these silently corrupts the flight or the lockstep loop.
 
 - **Monotonic sim-time.** `HIL_SENSOR.time_usec` is strictly increasing and
   derived from sim time, not wall clock; the bridge passes `sim_time_us`
-  straight through. Enforced at the source by `SimClock` (Contract 1, *Required
+  straight through. Enforced at the source by `SimClockState` transitions (Contract 1, *Required
   state inputs*; Contract 2, *Lockstep semantics*).
 - **Bridge listens first.** The bridge must be listening on the simulator port
   before PX4 dials in (Contract 2, *Connection lifecycle*).
@@ -130,7 +132,7 @@ This separation is required because the thrust model is what gets randomized dur
 ### Motor index ordering
 
 The single most error-prone detail. The default runtime discovers rotor thrust
-marker USD paths from the spawned asset and passes them to `Px4Bridge` in **PX4
+marker USD paths from the spawned asset and passes them to `create_px4_bridge` in **PX4
 motor-index order**, not in scene-graph order or alphabetical order. These
 marker prims locate where thrust is applied on the drone body; they are not
 simulated as separate rotor bodies.
@@ -159,11 +161,11 @@ lifecycle into small owners. Sync work must preserve these boundaries:
 
 | Layer | Owns | Must not own |
 |-------|------|--------------|
-| `robotics_experiments.runtime.FleetOrchestrator` | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine drivers, teardown. Driven by a thin per-host shell (the live `experiment_runtime` Kit extension or the standalone runner) | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
+| `robotics_experiments.runtime.FleetState` functions | The host-agnostic runtime pipeline: open scene + apply settings, spawn the fleet, build per-vehicle hosts and wrap them in one `BridgeHostGroup`, build per-drone routine states, teardown. Driven by a thin per-host shell that rebinds each returned state | Timeline/Kit/SimApp lifecycle (the shell owns it), PX4 sockets, MAVLink, thrust math |
 | `robotics_experiments.drone` (`spawn_drone` / `despawn_drone`) | Public stage-authoring contract for USD reference creation, runtime pose placement, stationary spawn height, velocity reset, and despawn; backed by an Isaac-only private implementation | Physics callbacks, PX4 bridge construction |
 | `BridgeHostGroup` (`robotics_experiments.runtime.BridgeHostGroup`) | The single fleet-wide physics-step subscription; running every host's send leg before every host's poll leg per step | Per-vehicle bridge/clock/rotor state |
 | `BridgeHost` (`robotics_experiments.runtime.BridgeHost`) | PX4 enable gate, per-leg `send_phase` / `recv_phase`, optional startup settle delay, rotor discovery, bridge lifetime, bridge-facing sim-time counter | Physics-step subscription (the group owns it), drone USD authoring, MAVLink packet logic |
-| `Px4Bridge` | Per-tick orchestration across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
+| `Px4BridgeState` transitions | Frozen per-tick progress across Isaac I/O, MAVLink port, thrust model, and force application | Timeline events, PX4 process ownership, rotor discovery |
 | `Px4MavlinkPort` | PX4 simulator MAVLink connection, heartbeat, lockstep transaction, Pegasus sensors/GPS, actuator parsing | Isaac scene access or force application |
 | `IsaacArticulationIO` | Body and rotor prim handles, body-vs-root diagnostics, state sampling, force/torque application | MAVLink or thrust model policy |
 
@@ -195,7 +197,7 @@ harmful.
 ### Lifecycle
 
 ```
-[Shell startup]           FleetOrchestrator.open_scene(); register timeline/stage
+[Shell startup]           state = open_scene(state=state); register timeline/stage
                             subscriptions (live) or run the phases in sequence
                             (standalone)
         │
@@ -205,7 +207,7 @@ harmful.
         │
         ▼
 [BridgeHost.start()]      subscribe to physics steps; optionally wait for
-                            startup_settle_time_s before constructing Px4Bridge
+                            startup_settle_time_s before creating Px4BridgeState
         │
         ▼
 [Bridge start]            discover rotor mapping, construct port/thrust model,
@@ -213,8 +215,9 @@ harmful.
                             perform PX4 handshake
         │
         ▼
-[Each bridge tick]        bridge.on_physics_step(dt, sim_time_us)
-                          = send_sensors(dt, sim_time_us) + recv_and_apply():
+[Each bridge tick]        bridge = tick_px4_bridge(state=bridge, dt=dt,
+                                                   sim_time_us=sim_time_us)
+                          = send_sensors(...) + recv_and_apply(...):
                             - send_sensors: read resolved body state;
                               port.send(state) (sensors to PX4, no block)
                             - recv_and_apply: port.poll() (block for the paired
@@ -248,7 +251,7 @@ Isaac session — common during development when pressing Play repeatedly.
 on a non-finite tick, send `HIL_SENSOR` from it with a bumped `sim_time_us`
 while applying zero forces) is *not* implemented. The bridge currently raises on
 the first non-finite tick. The breadcrumb design lives in the comment block in
-`bridge.py::Px4Bridge.on_physics_step`.
+`bridge.py::send_sensors`.
 
 **Principle:** the bridge never silently corrupts the simulation. It either
 succeeds or surfaces a clean error the surrounding system can interpret — a flag
@@ -262,12 +265,13 @@ contains the raise so one bad tick does not crash the simulator loop.
 `robotics_experiments.px4_bridge.__init__` is the only supported public import
 surface for this package. Runtime, command, RL, tests, and extension shims must
 import bridge concepts from the package root, for example
-`from robotics_experiments.px4_bridge import Px4Bridge, VehicleState`. Internal
+`from robotics_experiments.px4_bridge import Px4BridgeState, VehicleState`. Internal
 submodules remain implementation detail even when their names are stable inside
 the package.
 
-The contract is expressed as four explicit pieces: pure-data state objects, a
-settings object, a single-call lockstep port, and a single Isaac sink call.
+The contract is expressed as frozen state values and stateless transitions over
+mutable MAVLink/Isaac resource adapters. Adapter state is read only through
+`read_bridge_status` and `read_articulation_io_status` immutable snapshots.
 
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
@@ -300,54 +304,43 @@ class LockstepSettings:
     first_actuator_timeout_s; max_sustained_actuator_lag_s
     heartbeat_rate_hz; physics_rate_hz
 
-# The PX4 flight-stack port: the lockstep seam (Pegasus stays hidden behind it).
+# The PX4 flight-stack port: a mutable lockstep resource seam.
 class Px4MavlinkPort:
+    num_rotors: int
     def start(self) -> None: ...
     def stop(self) -> None: ...
     def send(self, state: VehicleState) -> ActuatorCommands | None: ...  # sensors -> PX4, no block; None => poll owed
     def poll(self) -> ActuatorCommands: ...  # block, recv <- PX4 (only after send returned None)
     def exchange(self, state: VehicleState) -> ActuatorCommands: ...  # send-then-poll; single-vehicle convenience
-    @property
-    def status(self) -> BridgeStatus: ...
-    @property
-    def num_rotors(self) -> int: ...
-    @property
-    def is_connected(self) -> bool: ...
-    @property
-    def is_armed(self) -> bool: ...
+
+def read_bridge_status(*, port: Px4MavlinkPort) -> BridgeStatus: ...
 
 # The Isaac seam behavior: read state in, apply a full rotor-model result out.
 # Implemented by IsaacArticulationIO; the local structural protocol is private.
 class _ArticulationIO(Protocol):
+    initialized: bool
     def read_state(self, sim_time_us: int) -> VehicleState: ...    # read <- Isaac
     def apply_dynamics(self, dynamics: RotorDynamics) -> None: ...  # send -> Isaac (physics sink)
     def update_rotor_spin(self, rotor_omega_rad_s, dt) -> None: ...  # cosmetic-only visual rotor spin; never touches forces/lockstep
-    # plus initialize / shutdown / is_initialized / num_rotors
+    # plus initialize / shutdown
 
-# The orchestrator ties the four pieces into a per-tick pipeline.
-class Px4Bridge:
-    def __init__(
-        self,
-        *,
-        articulation_path: str,         # USD path to drone root
-        rotor_link_paths: list[str],    # discovered rotor marker paths in PX4 motor-index order
-        thrust_model: RotorThrustModel,
-        port: Px4MavlinkPort,
-        articulation_io: _ArticulationIO | None = None,  # test seam; defaults to IsaacArticulationIO
-        max_tilt_angle_deg: float = 180.0,              # zeros forces past this tilt; 180 = disabled
-        rotor_spin_visual_scale: float = 0.03,          # cosmetic-only spin scale; passed to the default IsaacArticulationIO
-    ): ...
+# Frozen bridge progress; functions return its successor.
+@dataclass(frozen=True)
+class Px4BridgeState:
+    port: Px4MavlinkPort
+    thrust_model: RotorThrustModel
+    articulation_io: _ArticulationIO
+    max_tilt_angle_deg: float
+    tick_count: int
+    tilt_cutoff_count: int
+    pending: _PendingTick | None
 
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-    def on_physics_step(self, dt: float, sim_time_us: int) -> None: ...
-
-    @property
-    def status(self) -> BridgeStatus: ...
-    @property
-    def is_connected(self) -> bool: ...
-    @property
-    def is_armed(self) -> bool: ...
+def create_px4_bridge(...) -> Px4BridgeState: ...
+def start_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState: ...
+def send_sensors(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4BridgeState: ...
+def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState: ...
+def tick_px4_bridge(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px4BridgeState: ...
+def stop_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState: ...
 ```
 
 **Lockstep ordering contract:** a tick decomposes into `send(state)` -- which
@@ -356,7 +349,7 @@ when an actuator is owed -- and `poll()`, which blocks for the paired
 `HIL_ACTUATOR_CONTROLS` and returns the rotor references. Within a vehicle the
 send strictly precedes its poll. `exchange(state)` composes the two back into
 one send-then-poll call and is the single-vehicle convenience;
-`Px4Bridge.on_physics_step` (itself `send_sensors` then `recv_and_apply`) is the
+`tick_px4_bridge` (itself `send_sensors` then `recv_and_apply`) is the
 canonical single-vehicle caller. The multi-vehicle `BridgeHostGroup` instead
 calls every vehicle's send leg before any vehicle's poll leg, so the flight
 stacks compute concurrently and one stalled PX4 cannot freeze the others; the
@@ -397,9 +390,9 @@ MAVLink v2 over TCP. Standard PX4 Simulator MAVLink API.
 mapping). `id` is the sole numeric identity; one enrichment step
 derives each vehicle's `mavlink_port`
 (`= connection_baseport + id`), PX4 `-i` index (`= id`), and log token from it
-on the immutable `VehicleConfig`. The fleet runtime (`FleetOrchestrator`) then
+on the immutable `VehicleConfig`. The fleet runtime (`spawn_fleet`) then
 constructs N fully independent bridges -- one per vehicle -- each owning its own
-simulator port (the resolved `mavlink_port = 4560 + id`) and its own `SimClock`.
+simulator port (the resolved `mavlink_port = 4560 + id`) and its own `SimClockState`.
 The `Px4MavlinkPort` takes that resolved `port` directly (handed to the vendored
 Pegasus backend with a zero `vehicle_id` offset), so no layer recomputes
 `baseport + id`. A single
@@ -544,7 +537,7 @@ of truth for both the Isaac physics rate and the PX4 sensor rate; the host plumb
 it into the port as `LockstepSettings.physics_rate_hz` (there is no separate
 sensor-rate knob to drift). The integer-microsecond tick is derived in exactly
 one place -- `_physics_tick_us(physics_hz)` in `px4_bridge/sim_clock.py`, shared by
-the port and by `SimClock`. The port pins the Pegasus sensor `update_period` to
+the port and by `SimClockState` transitions. The port pins the Pegasus sensor `update_period` to
 that integer-microsecond tick (rate `1e6 / tick_us`), not `1/physics_rate_hz`, so
 the `update_at_rate` gate fires on every physics step at any rate;
 `1/physics_rate_hz` can sit a float ULP above the per-tick dt (for example at

@@ -9,7 +9,7 @@ project's product or research goal.
 
 The current architecture has a strong foundation:
 
-- Runtime composition is centralized in `FleetOrchestrator` and documented by an
+- Runtime composition is centralized in frozen `FleetState` transitions and documented by an
   explicit contract.
 - Isaac Sim, ROS 2, PX4, and training dependencies are kept behind lazy package
   boundaries where practical.

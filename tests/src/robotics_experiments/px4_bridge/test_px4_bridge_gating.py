@@ -6,8 +6,11 @@ import pytest
 
 from robotics_experiments.px4_bridge import (
     PegasusQuadraticThrustModel,
-    Px4Bridge,
     VehicleState,
+    create_px4_bridge,
+    start_px4_bridge,
+    stop_px4_bridge,
+    tick_px4_bridge,
     tilt_angle_deg,
 )
 from tests.support.bridge_fakes import (
@@ -23,12 +26,8 @@ from tests.support.fakes import (
 
 class _LinearThrustModel:
     def __init__(self, *, num_rotors: int, max_force_n: float):
-        self._num_rotors = int(num_rotors)
+        self.num_rotors = int(num_rotors)
         self._max_force_n = float(max_force_n)
-
-    @property
-    def num_rotors(self):
-        return self._num_rotors
 
     def commands_to_forces(self, commands):
         controls = np.clip(np.asarray(commands.controls, dtype=np.float64), 0.0, 1.0)
@@ -41,7 +40,7 @@ class _LinearThrustModel:
             forces_n=self.commands_to_forces(commands),
             body_torque_n_m=np.zeros(3, dtype=np.float64),
             body_drag_n=np.zeros(3, dtype=np.float64),
-            rotor_omega_rad_s=np.zeros(self._num_rotors, dtype=np.float64),
+            rotor_omega_rad_s=np.zeros(self.num_rotors, dtype=np.float64),
         )
 
 
@@ -49,7 +48,7 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
     state = VehicleState.hover_at(sim_time_us=0)
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -57,9 +56,14 @@ def test_px4_bridge_tick_reads_state_and_applies_forces():
         articulation_io=io,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    created = bridge
+    bridge = start_px4_bridge(state=bridge)
+    assert bridge is not created
+    started = bridge
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    assert bridge is not started
+    assert started.tick_count == 0 and started.pending is None
+    bridge = stop_px4_bridge(state=bridge)
 
     assert port.started is True
     assert port.stopped is True
@@ -79,7 +83,7 @@ def test_px4_bridge_derives_drag_velocity_from_world_velocity():
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.0, 0.0, 0.0])
     thrust_model = _CapturingThrustModel(num_rotors=4)
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=thrust_model,
@@ -87,9 +91,9 @@ def test_px4_bridge_derives_drag_velocity_from_world_velocity():
         articulation_io=io,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     np.testing.assert_allclose(
         thrust_model.captured_body_velocity_flu,
@@ -100,7 +104,7 @@ def test_px4_bridge_derives_drag_velocity_from_world_velocity():
 
 def test_px4_bridge_validates_rotor_count_against_port():
     with pytest.raises(ValueError, match="rotor_link_paths has 3 entries"):
-        Px4Bridge(
+        create_px4_bridge(
             articulation_path="/World/Drone",
             rotor_link_paths=["m1", "m2", "m3"],
             thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -117,12 +121,12 @@ def test_px4_bridge_passes_visual_spin_signs_to_default_isaac_io(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        sys.modules["robotics_experiments.px4_bridge"],
+        sys.modules["robotics_experiments.px4_bridge.isaac_articulation"],
         "IsaacArticulationIO",
         FakeIsaacArticulationIO,
     )
 
-    Px4Bridge(
+    create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -159,7 +163,7 @@ def test_bridge_tilt_cutoff_zeros_forces():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -168,9 +172,9 @@ def test_bridge_tilt_cutoff_zeros_forces():
         max_tilt_angle_deg=60.0,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     # Forces are zeroed, but the MAVLink exchange must still run so PX4
     # lockstep keeps advancing (the sensor tick is not dropped).
@@ -186,7 +190,7 @@ def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -195,11 +199,11 @@ def test_bridge_tilt_cutoff_sustained_preserves_lockstep():
         max_tilt_angle_deg=60.0,
     )
 
-    bridge.start()
+    bridge = start_px4_bridge(state=bridge)
     sim_times = [4_000, 8_000, 12_000, 16_000, 20_000]
     for t in sim_times:
-        bridge.on_physics_step(0.004, t)
-    bridge.stop()
+        bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=t)
+    bridge = stop_px4_bridge(state=bridge)
 
     # Every tick exchanged sensors with strictly increasing sim time, while all
     # applied forces stayed zero throughout the sustained tilt excursion.
@@ -218,7 +222,7 @@ def test_bridge_nonfinite_state_raises_without_exchange():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.5, 0.5, 0.5, 0.5])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -227,10 +231,10 @@ def test_bridge_nonfinite_state_raises_without_exchange():
         max_tilt_angle_deg=60.0,
     )
 
-    bridge.start()
+    bridge = start_px4_bridge(state=bridge)
     with pytest.raises(RuntimeError):
-        bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+        tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     # No NaN forwarded into the lockstep exchange, and no forces applied.
     assert port.states == []
@@ -243,7 +247,7 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -252,9 +256,9 @@ def test_bridge_tilt_cutoff_passes_through_within_limit():
         max_tilt_angle_deg=60.0,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     assert len(io.applied_forces) == 1
     # Within the limit the cutoff does not fire: forces pass through unchanged.
@@ -269,7 +273,7 @@ def test_bridge_tilt_cutoff_disabled_by_default():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([0.0, 0.25, 0.5, 1.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=_LinearThrustModel(num_rotors=4, max_force_n=8.0),
@@ -277,9 +281,9 @@ def test_bridge_tilt_cutoff_disabled_by_default():
         articulation_io=io,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     assert len(io.applied_forces) == 1
     # The cutoff is effectively disabled: a 170 deg pitch still applies forces.
@@ -290,7 +294,7 @@ def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
     state = VehicleState.hover_at(sim_time_us=0)
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([100.0, 500.0, 1100.0, 1500.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
@@ -298,9 +302,9 @@ def test_bridge_forwards_rotor_omega_to_visual_spin_seam():
         articulation_io=io,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     # The cosmetic spin seam is fed the clipped per-rotor omega and the tick dt.
     assert len(io.spin_updates) == 1
@@ -313,7 +317,7 @@ def test_bridge_visual_spin_uses_airframe_max_rotor_velocity():
     state = VehicleState.hover_at(sim_time_us=0)
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([1100.0, 1100.0, 1100.0, 1100.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=PegasusQuadraticThrustModel(
@@ -324,9 +328,9 @@ def test_bridge_visual_spin_uses_airframe_max_rotor_velocity():
         articulation_io=io,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     omega, _dt = io.spin_updates[0]
     np.testing.assert_allclose(omega, [525.0, 525.0, 525.0, 525.0])
@@ -341,7 +345,7 @@ def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
     )
     io = _FakeArticulationIO(state)
     port = _FakeFlightStack([700.0, 700.0, 700.0, 700.0])
-    bridge = Px4Bridge(
+    bridge = create_px4_bridge(
         articulation_path="/World/Drone",
         rotor_link_paths=["m1", "m2", "m3", "m4"],
         thrust_model=PegasusQuadraticThrustModel(num_rotors=4),
@@ -350,9 +354,9 @@ def test_bridge_tilt_cutoff_still_spins_rotors_with_real_omega():
         max_tilt_angle_deg=60.0,
     )
 
-    bridge.start()
-    bridge.on_physics_step(0.004, 4_000)
-    bridge.stop()
+    bridge = start_px4_bridge(state=bridge)
+    bridge = tick_px4_bridge(state=bridge, dt=0.004, sim_time_us=4_000)
+    bridge = stop_px4_bridge(state=bridge)
 
     # Forces gated to zero (cutoff fired), but the rotors still spin (next assert).
     assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])

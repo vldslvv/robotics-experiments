@@ -10,5 +10,5 @@ Enable it from Isaac Sim with:
 ```
 
 The extension does not spawn drones or own physics callbacks. Host extensions
-construct `Px4Bridge`, select the MAVLink port, and call the bridge during
+create `Px4BridgeState`, select the MAVLink port, and rebind bridge transitions during
 timeline playback. See `docs/PX4_BRIDGE_CONTRACTS.md` for layer contracts.

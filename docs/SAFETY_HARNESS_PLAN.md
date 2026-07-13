@@ -23,7 +23,7 @@ The harness changes three things at once:
 ## Step 1 -- Hardware failure profile (the third `on_failure` profile)
 
 - Today the `make_env` seam injected into
-  `robotics_experiments.runtime.FleetOrchestrator` has two failure reactions:
+  the `robotics_experiments.runtime.FleetState` lifecycle has two failure reactions:
   forgiving (live extension: log + idle the driver) and strict (integration
   test: raise). Hardware adds a third: **abort** -- any driver `on_failure` (a
   `FAIL`, a PX4 failsafe, a phase timeout) commands an immediate land/RTL

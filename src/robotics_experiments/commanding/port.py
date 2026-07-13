@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from robotics_experiments.commanding.commands import (
@@ -29,9 +30,25 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, CommandAck
 
-__all__ = ["MavlinkCommandPort"]
+__all__ = ["CommandPortStatus", "MavlinkCommandPort", "read_command_port_status"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CommandPortStatus:
+    """Immutable control-link values read by the routine driver."""
+
+    is_handshaked: bool
+    failsafe: bool
+    failsafe_system_status: int
+    latest_global_position: Optional[tuple[float, float, float]]
+
+
+def read_command_port_status(*, port: MavlinkCommandPort) -> CommandPortStatus:
+    """Read the current control-link state without exposing mutable internals."""
+    return port._read_status()  # noqa: SLF001 - package status boundary
+
 
 # SET_POSITION_TARGET type mask: use position + yaw, ignore velocity (bits 3-5),
 # acceleration (bits 6-8), and yaw-rate (bit 11). A NaN setpoint yaw adds the
@@ -109,26 +126,6 @@ class MavlinkCommandPort:
         self._failsafe_system_status = 0
         self._latest_global_position: Optional[tuple[float, float, float]] = None
 
-    @property
-    def is_handshaked(self) -> bool:
-        """Whether the target system/component has been learned from a heartbeat."""
-        return self._target_known
-
-    @property
-    def failsafe(self) -> bool:
-        """Whether the last drained heartbeat reported a failsafe system status."""
-        return self._failsafe
-
-    @property
-    def failsafe_system_status(self) -> int:
-        """The last heartbeat ``system_status`` value (for failsafe diagnostics)."""
-        return self._failsafe_system_status
-
-    @property
-    def latest_global_position(self) -> Optional[tuple[float, float, float]]:
-        """Latest ``(latitude_deg, longitude_deg, altitude_m)`` telemetry, or ``None``."""
-        return self._latest_global_position
-
     def connect(self) -> None:
         if self._mav is None:
             from pymavlink import mavutil
@@ -144,6 +141,14 @@ class MavlinkCommandPort:
             except Exception:  # noqa: BLE001 - best-effort close on teardown
                 pass
             self._mav = None
+
+    def _read_status(self) -> CommandPortStatus:
+        return CommandPortStatus(
+            is_handshaked=self._target_known,
+            failsafe=self._failsafe,
+            failsafe_system_status=self._failsafe_system_status,
+            latest_global_position=self._latest_global_position,
+        )
 
     def pump_heartbeat(self, *, force: bool = False) -> None:
         from pymavlink import mavutil

@@ -2,8 +2,8 @@
 
 This is the runtime path for ``make run-all`` / ``make run-isaac``. The extension
 owns no flight logic: it builds a
-:class:`~robotics_experiments.runtime.FleetOrchestrator` and wires Kit events to
-its phases. The orchestrator owns scene-open and sim settings (so the live boot
+:class:`~robotics_experiments.runtime.FleetState` and wires Kit events to
+its transitions. The runtime owns scene-open and sim settings (so the live boot
 does not rely on Kit's ``--exec open_stage.py`` or a separate ``sim_settings``
 extension):
 
@@ -12,7 +12,7 @@ extension):
   stage is adopted and settings applied on the ``OPENED`` event, once the stage
   has finished loading (``lightswitch_spawner`` reacts to the same event).
 - Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group, and
-  -- if any drone has a routine -- builds one ``RoutineDriver`` per flying drone
+  -- if any drone has a routine -- builds one ``RoutineDriverState`` per flying drone
   and ticks them from a separate Kit app-update subscription (never the bridge's
   physics legs). Spawn stays gated on PLAY so the persisted stage is not mutated
   with drones until the user presses Play.
@@ -37,7 +37,18 @@ from omni.usd import StageEventType
 
 from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
 from robotics_experiments.config import load_config
-from robotics_experiments.runtime import FleetDriverEnv, FleetOrchestrator
+from robotics_experiments.runtime import (
+    FleetDriverEnv,
+    adopt_current_stage,
+    apply_settings,
+    build_drivers,
+    create_fleet,
+    open_scene,
+    spawn_fleet,
+    start_bridges,
+    teardown,
+    tick_drivers,
+)
 
 __all__ = ["Extension"]
 
@@ -46,7 +57,7 @@ _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 
 class Extension(omni.ext.IExt):
-    """Kit lifecycle wiring around the shared :class:`FleetOrchestrator`."""
+    """Kit lifecycle wiring around the shared frozen fleet state."""
 
     def on_startup(self, ext_id: str):
         """Build the orchestrator and subscribe to Kit events.
@@ -59,7 +70,7 @@ class Extension(omni.ext.IExt):
             config_path = os.environ[_CONFIG_PATH_ENV]
         except KeyError as exc:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
-        self._orchestrator = FleetOrchestrator(load_config(config_path))
+        self._fleet = create_fleet(config=load_config(config_path))
         self._scene_opened = False
         self._scene_open_sub: Any = None
         self._update_sub: Any = None
@@ -88,7 +99,7 @@ class Extension(omni.ext.IExt):
             return
         self._scene_opened = True
         self._scene_open_sub = None
-        self._orchestrator.open_scene()
+        self._fleet = open_scene(state=self._fleet)
         carb.log_info(f"{_LOG_PREFIX} running. Press Play to fly the configured routine.")
 
     def on_shutdown(self):
@@ -97,7 +108,7 @@ class Extension(omni.ext.IExt):
         self._stop_control()
         self._stage_event_sub = None
         self._timeline_event_sub = None
-        self._orchestrator.teardown()
+        self._fleet = teardown(state=self._fleet)
 
     def _on_stage_event(self, event):
         """Adopt and configure a stage once it finishes opening.
@@ -110,9 +121,9 @@ class Extension(omni.ext.IExt):
             # A new stage replaces any running fleet: stop control and tear down,
             # then adopt the new stage and apply settings to it.
             self._stop_control()
-            self._orchestrator.teardown()
-            self._orchestrator.adopt_current_stage()
-            self._orchestrator.apply_settings()
+            self._fleet = teardown(state=self._fleet)
+            self._fleet = adopt_current_stage(state=self._fleet)
+            self._fleet = apply_settings(state=self._fleet)
 
     def _on_timeline_event(self, event):
         """Spawn the fleet on PLAY; tear it down on STOP/PAUSE.
@@ -124,20 +135,20 @@ class Extension(omni.ext.IExt):
             self._setup_fleet()
         elif event.type in (int(TimelineEventType.STOP), int(TimelineEventType.PAUSE)):
             self._stop_control()
-            self._orchestrator.teardown()
+            self._fleet = teardown(state=self._fleet)
 
     def _setup_fleet(self):
         """Spawn the fleet, start the bridges, and arm the routine drivers."""
-        if self._orchestrator.stage is None:
+        if self._fleet.stage is None:
             carb.log_error(f"{_LOG_PREFIX} no stage adopted yet; cannot spawn fleet")
             return
-        self._orchestrator.teardown()
-        self._orchestrator.spawn_fleet()
-        self._orchestrator.start_bridges()
+        self._fleet = teardown(state=self._fleet)
+        self._fleet = spawn_fleet(state=self._fleet)
+        self._fleet = start_bridges(state=self._fleet)
         # routine.steps is the per-drone on/off switch: build drivers only when at
         # least one drone has a routine to fly.
-        if any(h.vehicle.routine.steps for h in self._orchestrator.drones):
-            self._orchestrator.build_drivers(self._make_env)
+        if any(drone.vehicle.routine.steps for drone in self._fleet.drones):
+            self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
             app = omni.kit.app.get_app()
             self._update_sub = app.get_update_event_stream().create_subscription_to_pop(
                 self._on_update, name="experiment_runtime_control"
@@ -153,11 +164,10 @@ class Extension(omni.ext.IExt):
         Forgiving: a control bug in one drone is logged and must not stop the
         others or spam every frame, so each driver tick is guarded.
         """
-        for flying in self._orchestrator.flying:
-            try:
-                flying.driver.tick()
-            except Exception as exc:  # noqa: BLE001 - keep the sim loop alive
-                carb.log_error(f"{_LOG_PREFIX} [{flying.spawned.label}] control tick failed: {exc}")
+        self._fleet = tick_drivers(state=self._fleet, on_error=self._log_tick_error)
+
+    def _log_tick_error(self, flying, exc):
+        carb.log_error(f"{_LOG_PREFIX} [{flying.spawned.label}] control tick failed: {exc}")
 
     def _make_env(self, spawned, port):
         """Build the forgiving :class:`DriverEnvironment` for one flying drone."""
