@@ -25,13 +25,25 @@ scope, so it stays off the core import path behind the lazy package
 from __future__ import annotations
 
 import time
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Callable, Optional, cast
 
 import carb
 import omni.physx
 
 from robotics_experiments.config import Px4BridgeConfig
+
+if TYPE_CHECKING:
+    from robotics_experiments.px4_bridge import (
+        BridgeStatus,
+        DiscoveredRotorMapping,
+        LockstepSettings,
+        PegasusQuadraticThrustModel,
+        Px4Bridge,
+        Px4MavlinkPort,
+        SimClock,
+    )
 
 __all__ = ["BridgeHost", "BridgeHostGroup", "BridgeHostParams"]
 
@@ -52,7 +64,9 @@ class _PendingPoll:
     block_start: float
 
 
-def _bridge_components(params: BridgeHostParams, rotor_mapping: Any) -> tuple[Any, Any, Any]:
+def _bridge_components(
+    params: BridgeHostParams, rotor_mapping: DiscoveredRotorMapping
+) -> tuple[LockstepSettings, Px4MavlinkPort, PegasusQuadraticThrustModel]:
     """Pure config -> bridge-component mapping: ``(lockstep, port, thrust_model)``.
 
     Everything here is derived from the frozen params plus the discovered rotor
@@ -140,15 +154,15 @@ class BridgeHost:
     def __init__(self, params: BridgeHostParams):
         self._params = params
         self._cfg = params.bridge
-        self._bridge: Any | None = None
-        self._clock: Any = None
+        self._bridge: Optional[Px4Bridge] = None
+        self._clock: Optional[SimClock] = None
         self._start_attempted: bool = False
         # Send-leg state consumed by the poll leg of the same tick (the
         # coordinator runs all sends before all polls); None = nothing to poll.
         self._pending: Optional[_PendingPoll] = None
         # Cached px4_bridge.vehicle_log_context, bound lazily when the bridge is
         # built (kept off the module top to preserve the lazy import contract).
-        self._log_ctx: Any = None
+        self._log_ctx: Callable[[int], AbstractContextManager[None]]
         # Per-vehicle log tag so the two BridgeHosts in a multi-drone scene are
         # distinguishable in the shared Isaac console.
         self._endpoint = (
@@ -187,7 +201,7 @@ class BridgeHost:
         return self._bridge is not None and bool(self._bridge.is_connected)
 
     @property
-    def status(self) -> Any:
+    def status(self) -> BridgeStatus:
         """The bridge lockstep status snapshot (``BridgeStatus``).
 
         The control driver folds this into each ``RoutineObservation`` so the
@@ -336,11 +350,12 @@ class BridgeHost:
         PX4 without blocking. Leaves the :class:`_PendingPoll` for
         :meth:`recv_phase` when a poll is owed this tick.
         """
+        clock = cast("SimClock", self._clock)
         self._pending = None
-        total_us = self._clock.advance(dt)
-        tick = self._clock.tick_count
+        total_us = clock.advance(dt)
+        tick = clock.tick_count
         if self._bridge is None:
-            if not self._clock.is_settling:
+            if not clock.is_settling:
                 carb.log_info(
                     f"[{self._tag}] startup settle complete at "
                     f"tick={tick} sim_time_us={total_us}; "
@@ -352,11 +367,11 @@ class BridgeHost:
                 carb.log_info(
                     f"[{self._tag}] waiting for startup settle "
                     f"tick={tick} dt={dt:.6f} "
-                    f"sim_time_us={total_us} target_us={self._clock.settle_time_us}"
+                    f"sim_time_us={total_us} target_us={clock.settle_time_us}"
                 )
             return
 
-        bridge_sim_time_us = self._clock.bridge_time_us()
+        bridge_sim_time_us = clock.bridge_time_us()
         # A bridge that never connects starves its PX4 of sensor data, so that
         # PX4's lockstep stalls and the GCS hangs (e.g. on `commander arm`).
         # Make that obvious instead of leaving it to a 250-tick info heartbeat.

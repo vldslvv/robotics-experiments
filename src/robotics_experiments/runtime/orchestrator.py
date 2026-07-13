@@ -31,9 +31,10 @@ lazy ``robotics_experiments.runtime`` package ``__init__``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import carb
 
@@ -50,6 +51,10 @@ from robotics_experiments.commanding import (
 from robotics_experiments.config import ExperimentConfig, VehicleConfig
 from robotics_experiments.runtime._scene import resolve_scene_path
 from robotics_experiments.runtime.bridge_host import BridgeHost, BridgeHostGroup, BridgeHostParams
+
+if TYPE_CHECKING:
+    from robotics_experiments.commanding import PolicyStepFn
+    from robotics_experiments.px4_bridge import IsaacArticulationIO
 
 __all__ = ["FleetDriverEnv", "FleetOrchestrator", "SpawnedDrone"]
 
@@ -75,7 +80,7 @@ class SpawnedDrone:
     label: str
     articulation_path: str
     host: Optional[BridgeHost]
-    observer: Any
+    observer: Optional[IsaacArticulationIO]
 
 
 @dataclass(frozen=True)
@@ -224,7 +229,6 @@ class FleetOrchestrator:
         :class:`BridgeHostGroup` coordinates all hosts.
         """
         from robotics_experiments.drone import spawn_drone
-        from robotics_experiments.px4_bridge import IsaacArticulationIO
 
         if self.stage is None:
             raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
@@ -239,12 +243,14 @@ class FleetOrchestrator:
         for label, vehicle in self.env.vehicles.items():
             path = spawn_drone(stage=self.stage, config=vehicle.spawn)
             host: Optional[BridgeHost] = None
-            observer: Any = None
+            observer: Optional[IsaacArticulationIO] = None
             # The observer reads the same body the bridge actuates (honoring any
             # px4.articulation_path override) so it never samples a stale frame;
             # the params resolve that path once for both.
             articulation_path = vehicle.bridge.articulation_path or path
             if vehicle.bridge.enabled:
+                from robotics_experiments.px4_bridge import IsaacArticulationIO
+
                 host = BridgeHost(
                     BridgeHostParams(
                         bridge=vehicle.bridge,
@@ -277,7 +283,7 @@ class FleetOrchestrator:
         """Start the bridge group (its hosts and the single physics-step sub)."""
         self._group.start()
 
-    def _policy_fn_factory(self, descriptor: Any) -> Any:
+    def _policy_fn_factory(self, descriptor: Mapping[str, Any]) -> PolicyStepFn:
         """Load a ``{kind: policy}`` step's artifact into its pure step function.
 
         Injected into every driver's params: composes

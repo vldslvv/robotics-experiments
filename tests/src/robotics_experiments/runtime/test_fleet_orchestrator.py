@@ -203,6 +203,19 @@ def test_spawn_fleet_builds_host_only_for_enabled(monkeypatch):
     assert params.physics_hz == 250.0
 
 
+def test_spawn_fleet_with_all_bridges_disabled_does_not_import_px4_bridge(monkeypatch):
+    module, _rec = _import_orchestrator(monkeypatch)
+    monkeypatch.delitem(sys.modules, "robotics_experiments.px4_bridge", raising=False)
+    orch = module.FleetOrchestrator(_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=False)))
+    orch.stage = object()
+
+    orch.spawn_fleet()
+
+    assert "robotics_experiments.px4_bridge" not in sys.modules
+    assert orch.drones[0].host is None
+    assert orch.drones[0].observer is None
+
+
 def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     orch = module.FleetOrchestrator(_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=True)))
