@@ -36,11 +36,19 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         environment = importlib.import_module("robotics_experiments.environment")
         assert environment.__all__ == [
             "SwitchState",
+            "SwitchesRuntimePhase",
+            "SwitchesRuntimeState",
+            "adopt_switches_stage",
             "apply_button_sample",
+            "create_switches_runtime",
             "despawn_switches",
             "init_articulations",
+            "pause_switches_runtime",
+            "play_switches_runtime",
             "spawn_switches",
             "step_switches",
+            "step_switches_runtime",
+            "teardown_switches_runtime",
             "validate_switches",
         ]
         drone = importlib.import_module("robotics_experiments.drone")

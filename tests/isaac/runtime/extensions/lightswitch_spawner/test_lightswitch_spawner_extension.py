@@ -10,15 +10,6 @@ import pytest
 from tests.support.paths import REPO_ROOT
 
 
-def test_extension_manifest_exposes_only_lightswitch_python_module():
-    manifest_path = REPO_ROOT / "isaac/runtime/extensions/lightswitch_spawner/config/extension.toml"
-
-    manifest = tomllib.loads(manifest_path.read_text())
-    module_names = {module["name"] for module in manifest["python"]["module"]}
-
-    assert module_names == {"LightSwitch_python"}
-
-
 class _TimelineEventType(IntEnum):
     PLAY = 1
     STOP = 2
@@ -38,60 +29,20 @@ class _EventStream:
         return SimpleNamespace(unsubscribe=lambda: None)
 
 
-class _UsdContext:
-    def __init__(self, stage):
-        self.stage = stage
-        self.stage_events = _EventStream()
-
-    def get_stage(self):
-        return self.stage
-
-    def get_stage_event_stream(self):
-        return self.stage_events
-
-
-class _Timeline:
-    def __init__(self):
-        self.events = _EventStream()
-
-    def get_timeline_event_stream(self):
-        return self.events
-
-
-class _App:
-    def __init__(self):
-        self.events = _EventStream()
-
-    def get_update_event_stream(self):
-        return self.events
-
-
-class _Publisher:
-    def __init__(self):
-        self.messages = []
-
-    def publish(self, msg):
-        self.messages.append(msg)
-
-
 class _Node:
-    # Test-local fake. ``instances`` exposes the node(s) the extension created so
-    # a test can observe the ROS publisher (and its published messages) without
-    # reading the extension's private ``_ros_node`` handle. Both lists are reset
-    # per test by ``_import_extension``.
     instances: list["_Node"] = []
     destroyed: list["_Node"] = []
 
     def __init__(self, name):
         self.name = name
         self.publishers = []
-        _Node.instances.append(self)
+        self.instances.append(self)
 
     def get_logger(self):
         return SimpleNamespace(info=lambda message: None)
 
     def create_publisher(self, msg_type, topic, qos):
-        publisher = _Publisher()
+        publisher = SimpleNamespace(messages=[], publish=lambda msg: publisher.messages.append(msg))
         self.publishers.append((msg_type, topic, qos, publisher))
         return publisher
 
@@ -113,11 +64,7 @@ class _Float32MultiArray:
 
 
 def _qos_config(
-    *,
-    depth=1,
-    durability="transient_local",
-    reliability="reliable",
-    history="keep_last",
+    *, depth=1, durability="transient_local", reliability="reliable", history="keep_last"
 ):
     return SimpleNamespace(
         depth=depth,
@@ -127,27 +74,43 @@ def _qos_config(
     )
 
 
-def _publisher_config(topic="/light_switches/state", qos=None):
-    if qos is None:
-        qos = _qos_config()
-    return SimpleNamespace(topic=topic, qos=qos)
+def _publisher_config(*, topic="/light_switches/state", qos=None):
+    return SimpleNamespace(topic=topic, qos=qos or _qos_config())
 
 
-def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_config):
-    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/takeoff_quad.yaml")
+def _import_extension(monkeypatch, *, stage=None, publisher_config=None):
+    for name in list(sys.modules):
+        if name == "LightSwitch_python" or name.startswith("LightSwitch_python."):
+            sys.modules.pop(name, None)
+    _Node.instances = []
+    _Node.destroyed = []
+    if stage is None:
+        stage = object()
+
+    stage_events = _EventStream()
+    timeline_events = _EventStream()
+    update_events = _EventStream()
+    usd_context = SimpleNamespace(
+        stage=stage,
+        get_stage=lambda: usd_context.stage,
+        get_stage_event_stream=lambda: stage_events,
+    )
+
     omni = types.ModuleType("omni")
     omni.__path__ = []
     omni_ext = types.ModuleType("omni.ext")
     omni_ext.IExt = object
     omni_timeline = types.ModuleType("omni.timeline")
     omni_timeline.TimelineEventType = _TimelineEventType
-    omni_timeline.get_timeline_interface = lambda: timeline
+    omni_timeline.get_timeline_interface = lambda: SimpleNamespace(
+        get_timeline_event_stream=lambda: timeline_events
+    )
     omni_usd = types.ModuleType("omni.usd")
     omni_usd.StageEventType = _StageEventType
     omni_usd.get_context = lambda: usd_context
     omni_kit = types.ModuleType("omni.kit")
     omni_kit_app = types.ModuleType("omni.kit.app")
-    omni_kit_app.get_app = lambda: app
+    omni_kit_app.get_app = lambda: SimpleNamespace(get_update_event_stream=lambda: update_events)
     omni.ext = omni_ext
     omni.timeline = omni_timeline
     omni.usd = omni_usd
@@ -161,41 +124,19 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_con
     rclpy = types.ModuleType("rclpy")
     rclpy.ok_value = False
     rclpy.spin_calls = []
-    rclpy.init_calls = 0
-    rclpy.shutdown_calls = 0
-
-    def ok():
-        return rclpy.ok_value
-
-    def init():
-        rclpy.init_calls += 1
-        rclpy.ok_value = True
-
-    def shutdown():
-        rclpy.shutdown_calls += 1
-        rclpy.ok_value = False
-
-    rclpy.ok = ok
-    rclpy.init = init
-    rclpy.shutdown = shutdown
+    rclpy.init = lambda: setattr(rclpy, "ok_value", True)
+    rclpy.ok = lambda: rclpy.ok_value
+    rclpy.shutdown = lambda: setattr(rclpy, "ok_value", False)
     rclpy.spin_once = lambda node, timeout_sec=0: rclpy.spin_calls.append((node, timeout_sec))
-
     rclpy_node = types.ModuleType("rclpy.node")
     rclpy_node.Node = _Node
     rclpy_qos = types.ModuleType("rclpy.qos")
     rclpy_qos.DurabilityPolicy = SimpleNamespace(
-        TRANSIENT_LOCAL="transient_local",
-        VOLATILE="volatile",
+        TRANSIENT_LOCAL="transient_local", VOLATILE="volatile"
     )
-    rclpy_qos.HistoryPolicy = SimpleNamespace(
-        KEEP_LAST="keep_last",
-        KEEP_ALL="keep_all",
-    )
+    rclpy_qos.HistoryPolicy = SimpleNamespace(KEEP_LAST="keep_last", KEEP_ALL="keep_all")
     rclpy_qos.QoSProfile = _QoSProfile
-    rclpy_qos.ReliabilityPolicy = SimpleNamespace(
-        RELIABLE="reliable",
-        BEST_EFFORT="best_effort",
-    )
+    rclpy_qos.ReliabilityPolicy = SimpleNamespace(RELIABLE="reliable", BEST_EFFORT="best_effort")
 
     std_msgs = types.ModuleType("std_msgs")
     std_msgs_msg = types.ModuleType("std_msgs.msg")
@@ -203,26 +144,21 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_con
 
     fake_environment = types.ModuleType("robotics_experiments.environment")
     fake_environment.__path__ = []
-    fake_environment.__all__ = [
-        "SwitchState",
-        "apply_button_sample",
-        "despawn_switches",
-        "init_articulations",
-        "spawn_switches",
-        "step_switches",
-        "validate_switches",
-    ]
-    fake_environment.SwitchState = SimpleNamespace
-    fake_environment.apply_button_sample = lambda switch, **kwargs: False
-    fake_environment.despawn_switches = lambda stage, switch_state: None
-    fake_environment.spawn_switches = lambda **kwargs: []
-    fake_environment.validate_switches = lambda stage, switch_state: True
-    fake_environment.init_articulations = lambda **kwargs: []
-    fake_environment.step_switches = lambda **kwargs: tuple(kwargs["switch_state"])
+    fake_environment.SwitchesRuntimeState = SimpleNamespace
+    fake_environment.create_switches_runtime = lambda **kwargs: SimpleNamespace(**kwargs)
+    for name in (
+        "adopt_switches_stage",
+        "pause_switches_runtime",
+        "play_switches_runtime",
+        "step_switches_runtime",
+        "teardown_switches_runtime",
+    ):
+        setattr(fake_environment, name, lambda **kwargs: kwargs["state"])
 
+    config = publisher_config or _publisher_config()
     fake_config = types.ModuleType("robotics_experiments.config")
     fake_config.load_config = lambda path: SimpleNamespace(
-        switches=SimpleNamespace(state_publisher=publisher_config)
+        switches=SimpleNamespace(state_publisher=config)
     )
 
     modules = {
@@ -243,369 +179,136 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_con
     }
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
-
-
-def _import_extension(monkeypatch, stage=None, publisher_config=None):
-    for name in list(sys.modules):
-        if name == "LightSwitch_python" or name.startswith("LightSwitch_python."):
-            sys.modules.pop(name, None)
-
-    _Node.instances = []
-    _Node.destroyed = []
-    if stage is None:
-        stage = object()
-    usd_context = _UsdContext(stage)
-    timeline = _Timeline()
-    app = _App()
-    if publisher_config is None:
-        publisher_config = _publisher_config()
-    _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_config)
-    extension_root = REPO_ROOT / "isaac/runtime/extensions/lightswitch_spawner"
-    monkeypatch.syspath_prepend(str(extension_root))
+    monkeypatch.setenv("ROBOTICS_EXPERIMENT_CONFIG_PATH", "configs/takeoff_quad.yaml")
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "isaac/runtime/extensions/lightswitch_spawner"))
     module = importlib.import_module("LightSwitch_python.extension")
-    return module, usd_context, timeline, app
+    return module, usd_context, stage_events, timeline_events, update_events
 
 
-def _fire_timeline(timeline, event_type):
-    for callback, _name in timeline.events.callbacks:
-        callback(SimpleNamespace(type=int(event_type)))
+def _fire(stream, event_type=None):
+    event = SimpleNamespace(type=int(event_type)) if event_type is not None else SimpleNamespace()
+    for callback, _name in stream.callbacks:
+        callback(event)
 
 
-def _fire_stage_opened(usd_context):
-    for callback, _name in usd_context.stage_events.callbacks:
-        callback(SimpleNamespace(type=int(_StageEventType.OPENED)))
+def test_extension_manifest_exposes_only_lightswitch_python_module():
+    path = REPO_ROOT / "isaac/runtime/extensions/lightswitch_spawner/config/extension.toml"
+    manifest = tomllib.loads(path.read_text())
+    assert {module["name"] for module in manifest["python"]["module"]} == {"LightSwitch_python"}
 
 
-def _fire_update(app):
-    for callback, _name in app.events.callbacks:
-        callback(SimpleNamespace())
-
-
-def _created_node():
-    """The ROS node the extension constructed (the latest, if reconstructed)."""
-    return _Node.instances[-1]
-
-
-def test_startup_subscribes_without_spawning(monkeypatch):
-    module, usd_context, timeline, app = _import_extension(monkeypatch)
+def test_startup_creates_one_state_node_and_three_subscriptions(monkeypatch):
+    module, _context, stage_events, timeline_events, update_events = _import_extension(monkeypatch)
     calls = []
     monkeypatch.setattr(
         module,
-        "spawn_switches",
-        lambda **kwargs: calls.append(("spawn", kwargs["stage"])),
+        "create_switches_runtime",
+        lambda **kwargs: calls.append(kwargs) or SimpleNamespace(name="initial"),
     )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
 
-    # Startup subscribes to all three Kit streams but spawns nothing until play,
-    # and creates the ROS node with its state publisher.
-    assert calls == []
-    assert len(usd_context.stage_events.callbacks) == 1
-    assert len(timeline.events.callbacks) == 1
-    assert len(app.events.callbacks) == 1
-    assert _created_node().publishers
+    assert calls and len(_Node.instances) == 1
+    assert all(
+        len(stream.callbacks) == 1 for stream in (stage_events, timeline_events, update_events)
+    )
 
 
-def test_play_spawns_validates_and_uses_startup_publisher(monkeypatch):
-    stage = object()
-    publisher_config = _publisher_config(
-        topic="/custom_switch_state",
+def test_timeline_events_rebind_the_single_runtime_state(monkeypatch):
+    module, _context, _stage_events, timeline_events, _update_events = _import_extension(
+        monkeypatch
+    )
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+    calls = []
+
+    def transition(label):
+        return lambda **kwargs: calls.append((label, kwargs["state"])) or SimpleNamespace(
+            name=label
+        )
+
+    monkeypatch.setattr(module, "play_switches_runtime", transition("play"))
+    monkeypatch.setattr(module, "pause_switches_runtime", transition("pause"))
+    monkeypatch.setattr(module, "teardown_switches_runtime", transition("stop"))
+
+    _fire(timeline_events, _TimelineEventType.PLAY)
+    _fire(timeline_events, _TimelineEventType.PAUSE)
+    _fire(timeline_events, _TimelineEventType.STOP)
+
+    assert [label for label, _state in calls] == ["play", "pause", "stop"]
+    assert calls[1][1].name == "play"
+    assert calls[2][1].name == "pause"
+
+
+def test_stage_and_update_events_delegate_and_rebind(monkeypatch):
+    module, context, stage_events, _timeline_events, update_events = _import_extension(monkeypatch)
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+    adopted = SimpleNamespace(name="adopted")
+    stepped = SimpleNamespace(name="stepped")
+    monkeypatch.setattr(module, "adopt_switches_stage", lambda **kwargs: adopted)
+    callback = []
+    inputs = []
+    monkeypatch.setattr(
+        module,
+        "step_switches_runtime",
+        lambda **kwargs: (
+            inputs.append(kwargs["state"]),
+            callback.append(kwargs["on_toggle"]),
+            stepped,
+        )[2],
+    )
+
+    context.stage = "new-stage"
+    _fire(stage_events, _StageEventType.OPENED)
+    _fire(update_events)
+    _fire(update_events)
+
+    assert inputs == [adopted, stepped]
+    callback[0](2, True)
+    assert _Node.instances[0].publishers[0][3].messages[-1].data == [2.0, 1.0]
+    assert sys.modules["rclpy"].spin_calls == [(_Node.instances[0], 0)] * 2
+
+
+def test_shutdown_tears_down_state_and_destroys_node(monkeypatch):
+    module, _context, _stage_events, _timeline_events, _update_events = _import_extension(
+        monkeypatch
+    )
+    extension = module.LightSwitchExtension()
+    extension.on_startup("lightswitch_spawner")
+    node = _Node.instances[0]
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "teardown_switches_runtime",
+        lambda **kwargs: calls.append(kwargs["state"]) or kwargs["state"],
+    )
+
+    extension.on_shutdown()
+
+    assert calls
+    assert node in _Node.destroyed
+
+
+def test_configured_qos_is_applied(monkeypatch):
+    publisher = _publisher_config(
+        topic="/custom",
         qos=_qos_config(
-            depth=7,
-            durability="volatile",
-            reliability="best_effort",
-            history="keep_all",
+            depth=7, durability="volatile", reliability="best_effort", history="keep_all"
         ),
     )
-    module, _usd_context, timeline, _app = _import_extension(
-        monkeypatch,
-        stage=stage,
-        publisher_config=publisher_config,
+    module, *_ = _import_extension(monkeypatch, publisher_config=publisher)
+    module.LightSwitchExtension().on_startup("lightswitch_spawner")
+
+    _msg_type, topic, qos, _publisher = _Node.instances[0].publishers[0]
+    assert (topic, qos.depth, qos.durability, qos.reliability, qos.history) == (
+        "/custom",
+        7,
+        "volatile",
+        "best_effort",
+        "keep_all",
     )
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
-    calls = []
-
-    def despawn(stage, state):
-        calls.append(("despawn", stage, list(state)))
-
-    def spawn(**kwargs):
-        calls.append(("spawn", kwargs["stage"]))
-        return switches
-
-    def validate(stage, state):
-        calls.append(("validate", stage, state))
-        return True
-
-    monkeypatch.setattr(module, "despawn_switches", despawn)
-    monkeypatch.setattr(module, "spawn_switches", spawn)
-    monkeypatch.setattr(module, "validate_switches", validate)
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    startup_node = _created_node()
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    # Play clears the stage, spawns, and validates -- in that order -- using the
-    # play stage and the switches spawn returned (so the state flows to validate).
-    assert calls == [
-        ("despawn", stage, []),
-        ("spawn", stage),
-        ("validate", stage, switches),
-    ]
-    # Play reuses the startup node/publisher; no second node is constructed.
-    assert _Node.instances == [startup_node]
-    _msg_type, topic, qos, _publisher = startup_node.publishers[0]
-    assert topic == "/custom_switch_state"
-    assert qos.depth == 7
-    assert qos.durability == "volatile"
-    assert qos.reliability == "best_effort"
-    assert qos.history == "keep_all"
-
-
-def test_play_uses_default_hydra_publisher_settings(monkeypatch):
-    stage = object()
-    module, _usd_context, _timeline, _app = _import_extension(monkeypatch, stage=stage)
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-
-    _msg_type, topic, qos, _publisher = _created_node().publishers[0]
-    assert topic == "/light_switches/state"
-    assert qos.depth == 1
-    assert qos.durability == "transient_local"
-    assert qos.reliability == "reliable"
-    assert qos.history == "keep_last"
-
-
-def test_validation_failure_tears_down_partial_runtime_state(monkeypatch):
-    stage = object()
-    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
-    calls = []
-
-    def despawn(stage, state):
-        calls.append(("despawn", list(state)))
-
-    monkeypatch.setattr(module, "despawn_switches", despawn)
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stage, state: False)
-    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
-    monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    # A failed validation despawns the just-spawned switches (the second despawn).
-    assert calls == [("despawn", []), ("despawn", switches)]
-    # The loop is left idle: subsequent updates neither init nor step.
-    _fire_update(app)
-    assert calls == [("despawn", []), ("despawn", switches)]
-    # The ROS node survives the failed start.
-    assert _created_node().publishers
-
-
-def test_repeated_play_does_not_double_spawn(monkeypatch):
-    stage = object()
-    module, _usd_context, timeline, _app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0", lamp_prim_path="/Root/Lamp_0")]
-    calls = []
-
-    monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
-    monkeypatch.setattr(
-        module,
-        "spawn_switches",
-        lambda **kwargs: calls.append("spawn") or switches,
-    )
-    monkeypatch.setattr(
-        module,
-        "validate_switches",
-        lambda stage, state: calls.append("validate") or True,
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    # The second play does not re-spawn: spawn/validate run exactly once.
-    assert calls == ["despawn", "spawn", "validate"]
-
-
-def test_pause_keeps_switch_state_and_articulations(monkeypatch):
-    stage = object()
-    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
-    calls = []
-
-    monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
-    monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    _fire_update(app)  # init articulations
-    _fire_update(app)  # step (running)
-
-    # The play teardown despawns once, then articulations init, then a step runs.
-    assert calls == ["despawn", "init", "step"]
-
-    _fire_timeline(timeline, _TimelineEventType.PAUSE)
-    _fire_update(app)  # paused: no further step
-
-    # Pause keeps state (no despawn) and halts per-frame stepping.
-    assert calls == ["despawn", "init", "step"]
-
-
-def test_play_after_pause_resumes_without_reinitializing(monkeypatch):
-    stage = object()
-    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
-    calls = []
-
-    monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
-    monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    _fire_update(app)  # init articulations
-    _fire_update(app)  # step
-    _fire_timeline(timeline, _TimelineEventType.PAUSE)
-
-    _fire_timeline(timeline, _TimelineEventType.PLAY)  # resume
-    _fire_update(app)  # steps immediately, no re-spawn and no re-init
-
-    # Only one despawn (no re-spawn) and one init (no re-initialize); stepping
-    # resumes directly.
-    assert calls == ["despawn", "init", "step", "step"]
-
-
-def test_stop_stage_open_and_shutdown_teardown(monkeypatch):
-    stage = object()
-    module, usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
-    despawns = []
-
-    monkeypatch.setattr(
-        module, "despawn_switches", lambda stg, state: despawns.append((stg, list(state)))
-    )
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stg, state: True)
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-
-    # STOP despawns the spawned switches with the play stage.
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    _fire_timeline(timeline, _TimelineEventType.STOP)
-    assert despawns[-1] == (stage, switches)
-
-    # A new stage opening re-targets the stage and tears down again: the despawn
-    # carries the new stage (observable proof the stage handle was adopted).
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    usd_context.stage = "new-stage"
-    _fire_stage_opened(usd_context)
-    assert despawns[-1] == ("new-stage", switches)
-
-    # Shutdown tears down on that adopted stage and destroys the ROS node; a
-    # second shutdown is idempotent (no raise).
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    node = _created_node()
-    extension.on_shutdown()
-    assert despawns[-1] == ("new-stage", switches)
-    assert node in _Node.destroyed
-    extension.on_shutdown()
-
-
-def test_update_spins_ros_initializes_then_steps(monkeypatch):
-    stage = object()
-    module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
-    calls = []
-
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stg, state: True)
-
-    def init_articulations(**kwargs):
-        calls.append(("init", list(kwargs["prim_paths"])))
-        return ["articulation"]
-
-    monkeypatch.setattr(module, "init_articulations", init_articulations)
-    monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda **kwargs: calls.append(
-            (
-                "step",
-                kwargs["stage"],
-                list(kwargs["switch_state"]),
-                kwargs["on_toggle"],
-            )
-        )
-        or tuple(kwargs["switch_state"]),
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-
-    _fire_update(app)  # first running tick initializes articulations
-    _fire_update(app)  # next tick steps
-
-    assert calls[0] == ("init", [switch.prim_path for switch in switches])
-    _step_label, step_stage, step_state, on_toggle = calls[1]
-    assert (_step_label, step_stage, step_state) == ("step", stage, switches)
-    # The step's on_toggle is the publisher callback: invoking it publishes.
-    on_toggle(2, True)
-    assert _created_node().publishers[0][3].messages[-1].data == [2.0, 1.0]
-    # Each update tick spun the ROS node once.
-    node = _created_node()
-    assert sys.modules["rclpy"].spin_calls == [(node, 0), (node, 0)]
-
-
-def test_publish_toggle_sends_float_array(monkeypatch):
-    module, _usd_context, timeline, app = _import_extension(monkeypatch)
-    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
-    monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
-    monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: ["articulation"])
-    # A real switch toggle flows through step_switches' on_toggle to the publisher.
-    monkeypatch.setattr(
-        module,
-        "step_switches",
-        lambda **kwargs: (kwargs["on_toggle"](2, True), tuple(kwargs["switch_state"]))[1],
-    )
-
-    extension = module.LightSwitchExtension()
-    extension.on_startup("lightswitch_spawner")
-    _fire_timeline(timeline, _TimelineEventType.PLAY)
-    _fire_update(app)  # init articulations
-    _fire_update(app)  # step -> on_toggle -> publish
-
-    publisher = _created_node().publishers[0][3]
-    assert len(publisher.messages) == 1
-    assert publisher.messages[0].data == [2.0, 1.0]
 
 
 @pytest.mark.parametrize(
@@ -618,9 +321,6 @@ def test_publish_toggle_sends_float_array(monkeypatch):
     ],
 )
 def test_invalid_qos_config_raises(monkeypatch, qos, message):
-    module, _usd_context, _timeline, _app = _import_extension(
-        monkeypatch,
-        publisher_config=_publisher_config(qos=qos),
-    )
+    module, *_ = _import_extension(monkeypatch, publisher_config=_publisher_config(qos=qos))
     with pytest.raises(ValueError, match=message):
         module.LightSwitchExtension().on_startup("lightswitch_spawner")

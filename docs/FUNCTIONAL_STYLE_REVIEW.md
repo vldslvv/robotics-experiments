@@ -59,10 +59,10 @@ The gaps cluster in the areas the convention does not yet name (the
 `environment` package and the older `lightswitch_spawner` extension) plus a few
 impurity leaks inside otherwise-frozen values. In rough order of value:
 
-1. `environment/switches.py`: mutable `SwitchState` mutated in place -- the
-   exact pattern the rest of the project replaced (step 1).
-2. `lightswitch_spawner` extension: imperative boolean-flag machine owning
-   composition, predating the `experiment_runtime` pattern (step 2).
+1. `environment/switches.py`: resolved in step 1 with frozen state and pure
+   latch transitions.
+2. `lightswitch_spawner` extension: resolved in step 2 with a frozen runtime
+   state and a thin event-wiring shell.
 3. `commanding/port.py`: pure feedback-parsing logic buried inside the mutable
    adapter (step 3).
 4. Writable `np.ndarray` payloads inside frozen dataclasses -- aliasable
@@ -105,45 +105,32 @@ Risk: low. The latch logic is small and fully covered by unit tests.
 
 ## Step 2: Rebuild `lightswitch_spawner` on the `experiment_runtime` pattern
 
+- [x] Complete
+
 Goal: the second live extension follows the same shape as the first -- a thin
 Kit shell rebinding one frozen state through host-agnostic transitions --
 instead of an imperative flag machine (`_switches_spawned`,
 `_articulations_ready`, `_simulation_running`) with feature logic inline.
 
-Depends on: step 1 is a natural prerequisite (do it first or fold it in);
-everything else here is independent.
+Current behavior:
 
-Changes:
-
-- Add a frozen `SwitchesRuntimeState` (config, stage, `switch_state` tuple,
-  articulation handles or an adapter holding them, `phase`/flags) plus
-  transition functions `spawn`, `arm_articulations`, `step`, `teardown`.
-  Placement: the Isaac-coupled parts belong in the existing Isaac-only leaves
-  (`environment/step.py`, `environment/stage.py`); the composition transitions
-  can live in a new private module under `src/robotics_experiments/environment/`
-  behind the existing lazy package `__init__` (mirroring how
-  `runtime/orchestrator.py` sits above `bridge_host.py`). Do not put them in
-  the extension.
-- Move the pure QoS helpers (`_normalize_qos_name`, `_resolve_qos_policy`,
-  `_build_qos_profile`) out of the extension into a small module next to the
-  ROS node wiring (they are already pure; the extension should be wiring only).
-- The extension keeps: event subscriptions, `self._state` rebinding, the
-  `LightSwitchNode` ROS adapter lifecycle, and `rclpy.spin_once` pumping.
-  `_on_update` becomes `self._state = step(state=self._state, on_toggle=...)`.
-- Keep the forgiving semantics: articulation init retried per tick until it
-  succeeds, validation failure keeps the runtime idle.
-
-Tests: rework
-`tests/isaac/runtime/extensions/lightswitch_spawner/test_lightswitch_spawner_extension.py`
-to drive the transitions directly (the same style as
-`tests/isaac/runtime/extensions/experiment_runtime/test_experiment_runtime_extension.py`
-and `tests/src/robotics_experiments/runtime/test_fleet_orchestrator.py`).
-
-Done when: the extension class contains no domain logic or boolean phase
-flags beyond subscription handles and the single state rebinding; transitions
-are unit-testable without Kit; docs touched if behavior wording changes
-(`AGENTS.md` extension-design section already prescribes this pattern, so no
-doc change expected).
+- The Isaac-only `environment._runtime` module owns a frozen
+  `SwitchesRuntimeState` and explicit idle, arming, running, and paused phases.
+  Stateless transitions create the runtime, adopt a new stage, play, pause,
+  retry articulation initialization, step switch interaction, and tear down.
+- Play spawns and validates once, repeated play is inert, pause preserves the
+  spawned prims and articulation resources, and resume returns to arming or
+  running as appropriate. Failed validation tears down partial prims and leaves
+  the runtime idle; failed articulation setup remains in arming for a later
+  retry.
+- The extension contains only Kit event routing, ROS node lifecycle and
+  pumping, publisher adaptation, subscription handles, and one `self._state`
+  rebinding. It carries no domain phase flags or switch composition logic.
+- ROS QoS normalization and profile construction live beside the ROS node in
+  `LightSwitch_python.qos`, outside the extension wiring module.
+- Runtime-transition tests execute without Kit through injected stage and
+  articulation adapters. Extension tests verify event delegation, successor
+  rebinding, ROS publication, shutdown, and configured QoS behavior.
 
 Risk: medium. This is a restructuring of a working extension; verify manually
 with `make run-isaac` (switch spawn on Play, lamp toggle, ROS message) since

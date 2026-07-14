@@ -10,36 +10,24 @@ import rclpy
 from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float32MultiArray
 
 from LightSwitch_python.global_variables import EXTENSION_TITLE
+from LightSwitch_python.qos import build_qos_profile
 from robotics_experiments.config import load_config
 from robotics_experiments.environment import (
-    SwitchState,
-    despawn_switches,
-    init_articulations,
-    spawn_switches,
-    step_switches,
-    validate_switches,
+    SwitchesRuntimeState,
+    adopt_switches_stage,
+    create_switches_runtime,
+    pause_switches_runtime,
+    play_switches_runtime,
+    step_switches_runtime,
+    teardown_switches_runtime,
 )
 
 __all__ = ["LightSwitchExtension", "LightSwitchNode"]
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
-
-_DURABILITY_POLICIES = {
-    "transient_local": DurabilityPolicy.TRANSIENT_LOCAL,
-    "volatile": DurabilityPolicy.VOLATILE,
-}
-_HISTORY_POLICIES = {
-    "keep_last": HistoryPolicy.KEEP_LAST,
-    "keep_all": HistoryPolicy.KEEP_ALL,
-}
-_RELIABILITY_POLICIES = {
-    "reliable": ReliabilityPolicy.RELIABLE,
-    "best_effort": ReliabilityPolicy.BEST_EFFORT,
-}
 
 
 class LightSwitchNode(Node):
@@ -48,7 +36,7 @@ class LightSwitchNode(Node):
     def __init__(self, publisher_config: Any):
         """Initialize the ROS node with the fixed name ``light_switch_node``."""
         super().__init__("light_switch_node")
-        qos = _build_qos_profile(publisher_config.qos)
+        qos = build_qos_profile(qos_config=publisher_config.qos)
         self._state_pub = self.create_publisher(
             Float32MultiArray,
             publisher_config.topic,
@@ -82,20 +70,18 @@ class LightSwitchExtension(omni.ext.IExt):
             config_path = os.environ[_CONFIG_PATH_ENV]
         except KeyError as exc:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
-        self._config = load_config(config_path).switches
+        config = load_config(config_path).switches
 
         usd_context = omni.usd.get_context()
-        self._stage = usd_context.get_stage()
-        self._switch_state: tuple[SwitchState, ...] = ()
-        self._articulations: list[Any] | None = None
-        self._articulations_ready = False
-        self._simulation_running = False
-        self._switches_spawned = False
+        self._state: SwitchesRuntimeState = create_switches_runtime(
+            config=config,
+            stage=usd_context.get_stage(),
+        )
 
         self._owns_rclpy = not rclpy.ok()
         if self._owns_rclpy:
             rclpy.init()
-        self._ros_node: LightSwitchNode | None = LightSwitchNode(self._config.state_publisher)
+        self._ros_node: LightSwitchNode | None = LightSwitchNode(config.state_publisher)
 
         stage_events = usd_context.get_stage_event_stream()
         self._stage_event_sub = stage_events.create_subscription_to_pop(
@@ -138,7 +124,7 @@ class LightSwitchExtension(omni.ext.IExt):
             self._stage_event_sub.unsubscribe()
             self._stage_event_sub = None
 
-        self._teardown_switches()
+        self._state = teardown_switches_runtime(state=self._state)
 
         if self._ros_node:
             self._ros_node.destroy_node()
@@ -157,8 +143,10 @@ class LightSwitchExtension(omni.ext.IExt):
                 ``StageEventType.OPENED`` is handled.
         """
         if event.type == int(StageEventType.OPENED):
-            self._stage = omni.usd.get_context().get_stage()
-            self._teardown_switches()
+            self._state = adopt_switches_stage(
+                state=self._state,
+                stage=omni.usd.get_context().get_stage(),
+            )
 
     def _on_timeline_event(self, event):
         """Dispatch timeline transitions to simulation start/stop handlers.
@@ -170,55 +158,11 @@ class LightSwitchExtension(omni.ext.IExt):
             event: Timeline event emitted by ``omni.timeline``.
         """
         if event.type == int(TimelineEventType.PLAY):
-            self._setup_switches()
+            self._state = play_switches_runtime(state=self._state)
         elif event.type == int(TimelineEventType.PAUSE):
-            self._pause_switches()
+            self._state = pause_switches_runtime(state=self._state)
         elif event.type == int(TimelineEventType.STOP):
-            self._teardown_switches()
-
-    def _setup_switches(self):
-        """Spawn switches if needed and arm per-frame switch processing.
-
-        Validates the resulting scene before arming the main loop. On
-        validation failure the simulation-running flag is left unset so the
-        update loop stays idle.
-        """
-        if self._stage is None:
-            carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
-            return
-
-        if not self._switches_spawned:
-            self._teardown_switches()
-            self._switch_state = spawn_switches(stage=self._stage, config=self._config)
-
-            if not validate_switches(self._stage, self._switch_state):
-                carb.log_error(
-                    f"[{EXTENSION_TITLE}] Scene validation failed; aborting simulation start."
-                )
-                self._teardown_switches()
-                return
-
-            self._switches_spawned = True
-            self._articulations_ready = False
-            self._articulations = None
-
-        carb.log_info(f"[{EXTENSION_TITLE}] Simulation started.")
-        self._simulation_running = True
-
-    def _pause_switches(self):
-        """Pause per-frame switch processing while keeping runtime state intact."""
-        self._simulation_running = False
-
-    def _teardown_switches(self):
-        """Reset runtime flags and despawn all switches and lamps from the stage."""
-        carb.log_info(f"[{EXTENSION_TITLE}] Simulation stopped - resetting state.")
-        self._simulation_running = False
-        self._articulations_ready = False
-        self._articulations = None
-        self._switches_spawned = False
-
-        despawn_switches(self._stage, self._switch_state)
-        self._switch_state = ()
+            self._state = teardown_switches_runtime(state=self._state)
 
     def _on_update(self, event):
         """Pump ROS callbacks and, when the sim is playing, step switch logic.
@@ -236,32 +180,8 @@ class LightSwitchExtension(omni.ext.IExt):
 
         rclpy.spin_once(self._ros_node, timeout_sec=0)
 
-        if self._simulation_running:
-            self._step_switches()
-
-    def _step_switches(self):
-        """Initialize articulations or run per-frame switch interaction logic."""
-        if not self._switches_spawned:
-            return
-
-        if not self._articulations_ready:
-            articulations = init_articulations(
-                prim_paths=tuple(switch.prim_path for switch in self._switch_state)
-            )
-            if articulations is not None:
-                self._articulations = articulations
-                self._articulations_ready = True
-            return
-
-        if self._stage is None:
-            carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
-            return
-        assert self._articulations is not None
-        self._switch_state = step_switches(
-            stage=self._stage,
-            switch_state=self._switch_state,
-            articulations=self._articulations,
-            config=self._config,
+        self._state = step_switches_runtime(
+            state=self._state,
             on_toggle=self._publish_toggle,
         )
 
@@ -276,44 +196,3 @@ class LightSwitchExtension(omni.ext.IExt):
             carb.log_error(f"[{EXTENSION_TITLE}] ROS node is not initialized.")
             return
         self._ros_node.publish_toggle(index, state)
-
-
-def _normalize_qos_name(name: str, *, field_name: str) -> str:
-    """Normalize a configured QoS policy name for enum lookup."""
-    if not isinstance(name, str):
-        raise ValueError(f"QoS {field_name} must be a string, got {type(name).__name__}.")
-    return name.strip().lower().replace("-", "_")
-
-
-def _resolve_qos_policy(name: str, *, field_name: str, policies: dict[str, Any]) -> Any:
-    """Resolve a configured QoS policy name to the corresponding rclpy enum value."""
-    key = _normalize_qos_name(name, field_name=field_name)
-    try:
-        return policies[key]
-    except KeyError as exc:
-        valid = ", ".join(sorted(policies))
-        raise ValueError(f"Invalid QoS {field_name} {name!r}; expected one of: {valid}.") from exc
-
-
-def _build_qos_profile(qos_config: Any) -> QoSProfile:
-    """Build a ROS 2 QoS profile from Hydra configuration."""
-    if qos_config.depth <= 0:
-        raise ValueError(f"QoS depth must be positive, got {qos_config.depth}.")
-    return QoSProfile(
-        depth=qos_config.depth,
-        durability=_resolve_qos_policy(
-            qos_config.durability,
-            field_name="durability",
-            policies=_DURABILITY_POLICIES,
-        ),
-        history=_resolve_qos_policy(
-            qos_config.history,
-            field_name="history",
-            policies=_HISTORY_POLICIES,
-        ),
-        reliability=_resolve_qos_policy(
-            qos_config.reliability,
-            field_name="reliability",
-            policies=_RELIABILITY_POLICIES,
-        ),
-    )
