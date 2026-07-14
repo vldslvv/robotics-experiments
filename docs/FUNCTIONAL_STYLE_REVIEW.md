@@ -55,9 +55,7 @@ points are model citizens:
   deep-frozen after loading (`_immutability.py`), so the paradigm's inputs are
   actually immutable, not just conventionally so.
 
-The gaps cluster in the areas the convention does not yet name (the
-`environment` package and the older `lightswitch_spawner` extension) plus a few
-impurity leaks inside otherwise-frozen values. In rough order of value:
+The review findings and their outcomes, in rough order of value, are:
 
 1. `environment/switches.py`: resolved in step 1 with frozen state and pure
    latch transitions.
@@ -71,9 +69,9 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
    experiment configuration.
 6. Incidentally mutable value-object dataclasses: resolved in step 6 by
    declaring the airframe graph and scenario flight samples frozen.
-7. `px4_bridge/mavlink.py`: a large body of project-owned lockstep protocol
-   state inside the adapter -- allowed by the current convention, listed as a
-   deferred decision (step 7).
+7. `px4_bridge/mavlink.py` lockstep progress: reviewed in step 7 and retained
+   as the documented mutable adapter exception until a concrete extraction
+   trigger appears.
 
 ## Step 1: Freeze `SwitchState` and make the button latch a pure transition
 
@@ -238,33 +236,32 @@ Current behavior:
 
 Risk: minimal.
 
-## Step 7 (deferred decision): lockstep progress state inside `Px4MavlinkPort`
+## Step 7: Retain lockstep progress state inside `Px4MavlinkPort`
 
-`px4_bridge/mavlink.py` keeps ~15 mutable fields of project-owned lockstep
-protocol progress (send/receive counters, last-timestamp bookkeeping,
-heartbeat pacing, prime-then-block bootstrap, freshness tripwire, disconnect
-reason) inside the MAVLink adapter. This is permitted by the current
-convention ("mutable classes are limited to external resource adapters"), and
-`read_status()` already exposes it immutably -- but by weight it is the largest
-block of non-functional project logic left, and the phase logic
-(`_heartbeat_phase`, `_sensor_phase`, `_needs_to_block_for_actuator`,
-`_actuator_is_fresh`) is pure decision-making testable without a socket.
+- [x] Complete
 
-Options:
+Goal: make an explicit, evidence-based decision about the largest remaining
+mutable block of project logic rather than extracting it opportunistically.
 
-- A (status quo, recommended until a concrete need appears): keep the port as
-  the documented adapter exception. It is well covered
-  (`test_px4_bridge_lockstep.py`, `_actuator.py`, `_gating.py`, `_sensors.py`
-  drive it through fakes), and the bridge contract doc treats its sequencing
-  as load-bearing. Cost of change > benefit today.
-- B (full extraction): frozen `LockstepProgress` + pure transitions returning
-  `(actions, next_state)` interpreted against the Pegasus backend, mirroring
-  the `bridge_host.py` pattern. Prerequisites if attempted: read
-  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`
-  first; preserve exact sequencing (prime-then-block, drain-newest, cadence
-  guard); benchmark per-tick allocation on the 250 Hz path before and after;
-  land behind the full px4 integration suite
-  (`make test-integration-all`).
+Current behavior and decision:
 
-Decision needed only if the port grows new protocol behavior or its tests
-become the bottleneck; do not do this as opportunistic cleanup.
+- `Px4MavlinkPort` retains send/receive counters, timestamp bookkeeping,
+  heartbeat pacing, prime-then-block bootstrap, actuator freshness, and
+  disconnect progress as mutable adapter state. This remains within the
+  project's documented exception for external resource adapters.
+- Consumers see one immutable `BridgeStatus` through `read_status()`;
+  `is_connected()` remains the deliberate narrow hot-path probe that avoids a
+  snapshot allocation on every physics tick.
+- The heartbeat, sensor, actuator, freshness, and backlog-draining phases stay
+  private to the adapter. Focused lockstep, actuator, gating, and sensor tests
+  drive them through fake backends, while the full integration matrix exercises
+  the load-bearing prime-then-block, all-sends-before-polls, cadence, and
+  multi-vehicle behavior.
+- The status quo is retained because no new protocol behavior or testability
+  bottleneck supplies the documented trigger for a frozen `LockstepProgress`
+  extraction. Such an extraction would add transition/action machinery and
+  per-tick allocation risk without changing behavior today.
+- Reconsider a full extraction only if the port gains protocol behavior or its
+  adapter-level tests become a bottleneck. Any future attempt must preserve the
+  PX4 bridge contract exactly, benchmark the 250 Hz path, and pass the full PX4
+  integration suite.
