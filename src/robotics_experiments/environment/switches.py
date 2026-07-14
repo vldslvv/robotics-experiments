@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, replace
 
 __all__ = ["SwitchState", "apply_button_sample"]
 
 
-@dataclass
+@dataclass(frozen=True)
 class SwitchState:
     """Runtime state for a single spawned light switch.
 
@@ -19,20 +18,19 @@ class SwitchState:
 
     prim_path: str
     lamp_prim_path: str = ""
-    articulation: Any | None = field(default=None, repr=False)
     state: bool = False
     press_steps: int = 0
     toggle_latched: bool = False
 
 
 def apply_button_sample(
-    switch: SwitchState,
     *,
+    switch: SwitchState,
     button_position: float,
     press_threshold: float,
     confirm_steps: int,
-) -> bool:
-    """Update one switch from a button position sample.
+) -> tuple[SwitchState, bool]:
+    """Return the successor state for one button position sample.
 
     Implements the light-state latch: a press toggles the switch only once it
     has stayed at or above ``press_threshold`` for
@@ -40,16 +38,20 @@ def apply_button_sample(
     window completes does not count; a sustained press toggles exactly once and
     will not re-toggle until the button is released and pressed again.
 
-    Returns ``True`` only on the sample that confirms (and applies) the toggle.
+    The input state is never mutated. The boolean result is ``True`` only on
+    the sample that confirms the toggle.
     """
     if button_position < press_threshold:
-        switch.press_steps = 0
-        switch.toggle_latched = False
-        return False
+        return replace(switch, press_steps=0, toggle_latched=False), False
 
-    switch.press_steps += 1
-    if switch.press_steps >= confirm_steps and not switch.toggle_latched:
-        switch.state = not switch.state
-        switch.toggle_latched = True
-        return True
-    return False
+    press_steps = switch.press_steps + 1
+    toggled = press_steps >= confirm_steps and not switch.toggle_latched
+    return (
+        replace(
+            switch,
+            state=not switch.state if toggled else switch.state,
+            press_steps=press_steps,
+            toggle_latched=switch.toggle_latched or toggled,
+        ),
+        toggled,
+    )

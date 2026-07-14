@@ -1,90 +1,105 @@
+from dataclasses import FrozenInstanceError
+
+import pytest
+
 from robotics_experiments.environment import SwitchState, apply_button_sample
 
 
+def _sample(
+    switch: SwitchState, *, position: float, confirm_steps: int
+) -> tuple[SwitchState, bool]:
+    return apply_button_sample(
+        switch=switch,
+        button_position=position,
+        press_threshold=0.5,
+        confirm_steps=confirm_steps,
+    )
+
+
 def test_switch_toggles_only_on_rising_edge():
-    # confirm_steps=1 reduces the latch to a plain rising-edge toggle.
     switch = SwitchState("/Root/Switch")
 
-    assert not apply_button_sample(
-        switch, button_position=0.0, press_threshold=0.5, confirm_steps=1
-    )
+    switch, toggled = _sample(switch, position=0.0, confirm_steps=1)
+    assert not toggled
     assert not switch.state
 
-    assert apply_button_sample(switch, button_position=0.5, press_threshold=0.5, confirm_steps=1)
+    switch, toggled = _sample(switch, position=0.5, confirm_steps=1)
+    assert toggled
     assert switch.state
 
-    assert not apply_button_sample(
-        switch, button_position=0.8, press_threshold=0.5, confirm_steps=1
-    )
+    switch, toggled = _sample(switch, position=0.8, confirm_steps=1)
+    assert not toggled
     assert switch.state
 
-    assert not apply_button_sample(
-        switch, button_position=0.1, press_threshold=0.5, confirm_steps=1
-    )
-    assert switch.state
+    switch, toggled = _sample(switch, position=0.1, confirm_steps=1)
+    assert not toggled
 
-    assert apply_button_sample(switch, button_position=0.6, press_threshold=0.5, confirm_steps=1)
+    switch, toggled = _sample(switch, position=0.6, confirm_steps=1)
+    assert toggled
     assert not switch.state
+
+
+def test_transition_leaves_input_state_unchanged():
+    initial = SwitchState("/Root/Switch")
+
+    successor, toggled = _sample(initial, position=0.9, confirm_steps=1)
+
+    assert toggled
+    assert initial == SwitchState("/Root/Switch")
+    assert successor.state
+    with pytest.raises(FrozenInstanceError):
+        initial.state = True
 
 
 def test_sustained_press_toggles_after_confirmation_window():
-    # The latch requires the press to hold for the full confirmation window.
     switch = SwitchState("/Root/Switch")
 
-    # First four pressed samples are within the window: no toggle yet.
     for _ in range(4):
-        assert not apply_button_sample(
-            switch, button_position=0.9, press_threshold=0.5, confirm_steps=5
-        )
+        switch, toggled = _sample(switch, position=0.9, confirm_steps=5)
+        assert not toggled
         assert not switch.state
 
-    # Fifth consecutive pressed sample confirms the toggle.
-    assert apply_button_sample(switch, button_position=0.9, press_threshold=0.5, confirm_steps=5)
+    switch, toggled = _sample(switch, position=0.9, confirm_steps=5)
+    assert toggled
     assert switch.state
 
 
 def test_brief_tap_does_not_toggle():
-    # A tap that releases before the window completes must not count.
     switch = SwitchState("/Root/Switch")
 
     for _ in range(3):
-        assert not apply_button_sample(
-            switch, button_position=0.9, press_threshold=0.5, confirm_steps=5
-        )
-    # Released before the 5-step window -> no toggle, counter resets.
-    assert not apply_button_sample(
-        switch, button_position=0.0, press_threshold=0.5, confirm_steps=5
-    )
+        switch, _ = _sample(switch, position=0.9, confirm_steps=5)
+    switch, toggled = _sample(switch, position=0.0, confirm_steps=5)
+
+    assert not toggled
     assert not switch.state
+    assert switch.press_steps == 0
 
 
 def test_held_press_toggles_exactly_once():
-    # Holding past the window must not re-toggle every step.
     switch = SwitchState("/Root/Switch")
+    toggles = []
 
-    toggles = [
-        apply_button_sample(switch, button_position=0.9, press_threshold=0.5, confirm_steps=3)
-        for _ in range(10)
-    ]
+    for _ in range(10):
+        switch, toggled = _sample(switch, position=0.9, confirm_steps=3)
+        toggles.append(toggled)
+
     assert toggles.count(True) == 1
     assert switch.state
 
 
 def test_release_then_press_toggles_again():
-    # A fresh sustained press after release confirms a second toggle.
     switch = SwitchState("/Root/Switch")
 
     for _ in range(3):
-        apply_button_sample(switch, button_position=0.9, press_threshold=0.5, confirm_steps=3)
-    assert switch.state  # toggled on the first sustained press
+        switch, _ = _sample(switch, position=0.9, confirm_steps=3)
+    assert switch.state
 
-    # Release, then press again for a full window.
-    assert not apply_button_sample(
-        switch, button_position=0.0, press_threshold=0.5, confirm_steps=3
-    )
+    switch, toggled = _sample(switch, position=0.0, confirm_steps=3)
+    assert not toggled
     for _ in range(2):
-        assert not apply_button_sample(
-            switch, button_position=0.9, press_threshold=0.5, confirm_steps=3
-        )
-    assert apply_button_sample(switch, button_position=0.9, press_threshold=0.5, confirm_steps=3)
-    assert not switch.state  # toggled back off
+        switch, toggled = _sample(switch, position=0.9, confirm_steps=3)
+        assert not toggled
+    switch, toggled = _sample(switch, position=0.9, confirm_steps=3)
+    assert toggled
+    assert not switch.state

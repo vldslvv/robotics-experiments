@@ -217,8 +217,8 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app, publisher_con
     fake_environment.despawn_switches = lambda stage, switch_state: None
     fake_environment.spawn_switches = lambda **kwargs: []
     fake_environment.validate_switches = lambda stage, switch_state: True
-    fake_environment.init_articulations = lambda switch_state: True
-    fake_environment.step_switches = lambda **kwargs: None
+    fake_environment.init_articulations = lambda **kwargs: []
+    fake_environment.step_switches = lambda **kwargs: tuple(kwargs["switch_state"])
 
     fake_config = types.ModuleType("robotics_experiments.config")
     fake_config.load_config = lambda path: SimpleNamespace(
@@ -390,8 +390,12 @@ def test_validation_failure_tears_down_partial_runtime_state(monkeypatch):
     monkeypatch.setattr(module, "despawn_switches", despawn)
     monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stage, state: False)
-    monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
-    monkeypatch.setattr(module, "step_switches", lambda **kwargs: calls.append("step"))
+    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
+    monkeypatch.setattr(
+        module,
+        "step_switches",
+        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
+    )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
@@ -437,14 +441,18 @@ def test_repeated_play_does_not_double_spawn(monkeypatch):
 def test_pause_keeps_switch_state_and_articulations(monkeypatch):
     stage = object()
     module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = ["switch"]
+    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
     calls = []
 
     monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
     monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
-    monkeypatch.setattr(module, "step_switches", lambda **kwargs: calls.append("step"))
+    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
+    monkeypatch.setattr(
+        module,
+        "step_switches",
+        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
+    )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
@@ -465,14 +473,18 @@ def test_pause_keeps_switch_state_and_articulations(monkeypatch):
 def test_play_after_pause_resumes_without_reinitializing(monkeypatch):
     stage = object()
     module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = ["switch"]
+    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
     calls = []
 
     monkeypatch.setattr(module, "despawn_switches", lambda stage, state: calls.append("despawn"))
     monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda state: calls.append("init") or True)
-    monkeypatch.setattr(module, "step_switches", lambda **kwargs: calls.append("step"))
+    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: calls.append("init") or [])
+    monkeypatch.setattr(
+        module,
+        "step_switches",
+        lambda **kwargs: calls.append("step") or tuple(kwargs["switch_state"]),
+    )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")
@@ -492,7 +504,7 @@ def test_play_after_pause_resumes_without_reinitializing(monkeypatch):
 def test_stop_stage_open_and_shutdown_teardown(monkeypatch):
     stage = object()
     module, usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = ["switch"]
+    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
     despawns = []
 
     monkeypatch.setattr(
@@ -507,21 +519,21 @@ def test_stop_stage_open_and_shutdown_teardown(monkeypatch):
     # STOP despawns the spawned switches with the play stage.
     _fire_timeline(timeline, _TimelineEventType.PLAY)
     _fire_timeline(timeline, _TimelineEventType.STOP)
-    assert despawns[-1] == (stage, ["switch"])
+    assert despawns[-1] == (stage, switches)
 
     # A new stage opening re-targets the stage and tears down again: the despawn
     # carries the new stage (observable proof the stage handle was adopted).
     _fire_timeline(timeline, _TimelineEventType.PLAY)
     usd_context.stage = "new-stage"
     _fire_stage_opened(usd_context)
-    assert despawns[-1] == ("new-stage", ["switch"])
+    assert despawns[-1] == ("new-stage", switches)
 
     # Shutdown tears down on that adopted stage and destroys the ROS node; a
     # second shutdown is idempotent (no raise).
     _fire_timeline(timeline, _TimelineEventType.PLAY)
     node = _created_node()
     extension.on_shutdown()
-    assert despawns[-1] == ("new-stage", ["switch"])
+    assert despawns[-1] == ("new-stage", switches)
     assert node in _Node.destroyed
     extension.on_shutdown()
 
@@ -529,15 +541,15 @@ def test_stop_stage_open_and_shutdown_teardown(monkeypatch):
 def test_update_spins_ros_initializes_then_steps(monkeypatch):
     stage = object()
     module, _usd_context, timeline, app = _import_extension(monkeypatch, stage=stage)
-    switches = ["switch"]
+    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
     calls = []
 
     monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stg, state: True)
 
-    def init_articulations(state):
-        calls.append(("init", list(state)))
-        return True
+    def init_articulations(**kwargs):
+        calls.append(("init", list(kwargs["prim_paths"])))
+        return ["articulation"]
 
     monkeypatch.setattr(module, "init_articulations", init_articulations)
     monkeypatch.setattr(
@@ -550,7 +562,8 @@ def test_update_spins_ros_initializes_then_steps(monkeypatch):
                 list(kwargs["switch_state"]),
                 kwargs["on_toggle"],
             )
-        ),
+        )
+        or tuple(kwargs["switch_state"]),
     )
 
     extension = module.LightSwitchExtension()
@@ -560,9 +573,9 @@ def test_update_spins_ros_initializes_then_steps(monkeypatch):
     _fire_update(app)  # first running tick initializes articulations
     _fire_update(app)  # next tick steps
 
-    assert calls[0] == ("init", ["switch"])
+    assert calls[0] == ("init", [switch.prim_path for switch in switches])
     _step_label, step_stage, step_state, on_toggle = calls[1]
-    assert (_step_label, step_stage, step_state) == ("step", stage, ["switch"])
+    assert (_step_label, step_stage, step_state) == ("step", stage, switches)
     # The step's on_toggle is the publisher callback: invoking it publishes.
     on_toggle(2, True)
     assert _created_node().publishers[0][3].messages[-1].data == [2.0, 1.0]
@@ -573,12 +586,16 @@ def test_update_spins_ros_initializes_then_steps(monkeypatch):
 
 def test_publish_toggle_sends_float_array(monkeypatch):
     module, _usd_context, timeline, app = _import_extension(monkeypatch)
-    switches = ["switch"]
+    switches = [SimpleNamespace(prim_path="/Root/LightSwitch_0")]
     monkeypatch.setattr(module, "spawn_switches", lambda **kwargs: switches)
     monkeypatch.setattr(module, "validate_switches", lambda stage, state: True)
-    monkeypatch.setattr(module, "init_articulations", lambda state: True)
+    monkeypatch.setattr(module, "init_articulations", lambda **kwargs: ["articulation"])
     # A real switch toggle flows through step_switches' on_toggle to the publisher.
-    monkeypatch.setattr(module, "step_switches", lambda **kwargs: kwargs["on_toggle"](2, True))
+    monkeypatch.setattr(
+        module,
+        "step_switches",
+        lambda **kwargs: (kwargs["on_toggle"](2, True), tuple(kwargs["switch_state"]))[1],
+    )
 
     extension = module.LightSwitchExtension()
     extension.on_startup("lightswitch_spawner")

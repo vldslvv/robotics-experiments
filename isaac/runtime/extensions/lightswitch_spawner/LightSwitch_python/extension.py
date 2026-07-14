@@ -86,7 +86,8 @@ class LightSwitchExtension(omni.ext.IExt):
 
         usd_context = omni.usd.get_context()
         self._stage = usd_context.get_stage()
-        self._switch_state: list[SwitchState] = []
+        self._switch_state: tuple[SwitchState, ...] = ()
+        self._articulations: list[Any] | None = None
         self._articulations_ready = False
         self._simulation_running = False
         self._switches_spawned = False
@@ -199,6 +200,7 @@ class LightSwitchExtension(omni.ext.IExt):
 
             self._switches_spawned = True
             self._articulations_ready = False
+            self._articulations = None
 
         carb.log_info(f"[{EXTENSION_TITLE}] Simulation started.")
         self._simulation_running = True
@@ -212,10 +214,11 @@ class LightSwitchExtension(omni.ext.IExt):
         carb.log_info(f"[{EXTENSION_TITLE}] Simulation stopped - resetting state.")
         self._simulation_running = False
         self._articulations_ready = False
+        self._articulations = None
         self._switches_spawned = False
 
         despawn_switches(self._stage, self._switch_state)
-        self._switch_state = []
+        self._switch_state = ()
 
     def _on_update(self, event):
         """Pump ROS callbacks and, when the sim is playing, step switch logic.
@@ -242,16 +245,22 @@ class LightSwitchExtension(omni.ext.IExt):
             return
 
         if not self._articulations_ready:
-            if init_articulations(self._switch_state):
+            articulations = init_articulations(
+                prim_paths=tuple(switch.prim_path for switch in self._switch_state)
+            )
+            if articulations is not None:
+                self._articulations = articulations
                 self._articulations_ready = True
             return
 
         if self._stage is None:
             carb.log_error(f"[{EXTENSION_TITLE}] No stage loaded.")
             return
-        step_switches(
+        assert self._articulations is not None
+        self._switch_state = step_switches(
             stage=self._stage,
             switch_state=self._switch_state,
+            articulations=self._articulations,
             config=self._config,
             on_toggle=self._publish_toggle,
         )

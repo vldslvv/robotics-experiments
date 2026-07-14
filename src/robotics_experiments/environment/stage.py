@@ -195,7 +195,7 @@ def _spawn_lamps(
     return prim_paths
 
 
-def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> List[SwitchState]:
+def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[SwitchState, ...]:
     """Spawn switches and their paired lamps at randomly sampled positions.
 
     Args:
@@ -214,13 +214,13 @@ def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> List[Switc
     )
     switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
     lamp_paths = _spawn_lamps(stage, config.lamp_usd_path, positions)
-    return [
+    return tuple(
         SwitchState(prim_path=sp, lamp_prim_path=lp)
         for sp, lp in zip(switch_paths, lamp_paths, strict=False)
-    ]
+    )
 
 
-def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
+def despawn_switches(stage: Usd.Stage, switch_state: tuple[SwitchState, ...]) -> None:
     """Remove all switch and lamp prims tracked by ``switch_state``.
 
     Safe to call when ``stage`` is ``None`` or prims have already been
@@ -241,7 +241,7 @@ def despawn_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> None:
                 stage.RemovePrim(Sdf.Path(path))
 
 
-def validate_switches(stage: Usd.Stage, switch_state: List[SwitchState]) -> bool:
+def validate_switches(stage: Usd.Stage, switch_state: tuple[SwitchState, ...]) -> bool:
     """Verify that every tracked switch prim resolves on the stage.
 
     Args:

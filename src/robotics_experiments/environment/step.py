@@ -9,7 +9,7 @@ robotics_experiments`` works outside the Isaac runtime. See
 ``tests/test_core_imports.py`` for the boundary guard.
 """
 
-from typing import Callable, List
+from collections.abc import Callable, Sequence
 
 import carb
 from isaacsim.core.prims import SingleArticulation
@@ -51,47 +51,45 @@ def _set_lamp(
         shader.CreateInput("enable_emission", Sdf.ValueTypeNames.Bool).Set(on)
 
 
-def init_articulations(switch_state: List[SwitchState]) -> bool:
+def init_articulations(*, prim_paths: Sequence[str]) -> list[SingleArticulation] | None:
     """Initialize PhysX articulations for each tracked switch.
 
     Must be called only after the simulation has begun playing; PhysX does
-    not expose articulations until the first physics step. On failure all
-    articulation handles are cleared so the caller can retry on a later tick.
+    not expose articulations until the first physics step. On failure the
+    caller can retry on a later tick.
 
     Args:
-        switch_state: Per-switch state entries whose articulations should be
-            initialized in-place.
+        prim_paths: Switch prim paths whose articulations should be initialized.
 
     Returns:
-        ``True`` if every articulation initialized, ``False`` on the first
-        exception (with articulations reset to ``None``).
+        All initialized articulation handles, or ``None`` on the first
+        exception.
     """
     try:
-        for sw in switch_state:
-            art = SingleArticulation(prim_path=sw.prim_path)
+        articulations = []
+        for prim_path in prim_paths:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
-            sw.articulation = art
+            articulations.append(art)
 
-        carb.log_info(f"[LightSwitch] Initialized {len(switch_state)} articulations.")
-        articulation = switch_state[0].articulation
-        if articulation is not None:
-            carb.log_info(f"[LightSwitch] DOFs: {articulation.dof_names}")
-        return True
+        carb.log_info(f"[LightSwitch] Initialized {len(articulations)} articulations.")
+        if articulations:
+            carb.log_info(f"[LightSwitch] DOFs: {articulations[0].dof_names}")
+        return articulations
 
     except Exception as e:
         carb.log_error(f"[LightSwitch] Articulation init failed: ({e})")
-        for sw in switch_state:
-            sw.articulation = None
-        return False
+        return None
 
 
 def step_switches(
     *,
     stage: Usd.Stage,
-    switch_state: List[SwitchState],
+    switch_state: tuple[SwitchState, ...],
+    articulations: Sequence[SingleArticulation],
     config: LightSwitchConfig,
     on_toggle: Callable[[int, bool], None] | None = None,
-) -> None:
+) -> tuple[SwitchState, ...]:
     """Detect confirmed button presses and toggle the paired lamps.
 
     Reads the first DOF of each articulation; once it has stayed at or above the
@@ -102,25 +100,31 @@ def step_switches(
 
     Args:
         stage: USD stage to mutate for lamp visuals.
-        switch_state: Per-switch state entries; ``state``, ``press_steps``, and
-            ``toggle_latched`` are updated in place.
+        switch_state: Immutable per-switch progress snapshots.
+        articulations: PhysX articulation handles parallel to ``switch_state``.
         on_toggle: Optional callback receiving ``(index, new_state)`` on every
             successful toggle.
         config: Spawner configuration.
     """
-    for i, sw in enumerate(switch_state):
-        if sw.articulation is None:
-            carb.log_error(f"[LightSwitch] No articulation set for switch with index {i}")
-            continue
-        joint_positions = sw.articulation.get_joint_positions()
+    successor = []
+    for i, (sw, articulation) in enumerate(zip(switch_state, articulations, strict=True)):
+        joint_positions = articulation.get_joint_positions()
         button_pos = joint_positions[0]
 
-        if apply_button_sample(
-            sw,
+        next_switch, toggled = apply_button_sample(
+            switch=sw,
             button_position=float(button_pos),
             press_threshold=config.press_threshold,
             confirm_steps=config.press_confirm_steps,
-        ):
-            _set_lamp(stage, sw.lamp_prim_path, sw.state, config.lamp_on_intensity)
+        )
+        successor.append(next_switch)
+        if toggled:
+            _set_lamp(
+                stage,
+                next_switch.lamp_prim_path,
+                next_switch.state,
+                config.lamp_on_intensity,
+            )
             if on_toggle is not None:
-                on_toggle(i, sw.state)
+                on_toggle(i, next_switch.state)
+    return tuple(successor)

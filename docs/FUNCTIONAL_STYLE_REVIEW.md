@@ -77,54 +77,29 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
 
 ## Step 1: Freeze `SwitchState` and make the button latch a pure transition
 
+- [x] Complete
+
 Goal: `environment` follows the same frozen-state + transition-function rule
 as `runtime` / `commanding` / `px4_bridge`, and the articulation resource stops
 living inside project-owned progress state.
 
-Problem today (`src/robotics_experiments/environment/switches.py`):
-`SwitchState` is a non-frozen dataclass mixing identity (`prim_path`,
-`lamp_prim_path`), a live PhysX resource (`articulation`), and progress
-(`state`, `press_steps`, `toggle_latched`); `apply_button_sample` mutates it in
-place; `init_articulations` and `step_switches`
-(`src/robotics_experiments/environment/step.py`) mutate entries in place.
+Current behavior:
 
-Changes:
-
-- `switches.py`:
-  - Make `SwitchState` frozen and drop the `articulation` field. Keep
-    `prim_path`, `lamp_prim_path`, `state`, `press_steps`, `toggle_latched`.
-  - Rewrite `apply_button_sample` as a pure transition
-    `apply_button_sample(switch, *, button_position, press_threshold,
-    confirm_steps) -> tuple[SwitchState, bool]` returning the successor state
-    and the toggled flag (same latch semantics, `dataclasses.replace` instead
-    of assignment).
-- `step.py` (Isaac-only leaf):
-  - `init_articulations(switch_state) -> list | None`-style signature becomes
-    `init_articulations(prim_paths) -> list[SingleArticulation] | None`
-    (return the handles or `None` on failure) so the resource lives with the
-    caller, not inside the frozen state.
-  - `step_switches(...)` takes the switch tuple plus the parallel articulation
-    list, calls the pure transition, applies `_set_lamp` / `on_toggle` for
-    toggles, and returns the successor `tuple[SwitchState, ...]`.
-- `stage.py`: `spawn_switches` returns `tuple[SwitchState, ...]` (frozen
-  entries); `despawn_switches` is unchanged apart from the tuple type.
-- `isaac/runtime/extensions/lightswitch_spawner/LightSwitch_python/extension.py`:
-  rebind `self._switch_state` from the return values; hold
-  `self._articulations` separately (or fold this into step 2 if done
-  together).
-- Update `environment/__init__.py` exports only if signatures force it; do not
-  widen the public API.
-
-Tests: rewrite
-`tests/src/robotics_experiments/environment/test_environment_switches.py` to
-thread returned states (assert input state is unchanged after a call);
-`tests/isaac/runtime/extensions/lightswitch_spawner/test_lightswitch_spawner_extension.py`
-adjusts to the new return-value flow. `tests/src/robotics_experiments/test_core_imports.py`
-keeps guarding that `switches.py` stays import-clean.
-
-Done when: no function in `environment/` assigns to a `SwitchState` field;
-`SwitchState` is `frozen=True`; all listed tests pass;
-`uv run pre-commit run --all-files` is clean.
+- `SwitchState` is frozen and contains only switch identity and latch progress;
+  PhysX articulation handles are held separately by the live adapter.
+- `apply_button_sample` is a pure transition returning the successor state and
+  a toggle flag while leaving its input unchanged.
+- `init_articulations` accepts prim paths and returns the complete handle list,
+  or `None` so initialization can be retried after a failure.
+- `step_switches` consumes parallel immutable switch snapshots and articulation
+  handles, performs lamp and notification effects only for confirmed toggles,
+  and returns the successor switch tuple.
+- The stage spawner returns a tuple of frozen switch snapshots, and the live
+  extension rebinds that tuple after every step while retaining articulation
+  resources separately pending the runtime restructuring in step 2.
+- Unit coverage threads transition results, verifies the original state remains
+  unchanged, and exercises the extension's returned-state flow. The core-import
+  regression continues to keep the pure switch module importable without Isaac.
 
 Risk: low. The latch logic is small and fully covered by unit tests.
 
