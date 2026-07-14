@@ -67,8 +67,8 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
    immutable `CommandPortStatus` snapshot.
 4. Writable `np.ndarray` payloads: resolved at the production construction
    seams in step 4 with copied or ownership-frozen arrays.
-5. `environment/stage.py`: hidden module-global RNG, so spawns are impure and
-   unreproducible (step 5).
+5. `environment/stage.py`: resolved in step 5 with a per-spawn seeded RNG from
+   experiment configuration.
 6. Value-object dataclasses that are incidentally mutable (`drone/_airframe.py`,
    scenario `_FlightSample`) (step 6).
 7. `px4_bridge/mavlink.py`: a large body of project-owned lockstep protocol
@@ -193,35 +193,23 @@ exactly the point; any that fire reveal real aliasing bugs.
 
 ## Step 5: Replace the hidden global RNG in switch spawning with an injected seeded RNG
 
+- [x] Complete
+
 Goal: `spawn_switches` becomes a deterministic function of its inputs --
 referential transparency and reproducible experiment layouts.
 
-Problem today (`src/robotics_experiments/environment/stage.py`):
-`_sample_positions` uses module-global `random.choice` / `random.uniform`, and
-`_spawn_lamps` draws lamp heights the same way. Layouts differ every run and
-cannot be reproduced from config.
+Current behavior:
 
-Changes:
-
-- Config: add `spawn_seed: int` as a bare-annotation field to
-  `LightSwitchConfig` in the owning module under
-  `src/robotics_experiments/config/` and set the project value in the Hydra
-  `configs/` YAML (tunables live in YAML; raise on invalid config as usual).
-- `stage.py`: `spawn_switches` builds `rng = random.Random(config.spawn_seed)`
-  and threads it into `_sample_positions` and `_spawn_lamps` (parameter, not a
-  global). No other call-site changes: both helpers are private to the module.
-
-Tests: extend
-`tests/src/robotics_experiments/environment/test_environment_switches.py` (or
-the config tests if stage.py stays untestable off-Isaac -- `stage.py` imports
-`pxr`, so put the determinism test wherever the existing spawner extension
-test stubs Isaac): same seed -> identical positions; different seed ->
-different positions. `tests/src/robotics_experiments/config/test_config.py`
-gains the new field.
-
-Done when: `grep -rn "random\." src/robotics_experiments/environment/` shows
-only the injected `Random` usage; two runs with the same config produce the
-same prim positions.
+- `LightSwitchConfig.spawn_seed` is a required typed field, with the project
+  value authored in `configs/experiment/switches/default.yaml`.
+- Each `spawn_switches` call creates one local `random.Random` from that seed
+  and threads it through position sampling and lamp-height sampling. No helper
+  reads the module-global random generator.
+- The complete switch/lamp layout is reproducible for a resolved experiment:
+  repeated calls with the same seed produce identical positions and heights,
+  while a different seed selects a different layout.
+- Config composition asserts the shipped seed, and an Isaac-free stage test
+  stubs the USD types to exercise deterministic layout sampling directly.
 
 Risk: low. Behavior change is the (desired) determinism; docs
 (`docs/EXPERIMENT_CONFIG.md`) mention the new key.

@@ -34,6 +34,8 @@ def _to_range(box: BoundingBox) -> Gf.Range3d:
 
 
 def _sample_positions(
+    *,
+    rng: random.Random,
     count: int,
     bounds: List[Gf.Range3d],
     min_distance: float,
@@ -47,6 +49,7 @@ def _sample_positions(
     logged rather than aborting the spawn.
 
     Args:
+        rng: Seeded random source owned by the spawn operation.
         count: Number of positions to sample.
         bounds: Candidate axis-aligned regions to sample from.
         min_distance: Minimum pairwise distance between accepted positions.
@@ -64,12 +67,12 @@ def _sample_positions(
         fallback = None
         placed = False
         for _ in range(max_retries):
-            b = random.choice(bounds)
+            b = rng.choice(bounds)
             mn, mx = b.min, b.max
             c = Gf.Vec3d(
-                random.uniform(mn[0], mx[0]),
-                random.uniform(mn[1], mx[1]),
-                random.uniform(mn[2], mx[2]),
+                rng.uniform(mn[0], mx[0]),
+                rng.uniform(mn[1], mx[1]),
+                rng.uniform(mn[2], mx[2]),
             )
             if fallback is None:
                 fallback = c
@@ -98,6 +101,7 @@ def _reference_asset_at(
     """Define an ``Xform`` prim that references ``usd_path`` and translate it.
 
     Args:
+        rng: Seeded random source shared with switch position sampling.
         stage: USD stage to mutate.
         prim_path: Absolute prim path to create.
         usd_path: Absolute path to the USD asset to reference.
@@ -146,6 +150,8 @@ def _spawn_switches(
 
 
 def _spawn_lamps(
+    *,
+    rng: random.Random,
     stage: Usd.Stage,
     usd_path: str,
     positions: List[Gf.Vec3d],
@@ -171,7 +177,7 @@ def _spawn_lamps(
 
     prim_paths: List[str] = []
     for i, pos in enumerate(positions):
-        lamp_pos = Gf.Vec3d(pos[0], pos[1], random.uniform(3.4, 5.0))
+        lamp_pos = Gf.Vec3d(pos[0], pos[1], rng.uniform(3.4, 5.0))
         prim_path = f"/Root/Lamp_{i}"
 
         _reference_asset_at(stage, prim_path, usd_path, lamp_pos)
@@ -196,7 +202,7 @@ def _spawn_lamps(
 
 
 def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[SwitchState, ...]:
-    """Spawn switches and their paired lamps at randomly sampled positions.
+    """Spawn switches and paired lamps from the configured deterministic seed.
 
     Args:
         stage: USD stage to mutate.
@@ -206,14 +212,21 @@ def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[Swit
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
+    rng = random.Random(config.spawn_seed)
     positions = _sample_positions(
-        config.num_switches,
-        [_to_range(b) for b in config.spawn_bounds],
-        config.min_spawn_dist,
-        config.max_spawn_retries,
+        rng=rng,
+        count=config.num_switches,
+        bounds=[_to_range(b) for b in config.spawn_bounds],
+        min_distance=config.min_spawn_dist,
+        max_retries=config.max_spawn_retries,
     )
     switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
-    lamp_paths = _spawn_lamps(stage, config.lamp_usd_path, positions)
+    lamp_paths = _spawn_lamps(
+        rng=rng,
+        stage=stage,
+        usd_path=config.lamp_usd_path,
+        positions=positions,
+    )
     return tuple(
         SwitchState(prim_path=sp, lamp_prim_path=lp)
         for sp, lp in zip(switch_paths, lamp_paths, strict=False)

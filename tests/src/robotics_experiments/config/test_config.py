@@ -97,6 +97,7 @@ def test_default_experiment_has_only_global_root_config():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "takeoff_quad.yaml")
+    assert config.switches.spawn_seed == 0
     assert set(vars(config)) - {"_config_frozen"} == {
         "sim",
         "switches",

@@ -94,6 +94,7 @@ class LightSwitchConfig(_FreezableConfig):
         switch_usd_path: Absolute path to the switch USD asset.
         lamp_usd_path: Absolute path to the lamp USD asset.
         num_switches: Number of switch/lamp pairs to spawn.
+        spawn_seed: Seed for deterministic switch positions and lamp heights.
         press_threshold: Joint position above which the button is treated as pressed.
         press_confirm_steps: Consecutive steps the button must stay pressed before
             a toggle is confirmed (the light-state latch / confirmation window).
@@ -107,6 +108,7 @@ class LightSwitchConfig(_FreezableConfig):
     switch_usd_path: str
     lamp_usd_path: str
     num_switches: int
+    spawn_seed: int
     press_threshold: float
     press_confirm_steps: int
     min_spawn_dist: float

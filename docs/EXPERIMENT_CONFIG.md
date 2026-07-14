@@ -26,6 +26,11 @@ make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
 The standalone `--scene` option overrides the configured scene; `@`-prefixed
 scene paths are repository-relative.
 
+The global `switches.spawn_seed` deterministically drives both switch position
+sampling and lamp heights. Reusing the same resolved experiment configuration
+reproduces the complete switch/lamp layout; changing the seed selects a new
+layout.
+
 ## Routine behavior
 
 Every vehicle owns a complete `RoutineConfig`. Every bridge-enabled vehicle gets
