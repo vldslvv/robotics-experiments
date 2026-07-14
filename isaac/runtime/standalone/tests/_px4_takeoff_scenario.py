@@ -68,7 +68,7 @@ class Px4FailsafeDetected(AssertionError):
     """
 
 
-@dataclass
+@dataclass(frozen=True)
 class _FlightSample:
     sim_time_us: int
     position_enu: np.ndarray

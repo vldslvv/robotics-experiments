@@ -31,7 +31,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs" / "usd_builder"
 Vec3 = tuple[float, float, float]
 
 
-@dataclass
+@dataclass(frozen=True)
 class BoxPart:
     name: str
     size: tuple[float, float, float]
@@ -40,7 +40,7 @@ class BoxPart:
     rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
-@dataclass
+@dataclass(frozen=True)
 class CylinderPart:
     name: str
     radius: float
@@ -50,7 +50,7 @@ class CylinderPart:
     rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
-@dataclass
+@dataclass(frozen=True)
 class BoomPart:
     # The arm tube. Massless geometry (mass folded into the frame), so no `mass`
     # field. `length` is the tip-to-tip radial reach of the boom (origin to motor);
@@ -61,7 +61,7 @@ class BoomPart:
     length: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class ArmGeometry:
     # Geometry of one arm, authored once and shared by every arm of the airframe.
     # Every position is in the arm-local frame, where +X points outboard along the
@@ -74,7 +74,7 @@ class ArmGeometry:
     prop_num_blades: int  # cosmetic blade count for the propeller visual
 
 
-@dataclass
+@dataclass(frozen=True)
 class ArmPlacement:
     # One physical arm: where the shared ArmGeometry is mounted and which motor it
     # carries. `azimuth_deg` is the sole source of the arm's heading.
@@ -84,7 +84,7 @@ class ArmPlacement:
     px4_motor_index: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class AirframeConfig:
     name: str
     output_filename: str
@@ -122,21 +122,21 @@ class AirframeConfig:
     pusher: PusherConfig | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class PusherDriveConfig:
     travel: float
     stiffness: float
     damping: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class PusherConfig:
     enabled: bool
     pad: CylinderPart
     drive: PusherDriveConfig
 
 
-@dataclass
+@dataclass(frozen=True)
 class BuilderConfig:
     output_dir: str
     airframe: AirframeConfig

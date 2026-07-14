@@ -69,8 +69,8 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
    seams in step 4 with copied or ownership-frozen arrays.
 5. `environment/stage.py`: resolved in step 5 with a per-spawn seeded RNG from
    experiment configuration.
-6. Value-object dataclasses that are incidentally mutable (`drone/_airframe.py`,
-   scenario `_FlightSample`) (step 6).
+6. Incidentally mutable value-object dataclasses: resolved in step 6 by
+   declaring the airframe graph and scenario flight samples frozen.
 7. `px4_bridge/mavlink.py`: a large body of project-owned lockstep protocol
    state inside the adapter -- allowed by the current convention, listed as a
    deferred decision (step 7).
@@ -216,31 +216,25 @@ Risk: low. Behavior change is the (desired) determinism; docs
 
 ## Step 6: Freeze incidentally-mutable value-object dataclasses
 
+- [x] Complete
+
 Goal: value objects that are never mutated are declared immutable, so the
 default in the codebase is `frozen=True` and mutability is a visible,
 deliberate exception.
 
-Where:
+Current behavior:
 
-- `src/robotics_experiments/drone/_airframe.py`: `BoxPart`, `CylinderPart`,
-  `BoomPart`, `ArmGeometry`, `ArmPlacement`, `AirframeConfig`,
-  `PusherDriveConfig`, `PusherConfig`, `BuilderConfig` -- all plain
-  `@dataclass`. `_replace_pos` already uses `dataclasses.replace`, which works
-  on frozen dataclasses, and no in-place field assignment exists in the
-  module.
-- `isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`: `_FlightSample`.
-
-Changes: add `frozen=True` to each; fix any construction path that turns out
-to assign post-init (none expected).
-
-Tests: existing `tests/src/robotics_experiments/drone/test_airframe.py`,
-`tests/isaac/runtime/standalone/test_standalone_px4_scripts.py`, and
-`tests/isaac/runtime/standalone/test_usd_builder_config.py` cover the touched
-code; no new tests needed.
-
-Done when: `grep -n "@dataclass$" src/robotics_experiments isaac/runtime -r`
-(excluding pegasus) returns only classes with a stated reason to stay mutable;
-pre-commit clean.
+- The complete USD-builder value graph (`BoxPart`, `CylinderPart`, `BoomPart`,
+  `ArmGeometry`, `ArmPlacement`, `AirframeConfig`, `PusherDriveConfig`,
+  `PusherConfig`, and `BuilderConfig`) is declared with
+  `@dataclass(frozen=True)`. Derived placement updates continue to use
+  `dataclasses.replace` rather than field assignment.
+- Standalone PX4 scenario `_FlightSample` snapshots are frozen after sampling.
+- The remaining plain dataclasses under the project package are Hydra schema
+  inputs. They deliberately remain mutable during composition and are
+  deep-frozen at the public config boundary, as described in the assessment.
+- Existing airframe calculation, standalone import, and USD-builder config
+  tests cover all construction and replacement paths.
 
 Risk: minimal.
 
