@@ -226,6 +226,14 @@ def test_bridge_tilt_cutoff_zeros_forces():
     assert len(io.applied_forces) == 1
     # Forces zeroed is the observable gating effect of the tilt cutoff firing.
     assert np.allclose(io.applied_forces[0], [0.0, 0.0, 0.0, 0.0])
+    cutoff_dynamics = io.applied_dynamics[0]
+    for array in (
+        cutoff_dynamics.forces_n,
+        cutoff_dynamics.body_torque_n_m,
+        cutoff_dynamics.body_drag_n,
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            array.flat[0] = 1.0
 
 
 def test_bridge_tilt_cutoff_sustained_preserves_lockstep():

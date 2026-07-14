@@ -65,8 +65,8 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
    state and a thin event-wiring shell.
 3. `commanding/port.py`: resolved in step 3 by folding feedback through an
    immutable `CommandPortStatus` snapshot.
-4. Writable `np.ndarray` payloads inside frozen dataclasses -- aliasable
-   mutable state behind a frozen facade (step 4).
+4. Writable `np.ndarray` payloads: resolved at the production construction
+   seams in step 4 with copied or ownership-frozen arrays.
 5. `environment/stage.py`: hidden module-global RNG, so spawns are impure and
    unreproducible (step 5).
 6. Value-object dataclasses that are incidentally mutable (`drone/_airframe.py`,
@@ -164,52 +164,29 @@ changes.
 
 ## Step 4: Make numpy payloads in frozen dataclasses read-only
 
-Goal: frozen dataclasses are actually immutable. Today `frozen=True` values
-carry writable, aliasable `np.ndarray` fields, so "immutable" state can be
-mutated through a leaked reference -- the one hole in the paradigm's
-foundation. `thrust_model.py` already solved this locally with
-`_readonly_array` (copy + `setflags(write=False)`).
+- [x] Complete
 
-Where to apply (producer seams, not every consumer):
+Goal: production frozen-state construction seams expose immutable NumPy
+payloads instead of writable arrays behind a frozen facade.
 
-- `px4_bridge/vehicle_state.py` `VehicleState`: freeze arrays in
-  `IsaacArticulationIO.read_state` (`isaac_articulation.py`) and in
-  `VehicleState.hover_at`.
-- `px4_bridge/contract.py` `ActuatorCommands`: freeze in
-  `Px4MavlinkPort._references` / `_zeros` (`mavlink.py`).
-- `px4_bridge/thrust_model.py` `RotorDynamics`: freeze the arrays built in
-  `commands_to_dynamics` (both implementations) and the zero-dynamics built in
-  `bridge.py` `recv_and_apply`'s cutoff branch.
-- `commanding/_routine_model.py` `RoutineState.baseline_position_enu`: freeze
-  at capture in `_routine_stepper.decide` (the `np.asarray(...)` on step
-  entry).
-- `rl/press/actuation.py` `MixerGeometry` / `ActuationParams`: freeze in
-  `build_actuation_params` (and wherever `MixerGeometry` is constructed).
+Current behavior:
 
-Mechanics:
-
-- Generalize the existing `_readonly_array` idea: a tiny private helper per
-  owning module, or promote the thrust-model helper to a shared private
-  function inside `px4_bridge` (no new public API; keep `__all__` unchanged).
-- Copy only when the source array aliases external memory (e.g. Isaac handle
-  outputs); `read_state` already builds fresh arrays, so `setflags` alone is
-  enough there -- keep per-tick allocations flat (this is the 250 Hz path; see
-  the hot-path note in `AGENTS.md`'s functional-style balance).
-- Watch the one known writer risk: `_pegasus_sensors._to_pegasus_state` does
-  `np.asarray(state.position_enu)` (no copy) and hands arrays to vendored
-  Pegasus sensor code. Run the bridge sensor tests first; if Pegasus mutates
-  its `State` fields, copy at that boundary (in `_to_pegasus_state`, not by
-  unfreezing `VehicleState`).
-
-Tests: add a small assertion per touched constructor test (e.g. in
-`test_thrust_model.py`, `test_px4_bridge_sensors.py`,
-`test_commanding_routine.py`, `test_press_actuation.py`) that writing to a
-field raises `ValueError` (`array is read-only`). Full existing suites must
-stay green -- they are the detector for any hidden in-place writer.
-
-Done when: every `np.ndarray` field on a `frozen=True` dataclass in
-`commanding`, `px4_bridge`, and `rl/press` is non-writable at construction;
-integration smoke (`make test-integration`) passes.
+- `VehicleState.hover_at` owns and freezes its vectors. `IsaacArticulationIO`
+  copies arrays returned by the external simulator adapter, converts angular
+  velocity, and marks the complete sampled state read-only before publication.
+- `Px4MavlinkPort` copies backend actuator references and freezes them; its zero
+  command output is frozen in place. Both thrust-model implementations freeze
+  their owned `RotorDynamics` arrays, and the tilt-cutoff path does the same for
+  its replacement zero dynamics without extra copies.
+- The routine stepper copies and freezes the active-step baseline when it is
+  captured, so later observation aliases cannot change progress state.
+- `build_actuation_params` copies every caller-owned mixer array into a frozen
+  `MixerGeometry`, precomputes a read-only allocation pseudoinverse, and freezes
+  all controller gain arrays.
+- Focused tests attempt writes at every producer seam and receive `ValueError`;
+  they also verify that mutating the caller's mixer geometry cannot affect the
+  built parameter graph. Existing bridge sensor tests confirm that the Pegasus
+  boundary consumes the read-only state without an in-place writer.
 
 Risk: medium-low. The failure mode is loud (`ValueError` on write), which is
 exactly the point; any that fire reveal real aliasing bugs.

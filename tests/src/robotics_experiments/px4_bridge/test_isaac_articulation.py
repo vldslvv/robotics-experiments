@@ -102,6 +102,14 @@ def test_read_state_rotates_world_angular_velocity_into_body_frame():
     state = io.read_state(sim_time_us=1_000)
 
     np.testing.assert_allclose(state.angular_velocity_flu, [0.0, -1.0, 0.0], atol=1e-12)
+    for array in (
+        state.position_enu,
+        state.orientation_flu_enu_wxyz,
+        state.linear_velocity_enu,
+        state.angular_velocity_flu,
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            array.flat[0] = 1.0
 
 
 def test_read_state_samples_body_pose_when_root_pose_differs():

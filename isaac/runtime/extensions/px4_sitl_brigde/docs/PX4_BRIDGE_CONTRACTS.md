@@ -278,6 +278,14 @@ probe used to avoid constructing that snapshot every physics tick, and
 `IsaacArticulationIO.is_initialized()` returns the lifecycle flag needed by the
 bridge.
 
+The production seams also make NumPy payloads genuinely immutable:
+`IsaacArticulationIO` copies simulator-owned samples and marks every
+`VehicleState` vector read-only, the MAVLink port copies actuator references
+before exposing read-only `ActuatorCommands`, and thrust/bridge producers mark
+all `RotorDynamics` arrays read-only. This prevents aliases from mutating a
+frozen snapshot after construction without adding allocations to arrays already
+owned by the thrust and cutoff paths.
+
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)
 # Per-tick data flow: VehicleState -> ActuatorCommands -> RotorDynamics

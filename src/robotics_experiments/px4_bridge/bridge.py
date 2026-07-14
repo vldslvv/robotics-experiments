@@ -168,11 +168,16 @@ def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
     state.articulation_io.update_rotor_spin(dynamics.rotor_omega_rad_s, pending.dt)
     consumed = replace(state, pending=None)
     if pending.force_cutoff:
+        zero_forces = np.zeros(state.thrust_model.num_rotors, dtype=np.float64)
+        zero_torque = np.zeros(3, dtype=np.float64)
+        zero_drag = np.zeros(3, dtype=np.float64)
+        for array in (zero_forces, zero_torque, zero_drag):
+            array.setflags(write=False)
         state.articulation_io.apply_dynamics(
             RotorDynamics(
-                forces_n=np.zeros(state.thrust_model.num_rotors, dtype=np.float64),
-                body_torque_n_m=np.zeros(3, dtype=np.float64),
-                body_drag_n=np.zeros(3, dtype=np.float64),
+                forces_n=zero_forces,
+                body_torque_n_m=zero_torque,
+                body_drag_n=zero_drag,
                 rotor_omega_rad_s=dynamics.rotor_omega_rad_s,
             )
         )

@@ -66,7 +66,12 @@ def decide(
     step = steps[state.cursor]
 
     if not state.sent:
-        baseline = np.asarray(observation.vehicle_state.position_enu, dtype=np.float64)
+        baseline = np.array(
+            observation.vehicle_state.position_enu,
+            dtype=np.float64,
+            copy=True,
+        )
+        baseline.setflags(write=False)
         new_state = replace(
             state,
             sent=True,

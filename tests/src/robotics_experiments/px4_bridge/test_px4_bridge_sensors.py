@@ -363,3 +363,16 @@ def test_mavlink_port_can_disable_gps(monkeypatch):
     assert [args[0] for args in backend._connection.hil_sensor_sends] == [100_000]
     assert backend.gps_times == []
     assert backend.gps_updates == []
+
+
+def test_hover_state_arrays_are_read_only():
+    state = VehicleState.hover_at()
+
+    for array in (
+        state.position_enu,
+        state.orientation_flu_enu_wxyz,
+        state.linear_velocity_enu,
+        state.angular_velocity_flu,
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            array.flat[0] = 1.0

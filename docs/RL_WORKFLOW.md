@@ -55,6 +55,9 @@ test oracle) and the Lab package exposes the env diagnostic entry point as
 `robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega`; both mirror
 the PX4 bridge's `PegasusQuadraticThrustModel` allocation so an action
 reproduces the commanded wrench.
+The NumPy reference builder copies the caller's mixer geometry and marks every
+geometry, gain, and derived-allocation array read-only, so its frozen parameter
+graph cannot be mutated through an external alias.
 
 Shared RL training scale and the RL action level live in the Hydra `rl` group
 with matching bare annotations in `src/robotics_experiments/config/_rl.py`.

@@ -54,6 +54,14 @@ def test_pegasus_quadratic_model_reports_clipped_omega():
     expected_omega = np.clip(commands, 0.0, 1100.0)
     np.testing.assert_allclose(dynamics.rotor_omega_rad_s, expected_omega)
     np.testing.assert_allclose(dynamics.forces_n, 8.54858e-6 * np.square(expected_omega))
+    for array in (
+        dynamics.forces_n,
+        dynamics.body_torque_n_m,
+        dynamics.body_drag_n,
+        dynamics.rotor_omega_rad_s,
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            array.flat[0] = 1.0
 
 
 def test_pegasus_quadratic_model_drag_opposes_body_velocity():

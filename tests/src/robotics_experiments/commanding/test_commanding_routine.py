@@ -85,6 +85,8 @@ def test_decide_runs_arm_takeoff_to_done():
     assert state.sent is True
     assert state.step_started_us == 0
     assert state.baseline_position_enu is not None
+    with pytest.raises(ValueError, match="read-only"):
+        state.baseline_position_enu[0] = 1.0
 
     # Tick 2: arm sent, no ack -> WAIT.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=10_000))

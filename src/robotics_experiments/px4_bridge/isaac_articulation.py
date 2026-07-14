@@ -279,6 +279,14 @@ class IsaacArticulationIO:
             angular_velocity_enu,
         )
 
+        for array in (
+            position_enu,
+            orientation_wxyz,
+            linear_velocity_enu,
+            angular_velocity_flu,
+        ):
+            array.setflags(write=False)
+
         return VehicleState(
             position_enu=position_enu,
             orientation_flu_enu_wxyz=orientation_wxyz,
@@ -314,7 +322,10 @@ class IsaacArticulationIO:
         if is_batched:
             pos = self._first_body_row(pos)
             quat_wxyz = self._first_body_row(quat_wxyz)
-        return np.asarray(pos, dtype=np.float64), np.asarray(quat_wxyz, dtype=np.float64)
+        return (
+            np.array(pos, dtype=np.float64, copy=True),
+            np.array(quat_wxyz, dtype=np.float64, copy=True),
+        )
 
     def _sample_body_linear_velocity(self) -> np.ndarray:
         method, is_batched = self._require_body_method(
@@ -324,7 +335,7 @@ class IsaacArticulationIO:
         velocity = method()
         if is_batched:
             velocity = self._first_body_row(velocity)
-        return np.asarray(velocity, dtype=np.float64)
+        return np.array(velocity, dtype=np.float64, copy=True)
 
     def _sample_body_angular_velocity(self) -> np.ndarray:
         method, is_batched = self._require_body_method(
@@ -334,7 +345,7 @@ class IsaacArticulationIO:
         velocity = method()
         if is_batched:
             velocity = self._first_body_row(velocity)
-        return np.asarray(velocity, dtype=np.float64)
+        return np.array(velocity, dtype=np.float64, copy=True)
 
     @staticmethod
     def _rotor_forces_to_world(

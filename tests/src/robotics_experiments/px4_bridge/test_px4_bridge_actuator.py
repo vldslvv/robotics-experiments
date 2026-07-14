@@ -1,6 +1,7 @@
 import types
 
 import numpy as np
+import pytest
 
 from robotics_experiments.px4_bridge import (
     LockstepSettings,
@@ -44,6 +45,8 @@ def test_mavlink_port_drains_actuator_backlog_to_newest(monkeypatch):
     # public commands plus status are the observable, and the recv history (a
     # documented seam) confirms one blocking poll then non-blocking drains.
     assert np.allclose(commands, [300.0, 400.0, 500.0, 600.0])
+    with pytest.raises(ValueError, match="read-only"):
+        commands[0] = 0.0
     assert port.read_status().actuator_receive_count == 2
     assert port.read_status().last_actuator_receive_us == 112_000
     assert len(connection.recv_calls) == 3

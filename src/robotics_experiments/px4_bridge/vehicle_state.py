@@ -14,6 +14,11 @@ import numpy as np
 __all__ = ["VehicleState"]
 
 
+def _readonly(array: np.ndarray) -> np.ndarray:
+    array.setflags(write=False)
+    return array
+
+
 @dataclass(frozen=True)
 class VehicleState:
     """Frozen snapshot of the drone's state at a single physics tick.
@@ -47,9 +52,9 @@ class VehicleState:
         without an actual physics simulation.
         """
         return VehicleState(
-            position_enu=np.asarray(position_enu, dtype=np.float64),
-            orientation_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64),
-            linear_velocity_enu=np.zeros(3, dtype=np.float64),
-            angular_velocity_flu=np.zeros(3, dtype=np.float64),
+            position_enu=_readonly(np.array(position_enu, dtype=np.float64, copy=True)),
+            orientation_flu_enu_wxyz=_readonly(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)),
+            linear_velocity_enu=_readonly(np.zeros(3, dtype=np.float64)),
+            angular_velocity_flu=_readonly(np.zeros(3, dtype=np.float64)),
             sim_time_us=int(sim_time_us),
         )

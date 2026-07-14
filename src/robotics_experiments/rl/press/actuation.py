@@ -46,6 +46,12 @@ __all__ = [
 _EPS = 1e-9
 
 
+def _readonly_copy(values: np.ndarray) -> np.ndarray:
+    array = np.array(values, dtype=np.float64, copy=True)
+    array.setflags(write=False)
+    return array
+
+
 @dataclass(frozen=True)
 class MixerGeometry:
     """Airframe control-allocation geometry in PX4 motor-index order (body-FLU).
@@ -307,19 +313,29 @@ def build_actuation_params(
         raise ValueError(
             f"unsupported rl.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
         )
+    frozen_geometry = MixerGeometry(
+        positions_body=_readonly_copy(geometry.positions_body),
+        rot_dir=_readonly_copy(geometry.rot_dir),
+        rotor_constant=_readonly_copy(geometry.rotor_constant),
+        rolling_moment_coefficient=_readonly_copy(geometry.rolling_moment_coefficient),
+        min_rotor_velocity=_readonly_copy(geometry.min_rotor_velocity),
+        max_rotor_velocity=_readonly_copy(geometry.max_rotor_velocity),
+    )
+    allocation_pinv = np.linalg.pinv(_allocation_matrix(frozen_geometry))
+    allocation_pinv.setflags(write=False)
     return ActuationParams(
         kind=kind,
         action_dim=4,
         mass=float(mass),
-        geometry=geometry,
-        allocation_pinv=np.linalg.pinv(_allocation_matrix(geometry)),
-        max_total_thrust=_max_total_thrust(geometry),
-        kp_rate=np.asarray(action_cfg.controller_kp_rate, dtype=np.float64),
+        geometry=frozen_geometry,
+        allocation_pinv=allocation_pinv,
+        max_total_thrust=_max_total_thrust(frozen_geometry),
+        kp_rate=_readonly_copy(action_cfg.controller_kp_rate),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
         hover_thrust_fraction=float(action_cfg.hover_thrust_fraction),
-        kp_vel=np.asarray(action_cfg.controller_kp_vel, dtype=np.float64),
-        kd_vel=np.asarray(action_cfg.controller_kd_vel, dtype=np.float64),
-        kp_att=np.asarray(action_cfg.controller_kp_att, dtype=np.float64),
+        kp_vel=_readonly_copy(action_cfg.controller_kp_vel),
+        kd_vel=_readonly_copy(action_cfg.controller_kd_vel),
+        kp_att=_readonly_copy(action_cfg.controller_kp_att),
         max_body_velocity_mps=float(action_cfg.max_body_velocity_mps),
         max_yaw_rate_radps=float(action_cfg.max_yaw_rate_radps),
         max_tilt_rad=float(np.radians(float(action_cfg.max_tilt_cmd_deg))),

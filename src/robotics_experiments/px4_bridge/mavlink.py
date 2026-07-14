@@ -409,10 +409,14 @@ class Px4MavlinkPort:
     # ---- Internals ---------------------------------------------------------
 
     def _references(self) -> ActuatorCommands:
-        return ActuatorCommands(np.asarray(self._backend.input_reference(), dtype=np.float64))
+        controls = np.array(self._backend.input_reference(), dtype=np.float64, copy=True)
+        controls.setflags(write=False)
+        return ActuatorCommands(controls)
 
     def _zeros(self) -> ActuatorCommands:
-        return ActuatorCommands(np.zeros(self.num_rotors, dtype=np.float64))
+        controls = np.zeros(self.num_rotors, dtype=np.float64)
+        controls.setflags(write=False)
+        return ActuatorCommands(controls)
 
     def _heartbeat_phase(self, now: float) -> bool:
         """Send the paced heartbeat and gate on PX4's first heartbeat.

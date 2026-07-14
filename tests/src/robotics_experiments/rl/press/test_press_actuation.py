@@ -154,3 +154,27 @@ def test_velocity_left_command_tilts_toward_plus_y():
 def test_build_actuation_params_rejects_unimplemented_kind():
     with pytest.raises(ValueError, match="attitude"):
         build_actuation_params(_quad_geometry(), _action_cfg("attitude"), _MASS_KG)
+
+
+def test_built_actuation_parameter_arrays_are_read_only_and_non_aliased():
+    geometry = _quad_geometry()
+    params = build_actuation_params(geometry, _action_cfg("velocity"), _MASS_KG)
+    arrays = (
+        params.geometry.positions_body,
+        params.geometry.rot_dir,
+        params.geometry.rotor_constant,
+        params.geometry.rolling_moment_coefficient,
+        params.geometry.min_rotor_velocity,
+        params.geometry.max_rotor_velocity,
+        params.allocation_pinv,
+        params.kp_rate,
+        params.kp_vel,
+        params.kd_vel,
+        params.kp_att,
+    )
+
+    geometry.positions_body[0, 0] = 99.0
+    assert params.geometry.positions_body[0, 0] != 99.0
+    for array in arrays:
+        with pytest.raises(ValueError, match="read-only"):
+            array.flat[0] = 1.0
