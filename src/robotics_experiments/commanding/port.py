@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from robotics_experiments.commanding.commands import (
@@ -79,6 +79,54 @@ _ARM_ACCEPTED_STATUSTEXT = "Armed by external command"
 _FAILSAFE_SYSTEM_STATUS = frozenset({5, 6, 8})
 
 
+def _global_position(msg: Any) -> Optional[tuple[float, float, float]]:
+    lat_e7 = getattr(msg, "lat", None)
+    lon_e7 = getattr(msg, "lon", None)
+    alt_mm = getattr(msg, "alt", None)
+    if lat_e7 is None or lon_e7 is None or alt_mm is None:
+        return None
+    position = (
+        float(lat_e7) / 10_000_000.0,
+        float(lon_e7) / 10_000_000.0,
+        float(alt_mm) / 1000.0,
+    )
+    if not all(math.isfinite(value) for value in position):
+        return None
+    if abs(position[0]) < 1e-7 and abs(position[1]) < 1e-7:
+        return None
+    return position
+
+
+def _fold_feedback(
+    state: CommandPortStatus, msg: Any
+) -> tuple[CommandPortStatus, Optional[CommandAck]]:
+    """Purely fold one MAVLink feedback message into an immutable snapshot."""
+    msg_type = msg.get_type()
+    if msg_type == "HEARTBEAT":
+        system_status = int(getattr(msg, "system_status", 0))
+        return (
+            replace(
+                state,
+                is_handshaked=True,
+                failsafe=system_status in _FAILSAFE_SYSTEM_STATUS,
+                failsafe_system_status=system_status,
+            ),
+            None,
+        )
+    if msg_type == "COMMAND_ACK":
+        return state, CommandAck.from_result(int(msg.command), int(msg.result))
+    if msg_type == "STATUSTEXT":
+        text = str(getattr(msg, "text", ""))
+        if _ARM_ACCEPTED_STATUSTEXT in text:
+            return state, CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, MAV_RESULT_ACCEPTED)
+        return state, None
+    if msg_type in {"GLOBAL_POSITION_INT", "GPS_RAW_INT"}:
+        position = _global_position(msg)
+        if position is not None:
+            return replace(state, latest_global_position=position), None
+    return state, None
+
+
 class MavlinkCommandPort:
     """PX4 command port over a GCS MAVLink (UDP) endpoint.
 
@@ -116,10 +164,12 @@ class MavlinkCommandPort:
         # access of the function-scoped pymavlink object.
         self._mav: Any = connection
         self._last_heartbeat_sent_s = 0.0
-        self._target_known = False
-        self._failsafe = False
-        self._failsafe_system_status = 0
-        self._latest_global_position: Optional[tuple[float, float, float]] = None
+        self._feedback = CommandPortStatus(
+            is_handshaked=False,
+            failsafe=False,
+            failsafe_system_status=0,
+            latest_global_position=None,
+        )
 
     def connect(self) -> None:
         if self._mav is None:
@@ -139,12 +189,7 @@ class MavlinkCommandPort:
 
     def read_status(self) -> CommandPortStatus:
         """Return an immutable snapshot of the current control-link state."""
-        return CommandPortStatus(
-            is_handshaked=self._target_known,
-            failsafe=self._failsafe,
-            failsafe_system_status=self._failsafe_system_status,
-            latest_global_position=self._latest_global_position,
-        )
+        return self._feedback
 
     def pump_heartbeat(self, *, force: bool = False) -> None:
         from pymavlink import mavutil
@@ -163,7 +208,7 @@ class MavlinkCommandPort:
 
     def _require_target(self, action: str) -> None:
         """Guard: every send needs the PX4 target learned from a heartbeat first."""
-        if not self._target_known:
+        if not self._feedback.is_handshaked:
             raise RuntimeError(
                 f"[{self._label}] cannot {action}: GCS link has not "
                 "learned the PX4 target system yet (no heartbeat handshake)"
@@ -247,51 +292,16 @@ class MavlinkCommandPort:
             msg = self._mav.recv_match(blocking=False)
             if msg is None:
                 return latest_ack
-            ack = self._handle_message(msg)
-            if ack is not None:
-                latest_ack = ack
-
-    def _handle_message(self, msg: Any) -> Optional[CommandAck]:
-        msg_type = msg.get_type()
-        if msg_type == "HEARTBEAT":
-            if not self._target_known:
+            previous = self._feedback
+            self._feedback, ack = _fold_feedback(self._feedback, msg)
+            if not previous.is_handshaked and self._feedback.is_handshaked:
                 self._mav.target_system = msg.get_srcSystem()
                 self._mav.target_component = msg.get_srcComponent()
-                self._target_known = True
                 _LOGGER.info(
                     "[%s] GCS learned target system=%s component=%s",
                     self._label,
                     msg.get_srcSystem(),
                     msg.get_srcComponent(),
                 )
-            self._failsafe_system_status = int(getattr(msg, "system_status", 0))
-            self._failsafe = self._failsafe_system_status in _FAILSAFE_SYSTEM_STATUS
-            return None
-        if msg_type == "COMMAND_ACK":
-            return CommandAck.from_result(int(msg.command), int(msg.result))
-        if msg_type == "STATUSTEXT":
-            text = str(getattr(msg, "text", ""))
-            _LOGGER.info("[%s] PX4 STATUSTEXT: %s", self._label, text)
-            if _ARM_ACCEPTED_STATUSTEXT in text:
-                return CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, MAV_RESULT_ACCEPTED)
-            return None
-        if msg_type in {"GLOBAL_POSITION_INT", "GPS_RAW_INT"}:
-            self._update_global_position(msg)
-            return None
-        return None
-
-    def _update_global_position(self, msg: Any) -> None:
-        lat_e7 = getattr(msg, "lat", None)
-        lon_e7 = getattr(msg, "lon", None)
-        alt_mm = getattr(msg, "alt", None)
-        if lat_e7 is None or lon_e7 is None or alt_mm is None:
-            return
-        latitude_deg = float(lat_e7) / 10_000_000.0
-        longitude_deg = float(lon_e7) / 10_000_000.0
-        altitude_m = float(alt_mm) / 1000.0
-        if not all(math.isfinite(v) for v in (latitude_deg, longitude_deg, altitude_m)):
-            return
-        if abs(latitude_deg) < 1e-7 and abs(longitude_deg) < 1e-7:
-            # PX4 publishes (0, 0) before it has a fix; ignore until valid.
-            return
-        self._latest_global_position = (latitude_deg, longitude_deg, altitude_m)
+            if ack is not None:
+                latest_ack = ack

@@ -15,9 +15,11 @@ import pytest
 
 from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    CommandPortStatus,
     MavlinkCommandPort,
     PositionSetpoint,
 )
+from robotics_experiments.commanding.port import _fold_feedback
 
 _MAV_FRAME_GLOBAL_INT = 5
 _POSITION_TARGET_TYPEMASK_POS_YAW = 0b1001_1111_1000
@@ -76,6 +78,58 @@ def _port_with(messages):
         heartbeat_period_s=1.0,
         connection=_FakeConn(messages),
     )
+
+
+def _feedback_state():
+    return CommandPortStatus(
+        is_handshaked=False,
+        failsafe=False,
+        failsafe_system_status=0,
+        latest_global_position=None,
+    )
+
+
+def test_feedback_fold_is_pure_across_handshake_and_failsafe_transitions():
+    initial = _feedback_state()
+
+    active, ack = _fold_feedback(initial, _msg("HEARTBEAT", system_status=4))
+    critical, ack = _fold_feedback(active, _msg("HEARTBEAT", system_status=5))
+    recovered, ack = _fold_feedback(critical, _msg("HEARTBEAT", system_status=3))
+
+    assert initial == _feedback_state()
+    assert active.is_handshaked and not active.failsafe
+    assert critical.failsafe and critical.failsafe_system_status == 5
+    assert not recovered.failsafe and recovered.failsafe_system_status == 3
+    assert ack is None
+
+
+def test_feedback_fold_returns_command_and_arm_statustext_acks():
+    state = _feedback_state()
+
+    unchanged, rejected = _fold_feedback(
+        state,
+        _msg("COMMAND_ACK", command=MAV_CMD_COMPONENT_ARM_DISARM, result=1),
+    )
+    unchanged_again, accepted = _fold_feedback(
+        state, _msg("STATUSTEXT", text="WARN Armed by external command")
+    )
+
+    assert unchanged is state and unchanged_again is state
+    assert rejected is not None and not rejected.accepted
+    assert accepted is not None and accepted.accepted
+
+
+def test_feedback_fold_ignores_zero_gps_and_accepts_valid_position():
+    state = _feedback_state()
+
+    unchanged, _ = _fold_feedback(state, _msg("GPS_RAW_INT", lat=0, lon=0, alt=0))
+    positioned, _ = _fold_feedback(
+        unchanged,
+        _msg("GLOBAL_POSITION_INT", lat=473977000, lon=85456000, alt=488000),
+    )
+
+    assert unchanged is state
+    assert positioned.latest_global_position == pytest.approx((47.3977, 8.5456, 488.0))
 
 
 def _handshaked_port():

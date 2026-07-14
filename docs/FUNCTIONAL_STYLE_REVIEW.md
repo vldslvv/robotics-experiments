@@ -63,8 +63,8 @@ impurity leaks inside otherwise-frozen values. In rough order of value:
    latch transitions.
 2. `lightswitch_spawner` extension: resolved in step 2 with a frozen runtime
    state and a thin event-wiring shell.
-3. `commanding/port.py`: pure feedback-parsing logic buried inside the mutable
-   adapter (step 3).
+3. `commanding/port.py`: resolved in step 3 by folding feedback through an
+   immutable `CommandPortStatus` snapshot.
 4. Writable `np.ndarray` payloads inside frozen dataclasses -- aliasable
    mutable state behind a frozen facade (step 4).
 5. `environment/stage.py`: hidden module-global RNG, so spawns are impure and
@@ -138,41 +138,26 @@ there is no integration test for switches.
 
 ## Step 3: Extract the pure feedback fold from `MavlinkCommandPort`
 
+- [x] Complete
+
 Goal: the GCS message-interpretation logic (handshake, failsafe detection, arm
 statustext, global-position tracking) becomes a pure function over a frozen
 state, leaving `MavlinkCommandPort` as transport only.
 
-Problem today (`src/robotics_experiments/commanding/port.py`):
-`_handle_message` / `_update_global_position` interleave protocol decisions
-with mutation of `_target_known`, `_failsafe`, `_failsafe_system_status`,
-`_latest_global_position`. The decisions are project-owned logic, testable
-without any socket, but currently reachable only through the adapter.
+Current behavior:
 
-Changes:
-
-- Introduce a frozen `_FeedbackState` (fields: `target_known`, `failsafe`,
-  `failsafe_system_status`, `latest_global_position`; consider reusing
-  `CommandPortStatus` directly since the fields coincide -- prefer reuse over a
-  parallel model).
-- Add a pure module-level function
-  `_fold_feedback(state, msg) -> tuple[_FeedbackState, Optional[CommandAck]]`
-  containing the current `_handle_message` + `_update_global_position` logic
-  (constants `_ARM_ACCEPTED_STATUSTEXT`, `_FAILSAFE_SYSTEM_STATUS` feed it
-  unchanged). Learning `target_system`/`target_component` on the connection
-  object stays in the adapter: the fold returns the decision (e.g. the state
-  flip), the adapter applies the connection side effect when `target_known`
-  transitions.
-- `poll_feedback` drains messages and rebinds one `self._feedback` value;
-  `read_status()` builds its snapshot from it.
-
-Tests: `tests/src/robotics_experiments/commanding/test_commanding_port.py`
-already exercises parsing via the injected `connection=` double -- keep those;
-add direct `_fold_feedback` cases (heartbeat handshake, failsafe enter/leave,
-temporarily-rejected ack, statustext arm, (0,0) GPS ignore).
-
-Done when: `MavlinkCommandPort` methods other than `_fold_feedback` contain no
-message-type branching; port tests and driver tests
-(`test_commanding_driver.py`) pass unchanged in behavior.
+- `CommandPortStatus` serves as both the adapter's immutable feedback state and
+  its public read snapshot, avoiding a duplicate private model.
+- `_fold_feedback(state, msg)` is a pure transition containing all message-type
+  branching for heartbeat handshake and failsafe state, command acknowledgments,
+  arm acceptance statustext, and valid global-position tracking.
+- `poll_feedback` drains transport messages and rebinds `self._feedback`. When
+  the fold first changes `is_handshaked` to true, the adapter applies the source
+  system/component to the live MAVLink connection; no other protocol decisions
+  remain in the mutable adapter.
+- Direct fold tests cover handshake, failsafe entry and recovery, rejected and
+  statustext acknowledgments, zero-fix rejection, and valid GPS capture. Existing
+  port and driver tests continue to exercise the transport-facing behavior.
 
 Risk: low. Pure refactor with existing coverage; no timing or socket behavior
 changes.

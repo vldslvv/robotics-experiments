@@ -131,9 +131,13 @@ holds immutable parameters and resource adapters, while one frozen
   `pymavlink` import is function-scoped. The port
   absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
   send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
-  `HEARTBEAT` / `STATUSTEXT` / position telemetry). Its `read_status()` method
-  returns the immutable `CommandPortStatus` snapshot containing `is_handshaked`,
-  `failsafe`, `failsafe_system_status`, and `latest_global_position`. The
+  `HEARTBEAT` / `STATUSTEXT` / position telemetry). Feedback interpretation is
+  a pure `_fold_feedback(status, msg)` transition over immutable
+  `CommandPortStatus`; the adapter drain only rebinds that snapshot and applies
+  the learned target system/component to the live connection on the first
+  heartbeat. Its `read_status()` method returns the immutable snapshot containing
+  `is_handshaked`, `failsafe`, `failsafe_system_status`, and
+  `latest_global_position`. The
   velocity / attitude-rate senders are the **deploy-time seam for the F1 RL
   action levels**: `send_velocity_setpoint` serializes a `VelocitySetpoint` to
   `SET_POSITION_TARGET_LOCAL_NED` (body velocity, `MAV_FRAME_BODY_NED`) for the
