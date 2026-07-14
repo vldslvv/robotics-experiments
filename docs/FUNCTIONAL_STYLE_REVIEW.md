@@ -1,0 +1,364 @@
+# Functional style review and improvement plan
+
+Assessment of how well the codebase follows its functional paradigm (frozen
+dataclasses for project-owned evolving state, stateless transition functions,
+mutable classes only as external resource adapters read through immutable
+snapshots), followed by improvement steps. Each numbered step is a
+self-contained plan that can be picked up independently and in any order,
+except where a step notes otherwise.
+
+Out of scope, by design:
+
+- The vendored Pegasus tree
+  (`isaac/runtime/extensions/px4_sitl_brigde/pegasus/`): an unpinned upstream
+  snapshot with stateful sensor models; not project style.
+- Isaac/Kit/PhysX/ROS adapter classes themselves (`IsaacArticulationIO`,
+  `BridgeHost`/`BridgeHostGroup`, `LightSwitchNode`, Isaac Lab envs): mutation
+  there is the documented adapter allowance, and Isaac Lab's batched
+  tensor-in-place style is a deliberate hot-path exception.
+
+## Assessment
+
+The paradigm is followed strongly on the main runtime path, and the two entry
+points are model citizens:
+
+- `src/robotics_experiments/runtime/orchestrator.py`: frozen `FleetState` /
+  `SpawnedDrone` / `FlyingDrone`, every phase a `f(state=...) -> FleetState`
+  transition; the live extension
+  (`isaac/runtime/extensions/experiment_runtime/.../extension.py`) and the
+  standalone scenario (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`)
+  are thin imperative shells that only rebind `self._fleet` / `fleet` at event
+  boundaries.
+- `src/robotics_experiments/commanding/`: `decide` in `_routine_stepper.py` is
+  a genuinely pure kernel `(routine, state, observation) -> (state, decision)`;
+  `RoutineDecision` reifies the side effect as data and `_apply_decision` in
+  `driver.py` is the single interpreter. `driver.py` threads frozen
+  `RoutineDriverState` through stateless transitions, with even the wall clock
+  injected (`DriverContext.monotonic`). Predicates and invariants
+  (`_routine_predicates.py`) and the handoff gate (`rl/press/handoff.py`) are
+  pure closures over frozen threshold dataclasses.
+- `src/robotics_experiments/px4_bridge/`: frozen `Px4BridgeState` and
+  `SimClockState` with stateless transitions (`send_sensors`, `recv_and_apply`,
+  `advance_sim_clock`); `frames.py` is pure math; `thrust_model.py` even makes
+  its coefficient arrays read-only (`_readonly_array`). Effects are confined to
+  the two adapter seams (`Px4MavlinkPort`, `_ArticulationIO`) and read back via
+  immutable `BridgeStatus` snapshots, with `is_connected()` as the documented
+  narrow hot-path probe.
+- `src/robotics_experiments/runtime/bridge_host.py`: even where PhysX forces a
+  mutable holder (callbacks ignore return values), the state is a frozen
+  `_BridgeHostState` replaced by module-level transitions; the class is a
+  minimal cell.
+- `src/robotics_experiments/rl/press/actuation.py`: frozen params + pure
+  `f(params, inputs) -> outputs` pipeline, explicitly kept as the numpy oracle
+  for the torch twin.
+- `src/robotics_experiments/config/`: the whole resolved config graph is
+  deep-frozen after loading (`_immutability.py`), so the paradigm's inputs are
+  actually immutable, not just conventionally so.
+
+The gaps cluster in the areas the convention does not yet name (the
+`environment` package and the older `lightswitch_spawner` extension) plus a few
+impurity leaks inside otherwise-frozen values. In rough order of value:
+
+1. `environment/switches.py`: mutable `SwitchState` mutated in place -- the
+   exact pattern the rest of the project replaced (step 1).
+2. `lightswitch_spawner` extension: imperative boolean-flag machine owning
+   composition, predating the `experiment_runtime` pattern (step 2).
+3. `commanding/port.py`: pure feedback-parsing logic buried inside the mutable
+   adapter (step 3).
+4. Writable `np.ndarray` payloads inside frozen dataclasses -- aliasable
+   mutable state behind a frozen facade (step 4).
+5. `environment/stage.py`: hidden module-global RNG, so spawns are impure and
+   unreproducible (step 5).
+6. Value-object dataclasses that are incidentally mutable (`drone/_airframe.py`,
+   scenario `_FlightSample`) (step 6).
+7. `px4_bridge/mavlink.py`: a large body of project-owned lockstep protocol
+   state inside the adapter -- allowed by the current convention, listed as a
+   deferred decision (step 7).
+
+## Step 1: Freeze `SwitchState` and make the button latch a pure transition
+
+Goal: `environment` follows the same frozen-state + transition-function rule
+as `runtime` / `commanding` / `px4_bridge`, and the articulation resource stops
+living inside project-owned progress state.
+
+Problem today (`src/robotics_experiments/environment/switches.py`):
+`SwitchState` is a non-frozen dataclass mixing identity (`prim_path`,
+`lamp_prim_path`), a live PhysX resource (`articulation`), and progress
+(`state`, `press_steps`, `toggle_latched`); `apply_button_sample` mutates it in
+place; `init_articulations` and `step_switches`
+(`src/robotics_experiments/environment/step.py`) mutate entries in place.
+
+Changes:
+
+- `switches.py`:
+  - Make `SwitchState` frozen and drop the `articulation` field. Keep
+    `prim_path`, `lamp_prim_path`, `state`, `press_steps`, `toggle_latched`.
+  - Rewrite `apply_button_sample` as a pure transition
+    `apply_button_sample(switch, *, button_position, press_threshold,
+    confirm_steps) -> tuple[SwitchState, bool]` returning the successor state
+    and the toggled flag (same latch semantics, `dataclasses.replace` instead
+    of assignment).
+- `step.py` (Isaac-only leaf):
+  - `init_articulations(switch_state) -> list | None`-style signature becomes
+    `init_articulations(prim_paths) -> list[SingleArticulation] | None`
+    (return the handles or `None` on failure) so the resource lives with the
+    caller, not inside the frozen state.
+  - `step_switches(...)` takes the switch tuple plus the parallel articulation
+    list, calls the pure transition, applies `_set_lamp` / `on_toggle` for
+    toggles, and returns the successor `tuple[SwitchState, ...]`.
+- `stage.py`: `spawn_switches` returns `tuple[SwitchState, ...]` (frozen
+  entries); `despawn_switches` is unchanged apart from the tuple type.
+- `isaac/runtime/extensions/lightswitch_spawner/LightSwitch_python/extension.py`:
+  rebind `self._switch_state` from the return values; hold
+  `self._articulations` separately (or fold this into step 2 if done
+  together).
+- Update `environment/__init__.py` exports only if signatures force it; do not
+  widen the public API.
+
+Tests: rewrite
+`tests/src/robotics_experiments/environment/test_environment_switches.py` to
+thread returned states (assert input state is unchanged after a call);
+`tests/isaac/runtime/extensions/lightswitch_spawner/test_lightswitch_spawner_extension.py`
+adjusts to the new return-value flow. `tests/src/robotics_experiments/test_core_imports.py`
+keeps guarding that `switches.py` stays import-clean.
+
+Done when: no function in `environment/` assigns to a `SwitchState` field;
+`SwitchState` is `frozen=True`; all listed tests pass;
+`uv run pre-commit run --all-files` is clean.
+
+Risk: low. The latch logic is small and fully covered by unit tests.
+
+## Step 2: Rebuild `lightswitch_spawner` on the `experiment_runtime` pattern
+
+Goal: the second live extension follows the same shape as the first -- a thin
+Kit shell rebinding one frozen state through host-agnostic transitions --
+instead of an imperative flag machine (`_switches_spawned`,
+`_articulations_ready`, `_simulation_running`) with feature logic inline.
+
+Depends on: step 1 is a natural prerequisite (do it first or fold it in);
+everything else here is independent.
+
+Changes:
+
+- Add a frozen `SwitchesRuntimeState` (config, stage, `switch_state` tuple,
+  articulation handles or an adapter holding them, `phase`/flags) plus
+  transition functions `spawn`, `arm_articulations`, `step`, `teardown`.
+  Placement: the Isaac-coupled parts belong in the existing Isaac-only leaves
+  (`environment/step.py`, `environment/stage.py`); the composition transitions
+  can live in a new private module under `src/robotics_experiments/environment/`
+  behind the existing lazy package `__init__` (mirroring how
+  `runtime/orchestrator.py` sits above `bridge_host.py`). Do not put them in
+  the extension.
+- Move the pure QoS helpers (`_normalize_qos_name`, `_resolve_qos_policy`,
+  `_build_qos_profile`) out of the extension into a small module next to the
+  ROS node wiring (they are already pure; the extension should be wiring only).
+- The extension keeps: event subscriptions, `self._state` rebinding, the
+  `LightSwitchNode` ROS adapter lifecycle, and `rclpy.spin_once` pumping.
+  `_on_update` becomes `self._state = step(state=self._state, on_toggle=...)`.
+- Keep the forgiving semantics: articulation init retried per tick until it
+  succeeds, validation failure keeps the runtime idle.
+
+Tests: rework
+`tests/isaac/runtime/extensions/lightswitch_spawner/test_lightswitch_spawner_extension.py`
+to drive the transitions directly (the same style as
+`tests/isaac/runtime/extensions/experiment_runtime/test_experiment_runtime_extension.py`
+and `tests/src/robotics_experiments/runtime/test_fleet_orchestrator.py`).
+
+Done when: the extension class contains no domain logic or boolean phase
+flags beyond subscription handles and the single state rebinding; transitions
+are unit-testable without Kit; docs touched if behavior wording changes
+(`AGENTS.md` extension-design section already prescribes this pattern, so no
+doc change expected).
+
+Risk: medium. This is a restructuring of a working extension; verify manually
+with `make run-isaac` (switch spawn on Play, lamp toggle, ROS message) since
+there is no integration test for switches.
+
+## Step 3: Extract the pure feedback fold from `MavlinkCommandPort`
+
+Goal: the GCS message-interpretation logic (handshake, failsafe detection, arm
+statustext, global-position tracking) becomes a pure function over a frozen
+state, leaving `MavlinkCommandPort` as transport only.
+
+Problem today (`src/robotics_experiments/commanding/port.py`):
+`_handle_message` / `_update_global_position` interleave protocol decisions
+with mutation of `_target_known`, `_failsafe`, `_failsafe_system_status`,
+`_latest_global_position`. The decisions are project-owned logic, testable
+without any socket, but currently reachable only through the adapter.
+
+Changes:
+
+- Introduce a frozen `_FeedbackState` (fields: `target_known`, `failsafe`,
+  `failsafe_system_status`, `latest_global_position`; consider reusing
+  `CommandPortStatus` directly since the fields coincide -- prefer reuse over a
+  parallel model).
+- Add a pure module-level function
+  `_fold_feedback(state, msg) -> tuple[_FeedbackState, Optional[CommandAck]]`
+  containing the current `_handle_message` + `_update_global_position` logic
+  (constants `_ARM_ACCEPTED_STATUSTEXT`, `_FAILSAFE_SYSTEM_STATUS` feed it
+  unchanged). Learning `target_system`/`target_component` on the connection
+  object stays in the adapter: the fold returns the decision (e.g. the state
+  flip), the adapter applies the connection side effect when `target_known`
+  transitions.
+- `poll_feedback` drains messages and rebinds one `self._feedback` value;
+  `read_status()` builds its snapshot from it.
+
+Tests: `tests/src/robotics_experiments/commanding/test_commanding_port.py`
+already exercises parsing via the injected `connection=` double -- keep those;
+add direct `_fold_feedback` cases (heartbeat handshake, failsafe enter/leave,
+temporarily-rejected ack, statustext arm, (0,0) GPS ignore).
+
+Done when: `MavlinkCommandPort` methods other than `_fold_feedback` contain no
+message-type branching; port tests and driver tests
+(`test_commanding_driver.py`) pass unchanged in behavior.
+
+Risk: low. Pure refactor with existing coverage; no timing or socket behavior
+changes.
+
+## Step 4: Make numpy payloads in frozen dataclasses read-only
+
+Goal: frozen dataclasses are actually immutable. Today `frozen=True` values
+carry writable, aliasable `np.ndarray` fields, so "immutable" state can be
+mutated through a leaked reference -- the one hole in the paradigm's
+foundation. `thrust_model.py` already solved this locally with
+`_readonly_array` (copy + `setflags(write=False)`).
+
+Where to apply (producer seams, not every consumer):
+
+- `px4_bridge/vehicle_state.py` `VehicleState`: freeze arrays in
+  `IsaacArticulationIO.read_state` (`isaac_articulation.py`) and in
+  `VehicleState.hover_at`.
+- `px4_bridge/contract.py` `ActuatorCommands`: freeze in
+  `Px4MavlinkPort._references` / `_zeros` (`mavlink.py`).
+- `px4_bridge/thrust_model.py` `RotorDynamics`: freeze the arrays built in
+  `commands_to_dynamics` (both implementations) and the zero-dynamics built in
+  `bridge.py` `recv_and_apply`'s cutoff branch.
+- `commanding/_routine_model.py` `RoutineState.baseline_position_enu`: freeze
+  at capture in `_routine_stepper.decide` (the `np.asarray(...)` on step
+  entry).
+- `rl/press/actuation.py` `MixerGeometry` / `ActuationParams`: freeze in
+  `build_actuation_params` (and wherever `MixerGeometry` is constructed).
+
+Mechanics:
+
+- Generalize the existing `_readonly_array` idea: a tiny private helper per
+  owning module, or promote the thrust-model helper to a shared private
+  function inside `px4_bridge` (no new public API; keep `__all__` unchanged).
+- Copy only when the source array aliases external memory (e.g. Isaac handle
+  outputs); `read_state` already builds fresh arrays, so `setflags` alone is
+  enough there -- keep per-tick allocations flat (this is the 250 Hz path; see
+  the hot-path note in `AGENTS.md`'s functional-style balance).
+- Watch the one known writer risk: `_pegasus_sensors._to_pegasus_state` does
+  `np.asarray(state.position_enu)` (no copy) and hands arrays to vendored
+  Pegasus sensor code. Run the bridge sensor tests first; if Pegasus mutates
+  its `State` fields, copy at that boundary (in `_to_pegasus_state`, not by
+  unfreezing `VehicleState`).
+
+Tests: add a small assertion per touched constructor test (e.g. in
+`test_thrust_model.py`, `test_px4_bridge_sensors.py`,
+`test_commanding_routine.py`, `test_press_actuation.py`) that writing to a
+field raises `ValueError` (`array is read-only`). Full existing suites must
+stay green -- they are the detector for any hidden in-place writer.
+
+Done when: every `np.ndarray` field on a `frozen=True` dataclass in
+`commanding`, `px4_bridge`, and `rl/press` is non-writable at construction;
+integration smoke (`make test-integration`) passes.
+
+Risk: medium-low. The failure mode is loud (`ValueError` on write), which is
+exactly the point; any that fire reveal real aliasing bugs.
+
+## Step 5: Replace the hidden global RNG in switch spawning with an injected seeded RNG
+
+Goal: `spawn_switches` becomes a deterministic function of its inputs --
+referential transparency and reproducible experiment layouts.
+
+Problem today (`src/robotics_experiments/environment/stage.py`):
+`_sample_positions` uses module-global `random.choice` / `random.uniform`, and
+`_spawn_lamps` draws lamp heights the same way. Layouts differ every run and
+cannot be reproduced from config.
+
+Changes:
+
+- Config: add `spawn_seed: int` as a bare-annotation field to
+  `LightSwitchConfig` in the owning module under
+  `src/robotics_experiments/config/` and set the project value in the Hydra
+  `configs/` YAML (tunables live in YAML; raise on invalid config as usual).
+- `stage.py`: `spawn_switches` builds `rng = random.Random(config.spawn_seed)`
+  and threads it into `_sample_positions` and `_spawn_lamps` (parameter, not a
+  global). No other call-site changes: both helpers are private to the module.
+
+Tests: extend
+`tests/src/robotics_experiments/environment/test_environment_switches.py` (or
+the config tests if stage.py stays untestable off-Isaac -- `stage.py` imports
+`pxr`, so put the determinism test wherever the existing spawner extension
+test stubs Isaac): same seed -> identical positions; different seed ->
+different positions. `tests/src/robotics_experiments/config/test_config.py`
+gains the new field.
+
+Done when: `grep -rn "random\." src/robotics_experiments/environment/` shows
+only the injected `Random` usage; two runs with the same config produce the
+same prim positions.
+
+Risk: low. Behavior change is the (desired) determinism; docs
+(`docs/EXPERIMENT_CONFIG.md`) mention the new key.
+
+## Step 6: Freeze incidentally-mutable value-object dataclasses
+
+Goal: value objects that are never mutated are declared immutable, so the
+default in the codebase is `frozen=True` and mutability is a visible,
+deliberate exception.
+
+Where:
+
+- `src/robotics_experiments/drone/_airframe.py`: `BoxPart`, `CylinderPart`,
+  `BoomPart`, `ArmGeometry`, `ArmPlacement`, `AirframeConfig`,
+  `PusherDriveConfig`, `PusherConfig`, `BuilderConfig` -- all plain
+  `@dataclass`. `_replace_pos` already uses `dataclasses.replace`, which works
+  on frozen dataclasses, and no in-place field assignment exists in the
+  module.
+- `isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`: `_FlightSample`.
+
+Changes: add `frozen=True` to each; fix any construction path that turns out
+to assign post-init (none expected).
+
+Tests: existing `tests/src/robotics_experiments/drone/test_airframe.py`,
+`tests/isaac/runtime/standalone/test_standalone_px4_scripts.py`, and
+`tests/isaac/runtime/standalone/test_usd_builder_config.py` cover the touched
+code; no new tests needed.
+
+Done when: `grep -n "@dataclass$" src/robotics_experiments isaac/runtime -r`
+(excluding pegasus) returns only classes with a stated reason to stay mutable;
+pre-commit clean.
+
+Risk: minimal.
+
+## Step 7 (deferred decision): lockstep progress state inside `Px4MavlinkPort`
+
+`px4_bridge/mavlink.py` keeps ~15 mutable fields of project-owned lockstep
+protocol progress (send/receive counters, last-timestamp bookkeeping,
+heartbeat pacing, prime-then-block bootstrap, freshness tripwire, disconnect
+reason) inside the MAVLink adapter. This is permitted by the current
+convention ("mutable classes are limited to external resource adapters"), and
+`read_status()` already exposes it immutably -- but by weight it is the largest
+block of non-functional project logic left, and the phase logic
+(`_heartbeat_phase`, `_sensor_phase`, `_needs_to_block_for_actuator`,
+`_actuator_is_fresh`) is pure decision-making testable without a socket.
+
+Options:
+
+- A (status quo, recommended until a concrete need appears): keep the port as
+  the documented adapter exception. It is well covered
+  (`test_px4_bridge_lockstep.py`, `_actuator.py`, `_gating.py`, `_sensors.py`
+  drive it through fakes), and the bridge contract doc treats its sequencing
+  as load-bearing. Cost of change > benefit today.
+- B (full extraction): frozen `LockstepProgress` + pure transitions returning
+  `(actions, next_state)` interpreted against the Pegasus backend, mirroring
+  the `bridge_host.py` pattern. Prerequisites if attempted: read
+  `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md`
+  first; preserve exact sequencing (prime-then-block, drain-newest, cadence
+  guard); benchmark per-tick allocation on the 250 Hz path before and after;
+  land behind the full px4 integration suite
+  (`make test-integration-all`).
+
+Decision needed only if the port grows new protocol behavior or its tests
+become the bottleneck; do not do this as opportunistic cleanup.
