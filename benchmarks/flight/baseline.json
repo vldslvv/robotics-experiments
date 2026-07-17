@@ -1,0 +1,122 @@
+{
+  "accepted_at": "2026-07-17T15:26:36.946701+00:00",
+  "accepted_from": "flight.20260717T152225Z.28286",
+  "contracts": {
+    "physics_only": {
+      "methodology_version": 1,
+      "physics_hz": 250.0,
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_physics_ticks": 5000,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "px4_flight": {
+      "methodology_version": 1,
+      "physics_hz": 250.0,
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_physics_ticks": null,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    }
+  },
+  "environment": {
+    "isaac_image": "vv-isaac-sim-custom:5.1.0",
+    "isaac_image_id": "sha256:d582a53ad6f501438b109b376016adf74450129c699f09d62614f6daeb8732ad",
+    "isaac_versions": [
+      "5.1.0.rc.19.5"
+    ],
+    "px4_ref": "1dacb4cdef2d7145754fc788fa8dc482eed74b40"
+  },
+  "hardware": {
+    "cpu_governor": "powersave",
+    "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor",
+    "gpu_count": 1,
+    "gpu_models": [
+      "NVIDIA GeForce RTX 4090"
+    ],
+    "logical_cpus": 32
+  },
+  "metrics": {
+    "physics_only": {
+      "app_update_p50_ms": 16.729275,
+      "app_update_p95_ms": 16.8592973,
+      "app_update_p99_ms": 16.92866278,
+      "physics_p50_ms": 1.9922599792480469,
+      "physics_p95_ms": 2.5190240383148192,
+      "physics_p99_ms": 4.982774667739871,
+      "real_time_factor": 0.9960411745754666,
+      "sim_elapsed_s": 20.000000949949026,
+      "simulation_app_start_s": 8.03,
+      "step_interval_p50_ms": 0.461859,
+      "step_interval_p95_ms": 15.560689,
+      "step_interval_p99_ms": 15.808773619999998,
+      "wall_elapsed_s": 20.079492154
+    },
+    "px4_flight": {
+      "app_update_p50_ms": 17.168281999999998,
+      "app_update_p95_ms": 17.537188800000003,
+      "app_update_p99_ms": 17.84573726,
+      "physics_p50_ms": 9.156874656677246,
+      "physics_p95_ms": 11.736516427993777,
+      "physics_p99_ms": 12.899516248703002,
+      "real_time_factor": 0.9665541086320107,
+      "sim_elapsed_s": 11.984000569209456,
+      "simulation_app_start_s": 8.058,
+      "step_interval_p50_ms": 2.401581,
+      "step_interval_p95_ms": 10.5617685,
+      "step_interval_p99_ms": 11.05989884,
+      "wall_elapsed_s": 12.398685663
+    }
+  },
+  "repetitions": 3,
+  "schema_version": 1,
+  "tolerances": {
+    "physics_only": {
+      "physics_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "physics_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      },
+      "step_interval_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "step_interval_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      }
+    },
+    "px4_flight": {
+      "real_time_factor": {
+        "absolute_min": 0.95,
+        "direction": "min",
+        "relative_percent": 5.0
+      },
+      "step_interval_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "step_interval_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      }
+    }
+  }
+}

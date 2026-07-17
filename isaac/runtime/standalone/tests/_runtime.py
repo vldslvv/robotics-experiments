@@ -81,6 +81,7 @@ class SceneTestContext:
     scene_path: Path | None = None
     scene_override: str | None = None
     strict: bool = False
+    benchmark_output_dir: Path | None = None
 
     def report_vehicle_state(self, label: str, state_or_sample: Any) -> None:
         """Emit a standardized drone state vector log line."""
@@ -190,6 +191,11 @@ def _parse_scene_args(description: str, default_scene: str | None) -> argparse.N
             "extension."
         ),
     )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Capture performance metrics under the integration run artifact directory.",
+    )
     return parser.parse_args()
 
 
@@ -231,6 +237,13 @@ def run_scene_test(
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
     strict = bool(args.strict)
+    benchmark_output_dir = None
+    if args.benchmark:
+        try:
+            timing_log = Path(os.environ["HOST_TIMING_LOG"])
+        except KeyError as exc:
+            raise RuntimeError("--benchmark requires HOST_TIMING_LOG") from exc
+        benchmark_output_dir = timing_log.parent / "benchmark"
     scene_override: str | None = None
     scene_path: Path | None = None
     if manage_stage:
@@ -288,6 +301,7 @@ def run_scene_test(
                 report=report,
                 config=config,
                 strict=strict,
+                benchmark_output_dir=benchmark_output_dir,
             )
         )
         timing.report_stage("test_body", stage_start_s)

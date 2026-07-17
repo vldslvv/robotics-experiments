@@ -63,6 +63,7 @@ mkdir_colon_dirs() {
 }
 
 for name in \
+    HOST_PROJECT_DIR \
     INTEGRATION_ROOT \
     ISAAC_DOCKER_ENV \
     ISAAC_DOCKER_VOLUMES \
@@ -88,7 +89,16 @@ SCRIPT_START_MS="$(now_ms)"
 run_root="$(make_run_root)"
 ISAAC_RUN_ROOT="${run_root}/isaac"
 HOST_TIMING_LOG="${run_root}/integration-timing.log"
-CONTAINER_TIMING_LOG="${ISAAC_PROJECT_DIR}/.build/docker/integration/$(basename "${run_root}")/integration-timing.log"
+case "${run_root}" in
+    "${HOST_PROJECT_DIR}"/*)
+        container_run_root="${ISAAC_PROJECT_DIR}/${run_root#"${HOST_PROJECT_DIR}"/}"
+        ;;
+    *)
+        echo "Integration root must be inside the project: ${run_root}" >&2
+        exit 2
+        ;;
+esac
+CONTAINER_TIMING_LOG="${container_run_root}/integration-timing.log"
 
 mkdir -p "${ISAAC_RUN_ROOT}/logs" "${ISAAC_RUN_ROOT}/data" "${ISAAC_RUN_ROOT}/documents"
 mkdir_colon_dirs "${ISAAC_HOST_CACHE_DIRS}"
@@ -105,6 +115,7 @@ if docker run --rm \
     ${ISAAC_DOCKER_RUNTIME} \
     ${ISAAC_DOCKER_ENV} \
     -e "HOST_TIMING_LOG=${CONTAINER_TIMING_LOG}" \
+    -e "ISAAC_BENCHMARK_IMAGE=${ISAAC_IMAGE}" \
     -e "ISAAC_PYTHON=${ISAAC_PYTHON}" \
     -e "ISAAC_TEST_ERROR_FILTER=${ISAAC_TEST_ERROR_FILTER}" \
     -e "ISAAC_TEST_FAILURE_FILTER=${ISAAC_TEST_FAILURE_FILTER}" \

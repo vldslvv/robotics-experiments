@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
+from _benchmark import StandaloneBenchmarkCapture
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
 
 from robotics_experiments.commanding import FailureKind, MavlinkCommandPort
@@ -242,6 +243,8 @@ def _build_make_env(
     strict: bool,
     post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None,
     first_label: str,
+    benchmark: StandaloneBenchmarkCapture | None,
+    /,
 ) -> Callable[[SpawnedDrone, MavlinkCommandPort], FleetDriverEnv]:
     """Build the per-drone ``make_env`` closure with the strict/forgiving reaction.
 
@@ -270,6 +273,8 @@ def _build_make_env(
             )
 
         def on_step_advanced(step_label: str) -> None:
+            if benchmark is not None and is_first and step_label == "arm":
+                benchmark.start()
             if post_takeoff_hook is not None and is_first and step_label == "takeoff":
                 post_takeoff_hook(context, spawned.host)
 
@@ -339,6 +344,15 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
     timing = TimingReporter(options.test_name, emit=context.report)
 
     env = context.config
+    benchmark = (
+        StandaloneBenchmarkCapture(
+            context=context,
+            workload="px4_flight",
+            target_physics_ticks=None,
+        )
+        if context.benchmark_output_dir is not None
+        else None
+    )
     active_routines = [
         vehicle.routine for vehicle in env.vehicles.values() if vehicle.routine.steps
     ]
@@ -420,15 +434,22 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
 
         make_env = _build_make_env(
             context,
-            strict=strict,
-            post_takeoff_hook=options.post_takeoff_hook,
-            first_label=fleet.drones[0].label,
+            strict,
+            options.post_takeoff_hook,
+            fleet.drones[0].label,
+            benchmark,
         )
         with timing.timed_stage("build_drivers", sim_time_us=sim_time_us):
             fleet = build_drivers(state=fleet, make_env=make_env)
 
-        with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
-            fleet = _drive_to_done(context, fleet)
+        try:
+            with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
+                fleet = _drive_to_done(context, fleet)
+        finally:
+            if benchmark is not None and benchmark.started:
+                benchmark.stop()
+        if benchmark is not None and not benchmark.started:
+            raise AssertionError("PX4 flight benchmark never completed its arm step")
 
         bridge_logs = [(h.label, _bridge_debug_log_path(h.host)) for h in _bridged(fleet)]
     finally:

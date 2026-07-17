@@ -52,6 +52,10 @@ PX4-backed scenario tests should be run from their host Make targets so Docker
 lifecycle, mounted EEPROM state, and persisted `px4/logs` diagnostics stay
 owned by the repository workflow. For example, use
 `make test-integration-px4-takeoff` for the arm/takeoff stability scenario.
+The upgrade-performance workflow adds `--benchmark` through the same harness;
+use `make benchmark-flight` rather than passing that internal flag manually so
+cache warm-up, repetitions, comparison, and artifacts remain consistent. See
+`docs/FLIGHT_BENCHMARK.md`.
 Use `make test-integration-px4-takeoff-instability` for the opt-in negative
 scenario that intentionally faults a rotor after takeoff and passes only when the
 routine's hover-step envelope catches the resulting instability. The positive

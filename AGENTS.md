@@ -37,6 +37,9 @@ Read area docs on demand when a task touches that area:
 - Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
   target mechanics, harness scripts, caching, artifacts, concurrency, and
   multi-instance PX4.
+- Flight performance benchmark: `docs/FLIGHT_BENCHMARK.md` for the Isaac
+  physics/PX4 lockstep upgrade gate, comparable-hardware contract, artifacts,
+  and baseline acceptance.
 - PX4 bridge contract:
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` for
   bridge interfaces, frame conventions, motor ordering, lockstep, and actuator
@@ -84,6 +87,8 @@ the current contents and the intended home for that kind of code.
 - `px4/eeprom/` -> PX4 SITL simulated EEPROM mount; cleared by the default PX4
   launch wrapper.
 - `docs/` -> Design and usage docs.
+- `benchmarks/` -> Committed benchmark summaries and comparison policy; raw
+  benchmark artifacts stay under `.build/benchmarks/`.
 
 ## Python API organization
 - Public top-level functions, classes, and intentional constants in Python

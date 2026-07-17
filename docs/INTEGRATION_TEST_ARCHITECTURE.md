@@ -125,6 +125,13 @@ vector formatter and include full ENU position and linear velocity
 (`pos_enu_m=(x=..., y=..., z=...)`, `vel_enu_m_s=(x=..., y=..., z=...)`) for
 flight-performance triage.
 
+The integration runners also accept `ISAAC_TEST_EXTRA_ARGS` for an owning
+workflow to pass standalone-script flags. The flight performance workflow uses
+`--benchmark` to add measurements to the existing articulation and PX4 takeoff
+scenarios; ordinary integration targets do not capture benchmark samples. Its
+methodology, gate, and baseline workflow are documented in
+`docs/FLIGHT_BENCHMARK.md`.
+
 ## Scene selection
 
 Integration tests default to the minimal

@@ -16,6 +16,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from _benchmark import StandaloneBenchmarkCapture, advance_physics_ticks
 from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.px4_bridge import (
@@ -34,6 +35,8 @@ DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "drone_articulation_io"
 PHYSICS_DT_S = 0.004
 SETTLE_UPDATES = 8
+_BENCHMARK_WARMUP_TICKS = 500
+_BENCHMARK_MEASURE_TICKS = 5_000
 
 
 def _assert_finite_array(value: Any, shape: tuple[int, ...], label: str) -> None:
@@ -141,6 +144,26 @@ def _run_test(context: SceneTestContext) -> None:
         )
         context.report_vehicle_state(f"{TEST_NAME}: post-force drone state", state_after_force)
         _assert_vehicle_state(state_after_force, sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000))
+
+        if context.benchmark_output_dir is not None:
+            context.report(f"{TEST_NAME}: warming physics for {_BENCHMARK_WARMUP_TICKS} ticks")
+            advance_physics_ticks(
+                simulation_app=context.simulation_app,
+                minimum_ticks=_BENCHMARK_WARMUP_TICKS,
+            )
+            benchmark = StandaloneBenchmarkCapture(
+                context=context,
+                workload="physics_only",
+                target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
+            )
+            context.report(f"{TEST_NAME}: measuring {_BENCHMARK_MEASURE_TICKS} physics ticks")
+            benchmark.start()
+            try:
+                while benchmark.physics_step_count < _BENCHMARK_MEASURE_TICKS:
+                    context.simulation_app.update()
+            finally:
+                benchmark.stop()
+            context.report(f"{TEST_NAME}: captured {benchmark.physics_step_count} physics ticks")
     finally:
         context.report(f"{TEST_NAME}: stopping timeline and despawning drone")
         timeline.stop()
