@@ -26,7 +26,7 @@ ros_DOCKER_ARGS = \
 
 .PHONY: generate-drone-usd
 generate-drone-usd:
-	@uv run --extra simulation python isaac/runtime/standalone/build_copter_usd_standalone.py --all
+	@uv run --isolated --group usd-build python isaac/runtime/standalone/build_copter_usd_standalone.py --all
 
 .PHONY: run-isaac
 run-isaac: generate-drone-usd $(isaac_RUN_DEPS)

@@ -242,12 +242,12 @@ CMD ["tmux", "new-session", "-A", "-s", "ros"]
 # superset of the isaac-sim stage rather than a separate image. Only the Phase F
 # RL/DirectRLEnv workflow needs it (the test-integration-press-hover-goto gate and
 # future F2/F3 training); the other integration targets stay on the leaner
-# isaac-sim image. ISAACLAB_REF is pinned for reproducibility -- v2.3.2 is the
-# Isaac Lab release built on Isaac Sim 5.1 (and it ships multirotor support).
+# isaac-sim image. ISAACLAB_REF is pinned for reproducibility --
+# v3.0.0-beta2.patch1 is the Isaac Lab release supporting Isaac Sim 6.0.1.
 # Override with --build-arg ISAACLAB_REF=... when moving Isaac Sim versions.
 FROM isaac-sim AS isaac-lab
 
-ARG ISAACLAB_REF=37ddf626871758333d6ed89cf64ad702aef127d0
+ARG ISAACLAB_REF=ffff603eafc6b74264a5261cc0183d6a65390d78
 # Build prerequisites: cmake/build-essential for the source packages / RL
 # frameworks the full install resolves (some compile), and ncurses-term for the
 # full terminfo DB. isaaclab.sh starts with `tabs 4`, which resolves the
@@ -257,7 +257,7 @@ ARG ISAACLAB_REF=37ddf626871758333d6ed89cf64ad702aef127d0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake build-essential ncurses-term \
  && rm -rf /var/lib/apt/lists/*
-# Install only the project-used Isaac Lab base and rsl_rl adapter. The upstream
+# Install only the project-used Isaac Lab base, PhysX backend, and rsl_rl adapter. The upstream
 # `isaaclab.sh --install` default installs every RL framework and resolves broad
 # dependency ranges at build time. The pinned requirements file plus --no-deps
 # editable installs keep this image reproducible and omit unused frameworks and
@@ -267,14 +267,18 @@ RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
  && cd /isaac-lab \
  && git -c advice.detachedHead=false checkout "${ISAACLAB_REF}" \
  && ln -s /isaac-sim _isaac_sim \
+ && /isaac-sim/python.sh -c \
+      "import site; from pathlib import Path; root = Path('/isaac-sim'); torch_paths = list(root.glob('exts*/omni.isaac.ml_archive/pip_prebundle')); warp_paths = list(root.glob('extscache/omni.warp.core-*')); assert len(torch_paths) == 1, f'expected one Torch prebundle, found {torch_paths}'; assert len(warp_paths) == 1, f'expected one Warp extension, found {warp_paths}'; Path(site.getsitepackages()[0], 'isaacsim_lab_prebundles.pth').write_text(f'{torch_paths[0]}\\n{warp_paths[0]}\\n')" \
  && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-deps \
       --no-build-isolation \
       -r /tmp/isaac-lab-requirements.txt \
  && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-deps \
-      --no-build-isolation -e source/isaaclab -e source/isaaclab_rl \
+      --no-build-isolation \
+      -e source/isaaclab -e source/isaaclab_physx -e source/isaaclab_rl \
+ && /isaac-sim/python.sh -m pip uninstall --yes wheel \
  && rm /tmp/isaac-lab-requirements.txt \
  && /isaac-sim/python.sh -c \
-      "import flatdict, gymnasium, isaaclab, isaaclab_rl, rsl_rl; print('isaaclab OK:', isaaclab.__file__)"
+      "import flatdict, gymnasium, importlib.util, isaaclab, isaaclab_physx, isaaclab_rl, rsl_rl, torch, torchvision, warp; assert importlib.util.find_spec('wheel') is None; assert torch.__version__ == '2.11.0+cu128'; assert torchvision.__version__ == '0.26.0+cu128'; assert warp.__version__ == '1.13.0'; print('isaaclab OK:', isaaclab.__file__, 'torch:', torch.__version__, 'warp:', warp.__version__)"
 
 
 # PX4 SITL stands in for the flight controller on a real drone; kept in its own

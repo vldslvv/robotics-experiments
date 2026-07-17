@@ -9,7 +9,7 @@
 # runner on the Isaac Lab superset image; pass TRAIN_ARGS for overrides, e.g.
 #   make train-rl TRAIN_ARGS='--max-iterations 5'   (smoke run)
 TRAIN_RL_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/train_rl.py
-TRAIN_RL_LOG = /isaac-sim/.nvidia-omniverse/logs/train_rl.log
+TRAIN_RL_LOG = /root/.nvidia-omniverse/logs/train_rl.log
 TRAIN_ARGS ?=
 
 .PHONY: train-rl

@@ -284,7 +284,9 @@ The production seams also make NumPy payloads genuinely immutable:
 before exposing read-only `ActuatorCommands`, and thrust/bridge producers mark
 all `RotorDynamics` arrays read-only. This prevents aliases from mutating a
 frozen snapshot after construction without adding allocations to arrays already
-owned by the thrust and cutoff paths.
+owned by the thrust and cutoff paths. The Pegasus sensor adapter copies those
+read-only vectors once when constructing Pegasus' mutable `State`; this is the
+ownership boundary required by SciPy's writable-buffer kernels under NumPy 2.
 
 ```python
 # State objects (pure data; no Isaac / MAVLink / Pegasus deps)

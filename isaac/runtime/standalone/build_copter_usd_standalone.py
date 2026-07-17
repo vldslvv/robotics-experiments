@@ -1,7 +1,7 @@
 # build_copter_usd_standalone.py - Hydra-config-driven drone USD generator
 #
-# Run with standalone OpenUSD Python bindings:
-#   python isaac/runtime/standalone/build_copter_usd_standalone.py [config_name] [overrides...]
+# Run with the repository's isolated standalone OpenUSD environment:
+#   make generate-drone-usd
 #
 # Available configs: holybro_x500_v2 (default), hexacopter_s550
 #

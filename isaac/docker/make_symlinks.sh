@@ -11,8 +11,8 @@
 # Now, create a symlink for api, if doesn't exist already
 
 # TODO: create symlinks for /isaac-sim/kit/kernel/py/omni/ext/
-# and /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy/
-# Consider also /isaac-sim/exts/isaacsim.ros2.bridge/jazzy/rclpy/rclpy/
+# and /isaac-sim/exts/isaacsim.ros2.core/jazzy/rclpy/
+# Consider also /isaac-sim/exts/isaacsim.ros2.core/jazzy/rclpy/rclpy/
 
 set -euo pipefail
 

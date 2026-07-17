@@ -148,7 +148,14 @@ def _install_fake_isaac_modules(monkeypatch, *, min_z=-0.06, empty_bound=False):
             return 0
 
     class _RigidBodyAPI:
-        pass
+        def __init__(self, prim):
+            self.prim = prim
+
+        def CreateVelocityAttr(self):
+            return self.prim.GetAttribute("physics:velocity")
+
+        def CreateAngularVelocityAttr(self):
+            return self.prim.GetAttribute("physics:angularVelocity")
 
     def _prim_range(root):
         yield root
@@ -251,11 +258,17 @@ def _world_position(stage):
 
 
 def test_stationary_spawn_computes_z_from_composed_bounds(monkeypatch):
-    drone, stage, _carb, _references = _import_drone_package(monkeypatch, min_z=-0.06)
+    drone, stage, carb, _references = _import_drone_package(monkeypatch, min_z=-0.06)
 
     drone.spawn_drone(stage=stage, config=_config())
 
     assert _world_position(stage) == pytest.approx((1.0, 2.0, 0.07))
+    body = stage.GetPrimAtPath("/World/Drone/body")
+    assert body.GetAttribute("physics:velocity").value == (0.0, 0.0, 0.0)
+    assert body.GetAttribute("physics:angularVelocity").value == (0.0, 0.0, 0.0)
+    assert not any(
+        "Could not clear rigid body velocity" in message for _level, message in carb.logs
+    )
 
 
 def test_stationary_spawn_uses_fallback_when_bounds_are_invalid(monkeypatch):

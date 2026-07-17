@@ -25,10 +25,12 @@ def _pegasus_state_from_vehicle(state: VehicleState):
     from pegasus.simulator.logic.state import State
 
     pegasus_state = State()
-    pegasus_state.position = np.asarray(state.position_enu, dtype=np.float64)
+    pegasus_state.position = np.array(state.position_enu, dtype=np.float64, copy=True)
     pegasus_state.attitude = quat_wxyz_to_xyzw(state.orientation_flu_enu_wxyz)
-    pegasus_state.linear_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
-    pegasus_state.angular_velocity = np.asarray(state.angular_velocity_flu, dtype=np.float64)
+    pegasus_state.linear_velocity = np.array(state.linear_velocity_enu, dtype=np.float64, copy=True)
+    pegasus_state.angular_velocity = np.array(
+        state.angular_velocity_flu, dtype=np.float64, copy=True
+    )
     pegasus_state.linear_body_velocity = world_enu_to_body_flu(
         state.orientation_flu_enu_wxyz,
         state.linear_velocity_enu,

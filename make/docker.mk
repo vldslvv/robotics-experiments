@@ -18,28 +18,29 @@ ISAAC_DOCKER_ENV = \
 	-e OMNI_KIT_DISABLE_TELEMETRY=1 \
 	-e PYTHONPATH=$(ISAAC_PROJECT_DIR)/src \
 	-e ROBOTICS_EXPERIMENT_CONFIG_PATH=$(HYDRA_CONFIG_CONTAINER_PATH) \
-	-e isaac_sim_package_path=/isaac-sim
+	-e isaac_sim_package_path=/isaac-sim \
+	$(if $(WARN_ON_TORCH_QUATF_ACCESS),-e WARN_ON_TORCH_QUATF_ACCESS=$(WARN_ON_TORCH_QUATF_ACCESS),)
 
 ISAAC_DOCKER_VOLUMES = \
 	-v $(ISAAC_KIT_CACHE):/isaac-sim/kit/cache \
-	-v $(ISAAC_OV_CACHE):/isaac-sim/.cache/ov \
-	-v $(ISAAC_PIP_CACHE):/isaac-sim/.cache/pip \
-	-v $(ISAAC_GLCACHE):/isaac-sim/.cache/nvidia/GLCache \
-	-v $(ISAAC_COMPUTEC):/isaac-sim/.nv/ComputeCache \
-	-v $(ISAAC_LOGS):/isaac-sim/.nvidia-omniverse/logs \
-	-v $(ISAAC_DATA):/isaac-sim/.local/share/ov/data \
+	-v $(ISAAC_OV_CACHE):/root/.cache/ov \
+	-v $(ISAAC_PIP_CACHE):/root/.cache/pip \
+	-v $(ISAAC_GLCACHE):/root/.cache/nvidia/GLCache \
+	-v $(ISAAC_COMPUTEC):/root/.nv/ComputeCache \
+	-v $(ISAAC_LOGS):/root/.nvidia-omniverse/logs \
+	-v $(ISAAC_DATA):/root/.local/share/ov/data \
 	-v $(ISAAC_DOCS):/isaac-sim/Documents \
 	-v $(CURDIR):$(ISAAC_PROJECT_DIR) \
 	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
 
 ISAAC_INTEGRATION_DOCKER_VOLUMES = \
 	-v $(ISAAC_KIT_CACHE):/isaac-sim/kit/cache \
-	-v $(ISAAC_OV_CACHE):/isaac-sim/.cache/ov \
-	-v $(ISAAC_PIP_CACHE):/isaac-sim/.cache/pip \
-	-v $(ISAAC_GLCACHE):/isaac-sim/.cache/nvidia/GLCache \
-	-v $(ISAAC_COMPUTEC):/isaac-sim/.nv/ComputeCache \
-	-v $${ISAAC_RUN_ROOT}/logs:/isaac-sim/.nvidia-omniverse/logs \
-	-v $${ISAAC_RUN_ROOT}/data:/isaac-sim/.local/share/ov/data \
+	-v $(ISAAC_OV_CACHE):/root/.cache/ov \
+	-v $(ISAAC_PIP_CACHE):/root/.cache/pip \
+	-v $(ISAAC_GLCACHE):/root/.cache/nvidia/GLCache \
+	-v $(ISAAC_COMPUTEC):/root/.nv/ComputeCache \
+	-v $${ISAAC_RUN_ROOT}/logs:/root/.nvidia-omniverse/logs \
+	-v $${ISAAC_RUN_ROOT}/data:/root/.local/share/ov/data \
 	-v $${ISAAC_RUN_ROOT}/documents:/isaac-sim/Documents \
 	-v $(CURDIR):$(ISAAC_PROJECT_DIR) \
 	-v $(CURDIR)/$(ROS_CONFIG_DIR):/etc/ros:ro
@@ -51,7 +52,7 @@ ISAAC_INTERACTIVE_ENV = \
 	-e ROS_DOMAIN_ID=$(ROS_DOMAIN_ID) \
 	-e RMW_IMPLEMENTATION=$(RMW_IMPLEMENTATION) \
 	-e ROS_DISTRO=$(ROS_DISTRO) \
-	-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.bridge/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
+	-e LD_LIBRARY_PATH=/isaac-sim/exts/isaacsim.ros2.core/$(ROS_DISTRO)/lib:$$LD_LIBRARY_PATH \
 	-e FASTRTPS_DEFAULT_PROFILES_FILE=$(FASTRTPS_DEFAULT_PROFILES_FILE)
 
 ISAAC_INTERACTIVE_VOLUMES = \

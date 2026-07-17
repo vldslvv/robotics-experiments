@@ -11,6 +11,7 @@ re-implements.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -18,10 +19,17 @@ from typing import Any, Protocol
 __all__ = ["TrainingResult", "build_runner", "export_policy", "train"]
 
 
+class _RunnerLogger(Protocol):
+    """Logger state exposed by RSL-RL 5 runners."""
+
+    log_dir: str
+
+
 class _PolicyRunner(Protocol):
     """The runner surface the adapter contract relies on."""
 
-    alg: Any
+    export_policy_to_jit: Callable[[str, str], None]
+    logger: _RunnerLogger
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -41,19 +49,26 @@ def _train_cfg(training_cfg: Any) -> dict[str, Any]:
     return {
         # Single observation group: the env emits {"policy": tensor} and the
         # critic shares it (no privileged observations yet).
-        "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
+        "obs_groups": {"actor": ["policy"], "critic": ["policy"]},
         "num_steps_per_env": int(training_cfg.num_steps_per_env),
         "save_interval": int(training_cfg.save_interval),
-        "empirical_normalization": False,
-        "policy": {
-            "class_name": "ActorCritic",
-            "init_noise_std": float(training_cfg.init_noise_std),
-            "noise_std_type": "scalar",
-            "actor_obs_normalization": False,
-            "critic_obs_normalization": False,
-            "actor_hidden_dims": [int(d) for d in training_cfg.actor_hidden_dims],
-            "critic_hidden_dims": [int(d) for d in training_cfg.critic_hidden_dims],
+        "actor": {
+            "class_name": "MLPModel",
+            "hidden_dims": [int(d) for d in training_cfg.actor_hidden_dims],
             "activation": str(training_cfg.activation),
+            "obs_normalization": False,
+            "distribution_cfg": {
+                "class_name": "GaussianDistribution",
+                "init_std": float(training_cfg.init_noise_std),
+                "std_type": "scalar",
+            },
+        },
+        "critic": {
+            "class_name": "MLPModel",
+            "hidden_dims": [int(d) for d in training_cfg.critic_hidden_dims],
+            "activation": str(training_cfg.activation),
+            "obs_normalization": False,
+            "distribution_cfg": None,
         },
         "algorithm": {
             "class_name": "PPO",
@@ -85,15 +100,7 @@ def build_runner(env: Any, training_cfg: Any, *, log_dir: str, device: str) -> _
 def train(runner: _PolicyRunner, iterations: int) -> TrainingResult:
     """Run the training loop and return the run summary."""
     runner.learn(num_learning_iterations=int(iterations), init_at_random_ep_len=True)
-    return TrainingResult(iterations=int(iterations), log_dir=str(getattr(runner, "log_dir", "")))
-
-
-def _actor_module(runner: _PolicyRunner) -> Any:
-    # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
-    policy = getattr(runner.alg, "policy", None)
-    if policy is None:
-        policy = runner.alg.actor_critic
-    return policy.actor
+    return TrainingResult(iterations=int(iterations), log_dir=str(runner.logger.log_dir))
 
 
 def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, Any]) -> None:
@@ -103,16 +110,9 @@ def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, A
     ``[N, action_dim]`` action mean (deterministic inference); the metadata is
     the runtime policy-step loader validates at load time.
     """
-    import copy
-
-    import torch
-
     from robotics_experiments.rl.press import METADATA_FILENAME, POLICY_FILENAME
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    actor = copy.deepcopy(_actor_module(runner)).to("cpu").eval()
-    example = torch.zeros(1, int(metadata["obs_dim"]), dtype=torch.float32)
-    scripted = torch.jit.trace(actor, example)
-    scripted.save(str(out_dir / POLICY_FILENAME))
+    runner.export_policy_to_jit(str(out_dir), POLICY_FILENAME)
     (out_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2) + "\n")

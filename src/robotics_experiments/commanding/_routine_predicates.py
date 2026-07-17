@@ -220,7 +220,8 @@ def cross_track_to_segment_below(target_x_m: float, target_y_m: float, max_m: fl
         if ab_len < 1e-6:
             cross = float(np.linalg.norm(p - a))
         else:
-            cross = abs(float(np.cross(ab, p - a))) / ab_len
+            offset = p - a
+            cross = abs(float(ab[0] * offset[1] - ab[1] * offset[0])) / ab_len
         if cross > max_m:
             return f"cross-track {cross:.2f}m exceeds limit {max_m:.2f}m"
         return None

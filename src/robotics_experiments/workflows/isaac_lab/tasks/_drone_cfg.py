@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
-from isaaclab.sim import RigidBodyPropertiesCfg, UsdFileCfg
+from isaaclab.sim import UsdFileCfg
+from isaaclab_physx.sim.schemas import PhysxRigidBodyPropertiesCfg
 
 __all__: list[str] = []
 
@@ -42,7 +43,7 @@ def _make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationC
             usd_path=usd_path,
             # Rigid-body solver caps protect against numerical blowups when a
             # policy outputs extreme thrusts early in training.
-            rigid_props=RigidBodyPropertiesCfg(
+            rigid_props=PhysxRigidBodyPropertiesCfg(
                 disable_gravity=False,
                 max_linear_velocity=20.0,
                 max_angular_velocity=20.0,

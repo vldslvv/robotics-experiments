@@ -7,6 +7,7 @@ the package without loading simulator-only modules.
 """
 
 import carb
+from isaacsim.core.rendering_manager import RenderingManager
 from pxr import Gf, PhysxSchema, Usd, UsdPhysics
 
 from robotics_experiments.config import SimSettings
@@ -75,19 +76,17 @@ def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -
 
 
 def _apply_render_rate(rendering_hz: float) -> None:
-    """Enable and set the Kit main run-loop rate limit.
+    """Set Isaac 6's coherent render-loop and timeline cadence.
 
     Args:
-        rendering_hz: Target render frequency in Hz; truncated to int.
+        rendering_hz: Target render frequency in Hz.
 
     Raises:
         ValueError: If ``rendering_hz`` is not positive.
     """
     if rendering_hz <= 0:
         raise ValueError(f"rendering_hz must be positive, got {rendering_hz}")
-    carb_settings = carb.settings.get_settings()
-    carb_settings.set("/app/runLoops/main/rateLimitEnabled", True)
-    carb_settings.set("/app/runLoops/main/rateLimitFrequency", int(rendering_hz))
+    RenderingManager.set_dt(1.0 / float(rendering_hz))
 
 
 def _apply_isaac_settings(*, stage: Usd.Stage, settings: SimSettings) -> None:

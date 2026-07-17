@@ -3,6 +3,11 @@
 This directory contains scripts run directly by Isaac Sim, for example through
 `/isaac-sim/python.sh` or `runapp.sh`.
 
+`set_python_env.sh` sources Isaac Sim's generated `setup_python_env.sh`,
+preserves the caller's `PYTHONPATH`, and appends the editor extension symlinks.
+Keep it version-independent; do not duplicate Kit library paths or hardcode the
+Kit Python minor version or extension-cache build identifiers.
+
 Keep Isaac Kit extensions in `isaac/runtime/extensions` and Isaac Lab configs
 or environments in `isaac/runtime/lab`.
 

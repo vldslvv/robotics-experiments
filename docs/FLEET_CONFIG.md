@@ -62,6 +62,10 @@ one frozen progress state for each bridge-enabled vehicle, including those with
 empty `vehicle.routine.steps`.
 Shells explicitly rebind every returned state.
 
+Stationary spawning authors zero linear and angular velocity on the composed
+USD rigid body before simulation starts. A configured asset without a rigid
+body remains spawnable but emits an explicit warning that the reset was skipped.
+
 One `BridgeHostGroup` runs every send leg before every poll leg. Each PX4 instance
 therefore remains isolated while lockstep latency tracks the slowest instance,
 not the sum of all instances. Host-side PX4 launch uses the same ordered vehicle

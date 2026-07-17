@@ -47,7 +47,7 @@ def _assert_vec3_close(actual: Any, expected: tuple[float, float, float], label:
 def _assert_settings_applied(context: SceneTestContext, original_scene_paths: list[str]) -> None:
     # carb / pxr.PhysxSchema follow Isaac's create-app-first import convention and
     # stay deferred until after SimulationApp has started.
-    import carb
+    from isaacsim.core.rendering_manager import RenderingManager
     from pxr import PhysxSchema
 
     expected = context.config.sim
@@ -99,14 +99,10 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
             f"got {physx_api.GetSolverTypeAttr().Get()}"
         )
 
-    carb_settings = carb.settings.get_settings()
-    if not carb_settings.get("/app/runLoops/main/rateLimitEnabled"):
-        raise AssertionError("Expected Kit main run-loop rate limit to be enabled")
-    actual_rendering_hz = int(carb_settings.get("/app/runLoops/main/rateLimitFrequency"))
-    if actual_rendering_hz != int(expected.rendering_hz):
+    actual_rendering_hz = 1.0 / RenderingManager.get_dt()
+    if not math.isclose(actual_rendering_hz, expected.rendering_hz, rel_tol=1e-5):
         raise AssertionError(
-            "Render rate mismatch: "
-            f"expected {int(expected.rendering_hz)}, got {actual_rendering_hz}"
+            "Render rate mismatch: " f"expected {expected.rendering_hz}, got {actual_rendering_hz}"
         )
     context.report(
         f"{TEST_NAME}: verified Hydra settings: "

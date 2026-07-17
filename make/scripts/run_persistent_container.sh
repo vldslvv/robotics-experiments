@@ -22,11 +22,36 @@ if [ -n "${EXPECTED_CMD:-}" ]; then
     eval "cmd_argv=(${EXPECTED_CMD})"
 fi
 
+expected_binds=()
+for ((index = 0; index < ${#docker_flags[@]}; index++)); do
+    case "${docker_flags[$index]}" in
+        -v|--volume)
+            ((index += 1))
+            expected_binds+=("${docker_flags[$index]}")
+            ;;
+        --volume=*)
+            expected_binds+=("${docker_flags[$index]#--volume=}")
+            ;;
+    esac
+done
+
 if docker ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
     recreate_reason=""
-    if [ -n "${expected_env}" ] && ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container_name}" | grep -qx "${expected_env}"; then
+    expected_image_id="$(docker image inspect --format '{{.Id}}' "${image}")"
+    existing_image_id="$(docker inspect --format '{{.Image}}' "${container_name}")"
+    if [ "${existing_image_id}" != "${expected_image_id}" ]; then
+        recreate_reason="updated image"
+    elif [ -n "${expected_env}" ] && ! docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container_name}" | grep -qx "${expected_env}"; then
         recreate_reason="updated runtime environment"
-    elif [ "${#cmd_argv[@]}" -gt 0 ]; then
+    fi
+    if [ -z "${recreate_reason}" ] && [ "${#expected_binds[@]}" -gt 0 ]; then
+        existing_binds="$(docker inspect --format '{{range .HostConfig.Binds}}{{println .}}{{end}}' "${container_name}" | sort)"
+        expected_bind_list="$(printf '%s\n' "${expected_binds[@]}" | sort)"
+        if [ "${existing_binds}" != "${expected_bind_list}" ]; then
+            recreate_reason="updated volume mounts"
+        fi
+    fi
+    if [ -z "${recreate_reason}" ] && [ "${#cmd_argv[@]}" -gt 0 ]; then
         existing_cmd="$(docker inspect --format '{{join .Config.Cmd " "}}' "${container_name}")"
         if [ "${cmd_argv[*]}" != "${existing_cmd}" ]; then
             recreate_reason="updated startup command"

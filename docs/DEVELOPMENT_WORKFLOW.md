@@ -8,7 +8,7 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 - This project uses `uv` for all host-side Python work. Do not call `pip`,
   `python -m venv`, or a system/global Python directly.
 - The project virtualenv lives at `.venv` and is pinned to the Python in
-  `.python-version` (3.11). Dependencies and the resolver index (including the
+  `.python-version` (3.12). Dependencies and the resolver index (including the
   NVIDIA index for Isaac Sim) are defined in `pyproject.toml`; exact versions
   are locked in `uv.lock`. Do not edit `uv.lock` by hand.
 - This repository is a checkout-only application, not an installable wheel.
@@ -23,15 +23,19 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 - Initialize or repair the core development environment with
   `uv sync --extra dev`. The default dependency set contains only reusable-core
   runtime dependencies. The `dev` extra adds pytest and quality tools; the
-  `simulation` extra adds Isaac Sim and USD for host-side asset/simulator work;
+  `simulation` extra adds Isaac Sim for host-side simulator work; the isolated
+  `usd-build` dependency group supplies USD 26.5 to `make generate-drone-usd`;
   and the `training` extra adds `rsl-rl-lib` (and torch) for host-side training
   tooling only. Actual training runs in the Isaac Lab image, which already
-  ships rsl_rl. Flight-analysis tools deliberately use the documented
+  ships rsl_rl. The USD builder must remain isolated because Isaac Sim's
+  converter closure ships `usd-exchange`, whose `pxr` module paths overlap with
+  `usd-core`; installing both binary distributions into one environment mixes
+  incompatible USD libraries. Flight-analysis tools deliberately use the documented
   throwaway `uv --no-project --with pyulog --with numpy` environment instead of
   a project extra.
 - If `.venv` is missing, points outside the repository, or cannot be read from
   the sandbox, recreate it with the repo-local interpreter:
-  `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.11`, then
+  `UV_PYTHON_INSTALL_DIR=.uv-python uv python install 3.12`, then
   `UV_PYTHON_INSTALL_DIR=.uv-python uv sync --extra dev --managed-python`.
   After that, normal `uv run ...` and `uv sync ...` commands reuse `.venv`.
 - Always work inside the project venv. Either activate it with
@@ -43,7 +47,9 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   `uv.lock` committed and in sync; `uv lock --check` must pass.
 - Host-side Isaac Sim, ROS 2, and PX4 work that does not run inside their Docker
   containers still goes through this venv. Sync or invoke with
-  `--extra simulation` when host-side code imports Isaac or USD. Throwaway
+  `--extra simulation` when host-side code imports Isaac. Use
+  `make generate-drone-usd` for standalone USD authoring; it runs the locked
+  `usd-build` group in an isolated uv environment. Throwaway
   `uv run --no-project ...` invocations are deliberate exceptions for one-off
   tooling that must not touch the project environment.
 

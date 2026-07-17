@@ -25,6 +25,7 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
+from isaaclab.utils.array import convert_to_torch
 
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
@@ -40,10 +41,15 @@ __all__ = ["DroneHoverEnvCfg", "DroneHoverEnv", "make_drone_hover_env_cfg"]
 _DRONE_PRIM_PATH = "/World/envs/env_.*/Drone"
 
 
+def _xyzw_to_wxyz(quat_xyzw: torch.Tensor, /) -> torch.Tensor:
+    """Convert Lab 3's simulator quaternion order at a project WXYZ boundary."""
+    return torch.cat((quat_xyzw[..., 3:], quat_xyzw[..., :3]), dim=-1)
+
+
 def _hover_observation(
     position_w: torch.Tensor,
     target_w: torch.Tensor,
-    quat_w: torch.Tensor,
+    quat_wxyz: torch.Tensor,
     lin_vel_w: torch.Tensor,
     ang_vel_b: torch.Tensor,
 ) -> torch.Tensor:
@@ -54,7 +60,7 @@ def _hover_observation(
     body-frame, matching ``VehicleState.angular_velocity_flu`` so the same
     vector is assemblable at deploy time.
     """
-    return torch.cat((position_w - target_w, quat_w, lin_vel_w, ang_vel_b), dim=-1)
+    return torch.cat((position_w - target_w, quat_wxyz, lin_vel_w, ang_vel_b), dim=-1)
 
 
 def _hover_reward(
@@ -79,11 +85,11 @@ def _hover_terminated(
     task,
     position_w: torch.Tensor,
     target_w: torch.Tensor,
-    quat_w: torch.Tensor,
+    quat_xyzw: torch.Tensor,
 ) -> torch.Tensor:
     # Body-Z projected onto world-Z: the (0,0,1) column of the body->world
-    # rotation is 1 - 2(x^2 + y^2) for a wxyz quaternion.
-    body_z_world_z = 1.0 - 2.0 * (quat_w[:, 1] ** 2 + quat_w[:, 2] ** 2)
+    # rotation is 1 - 2(x^2 + y^2) for an xyzw quaternion.
+    body_z_world_z = 1.0 - 2.0 * (quat_xyzw[:, 0] ** 2 + quat_xyzw[:, 1] ** 2)
     tilted = body_z_world_z < task.crash_tilt_cos
     too_low = position_w[:, 2] < task.min_altitude_m
     position_error = torch.linalg.norm(position_w - target_w, dim=-1)
@@ -195,7 +201,7 @@ class DroneHoverEnv(DirectRLEnv):
         rotors = discover_px4_rotor_mapping(stage, env0_path)
         bridge = _training_vehicle(self._experiment_config).bridge
 
-        masses = self.drone.root_physx_view.get_masses()
+        masses = convert_to_torch(self.drone.root_view.get_masses())
         total_mass = float(masses[0].sum().item())
         self._body_id = int(self.drone.find_bodies("body")[0][0])
         self._linear_drag = torch.as_tensor(
@@ -219,43 +225,47 @@ class DroneHoverEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-1.0, 1.0)
 
     def _apply_action(self) -> None:
+        quat_wxyz = _xyzw_to_wxyz(self.drone.data.root_quat_w.torch)
         omega = action_to_rotor_omega(
             self.actuation_params,
             self.actions,
-            self.drone.data.root_quat_w,
-            self.drone.data.root_lin_vel_w,
-            self.drone.data.root_ang_vel_b,
+            quat_wxyz,
+            self.drone.data.root_lin_vel_w.torch,
+            self.drone.data.root_ang_vel_b.torch,
         )
         force_body, torque_body = rotor_omega_to_body_wrench(
-            self.actuation_params, omega, self.drone.data.root_lin_vel_b, self._linear_drag
+            self.actuation_params,
+            omega,
+            self.drone.data.root_lin_vel_b.torch,
+            self._linear_drag,
         )
         apply_body_wrench(self.drone, self._body_id, force_body, torque_body)
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
         observations = _hover_observation(
-            self.drone.data.root_pos_w,
+            self.drone.data.root_pos_w.torch,
             self._hover_target_w,
-            self.drone.data.root_quat_w,
-            self.drone.data.root_lin_vel_w,
-            self.drone.data.root_ang_vel_b,
+            _xyzw_to_wxyz(self.drone.data.root_quat_w.torch),
+            self.drone.data.root_lin_vel_w.torch,
+            self.drone.data.root_ang_vel_b.torch,
         )
         return {"policy": observations}
 
     def _get_rewards(self) -> torch.Tensor:
         return _hover_reward(
             self._task,
-            self.drone.data.root_pos_w,
+            self.drone.data.root_pos_w.torch,
             self._hover_target_w,
-            self.drone.data.root_lin_vel_w,
-            self.drone.data.root_ang_vel_w,
+            self.drone.data.root_lin_vel_w.torch,
+            self.drone.data.root_ang_vel_w.torch,
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated = _hover_terminated(
             self._task,
-            self.drone.data.root_pos_w,
+            self.drone.data.root_pos_w.torch,
             self._hover_target_w,
-            self.drone.data.root_quat_w,
+            self.drone.data.root_quat_w.torch,
         )
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return terminated, time_out
@@ -265,7 +275,7 @@ class DroneHoverEnv(DirectRLEnv):
             env_ids = self.drone._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        default_root_state = self.drone.data.default_root_state[env_ids]
+        default_root_state = self.drone.data.default_root_state.torch[env_ids].clone()
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
         # The hover target is the (un-randomized) spawn pose; the start pose is
         # randomized within a small box around it so the policy learns to recover.
@@ -275,5 +285,9 @@ class DroneHoverEnv(DirectRLEnv):
         offset[:, 2].uniform_(-self._task.reset_z_half_m, self._task.reset_z_half_m)
         default_root_state[:, :3] += offset
 
-        self.drone.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        self.drone.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
+        self.drone.write_root_pose_to_sim_index(
+            root_pose=default_root_state[:, :7], env_ids=env_ids
+        )
+        self.drone.write_root_velocity_to_sim_index(
+            root_velocity=default_root_state[:, 7:], env_ids=env_ids
+        )

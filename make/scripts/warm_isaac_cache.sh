@@ -78,7 +78,7 @@ if [ "${WARM_ISAAC_CACHE_IN_CONTAINER:-0}" = "1" ]; then
     mkdir -p "$(dirname "${HOST_TIMING_LOG}")"
 
     cd /isaac-sim
-    warm_log="/isaac-sim/.nvidia-omniverse/logs/test_integration_warm_isaac_cache.log"
+    warm_log="/root/.nvidia-omniverse/logs/test_integration_warm_isaac_cache.log"
     rm -f "${warm_log}"
 
     stage_start_ms="$(now_ms)"

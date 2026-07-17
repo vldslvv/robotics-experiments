@@ -8,6 +8,18 @@ details live in `docs/EXPERIMENT_CONFIG.md`.
 Run ROS 2, Isaac Sim, and PX4 through the Docker targets below, not directly on
 the host. They are meant to be used in the Dockerized environment.
 
+## Runtime version matrix
+
+- Isaac Sim: 6.0.1 (container and Python packages).
+- Isaac Lab: v3.0.0-beta2.patch1 with the PhysX backend and RSL-RL 5.0.1.
+- Host Python: 3.12.
+- ROS 2: Jazzy; the existing topic-control and Isaac ROS workspace commits stay
+  pinned. Isaac loads Jazzy's native libraries from the Isaac 6
+  `isaacsim.ros2.core` extension.
+- PX4: v1.14.3 at its existing immutable commit. This release is superseded
+  upstream, but remains intentionally pinned behind the MAVLink HIL boundary;
+  its upgrade is a separate compatibility and flight-tuning effort.
+
 ## Docker targets
 
 - `make build` builds the Isaac Sim, Isaac Lab, ROS 2, and PX4 images. The Isaac
@@ -58,6 +70,14 @@ The ROS workspace deliberately skips the upstream humanoid example's
 and allowing rosdep to install it would resolve a mutable, multi-gigabyte CUDA
 closure during every ROS image build.
 
+Isaac generated caches are rooted under
+`isaac/isaac-sim/cache/<ISAAC_BASE_TAG>/`, so the 6.0.1 kit, Omniverse, pip,
+shader, compute, and shell caches cannot reuse or overwrite 5.1 cache state.
+Logs, data, documents, image history, container names, and Make entrypoints are
+not versioned. Stop old persistent containers with `make stop` before changing
+the default image, but do not delete the 5.1 image or cache tree as part of the
+migration; they are the rollback boundary.
+
 ## Persistent Isaac logs
 
 The persistent Isaac container (`make run-isaac` / `make run-all`) is named
@@ -74,13 +94,10 @@ blank stage from `docker logs` first.
 
 Kit's own log is written inside the container at
 `/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/<ver>/kit_<timestamp>.log`
-(container `HOME` is `/root`). It is not on the host, because the
-`isaac/isaac-sim/logs` host mount maps to `/isaac-sim/.nvidia-omniverse/logs`, a
-different path than `/root/...`. Copy it out with
-`docker cp 'vv-isaac-sim-custom:/root/.nvidia-omniverse/logs/Kit/' <dest>` when
-you need the structured Kit log rather than the console stream. The
-`isaac/isaac-sim/logs/test_*.log` files there are integration-test output, which
-redirects explicitly; manual runs do not land there.
+(container `HOME` is `/root`). The persistent runtime mounts that directory at
+`isaac/isaac-sim/logs`, so both the structured Kit log and the console stream
+remain available after the container is recreated. Integration runs mount their
+per-run `logs` artifact directory at the same container path.
 
 ## Persistent PX4
 

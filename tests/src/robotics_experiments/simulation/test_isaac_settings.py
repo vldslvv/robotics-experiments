@@ -69,6 +69,14 @@ class _FakePhysxApi:
         return self.solver_type
 
 
+class _FakeRenderingManager:
+    dt = None
+
+    @classmethod
+    def set_dt(cls, dt):
+        cls.dt = dt
+
+
 class _FakeCarbSettings:
     def __init__(self):
         self.values = {}
@@ -100,6 +108,13 @@ def simulation_api(monkeypatch):
     pxr.UsdPhysics = types.SimpleNamespace(Scene=_FakeUsdPhysicsScene)
 
     monkeypatch.setitem(sys.modules, "carb", carb)
+    isaacsim = types.ModuleType("isaacsim")
+    isaacsim_core = types.ModuleType("isaacsim.core")
+    rendering_manager = types.ModuleType("isaacsim.core.rendering_manager")
+    rendering_manager.RenderingManager = _FakeRenderingManager
+    monkeypatch.setitem(sys.modules, "isaacsim", isaacsim)
+    monkeypatch.setitem(sys.modules, "isaacsim.core", isaacsim_core)
+    monkeypatch.setitem(sys.modules, "isaacsim.core.rendering_manager", rendering_manager)
     monkeypatch.setitem(sys.modules, "pxr", pxr)
     monkeypatch.setitem(sys.modules, "pxr.Gf", pxr.Gf)
     monkeypatch.setitem(sys.modules, "pxr.PhysxSchema", pxr.PhysxSchema)
@@ -107,6 +122,7 @@ def simulation_api(monkeypatch):
     monkeypatch.setitem(sys.modules, "pxr.UsdPhysics", pxr.UsdPhysics)
 
     simulation = importlib.import_module("robotics_experiments.simulation")
+    _FakeRenderingManager.dt = None
     yield simulation.apply_settings, carb_settings
 
     for name in (
@@ -138,10 +154,8 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
     physx_api = _FakePhysxApi.last_instance
     assert physx_api.time_steps_per_second.value == 500
     assert physx_api.solver_type.value == "TGS"
-    assert carb_settings.values == {
-        "/app/runLoops/main/rateLimitEnabled": True,
-        "/app/runLoops/main/rateLimitFrequency": 60,
-    }
+    assert carb_settings.values == {}
+    assert _FakeRenderingManager.dt == pytest.approx(1.0 / 60.9)
 
 
 def test_apply_settings_rejects_zero_magnitude_gravity(simulation_api):

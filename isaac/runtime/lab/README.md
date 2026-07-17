@@ -39,11 +39,23 @@ Isaac Lab is not in the default `isaac-sim` image. It is baked into the
 `isaac-lab` Dockerfile stage (layered `FROM isaac-sim`; same kit python, USD, and
 PhysX) built by `make build-isaac-lab` as `ISAAC_LAB_IMAGE`
 (`vv-isaac-lab-custom:<tag>`), from `isaac-sim/IsaacLab` pinned by the
-`ISAACLAB_REF` build ARG (default `v2.3.2`, built on Isaac Sim 5.1). The
+`ISAACLAB_REF` build ARG (default `v3.0.0-beta2.patch1`, built on Isaac Sim
+6.0.1). The base, `isaaclab_physx`, and rsl_rl adapter packages are installed
+as the minimal editable set. The
 `test-integration-press-hover-goto` gate (and future F2/F3 training) runs on this
 image; every other integration target uses the leaner `isaac-sim` image.
+The Lab layer also exposes Isaac 6's digest-pinned Torch 2.11.0+cu128,
+TorchVision 0.26.0+cu128, and Warp 1.13.0 prebundles to standalone Python. This
+keeps the Lab runtime on the CUDA builds shipped with Isaac instead of layering
+second Torch or Warp distributions into the image.
 
 Use guarded registration through
 `robotics_experiments.workflows.isaac_lab.register_isaac_lab_tasks()`. The helper
 returns `False` on host environments without Isaac Lab/Gymnasium, so core package
 imports and normal unit tests stay simulator-free.
+
+Lab 3 data properties are `ProxyArray` values and must be read through explicit
+`.torch` access in this task. Lab-facing quaternions are XYZW; convert them to
+the project's WXYZ convention only at controller, observation, and policy
+artifact boundaries. Use `root_view`, indexed write methods for sparse resets,
+and `WARN_ON_TORCH_QUATF_ACCESS=1` for the quaternion migration gate.

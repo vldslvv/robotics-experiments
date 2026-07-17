@@ -96,9 +96,9 @@ target racing to initialize identical caches.
 ## Shared cache vs isolated artifacts
 
 Integration Isaac runs share the persistent Isaac cache mounts under
-`isaac/isaac-sim/cache/` (`kit`, `ov`, `pip`, `glcache`, `computecache`; see
-`make/config.mk`) to avoid repeating identical Kit, OV, pip, GL, and Compute
-cache initialization.
+`isaac/isaac-sim/cache/<ISAAC_BASE_TAG>/` (`kit`, `ov`, `pip`, `glcache`,
+`computecache`; see `make/config.mk`) to avoid repeating identical Kit, OV, pip,
+GL, and Compute cache initialization while isolating incompatible Isaac releases.
 
 Per-run logs, data, PX4 logs, and timing artifacts are isolated under
 `.build/docker/integration/<target>.<run-id>/`, where `<run-id>` is a UTC

@@ -80,7 +80,7 @@ def _seed_everything(seed: int) -> None:
 def _position_action(
     env: DroneHoverEnv, target_w: torch.Tensor, max_velocity: float
 ) -> torch.Tensor:
-    position = env.drone.data.root_pos_w
+    position = env.drone.data.root_pos_w.torch
     velocity_command = torch.clamp(
         _POSITION_KP * (target_w - position), -max_velocity, max_velocity
     )
@@ -100,31 +100,37 @@ def _yaw_tilt_from_quat(quat_wxyz: torch.Tensor) -> tuple[torch.Tensor, torch.Te
     return yaw, tilt
 
 
+def _xyzw_to_wxyz(quat_xyzw: torch.Tensor) -> torch.Tensor:
+    """Convert Lab 3 simulator quaternions at the project controller boundary."""
+    return torch.cat((quat_xyzw[..., 3:], quat_xyzw[..., :3]), dim=-1)
+
+
 def _diagnostic_sample(
     env: DroneHoverEnv, target_w: torch.Tensor, action: torch.Tensor, max_velocity: float
 ) -> str:
     # Isaac Lab workflow code is imported after AppLauncher.
     from robotics_experiments.workflows.isaac_lab import compute_lab_rotor_omega
 
-    position_error = env.drone.data.root_pos_w - target_w
+    position_error = env.drone.data.root_pos_w.torch - target_w
     error_norm = torch.linalg.norm(position_error, dim=-1)
     env_index = int(torch.argmax(error_norm).item())
-    yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
+    quat_wxyz = _xyzw_to_wxyz(env.drone.data.root_quat_w.torch)
+    yaw, tilt = _yaw_tilt_from_quat(quat_wxyz)
 
     omega = compute_lab_rotor_omega(
         env.actuation_params,
         action,
-        env.drone.data.root_quat_w,
-        env.drone.data.root_lin_vel_w,
-        env.drone.data.root_ang_vel_b,
+        quat_wxyz,
+        env.drone.data.root_lin_vel_w.torch,
+        env.drone.data.root_ang_vel_b.torch,
     )
     velocity_cmd = action[:, :3] * max_velocity
     sim_time = float(env.common_step_counter * env.step_dt)
 
     pos = position_error[env_index].detach().cpu().tolist()
-    vel_w = env.drone.data.root_lin_vel_w[env_index].detach().cpu().tolist()
-    vel_b = env.drone.data.root_lin_vel_b[env_index].detach().cpu().tolist()
-    ang_b = env.drone.data.root_ang_vel_b[env_index].detach().cpu().tolist()
+    vel_w = env.drone.data.root_lin_vel_w.torch[env_index].detach().cpu().tolist()
+    vel_b = env.drone.data.root_lin_vel_b.torch[env_index].detach().cpu().tolist()
+    ang_b = env.drone.data.root_ang_vel_b.torch[env_index].detach().cpu().tolist()
     cmd = velocity_cmd[env_index].detach().cpu().tolist()
 
     return (
@@ -172,7 +178,7 @@ def _drive_to(
 
 
 def _max_position_error(env: DroneHoverEnv, target_w: torch.Tensor) -> float:
-    return float(torch.linalg.norm(env.drone.data.root_pos_w - target_w, dim=-1).max().item())
+    return float(torch.linalg.norm(env.drone.data.root_pos_w.torch - target_w, dim=-1).max().item())
 
 
 def _reset_env(env: DroneHoverEnv, seed: int) -> None:
@@ -202,7 +208,9 @@ def _make_env(
 def _ctbr_hover_action(
     env: DroneHoverEnv, action_cfg: PressActionConfig
 ) -> tuple[torch.Tensor, float]:
-    mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
+    from isaaclab.utils.array import convert_to_torch
+
+    mass = float(convert_to_torch(env.drone.root_view.get_masses())[0].sum().item())
     max_total_thrust = float(env.actuation_params.max_total_thrust)
     hover_fraction = mass * 9.81 / max_total_thrust
     action = torch.zeros((env.num_envs, env.cfg.action_space), device=env.device)
@@ -233,7 +241,7 @@ def _run_ctbr_sanity(
     try:
         _reset_env(env, args.seed)
         hover_action, hover_fraction = _ctbr_hover_action(env, action_cfg)
-        start_z = env.drone.data.root_pos_w[:, 2].clone()
+        start_z = env.drone.data.root_pos_w.torch[:, 2].clone()
         steps = max(1, round(3.0 / env.step_dt))
         pulse_start = round(0.5 / env.step_dt)
         pulse_end = round(1.0 / env.step_dt)
@@ -248,19 +256,20 @@ def _run_ctbr_sanity(
             if bool(torch.any(terminated)) or bool(torch.any(truncated)):
                 raise AssertionError("ctbr sanity terminated or timed out")
 
-            _yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
+            quat_wxyz = _xyzw_to_wxyz(env.drone.data.root_quat_w.torch)
+            _yaw, tilt = _yaw_tilt_from_quat(quat_wxyz)
             max_tilt = max(max_tilt, float(tilt.max().item()))
-            yaw_rate = torch.abs(env.drone.data.root_ang_vel_b[:, 2]).max()
+            yaw_rate = torch.abs(env.drone.data.root_ang_vel_b.torch[:, 2]).max()
             max_yaw_rate = max(max_yaw_rate, float(yaw_rate.item()))
 
-        z_drift = torch.max(torch.abs(env.drone.data.root_pos_w[:, 2] - start_z))
+        z_drift = torch.max(torch.abs(env.drone.data.root_pos_w.torch[:, 2] - start_z))
         final_z_drift = float(z_drift.item())
         omega = compute_lab_rotor_omega(
             env.actuation_params,
             hover_action,
-            env.drone.data.root_quat_w,
-            env.drone.data.root_lin_vel_w,
-            env.drone.data.root_ang_vel_b,
+            _xyzw_to_wxyz(env.drone.data.root_quat_w.torch),
+            env.drone.data.root_lin_vel_w.torch,
+            env.drone.data.root_ang_vel_b.torch,
         )
         _report(
             "ctbr sanity: "
@@ -316,10 +325,11 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
         world_switch_to_contact_frame,
     )
 
-    position = env.drone.data.root_pos_w[0].cpu().numpy().astype(np.float64)
-    quat_wxyz = env.drone.data.root_quat_w[0].cpu().numpy().astype(np.float64)
-    lin_vel_w = env.drone.data.root_lin_vel_w[0].cpu().numpy().astype(np.float64)
-    ang_vel_b = env.drone.data.root_ang_vel_b[0].cpu().numpy().astype(np.float64)
+    position = env.drone.data.root_pos_w.torch[0].cpu().numpy().astype(np.float64)
+    quat_xyzw = env.drone.data.root_quat_w.torch[0].cpu().numpy().astype(np.float64)
+    quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]], dtype=np.float64)
+    lin_vel_w = env.drone.data.root_lin_vel_w.torch[0].cpu().numpy().astype(np.float64)
+    ang_vel_b = env.drone.data.root_ang_vel_b.torch[0].cpu().numpy().astype(np.float64)
     sample = provider.sample(0.0)
     sq = sample.world_switch_quat_xyzw
     switch_quat_wxyz = np.array([sq[3], sq[0], sq[1], sq[2]], dtype=np.float64)
@@ -420,7 +430,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     try:
         _reset_env(env, args.seed)
         # The hover target is the (un-randomized) spawn pose per env.
-        target = env.scene.env_origins + env.drone.data.default_root_state[:, :3]
+        target = env.scene.env_origins + env.drone.data.default_root_state.torch[:, :3]
 
         hover = _drive_to(
             env,

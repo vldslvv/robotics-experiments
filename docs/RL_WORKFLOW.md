@@ -15,9 +15,9 @@ The Isaac Lab image (`make build-isaac-lab`, `ISAAC_LAB_IMAGE` =
 `FROM isaac-sim`: Isaac Lab shares the same kit python (`/isaac-sim/python.sh`),
 USD, and PhysX and cannot run standalone, so it is a superset image, not a
 separate container. It is built from `isaac-sim/IsaacLab` pinned by the
-`ISAACLAB_REF` build ARG / Make variable (the immutable `v2.3.2` commit for
-Isaac Sim 5.1). The image installs only the Isaac Lab base package, its rsl_rl
-adapter, and the pinned closure in
+`ISAACLAB_REF` build ARG / Make variable (the immutable
+`v3.0.0-beta2.patch1` commit for Isaac Sim 6.0.1). The image installs only the
+Isaac Lab base package, its `isaaclab_physx` backend, its rsl_rl adapter, and the pinned closure in
 `isaac/docker/lab-runtime-requirements.txt`; unused RL frameworks and device
 retargeting stacks are excluded. Only the RL workflow needs it -- the
 `test-integration-press-hover-goto` and `test-integration-press-policy` gates
@@ -25,6 +25,10 @@ and `make train-rl` run on `ISAAC_LAB_IMAGE`; every other integration target
 and the persistent containers stay on the leaner `isaac-sim` image
 (`ISAAC_IMAGE`). Rebuild it after changing `ISAACLAB_REF` or when moving Isaac
 Sim versions.
+The Lab layer exposes the Isaac 6 image's digest-pinned Torch 2.11.0+cu128,
+TorchVision 0.26.0+cu128, and Warp 1.13.0 prebundles to standalone Python
+through a Lab-image-only `.pth` file. Do not install a second Torch or Warp
+build over those CUDA-compatible packages.
 
 ## In-Lab task and actuation seam
 
@@ -35,6 +39,16 @@ imports only from `robotics_experiments.workflows.isaac_lab`; its lazy package
 root is the public contract and exposes guarded task registration, the hover
 task id/env/config, and the named batched rotor-omega diagnostic seam without
 eager-importing Isaac Lab task modules during host-side package imports.
+
+Isaac Lab 3 asset and sensor data properties are `ProxyArray` values. Torch
+consumers must use explicit `.torch` access, and PhysX view access goes through
+`root_view`. Lab configuration, simulator state, and Lab math use XYZW
+quaternions. The project controller, observation layouts, and policy artifacts
+remain WXYZ, so convert XYZW to WXYZ immediately at those boundaries and do not
+propagate Lab ordering into the reusable RL contract. Sparse reset writes use
+the `write_*_to_sim_index` methods. Run the hover gate with
+`WARN_ON_TORCH_QUATF_ACCESS=1` after quaternion-related changes and inspect
+every reported access before accepting the gate.
 
 Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
 for direct-workflow environments. The first task is
@@ -104,7 +118,10 @@ unchanged apart from injecting the artifact-loader factory into
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
   image) writes the artifact under `.build/training/<policy-name>/<run-id>/`
   and updates the named `.build/training/<policy-name>/latest` symlink;
-  `TRAIN_ARGS='--max-iterations 5'` is the smoke run. rsl_rl comes from the
+  `TRAIN_ARGS='--max-iterations 5'` is the smoke run. RSL-RL 5.0.1 uses
+  separate `MLPModel` actor and critic entries; both observation sets consume
+  the env's `policy` group, and the actor owns its `GaussianDistribution`.
+  Artifact export goes through the runner's public JIT exporter. rsl_rl comes from the
   pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
   exists for tooling only.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema

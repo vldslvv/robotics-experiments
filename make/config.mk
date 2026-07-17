@@ -11,8 +11,8 @@ export PYTHONPATH
 
 # Isaac custom image
 ISAAC_BASE_IMAGE ?= nvcr.io/nvidia/isaac-sim
-ISAAC_BASE_TAG   ?= 5.1.0
-ISAAC_BASE_DIGEST ?= sha256:f3563cb2ba0c18af0b2fb321360dcb73a917b899f879e3213623d6bee484fa54
+ISAAC_BASE_TAG   ?= 6.0.1
+ISAAC_BASE_DIGEST ?= sha256:b1c542b2ecc549b3d1ebb78c25664aa3bacba1709e6ad8e0a68e09426d57dedb
 
 ISAAC_IMAGE_NAME     ?= vv-isaac-sim-custom
 ISAAC_IMAGE_TAG      ?= $(ISAAC_BASE_TAG)
@@ -23,9 +23,10 @@ ISAAC_PROJECT_DIR    = /isaac-sim/proj
 
 # Isaac Lab image (Dockerfile `isaac-lab` stage, FROM isaac-sim). Only the Phase F
 # RL workflow uses it (the test-integration-press-hover-goto gate; future F2/F3
-# training). ISAACLAB_REF is the immutable v2.3.2 commit for Isaac Sim 5.1.
+# training). ISAACLAB_REF is the immutable v3.0.0-beta2.patch1 commit for
+# Isaac Sim 6.0.1.
 # Keep it in sync with the Dockerfile ARG default.
-ISAACLAB_REF         ?= 37ddf626871758333d6ed89cf64ad702aef127d0
+ISAACLAB_REF         ?= ffff603eafc6b74264a5261cc0183d6a65390d78
 ISAAC_LAB_IMAGE_NAME ?= vv-isaac-lab-custom
 ISAAC_LAB_IMAGE      = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)
 ISAAC_LAB_CACHE_IMAGE = $(ISAAC_LAB_IMAGE_NAME):$(ISAAC_IMAGE_TAG)-buildcache
@@ -50,20 +51,20 @@ HYDRA_CONFIG_HOST_PATH      = $(abspath $(HYDRA_CONFIG))
 HYDRA_CONFIG_CONTAINER_PATH = $(if $(filter $(CURDIR)/%,$(HYDRA_CONFIG_HOST_PATH)),$(patsubst $(CURDIR)%,$(ISAAC_PROJECT_DIR)%,$(HYDRA_CONFIG_HOST_PATH)),$(HYDRA_CONFIG_HOST_PATH))
 ISAAC_PYTHON         = /isaac-sim/python.sh
 ISAAC_SIM_TEST       = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_sim_settings.py
-ISAAC_SIM_TEST_LOG   = /isaac-sim/.nvidia-omniverse/logs/test_simulation_settings.log
+ISAAC_SIM_TEST_LOG   = /root/.nvidia-omniverse/logs/test_simulation_settings.log
 ISAAC_DRONE_ARTICULATION_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_drone_articulation_io.py
-ISAAC_DRONE_ARTICULATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_drone_articulation_io.log
+ISAAC_DRONE_ARTICULATION_TEST_LOG = /root/.nvidia-omniverse/logs/test_drone_articulation_io.log
 ISAAC_PX4_TAKEOFF_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_takeoff_stability.py
-ISAAC_PX4_TAKEOFF_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_takeoff_stability.log
+ISAAC_PX4_TAKEOFF_TEST_LOG = /root/.nvidia-omniverse/logs/test_px4_takeoff_stability.log
 ISAAC_PX4_TAKEOFF_INSTABILITY_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_takeoff_instability_detection.py
-ISAAC_PX4_TAKEOFF_INSTABILITY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_takeoff_instability_detection.log
+ISAAC_PX4_TAKEOFF_INSTABILITY_TEST_LOG = /root/.nvidia-omniverse/logs/test_px4_takeoff_instability_detection.log
 ISAAC_PX4_MULTI_DRONE_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_multi_drone_takeoff.py
-ISAAC_PX4_MULTI_DRONE_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_multi_drone_takeoff.log
+ISAAC_PX4_MULTI_DRONE_TEST_LOG = /root/.nvidia-omniverse/logs/test_px4_multi_drone_takeoff.log
 ISAAC_PX4_NAVIGATION_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_navigation_routine.py
-ISAAC_PX4_NAVIGATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_navigation_routine.log
+ISAAC_PX4_NAVIGATION_TEST_LOG = /root/.nvidia-omniverse/logs/test_px4_navigation_routine.log
 ISAAC_PRESS_HOVER_GOTO_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_press_hover_goto.py
-ISAAC_PRESS_HOVER_GOTO_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_hover_goto.log
-ISAAC_PRESS_POLICY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_policy_hover.log
+ISAAC_PRESS_HOVER_GOTO_TEST_LOG = /root/.nvidia-omniverse/logs/test_press_hover_goto.log
+ISAAC_PRESS_POLICY_TEST_LOG = /root/.nvidia-omniverse/logs/test_press_policy_hover.log
 ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):
 ISAAC_TEST_FAILURE_FILTER = ^\[isaac-standalone-test\] ERROR:
@@ -78,15 +79,16 @@ HYDRA_CONFIG         ?= configs/takeoff_quad.yaml
 
 # Host paths for persistence
 ISAAC_HOME             = $(CURDIR)/isaac
-ISAAC_KIT_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/kit
-ISAAC_OV_CACHE         = $(ISAAC_HOME)/isaac-sim/cache/ov
-ISAAC_PIP_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/pip
-ISAAC_GLCACHE          = $(ISAAC_HOME)/isaac-sim/cache/glcache
-ISAAC_COMPUTEC         = $(ISAAC_HOME)/isaac-sim/cache/computecache
+ISAAC_CACHE_ROOT       = $(ISAAC_HOME)/isaac-sim/cache/$(ISAAC_BASE_TAG)
+ISAAC_KIT_CACHE        = $(ISAAC_CACHE_ROOT)/kit
+ISAAC_OV_CACHE         = $(ISAAC_CACHE_ROOT)/ov
+ISAAC_PIP_CACHE        = $(ISAAC_CACHE_ROOT)/pip
+ISAAC_GLCACHE          = $(ISAAC_CACHE_ROOT)/glcache
+ISAAC_COMPUTEC         = $(ISAAC_CACHE_ROOT)/computecache
 ISAAC_LOGS             = $(ISAAC_HOME)/isaac-sim/logs
 ISAAC_DATA             = $(ISAAC_HOME)/isaac-sim/data
 ISAAC_DOCS             = $(ISAAC_HOME)/isaac-sim/documents
-ISAAC_ZSH_CACHE        = $(ISAAC_HOME)/isaac-sim/cache/zsh
+ISAAC_ZSH_CACHE        = $(ISAAC_CACHE_ROOT)/zsh
 
 # These paths have to be relative to be inside docker build context.
 ISAAC_ASSETS_DIR       = isaac/assets

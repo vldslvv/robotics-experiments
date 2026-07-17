@@ -9,8 +9,9 @@ public API (``spawn_drone`` / ``despawn_drone``) lazily via ``__getattr__``, so
 ``tests/test_core_imports.py`` for the boundary guard.
 """
 
+from __future__ import annotations
+
 import math
-from typing import Optional
 
 import carb
 from isaacsim.core.utils.stage import add_reference_to_stage
@@ -93,40 +94,32 @@ def _computed_stationary_z(stage: Usd.Stage, prim_path: str, config: DroneSpawnC
         return fallback
 
 
-def _find_rigid_body_path(stage: Usd.Stage, prim_path: str) -> Optional[str]:
+def _find_rigid_body(stage: Usd.Stage, prim_path: str) -> Usd.Prim | None:
     root = stage.GetPrimAtPath(prim_path)
     if not root.IsValid():
         return None
     for prim in Usd.PrimRange(root):
         if prim.HasAPI(UsdPhysics.RigidBodyAPI):
-            return prim.GetPath().pathString
+            return prim
     return None
 
 
 def _clear_rigid_body_velocities(stage: Usd.Stage, prim_path: str) -> None:
-    """Best-effort velocity reset for the spawned drone rigid body."""
-    body_path = _find_rigid_body_path(stage, prim_path)
-    if body_path is None:
+    """Author zero initial velocities on the spawned drone rigid body."""
+    body_prim = _find_rigid_body(stage, prim_path)
+    if body_prim is None:
         carb.log_warn(
             f"[DroneSpawner] No rigid body found under {prim_path}; velocity reset skipped"
         )
         return
 
-    try:
-        import numpy as np
-        from isaacsim.core.prims import RigidPrim
-
-        body = RigidPrim(prim_paths_expr=body_path)
-        if hasattr(body, "initialize"):
-            body.initialize()
-        zeros = np.zeros(3, dtype=np.float64)
-        if hasattr(body, "set_linear_velocity"):
-            body.set_linear_velocity(zeros)
-        if hasattr(body, "set_angular_velocity"):
-            body.set_angular_velocity(zeros)
-        carb.log_info(f"[DroneSpawner] Cleared rigid body velocity for {body_path}")
-    except Exception as exc:
-        carb.log_warn(f"[DroneSpawner] Could not clear rigid body velocity for {body_path}: {exc}")
+    body = UsdPhysics.RigidBodyAPI(body_prim)
+    zeros = Gf.Vec3f(0.0, 0.0, 0.0)
+    body.CreateVelocityAttr().Set(zeros)
+    body.CreateAngularVelocityAttr().Set(zeros)
+    carb.log_info(
+        f"[DroneSpawner] Cleared rigid body velocity for {body_prim.GetPath().pathString}"
+    )
 
 
 def spawn_drone(
