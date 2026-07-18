@@ -59,8 +59,8 @@ scenario-specific notes.
   **concurrently** in parallel lanes (the hex `goto` waypoints offset +4 in x by
   its spawn, so the absolute world-ENU waypoints never converge), each on its
   own PX4 SITL instance with the per-asset airframe derived from its USD asset
-  (the quad's `none_x500_v2`/`4019` and the hex's generated Hex X
-  `none_hexa_x`/`6001`). It protects OFFBOARD setpoint continuity across the
+  (the quad's `none_x500_v2`/`22000` and the hex's generated Hex X
+  `none_hexa_x`/`22001`). It protects OFFBOARD setpoint continuity across the
   `goto` -> `hover` transition and passes only when **both** drones hold their
   envelope. It reuses the generic multi-PX4 launch path
   (`run_px4_integration_test.sh` over the enabled vehicles returned by

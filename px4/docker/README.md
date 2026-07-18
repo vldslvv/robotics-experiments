@@ -11,10 +11,10 @@ binary run directly with `-i ${PX4_INSTANCE}` and an interactive `pxh>` console
 every per-vehicle terminal), from its own per-instance rootfs subdir
 (`build/px4_sitl_default/rootfs/${PX4_INSTANCE}`). The airframe is selected by
 `PX4_SIM_MODEL` / `PX4_SYS_AUTOSTART` (defaulting to the repo's X500 V2 quad
-`none_x500_v2`/`4019` if unset): the host-side launch scripts derive the
+`none_x500_v2`/`22000` if unset): the host-side launch scripts derive the
 per-vehicle pair resolved by `config.load_config(path)` onto each enabled
-`VehicleConfig` (`none_x500_v2`/`4019` for the X500 V2
-quad asset, `none_hexa_x`/`6001` for the Hex X asset) and thread it into each
+`VehicleConfig` (`none_x500_v2`/`22000` for the X500 V2
+quad asset, `none_hexa_x`/`22001` for the Hex X asset) and thread it into each
 container. These repo-managed `none_*` airframes are generated from
 `configs/airframes` and baked into the PX4 image by the Dockerfile's px4 stage
 before `make px4_sitl_default`; the same YAML therefore drives USD geometry,
@@ -27,7 +27,7 @@ and instance `i` listens on simulator TCP `4560 + i` / GCS UDP `14550 + i`. Ther
 is intentionally no `instance == 0` special case in the launch, reset, or mount
 logic -- a divergent instance-0 launch (`make px4_sitl_default none_x500_v2` with
 a console vs. additional instances started in daemon mode) is exactly how the
-extra instances silently lost their `pxh>` console. PX4 v1.14.3 shifts the GCS local
+extra instances silently lost their `pxh>` console. PX4 v1.17.0 shifts the GCS local
 UDP port for `-i` but leaves its remote GCS port at `14550`, so the launchers
 patch `px4-rc.mavlink` at container startup to set the GCS remote port to
 `14550 + PX4_INSTANCE`. `reset_px4_state.sh` clears `dataman` /

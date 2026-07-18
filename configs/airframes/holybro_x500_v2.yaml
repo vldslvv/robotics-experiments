@@ -215,13 +215,11 @@ pusher:
 # build stage. Keep it flat/literal -- no Hydra interpolation or defaults here.
 px4:
   sitl:
-    # Holybro X500 V2 geometry slot. 4019 is free in the posix airframe set, so
-    # SYS_AUTOSTART=4019 deterministically selects this generated airframe. Do NOT
-    # use 4001: posix already ships 4001_gz_x500, and a second 4001_* only "wins"
-    # the rcS glob by sort order. CA_ROTOR* positions are generated from the arm
-    # geometry above (motor radius 0.25 -> CA_ROTOR +/-0.1768).
+    # PX4 reserves 22000-22999 for custom model airframes. CA_ROTOR* positions
+    # are generated from the arm geometry above (motor radius 0.25 -> CA_ROTOR
+    # +/-0.1768).
     sim_model: none_x500_v2
-    sys_autostart: 4019
+    sys_autostart: 22000
     mav_type: 2
     ca_rotor_km_abs: 0.05
   bridge:

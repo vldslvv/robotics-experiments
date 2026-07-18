@@ -19,6 +19,8 @@ _PX4_AIRFRAME_TYPE_BY_MAV_TYPE = {
     2: "Quadrotor x",
     13: "Hexarotor x",
 }
+_CUSTOM_AIRFRAME_ID_MIN = 22000
+_CUSTOM_AIRFRAME_ID_MAX = 22999
 
 
 @dataclass(frozen=True)
@@ -130,8 +132,11 @@ def _airframe_from_config(path: Path) -> _GeneratedAirframe:
     km_abs = float(_required(sitl, "ca_rotor_km_abs", f"{source}.px4.sitl"))
     if not sim_model.startswith("none_"):
         raise ValueError(f"{source}.px4.sitl.sim_model must start with none_")
-    if sys_autostart <= 0:
-        raise ValueError(f"{source}.px4.sitl.sys_autostart must be positive")
+    if not _CUSTOM_AIRFRAME_ID_MIN <= sys_autostart <= _CUSTOM_AIRFRAME_ID_MAX:
+        raise ValueError(
+            f"{source}.px4.sitl.sys_autostart must be in PX4's custom model range "
+            f"{_CUSTOM_AIRFRAME_ID_MIN}-{_CUSTOM_AIRFRAME_ID_MAX}"
+        )
     if km_abs <= 0.0:
         raise ValueError(f"{source}.px4.sitl.ca_rotor_km_abs must be positive")
     rotors = _rotor_geometry(data, km_abs=km_abs, source=source)
@@ -154,6 +159,9 @@ def _airframes(config_dir: Path) -> tuple[_GeneratedAirframe, ...]:
     script_names = [airframe.script_name for airframe in airframes]
     if len(script_names) != len(set(script_names)):
         raise ValueError(f"duplicate PX4 airframe script names: {script_names}")
+    sys_autostart_ids = [airframe.sys_autostart for airframe in airframes]
+    if len(sys_autostart_ids) != len(set(sys_autostart_ids)):
+        raise ValueError(f"duplicate PX4 SYS_AUTOSTART ids: {sys_autostart_ids}")
     return airframes
 
 
@@ -241,8 +249,7 @@ def _conflicting_airframe_files(
     PX4 posix ``rcS`` resolves the airframe by globbing
     ``airframes/<SYS_AUTOSTART>_*`` and sourcing the LAST match, so any
     non-generated ``<id>_*`` file sharing a generated airframe's
-    ``sys_autostart`` makes the selection depend on filename sort order (e.g. a
-    stock ``4001_gz_x500`` next to a generated ``4001_none_quad_x``). Returns,
+    ``sys_autostart`` makes the selection depend on filename sort order. Returns,
     per generated script name, the conflicting foreign files in the output dir.
     """
     generated = {airframe.script_name for airframe in airframes}
@@ -258,31 +265,14 @@ def _conflicting_airframe_files(
     return conflicts
 
 
-def _deregister_cmake_names(cmake_list: Path, names: list[str]) -> None:
-    text = cmake_list.read_text()
-    for name in names:
-        text = re.sub(rf"^[^\S\n]*{re.escape(name)}[^\S\n]*\n", "", text, flags=re.M)
-    cmake_list.write_text(text)
-
-
-def _resolve_airframe_conflicts(
-    conflicts: dict[str, list[Path]], *, cmake_list: Path | None, prune: bool
-) -> None:
+def _raise_airframe_conflicts(conflicts: dict[str, list[Path]]) -> None:
     flat = [(name, path) for name, paths in conflicts.items() for path in paths]
     detail = "; ".join(f"{path.name} shadows generated {name}" for name, path in flat)
-    if not prune:
-        raise ValueError(
-            "conflicting PX4 posix airframe id(s): "
-            f"{detail}. Pick a free SYS_AUTOSTART in configs/airframes, or pass "
-            "--prune-conflicts to remove the stock file(s) so the generated "
-            "airframe is the sole match for its id."
-        )
-    pruned_names = []
-    for _name, path in flat:
-        path.unlink()
-        pruned_names.append(path.name)
-    if cmake_list is not None:
-        _deregister_cmake_names(cmake_list, pruned_names)
+    raise ValueError(
+        "conflicting PX4 posix airframe id(s): "
+        f"{detail}. Pick another SYS_AUTOSTART in PX4's custom model range "
+        f"{_CUSTOM_AIRFRAME_ID_MIN}-{_CUSTOM_AIRFRAME_ID_MAX}."
+    )
 
 
 def _patch_cmake_list(cmake_list: Path, script_names: tuple[str, ...]) -> None:
@@ -312,14 +302,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cmake-list", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--print-manifest", action="store_true")
-    parser.add_argument(
-        "--prune-conflicts",
-        action="store_true",
-        help=(
-            "Remove stock posix airframe files (and their CMake entries) that "
-            "share a generated airframe's SYS_AUTOSTART id, instead of failing."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -334,9 +316,7 @@ def _main() -> None:
         _write_airframe_scripts(airframes, args.output_dir)
         conflicts = _conflicting_airframe_files(args.output_dir, airframes)
         if conflicts:
-            _resolve_airframe_conflicts(
-                conflicts, cmake_list=args.cmake_list, prune=args.prune_conflicts
-            )
+            _raise_airframe_conflicts(conflicts)
 
     if args.cmake_list is not None:
         _patch_cmake_list(args.cmake_list, tuple(airframe.script_name for airframe in airframes))

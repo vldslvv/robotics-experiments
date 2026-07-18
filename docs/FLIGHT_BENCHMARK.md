@@ -42,10 +42,11 @@ model, logical CPU count, CPU governor, GPU count, and ordered GPU model list.
 This deliberately refuses a comparison instead of weakening the threshold on a
 different machine.
 
-The PX4 source reference must also match the baseline so an Isaac upgrade is
-not compared across a simultaneous flight-controller change. The Isaac image
-and version are expected to differ during an upgrade and are recorded rather
-than used to reject the comparison.
+The PX4 source reference must also match the baseline for the normal automated
+gate, so an Isaac upgrade is not accidentally compared across a simultaneous
+flight-controller change. The Isaac image and version are expected to differ
+during an Isaac upgrade and are recorded rather than used to reject the
+comparison.
 
 The workload contract records the scene, physics and rendering rates, solver,
 vehicle count, vehicle assets and IDs, methodology version, and fixed tick
@@ -79,3 +80,21 @@ differs from an existing baseline. Review the report before accepting it. To
 relax a gate intentionally, edit the tolerance in
 `benchmarks/flight/baseline.json` separately so the policy change is visible in
 review; baseline acceptance preserves those tolerances.
+
+For an intentional PX4 upgrade, benchmark the old and new PX4 refs on the same
+hardware with the Isaac image held fixed. Preserve the last old-ref report, then
+run the new ref against a temporary nonexistent baseline so the reporter emits a
+complete `no_baseline` report instead of rejecting the deliberate ref change:
+
+```text
+make benchmark-flight \
+  FLIGHT_BENCHMARK_BASELINE=.build/benchmarks/empty-baseline.json
+```
+
+Compare the new report's aggregate gated metrics with the old report using the
+same p50/p95 and real-time-factor tolerances in the table above. Do not create
+the temporary baseline file, accept it, or weaken tolerances to make the upgrade
+pass. After the review passes, accept the new report directly into the committed
+baseline with `benchmark-flight-accept`; acceptance retains the existing
+tolerances and requires matching hardware. A functional or performance
+regression blocks the PX4 upgrade.

@@ -1,6 +1,6 @@
 {
-  "accepted_at": "2026-07-17T15:26:36.946701+00:00",
-  "accepted_from": "flight.20260717T152225Z.28286",
+  "accepted_at": "2026-07-18T00:41:43.768239+00:00",
+  "accepted_from": "flight.20260718T003740Z.57427",
   "contracts": {
     "physics_only": {
       "methodology_version": 1,
@@ -39,7 +39,7 @@
     "isaac_versions": [
       "5.1.0.rc.19.5"
     ],
-    "px4_ref": "1dacb4cdef2d7145754fc788fa8dc482eed74b40"
+    "px4_ref": "d6f12ad1c4f70ad3230afd7d86e971421e02fef4"
   },
   "hardware": {
     "cpu_governor": "powersave",
@@ -52,34 +52,34 @@
   },
   "metrics": {
     "physics_only": {
-      "app_update_p50_ms": 16.729275,
-      "app_update_p95_ms": 16.8592973,
-      "app_update_p99_ms": 16.92866278,
-      "physics_p50_ms": 1.9922599792480469,
-      "physics_p95_ms": 2.5190240383148192,
-      "physics_p99_ms": 4.982774667739871,
-      "real_time_factor": 0.9960411745754666,
+      "app_update_p50_ms": 16.730751,
+      "app_update_p95_ms": 16.8611274,
+      "app_update_p99_ms": 16.936079279999998,
+      "physics_p50_ms": 1.979099988937378,
+      "physics_p95_ms": 2.6726579904556274,
+      "physics_p99_ms": 4.819489631652836,
+      "real_time_factor": 0.9960281939363199,
       "sim_elapsed_s": 20.000000949949026,
-      "simulation_app_start_s": 8.03,
-      "step_interval_p50_ms": 0.461859,
-      "step_interval_p95_ms": 15.560689,
-      "step_interval_p99_ms": 15.808773619999998,
-      "wall_elapsed_s": 20.079492154
+      "simulation_app_start_s": 7.903,
+      "step_interval_p50_ms": 0.45705,
+      "step_interval_p95_ms": 15.5825585,
+      "step_interval_p99_ms": 15.84515222,
+      "wall_elapsed_s": 20.079753838
     },
     "px4_flight": {
-      "app_update_p50_ms": 17.168281999999998,
-      "app_update_p95_ms": 17.537188800000003,
-      "app_update_p99_ms": 17.84573726,
-      "physics_p50_ms": 9.156874656677246,
-      "physics_p95_ms": 11.736516427993777,
-      "physics_p99_ms": 12.899516248703002,
-      "real_time_factor": 0.9665541086320107,
-      "sim_elapsed_s": 11.984000569209456,
-      "simulation_app_start_s": 8.058,
-      "step_interval_p50_ms": 2.401581,
-      "step_interval_p95_ms": 10.5617685,
-      "step_interval_p99_ms": 11.05989884,
-      "wall_elapsed_s": 12.398685663
+      "app_update_p50_ms": 17.181494999999998,
+      "app_update_p95_ms": 17.53639135,
+      "app_update_p99_ms": 18.21196959,
+      "physics_p50_ms": 9.114480018615723,
+      "physics_p95_ms": 12.060109758377074,
+      "physics_p99_ms": 13.493925809860226,
+      "real_time_factor": 0.9654509929417481,
+      "sim_elapsed_s": 10.216000485233963,
+      "simulation_app_start_s": 8.001,
+      "step_interval_p50_ms": 2.441395,
+      "step_interval_p95_ms": 10.562461,
+      "step_interval_p99_ms": 11.104809840000001,
+      "wall_elapsed_s": 10.581583695
     }
   },
   "repetitions": 3,

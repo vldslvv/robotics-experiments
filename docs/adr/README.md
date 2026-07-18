@@ -43,7 +43,8 @@ fuller design doc under `docs/` where one exists.
 - [0009](0009-hexacopter-airframe-rotor-geometry.md) (2026-06-29) -- Rewrite the
   hexa airframe `CA_ROTOR` to match the USD asset (fixes the takeoff tip-over).
 - [0010](0010-quad-asset-uses-x500-airframe.md) (2026-06-30) -- Bind the square-X
-  quad asset to `4019`/`none_x500_v2` instead of the wide Iris geometry.
+  quad asset to `4019`/`none_x500_v2` instead of the wide Iris geometry (numeric
+  ID later superseded by 0015).
 - [0011](0011-config-driven-px4-airframe-generation.md) (2026-06-30) -- Generate
   airframes from `configs/airframes` at build time; single source for sim + PX4.
   Supersedes the hand-written mechanism of 0008-0010.
@@ -51,6 +52,9 @@ fuller design doc under `docs/` where one exists.
   (2026-06-30) -- Rebuild the quad as hardware-faithful `holybro_x500_v2`; author
   only cited per-component leaves and compute body mass/inertia + `rotor_constant`
   from them.
+- [0015](0015-px4-1.17-and-custom-airframe-ids.md) (2026-07-17) -- Upgrade PX4
+  SITL to 1.17.0 and move generated airframes to PX4's reserved custom model ID
+  range, superseding the earlier numeric bindings.
 
 ## RL press policy
 

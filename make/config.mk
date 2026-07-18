@@ -123,8 +123,8 @@ RMW_IMPLEMENTATION             ?= rmw_fastrtps_cpp
 FASTRTPS_DEFAULT_PROFILES_FILE ?= /etc/ros/fastdds.xml
 
 # PX4 SITL image / container (stands in for the flight controller)
-PX4_TAG            ?= v1.14.3
-PX4_REF            ?= 1dacb4cdef2d7145754fc788fa8dc482eed74b40
+PX4_TAG            ?= v1.17.0
+PX4_REF            ?= d6f12ad1c4f70ad3230afd7d86e971421e02fef4
 PX4_IMAGE_NAME     ?= vv-px4-sitl
 PX4_IMAGE_TAG      ?= $(PX4_TAG)
 PX4_IMAGE          = $(PX4_IMAGE_NAME):$(PX4_IMAGE_TAG)

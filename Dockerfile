@@ -281,7 +281,7 @@ RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
 # container (not in isaac-sim or ros) to mirror the hardware split.
 FROM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 AS px4
 
-ARG PX4_REF=1dacb4cdef2d7145754fc788fa8dc482eed74b40
+ARG PX4_REF=d6f12ad1c4f70ad3230afd7d86e971421e02fef4
 ENV PX4_DIR=/opt/PX4-Autopilot
 ENV PX4_AIRFRAME_MANIFEST=/usr/local/share/robotics-experiments/px4-airframes.json
 ENV DEBIAN_FRONTEND=noninteractive
@@ -321,7 +321,7 @@ RUN python3 /usr/local/bin/generate_px4_airframes.py \
 
 # Headless SITL build; Pegasus provides dynamics over MAVLink, so no built-in sim backend.
 # Build the firmware only — omit the sim target (e.g. `none`) since it would launch
-# the nsh shell during `docker build` even with DONT_RUN=1 on PX4 v1.14.x.
+# the nsh shell during `docker build` even with DONT_RUN=1.
 RUN cd ${PX4_DIR} && make px4_sitl_default
 
 COPY px4/docker/run_px4_sitl_fresh.sh /usr/local/bin/run_px4_sitl_fresh

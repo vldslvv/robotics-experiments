@@ -223,9 +223,12 @@ def test_mixed_airframes_drive_bridge_and_px4_launch():
     assert hexa.spawn.usd_path.endswith("/hexacopter_s550.usda")
     assert len(quad.bridge.max_rotor_velocity) == 4
     assert len(hexa.bridge.max_rotor_velocity) == 6
-    assert [(vehicle.id, vehicle.px4_sim_model) for vehicle in config.vehicles.values()] == [
-        (0, "none_x500_v2"),
-        (1, "none_hexa_x"),
+    assert [
+        (vehicle.id, vehicle.px4_sim_model, vehicle.px4_sys_autostart)
+        for vehicle in config.vehicles.values()
+    ] == [
+        (0, "none_x500_v2", 22000),
+        (1, "none_hexa_x", 22001),
     ]
 
 

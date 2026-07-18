@@ -252,7 +252,7 @@ def _vehicle(*, vehicle_id=0, prim_name="Drone", spawn_xy=(0.0, 0.0), **px4_over
         gcs_port=14550 + vehicle_id,
         debug_log_path=px4.debug_log_path.replace("{vehicle}", str(vehicle_id)),
         px4_sim_model="none_x500_v2",
-        px4_sys_autostart=4019,
+        px4_sys_autostart=22000,
     )
 
 

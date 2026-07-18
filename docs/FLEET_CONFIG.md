@@ -38,6 +38,11 @@ The loader enriches each `VehicleConfig` once:
 - MAVLink port, GCS port, bridge log path, PX4 simulator model, and PX4 autostart
   id are derived from the vehicle identity, spawn asset, and nested configs.
 
+Repo-generated PX4 model airframes use PX4's reserved custom model range
+`22000-22999`. The current bindings are `none_x500_v2`/`22000` and
+`none_hexa_x`/`22001`; the airframe generator rejects project configs outside
+that range.
+
 Airframe physical values are authoritative over the generic bridge fallback.
 Unknown enabled assets fail configuration loading instead of selecting the wrong
 airframe. PX4 instance identity and ROS frame prefixes are derived at their

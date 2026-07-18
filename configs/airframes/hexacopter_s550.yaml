@@ -138,11 +138,9 @@ pusher:
 # build stage. Keep it flat/literal -- no Hydra interpolation or defaults here.
 px4:
   sitl:
-    # 6001 is free in the posix airframe set (upstream ships 6001_hexa_x only in
-    # the NuttX set), so SYS_AUTOSTART=6001 deterministically selects this
-    # generated none-family hexarotor-x airframe.
+    # PX4 reserves 22000-22999 for custom model airframes.
     sim_model: none_hexa_x
-    sys_autostart: 6001
+    sys_autostart: 22001
     mav_type: 13
     ca_rotor_km_abs: 0.05
   bridge:
