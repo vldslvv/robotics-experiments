@@ -196,6 +196,11 @@ def _parse_scene_args(description: str, default_scene: str | None) -> argparse.N
         action="store_true",
         help="Capture performance metrics under the integration run artifact directory.",
     )
+    parser.add_argument(
+        "--benchmark-profile",
+        action="store_true",
+        help="Enable the Tracy profiler for a separate, non-gated benchmark run.",
+    )
     return parser.parse_args()
 
 
@@ -237,6 +242,9 @@ def run_scene_test(
     args = _parse_scene_args(description, default_scene)
     scene = args.scene
     strict = bool(args.strict)
+    benchmark_profile = bool(args.benchmark_profile)
+    if benchmark_profile and not args.benchmark:
+        raise ValueError("--benchmark-profile requires --benchmark")
     benchmark_output_dir = None
     if args.benchmark:
         try:
@@ -265,7 +273,28 @@ def run_scene_test(
     try:
         stage_start_s = timing.start()
         report(f"{test_name}: starting SimulationApp")
-        simulation_app = SimulationApp({"headless": True, "hide_ui": True})
+        app_config: dict[str, Any] = {"headless": True, "hide_ui": True}
+        if benchmark_profile:
+            app_config.update(
+                {
+                    "profiler_backend": ["tracy"],
+                    "extra_args": [
+                        "--enable",
+                        "omni.kit.profiler.tracy",
+                        "--/profiler/enabled=true",
+                        "--/privacy/externalBuild=0",
+                        "--/app/profileFromStart=true",
+                        "--/profiler/gpu=true",
+                        "--/profiler/gpu/tracyInject/enabled=true",
+                        "--/profiler/gpu/tracyInject/msBetweenClockCalibration=0",
+                        "--/app/profilerMask=1",
+                        "--/profiler/channels/carb.tasking/enabled=false",
+                        "--/profiler/channels/carb.events/enabled=false",
+                        "--/plugins/carb.profiler-tracy.plugin/fibersAsThreads=false",
+                    ],
+                }
+            )
+        simulation_app = SimulationApp(app_config)
         report(f"{test_name}: SimulationApp started")
         timing.report_stage("simulation_app_start", stage_start_s)
 
@@ -313,6 +342,11 @@ def run_scene_test(
         error = exc
         report(f"ERROR: {type(exc).__name__}: {exc}")
     finally:
+        if benchmark_profile and error is None:
+            report(f"{test_name}: profile workload complete; exiting without Kit cleanup")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
         if simulation_app is not None:
             stage_start_s = timing.start()
             try:

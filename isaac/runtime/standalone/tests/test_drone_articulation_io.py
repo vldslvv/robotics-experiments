@@ -13,6 +13,7 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,6 +22,7 @@ from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.px4_bridge import (
     IsaacArticulationIO,
+    RotorDynamics,
     discover_px4_rotor_mapping,
 )
 from robotics_experiments.simulation import apply_settings
@@ -37,6 +39,10 @@ PHYSICS_DT_S = 0.004
 SETTLE_UPDATES = 8
 _BENCHMARK_WARMUP_TICKS = 500
 _BENCHMARK_MEASURE_TICKS = 5_000
+_BENCHMARK_RENDER_WARMUP_UPDATES = 60
+_BENCHMARK_RENDER_MEASURE_UPDATES = 600
+_BENCHMARK_RENDERER = "RaytracedLighting"
+_BENCHMARK_RENDER_RESOLUTION = (1280, 720)
 
 
 def _assert_finite_array(value: Any, shape: tuple[int, ...], label: str) -> None:
@@ -74,6 +80,173 @@ def _advance(context: SceneTestContext, steps: int) -> None:
         context.simulation_app.update()
 
 
+def _set_rate_limit(*, enabled: bool) -> None:
+    import carb
+
+    carb.settings.get_settings().set("/app/runLoops/main/rateLimitEnabled", enabled)
+
+
+def _run_benchmark_phase(
+    *,
+    context: SceneTestContext,
+    workload: str,
+    target_app_updates: int | None,
+    target_physics_ticks: int | None,
+    rate_limited: bool,
+    on_physics_step: Callable[[StandaloneBenchmarkCapture, float], None] | None = None,
+) -> None:
+    benchmark = StandaloneBenchmarkCapture(
+        context=context,
+        workload=workload,
+        target_app_updates=target_app_updates,
+        target_physics_ticks=target_physics_ticks,
+        rate_limited=rate_limited,
+        renderer=_BENCHMARK_RENDERER,
+        render_resolution=_BENCHMARK_RENDER_RESOLUTION,
+        on_physics_step=on_physics_step,
+    )
+    context.report(f"{TEST_NAME}: measuring {workload}")
+    benchmark.start()
+    try:
+        if target_app_updates is not None:
+            while benchmark.app_update_count < target_app_updates:
+                context.simulation_app.update()
+        else:
+            assert target_physics_ticks is not None
+            while benchmark.physics_step_count < target_physics_ticks:
+                context.simulation_app.update()
+    finally:
+        benchmark.stop()
+    context.report(
+        f"{TEST_NAME}: captured {benchmark.app_update_count} app updates and "
+        f"{benchmark.physics_step_count} physics ticks for {workload}"
+    )
+
+
+def _create_render_workload() -> object:
+    import omni.replicator.core as rep
+
+    camera = rep.create.camera(
+        name="isaac_core_benchmark_camera",
+        position=[3.0, -3.0, 2.0],
+        rotation=[65.0, 0.0, 45.0],
+    )
+    render_product = rep.create.render_product(
+        camera,
+        _BENCHMARK_RENDER_RESOLUTION,
+        name="isaac_core_benchmark_render_product",
+    )
+    rep.orchestrator.preview()
+    return render_product
+
+
+def _run_empty_scene_benchmarks(
+    *,
+    context: SceneTestContext,
+    timeline: Any,
+) -> object:
+    timeline.stop()
+    _set_rate_limit(enabled=False)
+    _advance(context, _BENCHMARK_RENDER_WARMUP_UPDATES)
+    _run_benchmark_phase(
+        context=context,
+        workload="kit_only_unlimited",
+        target_app_updates=_BENCHMARK_RENDER_MEASURE_UPDATES,
+        target_physics_ticks=None,
+        rate_limited=False,
+    )
+
+    context.report(f"{TEST_NAME}: creating the fixed render workload")
+    render_product = _create_render_workload()
+    _advance(context, _BENCHMARK_RENDER_WARMUP_UPDATES)
+    _run_benchmark_phase(
+        context=context,
+        workload="render_only_unlimited",
+        target_app_updates=_BENCHMARK_RENDER_MEASURE_UPDATES,
+        target_physics_ticks=None,
+        rate_limited=False,
+    )
+
+    timeline.play()
+    advance_physics_ticks(
+        simulation_app=context.simulation_app,
+        minimum_ticks=_BENCHMARK_WARMUP_TICKS,
+    )
+    _run_benchmark_phase(
+        context=context,
+        workload="scene_physics_unlimited",
+        target_app_updates=None,
+        target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
+        rate_limited=False,
+    )
+    timeline.stop()
+    return render_product
+
+
+def _run_drone_benchmarks(
+    *,
+    context: SceneTestContext,
+    articulation_io: IsaacArticulationIO,
+) -> None:
+    _set_rate_limit(enabled=False)
+    advance_physics_ticks(
+        simulation_app=context.simulation_app,
+        minimum_ticks=_BENCHMARK_WARMUP_TICKS,
+    )
+    _run_benchmark_phase(
+        context=context,
+        workload="drone_physics_unlimited",
+        target_app_updates=None,
+        target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
+        rate_limited=False,
+    )
+
+    zero_dynamics = RotorDynamics(
+        forces_n=np.zeros(articulation_io.num_rotors, dtype=np.float64),
+        body_torque_n_m=np.zeros(3, dtype=np.float64),
+        body_drag_n=np.zeros(3, dtype=np.float64),
+        rotor_omega_rad_s=np.full(articulation_io.num_rotors, 600.0, dtype=np.float64),
+    )
+    sim_time_us = 0
+
+    def articulation_tick(capture: StandaloneBenchmarkCapture, dt: float, /) -> None:
+        nonlocal sim_time_us
+        sim_time_us += int(round(dt * 1_000_000))
+        with capture.measure_component("articulation_state_read"):
+            articulation_io.read_state(sim_time_us=sim_time_us)
+        with capture.measure_component("rotor_visual_update"):
+            articulation_io.update_rotor_spin(zero_dynamics.rotor_omega_rad_s, dt)
+        with capture.measure_component("dynamics_apply"):
+            articulation_io.apply_dynamics(zero_dynamics)
+
+    advance_physics_ticks(
+        simulation_app=context.simulation_app,
+        minimum_ticks=_BENCHMARK_WARMUP_TICKS,
+    )
+    _run_benchmark_phase(
+        context=context,
+        workload="drone_articulation_unlimited",
+        target_app_updates=None,
+        target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
+        rate_limited=False,
+        on_physics_step=articulation_tick,
+    )
+
+    _set_rate_limit(enabled=True)
+    advance_physics_ticks(
+        simulation_app=context.simulation_app,
+        minimum_ticks=_BENCHMARK_WARMUP_TICKS,
+    )
+    _run_benchmark_phase(
+        context=context,
+        workload="drone_articulation_realtime",
+        target_app_updates=None,
+        target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
+        rate_limited=True,
+        on_physics_step=articulation_tick,
+    )
+
+
 def _assert_vehicle_state(state: VehicleState, sim_time_us: int) -> None:
     _assert_finite_array(state.position_enu, shape=(3,), label="position_enu")
     _assert_finite_array(
@@ -104,6 +277,11 @@ def _run_test(context: SceneTestContext) -> None:
 
     articulation_io = None
     timeline = omni.timeline.get_timeline_interface()
+    render_product = None
+    if context.benchmark_output_dir is not None:
+        context.report(f"{TEST_NAME}: running empty-scene Kit and render phases")
+        render_product = _run_empty_scene_benchmarks(context=context, timeline=timeline)
+
     context.report(f"{TEST_NAME}: spawning configured drone")
     spawn_drone(stage=context.stage, config=vehicle.spawn)
     try:
@@ -146,30 +324,16 @@ def _run_test(context: SceneTestContext) -> None:
         _assert_vehicle_state(state_after_force, sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000))
 
         if context.benchmark_output_dir is not None:
-            context.report(f"{TEST_NAME}: warming physics for {_BENCHMARK_WARMUP_TICKS} ticks")
-            advance_physics_ticks(
-                simulation_app=context.simulation_app,
-                minimum_ticks=_BENCHMARK_WARMUP_TICKS,
-            )
-            benchmark = StandaloneBenchmarkCapture(
-                context=context,
-                workload="physics_only",
-                target_physics_ticks=_BENCHMARK_MEASURE_TICKS,
-            )
-            context.report(f"{TEST_NAME}: measuring {_BENCHMARK_MEASURE_TICKS} physics ticks")
-            benchmark.start()
-            try:
-                while benchmark.physics_step_count < _BENCHMARK_MEASURE_TICKS:
-                    context.simulation_app.update()
-            finally:
-                benchmark.stop()
-            context.report(f"{TEST_NAME}: captured {benchmark.physics_step_count} physics ticks")
+            context.report(f"{TEST_NAME}: running drone physics and articulation phases")
+            _run_drone_benchmarks(context=context, articulation_io=articulation_io)
     finally:
         context.report(f"{TEST_NAME}: stopping timeline and despawning drone")
         timeline.stop()
+        _set_rate_limit(enabled=True)
         if articulation_io is not None:
             articulation_io.shutdown()
         despawn_drone(stage=context.stage, config=vehicle.spawn)
+        del render_product
 
     context.report(f"{TEST_NAME}: verified real drone articulation read/write path")
 

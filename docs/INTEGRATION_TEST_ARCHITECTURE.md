@@ -126,11 +126,12 @@ vector formatter and include full ENU position and linear velocity
 flight-performance triage.
 
 The integration runners also accept `ISAAC_TEST_EXTRA_ARGS` for an owning
-workflow to pass standalone-script flags. The flight performance workflow uses
-`--benchmark` to add measurements to the existing articulation and PX4 takeoff
-scenarios; ordinary integration targets do not capture benchmark samples. Its
-methodology, gate, and baseline workflow are documented in
-`docs/FLIGHT_BENCHMARK.md`.
+workflow to pass standalone-script flags. The Isaac core performance workflow
+uses `--benchmark` to add phased Kit/render/physics/articulation measurements to
+the existing drone articulation scenario. Its separate one-shot trace also uses
+`--benchmark-profile` and `ISAAC_PROFILE_TRACE_NAME`; ordinary integration
+targets do not capture samples or profiler data. The methodology, gate, and
+baseline workflow are documented in `docs/ISAAC_CORE_BENCHMARK.md`.
 
 ## Scene selection
 

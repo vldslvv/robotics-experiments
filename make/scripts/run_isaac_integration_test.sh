@@ -84,6 +84,7 @@ done
 
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
+: "${ISAAC_PROFILE_TRACE_NAME:=}"
 
 SCRIPT_START_MS="$(now_ms)"
 run_root="$(make_run_root)"
@@ -99,6 +100,12 @@ case "${run_root}" in
         ;;
 esac
 CONTAINER_TIMING_LOG="${container_run_root}/integration-timing.log"
+profile_env=()
+if [ -n "${ISAAC_PROFILE_TRACE_NAME}" ]; then
+    profile_env+=(
+        -e "ISAAC_PROFILE_TRACE=${container_run_root}/${ISAAC_PROFILE_TRACE_NAME}"
+    )
+fi
 
 mkdir -p "${ISAAC_RUN_ROOT}/logs" "${ISAAC_RUN_ROOT}/data" "${ISAAC_RUN_ROOT}/documents"
 mkdir_colon_dirs "${ISAAC_HOST_CACHE_DIRS}"
@@ -125,6 +132,7 @@ if docker run --rm \
     -e "ISAAC_TEST_EXTRA_ARGS=${ISAAC_TEST_EXTRA_ARGS}" \
     -e "SCENE=${SCENE}" \
     -e "TEST_TARGET=${TEST_TARGET}" \
+    "${profile_env[@]}" \
     ${ISAAC_DOCKER_VOLUMES} \
     --entrypoint /bin/bash \
     "${ISAAC_IMAGE}" \

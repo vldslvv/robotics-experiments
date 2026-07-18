@@ -1,0 +1,305 @@
+{
+  "accepted_at": "2026-07-18T19:11:21.474168+00:00",
+  "accepted_from": "isaac-core.20260718T172627Z.30458",
+  "contracts": {
+    "drone_articulation_realtime": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": true,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": null,
+      "target_physics_ticks": 5000,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "drone_articulation_unlimited": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": false,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": null,
+      "target_physics_ticks": 5000,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "drone_physics_unlimited": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": false,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": null,
+      "target_physics_ticks": 5000,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "kit_only_unlimited": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": false,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": 600,
+      "target_physics_ticks": null,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "render_only_unlimited": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": false,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": 600,
+      "target_physics_ticks": null,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    },
+    "scene_physics_unlimited": {
+      "methodology_version": 3,
+      "physics_hz": 250.0,
+      "rate_limited": false,
+      "render_resolution": [
+        1280,
+        720
+      ],
+      "renderer": "RaytracedLighting",
+      "rendering_hz": 60.0,
+      "scene": "@isaac/assets/TestScenes/MinimalIntegration.usda",
+      "solver_type": "TGS",
+      "target_app_updates": null,
+      "target_physics_ticks": 5000,
+      "vehicle_assets": [
+        "isaac/assets/LightSwitchWarehouse/holybro_x500_v2.usda"
+      ],
+      "vehicle_count": 1,
+      "vehicle_ids": [
+        0
+      ]
+    }
+  },
+  "environment": {
+    "isaac_image": "vv-isaac-sim-custom:5.1.0",
+    "isaac_image_id": "sha256:d582a53ad6f501438b109b376016adf74450129c699f09d62614f6daeb8732ad",
+    "isaac_versions": [
+      "5.1.0.rc.19.5"
+    ]
+  },
+  "hardware": {
+    "cpu_governor": "powersave",
+    "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor",
+    "gpu_count": 1,
+    "gpu_models": [
+      "NVIDIA GeForce RTX 4090"
+    ],
+    "logical_cpus": 32
+  },
+  "metrics": {
+    "drone_articulation_realtime": {
+      "app_update_p50_ms": 16.72693,
+      "app_update_p95_ms": 16.897824999999997,
+      "app_update_p99_ms": 16.94363608,
+      "articulation_state_read_p50_ms": 0.09320049999999999,
+      "articulation_state_read_p95_ms": 0.12729905,
+      "articulation_state_read_p99_ms": 0.15670591000000003,
+      "dynamics_apply_p50_ms": 0.21004,
+      "dynamics_apply_p95_ms": 0.26258795,
+      "dynamics_apply_p99_ms": 0.31457912000000016,
+      "gpu_p50_ms": 3.59424,
+      "gpu_p95_ms": 4.1502976,
+      "gpu_p99_ms": 4.293632,
+      "physics_p50_ms": 7.027009963989258,
+      "physics_p95_ms": 8.887062263488769,
+      "physics_p99_ms": 9.404334087371826,
+      "real_time_factor": 0.996337817151453,
+      "rotor_visual_update_p50_ms": 0.194756,
+      "rotor_visual_update_p95_ms": 0.25684405,
+      "rotor_visual_update_p99_ms": 0.31599174000000035,
+      "sim_elapsed_s": 20.000000949949026,
+      "step_interval_p50_ms": 1.755445,
+      "step_interval_p95_ms": 11.745936,
+      "step_interval_p99_ms": 12.067128879999999,
+      "wall_elapsed_s": 20.073513828
+    },
+    "drone_articulation_unlimited": {
+      "app_update_p50_ms": 13.525644,
+      "app_update_p95_ms": 15.513737299999999,
+      "app_update_p99_ms": 16.324465919999998,
+      "articulation_state_read_p50_ms": 0.092489,
+      "articulation_state_read_p95_ms": 0.1766355,
+      "articulation_state_read_p99_ms": 0.19441690000000003,
+      "dynamics_apply_p50_ms": 0.210016,
+      "dynamics_apply_p95_ms": 0.31430205,
+      "dynamics_apply_p99_ms": 0.42329861,
+      "gpu_p50_ms": 4.8128,
+      "gpu_p95_ms": 5.2552768,
+      "gpu_p99_ms": 5.5299072,
+      "physics_p50_ms": 10.24368953704834,
+      "physics_p95_ms": 12.100582122802734,
+      "physics_p99_ms": 12.550152778625488,
+      "real_time_factor": 1.2096069010286563,
+      "rotor_visual_update_p50_ms": 0.19393549999999998,
+      "rotor_visual_update_p95_ms": 0.3864965,
+      "rotor_visual_update_p99_ms": 0.41779960000000005,
+      "sim_elapsed_s": 20.000000949949026,
+      "step_interval_p50_ms": 1.791663,
+      "step_interval_p95_ms": 8.3440813,
+      "step_interval_p99_ms": 9.207091359999971,
+      "wall_elapsed_s": 16.534297988
+    },
+    "drone_physics_unlimited": {
+      "app_update_p50_ms": 7.242886,
+      "app_update_p95_ms": 8.3098002,
+      "app_update_p99_ms": 9.037493220000002,
+      "gpu_p50_ms": 4.22912,
+      "gpu_p95_ms": 4.5497344,
+      "gpu_p99_ms": 4.72387584,
+      "physics_p50_ms": 4.701449871063232,
+      "physics_p95_ms": 5.333612966537475,
+      "physics_p99_ms": 7.5538580703735345,
+      "real_time_factor": 2.268981068354614,
+      "sim_elapsed_s": 20.000000949949026,
+      "step_interval_p50_ms": 0.512275,
+      "step_interval_p95_ms": 4.773212900000001,
+      "step_interval_p99_ms": 5.866942959999993,
+      "wall_elapsed_s": 8.814529671
+    },
+    "kit_only_unlimited": {
+      "app_update_p50_ms": 2.286945,
+      "app_update_p95_ms": 2.8450230000000003,
+      "app_update_p99_ms": 3.8750046799999995,
+      "gpu_p50_ms": 2.16272,
+      "gpu_p95_ms": 2.5271264,
+      "gpu_p99_ms": 2.75779712,
+      "wall_elapsed_s": 1.215456008
+    },
+    "render_only_unlimited": {
+      "app_update_p50_ms": 4.02088,
+      "app_update_p95_ms": 4.8599916,
+      "app_update_p99_ms": 5.74784796,
+      "gpu_p50_ms": 3.966976,
+      "gpu_p95_ms": 4.509078400000001,
+      "gpu_p99_ms": 4.70091776,
+      "wall_elapsed_s": 2.050934483
+    },
+    "scene_physics_unlimited": {
+      "app_update_p50_ms": 6.574979,
+      "app_update_p95_ms": 7.5909868,
+      "app_update_p99_ms": 8.46156048,
+      "gpu_p50_ms": 3.877888,
+      "gpu_p95_ms": 4.301926399999999,
+      "gpu_p99_ms": 4.3735244799999995,
+      "physics_p50_ms": 4.049709796905518,
+      "physics_p95_ms": 4.53832893371582,
+      "physics_p99_ms": 4.729630260467529,
+      "real_time_factor": 2.4071795558089506,
+      "sim_elapsed_s": 20.000000949949026,
+      "step_interval_p50_ms": 0.343948,
+      "step_interval_p95_ms": 4.635662499999999,
+      "step_interval_p99_ms": 5.687009479999991,
+      "wall_elapsed_s": 8.308479067
+    }
+  },
+  "repetitions": 3,
+  "schema_version": 2,
+  "tolerances": {
+    "drone_articulation_realtime": {
+      "app_update_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "app_update_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      },
+      "real_time_factor": {
+        "absolute_min": 0.95,
+        "direction": "min",
+        "relative_percent": 5.0
+      }
+    },
+    "drone_articulation_unlimited": {
+      "app_update_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "app_update_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      },
+      "gpu_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "gpu_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      },
+      "physics_p50_ms": {
+        "direction": "max",
+        "relative_percent": 10.0
+      },
+      "physics_p95_ms": {
+        "direction": "max",
+        "relative_percent": 15.0
+      }
+    }
+  }
+}

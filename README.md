@@ -113,7 +113,7 @@ make test-integration-all
 | `make test-integration-px4-takeoff`, `make test-integration-px4-navigation`, instability and multi-drone variants | PX4 lockstep, routines, flight envelopes, and fleet isolation | Isaac/PX4 images, NVIDIA runtime |
 | `make test-integration-press-policy` | Trained policy artifact deployment | Training artifact plus Isaac Lab image |
 | `make test-integration-all` | Seven stable Isaac, RL, and PX4 integration targets | Built runtime images, NVIDIA runtime |
-| `make benchmark-flight` | Isaac physics and PX4 lockstep upgrade regression gate | Quiet comparable host, built Isaac/PX4 images, NVIDIA runtime |
+| `make benchmark-isaac-core` | Isaac core upgrade regression gate and contributor attribution | Quiet comparable host, built Isaac image, NVIDIA runtime |
 
 For a fresh checkout, install the host environment with `uv sync --extra dev`,
 run `make check`, build the pinned execution images with `make build`, then run
@@ -121,7 +121,7 @@ run `make check`, build the pinned execution images with `make build`, then run
 in [Runtime operations](docs/RUNTIME_OPERATIONS.md) and
 [Integration test architecture](docs/INTEGRATION_TEST_ARCHITECTURE.md). The
 three-repeat upgrade benchmark and explicit baseline workflow are documented in
-[Flight performance benchmark](docs/FLIGHT_BENCHMARK.md).
+[Isaac core performance benchmark](docs/ISAAC_CORE_BENCHMARK.md).
 
 Destroy containers and images:
 

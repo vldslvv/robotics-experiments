@@ -37,9 +37,9 @@ Read area docs on demand when a task touches that area:
 - Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
   target mechanics, harness scripts, caching, artifacts, concurrency, and
   multi-instance PX4.
-- Flight performance benchmark: `docs/FLIGHT_BENCHMARK.md` for the Isaac
-  physics/PX4 lockstep upgrade gate, comparable-hardware contract, artifacts,
-  and baseline acceptance.
+- Isaac core benchmark: `docs/ISAAC_CORE_BENCHMARK.md` for the Isaac upgrade
+  gate, per-contributor attribution, comparable-hardware contract, Tracy
+  artifacts, and baseline acceptance.
 - PX4 bridge contract:
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` for
   bridge interfaces, frame conventions, motor ordering, lockstep, and actuator

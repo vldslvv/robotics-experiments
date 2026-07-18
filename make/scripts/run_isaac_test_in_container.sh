@@ -74,6 +74,27 @@ if [ -n "${ISAAC_TEST_EXTRA_ARGS}" ]; then
     extra_args=(${ISAAC_TEST_EXTRA_ARGS})
 fi
 
+trace_capture_pid=""
+cleanup_trace_capture() {
+    if [ -n "${trace_capture_pid}" ] && kill -0 "${trace_capture_pid}" 2>/dev/null; then
+        kill "${trace_capture_pid}" 2>/dev/null || true
+        wait "${trace_capture_pid}" 2>/dev/null || true
+    fi
+}
+trap cleanup_trace_capture EXIT
+
+: "${ISAAC_PROFILE_TRACE:=}"
+if [ -n "${ISAAC_PROFILE_TRACE}" ]; then
+    trace_bins=(/isaac-sim/extscache/omni.kit.profiler.tracy-*/bin/capture)
+    if [ "${#trace_bins[@]}" -ne 1 ] || [ ! -x "${trace_bins[0]}" ]; then
+        echo "Expected exactly one executable Tracy capture binary, found ${#trace_bins[@]}" >&2
+        exit 2
+    fi
+    mkdir -p "$(dirname "${ISAAC_PROFILE_TRACE}")"
+    "${trace_bins[0]}" -a 127.0.0.1 -o "${ISAAC_PROFILE_TRACE}" -f &
+    trace_capture_pid=$!
+fi
+
 SCRIPT_START_MS="$(now_ms)"
 cd /isaac-sim
 rm -f "${ISAAC_TEST_LOG}"
@@ -87,6 +108,18 @@ else
     status=$?
     integration_timing "test_script" "${stage_start_ms}" "fail"
     exit "${status}"
+fi
+
+if [ -n "${trace_capture_pid}" ]; then
+    if ! wait "${trace_capture_pid}"; then
+        echo "Tracy capture failed" >&2
+        exit 2
+    fi
+    trace_capture_pid=""
+    if [ ! -s "${ISAAC_PROFILE_TRACE}" ]; then
+        echo "Tracy capture was not written: ${ISAAC_PROFILE_TRACE}" >&2
+        exit 2
+    fi
 fi
 
 stage_start_ms="$(now_ms)"
