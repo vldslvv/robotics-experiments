@@ -24,7 +24,10 @@ control bug is caught per driver so it never spams Kit or stalls the others. The
 strict, asserting counterpart is the standalone scenario's adapter.
 """
 
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass
 from typing import Any
 
 import carb
@@ -36,7 +39,9 @@ from omni.timeline import TimelineEventType
 from omni.usd import StageEventType
 
 from ExperimentRuntime_python.global_variables import EXTENSION_TITLE
+from robotics_experiments.commanding import FailureKind
 from robotics_experiments.config import load_config
+from robotics_experiments.px4_bridge import BridgeStatus
 from robotics_experiments.runtime import (
     FleetDriverEnv,
     adopt_current_stage,
@@ -44,16 +49,42 @@ from robotics_experiments.runtime import (
     build_drivers,
     create_fleet,
     open_scene,
+    read_bridge_host_status,
     spawn_fleet,
     start_bridges,
     teardown,
     tick_drivers,
 )
 
-__all__ = ["Extension"]
+__all__ = [
+    "ExperimentRuntimeSnapshot",
+    "Extension",
+    "VehicleRuntimeSnapshot",
+    "get_instance",
+]
 
 _LOG_PREFIX = f"[{EXTENSION_TITLE}]"
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+_INSTANCE: Extension | None = None
+
+
+@dataclass(frozen=True)
+class VehicleRuntimeSnapshot:
+    """Immutable progress and bridge status for one flying vehicle."""
+
+    label: str
+    sim_time_us: int
+    bridge_status: BridgeStatus | None
+    completed_steps: int
+
+
+@dataclass(frozen=True)
+class ExperimentRuntimeSnapshot:
+    """Read-only live-extension state exposed to dependent Kit plugins."""
+
+    scene_ready: bool
+    failure: str | None
+    vehicles: tuple[VehicleRuntimeSnapshot, ...]
 
 
 class Extension(omni.ext.IExt):
@@ -72,6 +103,7 @@ class Extension(omni.ext.IExt):
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
         self._fleet = create_fleet(config=load_config(config_path))
         self._scene_opened = False
+        self._failure: str | None = None
         self._scene_open_sub: Any = None
         self._update_sub: Any = None
 
@@ -89,6 +121,8 @@ class Extension(omni.ext.IExt):
         self._scene_open_sub = app.get_update_event_stream().create_subscription_to_pop(
             self._open_scene_when_ready, name="experiment_runtime_open_scene"
         )
+        global _INSTANCE
+        _INSTANCE = self
 
     def _open_scene_when_ready(self, event):
         """Open the configured scene once Kit reports the app is ready."""
@@ -109,6 +143,33 @@ class Extension(omni.ext.IExt):
         self._stage_event_sub = None
         self._timeline_event_sub = None
         self._fleet = teardown(state=self._fleet)
+        global _INSTANCE
+        if _INSTANCE is self:
+            _INSTANCE = None
+
+    def read_status(self) -> ExperimentRuntimeSnapshot:
+        """Return an immutable snapshot for dependent runtime plugins."""
+        vehicles = []
+        for flying in self._fleet.flying:
+            host = flying.spawned.host
+            if host is None:
+                raise RuntimeError(
+                    f"{_LOG_PREFIX} flying vehicle {flying.spawned.label!r} has no bridge host"
+                )
+            host_status = read_bridge_host_status(host=host)
+            vehicles.append(
+                VehicleRuntimeSnapshot(
+                    label=flying.spawned.label,
+                    sim_time_us=host_status.sim_time_us,
+                    bridge_status=host_status.bridge_status,
+                    completed_steps=flying.driver.previous_cursor,
+                )
+            )
+        return ExperimentRuntimeSnapshot(
+            scene_ready=self._fleet.stage is not None,
+            failure=self._failure,
+            vehicles=tuple(vehicles),
+        )
 
     def _on_stage_event(self, event):
         """Adopt and configure a stage once it finishes opening.
@@ -139,6 +200,7 @@ class Extension(omni.ext.IExt):
 
     def _setup_fleet(self):
         """Spawn the fleet, start the bridges, and arm the routine drivers."""
+        self._failure = None
         if self._fleet.stage is None:
             carb.log_error(f"{_LOG_PREFIX} no stage adopted yet; cannot spawn fleet")
             return
@@ -171,7 +233,16 @@ class Extension(omni.ext.IExt):
         self._fleet = tick_drivers(state=self._fleet, on_error=self._log_tick_error)
 
     def _log_tick_error(self, flying, exc):
-        carb.log_error(f"{_LOG_PREFIX} [{flying.spawned.label}] control tick failed: {exc}")
+        message = f"[{flying.spawned.label}] control tick failed: {exc}"
+        self._failure = message
+        carb.log_error(f"{_LOG_PREFIX} {message}")
+
+    def _log_driver_failure(self, kind: FailureKind, message: str) -> None:
+        self._failure = f"{message} ({kind.name})"
+        carb.log_warn(
+            f"{_LOG_PREFIX} {message} ({kind.name}); stopping routine "
+            "(manual control remains available)"
+        )
 
     def _make_env(self, spawned, port):
         """Build the forgiving :class:`DriverEnvironment` for one flying drone."""
@@ -180,11 +251,15 @@ class Extension(omni.ext.IExt):
             spawned,
             port,
             log=lambda message: carb.log_info(f"{_LOG_PREFIX} {message}"),
-            on_failure=lambda kind, message: carb.log_warn(
-                f"{_LOG_PREFIX} {message} ({kind.name}); stopping routine "
-                "(manual control remains available)"
-            ),
+            on_failure=self._log_driver_failure,
             on_step_advanced=lambda step_label: carb.log_info(
                 f"{_LOG_PREFIX} [{label}] completed step {step_label!r}"
             ),
         )
+
+
+def get_instance() -> Extension:
+    """Return the active live runtime extension for dependent Kit plugins."""
+    if _INSTANCE is None:
+        raise RuntimeError("experiment_runtime extension is not active")
+    return _INSTANCE

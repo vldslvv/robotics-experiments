@@ -250,9 +250,8 @@ class StandaloneBenchmarkCapture:
     def _on_app_update(self, _event: Any, /) -> None:
         now_ns = time.perf_counter_ns()
         if self._last_app_ns:
-            self._samples_ms["app_update_interval"].append(
-                (now_ns - self._last_app_ns) / 1_000_000.0
-            )
+            elapsed_ns = now_ns - self._last_app_ns
+            self._samples_ms["app_update_interval"].append(elapsed_ns / 1_000_000.0)
         self._last_app_ns = now_ns
         self._app_update_count += 1
 

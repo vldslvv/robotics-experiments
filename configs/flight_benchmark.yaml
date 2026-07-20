@@ -1,0 +1,15 @@
+defaults:
+  - circle_land_quad_quad
+  - _self_
+
+# Cold full-GUI startup can spend longer than the production demo's bridge
+# deadline compiling the warehouse before PhysX begins to advance. Measurement
+# starts only after both bridges connect, so this changes startup tolerance but
+# not the captured flight workload.
+vehicles:
+  x500_01:
+    routine:
+      bridge_heartbeat_timeout_s: 60.0
+  x500_02:
+    routine:
+      bridge_heartbeat_timeout_s: 60.0

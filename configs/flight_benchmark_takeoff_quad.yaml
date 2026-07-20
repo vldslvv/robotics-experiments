@@ -1,0 +1,10 @@
+defaults:
+  - takeoff_quad
+  - _self_
+
+# Full-GUI startup can outlast the production demo's bridge deadline before
+# PhysX begins advancing. Capture starts only after the bridge connects.
+vehicles:
+  x500_01:
+    routine:
+      bridge_heartbeat_timeout_s: 60.0

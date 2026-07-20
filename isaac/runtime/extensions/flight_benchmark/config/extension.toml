@@ -1,0 +1,19 @@
+[package]
+version = "0.1.0"
+category = "Simulation"
+title = "FlightBenchmark"
+description = "Opt-in full-GUI flight benchmark wrapped around experiment_runtime"
+authors = ["Vladislav Vyatkin"]
+repository = ""
+keywords = []
+changelog = "docs/CHANGELOG.md"
+readme = "docs/README.md"
+writeTarget.kit = true
+
+[dependencies]
+"experiment_runtime" = {}
+"lightswitch_spawner" = {}
+"isaacsim.benchmark.services" = {}
+
+[[python.module]]
+name = "FlightBenchmark_python"

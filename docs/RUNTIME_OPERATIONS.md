@@ -46,6 +46,10 @@ the host. They are meant to be used in the Dockerized environment.
 - `make stop` stops persistent containers without removing them.
 - Legacy targets such as `build-all`, `run-all`, and `clean-all` are
   compatibility aliases.
+- `make benchmark-flight` enables the isolated `flight_benchmark` Kit plugin
+  around the unchanged production extension. The plugin owns Play, capture, and
+  application shutdown; the host runner owns temporary PX4 containers. Do not
+  start `run-all` beside it. See `docs/FLIGHT_BENCHMARK.md`.
 
 The Isaac, ROS, Ubuntu/PX4 base images are pinned by manifest digest. Runtime
 source checkouts used by the images are pinned to immutable commits, while the

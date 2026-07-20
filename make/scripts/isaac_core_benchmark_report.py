@@ -82,6 +82,7 @@ def _sample_summary(values: list[float], prefix: str, /) -> dict[str, float]:
         f"{prefix}_p50_ms": _percentile(values, 0.50),
         f"{prefix}_p95_ms": _percentile(values, 0.95),
         f"{prefix}_p99_ms": _percentile(values, 0.99),
+        f"{prefix}_max_ms": max(values),
     }
 
 
@@ -96,6 +97,51 @@ def _measurement_samples(*, path: Path, suffix: str, required: bool = True) -> l
     if required:
         raise ValueError(f"{path} does not contain {suffix}")
     return []
+
+
+def _resource_metrics(path: Path, /) -> dict[str, float]:
+    """Normalize NVIDIA's version-specific scalar resource measurements."""
+    suffixes = {
+        "System CPU iowait": "system_cpu_iowait_percent",
+        "System CPU system": "system_cpu_system_percent",
+        "System CPU user": "system_cpu_user_percent",
+        "System CPU idle": "system_cpu_idle_percent",
+        "Mean CPU Usage": "process_cpu_mean_percent",
+        "Max CPU Usage": "process_cpu_max_percent",
+        "Min CPU Usage": "process_cpu_min_percent",
+        "Stdev CPU Usage": "process_cpu_stdev_percent",
+    }
+    result = {}
+    for phase in _read_json(path):
+        for measurement in phase.get("measurements", []):
+            name = str(measurement.get("name", ""))
+            value = measurement.get("value")
+            if name.endswith("System Memory RSS") and isinstance(value, (int, float)):
+                unit = str(measurement.get("unit", ""))
+                multipliers = {
+                    "B": 1.0 / 1_000_000.0,
+                    "KB": 1.0 / 1_000.0,
+                    "MB": 1.0,
+                    "GB": 1_000.0,
+                    "KiB": 1024.0 / 1_000_000.0,
+                    "MiB": 1024.0 * 1024.0 / 1_000_000.0,
+                    "GiB": 1024.0 * 1024.0 * 1024.0 / 1_000_000.0,
+                }
+                if unit not in multipliers:
+                    raise ValueError(f"{path}: unsupported System Memory RSS unit {unit!r}")
+                normalized_rss = float(value) * multipliers[unit]
+                if not math.isfinite(normalized_rss) or normalized_rss < 0.0:
+                    raise ValueError(f"{path}: System Memory RSS is invalid")
+                result["process_rss_mb"] = normalized_rss
+            for suffix, metric in suffixes.items():
+                if name.endswith(suffix) and isinstance(value, (int, float)):
+                    normalized = float(value)
+                    if not math.isfinite(normalized) or normalized < 0.0:
+                        raise ValueError(f"{path}: {suffix} is invalid")
+                    result[metric] = normalized
+    if "process_rss_mb" not in result:
+        raise ValueError(f"{path} does not contain System Memory RSS")
+    return result
 
 
 def _contract(metadata: dict[str, Any], /) -> dict[str, Any]:
@@ -140,23 +186,34 @@ def _summarize_repeat(samples_path: Path, /) -> dict[str, Any]:
     if len(metrics_files) != 1:
         raise ValueError(f"{samples_path.parent} must contain exactly one metrics_*.json file")
 
-    app_samples = _measurement_samples(path=metrics_files[0], suffix="App_Update Frametime Samples")
+    metrics_path = metrics_files[0]
+    app_samples = _measurement_samples(path=metrics_path, suffix="App_Update Frametime Samples")
     gpu_samples = _measurement_samples(
-        path=metrics_files[0],
+        path=metrics_path,
         suffix="GPU Frametime Samples",
         required=workload != "kit_only_unlimited",
     )
     physics_expected = target_physics_ticks is not None
     physics_samples = _measurement_samples(
-        path=metrics_files[0],
+        path=metrics_path,
         suffix="Physics Frametime Samples",
         required=physics_expected,
     )
     sample_groups = raw["samples_ms"]
     metrics = {
         **_sample_summary(app_samples, "app_update"),
+        **_resource_metrics(metrics_path),
         "wall_elapsed_s": wall_elapsed_s,
     }
+    frame_budget_ms = 1000.0 / float(raw["metadata"]["rendering_hz"])
+    frame_budget_violations = sum(sample > frame_budget_ms for sample in app_samples)
+    metrics.update(
+        {
+            "frame_budget_ms": frame_budget_ms,
+            "frame_budget_violation_count": float(frame_budget_violations),
+            "frame_budget_violation_percent": 100.0 * frame_budget_violations / len(app_samples),
+        }
+    )
     sample_counts = {"app_update": len(app_samples)}
     if gpu_samples:
         metrics.update(_sample_summary(gpu_samples, "gpu"))
@@ -233,7 +290,8 @@ def _require_consistent(repeats: list[dict[str, Any]], field: str, workload: str
 def _aggregate_metrics(repeats: list[dict[str, Any]], /) -> dict[str, float]:
     names = set(repeats[0]["metrics"])
     for repeat in repeats[1:]:
-        names.intersection_update(repeat["metrics"])
+        if set(repeat["metrics"]) != names:
+            raise ValueError("benchmark repetitions expose different metric sets")
     return {
         name: statistics.median(float(repeat["metrics"][name]) for repeat in repeats)
         for name in sorted(names)

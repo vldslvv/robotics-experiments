@@ -5,3 +5,6 @@ defaults:
   - experiment/rl@rl: default
   - experiment/driver@driver: default
   - _self_
+
+flight_benchmark:
+  airborne_duration_s: 5.0

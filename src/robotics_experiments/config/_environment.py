@@ -16,6 +16,13 @@ __all__ = ["ExperimentConfig", "VehicleConfig"]
 
 
 @dataclass
+class _FlightBenchmarkConfig(_FreezableConfig):
+    """Opt-in full-GUI benchmark methodology parameters."""
+
+    airborne_duration_s: float
+
+
+@dataclass
 class VehicleConfig(_FreezableConfig):
     """Complete authored and derived configuration for one vehicle."""
 
@@ -41,3 +48,4 @@ class ExperimentConfig(_FreezableConfig):
     scene: str
     vehicles: Dict[str, VehicleConfig]
     driver: DriverConfig
+    flight_benchmark: _FlightBenchmarkConfig

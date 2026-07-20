@@ -54,6 +54,14 @@ PhysX, GPU, and project timers. Use the Tracy trace to inspect the remaining
 Kit, USD, renderer, driver, synchronization, and idle zones when a delta is not
 specific enough.
 
+Core reports also retain maximum frame time, the 60 Hz frame-budget violation
+count/percentage, and NVIDIA benchmark-service CPU/RSS diagnostics. RSS is
+normalized to MB using the unit carried by the NVIDIA measurement. Isaac 5 and Isaac 6 expose different CPU fields, so CPU is
+informational and is not compared across versions or included in the gate. The
+reporter reads these resource values after capture; it does not add per-frame
+resource probes to the measured workload. The accepted workload tolerances and
+gate behavior are unchanged.
+
 `physics_step_interval` is an inter-arrival latency, not a compute cost. It is
 retained for scheduling diagnosis but is not gated because multiple 250 Hz
 physics substeps are batched within a Kit update.

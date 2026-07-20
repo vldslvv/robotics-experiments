@@ -3,6 +3,8 @@
 ########################################
 
 BUILD_ROOT             = $(CURDIR)/.build/docker
+ISAAC_DOCKER_BUILD_FRESH ?= 0
+PX4_DOCKER_BUILD_FRESH   ?= 0
 SRC_DIR                = $(CURDIR)/src
 VENV_DIR               = $(CURDIR)/.venv
 VENV_ACTIVATE          = $(VENV_DIR)/bin/activate

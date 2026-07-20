@@ -114,6 +114,7 @@ make test-integration-all
 | `make test-integration-press-policy` | Trained policy artifact deployment | Training artifact plus Isaac Lab image |
 | `make test-integration-all` | Seven stable Isaac, RL, and PX4 integration targets | Built runtime images, NVIDIA runtime |
 | `make benchmark-isaac-core` | Isaac core upgrade regression gate and contributor attribution | Quiet comparable host, built Isaac image, NVIDIA runtime |
+| `make benchmark-flight` | Diagnostic full-GUI warehouse/two-drone Isaac comparison | X11 GUI, comparable host, NVIDIA runtime, fresh Isaac/PX4 images |
 
 For a fresh checkout, install the host environment with `uv sync --extra dev`,
 run `make check`, build the pinned execution images with `make build`, then run
@@ -122,6 +123,8 @@ in [Runtime operations](docs/RUNTIME_OPERATIONS.md) and
 [Integration test architecture](docs/INTEGRATION_TEST_ARCHITECTURE.md). The
 three-repeat upgrade benchmark and explicit baseline workflow are documented in
 [Isaac core performance benchmark](docs/ISAAC_CORE_BENCHMARK.md).
+The production-path Isaac 5/6 diagnostic and its cross-version report command
+are documented in [Full-GUI flight benchmark](docs/FLIGHT_BENCHMARK.md).
 
 Destroy containers and images:
 

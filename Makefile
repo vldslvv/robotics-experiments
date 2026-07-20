@@ -43,4 +43,6 @@ help:
 		'  make test-integration-px4-navigation Run the PX4 waypoint navigation test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test' \
 		'  make benchmark-isaac-core  Run and gate the Isaac core performance benchmark' \
-		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline'
+		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline' \
+		'  make benchmark-flight      Run the diagnostic full-GUI two-drone benchmark' \
+		'  make benchmark-flight-compare REFERENCE=... CANDIDATE=... Compare flight reports'

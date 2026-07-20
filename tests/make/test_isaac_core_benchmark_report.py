@@ -97,6 +97,17 @@ def _write_repeat(
             "value": [sample_ms / 2.0] * 100,
             "type": "list",
         },
+        {
+            "name": f"{workload} measured System Memory RSS",
+            "value": 2.0,
+            "unit": "GB",
+            "type": "scalar",
+        },
+        {
+            "name": f"{workload} measured System CPU user",
+            "value": 12.5,
+            "type": "scalar",
+        },
     ]
     if physics_expected:
         measurements.append(
@@ -189,6 +200,10 @@ def test_build_accept_and_pass(tmp_path: Path) -> None:
     assert first.returncode == 2
     report = json.loads((result / "report.json").read_text())
     assert report["status"] == "no_baseline"
+    assert report["metrics"]["kit_only_unlimited"]["app_update_max_ms"] == 4.0
+    assert report["metrics"]["kit_only_unlimited"]["system_cpu_user_percent"] == 12.5
+    assert report["metrics"]["kit_only_unlimited"]["process_rss_mb"] == 2000.0
+    assert "frame_budget_violation_percent" in report["metrics"]["kit_only_unlimited"]
     assert report["profile_trace"].endswith("isaac_core.tracy")
     assert "articulation_io" in report["attribution_deltas"]
     assert _accept(result, baseline).returncode == 0
@@ -199,6 +214,36 @@ def test_build_accept_and_pass(tmp_path: Path) -> None:
     second = _run_build(next_raw, profile, next_result, baseline)
     assert second.returncode == 0
     assert json.loads((next_result / "report.json").read_text())["status"] == "pass"
+
+
+def test_build_retains_isaac_6_cpu_diagnostics(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    profile = tmp_path / "profile"
+    result = tmp_path / "result"
+    _write_raw(root=raw, sample_ms=4.0)
+    _write_profile(profile)
+    for path in raw.rglob("metrics_*.json"):
+        payload = json.loads(path.read_text())
+        measurements = payload[0]["measurements"]
+        measurements[:] = [
+            measurement
+            for measurement in measurements
+            if not measurement["name"].endswith("System CPU user")
+        ]
+        measurements.extend(
+            [
+                {"name": "measured Mean CPU Usage", "value": 700.0},
+                {"name": "measured Max CPU Usage", "value": 1200.0},
+            ]
+        )
+        _write_json(path, payload)
+
+    completed = _run_build(raw, profile, result, tmp_path / "baseline")
+    assert completed.returncode == 2
+    metrics = json.loads((result / "report.json").read_text())["metrics"]["kit_only_unlimited"]
+    assert metrics["process_cpu_mean_percent"] == 700.0
+    assert metrics["process_cpu_max_percent"] == 1200.0
+    assert "system_cpu_user_percent" not in metrics
 
 
 def test_regression_fails_gate(tmp_path: Path) -> None:

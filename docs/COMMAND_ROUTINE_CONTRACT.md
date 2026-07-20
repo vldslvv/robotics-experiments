@@ -218,6 +218,13 @@ raises into the sim); after `DONE` the driver keeps the GCS link warm so
 PX4-console control returns to the user. STOP/PAUSE and shutdown drop the tick and
 tear down.
 
+The live shell also exposes an immutable status snapshot for dependent Kit
+plugins. It reports each vehicle label, simulated time, completed-step count,
+and bridge status, without exposing or mutating `DriverContext`,
+`RoutineDriverState`, or `FleetState`; observation does not create a second
+executor path. The existing runtime failure field is the authoritative signal
+that a forgiving driver stopped early.
+
 **Standalone scenario**
 (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`):
 a blocking runner that drives the same lifecycle functions, adds the

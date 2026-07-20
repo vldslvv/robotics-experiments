@@ -105,7 +105,9 @@ def test_default_experiment_has_only_global_root_config():
         "scene",
         "vehicles",
         "driver",
+        "flight_benchmark",
     }
+    assert config.flight_benchmark.airborne_duration_s == 5.0
     vehicle = config.vehicles["x500_01"]
     assert vehicle.spawn.position_xy == (0.0, 0.0)
     assert vehicle.spawn.usd_path.endswith("/holybro_x500_v2.usda")

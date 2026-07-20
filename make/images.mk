@@ -3,6 +3,7 @@
 ########################################
 
 docker_cache_from = $(if $(shell docker image inspect $(1) >/dev/null 2>&1 && printf yes),--cache-from $(1),)
+docker_build_fresh_flags = $(if $(filter 1,$(1)),--pull --no-cache,)
 
 .PHONY: require-host-nvim
 require-host-nvim:
@@ -20,6 +21,7 @@ build-isaac: require-host-nvim
 	@echo "Building custom Isaac image: $(ISAAC_IMAGE)"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_build_fresh_flags,$(ISAAC_DOCKER_BUILD_FRESH)) \
 		$(call docker_cache_from,$(ISAAC_CACHE_IMAGE)) \
 		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
@@ -41,6 +43,7 @@ build-isaac-lab: require-host-nvim
 	@echo "Building Isaac Lab image: $(ISAAC_LAB_IMAGE) (ISAACLAB_REF=$(ISAACLAB_REF))"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_build_fresh_flags,$(ISAAC_DOCKER_BUILD_FRESH)) \
 		$(call docker_cache_from,$(ISAAC_LAB_CACHE_IMAGE)) \
 		--cache-to type=inline \
 		--build-arg DOCKER_REPO="$(ISAAC_BASE_IMAGE)" \
@@ -84,6 +87,7 @@ build-px4:
 	@echo "Building PX4 SITL image: $(PX4_IMAGE)"
 	docker buildx build \
 		--progress=plain \
+		$(call docker_build_fresh_flags,$(PX4_DOCKER_BUILD_FRESH)) \
 		$(call docker_cache_from,$(PX4_CACHE_IMAGE)) \
 		--cache-to type=inline \
 		--build-arg PX4_REF="$(PX4_REF)" \

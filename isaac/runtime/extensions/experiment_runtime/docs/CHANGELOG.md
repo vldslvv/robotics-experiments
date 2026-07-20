@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.0]
+- Expose the active extension and its immutable runtime snapshot to dependent
+  Kit plugins while preserving the forgiving live-runtime behavior.
+
 ## [1.0.0]
 - Initial release. Live Kit shell hosting the host-agnostic
   `FleetOrchestrator`: opens the scene after Kit reports app readiness, applies sim

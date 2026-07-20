@@ -12,6 +12,8 @@ import types
 from enum import IntEnum
 from types import SimpleNamespace
 
+import pytest
+
 from tests.support.paths import REPO_ROOT
 
 
@@ -92,6 +94,7 @@ class _FakeOrchestrator:
     def __init__(self, env):
         self.env = env
         self.stage = None
+        self.flying = []
         self.calls: list[str] = []
         type(self).last.append(self)
 
@@ -148,6 +151,13 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     fake_config = types.ModuleType("robotics_experiments.config")
     fake_config.load_config = lambda path: SimpleNamespace()
 
+    fake_commanding = types.ModuleType("robotics_experiments.commanding")
+    fake_commanding.DriverPhase = IntEnum("DriverPhase", {"DRIVE": 1, "DONE": 2})
+    fake_commanding.FailureKind = IntEnum("FailureKind", {"COMMAND": 1})
+
+    fake_bridge = types.ModuleType("robotics_experiments.px4_bridge")
+    fake_bridge.BridgeStatus = object
+
     fake_runtime = types.ModuleType("robotics_experiments.runtime")
     fake_runtime.FleetDriverEnv = lambda *a, **k: object()
     fake_runtime.create_fleet = lambda *, config: _FakeOrchestrator(config)
@@ -159,6 +169,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     fake_runtime.build_drivers = lambda *, state, make_env: state.build_drivers(make_env) or state
     fake_runtime.teardown = lambda *, state: state.teardown() or state
     fake_runtime.tick_drivers = lambda *, state, on_error: state
+    fake_runtime.read_bridge_host_status = lambda *, host: host.status
 
     modules = {
         "carb": carb,
@@ -168,7 +179,9 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
         "omni.kit.app": omni_kit_app,
         "omni.timeline": omni_timeline,
         "omni.usd": omni_usd,
+        "robotics_experiments.commanding": fake_commanding,
         "robotics_experiments.config": fake_config,
+        "robotics_experiments.px4_bridge": fake_bridge,
         "robotics_experiments.runtime": fake_runtime,
     }
     for name, module in modules.items():
@@ -257,6 +270,55 @@ def test_opened_adopts_stage_and_applies_settings(monkeypatch):
     # A new stage tears down any running fleet, then adopts + applies settings.
     assert orch.calls == ["open_scene", "teardown", "adopt_current_stage", "apply_settings"]
     assert orch.stage is not None
+
+
+def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
+    module, extension, orch, usd_context, _timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    bridge_status = SimpleNamespace(is_connected=True, is_armed=False)
+    host = SimpleNamespace(
+        status=SimpleNamespace(sim_time_us=1_250_000, bridge_status=bridge_status)
+    )
+    orch.flying = [
+        SimpleNamespace(
+            spawned=SimpleNamespace(
+                label="x500_01",
+                host=host,
+                vehicle=SimpleNamespace(routine=SimpleNamespace(steps=({}, {}, {}))),
+            ),
+            driver=SimpleNamespace(
+                phase=sys.modules["robotics_experiments.commanding"].DriverPhase.DRIVE,
+                previous_cursor=2,
+            ),
+        )
+    ]
+
+    status = extension.read_status()
+
+    assert module.get_instance() is extension
+    assert status.scene_ready
+    assert status.failure is None
+    assert status.vehicles == (
+        module.VehicleRuntimeSnapshot(
+            label="x500_01",
+            sim_time_us=1_250_000,
+            bridge_status=bridge_status,
+            completed_steps=2,
+        ),
+    )
+    with pytest.raises(AttributeError):
+        status.scene_ready = False
+
+
+def test_get_instance_fails_after_shutdown(monkeypatch):
+    module, extension, _orch, _usd_context, _timeline, _app = _started_extension(monkeypatch)
+
+    extension.on_shutdown()
+
+    with pytest.raises(RuntimeError, match="not active"):
+        module.get_instance()
 
 
 def test_play_re_adopts_stage_builds_drivers_and_subscribes(monkeypatch):

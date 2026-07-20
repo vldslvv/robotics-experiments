@@ -10,7 +10,7 @@ resolved configuration to downstream consumers.
 
 The root contains only execution-wide configuration:
 
-- `sim`, `switches`, `rl`, `scene`, and `driver`;
+- `sim`, `switches`, `rl`, `scene`, `driver`, and `flight_benchmark`;
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
 `configs/base.yaml` composes the global groups only. Vehicle-specific `spawn`,
@@ -30,6 +30,10 @@ The global `switches.spawn_seed` deterministically drives both switch position
 sampling and lamp heights. Reusing the same resolved experiment configuration
 reproduces the complete switch/lamp layout; changing the seed selects a new
 layout.
+
+`flight_benchmark.airborne_duration_s` is used only by the opt-in full-GUI
+benchmark. Keeping it in the resolved graph makes the capture duration part of
+the same canonical configuration fingerprint as the flown routine.
 
 ## Routine behavior
 

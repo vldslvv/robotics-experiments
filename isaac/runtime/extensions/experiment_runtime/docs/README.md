@@ -17,6 +17,11 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
   complete without commands.
 - `STOP` / `PAUSE` / `on_shutdown`: stop the control tick and tear down.
 
+Dependent Kit plugins may call `get_instance().read_status()` for an immutable
+snapshot of scene readiness, the last driver/control failure, and each vehicle's
+label, simulated time, bridge status, and completed-step count. The snapshot is the observation boundary used by the
+opt-in flight benchmark; it never exposes mutable `FleetState` resources.
+
 Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged and
 that drone idles (manual control remains). The strict counterpart is the
 standalone scenario runner under `--strict`.
