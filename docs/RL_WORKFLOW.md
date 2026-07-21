@@ -70,8 +70,12 @@ The standalone training root passes the resolved `ExperimentConfig` into
 physics decimation is selected per policy step by the shared exact-average
 cadence, not authored. At 250 Hz physics and the default 20 Hz policy rate it
 alternates 13 and 12 physics steps (52/48 ms), while `step_dt` remains the
-nominal 50 ms used to compute episode length in policy steps. The fixed render
-interval uses the ceiling decimation. The hover task's
+nominal 50 ms. The source period is derived from `cfg.sim.dt`; there is no
+redundant physics-rate field in the Lab config. `max_episode_length` is fixed to
+`ceil(episode_length_s * policy_rate_hz)`, so the alternating decimation cannot
+shorten an episode (20 steps per simulated second and exactly 100 steps for the
+default five-second episode). The fixed render interval uses the ceiling
+decimation. The hover task's
 reward/termination/reset values are the `rl.press.hover_task` block (task
 definition = one YAML block; no task-tuning literal in the env module). The RL
 action also maps to a PX4 OFFBOARD setpoint at deploy time

@@ -93,9 +93,21 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
         DroneHoverEnvCfg,
         make_drone_hover_env_cfg,
     )
+    from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
+        _episode_step_count,
+    )
 
     assert module.DroneHoverEnv is DroneHoverEnv
     assert module.DroneHoverEnvCfg is DroneHoverEnvCfg
     cfg = make_drone_hover_env_cfg(experiment_config=load_config("configs/takeoff_quad.yaml"))
     assert cfg.action_space == 4
     assert cfg.observation_space == 13
+    assert not hasattr(cfg, "physics_rate_hz")
+    assert cfg.sim.dt == pytest.approx(1.0 / 250.0)
+    assert (
+        _episode_step_count(
+            episode_length_s=cfg.episode_length_s,
+            policy_rate_hz=cfg.policy_rate_hz,
+        )
+        == 100
+    )

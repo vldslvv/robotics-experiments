@@ -61,10 +61,11 @@ The `FleetState` lifecycle functions iterate the mapping in authored order.
 one frozen progress state for each bridge-enabled vehicle, including those with
 empty `vehicle.routine.steps`.
 Shells explicitly rebind every returned state.
-`FleetState` also owns the shared physics-to-driver cadence and logical control
-time. Every due cycle passes one tick snapshot to every vehicle in authored
-order, so a multi-vehicle fleet stays synchronized. Driver build, teardown, and
-restart reset that cadence.
+`FleetState` also owns the shared physics-to-driver cadence; its timestamp is the
+authoritative logical control time. Driver creation and every due cycle pass one
+shared sim/wall-clock tick snapshot to every vehicle in authored order, so a
+multi-vehicle fleet stays synchronized and reads the wall clock once per cycle.
+Driver build, teardown, and restart reset that cadence.
 
 One `BridgeHostGroup` runs every send leg before every poll leg. Each PX4 instance
 therefore remains isolated while lockstep latency tracks the slowest instance,

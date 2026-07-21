@@ -69,7 +69,9 @@ than serially starving later sends.
 
 The live `experiment_runtime` extension owns Kit stage/timeline/PhysX event
 wiring and forgiving per-driver error logging. `FleetState` owns the shared
-driver cadence and resets it on rebuild/teardown. The standalone runner owns the
+driver cadence, uses its timestamp as logical control time, and resets it on
+rebuild/teardown. Driver creation and due cycles each receive one shared
+`DriverTick` for the whole fleet. The standalone runner owns the
 blocking `SimulationApp.update()` loop plus a matching PhysX subscription,
 strict-versus-forgiving failure
 reaction, and integration-only checks such as ground settling, first-heartbeat

@@ -6,6 +6,7 @@ from pathlib import Path
 from tests.support.paths import REPO_ROOT
 
 _PACKAGE_ROOT = REPO_ROOT / "src" / "robotics_experiments"
+_ROOT_PRIVATE_MODULES = frozenset({"_cadence"})
 
 # Dependencies point from a consumer to the lower-level packages it may import.
 # Same-package imports are always allowed. Host-specific shells outside this
@@ -70,6 +71,10 @@ def test_internal_package_imports_follow_dependency_direction() -> None:
         path.name for path in _PACKAGE_ROOT.iterdir() if (path / "__init__.py").is_file()
     }
     assert package_names == _ALLOWED_DEPENDENCIES.keys()
+    root_private_modules = {
+        path.stem for path in _PACKAGE_ROOT.glob("_*.py") if path.name != "__init__.py"
+    }
+    assert root_private_modules == _ROOT_PRIVATE_MODULES
 
     violations: list[str] = []
     for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
@@ -81,6 +86,8 @@ def test_internal_package_imports_follow_dependency_direction() -> None:
                 continue
             for target in _project_import_targets(node, path):
                 if target == source:
+                    continue
+                if target in _ROOT_PRIVATE_MODULES:
                     continue
                 if target not in _ALLOWED_DEPENDENCIES[source]:
                     relative_path = path.relative_to(REPO_ROOT)

@@ -226,7 +226,7 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
             hover_max_abs_horizontal_speed_m_s=0.30,
         )
         routine = commanding.build_vehicle_routine(
-            [
+            steps=[
                 {"kind": "arm"},
                 {"kind": "takeoff", "climb_m": 1.0, "min_climb_m": 0.8},
                 {"kind": "hover", "hold_s": 2.0},

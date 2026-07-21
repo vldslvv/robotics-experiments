@@ -52,7 +52,9 @@ the entire fleet cycle.
   sustained-completion window; and a tuple of continuous `invariants`),
   `VehicleRoutine` (ordered steps), `RoutineState`
   (cursor/sent/active-step baseline/step-start/`hold_since_us` plus nested
-  frozen policy-source and setpoint-stream progress), and `RoutineDecision`.
+  frozen `offboard` progress containing policy cadence, transmitter cadence,
+  the cached payload, actual transmission count, and mode request/acceptance),
+  and `RoutineDecision`.
   Its outcome is `CONTINUE` / `ADVANCE` / `DONE` / `FAIL`, independent of its
   optional `command` and `setpoint` effects; both effects may be present, and
   the driver applies the setpoint first. `StreamSetpoint` is the union
@@ -93,14 +95,18 @@ the entire fleet cycle.
   streaming the last OFFBOARD setpoint throughout that verifier. PX4 remains in
   OFFBOARD after the waypoint is reached, so stopping the stream between `goto`
   and `hover` would trigger offboard signal-loss failsafe before the hover hold
-  can complete.
+  can complete. The transmitter phase and cached payload also remain continuous
+  across consecutive OFFBOARD steps. A fixed `goto` payload is calculated once
+  on step entry and replaces the cache, then is sent on the next scheduled
+  emission; routine boundaries never create an extra transmission.
 
   The **`policy` step** is the RL deploy plug-in over the same streaming
   lifecycle: its `_StreamingSpec` carries a `setpoint_fn` (built from the
   injected `PolicyStepFn`) instead of a fixed geodetic target. It evaluates
-  immediately on entry and then at exact-average `rl.policy_rate_hz`; its latest
-  payload is held without interpolation while the independent setpoint streamer
-  runs. The payload is a
+  when a new OFFBOARD stream starts and then only when the continuous
+  exact-average `rl.policy_rate_hz` cadence is due; its latest payload is held
+  without interpolation while the independent setpoint streamer runs. A
+  compatible OFFBOARD-step boundary does not reset either cadence. The payload is a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
   The `PolicyStepFn` is composed at the runtime layer
   (`robotics_experiments.rl.press.build_policy_step_fn`: validated artifact load + hover
@@ -152,7 +158,7 @@ the entire fleet cycle.
   streams them in production (F2b), and the handoff-gated contact behavior
   (`{kind: press}`) is F3b on the same mechanism.
 - **`driver.py`** -- the frozen, per-drone `DriverContext` (parameters, port,
-  environment, label, and monotonic clock), progress-only `RoutineDriverState`,
+  environment, and label), progress-only `RoutineDriverState`,
   and stateless `create_routine_driver` / `tick_routine_driver` transition
   functions: a phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
@@ -160,8 +166,11 @@ the entire fleet cycle.
   `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
   connectivity, sim time, observation assembly, `log`, `on_failure`,
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
-  stopped) routine. It imports no Isaac/pymavlink; the wall-clock backstop uses an
-  injectable `monotonic`, so it is unit-testable with fakes. `DriverParams` is
+  stopped) routine. It imports no Isaac/pymavlink. Creation requires
+  `create_routine_driver(context=..., tick=...)`, and ticking requires the same
+  explicit `DriverTick` contract, so the runtime can share one sim/wall-clock
+  snapshot across the whole fleet and tests can supply deterministic time.
+  `DriverParams` is
   constructed directly by the runtime from the per-drone subset of
   `RoutineConfig` it needs plus the global `driver`
   execution heuristics (the `goto` heading epsilon and the wall-clock backstop
@@ -258,7 +267,7 @@ Every bridge-enabled drone gets one `DriverContext` and one
 `{kind: land, timeout_s}`)
 drive the authored commands; empty steps traverse the same phase machine,
 complete without commands, and retain terminal GCS servicing for manual control.
-The pure `build_vehicle_routine(steps, *, target_latitude_deg,
+The pure `build_vehicle_routine(*, steps, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
@@ -285,6 +294,8 @@ breach the envelope; goto uses a direction-agnostic cross-track-to-path gate
 excursion off the planned path still trips. A hover after `goto` remains
 verification-only from the config's perspective, but the stepper continues the
 last OFFBOARD setpoint stream while the sustained hover gate is being measured.
+Its transmission phase is unchanged, as it is across consecutive OFFBOARD
+steps; explicit commands such as `land` clear the stream before they begin.
 The home anchor the `goto` builder
 needs is **not** a routine knob -- it comes from the per-vehicle `px4` group
 (`home_lat_deg`/`home_lon_deg`/`home_alt_m`) and is passed by `build_drivers`

@@ -1,4 +1,4 @@
-"""Private exact-average cadence transition shared by cyclic executives."""
+"""Private exact-average cadence transitions shared across project packages."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ class _CadenceState:
 
 
 def _advance_cadence(
-    state: _CadenceState,
     *,
+    state: _CadenceState,
     time_ns: int,
     rate_hz: float,
 ) -> tuple[_CadenceState, bool]:
@@ -39,26 +39,21 @@ def _advance_cadence(
 
     period_ns = _NANOSECONDS_PER_SECOND / rate_hz
     accumulated_ns = state.remainder_ns + (time_ns - state.previous_time_ns)
-    due = accumulated_ns >= period_ns or math.isclose(
-        accumulated_ns,
-        period_ns,
-        rel_tol=1e-12,
-        abs_tol=1e-6,
-    )
-    remainder_ns = math.fmod(accumulated_ns, period_ns) if due else accumulated_ns
-    if due and math.isclose(
-        remainder_ns,
-        period_ns,
-        rel_tol=1e-12,
-        abs_tol=1e-6,
-    ):
-        remainder_ns = 0.0
-    return _CadenceState(time_ns, remainder_ns), due
+    if accumulated_ns < period_ns:
+        if not math.isclose(
+            accumulated_ns,
+            period_ns,
+            rel_tol=1e-12,
+            abs_tol=1e-6,
+        ):
+            return _CadenceState(time_ns, accumulated_ns), False
+        return _CadenceState(time_ns, 0.0), True
+    return _CadenceState(time_ns, accumulated_ns % period_ns), True
 
 
 def _next_interval_steps(
-    state: _CadenceState,
     *,
+    state: _CadenceState,
     source_period_ns: int,
     rate_hz: float,
 ) -> tuple[_CadenceState, int]:
@@ -73,7 +68,7 @@ def _next_interval_steps(
     remaining_ns = period_ns - state.remainder_ns
     steps = max(1, math.ceil(remaining_ns / source_period_ns))
     advanced, due = _advance_cadence(
-        state,
+        state=state,
         time_ns=current_time_ns + steps * source_period_ns,
         rate_hz=rate_hz,
     )

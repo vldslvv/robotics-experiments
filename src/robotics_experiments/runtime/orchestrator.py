@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import carb
 
+from robotics_experiments._cadence import _advance_cadence, _CadenceState
 from robotics_experiments.commanding import (
     CommandAck,
     DriverContext,
@@ -29,7 +30,6 @@ from robotics_experiments.commanding import (
     routine_driver_is_done,
     tick_routine_driver,
 )
-from robotics_experiments.commanding._cadence import _advance_cadence, _CadenceState
 from robotics_experiments.config import ExperimentConfig, VehicleConfig
 from robotics_experiments.runtime._scene import resolve_scene_path
 from robotics_experiments.runtime.bridge_host import (
@@ -99,7 +99,6 @@ class FleetState:
     drones: tuple[SpawnedDrone, ...]
     flying: tuple[FlyingDrone, ...]
     driver_cadence: _CadenceState
-    control_time_ns: int
 
 
 class FleetDriverEnv:
@@ -166,7 +165,6 @@ def create_fleet(*, config: ExperimentConfig) -> FleetState:
         drones=(),
         flying=(),
         driver_cadence=_CadenceState(previous_time_ns=0),
-        control_time_ns=0,
     )
 
 
@@ -276,6 +274,16 @@ def build_drivers(
     make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment],
 ) -> FleetState:
     """Compose one frozen routine driver state per bridge-enabled drone."""
+    clock_host = next((drone.host for drone in state.drones if drone.host is not None), None)
+    control_time_ns = (
+        read_bridge_host_status(host=clock_host).sim_time_us * 1_000
+        if clock_host is not None
+        else 0
+    )
+    creation_tick = DriverTick(
+        control_time_us=control_time_ns // 1_000,
+        monotonic_s=time.monotonic(),
+    )
     flying: list[FlyingDrone] = []
     for spawned in state.drones:
         if spawned.host is None:
@@ -327,18 +335,12 @@ def build_drivers(
             env=make_env(spawned, port),
             label=spawned.label,
         )
-        driver = create_routine_driver(context=context)
+        driver = create_routine_driver(context=context, tick=creation_tick)
         flying.append(FlyingDrone(spawned=spawned, context=context, driver=driver))
-    control_time_ns = 0
-    if flying:
-        clock_host = flying[0].spawned.host
-        assert clock_host is not None
-        control_time_ns = read_bridge_host_status(host=clock_host).sim_time_us * 1_000
     return replace(
         state,
         flying=tuple(flying),
         driver_cadence=_CadenceState(previous_time_ns=control_time_ns),
-        control_time_ns=control_time_ns,
     )
 
 
@@ -350,25 +352,22 @@ def tick_drivers(
     on_error: Optional[Callable[[FlyingDrone, Exception], None]] = None,
 ) -> FleetState:
     """Advance the physics-derived fleet cadence and tick every driver when due."""
-    control_time_ns = state.control_time_ns + int(round(physics_dt_s * 1_000_000_000))
+    previous_time_ns = state.driver_cadence.previous_time_ns
+    assert previous_time_ns is not None
+    control_time_ns = previous_time_ns + int(round(physics_dt_s * 1_000_000_000))
     cadence, due = _advance_cadence(
-        state.driver_cadence,
+        state=state.driver_cadence,
         time_ns=control_time_ns,
         rate_hz=state.config.driver.control_rate_hz,
     )
-    scheduled = replace(
-        state,
-        driver_cadence=cadence,
-        control_time_ns=control_time_ns,
-    )
     if not due:
-        return scheduled
+        return replace(state, driver_cadence=cadence)
     tick = DriverTick(
         control_time_us=control_time_ns // 1_000,
         monotonic_s=time.monotonic() if monotonic_s is None else monotonic_s,
     )
     advanced: list[FlyingDrone] = []
-    for flying in scheduled.flying:
+    for flying in state.flying:
         try:
             driver = tick_routine_driver(
                 context=flying.context,
@@ -380,8 +379,8 @@ def tick_drivers(
                 raise
             on_error(flying, exc)
             driver = flying.driver
-        advanced.append(replace(flying, driver=driver))
-    return replace(scheduled, flying=tuple(advanced))
+        advanced.append(flying if driver is flying.driver else replace(flying, driver=driver))
+    return replace(state, driver_cadence=cadence, flying=tuple(advanced))
 
 
 def fleet_is_done(*, state: FleetState) -> bool:
@@ -407,5 +406,4 @@ def teardown(*, state: FleetState) -> FleetState:
         drones=(),
         flying=(),
         driver_cadence=_CadenceState(previous_time_ns=0),
-        control_time_ns=0,
     )

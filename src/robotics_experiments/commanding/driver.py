@@ -8,7 +8,6 @@ the imperative boundary.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -120,7 +119,6 @@ class DriverContext:
     port: MavlinkCommandPort
     env: DriverEnvironment
     label: str = ""
-    monotonic: Callable[[], float] = time.monotonic
 
 
 @dataclass(frozen=True)
@@ -183,12 +181,12 @@ def _deadline_for_phase(
 def _enter(
     *, context: DriverContext, state: RoutineDriverState, phase: DriverPhase, tick: DriverTick
 ) -> RoutineDriverState:
-    entered = replace(state, phase=phase)
     return replace(
-        entered,
+        state,
+        phase=phase,
         deadline_s=_deadline_for_phase(
             context=context,
-            state=entered,
+            state=state,
             phase=phase,
             monotonic_s=tick.monotonic_s,
         ),
@@ -198,6 +196,7 @@ def _enter(
 def create_routine_driver(
     *,
     context: DriverContext,
+    tick: DriverTick,
 ) -> RoutineDriverState:
     """Create a fresh frozen driver state without opening its resources."""
     state = RoutineDriverState(
@@ -213,7 +212,7 @@ def create_routine_driver(
         context=context,
         state=state,
         phase=DriverPhase.WAIT_BRIDGE,
-        tick=DriverTick(control_time_us=0, monotonic_s=context.monotonic()),
+        tick=tick,
     )
 
 
@@ -291,25 +290,38 @@ def _tick_drive(
     )
     routine_state, decision = decide(state.routine, state.routine_state, observation)
     _apply_decision(port=context.port, decision=decision)
-    advanced = replace(state, routine_state=routine_state)
     if decision.kind is DecisionKind.FAIL:
         assert decision.failure_kind is not None
-        return _fail(
-            context=context,
-            state=advanced,
-            tick=tick,
-            kind=decision.failure_kind,
-            message=f"[{context.label}] routine failed: {decision.reason}",
+        context.env.on_failure(
+            decision.failure_kind,
+            f"[{context.label}] routine failed: {decision.reason}",
+        )
+        return replace(
+            state,
+            phase=DriverPhase.DONE,
+            deadline_s=0.0,
+            routine_state=routine_state,
         )
     previous_cursor = state.previous_cursor
     while previous_cursor < routine_state.cursor:
         context.env.on_step_advanced(state.routine.steps[previous_cursor].label)
         previous_cursor += 1
-    advanced = replace(advanced, previous_cursor=previous_cursor)
     if routine_state.cursor >= len(state.routine.steps):
         context.env.log(f"[{context.label}] routine complete; holding, manual control available")
-        return _enter(context=context, state=advanced, phase=DriverPhase.DONE, tick=tick)
-    return advanced
+        return replace(
+            state,
+            phase=DriverPhase.DONE,
+            deadline_s=0.0,
+            routine_state=routine_state,
+            previous_cursor=previous_cursor,
+        )
+    if routine_state is state.routine_state and previous_cursor == state.previous_cursor:
+        return state
+    return replace(
+        state,
+        routine_state=routine_state,
+        previous_cursor=previous_cursor,
+    )
 
 
 def tick_routine_driver(
@@ -397,7 +409,7 @@ def tick_routine_driver(
         latitude_deg, longitude_deg, altitude_m = state.target
         try:
             routine = build_vehicle_routine(
-                context.params.steps,
+                steps=context.params.steps,
                 target_latitude_deg=latitude_deg,
                 target_longitude_deg=longitude_deg,
                 target_altitude_m=altitude_m,

@@ -27,7 +27,7 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from robotics_experiments.commanding._cadence import _CadenceState, _next_interval_steps
+from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
@@ -40,6 +40,11 @@ from robotics_experiments.workflows.isaac_lab.tasks.flight import (
 __all__ = ["DroneHoverEnvCfg", "DroneHoverEnv", "make_drone_hover_env_cfg"]
 
 _DRONE_PRIM_PATH = "/World/envs/env_.*/Drone"
+
+
+def _episode_step_count(*, episode_length_s: float, policy_rate_hz: float) -> int:
+    """Return the exact policy-step budget for one episode."""
+    return math.ceil(episode_length_s * policy_rate_hz)
 
 
 def _hover_observation(
@@ -109,7 +114,6 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     # explicitly supplied fields; the cast keeps their consumer-facing types.
     decimation: int = cast(Any, MISSING)
     policy_rate_hz: float = cast(Any, MISSING)
-    physics_rate_hz: float = cast(Any, MISSING)
     episode_length_s: float = cast(Any, MISSING)
     action_space: int = cast(Any, MISSING)
     observation_space = 13
@@ -126,7 +130,6 @@ def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
     return DroneHoverEnvCfg(
         decimation=decimation,
         policy_rate_hz=experiment_config.rl.policy_rate_hz,
-        physics_rate_hz=experiment_config.sim.physics_hz,
         episode_length_s=experiment_config.rl.episode_length_s,
         action_space=experiment_config.rl.action.action_dim,
         observation_space=13,
@@ -168,7 +171,7 @@ class DroneHoverEnv(DirectRLEnv):
         **kwargs,
     ):
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
-        self._physics_period_ns = int(round(1_000_000_000 / cfg.physics_rate_hz))
+        self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
         self._policy_cadence = _CadenceState(previous_time_ns=0)
         super().__init__(cfg, render_mode, **kwargs)
         self._experiment_config = experiment_config
@@ -182,10 +185,18 @@ class DroneHoverEnv(DirectRLEnv):
         """Nominal policy interval used for episode timing and reporting."""
         return self._nominal_step_dt
 
+    @property
+    def max_episode_length(self) -> int:
+        """Exact policy-step budget, independent of variable decimation."""
+        return _episode_step_count(
+            episode_length_s=self.cfg.episode_length_s,
+            policy_rate_hz=self.cfg.policy_rate_hz,
+        )
+
     def step(self, action: torch.Tensor) -> tuple[Any, ...]:
         """Select the next exact-average physics decimation, then step Lab."""
         self._policy_cadence, self.cfg.decimation = _next_interval_steps(
-            self._policy_cadence,
+            state=self._policy_cadence,
             source_period_ns=self._physics_period_ns,
             rate_hz=self.cfg.policy_rate_hz,
         )

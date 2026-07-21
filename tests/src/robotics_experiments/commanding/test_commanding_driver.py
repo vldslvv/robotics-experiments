@@ -70,14 +70,14 @@ _STEPS = [
 ]
 
 
-def _tick_driver(*, context, state):
+def _tick_driver(*, context, state, monotonic_s=0.0):
     context.env.sim_us += 20_000
     return _transition_driver(
         context=context,
         state=state,
         tick=DriverTick(
             control_time_us=context.env.sim_us,
-            monotonic_s=context.monotonic(),
+            monotonic_s=monotonic_s,
         ),
     )
 
@@ -91,9 +91,11 @@ def _make_driver(*, raise_on_failure=False):
         port=port,
         env=env,
         label="d0",
-        monotonic=lambda: clock["now"],
     )
-    driver = create_routine_driver(context=context)
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=clock["now"]),
+    )
     return context, driver, port, env, clock
 
 
@@ -109,11 +111,26 @@ def test_routine_driver_state_contains_only_progress_fields():
     ]
 
 
+def test_driver_creation_uses_explicit_tick_for_initial_deadline():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    context = DriverContext(params=_params([]), port=port, env=env, label="d0")
+
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=123_000, monotonic_s=7.0),
+    )
+
+    assert driver.deadline_s == 19.0
+
+
 def test_routine_driver_runs_arm_takeoff_hover_to_done():
     context, driver, port, env, _clock = _make_driver()
 
     # WAIT_BRIDGE: holds until the bridge connects.
+    waiting = driver
     driver = _tick_driver(context=context, state=driver)
+    assert driver is waiting
     assert driver.phase is DriverPhase.WAIT_BRIDGE
     env.connected = True
     waiting = driver
@@ -183,10 +200,11 @@ def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
     env.connected = True
     port.set_handshaked()
     port.set_global_position((47.0, 8.0, 488.0))
-    context = DriverContext(
-        params=_params([]), port=port, env=env, label="d0", monotonic=lambda: 0.0
+    context = DriverContext(params=_params([]), port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
     )
-    driver = create_routine_driver(context=context)
 
     phases = []
     for _ in range(7):
@@ -251,7 +269,7 @@ def test_routine_driver_phase_timeout_fails():
     context, driver, port, env, clock = _make_driver()
     # Never connect the bridge; push the wall clock past the WAIT_BRIDGE deadline.
     clock["now"] = 10_000.0
-    driver = _tick_driver(context=context, state=driver)
+    driver = _tick_driver(context=context, state=driver, monotonic_s=clock["now"])
     assert routine_driver_is_done(state=driver)
     assert env.failures and env.failures[0][0] is FailureKind.TIMEOUT
 
@@ -274,10 +292,11 @@ _GOTO_STEPS = [{"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0}
 def test_routine_driver_goto_streams_setpoints_and_engages_offboard():
     port = FakeCommandPort()
     env = FakeDriverEnvironment()
-    context = DriverContext(
-        params=_params(_GOTO_STEPS), port=port, env=env, label="d0", monotonic=lambda: 0.0
+    context = DriverContext(params=_params(_GOTO_STEPS), port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
     )
-    driver = create_routine_driver(context=context)
 
     env.connected = True
     port.set_handshaked()
@@ -334,8 +353,11 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         offboard_setpoint_rate_hz=50.0,
         policy_fn_factory=lambda descriptor: _fake_policy_fn,
     )
-    context = DriverContext(params=params, port=port, env=env, label="d0", monotonic=lambda: 0.0)
-    driver = create_routine_driver(context=context)
+    context = DriverContext(params=params, port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
+    )
 
     env.connected = True
     port.set_handshaked()
@@ -381,9 +403,11 @@ def test_routine_driver_policy_step_without_factory_fails_at_build():
         port=port,
         env=env,
         label="d0",
-        monotonic=lambda: 0.0,
     )
-    driver = create_routine_driver(context=context)
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
+    )
 
     env.connected = True
     port.set_handshaked()

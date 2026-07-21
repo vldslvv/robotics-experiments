@@ -88,7 +88,10 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.MavlinkCommandPort = _FakePort
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
-    fake_commanding.create_routine_driver = lambda *, context: _FakeDriver()
+    creation_ticks = []
+    fake_commanding.create_routine_driver = (
+        lambda *, context, tick: creation_ticks.append((context, tick)) or _FakeDriver()
+    )
     fake_commanding.routine_driver_is_done = lambda *, state: state.is_done
     driver_ticks = []
     fake_commanding.tick_routine_driver = (
@@ -119,6 +122,7 @@ def _import_orchestrator(monkeypatch):
     return module, SimpleNamespace(
         spawned=spawned,
         despawned=despawned,
+        creation_ticks=creation_ticks,
         driver_ticks=driver_ticks,
     )
 
@@ -239,7 +243,7 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
 
 
 def test_build_drivers_for_every_bridge_enabled_drone(monkeypatch):
-    module, _rec = _import_orchestrator(monkeypatch)
+    module, rec = _import_orchestrator(monkeypatch)
     env = _env(
         _vehicle(0, "D0", (0.0, 0.0), enabled=True, steps=[{"kind": "arm"}]),
         _vehicle(1, "D1", (2.0, 0.0), enabled=True),
@@ -255,6 +259,8 @@ def test_build_drivers_for_every_bridge_enabled_drone(monkeypatch):
     assert fleet.flying[0].context.port.gcs_endpoint == "udp:127.0.0.1:14550"
     assert fleet.flying[1].context.params.steps == []
     assert not hasattr(fleet.flying[0], "port")
+    assert len(rec.creation_ticks) == 2
+    assert rec.creation_ticks[0][1] is rec.creation_ticks[1][1]
 
 
 def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
@@ -272,6 +278,7 @@ def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
     context, driver, tick = rec.driver_ticks[0]
     assert (context, driver) == (flying.context, flying.driver)
     assert (tick.control_time_us, tick.monotonic_s) == (20_000, 7.0)
+    assert fleet.flying[0] is flying
     assert fleet.flying[0].context is flying.context
 
 
@@ -323,7 +330,6 @@ def test_teardown_resets_driver_cadence(monkeypatch):
 
     assert rec.driver_ticks == []
     fleet = module.teardown(state=fleet)
-    assert fleet.control_time_ns == 0
     assert fleet.driver_cadence.previous_time_ns == 0
 
 

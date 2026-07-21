@@ -8,6 +8,7 @@ through the package-root contract. The per-drone driver itself is covered by
 """
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -180,7 +181,7 @@ def test_armed_predicate_reads_bridge_status():
 
 def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy_fn_factory=None):
     return build_vehicle_routine(
-        steps,
+        steps=steps,
         target_latitude_deg=47.0,
         target_longitude_deg=8.0,
         target_altitude_m=target_altitude_m,
@@ -350,7 +351,7 @@ def _goto_state_after_offboard_request():
     state, decision = decide(routine, state, _far(2))
     assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
-    assert state.offboard_requested is True
+    assert state.offboard.requested is True
     return routine, state
 
 
@@ -378,7 +379,7 @@ def _advance_first_goto(routine):
     for t in range(5):
         state, _decision = decide(routine, state, _far(t))
     reached = make_routine_observation(
-        sim_time_us=5,
+        sim_time_us=100_000,
         position_enu=(3.0, 0.0, 2.0),
         yaw_deg=0.0,
     )
@@ -399,18 +400,18 @@ def test_decide_goto_primes_then_engages_offboard_then_reaches():
     assert decision.kind is DecisionKind.CONTINUE
     assert decision.setpoint is not None
     assert decision.setpoint.yaw_rad == pytest.approx(math.pi / 2.0)
-    assert state.setpoint_stream.transmissions == 1
+    assert state.offboard.transmissions == 1
 
     # Two more priming setpoints (no command yet).
     state, decision = decide(routine, state, _far(1))
     assert decision.kind is DecisionKind.CONTINUE
     state, decision = decide(routine, state, _far(2))
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.setpoint_stream.transmissions == 3
+    assert state.offboard.transmissions == 3
     # The third actual transmission also engages OFFBOARD.
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
     assert decision.setpoint is not None
-    assert state.offboard_requested is True
+    assert state.offboard.requested is True
 
     # Then back to streaming until the waypoint is reached.
     state, decision = decide(routine, state, _far(3))
@@ -424,6 +425,31 @@ def test_decide_goto_primes_then_engages_offboard_then_reaches():
     assert decision.kind is DecisionKind.DONE
 
 
+def test_goto_fixed_setpoint_is_cached_between_transmissions():
+    routine = _goto_routine()
+    state, first = decide(routine, RoutineState(), _far(0))
+    cached = state.offboard.cached_setpoint
+
+    state, second = decide(routine, state, _far(1))
+
+    assert first.setpoint is cached
+    assert second.setpoint is cached
+    assert state.offboard.cached_setpoint is cached
+
+
+def test_lower_offboard_rate_counts_only_actual_transmissions():
+    routine = replace(_goto_routine(), offboard_setpoint_rate_hz=10.0)
+    state = RoutineState()
+    transmitted = 0
+
+    for cycle in range(50):
+        state, decision = decide(routine, state, _far(cycle))
+        transmitted += int(decision.setpoint is not None)
+
+    assert transmitted == 10
+    assert state.offboard.transmissions == 10
+
+
 def test_decide_goto_offboard_accepted_ack_continues_streaming():
     routine, state = _goto_state_after_offboard_request()
     accepted = CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0)
@@ -431,7 +457,7 @@ def test_decide_goto_offboard_accepted_ack_continues_streaming():
     state, decision = decide(routine, state, _far(4, last_ack=accepted))
 
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.offboard_requested is True
+    assert state.offboard.requested is True
 
 
 def test_decide_goto_ignores_offboard_ack_before_this_step_requests_mode():
@@ -444,8 +470,8 @@ def test_decide_goto_ignores_offboard_ack_before_this_step_requests_mode():
     state, decision = decide(routine, state, _far(1, last_ack=stale_denied))
 
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.setpoint_stream.transmissions == 2
-    assert state.offboard_requested is False
+    assert state.offboard.transmissions == 2
+    assert state.offboard.requested is False
 
 
 def test_decide_goto_offboard_temporary_rejection_streams_then_retries():
@@ -458,12 +484,12 @@ def test_decide_goto_offboard_temporary_rejection_streams_then_retries():
     state, decision = decide(routine, state, _far(4, last_ack=temp_reject))
 
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.offboard_requested is False
+    assert state.offboard.requested is False
 
     state, decision = decide(routine, state, _far(5))
     assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
-    assert state.offboard_requested is True
+    assert state.offboard.requested is True
 
 
 def test_decide_goto_offboard_hard_rejection_fails_command():
@@ -510,7 +536,7 @@ def test_consecutive_goto_uses_current_step_baseline_for_yaw():
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
+        make_routine_observation(sim_time_us=120_000, position_enu=(3.0, 0.0, 2.0)),
     )
 
     assert decision.kind is DecisionKind.CONTINUE
@@ -520,13 +546,49 @@ def test_consecutive_goto_uses_current_step_baseline_for_yaw():
     assert state.baseline_position_enu.tolist() == [3.0, 0.0, 2.0]
 
 
+def test_consecutive_goto_preserves_transmitter_phase_until_next_due_emission():
+    routine = replace(_two_goto_routine(), offboard_setpoint_rate_hz=10.0)
+    state, _ = decide(routine, RoutineState(), _far(0))
+    state, _ = decide(routine, state, _far(1))
+    reached = make_routine_observation(
+        sim_time_us=40_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = decide(routine, state, reached)
+    assert decision.kind is DecisionKind.ADVANCE
+
+    state, decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=60_000, position_enu=(3.0, 0.0, 2.0)),
+    )
+    assert decision.setpoint is None
+    assert state.offboard.transmissions == 1
+    assert state.offboard.cached_setpoint.yaw_rad == pytest.approx(0.0)
+
+    state, decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=80_000, position_enu=(3.0, 0.0, 2.0)),
+    )
+    assert decision.setpoint is None
+    state, decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=100_000, position_enu=(3.0, 0.0, 2.0)),
+    )
+    assert decision.setpoint is state.offboard.cached_setpoint
+    assert state.offboard.transmissions == 2
+
+
 def test_consecutive_goto_cross_track_uses_current_leg_path():
     routine = _two_goto_routine()
     state = _advance_first_goto(routine)
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
+        make_routine_observation(sim_time_us=120_000, position_enu=(3.0, 0.0, 2.0)),
     )
     assert decision.kind is DecisionKind.CONTINUE
 
@@ -535,7 +597,7 @@ def test_consecutive_goto_cross_track_uses_current_leg_path():
     _state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=7, position_enu=(5.1, 3.0, 2.0)),
+        make_routine_observation(sim_time_us=140_000, position_enu=(5.1, 3.0, 2.0)),
     )
 
     assert decision.kind is DecisionKind.FAIL
@@ -564,16 +626,24 @@ def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
             last_streamed = decision.setpoint
     assert last_streamed is not None
 
-    reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    reached = make_routine_observation(
+        sim_time_us=100_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
     state, decision = decide(routine, state, reached)
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 1
-    assert state.setpoint_stream.cached_setpoint == last_streamed
+    assert state.offboard.cached_setpoint == last_streamed
 
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+        make_routine_observation(
+            sim_time_us=120_000,
+            position_enu=(3.0, 0.0, 2.0),
+            yaw_deg=0.0,
+        ),
     )
     assert decision.kind is DecisionKind.CONTINUE
     assert decision.setpoint == last_streamed
@@ -594,22 +664,34 @@ def test_explicit_command_after_offboard_hover_clears_held_setpoint():
     for t in range(5):
         state, _decision = decide(routine, state, _far(t))
 
-    reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    reached = make_routine_observation(
+        sim_time_us=100_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
     state, decision = decide(routine, state, reached)
     assert decision.kind is DecisionKind.ADVANCE
 
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+        make_routine_observation(
+            sim_time_us=120_000,
+            position_enu=(3.0, 0.0, 2.0),
+            yaw_deg=0.0,
+        ),
     )
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.setpoint_stream.cached_setpoint is not None
+    assert state.offboard.cached_setpoint is not None
 
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=7, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+        make_routine_observation(
+            sim_time_us=140_000,
+            position_enu=(3.0, 0.0, 2.0),
+            yaw_deg=0.0,
+        ),
     )
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 2
@@ -617,11 +699,15 @@ def test_explicit_command_after_offboard_hover_clears_held_setpoint():
     state, decision = decide(
         routine,
         state,
-        make_routine_observation(sim_time_us=8, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
+        make_routine_observation(
+            sim_time_us=160_000,
+            position_enu=(3.0, 0.0, 2.0),
+            yaw_deg=0.0,
+        ),
     )
     assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_NAV_LAND
-    assert state.setpoint_stream.cached_setpoint is None
+    assert state.offboard.cached_setpoint is None
 
 
 def test_reached_world_position_within_tolerance():
@@ -871,7 +957,7 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
         )
         assert decision.kind is DecisionKind.CONTINUE
         assert isinstance(decision.setpoint, VelocitySetpoint)
-    assert state.setpoint_stream.transmissions == 3
+    assert state.offboard.transmissions == 3
 
     # The third actual transmission engages OFFBOARD on the same cycle.
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
@@ -891,7 +977,7 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
         make_routine_observation(sim_time_us=5 + 2_000_000, last_ack=accepted),
     )
     assert decision.kind is DecisionKind.CONTINUE
-    assert state.offboard_accepted is True
+    assert state.offboard.accepted is True
 
     # hold_s=2.0 of continuous in-envelope flight after accepted OFFBOARD -> ADVANCE.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=5 + 4_000_000))
@@ -915,7 +1001,7 @@ def test_policy_and_setpoint_cadences_are_independent_exact_averages():
 
     assert len(policy_fn.goals) == 20
     assert transmitted == 50
-    assert state.setpoint_stream.transmissions == 50
+    assert state.offboard.transmissions == 50
 
 
 def test_decide_policy_without_target_hovers_at_step_baseline():

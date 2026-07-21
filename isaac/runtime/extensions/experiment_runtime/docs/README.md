@@ -13,8 +13,9 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
 - Timeline `PLAY`: spawn the fleet, start the PX4 lockstep bridge group, build
   one frozen `DriverContext` plus one progress-only `RoutineDriverState` per
   bridge-enabled drone, and advance them with `tick_drivers` from a separate
-  PhysX-step subscription at the configured fleet cadence. Empty routines follow the same driver path and
-  complete without commands.
+  PhysX-step subscription at the configured fleet cadence. Creation and each
+  due cycle share one explicit sim/wall-clock `DriverTick` across the fleet.
+  Empty routines follow the same driver path and complete without commands.
 - `STOP` / `PAUSE` / `on_shutdown`: stop the control tick and tear down.
 
 Dependent Kit plugins may call `get_instance().read_status()` for an immutable

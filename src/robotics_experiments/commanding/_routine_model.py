@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 
-from robotics_experiments.commanding._cadence import _CadenceState
+from robotics_experiments._cadence import _CadenceState
 from robotics_experiments.commanding.commands import (
     AttitudeRateSetpoint,
     MavlinkCommand,
@@ -210,20 +210,15 @@ class VehicleRoutine:
 
 
 @dataclass(frozen=True)
-class _PolicySourceState:
-    """Policy evaluation phase and its zero-order-held output."""
+class _OffboardState:
+    """Continuous OFFBOARD policy, transmission, payload, and mode progress."""
 
-    cadence: _CadenceState = _CadenceState()
-    cached_setpoint: Optional[StreamSetpoint] = None
-
-
-@dataclass(frozen=True)
-class _SetpointStreamState:
-    """OFFBOARD transmission phase, count, and latest held payload."""
-
-    cadence: _CadenceState = _CadenceState()
+    policy_cadence: _CadenceState = _CadenceState()
+    transmitter_cadence: _CadenceState = _CadenceState()
     transmissions: int = 0
     cached_setpoint: Optional[StreamSetpoint] = None
+    requested: bool = False
+    accepted: bool = False
 
 
 @dataclass(frozen=True)
@@ -243,15 +238,10 @@ class RoutineState:
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
             ``False`` again. Used to enforce ``RoutineStep.hold_s``.
-        policy_source: Policy evaluation cadence plus its zero-order-held output.
-        setpoint_stream: OFFBOARD transmission cadence, actual transmission
-            count, and latest payload retained across command-less verification.
-        offboard_requested: Whether the one-shot OFFBOARD-mode command has been
-            sent for the active streaming step.
-        offboard_accepted: Whether PX4 accepted the OFFBOARD-mode command for
-            the active streaming step. Policy-step hold windows start only
-            after this is true, so a policy cannot complete before PX4 enters
-            the mode that is supposed to consume its stream.
+        offboard: Continuous OFFBOARD progress: policy and transmitter cadence,
+            zero-order-held payload, actual transmission count, and mode request
+            / acceptance flags. Compatible streaming and command-less verifier
+            steps retain this value so cadence phase remains continuous.
     """
 
     cursor: int = 0
@@ -259,7 +249,4 @@ class RoutineState:
     baseline_position_enu: Optional[np.ndarray] = None
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
-    policy_source: _PolicySourceState = _PolicySourceState()
-    setpoint_stream: _SetpointStreamState = _SetpointStreamState()
-    offboard_requested: bool = False
-    offboard_accepted: bool = False
+    offboard: _OffboardState = _OffboardState()

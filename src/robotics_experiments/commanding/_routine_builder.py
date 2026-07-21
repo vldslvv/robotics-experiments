@@ -279,8 +279,8 @@ def _build_land_step(*, descriptor: Mapping[str, Any], index: int) -> RoutineSte
 
 
 def build_vehicle_routine(
-    steps: Sequence[Mapping[str, Any]],
     *,
+    steps: Sequence[Mapping[str, Any]],
     target_latitude_deg: float,
     target_longitude_deg: float,
     target_altitude_m: float,
