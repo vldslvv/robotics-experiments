@@ -201,8 +201,8 @@ class RlConfig(_FreezableConfig):
 
     Replaces the retired ``isaac_lab`` group as the single source of truth for
     the DirectRLEnv Lab-scale tunables. ``decimation`` is not authored here: the
-    env derives it as ``round(sim.physics_hz / policy_rate_hz)`` so the physics
-    cadence stays single-sourced on ``sim.physics_hz``.
+    env schedules it from ``sim.physics_hz`` and ``policy_rate_hz`` so the
+    physics cadence stays single-sourced on ``sim.physics_hz``.
 
     Attributes:
         action: The RL action-level selection and controller tunables.
@@ -211,8 +211,7 @@ class RlConfig(_FreezableConfig):
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
         episode_length_s: Episode timeout, seconds.
-        policy_rate_hz: RL policy decision rate; the physics decimation is
-            ``round(sim.physics_hz / policy_rate_hz)``.
+        policy_rate_hz: Exact-average RL policy decision rate.
     """
 
     action: PressActionConfig

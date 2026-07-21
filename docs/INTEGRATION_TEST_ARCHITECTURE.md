@@ -40,7 +40,9 @@ scenario-specific notes.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs a prior `make train-rl`, so it is deliberately not
   part of `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy
-  artifact contract and routine config.
+  artifact contract and routine config. Policy metadata includes the active
+  policy rate, so artifacts trained before that field was introduced must be
+  retrained.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

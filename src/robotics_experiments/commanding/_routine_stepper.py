@@ -4,12 +4,15 @@ from typing import Optional
 
 import numpy as np
 
+from robotics_experiments.commanding._cadence import _advance_cadence, _CadenceState
 from robotics_experiments.commanding._routine_model import (
     FailureKind,
     RoutineDecision,
     RoutineState,
     StreamSetpoint,
     VehicleRoutine,
+    _PolicySourceState,
+    _SetpointStreamState,
     _StreamingSpec,
 )
 from robotics_experiments.commanding.commands import PositionSetpoint
@@ -21,9 +24,12 @@ from robotics_experiments.commanding.observation import (
 __all__ = ["decide"]
 
 
+def _anchored_cadence(sim_time_us: int) -> _CadenceState:
+    return _CadenceState(previous_time_ns=sim_time_us * 1_000)
+
+
 def _advanced(state: RoutineState) -> RoutineState:
-    """The state after the active step completes: cursor on the next step, its
-    per-step progress (baseline, timer, hold, streaming counters) cleared."""
+    """Advance while retaining only the setpoint a verifier may keep alive."""
     return replace(
         state,
         cursor=state.cursor + 1,
@@ -31,10 +37,103 @@ def _advanced(state: RoutineState) -> RoutineState:
         baseline_position_enu=None,
         step_started_us=None,
         hold_since_us=None,
-        setpoints_streamed=0,
+        policy_source=_PolicySourceState(),
+        setpoint_stream=_SetpointStreamState(cached_setpoint=state.setpoint_stream.cached_setpoint),
         offboard_requested=False,
         offboard_accepted=False,
     )
+
+
+def _advance_policy_source(
+    *,
+    routine: VehicleRoutine,
+    state: RoutineState,
+    spec: _StreamingSpec,
+    observation: RoutineObservation,
+) -> RoutineState:
+    if spec.setpoint_fn is None:
+        return state
+    cadence, due = _advance_cadence(
+        state.policy_source.cadence,
+        time_ns=int(observation.sim_time_us) * 1_000,
+        rate_hz=routine.policy_rate_hz,
+    )
+    cached = state.policy_source.cached_setpoint
+    if due:
+        cached = _setpoint_for(spec, state.baseline_position_enu, observation)
+    return replace(state, policy_source=_PolicySourceState(cadence, cached))
+
+
+def _advance_stream(
+    *,
+    routine: VehicleRoutine,
+    state: RoutineState,
+    observation: RoutineObservation,
+    setpoint: StreamSetpoint,
+) -> tuple[RoutineState, Optional[StreamSetpoint]]:
+    cadence, due = _advance_cadence(
+        state.setpoint_stream.cadence,
+        time_ns=int(observation.sim_time_us) * 1_000,
+        rate_hz=routine.offboard_setpoint_rate_hz,
+    )
+    transmissions = state.setpoint_stream.transmissions + int(due)
+    stream = _SetpointStreamState(cadence, transmissions, setpoint)
+    return replace(state, setpoint_stream=stream), setpoint if due else None
+
+
+def _enter_step(
+    *,
+    routine: VehicleRoutine,
+    state: RoutineState,
+    observation: RoutineObservation,
+) -> tuple[RoutineState, RoutineDecision]:
+    step = routine.steps[state.cursor]
+    baseline = np.array(observation.vehicle_state.position_enu, dtype=np.float64, copy=True)
+    baseline.setflags(write=False)
+    now_us = int(observation.sim_time_us)
+    entered = replace(
+        state,
+        sent=True,
+        baseline_position_enu=baseline,
+        step_started_us=now_us,
+        hold_since_us=None,
+        policy_source=_PolicySourceState(),
+        setpoint_stream=_SetpointStreamState(),
+        offboard_requested=False,
+        offboard_accepted=False,
+    )
+    if step.streaming is not None:
+        setpoint = _setpoint_for(step.streaming, baseline, observation)
+        policy_source = _PolicySourceState(
+            cadence=_anchored_cadence(now_us),
+            cached_setpoint=setpoint if step.streaming.setpoint_fn is not None else None,
+        )
+        stream = _SetpointStreamState(
+            cadence=_anchored_cadence(now_us),
+            transmissions=1,
+            cached_setpoint=setpoint,
+        )
+        command = step.command if step.streaming.prime_ticks <= 1 else None
+        return replace(
+            entered,
+            policy_source=policy_source,
+            setpoint_stream=stream,
+            offboard_requested=command is not None,
+        ), RoutineDecision.continue_(setpoint=setpoint, command=command)
+
+    held_setpoint = state.setpoint_stream.cached_setpoint
+    if step.command is None and held_setpoint is not None:
+        return replace(
+            entered,
+            setpoint_stream=_SetpointStreamState(
+                cadence=_anchored_cadence(now_us),
+                transmissions=1,
+                cached_setpoint=held_setpoint,
+            ),
+        ), RoutineDecision.continue_(setpoint=held_setpoint)
+    if step.command is None:
+        return entered, RoutineDecision.continue_()
+    return entered, RoutineDecision.continue_(command=step.command)
 
 
 def decide(
@@ -42,66 +141,14 @@ def decide(
     state: RoutineState,
     observation: RoutineObservation,
 ) -> tuple[RoutineState, RoutineDecision]:
-    """Pure routine stepper: map (routine, state, observation) to (state, decision).
-
-    Returns the next :class:`RoutineState` together with the
-    :class:`RoutineDecision` for this tick. The decision is purely a function of
-    the inputs; the only state mutation is the returned new state. Semantics:
-
-    - cursor past the last step -> ``DONE``.
-    - step not yet begun -> ``SEND`` (or ``WAIT``/``STREAM`` for a command-less
-      step), capturing that step's baseline and starting the timer.
-    - an active step's invariant breached -> ``FAIL`` (``ENVELOPE``).
-    - completion predicate true and held for ``hold_s`` -> ``ADVANCE``.
-    - a temporarily-rejected ack arrived and the step opts into retry -> ``SEND``
-      again (re-send, same step).
-    - a non-accepted ack arrived (and no retry) -> ``FAIL`` (``COMMAND``).
-    - past ``timeout_s`` of sim time -> ``FAIL`` (``COMMAND``).
-    - otherwise -> ``WAIT``.
-    """
+    """Purely advance one routine cycle and describe its independent effects."""
     steps = routine.steps
     if state.cursor >= len(steps):
         return state, RoutineDecision.done()
+    if not state.sent:
+        return _enter_step(routine=routine, state=state, observation=observation)
 
     step = steps[state.cursor]
-
-    if not state.sent:
-        baseline = np.array(
-            observation.vehicle_state.position_enu,
-            dtype=np.float64,
-            copy=True,
-        )
-        baseline.setflags(write=False)
-        new_state = replace(
-            state,
-            sent=True,
-            baseline_position_enu=baseline,
-            step_started_us=int(observation.sim_time_us),
-            hold_since_us=None,
-            setpoints_streamed=0,
-            offboard_requested=False,
-            offboard_accepted=False,
-        )
-        if step.streaming is not None:
-            # Streaming step: begin priming the OFFBOARD setpoint stream
-            # immediately; the mode command is sent later (see below).
-            setpoint = _setpoint_for(step.streaming, baseline, observation)
-            return replace(
-                new_state,
-                setpoints_streamed=1,
-                offboard_hold_setpoint=setpoint,
-            ), RoutineDecision.stream(setpoint)
-        if step.command is None and state.offboard_hold_setpoint is not None:
-            # A command-less verifier after a goto must keep feeding PX4's
-            # OFFBOARD stream until it advances or an explicit command changes
-            # mode. Without this PX4 declares offboard signal loss.
-            return new_state, RoutineDecision.stream(state.offboard_hold_setpoint)
-        if step.command is None:
-            return new_state, RoutineDecision.wait()
-        return replace(new_state, offboard_hold_setpoint=None), RoutineDecision.send(step.command)
-
-    # Continuous flight-envelope gates: a breach fails the routine as an
-    # envelope event, distinct from a command rejection or a timeout.
     for invariant in step.invariants:
         breach = invariant(observation, state.baseline_position_enu)
         if breach is not None:
@@ -122,75 +169,17 @@ def decide(
             hold_since_us = int(observation.sim_time_us)
         if int(observation.sim_time_us) - hold_since_us >= step.hold_s * 1_000_000:
             return _advanced(state), RoutineDecision.advance()
-        # Still accumulating the hold window; remember when it started.
         state = replace(state, hold_since_us=hold_since_us)
     elif state.hold_since_us is not None:
-        # The completion condition broke before the hold window elapsed; restart it.
         state = replace(state, hold_since_us=None)
 
-    # Streaming (OFFBOARD goto) lifecycle: prime the setpoint stream, engage
-    # OFFBOARD once, then keep streaming until completion or timeout. Handled
-    # before the generic ack/timeout tail so the one-shot mode command is not
-    # treated as a rejected step command.
     if step.streaming is not None:
-        spec = step.streaming
-        step_started_us = state.step_started_us
-        assert step_started_us is not None  # set on the entry tick, before sent=True
-        elapsed_us = int(observation.sim_time_us) - step_started_us
-        if elapsed_us > step.timeout_s * 1_000_000:
-            return state, RoutineDecision.fail(
-                f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
-                "(did not reach the waypoint)",
-                failure_kind=FailureKind.COMMAND,
-            )
-
-        if state.offboard_requested:
-            ack = observation.last_ack
-            if (
-                ack is not None
-                and step.command is not None
-                and ack.command_id == step.command.command_id
-            ):
-                setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
-                if ack.accepted:
-                    hold_since_us = state.hold_since_us
-                    if spec.setpoint_fn is not None and hold_since_us is None:
-                        hold_since_us = int(observation.sim_time_us)
-                    return replace(
-                        state,
-                        offboard_hold_setpoint=setpoint,
-                        offboard_accepted=True,
-                        hold_since_us=hold_since_us,
-                    ), RoutineDecision.stream(setpoint)
-                if ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
-                    # Keep the setpoint stream alive on this tick, then retry
-                    # the one-shot OFFBOARD command on a later tick inside the
-                    # same step timeout budget.
-                    return replace(
-                        state,
-                        offboard_requested=False,
-                        offboard_accepted=False,
-                        hold_since_us=None,
-                        offboard_hold_setpoint=setpoint,
-                    ), RoutineDecision.stream(setpoint)
-                return state, RoutineDecision.fail(
-                    f"step {step.label!r} rejected: command={step.command.command_id} "
-                    f"result={ack.result}",
-                    failure_kind=FailureKind.COMMAND,
-                )
-
-        if state.setpoints_streamed < spec.prime_ticks:
-            setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
-            return replace(
-                state,
-                setpoints_streamed=state.setpoints_streamed + 1,
-                offboard_hold_setpoint=setpoint,
-            ), RoutineDecision.stream(setpoint)
-        if not state.offboard_requested:
-            assert step.command is not None  # a streaming step always carries the mode command
-            return replace(state, offboard_requested=True), RoutineDecision.send(step.command)
-        setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
-        return replace(state, offboard_hold_setpoint=setpoint), RoutineDecision.stream(setpoint)
+        return _decide_streaming(
+            routine=routine,
+            state=state,
+            observation=observation,
+            spec=step.streaming,
+        )
 
     ack = observation.last_ack
     if (
@@ -200,17 +189,14 @@ def decide(
         and not ack.accepted
     ):
         if step.retry_on_temporarily_rejected and ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
-            # Re-send the same command; PX4 returned a transient rejection. Keep
-            # the step timer running so a vehicle that never becomes armable
-            # still fails on the step timeout below.
-            return state, RoutineDecision.send(step.command)
+            return state, RoutineDecision.continue_(command=step.command)
         return state, RoutineDecision.fail(
             f"step {step.label!r} rejected: command={step.command.command_id} result={ack.result}",
             failure_kind=FailureKind.COMMAND,
         )
 
     step_started_us = state.step_started_us
-    assert step_started_us is not None  # set on the entry tick, before sent=True
+    assert step_started_us is not None
     elapsed_us = int(observation.sim_time_us) - step_started_us
     if elapsed_us > step.timeout_s * 1_000_000:
         return state, RoutineDecision.fail(
@@ -219,27 +205,104 @@ def decide(
             failure_kind=FailureKind.COMMAND,
         )
 
-    if step.command is None and state.offboard_hold_setpoint is not None:
-        return state, RoutineDecision.stream(state.offboard_hold_setpoint)
+    held_setpoint = state.setpoint_stream.cached_setpoint
+    if step.command is None and held_setpoint is not None:
+        state, setpoint = _advance_stream(
+            routine=routine,
+            state=state,
+            observation=observation,
+            setpoint=held_setpoint,
+        )
+        return state, RoutineDecision.continue_(setpoint=setpoint)
+    return state, RoutineDecision.continue_()
 
-    return state, RoutineDecision.wait()
 
+def _decide_streaming(
+    *,
+    routine: VehicleRoutine,
+    state: RoutineState,
+    observation: RoutineObservation,
+    spec: _StreamingSpec,
+) -> tuple[RoutineState, RoutineDecision]:
+    step = routine.steps[state.cursor]
+    step_started_us = state.step_started_us
+    assert step_started_us is not None
+    elapsed_us = int(observation.sim_time_us) - step_started_us
+    if elapsed_us > step.timeout_s * 1_000_000:
+        return state, RoutineDecision.fail(
+            f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
+            "(did not reach the waypoint)",
+            failure_kind=FailureKind.COMMAND,
+        )
 
-# ---- Pure completion predicates over (RoutineObservation, baseline) ---------
+    retry_deferred = False
+    if state.offboard_requested:
+        ack = observation.last_ack
+        if (
+            ack is not None
+            and step.command is not None
+            and ack.command_id == step.command.command_id
+        ):
+            if ack.accepted:
+                hold_since_us = state.hold_since_us
+                if spec.setpoint_fn is not None and hold_since_us is None:
+                    hold_since_us = int(observation.sim_time_us)
+                state = replace(
+                    state,
+                    offboard_accepted=True,
+                    hold_since_us=hold_since_us,
+                )
+            elif ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
+                retry_deferred = True
+                state = replace(
+                    state,
+                    offboard_requested=False,
+                    offboard_accepted=False,
+                    hold_since_us=None,
+                )
+            else:
+                return state, RoutineDecision.fail(
+                    f"step {step.label!r} rejected: command={step.command.command_id} "
+                    f"result={ack.result}",
+                    failure_kind=FailureKind.COMMAND,
+                )
+
+    state = _advance_policy_source(
+        routine=routine,
+        state=state,
+        spec=spec,
+        observation=observation,
+    )
+    if spec.setpoint_fn is None:
+        setpoint = _setpoint_for(spec, state.baseline_position_enu, observation)
+    else:
+        policy_setpoint = state.policy_source.cached_setpoint
+        assert policy_setpoint is not None
+        setpoint = policy_setpoint
+    state, setpoint_effect = _advance_stream(
+        routine=routine,
+        state=state,
+        observation=observation,
+        setpoint=setpoint,
+    )
+
+    command = None
+    if (
+        not retry_deferred
+        and not state.offboard_requested
+        and state.setpoint_stream.transmissions >= spec.prime_ticks
+    ):
+        assert step.command is not None
+        command = step.command
+        state = replace(state, offboard_requested=True)
+    return state, RoutineDecision.continue_(setpoint=setpoint_effect, command=command)
 
 
 def _setpoint_for(
-    spec: "_StreamingSpec",
+    spec: _StreamingSpec,
     baseline: Optional[np.ndarray],
     observation: RoutineObservation,
 ) -> StreamSetpoint:
-    """Build the streamed setpoint for this tick.
-
-    A ``setpoint_fn`` spec (policy step) delegates to the injected pure
-    function. Otherwise (a ``goto``): the fixed geodetic target plus a live
-    heading -- yaw faces the active-step-baseline-to-target direction (constant
-    per leg); a near-vertical leg (or no baseline yet) holds heading (``NaN``).
-    """
     if spec.setpoint_fn is not None:
         return spec.setpoint_fn(observation, baseline)
     east, north, _up = spec.target_enu
@@ -248,7 +311,6 @@ def _setpoint_for(
         de = east - float(baseline[0])
         dn = north - float(baseline[1])
         if math.hypot(de, dn) >= spec.min_heading_dist_m:
-            # NED yaw: 0 = north, positive clockwise toward east.
             yaw_rad = math.atan2(de, dn)
     return PositionSetpoint(
         latitude_deg=spec.latitude_deg,

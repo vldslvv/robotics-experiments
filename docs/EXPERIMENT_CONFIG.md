@@ -35,6 +35,13 @@ layout.
 benchmark. Keeping it in the resolved graph makes the capture duration part of
 the same canonical configuration fingerprint as the flown routine.
 
+`driver.control_rate_hz` drives the fleet cyclic executive,
+`driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
+`rl.policy_rate_hz` drives policy inference and Isaac Lab stepping. All rates
+must be finite and positive; policy and setpoint rates cannot exceed the driver
+rate, and the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50,
+and 20 Hz respectively.
+
 ## Routine behavior
 
 Every vehicle owns a complete `RoutineConfig`. Every bridge-enabled vehicle gets

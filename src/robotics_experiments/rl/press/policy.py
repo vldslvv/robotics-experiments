@@ -3,7 +3,7 @@
 The policy artifact is a directory holding a TorchScript module
 (``policy.pt``) and a JSON metadata sidecar (``policy_meta.json``) recording
 the contract the policy was trained against: the observation schema version
-and dimension, the action level (``kind``/``action_dim``), and the action
+and dimension, policy rate, action level (``kind``/``action_dim``), and action
 command scales. The internal loader refuses any artifact whose metadata mismatches
 the active config -- fail loudly at load, never a shape error deep in the
 driver. A bare checkpoint without metadata is not a valid artifact.
@@ -53,11 +53,18 @@ _SCALE_FIELDS = (
 )
 
 
-def policy_metadata(action_cfg: Any, *, obs_schema_version: int, obs_dim: int) -> dict[str, Any]:
+def policy_metadata(
+    *,
+    action_cfg: Any,
+    obs_schema_version: int,
+    obs_dim: int,
+    policy_rate_hz: float,
+) -> dict[str, Any]:
     """Compose the artifact metadata for a policy trained on this config."""
     return {
         "obs_schema_version": int(obs_schema_version),
         "obs_dim": int(obs_dim),
+        "policy_rate_hz": float(policy_rate_hz),
         "action_kind": str(action_cfg.kind),
         "action_dim": int(action_cfg.action_dim),
         "action_scales": {name: float(getattr(action_cfg, name)) for name in _SCALE_FIELDS},
@@ -86,11 +93,12 @@ def _validate_metadata(found: dict[str, Any], expected: dict[str, Any], artifact
 
 
 def _load_policy(
-    artifact_dir: Union[str, Path],
     *,
+    artifact_dir: Union[str, Path],
     action_cfg: Any,
     obs_schema_version: int,
     obs_dim: int,
+    policy_rate_hz: float,
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Load a policy artifact, validating its metadata against the active config.
 
@@ -118,7 +126,12 @@ def _load_policy(
             f"{METADATA_FILENAME}; train one first (make train-rl)"
         )
     metadata = json.loads(metadata_path.read_text())
-    expected = policy_metadata(action_cfg, obs_schema_version=obs_schema_version, obs_dim=obs_dim)
+    expected = policy_metadata(
+        action_cfg=action_cfg,
+        obs_schema_version=obs_schema_version,
+        obs_dim=obs_dim,
+        policy_rate_hz=policy_rate_hz,
+    )
     _validate_metadata(metadata, expected, artifact_dir)
 
     import torch
@@ -143,7 +156,10 @@ def _load_policy(
 
 
 def build_policy_step_fn(
-    artifact_dir: Union[str, Path], action_cfg: Any
+    *,
+    artifact_dir: Union[str, Path],
+    action_cfg: Any,
+    policy_rate_hz: float,
 ) -> Callable[["VehicleState", np.ndarray], "Union[VelocitySetpoint, AttitudeRateSetpoint]"]:
     """Compose the ``{kind: policy}`` routine step's per-tick pure function.
 
@@ -158,10 +174,11 @@ def build_policy_step_fn(
             mismatched artifact (surfaces at routine build time).
     """
     policy = _load_policy(
-        artifact_dir,
+        artifact_dir=artifact_dir,
         action_cfg=action_cfg,
         obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         obs_dim=HOVER_OBSERVATION_DIM,
+        policy_rate_hz=policy_rate_hz,
     )
 
     def step(state: "VehicleState", target_enu: np.ndarray):

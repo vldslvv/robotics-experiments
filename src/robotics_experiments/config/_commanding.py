@@ -129,6 +129,8 @@ class DriverConfig(_FreezableConfig):
     top of the sim-time budgets in the routine). Global, not per vehicle.
 
     Attributes:
+        control_rate_hz: Fleet routine-driver rate derived from physics ticks.
+        offboard_setpoint_rate_hz: OFFBOARD setpoint transmission rate.
         goto_min_heading_dist_m: Below this horizontal baseline-to-target
             distance a ``goto`` leg has no meaningful heading (a near-vertical
             move): the streamed setpoint holds heading and the
@@ -143,6 +145,8 @@ class DriverConfig(_FreezableConfig):
             slack).
     """
 
+    control_rate_hz: float
+    offboard_setpoint_rate_hz: float
     goto_min_heading_dist_m: float
     prearm_backstop_floor_s: float
     prearm_backstop_multiplier: float

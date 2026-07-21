@@ -3,12 +3,12 @@ defaults:
   - press: default
 
 # Shared Isaac Lab RL scale. The physics decimation is derived in the env as
-# round(sim.physics_hz / policy_rate_hz) (250 / 50 = 5), so the physics cadence
-# stays single-sourced on sim.physics_hz.
+# scheduled exactly from sim.physics_hz (250 / 20 alternates 13 and 12 physics
+# steps), so the physics cadence stays single-sourced on sim.physics_hz.
 num_envs: 16
 env_spacing: 4.0
 episode_length_s: 5.0
-policy_rate_hz: 50.0
+policy_rate_hz: 20.0
 
 # PPO training (make train-rl, rl.training adapter). task_id selects the
 # Gymnasium task the entrypoint trains.

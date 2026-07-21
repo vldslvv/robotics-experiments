@@ -28,8 +28,9 @@ surfaces. Tests exercise the same root contract as production consumers.
 Like the bridge, the command layer is **per drone**: one frozen `DriverContext`
 holds immutable parameters and resource adapters, while one frozen
 `RoutineDriverState` holds progress and is advanced by
-`tick_routine_driver(context=..., state=...)`. There is no command fleet object - drones are independent
-(cross-drone synchronization is deliberately deferred).
+`tick_routine_driver(context=..., state=..., tick=...)`. One immutable
+`DriverTick` carries the shared logical control time and monotonic wall time for
+the entire fleet cycle.
 
 - **`commands.py`** -- `MavlinkCommand` (frozen: a `MAV_CMD_*` id, seven float
   params, a label) plus pure constructors (`arm`, `takeoff`, `reposition`,
@@ -50,11 +51,11 @@ holds immutable parameters and resource adapters, while one frozen
   sim-time `timeout_s`; `retry_on_temporarily_rejected`; an optional `hold_s`
   sustained-completion window; and a tuple of continuous `invariants`),
   `VehicleRoutine` (ordered steps), `RoutineState`
-  (cursor/sent/active-step baseline/step-start/`hold_since_us` plus the
-  streaming counters `setpoints_streamed`/`offboard_requested`), and
-  `RoutineDecision`
-  (`SEND` / `STREAM` / `WAIT` / `ADVANCE` / `DONE` / `FAIL`; `SEND` carries a
-  `command`, `STREAM` carries a `StreamSetpoint` -- the union
+  (cursor/sent/active-step baseline/step-start/`hold_since_us` plus nested
+  frozen policy-source and setpoint-stream progress), and `RoutineDecision`.
+  Its outcome is `CONTINUE` / `ADVANCE` / `DONE` / `FAIL`, independent of its
+  optional `command` and `setpoint` effects; both effects may be present, and
+  the driver applies the setpoint first. `StreamSetpoint` is the union
   `PositionSetpoint | VelocitySetpoint | AttitudeRateSetpoint`, dispatched by
   the commander on the concrete payload type -- and `FAIL` carries a
   `failure_kind`). `decide(routine, state, observation) -> (state, decision)` is
@@ -74,10 +75,11 @@ holds immutable parameters and resource adapters, while one frozen
 
   A **streaming step** (the `goto` and `policy` kinds, carrying a
   `_StreamingSpec`) is a
-  step whose `decide` emits `STREAM` rather than a single `SEND`: it primes
-  `prime_ticks` OFFBOARD setpoints, sends the one-shot offboard-mode command, then
-  streams the setpoint every tick until the waypoint is reached or the step times
-  out. Matching `MAV_CMD_DO_SET_MODE` ACKs are part of that pure state machine:
+  step whose `decide` may emit independent setpoint and command effects. It
+  primes `prime_ticks` actual OFFBOARD transmissions, sends the one-shot
+  offboard-mode command, then streams at `driver.offboard_setpoint_rate_hz`
+  until the step completes. The last priming transmission and mode command may
+  share a cycle. Matching `MAV_CMD_DO_SET_MODE` ACKs are part of that pure state machine:
   accepted ACKs keep streaming, temporary rejections keep the setpoint stream
   alive and retry OFFBOARD inside the same step timeout, and hard rejections fail
   the step as `FailureKind.COMMAND`. The streamed target is the absolute
@@ -95,8 +97,10 @@ holds immutable parameters and resource adapters, while one frozen
 
   The **`policy` step** is the RL deploy plug-in over the same streaming
   lifecycle: its `_StreamingSpec` carries a `setpoint_fn` (built from the
-  injected `PolicyStepFn`) instead of a fixed geodetic target, so each tick the
-  streamed payload is `policy_fn(observation.vehicle_state, target_enu)` -- a
+  injected `PolicyStepFn`) instead of a fixed geodetic target. It evaluates
+  immediately on entry and then at exact-average `rl.policy_rate_hz`; its latest
+  payload is held without interpolation while the independent setpoint streamer
+  runs. The payload is a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
   The `PolicyStepFn` is composed at the runtime layer
   (`robotics_experiments.rl.press.build_policy_step_fn`: validated artifact load + hover
@@ -171,11 +175,10 @@ observation)`; they are unit-tested with plain dataclasses (no Docker, Isaac, or
 pymavlink). The only side effects in the layer are the port's send methods
 (`send`, `send_setpoint`, `send_velocity_setpoint`, `send_attitude_target` --
 MAVLink out) and the port's connect/heartbeat/drain. `tick_routine_driver`
-receives context and state separately, stores `RoutineState` directly in the
-progress state, runs pure `decide`, then performs the one side
-effect (`SEND` -> `send`, `STREAM` -> the matching send method). A `policy`
-step's network forward pass runs
-inside `decide` as an injected deterministic callable (numpy in/out, no I/O),
+receives context, state, and the shared tick separately, stores `RoutineState`
+directly in the progress state, runs pure `decide`, then performs its optional
+effects (setpoint first, then command). A `policy` step's due network forward
+pass runs inside `decide` as an injected deterministic callable (numpy in/out, no I/O),
 so it does not break the purity split. Step timeouts are measured in **sim time**
 (`observation.sim_time_us`) so the stepper stays pure; the driver pairs that with
 its own wall-clock backstop for a fully stalled sim.
@@ -186,9 +189,9 @@ The command port talks the per-drone GCS MAVLink link
 (`VehicleConfig.gcs_port = bridge.gcs_baseport + id`) **only**. It never touches
 the bridge's simulator MAVLink port or its sensor/actuator lockstep, and
 symmetrically the bridge contract forbids the bridge touching `gcs_port`. The
-driver is a separate control layer by design; it is ticked from the
-adapter's control loop (the standalone blocking loop or the live Kit app-update
-subscription), never from the bridge's physics send/recv legs.
+driver is a separate control layer by design; it is ticked from the adapter's
+50 Hz physics-derived cyclic executive, never from the bridge's physics
+send/recv legs.
 
 ## Where the executor lives: functional fleet state, two thin shells
 
@@ -210,9 +213,10 @@ driver/routine; the shells differ only in tick source and reaction.
 (`isaac/runtime/extensions/experiment_runtime/ExperimentRuntime_python/extension.py`):
 the runtime path for `make run-all` / `make run-isaac`. On timeline PLAY it has
 the fleet functions spawn the fleet, start the bridge group, and build drivers,
-then calls `tick_drivers` from one **Kit app-update** subscription --
-a control tick separate from the bridge's physics-step subscription, never the
-bridge's send/recv legs. Its `make_env` is **forgiving**: `on_failure` (a `FAIL`,
+then calls `tick_drivers` from one separate **PhysX-step** subscription. The
+fleet cadence emits at `driver.control_rate_hz` (50 Hz by default), synchronized
+across vehicles and independent of render/app-update frequency. Its `make_env`
+is **forgiving**: `on_failure` (a `FAIL`,
 a PX4 failsafe, or a phase timeout) logs a warning and the driver idles (it never
 raises into the sim); after `DONE` the driver keeps the GCS link warm so
 PX4-console control returns to the user. STOP/PAUSE and shutdown drop the tick and
@@ -230,8 +234,9 @@ that a forgiving driver stopped early.
 a blocking runner that drives the same lifecycle functions, adds the
 **integration-test-only** checks the runtime does not own (ground settle,
 bridge first-heartbeat, the pre-arm start-tilt check), and ticks every flying
-drivers in a `while not fleet_is_done(state=fleet): simulation_app.update();
-fleet = tick_drivers(state=fleet)` loop, then runs the strict
+drivers from the same PhysX subscription while its host loop calls
+`SimulationApp.update()`. Callback failures are captured and re-raised after
+the update returns so strict exceptions keep their types. It then runs the strict
 bridge-log scan. Its `make_env` is **strict** under `--strict` (the integration
 test): `on_failure` raises `ExpectedInstabilityDetected` for a
 `FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe, and
@@ -257,7 +262,8 @@ The pure `build_vehicle_routine(steps, *, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
-goto_offboard_prime_ticks, goto_min_heading_dist_m, policy_fn_factory)` maps the
+goto_offboard_prime_ticks, policy_rate_hz, offboard_setpoint_rate_hz,
+goto_min_heading_dist_m, policy_fn_factory)` maps the
 descriptors plus a
 per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missing a required
 field, or a `policy` step without an injected factory, raises `ValueError`); it

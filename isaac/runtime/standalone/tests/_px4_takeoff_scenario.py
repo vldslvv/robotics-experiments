@@ -298,6 +298,8 @@ def _drive_to_done(
     The per-phase sim-time and wall-clock guards live in the drivers; this coarse
     wall budget is a final backstop against a sim that ticks but never finishes.
     """
+    import omni.physx
+
     from robotics_experiments.runtime import fleet_is_done, tick_drivers
 
     active = fleet.flying
@@ -312,11 +314,29 @@ def _drive_to_done(
         * 6.0
         for flying in active
     )
-    while not fleet_is_done(state=fleet):
-        if time.monotonic() > deadline_s:
-            raise AssertionError("Timed out driving the routine to completion")
-        _advance_once(context, fleet)
-        fleet = tick_drivers(state=fleet)
+    callback_error: BaseException | None = None
+
+    def on_physics_step(dt: float, *_args) -> None:
+        nonlocal callback_error, fleet
+        if callback_error is not None:
+            return
+        try:
+            fleet = tick_drivers(state=fleet, physics_dt_s=float(dt))
+        except BaseException as exc:  # re-raised on the host loop after update()
+            callback_error = exc
+
+    physics_subscription = omni.physx.get_physx_interface().subscribe_physics_step_events(
+        on_physics_step
+    )
+    try:
+        while not fleet_is_done(state=fleet):
+            if time.monotonic() > deadline_s:
+                raise AssertionError("Timed out driving the routine to completion")
+            _advance_once(context, fleet)
+            if callback_error is not None:
+                raise callback_error
+    finally:
+        del physics_subscription
     return fleet
 
 

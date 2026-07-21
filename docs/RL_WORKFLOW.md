@@ -67,8 +67,11 @@ the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
 because Lab deliberately bypasses PX4.
 The standalone training root passes the resolved `ExperimentConfig` into
 `make_drone_hover_env_cfg`; the Isaac Lab leaf never reloads global config. The
-physics decimation is derived as
-`round(sim.physics_hz / rl.policy_rate_hz)`, not authored, and the hover task's
+physics decimation is selected per policy step by the shared exact-average
+cadence, not authored. At 250 Hz physics and the default 20 Hz policy rate it
+alternates 13 and 12 physics steps (52/48 ms), while `step_dt` remains the
+nominal 50 ms used to compute episode length in policy steps. The fixed render
+interval uses the ceiling decimation. The hover task's
 reward/termination/reset values are the `rl.press.hover_task` block (task
 definition = one YAML block; no task-tuning literal in the env module). The RL
 action also maps to a PX4 OFFBOARD setpoint at deploy time
@@ -108,11 +111,13 @@ unchanged apart from injecting the artifact-loader factory into
   pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
   exists for tooling only.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
-  version/dim, action kind/dim, action scales). `build_policy_step_fn` raises
+  version/dim, policy rate, action kind/dim, action scales). `build_policy_step_fn` raises
   `ValueError` on ANY metadata/config mismatch at load (a bare checkpoint is
   not a valid artifact) and composes artifact loading + hover-observation
   packing + `press_action_to_offboard` into the `PolicyStepFn` the
   `{kind: policy}` routine step streams.
+  Artifacts without the active `rl.policy_rate_hz` are invalid and must be
+  retrained; deployment provides no legacy metadata fallback.
 - **Gate**: `make test-integration-press-policy` flies
   `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
   takeoff -> policy hover hold -> land) strict over PX4 SITL on

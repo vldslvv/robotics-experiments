@@ -5,6 +5,10 @@ defaults:
 # a routine, separate from the routine itself (what is flown and how a good
 # flight is verified). Global for the whole fleet, not merged per vehicle.
 
+# Physics-derived cyclic executive and independent OFFBOARD stream cadence.
+control_rate_hz: 50.0
+offboard_setpoint_rate_hz: 50.0
+
 # Below this horizontal baseline-to-target distance a goto leg has no
 # meaningful heading (a near-vertical move): the streamed setpoint holds the
 # current heading and the heading-alignment completion passes trivially.

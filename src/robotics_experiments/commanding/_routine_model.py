@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 
+from robotics_experiments.commanding._cadence import _CadenceState
 from robotics_experiments.commanding.commands import (
     AttitudeRateSetpoint,
     MavlinkCommand,
@@ -39,11 +40,11 @@ _DEFAULT_MIN_HEADING_DIST_M = 0.25
 _StepPredicate = Callable[[RoutineObservation, Optional[np.ndarray]], bool]
 _Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 
-# Any OFFBOARD setpoint payload a STREAM decision can carry; the commander
+# Any OFFBOARD setpoint payload a decision can carry; the commander
 # dispatches on the concrete type to the matching port send method.
 StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
 
-# The injected per-tick pure function of a ``policy`` step: maps the live
+# The injected pure function evaluated at a ``policy`` step's cadence: maps the live
 # vehicle state and the step's world-ENU target to the OFFBOARD setpoint
 # payload to stream (composed at the runtime layer from the observation
 # packing, the loaded policy, and the deploy action mapping -- see
@@ -52,11 +53,9 @@ PolicyStepFn = Callable[["VehicleState", np.ndarray], StreamSetpoint]
 
 
 class DecisionKind(Enum):
-    """The kind of a :class:`RoutineDecision`."""
+    """The control-flow outcome of a :class:`RoutineDecision`."""
 
-    SEND = auto()
-    STREAM = auto()
-    WAIT = auto()
+    CONTINUE = auto()
     ADVANCE = auto()
     DONE = auto()
     FAIL = auto()
@@ -86,9 +85,10 @@ class FailureKind(Enum):
 class RoutineDecision:
     """The pure output of :func:`decide` for one tick.
 
-    Exactly one ``kind``; ``command`` is set only for ``SEND``; ``setpoint`` only
-    for ``STREAM``; ``reason`` and ``failure_kind`` only for ``FAIL``. Build
-    instances through the classmethods.
+    ``kind`` controls routine progress while the optional ``setpoint`` and
+    ``command`` independently describe effects for this cycle. Both may be set;
+    the imperative driver transmits the setpoint first. ``reason`` and
+    ``failure_kind`` are set only for ``FAIL``.
     """
 
     kind: DecisionKind
@@ -98,16 +98,13 @@ class RoutineDecision:
     failure_kind: Optional[FailureKind] = None
 
     @classmethod
-    def send(cls, command: MavlinkCommand) -> "RoutineDecision":
-        return cls(DecisionKind.SEND, command=command)
-
-    @classmethod
-    def stream(cls, setpoint: StreamSetpoint) -> "RoutineDecision":
-        return cls(DecisionKind.STREAM, setpoint=setpoint)
-
-    @classmethod
-    def wait(cls) -> "RoutineDecision":
-        return cls(DecisionKind.WAIT)
+    def continue_(
+        cls,
+        *,
+        command: Optional[MavlinkCommand] = None,
+        setpoint: Optional[StreamSetpoint] = None,
+    ) -> "RoutineDecision":
+        return cls(DecisionKind.CONTINUE, command=command, setpoint=setpoint)
 
     @classmethod
     def advance(cls) -> "RoutineDecision":
@@ -153,7 +150,7 @@ class RoutineStep:
             ``FailureKind.ENVELOPE``.
         streaming: When set, this is a streamed OFFBOARD step (a ``goto``): the
             stepper primes setpoints, sends ``command`` once to engage offboard,
-            then streams the spec's setpoint every tick until completion. When
+            then streams the held setpoint at the configured rate until completion. When
             ``None`` (every other kind) the step uses the send-once-then-verify
             flow.
     """
@@ -174,7 +171,7 @@ class _StreamingSpec:
 
     Attributes:
         target_enu: The absolute world-ENU waypoint ``(east, north, up)`` in
-            metres, used to compute the per-tick heading and (with the captured
+            metres, used to compute the streamed heading and (with the captured
             baseline) the cross-track gate.
         latitude_deg, longitude_deg, altitude_m: The same waypoint precomputed
             (by :func:`build_vehicle_routine` via ``synth_gps_from_enu``) as the
@@ -185,7 +182,7 @@ class _StreamingSpec:
         min_heading_dist_m: Below this horizontal baseline-to-target distance
             the leg has no meaningful heading and the streamed setpoint holds
             the current heading (yaw ``NaN``).
-        setpoint_fn: When set (a ``policy`` step), the per-tick setpoint source:
+        setpoint_fn: When set (a ``policy`` step), the scheduled setpoint source:
             a pure function of the observation and the step baseline returning
             the payload to stream, replacing the fixed geodetic target (whose
             fields are then unused, ``NaN``). The OFFBOARD prime/engage/stream
@@ -208,6 +205,25 @@ class VehicleRoutine:
     """An ordered, immutable plan of :class:`RoutineStep`s for one vehicle."""
 
     steps: tuple[RoutineStep, ...]
+    policy_rate_hz: float
+    offboard_setpoint_rate_hz: float
+
+
+@dataclass(frozen=True)
+class _PolicySourceState:
+    """Policy evaluation phase and its zero-order-held output."""
+
+    cadence: _CadenceState = _CadenceState()
+    cached_setpoint: Optional[StreamSetpoint] = None
+
+
+@dataclass(frozen=True)
+class _SetpointStreamState:
+    """OFFBOARD transmission phase, count, and latest held payload."""
+
+    cadence: _CadenceState = _CadenceState()
+    transmissions: int = 0
+    cached_setpoint: Optional[StreamSetpoint] = None
 
 
 @dataclass(frozen=True)
@@ -227,18 +243,15 @@ class RoutineState:
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
             ``False`` again. Used to enforce ``RoutineStep.hold_s``.
-        setpoints_streamed: Number of OFFBOARD setpoints streamed for the active
-            streaming step so far (the priming counter); 0 for a non-streaming
-            step.
+        policy_source: Policy evaluation cadence plus its zero-order-held output.
+        setpoint_stream: OFFBOARD transmission cadence, actual transmission
+            count, and latest payload retained across command-less verification.
         offboard_requested: Whether the one-shot OFFBOARD-mode command has been
             sent for the active streaming step.
         offboard_accepted: Whether PX4 accepted the OFFBOARD-mode command for
             the active streaming step. Policy-step hold windows start only
             after this is true, so a policy cannot complete before PX4 enters
             the mode that is supposed to consume its stream.
-        offboard_hold_setpoint: Last OFFBOARD setpoint that must keep streaming
-            across command-less verification steps after a ``goto``. Cleared
-            when a later explicit command begins.
     """
 
     cursor: int = 0
@@ -246,7 +259,7 @@ class RoutineState:
     baseline_position_enu: Optional[np.ndarray] = None
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
-    setpoints_streamed: int = 0
+    policy_source: _PolicySourceState = _PolicySourceState()
+    setpoint_stream: _SetpointStreamState = _SetpointStreamState()
     offboard_requested: bool = False
     offboard_accepted: bool = False
-    offboard_hold_setpoint: Optional[StreamSetpoint] = None

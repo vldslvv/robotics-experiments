@@ -1,4 +1,5 @@
 import functools
+import math
 from collections.abc import Iterable
 from os import PathLike
 from pathlib import Path
@@ -125,6 +126,24 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
             log_paths.add(v.debug_log_path)
 
 
+def _validate_rates(experiment: ExperimentConfig) -> None:
+    rates = {
+        "sim.physics_hz": experiment.sim.physics_hz,
+        "driver.control_rate_hz": experiment.driver.control_rate_hz,
+        "driver.offboard_setpoint_rate_hz": experiment.driver.offboard_setpoint_rate_hz,
+        "rl.policy_rate_hz": experiment.rl.policy_rate_hz,
+    }
+    for name, value in rates.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and positive, got {value!r}")
+    if experiment.rl.policy_rate_hz > experiment.driver.control_rate_hz:
+        raise ValueError("rl.policy_rate_hz must not exceed driver.control_rate_hz")
+    if experiment.driver.offboard_setpoint_rate_hz > experiment.driver.control_rate_hz:
+        raise ValueError("driver.offboard_setpoint_rate_hz must not exceed driver.control_rate_hz")
+    if experiment.driver.control_rate_hz > experiment.sim.physics_hz:
+        raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
+
+
 def _resolve_ros_namespace(*, namespace, vehicle_id: int) -> str:
     if not isinstance(namespace, str):
         raise ValueError(
@@ -232,4 +251,5 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _enrich_fleet(cfg, airframe_config_dir)
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
+    _validate_rates(experiment)
     return _freeze_config_graph(experiment)

@@ -71,7 +71,11 @@ def _arm_takeoff_routine(*, min_climb_m=1.0):
         label="takeoff",
         timeout_s=10.0,
     )
-    return VehicleRoutine(steps=(arm_step, takeoff_step))
+    return VehicleRoutine(
+        steps=(arm_step, takeoff_step),
+        policy_rate_hz=20.0,
+        offboard_setpoint_rate_hz=50.0,
+    )
 
 
 def test_decide_runs_arm_takeoff_to_done():
@@ -80,7 +84,7 @@ def test_decide_runs_arm_takeoff_to_done():
 
     # Tick 1: first step not sent -> SEND arm, active-step baseline + timer captured.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_COMPONENT_ARM_DISARM
     assert state.sent is True
     assert state.step_started_us == 0
@@ -90,7 +94,7 @@ def test_decide_runs_arm_takeoff_to_done():
 
     # Tick 2: arm sent, no ack -> WAIT.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=10_000))
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
 
     # Tick 3: arm ack accepted -> ADVANCE to takeoff step.
     arm_ack = CommandAck.from_result(MAV_CMD_COMPONENT_ARM_DISARM, 0)
@@ -103,14 +107,14 @@ def test_decide_runs_arm_takeoff_to_done():
 
     # Tick 4: takeoff step not sent -> SEND takeoff.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=30_000))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_NAV_TAKEOFF
 
     # Tick 5: not climbed yet -> WAIT.
     state, decision = decide(
         routine, state, make_routine_observation(sim_time_us=40_000, position_enu=(0.0, 0.0, 0.2))
     )
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
 
     # Tick 6: climbed past the threshold -> ADVANCE past the last step.
     state, decision = decide(
@@ -128,7 +132,7 @@ def test_decide_retries_on_temporarily_rejected():
     routine = _arm_takeoff_routine()
     state = RoutineState()
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
 
     # A temporarily-rejected arm ack re-sends rather than failing.
     temp_reject = CommandAck.from_result(
@@ -137,7 +141,7 @@ def test_decide_retries_on_temporarily_rejected():
     state, decision = decide(
         routine, state, make_routine_observation(sim_time_us=5_000, last_ack=temp_reject)
     )
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_COMPONENT_ARM_DISARM
     assert state.cursor == 0
 
@@ -191,6 +195,8 @@ def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy
         goto_heading_tol_deg=25.0,
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
+        policy_rate_hz=20.0,
+        offboard_setpoint_rate_hz=50.0,
         policy_fn_factory=policy_fn_factory,
     )
 
@@ -330,7 +336,7 @@ def _goto_routine(**overrides):
 
 def _far(sim_time_us, **overrides):
     # On the active step's x-axis path, far from the (3, 0, 2) waypoint.
-    fields = {"sim_time_us": sim_time_us, "position_enu": (0.0, 0.0, 2.0)}
+    fields = {"sim_time_us": sim_time_us * 20_000, "position_enu": (0.0, 0.0, 2.0)}
     fields.update(overrides)
     return make_routine_observation(**fields)
 
@@ -338,11 +344,11 @@ def _far(sim_time_us, **overrides):
 def _goto_state_after_offboard_request():
     routine = _goto_routine()
     state = RoutineState()
-    for t in range(3):
+    for t in range(2):
         state, decision = decide(routine, state, _far(t))
-        assert decision.kind is DecisionKind.STREAM
-    state, decision = decide(routine, state, _far(3))
-    assert decision.kind is DecisionKind.SEND
+        assert decision.kind is DecisionKind.CONTINUE
+    state, decision = decide(routine, state, _far(2))
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
     assert state.offboard_requested is True
     return routine, state
@@ -390,27 +396,25 @@ def test_decide_goto_primes_then_engages_offboard_then_reaches():
     # Entry tick streams the first (priming) setpoint, facing the leg direction:
     # NED yaw = atan2(east=3, north=0) = pi/2.
     state, decision = decide(routine, state, _far(0))
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.setpoint is not None
     assert decision.setpoint.yaw_rad == pytest.approx(math.pi / 2.0)
-    assert state.setpoints_streamed == 1
+    assert state.setpoint_stream.transmissions == 1
 
     # Two more priming setpoints (no command yet).
     state, decision = decide(routine, state, _far(1))
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     state, decision = decide(routine, state, _far(2))
-    assert decision.kind is DecisionKind.STREAM
-    assert state.setpoints_streamed == 3
-
-    # Primed: engage OFFBOARD once.
-    state, decision = decide(routine, state, _far(3))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
+    assert state.setpoint_stream.transmissions == 3
+    # The third actual transmission also engages OFFBOARD.
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
+    assert decision.setpoint is not None
     assert state.offboard_requested is True
 
     # Then back to streaming until the waypoint is reached.
-    state, decision = decide(routine, state, _far(4))
-    assert decision.kind is DecisionKind.STREAM
+    state, decision = decide(routine, state, _far(3))
+    assert decision.kind is DecisionKind.CONTINUE
 
     # Reached and heading-aligned (facing +east) -> ADVANCE (then DONE).
     reached = make_routine_observation(sim_time_us=5, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
@@ -426,7 +430,7 @@ def test_decide_goto_offboard_accepted_ack_continues_streaming():
 
     state, decision = decide(routine, state, _far(4, last_ack=accepted))
 
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.offboard_requested is True
 
 
@@ -434,13 +438,13 @@ def test_decide_goto_ignores_offboard_ack_before_this_step_requests_mode():
     routine = _goto_routine()
     state = RoutineState()
     state, decision = decide(routine, state, _far(0))
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
 
     stale_denied = CommandAck.from_result(MAV_CMD_DO_SET_MODE, 2)
     state, decision = decide(routine, state, _far(1, last_ack=stale_denied))
 
-    assert decision.kind is DecisionKind.STREAM
-    assert state.setpoints_streamed == 2
+    assert decision.kind is DecisionKind.CONTINUE
+    assert state.setpoint_stream.transmissions == 2
     assert state.offboard_requested is False
 
 
@@ -453,11 +457,11 @@ def test_decide_goto_offboard_temporary_rejection_streams_then_retries():
 
     state, decision = decide(routine, state, _far(4, last_ack=temp_reject))
 
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.offboard_requested is False
 
     state, decision = decide(routine, state, _far(5))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
     assert state.offboard_requested is True
 
@@ -479,9 +483,13 @@ def test_decide_goto_holds_streaming_until_heading_aligned():
     for t in range(6):  # prime + engage offboard + steady stream
         state, _decision = decide(routine, state, _far(t))
     # At the waypoint but yawed 90 deg off the leg direction: not yet complete.
-    misaligned = make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=90.0)
+    misaligned = make_routine_observation(
+        sim_time_us=120_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=90.0,
+    )
     state, decision = decide(routine, state, misaligned)
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
 
 
 def test_decide_goto_cross_track_breach_fails_envelope():
@@ -505,7 +513,7 @@ def test_consecutive_goto_uses_current_step_baseline_for_yaw():
         make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
     )
 
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     # Second leg is due north from the first waypoint/current step start.
     assert decision.setpoint.yaw_rad == pytest.approx(0.0)
     assert state.baseline_position_enu is not None
@@ -520,7 +528,7 @@ def test_consecutive_goto_cross_track_uses_current_leg_path():
         state,
         make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0)),
     )
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
 
     # This is 2.1 m east of the current northbound leg x=3 (breach), but only
     # about 1.5 m from the stale origin->target diagonal (which would pass).
@@ -552,7 +560,7 @@ def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
     last_streamed = None
     for t in range(5):
         state, decision = decide(routine, state, _far(t))
-        if decision.kind is DecisionKind.STREAM:
+        if decision.kind is DecisionKind.CONTINUE:
             last_streamed = decision.setpoint
     assert last_streamed is not None
 
@@ -560,14 +568,14 @@ def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
     state, decision = decide(routine, state, reached)
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 1
-    assert state.offboard_hold_setpoint == last_streamed
+    assert state.setpoint_stream.cached_setpoint == last_streamed
 
     state, decision = decide(
         routine,
         state,
         make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
     )
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.setpoint == last_streamed
 
     state, decision = decide(
@@ -575,7 +583,7 @@ def test_hover_after_goto_keeps_offboard_setpoint_stream_alive():
         state,
         make_routine_observation(sim_time_us=500_000, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
     )
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.setpoint == last_streamed
     assert state.hold_since_us == 500_000
 
@@ -595,8 +603,8 @@ def test_explicit_command_after_offboard_hover_clears_held_setpoint():
         state,
         make_routine_observation(sim_time_us=6, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
     )
-    assert decision.kind is DecisionKind.STREAM
-    assert state.offboard_hold_setpoint is not None
+    assert decision.kind is DecisionKind.CONTINUE
+    assert state.setpoint_stream.cached_setpoint is not None
 
     state, decision = decide(
         routine,
@@ -611,9 +619,9 @@ def test_explicit_command_after_offboard_hover_clears_held_setpoint():
         state,
         make_routine_observation(sim_time_us=8, position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0),
     )
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
     assert decision.command.command_id == MAV_CMD_NAV_LAND
-    assert state.offboard_hold_setpoint is None
+    assert state.setpoint_stream.cached_setpoint is None
 
 
 def test_reached_world_position_within_tolerance():
@@ -700,7 +708,11 @@ def test_forward_invariant_allows_commanded_x_displacement():
             {"kind": "forward", "distance_m": 2.0, "timeout_s": 20.0},
         ]
     )
-    forward_routine = VehicleRoutine(steps=(routine.steps[1],))
+    forward_routine = VehicleRoutine(
+        steps=(routine.steps[1],),
+        policy_rate_hz=20.0,
+        offboard_setpoint_rate_hz=50.0,
+    )
     state = RoutineState()
 
     # Entry tick captures the baseline at the pre-forward position and SENDs.
@@ -709,7 +721,7 @@ def test_forward_invariant_allows_commanded_x_displacement():
         state,
         make_routine_observation(sim_time_us=0, position_enu=(0.0, 2.0, 0.0)),
     )
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
 
     # The commanded x displacement (and small cross-track drift) passes the gates.
     _, decision = decide(
@@ -745,10 +757,14 @@ def test_decide_invariant_breach_fails_with_envelope_kind():
         timeout_s=30.0,
         invariants=(tilt_below(35.0),),
     )
-    routine = VehicleRoutine(steps=(takeoff_step,))
+    routine = VehicleRoutine(
+        steps=(takeoff_step,),
+        policy_rate_hz=20.0,
+        offboard_setpoint_rate_hz=50.0,
+    )
     state = RoutineState()
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
-    assert decision.kind is DecisionKind.SEND
+    assert decision.kind is DecisionKind.CONTINUE
 
     _, decision = decide(
         routine, state, make_routine_observation(sim_time_us=10_000, tilt_deg=50.0)
@@ -771,17 +787,21 @@ def test_decide_hover_step_holds_before_advancing():
         timeout_s=10.0,
         hold_s=2.0,
     )
-    routine = VehicleRoutine(steps=(hover_step,))
+    routine = VehicleRoutine(
+        steps=(hover_step,),
+        policy_rate_hz=20.0,
+        offboard_setpoint_rate_hz=50.0,
+    )
     state = RoutineState()
 
     # Entry tick: command-less step begins -> WAIT (no SEND).
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=0))
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.sent is True
 
     # Stable but the hold window has not elapsed yet -> WAIT, hold started.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=500_000))
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.hold_since_us == 500_000
 
     # A transient excursion (too fast) breaks the hold; it must restart.
@@ -790,12 +810,12 @@ def test_decide_hover_step_holds_before_advancing():
         state,
         make_routine_observation(sim_time_us=1_000_000, linear_velocity_enu=(0.0, 0.0, 1.0)),
     )
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.hold_since_us is None
 
     # Stable again from t=1.5s; the hold restarts here.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=1_500_000))
-    assert decision.kind is DecisionKind.WAIT
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.hold_since_us == 1_500_000
 
     # 2s later the hold window has elapsed -> ADVANCE past the last step.
@@ -844,22 +864,24 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
 
     # Entry + priming ticks stream the policy's payload (a VelocitySetpoint).
     for t in range(3):
-        state, decision = decide(routine, state, make_routine_observation(sim_time_us=t))
-        assert decision.kind is DecisionKind.STREAM
+        state, decision = decide(
+            routine,
+            state,
+            make_routine_observation(sim_time_us=t * 20_000),
+        )
+        assert decision.kind is DecisionKind.CONTINUE
         assert isinstance(decision.setpoint, VelocitySetpoint)
-    assert state.setpoints_streamed == 3
+    assert state.setpoint_stream.transmissions == 3
 
-    # Primed: engage OFFBOARD once, then stream again.
-    state, decision = decide(routine, state, make_routine_observation(sim_time_us=3))
-    assert decision.kind is DecisionKind.SEND
+    # The third actual transmission engages OFFBOARD on the same cycle.
     assert decision.command.command_id == MAV_CMD_DO_SET_MODE
-    state, decision = decide(routine, state, make_routine_observation(sim_time_us=4))
-    assert decision.kind is DecisionKind.STREAM
+    state, decision = decide(routine, state, make_routine_observation(sim_time_us=60_000))
+    assert decision.kind is DecisionKind.CONTINUE
 
     # Without an accepted OFFBOARD ack, the policy stream stays alive but the
     # hold window does not start.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=4 + 2_000_000))
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.cursor == 0
 
     accepted = CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0)
@@ -868,7 +890,7 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
         state,
         make_routine_observation(sim_time_us=5 + 2_000_000, last_ack=accepted),
     )
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     assert state.offboard_accepted is True
 
     # hold_s=2.0 of continuous in-envelope flight after accepted OFFBOARD -> ADVANCE.
@@ -877,13 +899,32 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
     assert state.cursor == 1
 
 
+def test_policy_and_setpoint_cadences_are_independent_exact_averages():
+    policy_fn = _FakePolicyFn()
+    routine = _policy_routine(policy_fn)
+    state = RoutineState()
+    transmitted = 0
+
+    for cycle in range(50):
+        state, decision = decide(
+            routine,
+            state,
+            make_routine_observation(sim_time_us=cycle * 20_000),
+        )
+        transmitted += int(decision.setpoint is not None)
+
+    assert len(policy_fn.goals) == 20
+    assert transmitted == 50
+    assert state.setpoint_stream.transmissions == 50
+
+
 def test_decide_policy_without_target_hovers_at_step_baseline():
     policy_fn = _FakePolicyFn()
     routine = _policy_routine(policy_fn)
     state = RoutineState()
     start = make_routine_observation(sim_time_us=0, position_enu=(1.0, 2.0, 3.0))
     state, decision = decide(routine, state, start)
-    assert decision.kind is DecisionKind.STREAM
+    assert decision.kind is DecisionKind.CONTINUE
     np.testing.assert_allclose(policy_fn.goals[-1], [1.0, 2.0, 3.0])
 
 

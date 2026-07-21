@@ -34,7 +34,8 @@ The two shells drive the same sequence:
 5. on Play, `spawn_fleet(state=...)`
 6. `start_bridges(state=...)`
 7. `build_drivers(state=..., make_env=...)`
-8. repeatedly `tick_drivers(state=...)` until `fleet_is_done(state=...)`
+8. feed each physics `dt` to `tick_drivers(state=..., physics_dt_s=...)` until
+   `fleet_is_done(state=...)`
 9. `teardown(state=...)`
 
 Teardown stops the bridge group first, disconnects command ports, shuts down
@@ -66,9 +67,11 @@ than serially starving later sends.
 
 ## Shell responsibilities
 
-The live `experiment_runtime` extension owns Kit stage/timeline/update event
-wiring and forgiving per-driver error logging. The standalone runner owns the
-blocking `SimulationApp.update()` loop, strict-versus-forgiving failure
+The live `experiment_runtime` extension owns Kit stage/timeline/PhysX event
+wiring and forgiving per-driver error logging. `FleetState` owns the shared
+driver cadence and resets it on rebuild/teardown. The standalone runner owns the
+blocking `SimulationApp.update()` loop plus a matching PhysX subscription,
+strict-versus-forgiving failure
 reaction, and integration-only checks such as ground settling, first-heartbeat
 waiting, pre-arm tilt, fault injection, and bridge-log validation.
 

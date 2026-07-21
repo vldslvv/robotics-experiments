@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from dataclasses import dataclass, replace
 from typing import Any, Optional
 
@@ -191,10 +190,9 @@ class MavlinkCommandPort:
         """Return an immutable snapshot of the current control-link state."""
         return self._feedback
 
-    def pump_heartbeat(self, *, force: bool = False) -> None:
+    def pump_heartbeat(self, *, now_s: float, force: bool = False) -> None:
         from pymavlink import mavutil
 
-        now_s = time.monotonic()
         if not force and now_s - self._last_heartbeat_sent_s < self._heartbeat_period_s:
             return
         self._mav.mav.heartbeat_send(

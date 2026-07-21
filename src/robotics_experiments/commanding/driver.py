@@ -46,6 +46,7 @@ __all__ = [
     "DriverEnvironment",
     "DriverParams",
     "DriverPhase",
+    "DriverTick",
     "RoutineDriverState",
     "create_routine_driver",
     "routine_driver_is_done",
@@ -83,6 +84,8 @@ class DriverParams:
     goto_heading_tol_deg: float
     goto_cross_track_m: float
     goto_offboard_prime_ticks: int
+    policy_rate_hz: float
+    offboard_setpoint_rate_hz: float
     home_lat_deg: float = DEFAULT_HOME_LAT_DEG
     home_lon_deg: float = DEFAULT_HOME_LON_DEG
     home_alt_m: float = DEFAULT_HOME_ALT_M
@@ -97,8 +100,6 @@ class DriverEnvironment(Protocol):
     """Mutable resource seam for simulator reads and lifecycle reactions."""
 
     def is_bridge_connected(self) -> bool: ...
-
-    def sim_time_us(self) -> int: ...
 
     def read_observation(
         self, *, sim_time_us: int, last_ack: Optional[CommandAck]
@@ -123,6 +124,14 @@ class DriverContext:
 
 
 @dataclass(frozen=True)
+class DriverTick:
+    """One fleet-wide cyclic-executive snapshot."""
+
+    control_time_us: int
+    monotonic_s: float
+
+
+@dataclass(frozen=True)
 class RoutineDriverState:
     """Immutable progress for one routine driver."""
 
@@ -136,27 +145,30 @@ class RoutineDriverState:
 
 
 def _deadline_for_phase(
-    *, context: DriverContext, state: RoutineDriverState, phase: DriverPhase
+    *,
+    context: DriverContext,
+    state: RoutineDriverState,
+    phase: DriverPhase,
+    monotonic_s: float,
 ) -> float:
     params = context.params
-    now = context.monotonic()
     if phase is DriverPhase.WAIT_BRIDGE:
-        return now + params.bridge_heartbeat_timeout_s
+        return monotonic_s + params.bridge_heartbeat_timeout_s
     if phase is DriverPhase.HANDSHAKE:
-        return now + params.handshake_timeout_s
+        return monotonic_s + params.handshake_timeout_s
     if phase is DriverPhase.PREARM_SETTLE:
-        return now + max(
+        return monotonic_s + max(
             params.prearm_backstop_floor_s,
             params.prearm_settle_s * params.prearm_backstop_multiplier,
         )
     if phase is DriverPhase.FETCH_TARGET:
-        return now + params.takeoff_target_timeout_s
+        return monotonic_s + params.takeoff_target_timeout_s
     if phase is DriverPhase.DRIVE:
         routine_budget_s = (
             sum(step.timeout_s for step in state.routine.steps) if state.routine else 0.0
         )
         return (
-            now
+            monotonic_s
             + (
                 routine_budget_s
                 + params.takeoff_timeout_s
@@ -169,12 +181,17 @@ def _deadline_for_phase(
 
 
 def _enter(
-    *, context: DriverContext, state: RoutineDriverState, phase: DriverPhase
+    *, context: DriverContext, state: RoutineDriverState, phase: DriverPhase, tick: DriverTick
 ) -> RoutineDriverState:
     entered = replace(state, phase=phase)
     return replace(
         entered,
-        deadline_s=_deadline_for_phase(context=context, state=entered, phase=phase),
+        deadline_s=_deadline_for_phase(
+            context=context,
+            state=entered,
+            phase=phase,
+            monotonic_s=tick.monotonic_s,
+        ),
     )
 
 
@@ -192,7 +209,12 @@ def create_routine_driver(
         routine_state=RoutineState(),
         previous_cursor=0,
     )
-    return _enter(context=context, state=state, phase=DriverPhase.WAIT_BRIDGE)
+    return _enter(
+        context=context,
+        state=state,
+        phase=DriverPhase.WAIT_BRIDGE,
+        tick=DriverTick(control_time_us=0, monotonic_s=context.monotonic()),
+    )
 
 
 def routine_driver_is_done(*, state: RoutineDriverState) -> bool:
@@ -200,20 +222,25 @@ def routine_driver_is_done(*, state: RoutineDriverState) -> bool:
     return state.phase is DriverPhase.DONE
 
 
-def _pump_and_poll(*, context: DriverContext) -> Optional[CommandAck]:
-    context.port.pump_heartbeat()
+def _pump_and_poll(*, context: DriverContext, tick: DriverTick) -> Optional[CommandAck]:
+    context.port.pump_heartbeat(now_s=tick.monotonic_s)
     return context.port.poll_feedback()
 
 
 def _fail(
-    *, context: DriverContext, state: RoutineDriverState, kind: FailureKind, message: str
+    *,
+    context: DriverContext,
+    state: RoutineDriverState,
+    tick: DriverTick,
+    kind: FailureKind,
+    message: str,
 ) -> RoutineDriverState:
     context.env.on_failure(kind, message)
-    return _enter(context=context, state=state, phase=DriverPhase.DONE)
+    return _enter(context=context, state=state, phase=DriverPhase.DONE, tick=tick)
 
 
 def _abort_on_failsafe(
-    *, context: DriverContext, state: RoutineDriverState, phase_description: str
+    *, context: DriverContext, state: RoutineDriverState, tick: DriverTick, phase_description: str
 ) -> Optional[RoutineDriverState]:
     status = context.port.read_status()
     if not status.failsafe:
@@ -221,6 +248,7 @@ def _abort_on_failsafe(
     return _fail(
         context=context,
         state=state,
+        tick=tick,
         kind=FailureKind.FAILSAFE,
         message=(
             f"[{context.label}] PX4 entered failsafe {phase_description}: "
@@ -230,13 +258,7 @@ def _abort_on_failsafe(
 
 
 def _apply_decision(*, port: MavlinkCommandPort, decision: RoutineDecision) -> None:
-    """Perform the single MAVLink side effect described by a pure decision."""
-    if decision.kind is DecisionKind.SEND:
-        assert decision.command is not None
-        port.send(decision.command)
-        return
-    if decision.kind is not DecisionKind.STREAM:
-        return
+    """Apply independent effects, transmitting a setpoint before a command."""
     setpoint = decision.setpoint
     if isinstance(setpoint, PositionSetpoint):
         port.send_setpoint(setpoint)
@@ -244,20 +266,29 @@ def _apply_decision(*, port: MavlinkCommandPort, decision: RoutineDecision) -> N
         port.send_velocity_setpoint(setpoint)
     elif isinstance(setpoint, AttitudeRateSetpoint):
         port.send_attitude_target(setpoint)
-    else:
-        raise TypeError(f"STREAM decision carried unsupported payload {setpoint!r}")
+    elif setpoint is not None:
+        raise TypeError(f"routine decision carried unsupported setpoint {setpoint!r}")
+    if decision.command is not None:
+        port.send(decision.command)
 
 
-def _tick_drive(*, context: DriverContext, state: RoutineDriverState) -> RoutineDriverState:
+def _tick_drive(
+    *, context: DriverContext, state: RoutineDriverState, tick: DriverTick
+) -> RoutineDriverState:
     assert state.routine is not None
-    last_ack = _pump_and_poll(context=context)
+    last_ack = _pump_and_poll(context=context, tick=tick)
     failed = _abort_on_failsafe(
-        context=context, state=state, phase_description="during the routine"
+        context=context,
+        state=state,
+        tick=tick,
+        phase_description="during the routine",
     )
     if failed is not None:
         return failed
-    sim_time_us = context.env.sim_time_us()
-    observation = context.env.read_observation(sim_time_us=sim_time_us, last_ack=last_ack)
+    observation = context.env.read_observation(
+        sim_time_us=tick.control_time_us,
+        last_ack=last_ack,
+    )
     routine_state, decision = decide(state.routine, state.routine_state, observation)
     _apply_decision(port=context.port, decision=decision)
     advanced = replace(state, routine_state=routine_state)
@@ -266,6 +297,7 @@ def _tick_drive(*, context: DriverContext, state: RoutineDriverState) -> Routine
         return _fail(
             context=context,
             state=advanced,
+            tick=tick,
             kind=decision.failure_kind,
             message=f"[{context.label}] routine failed: {decision.reason}",
         )
@@ -276,62 +308,77 @@ def _tick_drive(*, context: DriverContext, state: RoutineDriverState) -> Routine
     advanced = replace(advanced, previous_cursor=previous_cursor)
     if routine_state.cursor >= len(state.routine.steps):
         context.env.log(f"[{context.label}] routine complete; holding, manual control available")
-        return _enter(context=context, state=advanced, phase=DriverPhase.DONE)
+        return _enter(context=context, state=advanced, phase=DriverPhase.DONE, tick=tick)
     return advanced
 
 
-def tick_routine_driver(*, context: DriverContext, state: RoutineDriverState) -> RoutineDriverState:
+def tick_routine_driver(
+    *, context: DriverContext, state: RoutineDriverState, tick: DriverTick
+) -> RoutineDriverState:
     """Advance one control frame and return the successor driver state."""
     if state.phase is DriverPhase.DONE:
-        _pump_and_poll(context=context)
+        _pump_and_poll(context=context, tick=tick)
         return state
-    if state.deadline_s and context.monotonic() > state.deadline_s:
+    if state.deadline_s and tick.monotonic_s > state.deadline_s:
         return _fail(
             context=context,
             state=state,
+            tick=tick,
             kind=FailureKind.TIMEOUT,
             message=f"phase {state.phase.name} timed out",
         )
     if state.phase is DriverPhase.WAIT_BRIDGE:
         if context.env.is_bridge_connected():
             context.env.log(f"[{context.label}] bridge connected; connecting GCS link")
-            return _enter(context=context, state=state, phase=DriverPhase.CONNECT)
+            return _enter(context=context, state=state, phase=DriverPhase.CONNECT, tick=tick)
         return state
     if state.phase is DriverPhase.CONNECT:
         context.port.connect()
-        context.port.pump_heartbeat(force=True)
-        return _enter(context=context, state=state, phase=DriverPhase.HANDSHAKE)
+        context.port.pump_heartbeat(now_s=tick.monotonic_s, force=True)
+        return _enter(context=context, state=state, phase=DriverPhase.HANDSHAKE, tick=tick)
     if state.phase is DriverPhase.HANDSHAKE:
-        _pump_and_poll(context=context)
+        _pump_and_poll(context=context, tick=tick)
         if context.port.read_status().is_handshaked:
             context.env.log(f"[{context.label}] GCS handshake complete; settling PX4 before arm")
             settled = replace(
                 state,
-                settle_target_us=context.env.sim_time_us()
+                settle_target_us=tick.control_time_us
                 + int(round(context.params.prearm_settle_s * 1_000_000)),
             )
-            return _enter(context=context, state=settled, phase=DriverPhase.PREARM_SETTLE)
+            return _enter(
+                context=context,
+                state=settled,
+                phase=DriverPhase.PREARM_SETTLE,
+                tick=tick,
+            )
         return state
     if state.phase is DriverPhase.PREARM_SETTLE:
-        _pump_and_poll(context=context)
+        _pump_and_poll(context=context, tick=tick)
         failed = _abort_on_failsafe(
             context=context,
             state=state,
+            tick=tick,
             phase_description="while settling before arm",
         )
         if failed is not None:
             return failed
-        if context.env.sim_time_us() >= state.settle_target_us:
+        if tick.control_time_us >= state.settle_target_us:
             context.env.log(
                 f"[{context.label}] prearm settle complete; waiting for takeoff telemetry"
             )
-            return _enter(context=context, state=state, phase=DriverPhase.FETCH_TARGET)
+            return _enter(
+                context=context,
+                state=state,
+                phase=DriverPhase.FETCH_TARGET,
+                tick=tick,
+            )
         return state
     if state.phase is DriverPhase.FETCH_TARGET:
-        _pump_and_poll(context=context)
+        _pump_and_poll(context=context, tick=tick)
         failed = _abort_on_failsafe(
             context=context,
             state=state,
+            tick=tick,
             phase_description="while waiting for altitude telemetry",
         )
         if failed is not None:
@@ -342,6 +389,7 @@ def tick_routine_driver(*, context: DriverContext, state: RoutineDriverState) ->
                 context=context,
                 state=replace(state, target=target),
                 phase=DriverPhase.BUILD,
+                tick=tick,
             )
         return state
     if state.phase is DriverPhase.BUILD:
@@ -364,6 +412,8 @@ def tick_routine_driver(*, context: DriverContext, state: RoutineDriverState) ->
                 goto_heading_tol_deg=context.params.goto_heading_tol_deg,
                 goto_cross_track_m=context.params.goto_cross_track_m,
                 goto_offboard_prime_ticks=context.params.goto_offboard_prime_ticks,
+                policy_rate_hz=context.params.policy_rate_hz,
+                offboard_setpoint_rate_hz=context.params.offboard_setpoint_rate_hz,
                 goto_min_heading_dist_m=context.params.goto_min_heading_dist_m,
                 policy_fn_factory=context.params.policy_fn_factory,
             )
@@ -371,6 +421,7 @@ def tick_routine_driver(*, context: DriverContext, state: RoutineDriverState) ->
             return _fail(
                 context=context,
                 state=state,
+                tick=tick,
                 kind=FailureKind.COMMAND,
                 message=f"[{context.label}] routine build failed: {exc}",
             )
@@ -381,7 +432,7 @@ def tick_routine_driver(*, context: DriverContext, state: RoutineDriverState) ->
             routine_state=RoutineState(),
             previous_cursor=0,
         )
-        return _enter(context=context, state=built, phase=DriverPhase.DRIVE)
+        return _enter(context=context, state=built, phase=DriverPhase.DRIVE, tick=tick)
     if state.phase is DriverPhase.DRIVE:
-        return _tick_drive(context=context, state=state)
+        return _tick_drive(context=context, state=state, tick=tick)
     return state

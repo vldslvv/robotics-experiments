@@ -35,9 +35,10 @@ def _action_cfg(**overrides):
 
 def _hover_metadata(action_cfg) -> dict:
     return policy_metadata(
-        action_cfg,
+        action_cfg=action_cfg,
         obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         obs_dim=HOVER_OBSERVATION_DIM,
+        policy_rate_hz=20.0,
     )
 
 
@@ -53,7 +54,11 @@ def _write_artifact(tmp_path: Path, metadata: dict) -> Path:
 
 
 def _build_step(artifact_dir: Path, action_cfg):
-    return build_policy_step_fn(artifact_dir, action_cfg)
+    return build_policy_step_fn(
+        artifact_dir=artifact_dir,
+        action_cfg=action_cfg,
+        policy_rate_hz=20.0,
+    )
 
 
 def test_missing_artifact_raises_with_hint(tmp_path: Path) -> None:
@@ -69,6 +74,7 @@ def test_metadata_mismatches_reject_before_torch(tmp_path: Path) -> None:
     for corrupt in (
         {"obs_schema_version": 999},
         {"obs_dim": 7},
+        {"policy_rate_hz": 50.0},
         {"action_kind": "ctbr"},
         {"action_dim": 6},
         {"action_scales": {**good["action_scales"], "max_body_velocity_mps": 9.9}},
@@ -88,7 +94,11 @@ def test_build_policy_step_fn_maps_state_to_setpoint(tmp_path: Path) -> None:
 
     action_cfg = _action_cfg()
     artifact = _write_artifact(tmp_path, _hover_metadata(action_cfg))
-    step_fn = build_policy_step_fn(artifact, action_cfg)
+    step_fn = build_policy_step_fn(
+        artifact_dir=artifact,
+        action_cfg=action_cfg,
+        policy_rate_hz=20.0,
+    )
     setpoint = step_fn(VehicleState.hover_at(), np.array([0.0, 0.0, 1.0]))
     assert isinstance(setpoint, VelocitySetpoint)
     # The action is clipped to [-1, 1] before scaling, so every command obeys

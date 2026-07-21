@@ -114,6 +114,44 @@ def test_default_experiment_has_only_global_root_config():
     assert vehicle.bridge.rotor_constant
     assert [step["kind"] for step in vehicle.routine.steps] == ["arm", "takeoff", "hover"]
     assert config.rl.training.vehicle_id == 0
+    assert config.rl.policy_rate_hz == 20.0
+    assert config.driver.control_rate_hz == 50.0
+    assert config.driver.offboard_setpoint_rate_hz == 50.0
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"driver": {"control_rate_hz": 0.0}}, "control_rate_hz"),
+        ({"driver": {"offboard_setpoint_rate_hz": float("inf")}}, "finite and positive"),
+        ({"rl": {"policy_rate_hz": float("nan")}}, "finite and positive"),
+        (
+            {"driver": {"control_rate_hz": 10.0}, "rl": {"policy_rate_hz": 20.0}},
+            "policy_rate_hz must not exceed",
+        ),
+        (
+            {
+                "driver": {
+                    "control_rate_hz": 40.0,
+                    "offboard_setpoint_rate_hz": 50.0,
+                }
+            },
+            "offboard_setpoint_rate_hz must not exceed",
+        ),
+        ({"driver": {"control_rate_hz": 300.0}}, "must not exceed sim.physics_hz"),
+    ],
+)
+def test_rate_validation(tmp_path, overrides, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_rates", {})
+    authored = OmegaConf.load(path)
+    authored = OmegaConf.merge(authored, overrides)
+    OmegaConf.save(authored, path)
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
 
 
 def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():

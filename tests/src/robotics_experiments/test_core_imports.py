@@ -245,6 +245,8 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
             goto_heading_tol_deg=25.0,
             goto_cross_track_m=2.0,
             goto_offboard_prime_ticks=3,
+            policy_rate_hz=20.0,
+            offboard_setpoint_rate_hz=50.0,
         )
         assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
         # The per-drone routine driver is pure too (its phase machine imports no
@@ -268,6 +270,7 @@ def test_commanding_public_api_contract_is_explicit():
         "DriverEnvironment",
         "DriverParams",
         "DriverPhase",
+        "DriverTick",
         "EnvelopeGates",
         "FailureKind",
         "MAV_CMD_COMPONENT_ARM_DISARM",

@@ -6,6 +6,7 @@ standalone runner explicitly rebind it at their imperative boundaries.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -18,6 +19,7 @@ from robotics_experiments.commanding import (
     DriverContext,
     DriverEnvironment,
     DriverParams,
+    DriverTick,
     EnvelopeGates,
     FailureKind,
     MavlinkCommandPort,
@@ -27,6 +29,7 @@ from robotics_experiments.commanding import (
     routine_driver_is_done,
     tick_routine_driver,
 )
+from robotics_experiments.commanding._cadence import _advance_cadence, _CadenceState
 from robotics_experiments.config import ExperimentConfig, VehicleConfig
 from robotics_experiments.runtime._scene import resolve_scene_path
 from robotics_experiments.runtime.bridge_host import (
@@ -95,6 +98,8 @@ class FleetState:
     group: BridgeHostGroup
     drones: tuple[SpawnedDrone, ...]
     flying: tuple[FlyingDrone, ...]
+    driver_cadence: _CadenceState
+    control_time_ns: int
 
 
 class FleetDriverEnv:
@@ -160,6 +165,8 @@ def create_fleet(*, config: ExperimentConfig) -> FleetState:
         group=BridgeHostGroup([]),
         drones=(),
         flying=(),
+        driver_cadence=_CadenceState(previous_time_ns=0),
+        control_time_ns=0,
     )
 
 
@@ -256,7 +263,11 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
     artifact = Path(str(descriptor["artifact"]))
     if not artifact.is_absolute():
         artifact = _repo_root() / artifact
-    return build_policy_step_fn(artifact, config.rl.action)
+    return build_policy_step_fn(
+        artifact_dir=artifact,
+        action_cfg=config.rl.action,
+        policy_rate_hz=config.rl.policy_rate_hz,
+    )
 
 
 def build_drivers(
@@ -298,6 +309,8 @@ def build_drivers(
                 goto_heading_tol_deg=routine.goto_heading_tol_deg,
                 goto_cross_track_m=routine.goto_cross_track_m,
                 goto_offboard_prime_ticks=routine.goto_offboard_prime_ticks,
+                policy_rate_hz=state.config.rl.policy_rate_hz,
+                offboard_setpoint_rate_hz=(state.config.driver.offboard_setpoint_rate_hz),
                 home_lat_deg=spawned.vehicle.bridge.home_lat_deg,
                 home_lon_deg=spawned.vehicle.bridge.home_lon_deg,
                 home_alt_m=spawned.vehicle.bridge.home_alt_m,
@@ -316,26 +329,59 @@ def build_drivers(
         )
         driver = create_routine_driver(context=context)
         flying.append(FlyingDrone(spawned=spawned, context=context, driver=driver))
-    return replace(state, flying=tuple(flying))
+    control_time_ns = 0
+    if flying:
+        clock_host = flying[0].spawned.host
+        assert clock_host is not None
+        control_time_ns = read_bridge_host_status(host=clock_host).sim_time_us * 1_000
+    return replace(
+        state,
+        flying=tuple(flying),
+        driver_cadence=_CadenceState(previous_time_ns=control_time_ns),
+        control_time_ns=control_time_ns,
+    )
 
 
 def tick_drivers(
     *,
     state: FleetState,
+    physics_dt_s: float,
+    monotonic_s: Optional[float] = None,
     on_error: Optional[Callable[[FlyingDrone, Exception], None]] = None,
 ) -> FleetState:
-    """Tick every routine once and return their successor fleet state."""
+    """Advance the physics-derived fleet cadence and tick every driver when due."""
+    control_time_ns = state.control_time_ns + int(round(physics_dt_s * 1_000_000_000))
+    cadence, due = _advance_cadence(
+        state.driver_cadence,
+        time_ns=control_time_ns,
+        rate_hz=state.config.driver.control_rate_hz,
+    )
+    scheduled = replace(
+        state,
+        driver_cadence=cadence,
+        control_time_ns=control_time_ns,
+    )
+    if not due:
+        return scheduled
+    tick = DriverTick(
+        control_time_us=control_time_ns // 1_000,
+        monotonic_s=time.monotonic() if monotonic_s is None else monotonic_s,
+    )
     advanced: list[FlyingDrone] = []
-    for flying in state.flying:
+    for flying in scheduled.flying:
         try:
-            driver = tick_routine_driver(context=flying.context, state=flying.driver)
+            driver = tick_routine_driver(
+                context=flying.context,
+                state=flying.driver,
+                tick=tick,
+            )
         except Exception as exc:
             if on_error is None:
                 raise
             on_error(flying, exc)
             driver = flying.driver
         advanced.append(replace(flying, driver=driver))
-    return replace(state, flying=tuple(advanced))
+    return replace(scheduled, flying=tuple(advanced))
 
 
 def fleet_is_done(*, state: FleetState) -> bool:
@@ -360,4 +406,6 @@ def teardown(*, state: FleetState) -> FleetState:
         group=BridgeHostGroup([]),
         drones=(),
         flying=(),
+        driver_cadence=_CadenceState(previous_time_ns=0),
+        control_time_ns=0,
     )

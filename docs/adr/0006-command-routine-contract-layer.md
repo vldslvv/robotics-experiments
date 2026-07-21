@@ -20,11 +20,12 @@ Add `robotics_experiments.commanding` as the high-level control layer, built as 
 **pure-function contract that mirrors the PX4 bridge contract part-for-part**:
 
 - `RoutineObservation` (pure input) -> `decide(routine, state, observation)`
-  (pure stepper) -> `RoutineDecision` (`SEND`/`STREAM`/`WAIT`/`ADVANCE`/`DONE`/
-  `FAIL`) across the PX4-specific `MavlinkCommandPort` seam. A frozen
+  (pure stepper) -> `RoutineDecision` (`CONTINUE`/`ADVANCE`/`DONE`/`FAIL` plus
+  independent optional setpoint and command effects) across the PX4-specific
+  `MavlinkCommandPort` seam. A frozen
   `DriverContext` carries immutable parameters and external resource adapters;
   a frozen `RoutineDriverState` carries progress and is advanced by the
-  stateless `tick_routine_driver(context=..., state=...)` transition.
+  stateless `tick_routine_driver(context=..., state=..., tick=...)` transition.
 - It is a **domain leaf on the core import path**: no module imports Isaac or
   pymavlink at module scope (the concrete `MavlinkCommandPort` imports `pymavlink`
   only inside its methods), so `import robotics_experiments` succeeds with both

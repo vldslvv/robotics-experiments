@@ -144,9 +144,10 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         )
         result = training.train(runner, iterations)
         metadata = press.policy_metadata(
-            config.rl.action,
+            action_cfg=config.rl.action,
             obs_schema_version=press.HOVER_OBSERVATION_SCHEMA_VERSION,
             obs_dim=int(env_cfg.observation_space),
+            policy_rate_hz=config.rl.policy_rate_hz,
         )
         training.export_policy(runner, run_dir, metadata=metadata)
     finally:

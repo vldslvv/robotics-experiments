@@ -13,8 +13,8 @@ extension):
   has finished loading (``lightswitch_spawner`` reacts to the same event).
 - Timeline ``PLAY`` spawns the fleet, starts the PX4 lockstep bridge group,
   builds one ``DriverContext`` plus one progress-only ``RoutineDriverState`` per
-  bridge-enabled drone, and ticks them from a separate Kit app-update
-  subscription (never the bridge's physics legs). Spawn stays gated on PLAY so
+  bridge-enabled drone, and ticks them from a separate PhysX-step subscription
+  (never the bridge's physics legs). Spawn stays gated on PLAY so
   the persisted stage is not mutated with drones until the user presses Play.
 - ``STOP`` / ``PAUSE`` and ``on_shutdown`` drop the control tick and tear down.
 
@@ -33,6 +33,7 @@ from typing import Any
 import carb
 import omni.ext
 import omni.kit.app
+import omni.physx
 import omni.timeline
 import omni.usd
 from omni.timeline import TimelineEventType
@@ -105,7 +106,7 @@ class Extension(omni.ext.IExt):
         self._scene_opened = False
         self._failure: str | None = None
         self._scene_open_sub: Any = None
-        self._update_sub: Any = None
+        self._physics_sub: Any = None
 
         usd_context = omni.usd.get_context()
         stage_events = usd_context.get_stage_event_stream()
@@ -215,22 +216,25 @@ class Extension(omni.ext.IExt):
         self._fleet = spawn_fleet(state=self._fleet)
         self._fleet = start_bridges(state=self._fleet)
         self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
-        app = omni.kit.app.get_app()
-        self._update_sub = app.get_update_event_stream().create_subscription_to_pop(
-            self._on_update, name="experiment_runtime_control"
+        self._physics_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(
+            self._on_physics_step
         )
 
     def _stop_control(self):
         """Drop the control tick subscription (the orchestrator owns the ports)."""
-        self._update_sub = None
+        self._physics_sub = None
 
-    def _on_update(self, event):
-        """One control tick: advance every flying drone's phase machine.
+    def _on_physics_step(self, dt, *_args):
+        """Advance the physics-derived fleet driver cadence.
 
         Forgiving: a control bug in one drone is logged and must not stop the
         others or spam every frame, so each driver tick is guarded.
         """
-        self._fleet = tick_drivers(state=self._fleet, on_error=self._log_tick_error)
+        self._fleet = tick_drivers(
+            state=self._fleet,
+            physics_dt_s=float(dt),
+            on_error=self._log_tick_error,
+        )
 
     def _log_tick_error(self, flying, exc):
         message = f"[{flying.spawned.label}] control tick failed: {exc}"

@@ -77,6 +77,7 @@ class _Timeline:
 class _App:
     def __init__(self):
         self.updates = _EventStream()
+        self.physics = _EventStream()
         self.ready = False
 
     def get_update_event_stream(self):
@@ -137,6 +138,12 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     omni_kit_app = types.ModuleType("omni.kit.app")
     omni_kit_app.get_app = lambda: app
     omni_kit.app = omni_kit_app
+    omni_physx = types.ModuleType("omni.physx")
+    omni_physx.get_physx_interface = lambda: SimpleNamespace(
+        subscribe_physics_step_events=lambda callback: app.physics.create_subscription_to_pop(
+            callback
+        )
+    )
     omni_timeline = types.ModuleType("omni.timeline")
     omni_timeline.TimelineEventType = _TimelineEventType
     omni_timeline.get_timeline_interface = lambda: timeline
@@ -145,6 +152,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     omni_usd.get_context = lambda: usd_context
     omni.ext = omni_ext
     omni.kit = omni_kit
+    omni.physx = omni_physx
     omni.timeline = omni_timeline
     omni.usd = omni_usd
 
@@ -168,7 +176,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     fake_runtime.start_bridges = lambda *, state: state.start_bridges() or state
     fake_runtime.build_drivers = lambda *, state, make_env: state.build_drivers(make_env) or state
     fake_runtime.teardown = lambda *, state: state.teardown() or state
-    fake_runtime.tick_drivers = lambda *, state, on_error: state
+    fake_runtime.tick_drivers = lambda *, state, physics_dt_s, on_error: state
     fake_runtime.read_bridge_host_status = lambda *, host: host.status
 
     modules = {
@@ -177,6 +185,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
         "omni.ext": omni_ext,
         "omni.kit": omni_kit,
         "omni.kit.app": omni_kit_app,
+        "omni.physx": omni_physx,
         "omni.timeline": omni_timeline,
         "omni.usd": omni_usd,
         "robotics_experiments.commanding": fake_commanding,
@@ -221,6 +230,11 @@ def _fire_stage_opened(usd_context):
     event = SimpleNamespace(type=int(_StageEventType.OPENED))
     for callback in list(usd_context.stage_events.callbacks):
         callback(event)
+
+
+def _fire_physics(app, dt=0.004):
+    for callback in list(app.physics.callbacks):
+        callback(dt)
 
 
 def _fire_timeline(timeline, event_type):
@@ -338,9 +352,9 @@ def test_play_re_adopts_stage_builds_drivers_and_subscribes(monkeypatch):
         "start_bridges",
         "build_drivers",
     ]
-    # A control tick subscription is armed (the one-shot scene-open already
-    # released, so the lone remaining update callback is the control tick).
-    assert app.updates.callbacks
+    assert app.updates.callbacks == []
+    assert app.physics.callbacks
+    _fire_physics(app)
 
 
 def test_play_before_stage_open_does_not_spawn(monkeypatch):
@@ -357,13 +371,13 @@ def test_stop_drops_control_and_tears_down(monkeypatch):
     _fire_app_update(app)
     _fire_stage_opened(usd_context)
     _fire_timeline(timeline, _TimelineEventType.PLAY)
-    assert app.updates.callbacks  # control tick armed by PLAY
+    assert app.physics.callbacks  # control tick armed by PLAY
 
     _fire_timeline(timeline, _TimelineEventType.STOP)
 
     assert orch.calls[-1] == "teardown"
     # STOP releases the control tick subscription.
-    assert app.updates.callbacks == []
+    assert app.physics.callbacks == []
 
 
 def test_shutdown_tears_down(monkeypatch):

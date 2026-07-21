@@ -23,6 +23,7 @@ class FakeCommandPort(MavlinkCommandPort):
         self.setpoints = []  # _PositionSetpoints emitted on STREAM
         self.velocity_setpoints = []  # _VelocitySetpoints (velocity deploy path)
         self.attitude_targets = []  # _AttitudeRateSetpoints (ctbr deploy path)
+        self.effects = []
         self.connected = False
         self.heartbeats = 0
         self.feedback_polls = 0
@@ -39,20 +40,24 @@ class FakeCommandPort(MavlinkCommandPort):
     def disconnect(self):
         self.connected = False
 
-    def pump_heartbeat(self, *, force=False):
+    def pump_heartbeat(self, *, now_s, force=False):
         self.heartbeats += 1
 
     def send(self, command):
         self.sent.append(command)
+        self.effects.append(("command", command))
 
     def send_setpoint(self, setpoint):
         self.setpoints.append(setpoint)
+        self.effects.append(("setpoint", setpoint))
 
     def send_velocity_setpoint(self, setpoint):
         self.velocity_setpoints.append(setpoint)
+        self.effects.append(("setpoint", setpoint))
 
     def send_attitude_target(self, setpoint):
         self.attitude_targets.append(setpoint)
+        self.effects.append(("setpoint", setpoint))
 
     def poll_feedback(self):
         self.feedback_polls += 1

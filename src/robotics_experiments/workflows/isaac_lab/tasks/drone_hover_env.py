@@ -14,6 +14,7 @@ for the F1 validation gate; F3 replaces it with the switch-press reward.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import MISSING
 from typing import Any, cast
@@ -26,6 +27,7 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
+from robotics_experiments.commanding._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
@@ -106,6 +108,8 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     # Isaac Lab's configclass requires the dataclasses.MISSING sentinel for
     # explicitly supplied fields; the cast keeps their consumer-facing types.
     decimation: int = cast(Any, MISSING)
+    policy_rate_hz: float = cast(Any, MISSING)
+    physics_rate_hz: float = cast(Any, MISSING)
     episode_length_s: float = cast(Any, MISSING)
     action_space: int = cast(Any, MISSING)
     observation_space = 13
@@ -118,12 +122,11 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
 def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
     """Build the Isaac Lab task config from one resolved experiment."""
     vehicle = _training_vehicle(experiment_config)
-    decimation = max(
-        1,
-        round(experiment_config.sim.physics_hz / experiment_config.rl.policy_rate_hz),
-    )
+    decimation = math.ceil(experiment_config.sim.physics_hz / experiment_config.rl.policy_rate_hz)
     return DroneHoverEnvCfg(
         decimation=decimation,
+        policy_rate_hz=experiment_config.rl.policy_rate_hz,
+        physics_rate_hz=experiment_config.sim.physics_hz,
         episode_length_s=experiment_config.rl.episode_length_s,
         action_space=experiment_config.rl.action.action_dim,
         observation_space=13,
@@ -164,12 +167,29 @@ class DroneHoverEnv(DirectRLEnv):
         render_mode: str | None = None,
         **kwargs,
     ):
+        self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
+        self._physics_period_ns = int(round(1_000_000_000 / cfg.physics_rate_hz))
+        self._policy_cadence = _CadenceState(previous_time_ns=0)
         super().__init__(cfg, render_mode, **kwargs)
         self._experiment_config = experiment_config
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._hover_target_w = torch.zeros((self.num_envs, 3), device=self.device)
         self._task = self._experiment_config.rl.press.hover_task
         self._setup_actuation()
+
+    @property
+    def step_dt(self) -> float:
+        """Nominal policy interval used for episode timing and reporting."""
+        return self._nominal_step_dt
+
+    def step(self, action: torch.Tensor) -> tuple[Any, ...]:
+        """Select the next exact-average physics decimation, then step Lab."""
+        self._policy_cadence, self.cfg.decimation = _next_interval_steps(
+            self._policy_cadence,
+            source_period_ns=self._physics_period_ns,
+            rate_hz=self.cfg.policy_rate_hz,
+        )
+        return super().step(action)
 
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)

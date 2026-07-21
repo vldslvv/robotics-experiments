@@ -82,6 +82,7 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.DriverContext = SimpleNamespace
     fake_commanding.DriverEnvironment = object
     fake_commanding.DriverParams = SimpleNamespace
+    fake_commanding.DriverTick = SimpleNamespace
     fake_commanding.EnvelopeGates = SimpleNamespace
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
@@ -91,7 +92,7 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.routine_driver_is_done = lambda *, state: state.is_done
     driver_ticks = []
     fake_commanding.tick_routine_driver = (
-        lambda *, context, state: driver_ticks.append((context, state)) or state
+        lambda *, context, state, tick: driver_ticks.append((context, state, tick)) or state
     )
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
 
@@ -171,8 +172,14 @@ def _env(*vehicles):
     return SimpleNamespace(
         scene="@scene.usd",
         sim=SimpleNamespace(physics_hz=250.0),
+        rl=SimpleNamespace(
+            policy_rate_hz=20.0,
+            action=SimpleNamespace(),
+        ),
         vehicles={f"drone{vehicle.id}": vehicle for vehicle in vehicles},
         driver=SimpleNamespace(
+            control_rate_hz=50.0,
+            offboard_setpoint_rate_hz=50.0,
             goto_min_heading_dist_m=0.25,
             prearm_backstop_floor_s=20.0,
             prearm_backstop_multiplier=5.0,
@@ -258,10 +265,66 @@ def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
     fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
     flying = fleet.flying[0]
 
-    fleet = module.tick_drivers(state=fleet)
+    for _ in range(5):
+        fleet = module.tick_drivers(state=fleet, physics_dt_s=0.004, monotonic_s=7.0)
 
-    assert rec.driver_ticks == [(flying.context, flying.driver)]
+    assert len(rec.driver_ticks) == 1
+    context, driver, tick = rec.driver_ticks[0]
+    assert (context, driver) == (flying.context, flying.driver)
+    assert (tick.control_time_us, tick.monotonic_s) == (20_000, 7.0)
     assert fleet.flying[0].context is flying.context
+
+
+def test_tick_drivers_isolates_errors_and_shares_one_fleet_tick(monkeypatch):
+    module, _rec = _import_orchestrator(monkeypatch)
+    env = _env(
+        _vehicle(0, "D0", (0.0, 0.0), enabled=True),
+        _vehicle(1, "D1", (2.0, 0.0), enabled=True),
+        _vehicle(2, "D2", (4.0, 0.0), enabled=True),
+    )
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
+    first_context = fleet.flying[0].context
+    successful_ticks = []
+    errors = []
+
+    def transition(*, context, state, tick):
+        if context is first_context:
+            raise RuntimeError("broken driver")
+        successful_ticks.append((context, tick))
+        return state
+
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(orchestrator, "tick_routine_driver", transition)
+    for _ in range(5):
+        fleet = module.tick_drivers(
+            state=fleet,
+            physics_dt_s=0.004,
+            monotonic_s=9.0,
+            on_error=lambda flying, exc: errors.append((flying, exc)),
+        )
+
+    assert len(errors) == 1
+    assert str(errors[0][1]) == "broken driver"
+    assert len(successful_ticks) == 2
+    assert successful_ticks[0][1].control_time_us == 20_000
+    assert successful_ticks[0][1] is successful_ticks[1][1]
+
+
+def test_teardown_resets_driver_cadence(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+    env = _env(_vehicle(0, "D0", (0.0, 0.0), enabled=True))
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    fleet = module.spawn_fleet(state=fleet)
+    fleet = module.build_drivers(state=fleet, make_env=lambda spawned, port: object())
+    for _ in range(3):
+        fleet = module.tick_drivers(state=fleet, physics_dt_s=0.004)
+
+    assert rec.driver_ticks == []
+    fleet = module.teardown(state=fleet)
+    assert fleet.control_time_ns == 0
+    assert fleet.driver_cadence.previous_time_ns == 0
 
 
 def test_all_done_reflects_flying_drivers(monkeypatch):

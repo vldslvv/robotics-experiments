@@ -295,6 +295,8 @@ def build_vehicle_routine(
     goto_heading_tol_deg: float,
     goto_cross_track_m: float,
     goto_offboard_prime_ticks: int,
+    policy_rate_hz: float,
+    offboard_setpoint_rate_hz: float,
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
     policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None,
 ) -> VehicleRoutine:
@@ -331,7 +333,7 @@ def build_vehicle_routine(
       cross-track-to-path gate plus tilt / vertical / angular gates apply.
     - ``policy`` (requires ``artifact``, ``hold_s`` and ``timeout_s``; optional
       ``target`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
-      produced by a trained policy each tick -- the injected
+      produced by a trained policy at its configured cadence -- the injected
       ``policy_fn_factory(descriptor)`` loads the artifact and returns the pure
       :data:`PolicyStepFn` (raising ``ValueError`` for a missing or mismatched
       artifact, so a bad config fails at build time). Reuses the ``goto``
@@ -422,4 +424,8 @@ def build_vehicle_routine(
             built.append(_build_land_step(descriptor=descriptor, index=index))
         else:
             raise ValueError(f"routine step {index} has unknown kind {kind!r}")
-    return VehicleRoutine(steps=tuple(built))
+    return VehicleRoutine(
+        steps=tuple(built),
+        policy_rate_hz=policy_rate_hz,
+        offboard_setpoint_rate_hz=offboard_setpoint_rate_hz,
+    )
