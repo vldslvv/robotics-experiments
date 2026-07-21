@@ -37,9 +37,9 @@ historical/rejected-plan note, not the completed runtime architecture.
 | A. Runtime and PX4 SITL foundation | Done | Frozen `FleetState` / `Px4BridgeState` transitions, `BridgeHost`, `BridgeHostGroup`, `VehicleState -> ActuatorCommands -> RotorDynamics`, lockstep send/poll, multi-vehicle send-all/poll-all, per-vehicle logging, and rotor visual spin are implemented. |
 | B. Generated X4/hexa assets and PX4 airframes | Mostly done | `configs/airframes/holybro_x500_v2.yaml` now owns the Stage 1 component leaves that generate `holybro_x500_v2.usda`, body properties, bridge thrust constants, and `22000_none_x500_v2`; `hexacopter_s550.usda` remains a placeholder bound to generated `22001_none_hexa_x`. Stage 2 X8 remains pending. |
 | C. Command routines and navigation primitives | Done for demos | Pure command routines cover arm, takeoff, hover, forward, absolute world-ENU `goto`, and land; live and standalone shells drive the same per-drone `RoutineDriverState`. |
-| D. Switch/lamp environment | Mostly done | Switch/lamp spawning and the N-step light-state latch exist. Closed-loop integration from navigation handoff into an RL or contact press policy remains pending. |
+| D. Switch/lamp environment | Component-level | Deterministic switch/lamp spawning and the N-step light-state latch exist. No live gate validates the pusher/contact/button/latch/lamp chain. |
 | E. Hardware-faithful X4/X8 asset/config | Partially done | Stage 1 Holybro X500 V2 X4 USD/config is implemented with computed mass properties and generated PX4 airframe binding. Stage 2 X8 geometry, rotor mapping, and tuning remain pending. |
-| F. RL press policy | Not done | Isaac Lab has a no-op DirectRLEnv hover skeleton. The switch-press task, reward, observation/action surfaces, curriculum, and trained policy are future work. |
+| F. RL press policy | Partially done | F1/F1b/F2/F2b are validated: the Lab env flies, the observation/provider/handoff contracts exist, and hover training/export/deployment through PX4 passed. F3 is the next blocker; the switch-press task, contact reward/eval, press policy, curriculum, and synthetic provider do not exist. |
 | G. Sensor simulation/fusion and ROS sensor stack | Not done | D435i/RPLiDAR/optical-flow simulation, ROS topics, LiDAR SLAM, and EKF/UKF fusion remain roadmap items. |
 | H. Full mission state machine and autonomous discovery | Future | Retry/abort behavior, wall scanning, switch discovery, multi-switch task queues, and full autonomous missions are not implemented. |
 
@@ -350,7 +350,8 @@ Possible next increments:
 
 ### Phase D: Switch/Lamp Environment
 
-Status: mostly done.
+Status: component-level implementation; the real contact chain is not yet
+validated.
 
 Pending:
 
@@ -375,27 +376,31 @@ Tasks:
 
 ### Phase F: RL Press Policy
 
-Status: not done. Detailed, implementation-ready step-by-step sub-plans live in
-`docs/phase_f/` (F1 in-Lab flight actuation, F2 observation interface + handoff,
-F3 switch-press env on ground truth + first policy, F3b contact-behavior seam +
-scripted press baseline, F4 contact curriculum + domain randomization, F5
-synthetic pose estimator). Phase F stops at synthetic pose noise; simulated/real
-sensor providers plug into the F2 provider seam in Phase G. The in-Lab RL action
-level (velocity / CTBR / attitude / rotor) is a deferred decision surveyed in F1.
+Status: partially done. The status matrix and current implementation contracts
+live in `docs/phase_f/README.md`. F1/F1b/F2/F2b are validated: the in-Lab env
+flies, `velocity` is the accepted default action level with `ctbr` implemented,
+the observation/provider/handoff seam exists, and the hover task has passed the
+train/export/strict-PX4-deploy pipeline. F3 is the next blocker. F3b, F4, and F5
+remain planned. Phase F stops at synthetic pose noise; simulated/real sensor
+providers plug into the F2 provider seam in Phase G.
 F3b starts only after the F3 first-policy gate: it puts the press behavior
-behind a `ContactBehavior` seam so a scripted model-based press and the learned
-policy are interchangeable implementations, with the scripted baseline as the
-published metric floor -- the project goal is the contact task family, not one
-policy.
+behind one immutable state/transition seam so a scripted model-based press and
+the learned policy are interchangeable implementations, with the scripted
+baseline as the published metric floor -- the project goal is the contact task
+family, not one policy.
 
 Tasks:
 
-- Build the Isaac Lab switch-press environment from the current no-op hover
-  scaffold.
-- Implement observations, action surface, reward components, reset logic,
-  contact reporting, and curriculum.
-- Train and evaluate with domain randomization.
-- Define handoff success/failure metrics before integrating into missions.
+- Add the deterministic real-asset contact-chain gate so policy failures can be
+  distinguished from broken contact physics.
+- Implement F3's Isaac Lab switch-press environment, contact/latch observation
+  wiring, reward/termination/reset logic, evaluation, and first ground-truth
+  press policy.
+- After F3, implement the immutable contact-behavior transition and scripted
+  baseline (F3b), then train through F4 curriculum/randomization and F5
+  synthetic pose degradation.
+- Preserve the validated F2 observation/handoff contract and F2b artifact/rate
+  validation while adding the contact task.
 
 ### Phase G: Sensor Simulation and Fusion
 

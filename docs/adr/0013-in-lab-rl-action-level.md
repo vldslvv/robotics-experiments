@@ -39,8 +39,9 @@ test oracle); the batched torch versions the env runs live in
 wrench. F1 also added the OFFBOARD deploy plumbing (both levels): `velocity` ->
 `SET_POSITION_TARGET_LOCAL_NED` (body velocity), `ctbr` -> `SET_ATTITUDE_TARGET`
 (thrust + body rates), with a pure `robotics_experiments.rl.press.press_action_to_offboard`
-mapper. The mission-level press routine step / `PressDriver` stays in F3 (only the
-port-level plumbing + mapper land in F1).
+mapper. The handoff-gated contact step is planned in F3b and aligned with
+frozen state transitions; only the port-level plumbing and mapper landed in F1,
+and no separate `PressDriver` class is implemented.
 
 ## Consequences
 
@@ -50,5 +51,6 @@ port-level plumbing + mapper land in F1).
   the container by the hover+goto gate (`make test-integration-press-hover-goto`).
 - The `isaac_lab` Hydra group + `IsaacLabConfig` are retired; the Lab-scale
   tunables and the action level live in the `rl` group (single source).
-- The deploy setpoint types are available for F3's press behavior, which layers a
-  `PressDriver` over the same command port without new wire plumbing.
+- The deploy setpoint types are available for F3b's planned press behavior,
+  which reuses the same routine driver and command port without new wire
+  plumbing.

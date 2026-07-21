@@ -60,8 +60,8 @@ The harness changes three things at once:
 - Rule: the contact behavior is only *entered* through the F2 `handoff_ready`
   gate, and always *exits* to a retreat hover -- `DONE` and `ABORT` both end at
   the retreat stand-off, never in contact. Retries are bounded by config;
-  exhaustion aborts (Step 1 profile). F3b's `{kind: press}` step already
-  encodes this; this plan makes it a hardware precondition: no real contact
+  exhaustion aborts (Step 1 profile). F3b's planned `{kind: press}` step must
+  encode this; this plan makes it a hardware precondition: no real contact
   flight before the bounded-retry/abort path is exercised in the PX4-bridge
   sim-to-sim scenario.
 - Done when: the standalone scenario demonstrates gate-blocked entry, a bounded

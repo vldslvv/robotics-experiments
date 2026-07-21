@@ -73,9 +73,6 @@ not decision snapshots:
 
 - Living references (AGENTS.md points at them): `COMMAND_ROUTINE_CONTRACT.md`,
   `INTEGRATION_TEST_ARCHITECTURE.md`.
-- Investigations / logs / scratch: the takeoff-instability investigation and
-  `flight_analysis_00_26_50.md` are distilled into ADR 0003; `notes.txt` and
-  `todos.txt` are scratch.
 - Canonical roadmap and supporting hardware detail for ADR 0001:
   `LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; historical source docs
   `archive/QUADCOPTER_PLAN_REVISED.md` and

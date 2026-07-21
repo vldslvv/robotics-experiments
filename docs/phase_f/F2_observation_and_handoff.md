@@ -7,6 +7,10 @@ implemented with pure tests, ADR 0014 records the contract, and the hover+goto
 gate's side channel measured the exit condition: wall-normal range shrinking
 2.190 m -> 0.254 m across the goto with the handoff gate flipping from
 `TOO_FAR` to ready at the settled endpoint.
+The later config refactor moved `handoff:` into the nested
+`configs/experiment/rl/press/default.yaml` group and exposes resolved config
+types only through `robotics_experiments.config`; the press API remains rooted
+at `robotics_experiments.rl.press`.
 
 Goal served: goal 1 (a stable policy input for the easy task) and the substrate for
 goals 3/4. Depends on: nothing (parallel with F1 and F2b; Step 1 adopts F2b's
@@ -56,9 +60,11 @@ over the PX4-specific `MavlinkCommandPort`); see
 - Rationale for `pose_confidence`/`pose_age_s`/`detection_valid` being mandatory:
   they turn perception uncertainty into explicit control state, which is what lets
   F5 and Phase G swap providers without touching the policy. Note: times are
-  seconds (repo convention: sim-time in seconds/`us`, not ms) rather than ROADMAP1's
-  ms.
-- Test: `tests/test_press_observation.py` (pure): `to_vector` length equals the
+  seconds (repo convention: sim-time in seconds/`us`, not ms) rather than the
+  historical research roadmap's milliseconds.
+- Test:
+  `tests/src/robotics_experiments/rl/press/test_press_observation.py` (pure):
+  `to_vector` length equals the
   declared layout length; field order is stable; changing a field changes the
   expected slot.
 
@@ -101,7 +107,8 @@ over the PX4-specific `MavlinkCommandPort`); see
   `valid=True`.
 - Keep `rl/press/__init__.py` re-export-only and lazy for this symbol so
   `import robotics_experiments.rl.press` stays Isaac-free.
-- Test: `tests/test_core_imports.py` asserts `press` imports with Isaac absent and
+- Test: `tests/src/robotics_experiments/test_core_imports.py` asserts `press`
+  imports with Isaac absent and
   that `isaac_provider` is not eager-imported.
 
 ## Step 5 -- Handoff gate (pure predicate + config)
@@ -115,17 +122,19 @@ over the PX4-specific `MavlinkCommandPort`); see
   error <= threshold, wall-normal speed <= threshold, lateral speed <= threshold,
   angular-rate magnitude <= threshold, estimator_health >= threshold.
 - `HandoffGate` is a frozen dataclass built from config (no magic numbers in code).
-- Action: append a `PressHandoffConfig` to `config/_rl.py` and a
-  `handoff:` block to `configs/experiment/rl/default.yaml` with the initial
-  thresholds from ROADMAP1's handoff table (`pose_confidence_min`, `pose_age_max_s`,
+- Action: append a `PressHandoffConfig` to the owning private RL config module
+  and a `handoff:` block to `configs/experiment/rl/press/default.yaml` with the
+  initial thresholds from the historical research roadmap's handoff table
+  (`pose_confidence_min`, `pose_age_max_s`,
   `switch_range_max_m`, `lateral_align_max_m`, `wall_normal_speed_max_mps`,
   `lateral_speed_max_mps`, `angular_speed_max_radps`, `estimator_health_min`). Add
-  `handoff: PressHandoffConfig` to `RlConfig`.
+  `handoff: PressHandoffConfig` to `PressTaskConfig`.
 - Reuse note: this mirrors the command layer's continuous envelope invariants
   (`commanding/_routine_predicates.py`: `tilt_below`, `_lateral_drift_below`, ...). Keep the
   same pure-predicate style; do not duplicate the envelope-gate logic, but a
   separate handoff predicate is warranted (different thresholds, different frame).
-- Test: `tests/test_press_handoff.py` (pure): a calm, close, confident, fresh obs
+- Test: `tests/src/robotics_experiments/rl/press/test_press_handoff.py` (pure):
+  a calm, close, confident, fresh obs
   is ready; each individual violation returns its specific reason; boundary values
   behave.
 
@@ -153,12 +162,13 @@ length there.
 - add `src/robotics_experiments/rl/press/observation.py`, `.../provider.py`,
   `.../handoff.py`, `.../isaac_provider.py`
 - edit `src/robotics_experiments/rl/press/__init__.py` (lazy re-exports)
-- edit `src/robotics_experiments/config/_rl.py` (`PressHandoffConfig`,
-  `PressObservationConfig` if needed), `configs/experiment/rl/default.yaml`
+- edit the owning private RL config module (`PressHandoffConfig`) and
+  `configs/experiment/rl/press/default.yaml`
 - edit `isaac/runtime/standalone/tests/test_press_hover_goto.py` (side-channel
   validation; the env leaf itself is untouched -- press-env wiring is F3)
-- add `tests/test_press_observation.py`, `tests/test_press_handoff.py`; extend
-  `tests/test_core_imports.py`
+- add the observation/handoff tests under
+  `tests/src/robotics_experiments/rl/press/`; extend
+  `tests/src/robotics_experiments/test_core_imports.py`
 - record an ADR for the observation/provider contract (it is a load-bearing seam)
 
 ## Exit gate

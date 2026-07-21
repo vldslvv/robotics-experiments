@@ -3,7 +3,6 @@
 - Status: Accepted (Implemented)
 - Date: 2026-06-30
 - Related: ADR 0008 (airframe mechanism), ADR 0009 (hexa geometry), ADR 0011 (config generator)
-- Full design: `docs/QUAD_GENERIC_AIRFRAME_PLAN.md`
 
 ## Context
 

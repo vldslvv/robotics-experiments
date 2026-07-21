@@ -9,6 +9,10 @@ streaming over PX4 SITL -> land, through the unchanged frozen `FleetState`
 lifecycle.
 The sim-to-PX4 fidelity caveat (Step 7) did not bite for the hover hold; it
 remains the watch item for aggressive maneuvers.
+The original reward/episode figures below were measured with the original 50 Hz
+training contract. After the rate split, a new 20 Hz artifact was trained on
+2026-07-20 and the strict policy deployment gate passed again on 2026-07-21;
+artifacts from the old rate are rejected by metadata validation.
 
 Goal served: the durable RL contract itself -- `task definition (Hydra YAML) ->
 train -> exported policy artifact -> {kind: policy} routine step -> frozen
@@ -19,6 +23,12 @@ its training observation -- F2's `PressObservation` is validated as a gate side
 channel and first becomes an env input in F3's press env). Blocks: F3.
 No deferred decisions (artifact metadata validation and hover-first sequencing
 were decided 2026-07-05).
+Post-F2b alignment: `rl.training.vehicle_id` now selects the fleet vehicle that
+supplies the Lab spawn asset and resolved bridge dynamics. Artifact metadata
+also records `rl.policy_rate_hz`; deployment refuses artifacts trained at a
+different rate. Policy evaluation, OFFBOARD transmission, and fleet driver
+ticks use independent exact-average cadences at `rl.policy_rate_hz`,
+`driver.offboard_setpoint_rate_hz`, and `driver.control_rate_hz` respectively.
 
 Why this exists: F3/F3b would otherwise be the first place the training adapter,
 policy artifact, and deploy integration ever run -- bundled with a new contact
@@ -26,16 +36,16 @@ env, a new observation, and a new reward, so a pipeline failure would be
 indistinguishable from a task failure. This plan proves the whole pipeline
 end-to-end on the simplest task that already exists and flies
 (`Isaac-Drone-Hover-Direct-v0`, F1). After F2b, "define a task" means authoring
-YAML, "train" is one make target, and "deploy" is one routine step; F3 only adds
-the press task on top.
+YAML, "train" is one make target, and "deploy" is one routine step. F3 reuses
+that pipeline but must remove the remaining hover-specific schema selection in
+the training entrypoint and validated loader before exporting a press artifact.
 
-Runtime plug point (load-bearing, state it once): `runtime/orchestrator.py`
-requires NO code change. Its `build_drivers` transition already constructs one
-`DriverContext` plus one `RoutineDriverState` per bridge-enabled drone; empty
-routines use the same lifecycle. The policy plugs in as a new routine step kind
-executed by `tick_routine_driver`, reusing the existing OFFBOARD streaming,
-envelope invariants, timeouts, and `on_failure` machinery. The seam is the
-routine step, not the fleet runtime.
+Runtime plug point (load-bearing, state it once): the policy is a routine step,
+not a second runtime pipeline. `FleetState` constructs one `DriverContext` plus
+one `RoutineDriverState` per bridge-enabled drone and injects the validated
+artifact-loader factory into driver params; empty routines use the same
+lifecycle. `tick_routine_driver` executes the policy step using the existing
+OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
 
 ---
 
@@ -47,9 +57,10 @@ routine step, not the fleet runtime.
   `_REWARD_ALIVE`, `_CRASH_TILT_COS` / `_MIN_ALTITUDE_M` /
   `_MAX_POSITION_ERROR_M`, `_RESET_XY_HALF_M` / `_RESET_Z_HALF_M`.
 - Action: add `@dataclass class PressHoverTaskConfig` (bare annotations, per the
-  configs rule) to `config/_rl.py`; add `hover_task: PressHoverTaskConfig` to
-  `RlConfig`; author a `hover_task:` block in
-  `configs/experiment/rl/default.yaml` with the current values.
+  configs rule) to the owning private RL config module; add
+  `hover_task: PressHoverTaskConfig` to `PressTaskConfig`; author a
+  `hover_task:` block in `configs/experiment/rl/press/default.yaml` with the
+  current values.
 - The env reads `cfg.rl.press.hover_task`; no reward/termination/reset literal
   remains in the env module. This is the "task definition = one YAML block"
   half of the contract, established before the press task repeats the pattern
@@ -97,8 +108,9 @@ routine step, not the fleet runtime.
     `_rl_games.py` are drop-in later.
 - `rl/training/__init__.py` stays lazy (rsl_rl is a training-only dep). Keep
   the pure `press` modules free of any training import;
-  `tests/test_core_imports.py` guards it.
-- Config: add `RlTrainingConfig` (PPO hyperparameters: lr,
+  `tests/src/robotics_experiments/test_core_imports.py` guards it.
+- Config: add `RlTrainingConfig` (task id, selected `vehicle_id`, artifact
+  namespace, and PPO hyperparameters: lr,
   num_steps_per_env, max_iterations, gamma, lam, entropy_coef, actor/critic
   hidden dims, seed) to `config/_rl.py` + a `training:` block in
   `configs/experiment/rl/default.yaml`. No hyperparameter hardcoded in
@@ -116,7 +128,8 @@ routine step, not the fleet runtime.
 
 - Action: `export_policy` writes a TorchScript module PLUS a JSON metadata
   sidecar next to it carrying the contract fields:
-  `obs_schema_version`, `action.kind`, `action_dim`, `obs_dim`, and the action
+  `obs_schema_version`, `action.kind`, `action_dim`, `obs_dim`,
+  `policy_rate_hz`, and the action
   scale values (`max_body_velocity_mps` / `max_yaw_rate_radps` /
   `max_body_rate_radps` / `hover_thrust_fraction` as applicable to the kind).
   The artifact = module + metadata; a bare checkpoint is not a valid artifact.
@@ -124,13 +137,14 @@ routine step, not the fleet runtime.
   (implemented in `src/robotics_experiments/rl/press/policy.py`; imports
   torch only inside functions, like `MavlinkCommandPort` imports pymavlink
   inside methods). Provide
-  `build_policy_step_fn(path, action_cfg) -> Callable[[VehicleState, np.ndarray], setpoint]`
+  `build_policy_step_fn(*, artifact_dir, action_cfg, policy_rate_hz)` returning
+  a `Callable[[VehicleState, np.ndarray], setpoint]`
   that loads the artifact and raises `ValueError` on ANY metadata mismatch
-  against the active config (schema version, kind, dims, scales) -- fail loudly
+  against the active config (schema version, kind, dims, policy rate, scales) -- fail loudly
   at load, never a shape error deep in the driver. It imports neither rsl_rl nor
   the training stack; the runtime depends only on this seam, never on the
   training library.
-- Test: `tests/test_press_policy.py`: a tiny exported identity/linear
+- Test: `tests/src/robotics_experiments/rl/press/test_press_policy.py`: a tiny exported identity/linear
   TorchScript module + metadata round-trips through `build_policy_step_fn`
   (guarded on torch availability); each metadata field mismatch (version, kind,
   dims, a scale) rejects with `ValueError`.
@@ -139,10 +153,12 @@ routine step, not the fleet runtime.
 
 ## Step 5 -- Train entrypoint + make target (thin)
 
-- Action: add `isaac/runtime/standalone/train_rl.py`: composes config,
-  builds the task from a config-selected task id (so F3 reuses this entrypoint
-  unchanged for `Isaac-Switch-Press-Direct-v0`), calls the Step-3 adapter, and
-  writes the Step-4 artifact. Follow the standalone import-ordering rule
+- Action: add `isaac/runtime/standalone/train_rl.py`: consumes the config
+  resolved by the runtime root and builds the task from its selected task id,
+  calls the Step-3 adapter, and writes the Step-4 artifact. At F2b completion
+  the exported schema constant is still hover-specific; F3 makes that metadata
+  task-owned before selecting `Isaac-Switch-Press-Direct-v0`. Follow the
+  standalone import-ordering rule
   (AppLauncher first, Kit-dependent imports deferred).
 - Action: add a thin `make train-rl` target that runs on **`ISAAC_LAB_IMAGE`**
   (the Isaac Lab superset image, like `test-integration-press-hover-goto` --
@@ -164,7 +180,10 @@ routine step, not the fleet runtime.
   step, so the per-tick chain inside `decide` is pure end-to-end:
   pack the Step-2 layout from `RoutineObservation.vehicle_state` (+ the step's
   target position) -> `policy(obs)` -> `robotics_experiments.rl.press.press_action_to_offboard`
-  -> a `STREAM` decision carrying the setpoint payload.
+  -> a `STREAM` decision carrying the setpoint payload. Policy inference runs
+  only when its exact-average `rl.policy_rate_hz` cadence is due; the latest
+  payload is held and transmitted independently at
+  `driver.offboard_setpoint_rate_hz`.
 - Action: extend the `STREAM` decision payload from `PositionSetpoint`-only to
   a union also carrying `VelocitySetpoint` / `AttitudeRateSetpoint` (the wire
   payloads and port methods `send_velocity_setpoint` / `send_attitude_target`
@@ -181,8 +200,8 @@ routine step, not the fleet runtime.
   fails as `FailureKind.ENVELOPE` like any other step.
 - Action: update `docs/COMMAND_ROUTINE_CONTRACT.md` for the new step kind and
   the widened `STREAM` payload as part of the same change.
-- Test: extend `tests/test_commanding_routine.py` /
-  `tests/test_commanding_driver.py` over fakes: a fake policy's action is
+- Test: extend the commanding routine/driver tests under
+  `tests/src/robotics_experiments/commanding/` over fakes: a fake policy's action is
   packed/streamed each tick, envelope breach fails, `hold_s` completion
   advances; no pymavlink/torch at module scope.
 - Done when: the commanding unit tests drive a fake policy through the step
@@ -216,14 +235,16 @@ routine step, not the fleet runtime.
 - add the pure hover-observation layout module under `press/`;
   add `rl/press/policy.py`, `rl/training/__init__.py`,
   `rl/training/rsl_rl.py`; edit `rl/__init__.py` (re-exports)
-- edit `config/_rl.py` (`PressHoverTaskConfig`, `RlTrainingConfig`),
-  `configs/experiment/rl/default.yaml`
+- edit the owning private RL config module (`PressHoverTaskConfig`,
+  `RlTrainingConfig`), `configs/experiment/rl/default.yaml`, and
+  `configs/experiment/rl/press/default.yaml`
 - add `isaac/runtime/standalone/train_rl.py`; add the `train-rl` make
   target (Isaac Lab image)
 - edit the commanding routine implementation (+ commander/driver for the widened `STREAM`
   payload), `docs/COMMAND_ROUTINE_CONTRACT.md`
-- add `tests/test_press_policy.py` + the layout test; extend the commanding
-  tests, the config test, `tests/test_core_imports.py`
+- add policy/layout tests under `tests/src/robotics_experiments/rl/press/`;
+  extend the commanding/config tests and
+  `tests/src/robotics_experiments/test_core_imports.py`
 - `pyproject.toml` `training` extra + `uv.lock`
 
 ## Exit gate
@@ -232,4 +253,5 @@ routine step, not the fleet runtime.
 task; the policy-step loader enforces the metadata contract; the `{kind: policy}` step
 flies that artifact over PX4 SITL through the unchanged orchestrator in the
 strict standalone scenario. The task->policy pipeline is proven end-to-end;
-F3 adds the press task, not plumbing.
+F3 adds the contact task plus the narrow task-schema generalization identified
+in its Steps 5-6, not another training/runtime pipeline.

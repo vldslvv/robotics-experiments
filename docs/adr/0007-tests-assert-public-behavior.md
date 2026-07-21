@@ -10,7 +10,8 @@ Unit tests across `tests/` reached into internals -- reading a unit's private
 state (`port._sensor_send_count`, `bridge._tilt_cutoff_count`,
 `extension._switches_spawned`) and asserting on mock/interaction logs even where a
 public observable existed. These tests pin implementation, not behavior, and break
-on harmless refactors. `tests/test_bridge_host.py` had already been reworked to
+on harmless refactors.
+`tests/src/robotics_experiments/runtime/test_bridge_host.py` had already been reworked to
 the better pattern and serves as the exemplar.
 
 ## Decision

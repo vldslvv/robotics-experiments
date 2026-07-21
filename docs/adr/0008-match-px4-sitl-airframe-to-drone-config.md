@@ -3,7 +3,6 @@
 - Status: Accepted (hand-written mechanism superseded by ADR 0011 / config generator)
 - Date: 2026-06-29
 - Related: ADR 0009 (hexa tuning), ADR 0010 (quad X500), ADR 0011 (config generator)
-- Full design: `docs/PX4_SITL_AIRFRAME_MATCH_PLAN.md`
 
 ## Context
 

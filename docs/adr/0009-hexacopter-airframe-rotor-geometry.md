@@ -3,7 +3,6 @@
 - Status: Accepted (Resolved)
 - Date: 2026-06-29
 - Related: ADR 0008 (airframe mechanism), ADR 0010 (quad X500)
-- Full design: `docs/HEXACOPTER_SITL_FLIGHT_TUNING.md`
 
 ## Context
 

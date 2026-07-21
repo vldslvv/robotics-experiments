@@ -3,6 +3,9 @@
 Status: COMPLETE. The final gains below are live in
 `configs/experiment/rl/default.yaml` and the gate passes reproducibly; the
 measured results are the record of this tuning.
+The exact-average 20 Hz policy cadence introduced later was revalidated by two
+successful `test-integration-press-hover-goto` runs on 2026-07-21; it did not
+require another gain change.
 
 Goal served: the F1 Step-7 `test-integration-press-hover-goto` gate is a
 trustworthy precondition for F3 training. It drives the Isaac Lab
@@ -79,7 +82,10 @@ omega=[319.2,322.7] rad/s
 Host-side:
 
 ```bash
-uv run pytest tests/test_pressactuation.py tests/test_config.py tests/test_core_imports.py
+uv run pytest \
+  tests/src/robotics_experiments/rl/press/test_press_actuation.py \
+  tests/src/robotics_experiments/config/test_config.py \
+  tests/src/robotics_experiments/test_core_imports.py
 ```
 
 Isaac Lab:

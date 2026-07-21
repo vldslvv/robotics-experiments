@@ -52,7 +52,8 @@ path):
 
 `GroundTruthPoseProvider` (`rl/press/isaac_provider.py`) is an Isaac-only leaf
 shielded by the lazy `rl/press/__init__.__getattr__`, mirroring
-`environment/_stage.py`; `tests/test_core_imports.py` guards the boundary.
+`environment/stage.py`;
+`tests/src/robotics_experiments/test_core_imports.py` guards the boundary.
 
 ## Consequences
 

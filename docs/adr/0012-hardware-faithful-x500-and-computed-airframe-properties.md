@@ -64,6 +64,8 @@ flies identically.
   geometry); Stage 2 X8 stays deferred (ADR 0001). Renames cascade through the
   drone config, USD builder default, and tests; the old
   `quadcopter_500mm.usda` artifact is removed.
-- Guards: `tests/test_usd_builder_config.py` checks the computed mass/CoM/inertia;
-  `tests/test_config.py` checks the derived `rotor_constant`;
-  `tests/test_px4_airframe_generator.py` checks the +/-0.1768 `CA_ROTOR` table.
+- Guards: `tests/isaac/runtime/standalone/test_usd_builder_config.py` checks the
+  computed mass/CoM/inertia;
+  `tests/src/robotics_experiments/config/test_config.py` checks the derived
+  `rotor_constant`; `tests/px4/scripts/test_px4_airframe_generator.py` checks
+  the +/-0.1768 `CA_ROTOR` table.

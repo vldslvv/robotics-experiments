@@ -1,5 +1,12 @@
 # LIGHT_SWITCH_MULTIROTOR_ROADMAP
 
+> Historical research/design input, not the current roadmap or an
+> implementation-status source. The canonical project roadmap is
+> `docs/LIGHT_SWITCH_MULTIROTOR_ROADMAP.md`; resolved Phase F contracts and
+> metrics live under `docs/phase_f/` and in Hydra config. Names, units, APIs,
+> and phase states below may predate the implementation (for example,
+> `pose_age_ms` became `pose_age_s`).
+
 ## Executive summary
 
 This roadmap proposes a deliberate separation between **flight stabilization**, **global navigation**, **state estimation/perception**, and **local contact manipulation**. The central architectural decision is that the **RL contact controller should be trained before full camera-based perception is integrated**, but it must **never** read simulator internals directly. Instead, it should consume a stable **Observation Interface** whose early values come from ground truth routed through synthetic sensor/provider channels, then progressively from a noisy synthetic pose estimator, then from simulated cameras/LiDAR, and only later from real sensors. That ordering matches both PX4’s cascaded control model and the way modern robot-learning stacks such as Isaac Lab factor observations, rewards, curriculum, and randomization into distinct managers. It also reflects the contact-control literature in aerial manipulation, which repeatedly shows that physical interaction is its own control problem and that stable contact depends heavily on compliant interaction and force-aware estimation, not only on perception quality. citeturn9view0turn8view4turn16view1turn16view2turn14view3turn14view4turn15view4
@@ -8,7 +15,10 @@ The practical consequence is simple. The project should not jump directly from n
 
 For this specific mission, the RL policy’s job is intentionally narrow: **the last decimeters of approach, first contact, compliant pressing, confirmation, and retreat**. PX4 keeps the high-rate inner-loop stabilization and control allocation, while a mission manager decides when to enter or exit contact mode. The policy therefore consumes relative switch pose, body velocity, angular rates, pusher compression, contact state, lamp confirmation, and explicit validity/staleness/confidence fields. The most important fields for staged perception are `pose_confidence`, `pose_age_ms`, and `detection_valid`, because they make it possible to test handoff logic before image pipelines are present. citeturn8view4turn10view0turn10view1turn16view1
 
-The remainder of this document is written as a consolidated, production-ready canonical roadmap. It defines the target objective, the system architecture, the Observation Interface, phased sensor integration, staged RL curricula, domain-randomization policy, implementation phases A–L, handoff criteria, evaluation metrics, sim-to-real gates, risks, and appendices with recommended noise models and an example observation schema. The emphasis throughout is on clear contracts, reproducible configuration, and reversible implementation decisions. citeturn16view1turn16view2turn7view6turn8view5
+The remainder of this document is the consolidated research recommendation that
+fed the current roadmap and Phase F plans. It defines the target objective,
+candidate architecture, observation interface, curricula, randomization,
+metrics, and noise models. Current implementation contracts take precedence.
 
 ## Objective and system architecture
 
