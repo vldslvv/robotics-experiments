@@ -8,7 +8,14 @@ exported here.
 
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
-from robotics_experiments.config._rl import PressActionConfig
+from robotics_experiments.config._rl import (
+    IsaacLabVehicleConfig,
+    PressActionConfig,
+    PressEvaluationConfig,
+    PressResetConfig,
+    PressRewardConfig,
+    PressTerminationConfig,
+)
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
 
@@ -16,8 +23,13 @@ __all__ = [
     "BoundingBox",
     "DroneSpawnConfig",
     "ExperimentConfig",
+    "IsaacLabVehicleConfig",
     "LightSwitchConfig",
     "PressActionConfig",
+    "PressEvaluationConfig",
+    "PressResetConfig",
+    "PressRewardConfig",
+    "PressTerminationConfig",
     "Px4BridgeConfig",
     "SimSettings",
     "VehicleConfig",

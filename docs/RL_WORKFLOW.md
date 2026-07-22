@@ -32,13 +32,15 @@ Importable Isaac Lab task/env code lives under
 `src/robotics_experiments/workflows/isaac_lab/`; `isaac/runtime/lab/` is the
 workflow/design-note area for Isaac Lab runtime files. Code outside that package
 imports only from `robotics_experiments.workflows.isaac_lab`; its lazy package
-root is the public contract and exposes guarded task registration, the hover
-task id/env/config, and the named batched rotor-omega diagnostic seam without
-eager-importing Isaac Lab task modules during host-side package imports.
+root is the public contract and exposes guarded task registration, both task
+IDs/env/config factories, the generic `make_isaac_lab_env(...)`, and the named
+batched rotor-omega diagnostic seam without eager-importing Isaac Lab task
+modules during host-side package imports.
 
 Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
-for direct-workflow environments. The first task is
-`Isaac-Drone-Hover-Direct-v0`; it flies N parallel drones through the
+for direct-workflow environments. The registered tasks are
+`Isaac-Drone-Hover-Direct-v0` and `Isaac-Switch-Press-Direct-v0`; registration
+is independently idempotent for each. Both fly N parallel drones through the
 pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
 normalized RL action to per-rotor angular-velocity references (and thence to
 forces) without a PX4 lockstep per env. The action level is a config switch
@@ -65,8 +67,8 @@ with matching bare annotations in `src/robotics_experiments/config/_rl.py`.
 airframe-enriched bridge dynamics configure the Lab task; selection fails when
 the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
 because Lab deliberately bypasses PX4.
-The standalone training root passes the resolved `ExperimentConfig` into
-`make_drone_hover_env_cfg`; the Isaac Lab leaf never reloads global config. The
+The standalone training root passes the resolved `ExperimentConfig` into the
+generic registry-owned factory; the Isaac Lab leaf never reloads global config. The
 physics decimation is selected per policy step by the shared exact-average
 cadence, not authored. At 250 Hz physics and the default 20 Hz policy rate it
 alternates 13 and 12 physics steps (52/48 ms), while `step_dt` remains the
@@ -82,6 +84,25 @@ action also maps to a PX4 OFFBOARD setpoint at deploy time
 (`press_action_to_offboard` + the commanding-layer velocity / attitude-rate
 setpoint seams).
 
+The private flight base owns cadence, action buffering, rotor force application,
+pusher hold, and drone reset. Task leaves own scene and task behavior. The press
+task clones one real switch articulation and static wall per environment, reads
+batched switch-root poses as ground truth, measures pusher-pad contact with an
+Isaac Lab contact sensor, and reads pusher/button joints directly. Its easy-task
+geometry and initial pose ranges, contact threshold, reward, reset, termination,
+and evaluation values live under `rl.press`; Lab-only vehicle limits live under
+`rl.lab_vehicle`. Pusher stiffness and damping are inherited from the generated
+USD rather than duplicated in Lab config.
+
+Press progression is the backend-neutral frozen `PressTaskState` advanced by
+`step_press_task(...)`. Its vector latch matches the production scalar
+`apply_button_sample` semantics. DirectRLEnv advances it once from `_get_dones`
+and caches the result for rewards and observations. Success is a confirmed
+toggle plus stable retreat; generic contact alone never earns toggle reward.
+Approach/retreat progress is signed, and crash/altitude/envelope termination
+has an explicit terminal failure cost, preventing timeout-hover and early-exit
+reward shortcuts.
+
 ## Task->policy pipeline (F2b)
 
 The pipeline is `task YAML -> make train-rl -> policy artifact ->
@@ -95,7 +116,7 @@ unchanged apart from injecting the artifact-loader factory into
   `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
   velocity) and the press-task `PressObservation`/`to_vector`
   (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
-  (`world_switch_to_contact_frame`; switch local `+X` = outward plate
+  (`world_switch_to_contact_frame`; canonical switch `+X` = outward plate
   normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
   and `VehicleState` at deploy; a field the deploy side cannot assemble is
   forbidden in a layout. The pose-provider seam is
@@ -111,13 +132,30 @@ unchanged apart from injecting the artifact-loader factory into
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
   image) writes the artifact under `.build/training/<policy-name>/<run-id>/`
   and updates the named `.build/training/<policy-name>/latest` symlink;
-  `TRAIN_ARGS='--max-iterations 5'` is the smoke run. rsl_rl comes from the
+  `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
+  task config owns its observation schema version and dimension, so exported
+  metadata contains no task-ID conditional. rsl_rl comes from the
   pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
   exists for tooling only.
+  If training finishes but artifact export is interrupted, recover the
+  checkpoint without another optimization run:
+
+  ```console
+  make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml \
+    TRAIN_ARGS='--num-envs 2 --export-checkpoint /isaac-sim/proj/.build/training/press/<run-id>/logs/model_<iteration>.pt'
+  ```
+
+  Export recovery loads policy weights without optimizer state, writes the
+  artifact back into the checkpoint's existing run directory, and updates the
+  policy namespace's `latest` symlink. The checkpoint must be below that
+  namespace's `.build/training/<policy-name>/<run-id>/logs/` directory.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
-  version/dim, policy rate, action kind/dim, action scales). `build_policy_step_fn` raises
+  version/dim, policy rate, action kind/dim, action scales, source Git commit,
+  and dirty-worktree flag). Train accepted policies from a clean revision;
+  `source_dirty: true` is diagnostic provenance, not a claim that the commit
+  alone reproduces the artifact. `build_policy_step_fn` raises
   `ValueError` on ANY metadata/config mismatch at load (a bare checkpoint is
-  not a valid artifact) and composes artifact loading + hover-observation
+  not a valid artifact) and composes the generic `load_vector_policy(...)` + hover-observation
   packing + `press_action_to_offboard` into the `PolicyStepFn` the
   `{kind: policy}` routine step streams.
   Artifacts without the active `rl.policy_rate_hz` are invalid and must be
@@ -130,3 +168,21 @@ unchanged apart from injecting the artifact-loader factory into
   `test-integration-all`. The hover+goto gate additionally runs the F2
   side-channel validation (ground-truth provider + `PressObservation` +
   handoff flip) without touching the env's training observation.
+
+## Ground-truth press training and evaluation (F3)
+
+`configs/train_press_quad.yaml` selects `Isaac-Switch-Press-Direct-v0`, the
+`press` artifact namespace, ten-second episodes, and press PPO settings. Run:
+
+```console
+make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml
+make eval-press
+```
+
+`make eval-press` loads `.build/training/press/latest` and evaluates 100
+deterministic episodes for each of three non-training seeds. It reports reward
+term means, latch-confirmed press success, first-contact stability among
+contacted episodes, retreat among toggled episodes, median time-to-toggle, and
+peak compression overshoot. The command fails below the configured 80% press,
+85% stable-contact, or 95% retreat thresholds. Artifacts remain ignored under
+`.build/training`; no policy binary is committed.

@@ -22,7 +22,8 @@ scenario-specific notes.
   `test-integration-px4-takeoff`.
 - `make test-integration-all` runs every target in `INTEGRATION_TEST_TARGETS`:
   `test-integration-isaac`, `test-integration-drone-articulation`,
-  `test-integration-press-hover-goto`, `test-integration-px4-takeoff`,
+  `test-integration-press-hover-goto`, `test-integration-press-contact-chain`,
+  `test-integration-px4-takeoff`,
   `test-integration-px4-navigation`, `test-integration-px4-takeoff-instability`,
   and `test-integration-px4-multi-drone-takeoff`. It prints an aggregate
   passed/failed summary after all targets finish.
@@ -37,6 +38,13 @@ scenario-specific notes.
   `ISAAC_INTEGRATION_COMMON_ENV` expands it at recipe time, so the rest of the
   runner is unchanged. Build the image first with `make build-isaac-lab` (or
   `make build`).
+- `make test-integration-press-contact-chain` runs the F3 deterministic
+  real-asset gate on the Isaac Lab image with one environment. It spawns the
+  paired switch/lamp, drives a slow pusher press, requires real pad contact and
+  pusher/button displacement, advances the production N-step latch, verifies
+  exactly one lamp transition, then retreats within the stability envelope.
+  It is part of `test-integration-all` and requires no PX4 container or trained
+  policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs a prior `make train-rl`, so it is deliberately not
   part of `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy

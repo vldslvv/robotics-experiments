@@ -24,8 +24,8 @@ ISAAC_CONTAINER_NAME ?= vv-isaac-sim-custom
 ISAAC_PROJECT_DIR    = /isaac-sim/proj
 
 # Isaac Lab image (Dockerfile `isaac-lab` stage, FROM isaac-sim). Only the Phase F
-# RL workflow uses it (the test-integration-press-hover-goto gate; future F2/F3
-# training). ISAACLAB_REF is the immutable v2.3.2 commit for Isaac Sim 5.1.
+# RL workflow uses it for hover/contact gates, training, and evaluation.
+# ISAACLAB_REF is the immutable v2.3.2 commit for Isaac Sim 5.1.
 # Keep it in sync with the Dockerfile ARG default.
 ISAACLAB_REF         ?= 37ddf626871758333d6ed89cf64ad702aef127d0
 ISAAC_LAB_IMAGE_NAME ?= vv-isaac-lab-custom
@@ -65,6 +65,7 @@ ISAAC_PX4_NAVIGATION_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/te
 ISAAC_PX4_NAVIGATION_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_navigation_routine.log
 ISAAC_PRESS_HOVER_GOTO_TEST     = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_press_hover_goto.py
 ISAAC_PRESS_HOVER_GOTO_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_hover_goto.log
+ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_contact_chain.log
 ISAAC_PRESS_POLICY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_policy_hover.log
 ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):

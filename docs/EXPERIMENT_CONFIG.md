@@ -31,6 +31,11 @@ sampling and lamp heights. Reusing the same resolved experiment configuration
 reproduces the complete switch/lamp layout; changing the seed selects a new
 layout.
 
+Switch count, press confirmation steps, and spawn retry budget must be positive.
+Switch/lamp bounds must be non-empty three-value corners with each minimum no
+greater than its maximum. Invalid values fail during `load_config`, before any
+stage mutation.
+
 `flight_benchmark.airborne_duration_s` is used only by the opt-in full-GUI
 benchmark. Keeping it in the resolved graph makes the capture duration part of
 the same canonical configuration fingerprint as the flown routine.
@@ -58,3 +63,10 @@ so there is no root routine.
 `rl.training.vehicle_id` selects the fleet vehicle whose spawn asset and resolved
 bridge dynamics configure the Isaac Lab task. The ID is checked when the Lab task
 is constructed. PX4 `bridge.enabled` does not affect Lab because Lab bypasses PX4.
+
+`rl.lab_vehicle` owns Lab-only spawn height, rigid-body velocity caps, and
+pusher effort/velocity limits. Pusher stiffness and damping are inherited from
+the generated vehicle USD. `rl.press` owns the press reward, reset geometry,
+contact threshold, termination envelopes, deterministic evaluation seeds/count,
+and acceptance targets. `configs/train_press_quad.yaml` selects the press task,
+the `press` artifact namespace, ten-second episodes, and its PPO settings.

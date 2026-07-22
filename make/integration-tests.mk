@@ -9,6 +9,7 @@ INTEGRATION_TEST_TARGETS = \
     test-integration-isaac \
     test-integration-drone-articulation \
     test-integration-press-hover-goto \
+    test-integration-press-contact-chain \
     test-integration-px4-takeoff \
     test-integration-px4-navigation \
     test-integration-px4-takeoff-instability \
@@ -77,6 +78,17 @@ test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-hover-goto: generate-drone-usd
 	@TEST_TARGET='test-integration-press-hover-goto' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
+	    $(ISAAC_INTEGRATION_COMMON_ENV) \
+	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-press-contact-chain
+test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_quad.yaml
+test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
+test-integration-press-contact-chain: generate-drone-usd
+	@TEST_TARGET='test-integration-press-contact-chain' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"

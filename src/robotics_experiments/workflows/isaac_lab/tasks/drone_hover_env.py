@@ -21,30 +21,25 @@ from typing import Any, cast
 
 import torch
 from isaaclab.assets import Articulation, ArticulationCfg
-from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
+from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.rl.press import (
+    HOVER_OBSERVATION_DIM,
+    HOVER_OBSERVATION_SCHEMA_VERSION,
+)
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
-from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-    action_to_rotor_omega,
-    apply_body_wrench,
-    build_flight_actuation_params,
-    rotor_omega_to_body_wrench,
+from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
+    _DRONE_PRIM_PATH,
+    _FlightDirectRLEnv,
+    _training_vehicle,
 )
 
 __all__ = ["DroneHoverEnvCfg", "DroneHoverEnv", "make_drone_hover_env_cfg"]
-
-_DRONE_PRIM_PATH = "/World/envs/env_.*/Drone"
-
-
-def _episode_step_count(*, episode_length_s: float, policy_rate_hz: float) -> int:
-    """Return the exact policy-step budget for one episode."""
-    return math.ceil(episode_length_s * policy_rate_hz)
 
 
 def _hover_observation(
@@ -98,14 +93,6 @@ def _hover_terminated(
     return tilted | too_low | out_of_bounds
 
 
-def _training_vehicle(config, /):
-    vehicle_id = config.rl.training.vehicle_id
-    try:
-        return next(vehicle for vehicle in config.vehicles.values() if vehicle.id == vehicle_id)
-    except StopIteration as exc:
-        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
-
-
 @configclass
 class DroneHoverEnvCfg(DirectRLEnvCfg):
     """Configuration for the flyable drone-hover DirectRLEnv."""
@@ -116,7 +103,8 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     policy_rate_hz: float = cast(Any, MISSING)
     episode_length_s: float = cast(Any, MISSING)
     action_space: int = cast(Any, MISSING)
-    observation_space = 13
+    observation_schema_version: int = cast(Any, MISSING)
+    observation_space: int = cast(Any, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(Any, MISSING)
     drone_cfg: ArticulationCfg = cast(Any, MISSING)
@@ -132,13 +120,18 @@ def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
         policy_rate_hz=experiment_config.rl.policy_rate_hz,
         episode_length_s=experiment_config.rl.episode_length_s,
         action_space=experiment_config.rl.action.action_dim,
-        observation_space=13,
+        observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
+        observation_space=HOVER_OBSERVATION_DIM,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
             render_interval=decimation,
         ),
-        drone_cfg=_make_drone_articulation_cfg(vehicle.spawn.usd_path, _DRONE_PRIM_PATH),
+        drone_cfg=_make_drone_articulation_cfg(
+            usd_path=vehicle.spawn.usd_path,
+            prim_path=_DRONE_PRIM_PATH,
+            lab_vehicle=experiment_config.rl.lab_vehicle,
+        ),
         scene=InteractiveSceneCfg(
             num_envs=experiment_config.rl.num_envs,
             env_spacing=experiment_config.rl.env_spacing,
@@ -148,7 +141,7 @@ def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
     )
 
 
-class DroneHoverEnv(DirectRLEnv):
+class DroneHoverEnv(_FlightDirectRLEnv):
     """Drone-hover task that actually flies N parallel drones.
 
     ``_apply_action`` closes the actuation loop every physics substep: the stored
@@ -170,37 +163,14 @@ class DroneHoverEnv(DirectRLEnv):
         render_mode: str | None = None,
         **kwargs,
     ):
-        self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
-        self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
-        self._policy_cadence = _CadenceState(previous_time_ns=0)
-        super().__init__(cfg, render_mode, **kwargs)
-        self._experiment_config = experiment_config
-        self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
+        super().__init__(
+            cfg=cfg,
+            experiment_config=experiment_config,
+            render_mode=render_mode,
+            **kwargs,
+        )
         self._hover_target_w = torch.zeros((self.num_envs, 3), device=self.device)
         self._task = self._experiment_config.rl.press.hover_task
-        self._setup_actuation()
-
-    @property
-    def step_dt(self) -> float:
-        """Nominal policy interval used for episode timing and reporting."""
-        return self._nominal_step_dt
-
-    @property
-    def max_episode_length(self) -> int:
-        """Exact policy-step budget, independent of variable decimation."""
-        return _episode_step_count(
-            episode_length_s=self.cfg.episode_length_s,
-            policy_rate_hz=self.cfg.policy_rate_hz,
-        )
-
-    def step(self, action: torch.Tensor) -> tuple[Any, ...]:
-        """Select the next exact-average physics decimation, then step Lab."""
-        self._policy_cadence, self.cfg.decimation = _next_interval_steps(
-            state=self._policy_cadence,
-            source_period_ns=self._physics_period_ns,
-            rate_hz=self.cfg.policy_rate_hz,
-        )
-        return super().step(action)
 
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)
@@ -209,58 +179,6 @@ class DroneHoverEnv(DirectRLEnv):
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
         self.scene.articulations["drone"] = self.drone
-
-    def _setup_actuation(self) -> None:
-        """Build the batched actuation from the resolved airframe + spawned mass.
-
-        Rotor geometry comes from the spawned USD metadata (env 0), the thrust
-        constants from the per-asset airframe bridge config, and the vehicle mass
-        from the spawned articulation, so the in-Lab model matches the asset.
-        """
-        import omni.usd
-
-        from robotics_experiments.px4_bridge import discover_px4_rotor_mapping
-
-        stage = omni.usd.get_context().get_stage()
-        env0_path = _DRONE_PRIM_PATH.replace("env_.*", "env_0")
-        rotors = discover_px4_rotor_mapping(stage, env0_path)
-        bridge = _training_vehicle(self._experiment_config).bridge
-
-        masses = self.drone.root_physx_view.get_masses()
-        total_mass = float(masses[0].sum().item())
-        self._body_id = int(self.drone.find_bodies("body")[0][0])
-        self._linear_drag = torch.as_tensor(
-            bridge.linear_drag, dtype=torch.float32, device=self.device
-        )
-        action_cfg = self._experiment_config.rl.action
-        self.actuation_params = build_flight_actuation_params(
-            kind=action_cfg.kind,
-            positions_body=rotors.positions_body,
-            rot_dir=rotors.rot_dir,
-            rotor_constant=bridge.rotor_constant,
-            rolling_moment_coefficient=bridge.rolling_moment_coefficient,
-            min_rotor_velocity=bridge.min_rotor_velocity,
-            max_rotor_velocity=bridge.max_rotor_velocity,
-            action_cfg=action_cfg,
-            mass=total_mass,
-            device=self.device,
-        )
-
-    def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self.actions = actions.clone().clamp(-1.0, 1.0)
-
-    def _apply_action(self) -> None:
-        omega = action_to_rotor_omega(
-            self.actuation_params,
-            self.actions,
-            self.drone.data.root_quat_w,
-            self.drone.data.root_lin_vel_w,
-            self.drone.data.root_ang_vel_b,
-        )
-        force_body, torque_body = rotor_omega_to_body_wrench(
-            self.actuation_params, omega, self.drone.data.root_lin_vel_b, self._linear_drag
-        )
-        apply_body_wrench(self.drone, self._body_id, force_body, torque_body)
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
         observations = _hover_observation(
@@ -296,7 +214,7 @@ class DroneHoverEnv(DirectRLEnv):
             env_ids = self.drone._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        default_root_state = self.drone.data.default_root_state[env_ids]
+        default_root_state = self.drone.data.default_root_state[env_ids].clone()
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
         # The hover target is the (un-randomized) spawn pose; the start pose is
         # randomized within a small box around it so the policy learns to recover.
@@ -306,5 +224,4 @@ class DroneHoverEnv(DirectRLEnv):
         offset[:, 2].uniform_(-self._task.reset_z_half_m, self._task.reset_z_half_m)
         default_root_state[:, :3] += offset
 
-        self.drone.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        self.drone.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
+        self._reset_drone(env_ids=env_ids, root_state=default_root_state)

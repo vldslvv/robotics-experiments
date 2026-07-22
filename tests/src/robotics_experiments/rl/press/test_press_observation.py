@@ -6,15 +6,19 @@ import dataclasses
 from typing import Any
 
 import numpy as np
+import pytest
 
 from robotics_experiments.px4_bridge import VehicleState
 from robotics_experiments.rl.press import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     OBSERVATION_SCHEMA_VERSION,
+    PRESS_OBSERVATION_DIM,
     PressObservation,
+    PressObservationMask,
     hover_observation_from_state,
     pack_hover_observation,
+    pack_press_observation,
     to_vector,
     world_switch_to_contact_frame,
 )
@@ -131,7 +135,7 @@ def test_press_observation_to_vector_length_and_slots() -> None:
     assert OBSERVATION_SCHEMA_VERSION == 1
     obs = _press_observation()
     vector = to_vector(obs)
-    assert vector.shape == (30 + 4,)
+    assert vector.shape == (PRESS_OBSERVATION_DIM,)
     np.testing.assert_allclose(vector[0:3], [0.2, 0.0, 0.0])
     # detection_valid occupies slot 9; flipping it changes exactly that slot.
     flipped = to_vector(_press_observation(detection_valid=False))
@@ -140,6 +144,47 @@ def test_press_observation_to_vector_length_and_slots() -> None:
     # lamp_state occupies slot 24.
     lamp = to_vector(_press_observation(lamp_state=1))
     assert np.nonzero(lamp - vector)[0].tolist() == [24]
+
+
+def test_press_observation_mask_bits_are_named_and_composable() -> None:
+    mask = PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
+    assert int(mask) == 7
+
+
+def test_press_observation_torch_numpy_packing_parity() -> None:
+    torch = pytest.importorskip("torch")
+    obs = _press_observation(
+        detection_valid=True,
+        contact_valid=True,
+        contact_flag=True,
+        lamp_state=1,
+        lamp_confidence=1.0,
+        handoff_mode=2,
+        obs_mask=7,
+    )
+    expected = to_vector(obs)
+    actual = pack_press_observation(
+        relative_switch_pos_m=torch.tensor(obs.relative_switch_pos_m).reshape(1, 3),
+        relative_switch_quat_xyzw=torch.tensor(obs.relative_switch_quat_xyzw).reshape(1, 4),
+        pose_confidence=torch.tensor([obs.pose_confidence]),
+        pose_age_s=torch.tensor([obs.pose_age_s]),
+        detection_valid=torch.tensor([obs.detection_valid]),
+        body_lin_vel_mps=torch.tensor(obs.body_lin_vel_mps).reshape(1, 3),
+        body_ang_vel_radps=torch.tensor(obs.body_ang_vel_radps).reshape(1, 3),
+        attitude_quat_xyzw=torch.tensor(obs.attitude_quat_xyzw).reshape(1, 4),
+        pusher_compression_m=torch.tensor([obs.pusher_compression_m]),
+        pusher_compression_rate_mps=torch.tensor([obs.pusher_compression_rate_mps]),
+        contact_valid=torch.tensor([obs.contact_valid]),
+        contact_flag=torch.tensor([obs.contact_flag]),
+        lamp_state=torch.tensor([obs.lamp_state]),
+        lamp_confidence=torch.tensor([obs.lamp_confidence]),
+        lamp_age_s=torch.tensor([obs.lamp_age_s]),
+        previous_action=torch.tensor(obs.previous_action).reshape(1, 4),
+        handoff_mode=torch.tensor([obs.handoff_mode]),
+        estimator_health=torch.tensor([obs.estimator_health]),
+        obs_mask=torch.tensor([obs.obs_mask]),
+    )
+    np.testing.assert_allclose(actual.cpu().numpy()[0], expected)
 
 
 def test_press_observation_field_order_is_stable() -> None:

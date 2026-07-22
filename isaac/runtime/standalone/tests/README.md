@@ -23,6 +23,13 @@ Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
 It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
+The same script's `--contact-chain` mode is the deterministic F3 real-asset
+gate, invoked by `make test-integration-press-contact-chain` with one
+environment. It spawns the real paired switch/lamp, orients the switch into the
+canonical contact frame, commands a slow press, verifies pad contact plus
+pusher and button displacement, advances the production N-step latch, requires
+exactly one lamp transition, and then retreats within the stability envelope.
+
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
 tests do not validate warehouse geometry, lights, pusher mechanisms, or

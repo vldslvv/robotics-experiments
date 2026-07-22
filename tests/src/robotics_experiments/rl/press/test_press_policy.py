@@ -15,6 +15,7 @@ from robotics_experiments.rl.press import (
     METADATA_FILENAME,
     POLICY_FILENAME,
     build_policy_step_fn,
+    load_vector_policy,
     policy_metadata,
 )
 
@@ -105,3 +106,31 @@ def test_build_policy_step_fn_maps_state_to_setpoint(tmp_path: Path) -> None:
     # the configured scale bounds.
     assert abs(setpoint.forward_mps) <= action_cfg.max_body_velocity_mps + 1e-9
     assert abs(setpoint.yaw_rate_radps) <= action_cfg.max_yaw_rate_radps + 1e-9
+
+
+def test_load_vector_policy_accepts_batched_press_observations(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    action_cfg = _action_cfg()
+    obs_dim = 34
+    metadata = policy_metadata(
+        action_cfg=action_cfg,
+        obs_schema_version=1,
+        obs_dim=obs_dim,
+        policy_rate_hz=20.0,
+    )
+    module = torch.jit.trace(torch.nn.Linear(obs_dim, 4), torch.zeros(1, obs_dim))
+    module.save(str(tmp_path / POLICY_FILENAME))
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    policy = load_vector_policy(
+        artifact_dir=tmp_path,
+        action_cfg=action_cfg,
+        obs_schema_version=1,
+        obs_dim=obs_dim,
+        policy_rate_hz=20.0,
+    )
+
+    assert policy(np.zeros(obs_dim)).shape == (4,)
+    assert policy(np.zeros((3, obs_dim))).shape == (3, 4)
+    with pytest.raises(ValueError, match="observation shape"):
+        policy(np.zeros((2, obs_dim // 2)))

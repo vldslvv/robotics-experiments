@@ -4,7 +4,7 @@ The policy artifact is a directory holding a TorchScript module
 (``policy.pt``) and a JSON metadata sidecar (``policy_meta.json``) recording
 the contract the policy was trained against: the observation schema version
 and dimension, policy rate, action level (``kind``/``action_dim``), and action
-command scales. The internal loader refuses any artifact whose metadata mismatches
+command scales. The vector loader refuses any artifact whose metadata mismatches
 the active config -- fail loudly at load, never a shape error deep in the
 driver. A bare checkpoint without metadata is not a valid artifact.
 
@@ -36,6 +36,7 @@ __all__ = [
     "METADATA_FILENAME",
     "POLICY_FILENAME",
     "build_policy_step_fn",
+    "load_vector_policy",
     "policy_metadata",
 ]
 
@@ -92,7 +93,7 @@ def _validate_metadata(found: dict[str, Any], expected: dict[str, Any], artifact
             )
 
 
-def _load_policy(
+def load_vector_policy(
     *,
     artifact_dir: Union[str, Path],
     action_cfg: Any,
@@ -109,6 +110,7 @@ def _load_policy(
         obs_schema_version: The observation schema version the caller will
             assemble (e.g. ``HOVER_OBSERVATION_SCHEMA_VERSION``).
         obs_dim: The observation vector length the caller will feed.
+        policy_rate_hz: The inference rate the caller will use.
 
     Returns:
         A pure ``obs_vector -> normalized action`` callable (numpy in/out; the
@@ -141,16 +143,25 @@ def _load_policy(
     action_dim = int(action_cfg.action_dim)
 
     def run(observation: np.ndarray) -> np.ndarray:
-        obs = np.asarray(observation, dtype=np.float32).reshape(1, obs_dim)
+        obs = np.asarray(observation, dtype=np.float32)
+        single = obs.ndim == 1
+        expected_tail = (obs_dim,)
+        if obs.ndim not in (1, 2) or obs.shape[-1:] != expected_tail:
+            raise ValueError(
+                f"policy artifact {artifact_dir} received observation shape "
+                f"{obs.shape}, expected ({obs_dim},) or (batch, {obs_dim})"
+            )
+        if single:
+            obs = obs.reshape(1, obs_dim)
         with torch.no_grad():
             action = module(torch.from_numpy(obs))
-        action_np = action.detach().cpu().numpy().reshape(-1).astype(np.float64)
-        if action_np.shape != (action_dim,):
+        action_np = action.detach().cpu().numpy().astype(np.float64)
+        if action_np.shape != (obs.shape[0], action_dim):
             raise ValueError(
                 f"policy artifact {artifact_dir} produced action shape "
-                f"{action_np.shape}, expected ({action_dim},)"
+                f"{action_np.shape}, expected ({obs.shape[0]}, {action_dim})"
             )
-        return action_np
+        return action_np[0] if single else action_np
 
     return run
 
@@ -170,10 +181,10 @@ def build_policy_step_fn(
     :func:`robotics_experiments.rl.press.press_action_to_offboard`.
 
     Raises:
-        ValueError: propagated from the internal artifact loader on a missing or
+        ValueError: propagated from the vector artifact loader on a missing or
             mismatched artifact (surfaces at routine build time).
     """
-    policy = _load_policy(
+    policy = load_vector_policy(
         artifact_dir=artifact_dir,
         action_cfg=action_cfg,
         obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,

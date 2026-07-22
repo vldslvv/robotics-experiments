@@ -101,7 +101,6 @@ def _reference_asset_at(
     """Define an ``Xform`` prim that references ``usd_path`` and translate it.
 
     Args:
-        rng: Seeded random source shared with switch position sampling.
         stage: USD stage to mutate.
         prim_path: Absolute prim path to create.
         usd_path: Absolute path to the USD asset to reference.
@@ -132,13 +131,8 @@ def _spawn_switches(
         positions: World-space positions for each spawned switch.
 
     Returns:
-        Absolute prim paths of the created switches, or an empty list when
-        the USD asset is missing.
+        Absolute prim paths of the created switches.
     """
-    if not os.path.isfile(usd_path):
-        carb.log_error(f"[LightSwitch] USD asset not found: '{usd_path}'")
-        return []
-
     prim_paths: List[str] = []
     for i, pos in enumerate(positions):
         prim_path = f"/Root/LightSwitch_{i}"
@@ -168,13 +162,8 @@ def _spawn_lamps(
         positions: Switch positions used for lamp X/Y placement.
 
     Returns:
-        Absolute prim paths of the created lamps, or an empty list when the
-        USD asset is missing.
+        Absolute prim paths of the created lamps.
     """
-    if not os.path.isfile(usd_path):
-        carb.log_error(f"[LightSwitch] Lamp USD asset not found: '{usd_path}'")
-        return []
-
     prim_paths: List[str] = []
     for i, pos in enumerate(positions):
         lamp_pos = Gf.Vec3d(pos[0], pos[1], rng.uniform(3.4, 5.0))
@@ -212,25 +201,64 @@ def spawn_switches(*, stage: Usd.Stage, config: LightSwitchConfig) -> tuple[Swit
         One :class:`SwitchState` per successfully spawned switch, pairing the
         switch prim path with its lamp prim path.
     """
-    rng = random.Random(config.spawn_seed)
-    positions = _sample_positions(
-        rng=rng,
-        count=config.num_switches,
-        bounds=[_to_range(b) for b in config.spawn_bounds],
-        min_distance=config.min_spawn_dist,
-        max_retries=config.max_spawn_retries,
+    missing = next(
+        (
+            (kind, path)
+            for kind, path in (
+                ("switch", config.switch_usd_path),
+                ("lamp", config.lamp_usd_path),
+            )
+            if not os.path.isfile(path)
+        ),
+        None,
     )
-    switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
-    lamp_paths = _spawn_lamps(
-        rng=rng,
-        stage=stage,
-        usd_path=config.lamp_usd_path,
-        positions=positions,
+    if missing is not None:
+        kind, path = missing
+        raise FileNotFoundError(f"{kind} USD asset not found: {path!r}")
+
+    target_paths = tuple(
+        path
+        for index in range(config.num_switches)
+        for path in (f"/Root/LightSwitch_{index}", f"/Root/Lamp_{index}")
     )
-    return tuple(
-        SwitchState(prim_path=sp, lamp_prim_path=lp)
-        for sp, lp in zip(switch_paths, lamp_paths, strict=False)
-    )
+    occupied = [path for path in target_paths if stage.GetPrimAtPath(path).IsValid()]
+    if occupied:
+        raise RuntimeError("switch/lamp spawn paths already exist: " + ", ".join(occupied))
+    try:
+        rng = random.Random(config.spawn_seed)
+        positions = _sample_positions(
+            rng=rng,
+            count=config.num_switches,
+            bounds=[_to_range(b) for b in config.spawn_bounds],
+            min_distance=config.min_spawn_dist,
+            max_retries=config.max_spawn_retries,
+        )
+        switch_paths = _spawn_switches(stage, config.switch_usd_path, positions)
+        lamp_paths = _spawn_lamps(
+            rng=rng,
+            stage=stage,
+            usd_path=config.lamp_usd_path,
+            positions=positions,
+        )
+        if len(switch_paths) != config.num_switches or len(lamp_paths) != config.num_switches:
+            raise RuntimeError(
+                "switch/lamp spawn count mismatch: "
+                f"expected {config.num_switches}, got "
+                f"{len(switch_paths)} switches and {len(lamp_paths)} lamps"
+            )
+        switches = tuple(
+            SwitchState(prim_path=sp, lamp_prim_path=lp)
+            for sp, lp in zip(switch_paths, lamp_paths, strict=True)
+        )
+        if not validate_switches(stage, switches):
+            raise RuntimeError("spawned switch/lamp prim validation failed")
+        return switches
+    except Exception:
+        for path in target_paths:
+            prim = stage.GetPrimAtPath(path)
+            if prim.IsValid():
+                stage.RemovePrim(Sdf.Path(path))
+        raise
 
 
 def despawn_switches(stage: Usd.Stage, switch_state: tuple[SwitchState, ...]) -> None:
@@ -255,18 +283,20 @@ def despawn_switches(stage: Usd.Stage, switch_state: tuple[SwitchState, ...]) ->
 
 
 def validate_switches(stage: Usd.Stage, switch_state: tuple[SwitchState, ...]) -> bool:
-    """Verify that every tracked switch prim resolves on the stage.
+    """Verify that every tracked switch and paired lamp resolves on the stage.
 
     Args:
         stage: USD stage to inspect.
         switch_state: Per-switch state entries to validate.
 
     Returns:
-        ``True`` if all switch prims are valid, ``False`` if any is missing.
+        ``True`` if every switch and paired lamp prim is valid, ``False`` if
+        any is missing.
     """
     for sw in switch_state:
-        prim = stage.GetPrimAtPath(sw.prim_path)
-        if not prim.IsValid():
-            carb.log_error(f"[LightSwitch] Prim not found at '{sw.prim_path}'.")
-            return False
+        for kind, path in (("switch", sw.prim_path), ("lamp", sw.lamp_prim_path)):
+            prim = stage.GetPrimAtPath(path)
+            if not prim.IsValid():
+                carb.log_error(f"[LightSwitch] {kind} prim not found at '{path}'.")
+                return False
     return True

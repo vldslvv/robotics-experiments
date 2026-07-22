@@ -27,3 +27,65 @@ handoff:
   lateral_speed_max_mps: 0.20
   angular_speed_max_radps: 0.40
   estimator_health_min: 0.80
+
+# Ground-truth F3 task. Penalty weights are positive and subtracted by the
+# transition; generic contact is never a substitute for a confirmed latch.
+reward:
+  alive_weight: 0.025
+  stability_weight: 0.025
+  approach_progress_weight: 10.0
+  gentle_contact_weight: 10.0
+  compression_progress_weight: 100.0
+  button_progress_weight: 100.0
+  toggle_weight: 30.0
+  retreat_progress_weight: 200.0
+  success_weight: 100.0
+  action_energy_weight: 0.001
+  action_delta_weight: 0.004
+  contact_oscillation_weight: 0.2
+  scraping_weight: 0.1
+  misalignment_weight: 0.2
+  failure_weight: 30.0
+  timeout_weight: 25.0
+  gentle_contact_speed_max_mps: 0.20
+  compression_target_m: 0.010
+  compression_overshoot_tolerance_m: 0.003
+  misalignment_tolerance_m: 0.035
+
+reset:
+  button_geometry_scale: 1.5
+  button_stiffness_scale: 0.5
+  button_threshold_scale: 0.5
+  switch_distance_from_env_origin_m: 0.40
+  switch_wall_offset_m: 0.02
+  switch_height_m: 1.0
+  wall_half_extents_m: [0.05, 1.0, 1.0]
+  wall_normal_min_m: 0.20
+  wall_normal_max_m: 0.30
+  lateral_error_min_m: -0.02
+  lateral_error_max_m: 0.02
+  vertical_error_min_m: -0.02
+  vertical_error_max_m: 0.02
+  initial_linear_velocity_max_mps: 0.0
+  initial_angular_velocity_max_radps: 0.0
+
+termination:
+  crash_tilt_cos: 0.5
+  min_altitude_m: 0.25
+  max_wall_normal_distance_m: 1.0
+  max_lateral_error_m: 0.30
+  max_vertical_error_m: 0.30
+  retreat_distance_m: 0.35
+  retreat_speed_max_mps: 0.20
+  stable_retreat_steps: 5
+  first_contact_speed_max_mps: 0.25
+  first_contact_angular_speed_max_radps: 0.50
+
+evaluation:
+  seeds: [101, 202, 303]
+  episodes_per_seed: 100
+  success_rate_min: 0.80
+  first_contact_stability_min: 0.85
+  retreat_rate_min: 0.95
+
+contact_force_threshold_n: 0.25

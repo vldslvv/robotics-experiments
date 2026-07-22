@@ -14,7 +14,7 @@ Status as of 2026-07-21:
 | F1b controller tuning | Validated | The recorded gains are live and the seeded gate passed repeatedly. |
 | F2 observation and handoff | Validated | Pure observation/provider/handoff tests pass; the hover/goto side channel reaches the handoff. |
 | F2b task-to-policy pipeline | Validated | `make train-rl` produced the hover artifact and `make test-integration-press-policy` passed strict deployment through PX4. |
-| F3 ground-truth press task | Planned; next blocker | `Isaac-Switch-Press-Direct-v0`, contact reward/termination, press evaluation, and a trained press artifact do not exist. |
+| F3 ground-truth press task | Implemented; evaluation paused | The contact-chain gate, smoke, and full policy training completed; `make eval-press` was stopped before seed 101 completed, so acceptance metrics remain pending. |
 | F3b contact behavior | Planned; blocked by F3 | No production contact-behavior transition or `{kind: press}` routine step exists. |
 | F4 curriculum/randomization | Planned; blocked by F3 | No press curriculum or contact-domain randomization exists. |
 | F5 synthetic pose | Planned; blocked by F4 | Only the ground-truth provider exists; no synthetic estimator/provider exists. |
@@ -45,8 +45,6 @@ Status as of 2026-07-21:
 - Host tests mirror source paths under `tests/src/robotics_experiments/`; Isaac
   standalone tests live under `isaac/runtime/standalone/tests/`.
 
-The immediate implementation target is F3, preceded by the deterministic
-real-asset contact-chain gate described in
-`docs/IMPLEMENTATION_GOALS_REVIEW.md`. F3b must not start until F3 has produced
-the first working policy; F4 may proceed in parallel with F3b only after that
-gate.
+F3b must not start until the paused F3 evaluation gate has produced a
+policy that meets the recorded metrics. F4 may proceed in parallel with F3b
+only after that gate.

@@ -10,6 +10,16 @@ env_spacing: 4.0
 episode_length_s: 5.0
 policy_rate_hz: 20.0
 
+# Lab-only spawn/solver caps. Pusher stiffness and damping are inherited from
+# the generated USD and therefore remain single-sourced in the airframe config.
+lab_vehicle:
+  spawn_height_m: 1.0
+  max_linear_velocity_mps: 20.0
+  max_angular_velocity_radps: 20.0
+  max_depenetration_velocity_mps: 10.0
+  pusher_effort_limit_n: 50.0
+  pusher_velocity_limit_mps: 1.0
+
 # PPO training (make train-rl, rl.training adapter). task_id selects the
 # Gymnasium task the entrypoint trains.
 training:

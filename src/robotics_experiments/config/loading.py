@@ -144,6 +144,27 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
 
 
+def _validate_switches(experiment: ExperimentConfig) -> None:
+    switches = experiment.switches
+    positive_integers = {
+        "switches.num_switches": switches.num_switches,
+        "switches.press_confirm_steps": switches.press_confirm_steps,
+        "switches.max_spawn_retries": switches.max_spawn_retries,
+    }
+    for name, value in positive_integers.items():
+        if value <= 0:
+            raise ValueError(f"{name} must be positive, got {value!r}")
+    if not switches.spawn_bounds:
+        raise ValueError("switches.spawn_bounds must contain at least one bound")
+    for index, bound in enumerate(switches.spawn_bounds):
+        if len(bound.min) != 3 or len(bound.max) != 3:
+            raise ValueError(f"switches.spawn_bounds[{index}] corners must each have length 3")
+        if any(minimum > maximum for minimum, maximum in zip(bound.min, bound.max, strict=True)):
+            raise ValueError(
+                f"switches.spawn_bounds[{index}] min corner must not exceed max corner"
+            )
+
+
 def _resolve_ros_namespace(*, namespace, vehicle_id: int) -> str:
     if not isinstance(namespace, str):
         raise ValueError(
@@ -252,4 +273,5 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
+    _validate_switches(experiment)
     return _freeze_config_graph(experiment)

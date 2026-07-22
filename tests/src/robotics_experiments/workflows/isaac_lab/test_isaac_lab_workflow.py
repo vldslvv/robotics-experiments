@@ -34,17 +34,24 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "DRONE_HOVER_TASK_ID",
         "DroneHoverEnv",
         "DroneHoverEnvCfg",
+        "SWITCH_PRESS_TASK_ID",
+        "SwitchPressEnv",
+        "SwitchPressEnvCfg",
         "compute_lab_rotor_omega",
         "make_drone_hover_env_cfg",
+        "make_isaac_lab_env",
+        "make_switch_press_env_cfg",
         "register_isaac_lab_tasks",
     ]
     assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v0"
+    assert module.SWITCH_PRESS_TASK_ID == "Isaac-Switch-Press-Direct-v0"
     assert module.register_isaac_lab_tasks() is False
 
 
 def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
     from robotics_experiments.workflows.isaac_lab import (
         DRONE_HOVER_TASK_ID,
+        SWITCH_PRESS_TASK_ID,
         register_isaac_lab_tasks,
     )
 
@@ -80,6 +87,21 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
             )
         },
     }
+    fake_gym.registry.pop(SWITCH_PRESS_TASK_ID)
+    assert register_isaac_lab_tasks() is True
+    assert fake_gym.registry[DRONE_HOVER_TASK_ID] is spec
+    assert fake_gym.registry[SWITCH_PRESS_TASK_ID] == {
+        "entry_point": (
+            "robotics_experiments.workflows.isaac_lab.tasks.switch_press_env:" "SwitchPressEnv"
+        ),
+        "disable_env_checker": True,
+        "kwargs": {
+            "env_cfg_entry_point": (
+                "robotics_experiments.workflows.isaac_lab.tasks.switch_press_env:"
+                "SwitchPressEnvCfg"
+            )
+        },
+    }
 
 
 def test_drone_hover_task_import_and_config_when_isaac_lab_available():
@@ -93,7 +115,7 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
         DroneHoverEnvCfg,
         make_drone_hover_env_cfg,
     )
-    from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
+    from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
         _episode_step_count,
     )
 

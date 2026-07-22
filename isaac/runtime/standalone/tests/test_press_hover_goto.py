@@ -56,6 +56,7 @@ _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 # settled drone sits inside the handoff gate's switch-range threshold.
 _SWITCH_BEYOND_GOTO_M = 0.25
 _SWITCH_PRIM_PATH = "/World/PressValidationSwitch"
+_CONTACT_LAMP_PRIM_PATH = "/World/envs/env_0/Lamp"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,17 @@ class _DriveStats:
     final_error_m: float
     last_window_max_error_m: float
     peak_error_m: float
+
+
+class _SwitchJointAdapter:
+    """Expose the Lab switch's real joint through production step_switches."""
+
+    def __init__(self, articulation, joint_id: int):
+        self._articulation = articulation
+        self._joint_id = joint_id
+
+    def get_joint_positions(self):
+        return self._articulation.data.joint_pos[0, self._joint_id].reshape(1).cpu().numpy()
 
 
 def _report(message: str) -> None:
@@ -278,6 +290,162 @@ def _run_ctbr_sanity(
         env.close()
 
 
+def _spawn_contact_chain_lamp(*, lamp_usd_path: str):
+    import omni.usd
+    from pxr import Gf, UsdGeom
+
+    stage = omni.usd.get_context().get_stage()
+    prim = stage.DefinePrim(_CONTACT_LAMP_PRIM_PATH, "Xform")
+    prim.GetReferences().AddReference(lamp_usd_path)
+    UsdGeom.Xformable(prim).AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
+        Gf.Vec3d(0.4, 0.0, 2.0)
+    )
+    if not prim.IsValid():
+        raise AssertionError("paired lamp prim did not resolve")
+    return stage
+
+
+def _collision_paths(stage, root_path: str) -> list[str]:
+    from pxr import UsdPhysics
+
+    root = stage.GetPrimAtPath(root_path)
+    return [
+        str(prim.GetPath())
+        for prim in stage.Traverse()
+        if prim.GetPath().HasPrefix(root.GetPath()) and prim.HasAPI(UsdPhysics.CollisionAPI)
+    ]
+
+
+def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    from pxr import UsdLux
+
+    from robotics_experiments.environment import SwitchState, step_switches
+    from robotics_experiments.workflows.isaac_lab import SwitchPressEnv, make_switch_press_env_cfg
+
+    if config.rl.action.kind != "velocity":
+        raise AssertionError("contact-chain gate requires rl.action.kind=velocity")
+    if args.num_envs not in (None, 1):
+        raise AssertionError("--contact-chain requires exactly one environment")
+    _seed_everything(args.seed)
+    cfg = make_switch_press_env_cfg(experiment_config=config)
+    cfg.scene.num_envs = 1
+    cfg.episode_length_s = config.rl.episode_length_s + _EPISODE_MARGIN_S
+    if hasattr(cfg, "seed"):
+        cfg.seed = args.seed
+    env = SwitchPressEnv(cfg=cfg, experiment_config=config)
+    try:
+        _reset_env(env, args.seed)
+        stage = _spawn_contact_chain_lamp(lamp_usd_path=config.switches.lamp_usd_path)
+        switch_joint_ids, _ = env.switch.find_joints(".*")
+        joint_id = int(switch_joint_ids[0])
+        pusher_joint_ids, _ = env.drone.find_joints("pusher_joint")
+        pusher_joint_id = int(pusher_joint_ids[0])
+        adapter = _SwitchJointAdapter(env.switch, joint_id)
+        switch_state = (SwitchState("/World/envs/env_0/Switch", _CONTACT_LAMP_PRIM_PATH),)
+        toggles: list[bool] = []
+        max_pusher = 0.0
+        max_button = 0.0
+        contact_seen = False
+        contact_steps = 0
+        max_contact_force = 0.0
+        retreat_started = False
+        stable_retreat = False
+        max_tilt = 0.0
+        steps = round(config.rl.episode_length_s / env.step_dt)
+        max_velocity = float(config.rl.action.max_body_velocity_mps)
+        approach_speed = config.rl.press.reward.gentle_contact_speed_max_mps
+        retreat_speed = config.rl.press.termination.retreat_speed_max_mps * 0.75
+        _report(
+            "contact geometry: "
+            f"switch_bodies={env.switch.body_names} drone_bodies={env.drone.body_names} "
+            f"switch_joint={env.switch.joint_names[joint_id]} "
+            f"switch_limits={env.switch.data.joint_pos_limits[0, joint_id].cpu().tolist()}"
+        )
+        _report(f"drone collision prims={_collision_paths(stage, '/World/envs/env_0/Drone')}")
+        for _step in range(steps):
+            switch_offset = env.switch.data.root_pos_w - env.drone.data.root_pos_w
+            action = torch.zeros((1, env.cfg.action_space), device=env.device)
+            if retreat_started:
+                speed = -retreat_speed
+            elif contact_seen:
+                contact_steps += 1
+                speed = min(
+                    max_velocity,
+                    approach_speed + contact_steps * approach_speed * 0.5,
+                )
+            else:
+                speed = approach_speed
+            action[:, 0] = speed / max_velocity
+            action[:, 1] = torch.clamp(2.0 * switch_offset[:, 1] / max_velocity, -0.2, 0.2)
+            action[:, 2] = torch.clamp(2.0 * switch_offset[:, 2] / max_velocity, -0.2, 0.2)
+            _observation, _reward, terminated, truncated, _info = env.step(action)
+            result = env.press_task_result
+            if result is None:
+                raise AssertionError("press task did not advance")
+            pusher = float(
+                env.drone.data.joint_pos_limits[0, pusher_joint_id, 1].item()
+                - env.drone.data.joint_pos[0, pusher_joint_id].item()
+            )
+            button = float(env.switch.data.joint_pos[0, joint_id].item())
+            max_pusher = max(max_pusher, pusher)
+            max_button = max(max_button, button)
+            contact_seen = contact_seen or bool(result.metrics.contacted[0].item())
+            max_contact_force = max(
+                max_contact_force,
+                float(torch.linalg.norm(env.contact_sensor.data.net_forces_w, dim=-1).max().item()),
+            )
+            switch_state = step_switches(
+                stage=stage,
+                switch_state=switch_state,
+                articulations=(adapter,),
+                config=config.switches,
+                on_toggle=lambda _index, state: toggles.append(state),
+            )
+            if toggles:
+                retreat_started = True
+            _yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
+            max_tilt = max(max_tilt, float(tilt[0].item()))
+            if retreat_started and bool(result.metrics.retreated[0].item()):
+                stable_retreat = True
+                break
+            if bool(truncated[0].item()):
+                break
+            if bool(terminated[0].item()) and not bool(result.termination.success[0].item()):
+                raise AssertionError("contact-chain drone breached its stability envelope")
+
+        light_prim = stage.GetPrimAtPath(f"{_CONTACT_LAMP_PRIM_PATH}/Lamp/SphereLight")
+        intensity = float(UsdLux.SphereLight(light_prim).GetIntensityAttr().Get())
+        _report(
+            "contact chain: "
+            f"contact={contact_seen} max_pusher={max_pusher:.5f} m "
+            f"max_button={max_button:.5f} m toggles={len(toggles)} "
+            f"max_contact_force={max_contact_force:.3f} N "
+            f"lamp_intensity={intensity:.1f} stable_retreat={stable_retreat} "
+            f"max_tilt={max_tilt:.3f} rad"
+        )
+        _report(
+            "contact final: "
+            f"drone_pos={env.drone.data.root_pos_w[0].cpu().tolist()} "
+            f"drone_body_pos={env.drone.data.body_pos_w[0].cpu().tolist()} "
+            f"switch_pos={env.switch.data.root_pos_w[0].cpu().tolist()} "
+            f"switch_body_pos={env.switch.data.body_pos_w[0].cpu().tolist()}"
+        )
+        if not contact_seen or max_pusher <= 0.0:
+            raise AssertionError("pusher contact/compression was not observed")
+        if max_button < config.switches.press_threshold:
+            raise AssertionError("real button did not cross the configured press threshold")
+        if toggles != [True]:
+            raise AssertionError(
+                f"production latch toggled {len(toggles)} times, expected exactly one"
+            )
+        if intensity != config.switches.lamp_on_intensity:
+            raise AssertionError("paired lamp did not make its configured off-to-on transition")
+        if not stable_retreat:
+            raise AssertionError("drone did not complete a stable post-toggle retreat")
+    finally:
+        env.close()
+
+
 def _setup_press_side_channel(*, goto_target_env0: np.ndarray, switch_usd_path: str):
     """Place the F2 validation switch prim and return its ground-truth provider.
 
@@ -379,6 +547,9 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    if args.contact_chain:
+        _run_contact_chain(args=args, config=config)
+        return
     action_cfg = config.rl.action
     if args.ctbr_sanity:
         action_cfg = replace(action_cfg, kind="ctbr")
@@ -502,6 +673,11 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--log-every", type=int, default=10)
     parser.add_argument("--ctbr-sanity", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--contact-chain",
+        action="store_true",
+        help="run the one-env real pusher/button/latch/lamp/retreat gate",
+    )
     args, _unknown = parser.parse_known_args()
     if args.log_every < 1:
         raise SystemExit("--log-every must be >= 1")
@@ -523,7 +699,9 @@ def main() -> None:
         except KeyError as exc:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
         _run(args=args, config=load_config(config_path))
-        if args.ctbr_sanity:
+        if args.contact_chain:
+            _report("press contact-chain validation PASSED")
+        elif args.ctbr_sanity:
             _report("ctbr sanity validation PASSED")
         else:
             _report("press hover+goto validation PASSED")

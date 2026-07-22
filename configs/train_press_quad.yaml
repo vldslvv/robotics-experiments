@@ -1,0 +1,45 @@
+defaults:
+  - base
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - _self_
+
+# F3 ground-truth switch-press training selection. The shared training target is
+# unchanged; this experiment selects the press task and artifact namespace.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+rl:
+  num_envs: 256
+  episode_length_s: 10.0
+  action:
+    # The 0.20-0.30 m easy-task start range does not need the shared 3 m/s
+    # navigation scale. The policy can command a gentle first contact while
+    # retaining enough post-contact authority to cross the real latch threshold.
+    max_body_velocity_mps: 2.0
+  training:
+    task_id: Isaac-Switch-Press-Direct-v0
+    vehicle_id: 0
+    policy_name: press
+    max_iterations: 3000
+    num_steps_per_env: 32
+    save_interval: 50
+    learning_rate: 1.0e-4
+    gamma: 0.995
+    lam: 0.95
+    entropy_coef: 0.001
+    clip_param: 0.2
+    value_loss_coef: 1.0
+    num_learning_epochs: 5
+    num_mini_batches: 8
+    desired_kl: 0.01
+    max_grad_norm: 1.0
+    init_noise_std: 0.3
+    actor_hidden_dims: [256, 256, 128]
+    critic_hidden_dims: [256, 256, 128]
+    activation: elu
+    seed: 42
+
+vehicles:
+  x500_01:
+    id: 0
+    ros: {namespace: /x500_01}
+    spawn: {position_xy: [0.0, 0.0]}

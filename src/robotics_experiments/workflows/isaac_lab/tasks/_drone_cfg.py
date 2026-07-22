@@ -3,9 +3,10 @@
 Torch/isaaclab leaf (off the core import path). Moved here from
 ``isaac/runtime/lab/drone_cfg.py`` so importable task code lives in the package,
 and made config-driven: the USD asset comes from ``drone.usd_path`` (Hydra) rather
-than a hardcoded assets path. The USD carries the static geometry/topology and the
-computed body mass/inertia/CoM; this cfg applies the spawn-time overrides Isaac Lab
-randomizes per env (rigid-body caps, pusher actuator drive, initial joint state).
+than a hardcoded assets path. The USD carries static geometry/topology, mass
+properties, and the authoritative pusher stiffness/damping. This cfg applies
+only Lab-specific solver caps, effort and velocity limits, and initial state
+from ``rl.lab_vehicle``.
 
 Assumes the pusher-enabled variant (the default ``holybro_x500_v2``): a
 pusher-less variant built with ``drone.pusher.enabled=false`` has no
@@ -20,15 +21,8 @@ from isaaclab.sim import RigidBodyPropertiesCfg, UsdFileCfg
 
 __all__: list[str] = []
 
-# Pusher prismatic-joint drive. cfg values override the USD defaults at spawn, so
-# these are authoritative for RL training; EventTerm randomization (in the env's
-# EventCfg) scales them per env without re-authoring the USD.
-_PUSHER_STIFFNESS = 800.0
-_PUSHER_DAMPING = 40.0
-_PUSHER_EFFORT_LIMIT = 50.0  # N -- rough cap for the prismatic pusher motor
 
-
-def _make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationCfg:
+def _make_drone_articulation_cfg(*, usd_path: str, prim_path: str, lab_vehicle) -> ArticulationCfg:
     """Build the drone ``ArticulationCfg`` for the Lab env from config.
 
     Args:
@@ -44,26 +38,27 @@ def _make_drone_articulation_cfg(usd_path: str, prim_path: str) -> ArticulationC
             # policy outputs extreme thrusts early in training.
             rigid_props=RigidBodyPropertiesCfg(
                 disable_gravity=False,
-                max_linear_velocity=20.0,
-                max_angular_velocity=20.0,
-                max_depenetration_velocity=10.0,
+                max_linear_velocity=lab_vehicle.max_linear_velocity_mps,
+                max_angular_velocity=lab_vehicle.max_angular_velocity_radps,
+                max_depenetration_velocity=lab_vehicle.max_depenetration_velocity_mps,
                 enable_gyroscopic_forces=True,
             ),
+            activate_contact_sensors=True,
             # No mass override: the USD carries the computed body mass/inertia/CoM
             # (robotics_experiments.drone._airframe.compute_body_mass_properties).
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.0, 1.0),
+            pos=(0.0, 0.0, lab_vehicle.spawn_height_m),
             joint_pos={"pusher_joint": 0.0},
             joint_vel={"pusher_joint": 0.0},
         ),
         actuators={
             "pusher": ImplicitActuatorCfg(
                 joint_names_expr=["pusher_joint"],
-                stiffness=_PUSHER_STIFFNESS,
-                damping=_PUSHER_DAMPING,
-                effort_limit=_PUSHER_EFFORT_LIMIT,
-                velocity_limit=1.0,  # m/s -- pad can't slam faster than this
+                stiffness=None,
+                damping=None,
+                effort_limit=lab_vehicle.pusher_effort_limit_n,
+                velocity_limit=lab_vehicle.pusher_velocity_limit_mps,
             ),
         },
     )

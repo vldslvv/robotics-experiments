@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from robotics_experiments.workflows.isaac_lab.registration import (
     DRONE_HOVER_TASK_ID,
+    SWITCH_PRESS_TASK_ID,
+    make_isaac_lab_env,
     register_isaac_lab_tasks,
 )
 
@@ -24,13 +26,23 @@ if TYPE_CHECKING:
         make_drone_hover_env_cfg,
     )
     from robotics_experiments.workflows.isaac_lab.tasks.flight import _FlightActuationParams
+    from robotics_experiments.workflows.isaac_lab.tasks.switch_press_env import (
+        SwitchPressEnv,
+        SwitchPressEnvCfg,
+        make_switch_press_env_cfg,
+    )
 
 __all__ = [
     "DRONE_HOVER_TASK_ID",
     "DroneHoverEnv",
     "DroneHoverEnvCfg",
+    "SWITCH_PRESS_TASK_ID",
+    "SwitchPressEnv",
+    "SwitchPressEnvCfg",
     "compute_lab_rotor_omega",
     "make_drone_hover_env_cfg",
+    "make_isaac_lab_env",
+    "make_switch_press_env_cfg",
     "register_isaac_lab_tasks",
 ]
 
@@ -47,6 +59,18 @@ def __getattr__(name: str):
             "DroneHoverEnv": DroneHoverEnv,
             "DroneHoverEnvCfg": DroneHoverEnvCfg,
             "make_drone_hover_env_cfg": make_drone_hover_env_cfg,
+        }[name]
+    if name in {"SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"}:
+        from robotics_experiments.workflows.isaac_lab.tasks.switch_press_env import (
+            SwitchPressEnv,
+            SwitchPressEnvCfg,
+            make_switch_press_env_cfg,
+        )
+
+        return {
+            "SwitchPressEnv": SwitchPressEnv,
+            "SwitchPressEnvCfg": SwitchPressEnvCfg,
+            "make_switch_press_env_cfg": make_switch_press_env_cfg,
         }[name]
     if name == "compute_lab_rotor_omega":
         from robotics_experiments.workflows.isaac_lab.tasks.flight import action_to_rotor_omega

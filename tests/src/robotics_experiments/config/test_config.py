@@ -154,6 +154,32 @@ def test_rate_validation(tmp_path, overrides, match):
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"switches": {"num_switches": 0}}, "num_switches must be positive"),
+        ({"switches": {"press_confirm_steps": 0}}, "press_confirm_steps must be positive"),
+        ({"switches": {"max_spawn_retries": 0}}, "max_spawn_retries must be positive"),
+        ({"switches": {"spawn_bounds": []}}, "spawn_bounds must contain"),
+        (
+            {"switches": {"spawn_bounds": [{"min": [1.0, 0.0, 0.0], "max": [0.0, 1.0, 1.0]}]}},
+            "min corner must not exceed max corner",
+        ),
+    ],
+)
+def test_switch_semantic_validation(tmp_path, overrides, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_switches", {})
+    authored = OmegaConf.merge(OmegaConf.load(path), overrides)
+    OmegaConf.save(authored, path)
+
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
+
+
 def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():
     from robotics_experiments.config import ExperimentConfig, VehicleConfig
 

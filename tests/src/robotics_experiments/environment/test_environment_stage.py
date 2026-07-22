@@ -3,6 +3,8 @@ import sys
 import types
 from types import SimpleNamespace
 
+import pytest
+
 
 class _Vec3d(tuple):
     def __new__(cls, x, y, z):
@@ -48,6 +50,7 @@ def _config(seed):
 
 def _spawn_layout(monkeypatch, module, seed):
     captured = {}
+    monkeypatch.setattr(module.os.path, "isfile", lambda path: True)
 
     def spawn_switches(stage, usd_path, positions):
         captured["switches"] = tuple(tuple(position) for position in positions)
@@ -61,7 +64,8 @@ def _spawn_layout(monkeypatch, module, seed):
 
     monkeypatch.setattr(module, "_spawn_switches", spawn_switches)
     monkeypatch.setattr(module, "_spawn_lamps", spawn_lamps)
-    module.spawn_switches(stage=object(), config=_config(seed))
+    monkeypatch.setattr(module, "validate_switches", lambda stage, switches: True)
+    module.spawn_switches(stage=_Stage(), config=_config(seed))
     return captured
 
 
@@ -74,3 +78,84 @@ def test_switch_and_lamp_layout_is_reproducible_from_seed(monkeypatch):
 
     assert first == repeated
     assert first != different
+
+
+class _Prim:
+    def __init__(self, valid):
+        self._valid = valid
+
+    def IsValid(self):
+        return self._valid
+
+
+class _Stage:
+    def __init__(self, valid_paths=()):
+        self.valid_paths = set(valid_paths)
+        self.removed = []
+
+    def GetPrimAtPath(self, path):
+        return _Prim(path in self.valid_paths)
+
+    def RemovePrim(self, path):
+        self.removed.append(str(path))
+        self.valid_paths.discard(str(path))
+
+
+def test_spawn_preflights_both_assets_before_mutating(monkeypatch):
+    module = _import_stage(monkeypatch)
+    calls = []
+    monkeypatch.setattr(module.os.path, "isfile", lambda path: path != "lamp.usd")
+    monkeypatch.setattr(module, "_spawn_switches", lambda *args: calls.append(args))
+
+    with pytest.raises(FileNotFoundError, match="lamp USD asset"):
+        module.spawn_switches(stage=_Stage(), config=_config(1))
+
+    assert calls == []
+
+
+def test_partial_pair_spawn_is_cleaned_up_and_raises(monkeypatch):
+    module = _import_stage(monkeypatch)
+    stage = _Stage()
+    monkeypatch.setattr(module.os.path, "isfile", lambda path: True)
+
+    def spawn_switches(stage, usd_path, positions):
+        paths = [f"/Root/LightSwitch_{index}" for index in range(3)]
+        stage.valid_paths.update(paths)
+        return paths
+
+    def spawn_lamps(**kwargs):
+        paths = [f"/Root/Lamp_{index}" for index in range(2)]
+        kwargs["stage"].valid_paths.update(paths)
+        return paths
+
+    monkeypatch.setattr(
+        module,
+        "_spawn_switches",
+        spawn_switches,
+    )
+    monkeypatch.setattr(module, "_spawn_lamps", spawn_lamps)
+
+    with pytest.raises(RuntimeError, match="spawn count mismatch"):
+        module.spawn_switches(stage=stage, config=_config(1))
+
+    assert stage.valid_paths == set()
+
+
+def test_spawn_rejects_occupied_target_without_removing_it(monkeypatch):
+    module = _import_stage(monkeypatch)
+    stage = _Stage({"/Root/LightSwitch_0"})
+    monkeypatch.setattr(module.os.path, "isfile", lambda path: True)
+
+    with pytest.raises(RuntimeError, match="spawn paths already exist"):
+        module.spawn_switches(stage=stage, config=_config(1))
+
+    assert stage.valid_paths == {"/Root/LightSwitch_0"}
+    assert stage.removed == []
+
+
+def test_validation_rejects_missing_paired_lamp(monkeypatch):
+    module = _import_stage(monkeypatch)
+    stage = _Stage({"/Root/LightSwitch_0"})
+    switch = module.SwitchState("/Root/LightSwitch_0", "/Root/Lamp_0")
+
+    assert not module.validate_switches(stage, (switch,))

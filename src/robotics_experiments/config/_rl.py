@@ -1,16 +1,37 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 from robotics_experiments.config._immutability import _FreezableConfig
 
 __all__ = [
+    "IsaacLabVehicleConfig",
     "PressActionConfig",
+    "PressEvaluationConfig",
     "PressHandoffConfig",
     "PressHoverTaskConfig",
+    "PressResetConfig",
+    "PressRewardConfig",
     "PressTaskConfig",
+    "PressTerminationConfig",
     "RlConfig",
     "RlTrainingConfig",
 ]
+
+
+@dataclass
+class IsaacLabVehicleConfig(_FreezableConfig):
+    """Isaac-Lab-only vehicle spawn and solver limits.
+
+    Pusher stiffness and damping deliberately do not live here: the generated
+    USD is authoritative for those physical values and Lab inherits them.
+    """
+
+    spawn_height_m: float
+    max_linear_velocity_mps: float
+    max_angular_velocity_radps: float
+    max_depenetration_velocity_mps: float
+    pusher_effort_limit_n: float
+    pusher_velocity_limit_mps: float
 
 
 @dataclass
@@ -127,6 +148,80 @@ class PressHandoffConfig(_FreezableConfig):
 
 
 @dataclass
+class PressRewardConfig(_FreezableConfig):
+    """Weights and gates for the ground-truth switch-press reward."""
+
+    alive_weight: float
+    stability_weight: float
+    approach_progress_weight: float
+    gentle_contact_weight: float
+    compression_progress_weight: float
+    button_progress_weight: float
+    toggle_weight: float
+    retreat_progress_weight: float
+    success_weight: float
+    action_energy_weight: float
+    action_delta_weight: float
+    contact_oscillation_weight: float
+    scraping_weight: float
+    misalignment_weight: float
+    failure_weight: float
+    timeout_weight: float
+    gentle_contact_speed_max_mps: float
+    compression_target_m: float
+    compression_overshoot_tolerance_m: float
+    misalignment_tolerance_m: float
+
+
+@dataclass
+class PressResetConfig(_FreezableConfig):
+    """Easy-task geometry and initial-state ranges for switch pressing."""
+
+    button_geometry_scale: float
+    button_stiffness_scale: float
+    button_threshold_scale: float
+    switch_distance_from_env_origin_m: float
+    switch_wall_offset_m: float
+    switch_height_m: float
+    wall_half_extents_m: Tuple[float, float, float]
+    wall_normal_min_m: float
+    wall_normal_max_m: float
+    lateral_error_min_m: float
+    lateral_error_max_m: float
+    vertical_error_min_m: float
+    vertical_error_max_m: float
+    initial_linear_velocity_max_mps: float
+    initial_angular_velocity_max_radps: float
+
+
+@dataclass
+class PressTerminationConfig(_FreezableConfig):
+    """Success and failure envelopes for the switch-press task."""
+
+    crash_tilt_cos: float
+    min_altitude_m: float
+    max_wall_normal_distance_m: float
+    max_lateral_error_m: float
+    max_vertical_error_m: float
+    retreat_distance_m: float
+    retreat_speed_max_mps: float
+    stable_retreat_steps: int
+    first_contact_speed_max_mps: float
+    first_contact_angular_speed_max_radps: float
+
+
+@dataclass
+class PressEvaluationConfig(_FreezableConfig):
+    """Deterministic press-policy evaluation workload and acceptance targets."""
+
+    seeds: List[int]
+    episodes_per_seed: int
+    success_rate_min: float
+    first_contact_stability_min: float
+    retreat_rate_min: float
+
+
+@dataclass
 class RlTrainingConfig(_FreezableConfig):
     """PPO training hyperparameters + task selection for ``make train-rl``.
 
@@ -189,10 +284,20 @@ class PressTaskConfig(_FreezableConfig):
     Attributes:
         hover_task: The hover task definition (reward/termination/reset).
         handoff: Thresholds for the nav -> contact handoff gate.
+        reward: Ground-truth press reward weights and gates.
+        reset: Easy-task geometry and initial-state ranges.
+        termination: Press success/failure envelopes.
+        evaluation: Deterministic evaluation workload and acceptance targets.
+        contact_force_threshold_n: Pad force norm that marks real contact.
     """
 
     hover_task: PressHoverTaskConfig
     handoff: PressHandoffConfig
+    reward: PressRewardConfig
+    reset: PressResetConfig
+    termination: PressTerminationConfig
+    evaluation: PressEvaluationConfig
+    contact_force_threshold_n: float
 
 
 @dataclass
@@ -215,6 +320,7 @@ class RlConfig(_FreezableConfig):
     """
 
     action: PressActionConfig
+    lab_vehicle: IsaacLabVehicleConfig
     training: RlTrainingConfig
     press: PressTaskConfig
     num_envs: int

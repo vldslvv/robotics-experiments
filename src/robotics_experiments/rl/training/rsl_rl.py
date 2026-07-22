@@ -3,9 +3,9 @@
 Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path (the lazy
 ``robotics_experiments.rl`` package root defers it). The package-root contract --
-``build_runner`` / ``train`` / ``export_policy`` plus ``TrainingResult`` over a
-private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
-re-implements.
+``build_runner`` / ``train`` / ``load_checkpoint`` / ``export_policy`` plus
+``TrainingResult`` over a private runner Protocol -- is what a future
+``skrl.py`` / ``rl_games.py`` re-implements.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-__all__ = ["TrainingResult", "build_runner", "export_policy", "train"]
+__all__ = ["TrainingResult", "build_runner", "export_policy", "load_checkpoint", "train"]
 
 
 class _PolicyRunner(Protocol):
@@ -26,6 +26,16 @@ class _PolicyRunner(Protocol):
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
         ...
+
+    def load(
+        self,
+        path: str,
+        load_optimizer: bool = True,
+        map_location: str | None = None,
+    ) -> dict:
+        """Restore a runner checkpoint."""
+        del path, load_optimizer, map_location
+        return {}
 
 
 @dataclass(frozen=True)
@@ -86,6 +96,15 @@ def train(runner: _PolicyRunner, iterations: int) -> TrainingResult:
     """Run the training loop and return the run summary."""
     runner.learn(num_learning_iterations=int(iterations), init_at_random_ep_len=True)
     return TrainingResult(iterations=int(iterations), log_dir=str(getattr(runner, "log_dir", "")))
+
+
+def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> None:
+    """Restore policy weights for export without resuming optimizer state."""
+    runner.load(
+        str(checkpoint_path),
+        load_optimizer=False,
+        map_location=device,
+    )
 
 
 def _actor_module(runner: _PolicyRunner) -> Any:

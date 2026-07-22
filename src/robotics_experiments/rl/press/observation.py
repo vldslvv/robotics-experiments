@@ -14,6 +14,7 @@ position) at deploy. Any field a deploy-side caller cannot assemble from
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntFlag
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -33,9 +34,12 @@ __all__ = [
     "HOVER_OBSERVATION_DIM",
     "HOVER_OBSERVATION_SCHEMA_VERSION",
     "OBSERVATION_SCHEMA_VERSION",
+    "PRESS_OBSERVATION_DIM",
     "PressObservation",
+    "PressObservationMask",
     "hover_observation_from_state",
     "pack_hover_observation",
+    "pack_press_observation",
     "to_vector",
     "world_switch_to_contact_frame",
 ]
@@ -141,6 +145,15 @@ def world_switch_to_contact_frame(
 
 # Bump whenever the press layout (field set, order, units, or frames) changes.
 OBSERVATION_SCHEMA_VERSION = 1
+PRESS_OBSERVATION_DIM = 34
+
+
+class PressObservationMask(IntFlag):
+    """Availability bits for optional press-observation field groups."""
+
+    POSE = 1 << 0
+    CONTACT = 1 << 1
+    LAMP = 1 << 2
 
 
 @dataclass(frozen=True)
@@ -204,34 +217,122 @@ def to_vector(obs: PressObservation) -> np.ndarray:
     float. Length is ``30 + len(previous_action)``. Swapping the pose provider
     must never change this length or order (asserted by tests).
     """
-    previous_action = np.asarray(obs.previous_action, dtype=np.float64).reshape(-1)
-    return np.concatenate(
-        (
-            np.asarray(obs.relative_switch_pos_m, dtype=np.float64).reshape(3),
-            np.asarray(obs.relative_switch_quat_xyzw, dtype=np.float64).reshape(4),
-            np.array(
-                [obs.pose_confidence, obs.pose_age_s, float(obs.detection_valid)],
-                dtype=np.float64,
-            ),
-            np.asarray(obs.body_lin_vel_mps, dtype=np.float64).reshape(3),
-            np.asarray(obs.body_ang_vel_radps, dtype=np.float64).reshape(3),
-            np.asarray(obs.attitude_quat_xyzw, dtype=np.float64).reshape(4),
-            np.array(
-                [
-                    obs.pusher_compression_m,
-                    obs.pusher_compression_rate_mps,
-                    float(obs.contact_valid),
-                    float(obs.contact_flag),
-                    float(obs.lamp_state),
-                    obs.lamp_confidence,
-                    obs.lamp_age_s,
-                ],
-                dtype=np.float64,
-            ),
-            previous_action,
-            np.array(
-                [float(obs.handoff_mode), obs.estimator_health, float(obs.obs_mask)],
-                dtype=np.float64,
-            ),
-        )
+    return pack_press_observation(
+        relative_switch_pos_m=obs.relative_switch_pos_m,
+        relative_switch_quat_xyzw=obs.relative_switch_quat_xyzw,
+        pose_confidence=obs.pose_confidence,
+        pose_age_s=obs.pose_age_s,
+        detection_valid=obs.detection_valid,
+        body_lin_vel_mps=obs.body_lin_vel_mps,
+        body_ang_vel_radps=obs.body_ang_vel_radps,
+        attitude_quat_xyzw=obs.attitude_quat_xyzw,
+        pusher_compression_m=obs.pusher_compression_m,
+        pusher_compression_rate_mps=obs.pusher_compression_rate_mps,
+        contact_valid=obs.contact_valid,
+        contact_flag=obs.contact_flag,
+        lamp_state=obs.lamp_state,
+        lamp_confidence=obs.lamp_confidence,
+        lamp_age_s=obs.lamp_age_s,
+        previous_action=obs.previous_action,
+        handoff_mode=obs.handoff_mode,
+        estimator_health=obs.estimator_health,
+        obs_mask=obs.obs_mask,
     )
+
+
+def pack_press_observation(
+    *,
+    relative_switch_pos_m,
+    relative_switch_quat_xyzw,
+    pose_confidence,
+    pose_age_s,
+    detection_valid,
+    body_lin_vel_mps,
+    body_ang_vel_radps,
+    attitude_quat_xyzw,
+    pusher_compression_m,
+    pusher_compression_rate_mps,
+    contact_valid,
+    contact_flag,
+    lamp_state,
+    lamp_confidence,
+    lamp_age_s,
+    previous_action,
+    handoff_mode,
+    estimator_health,
+    obs_mask,
+):
+    """Pack the press schema for either NumPy values or batched torch tensors."""
+    if type(relative_switch_pos_m).__module__.startswith("torch"):
+        import torch
+
+        reference = relative_switch_pos_m
+
+        def column(value):
+            return torch.as_tensor(value, dtype=reference.dtype, device=reference.device).reshape(
+                -1, 1
+            )
+
+        return torch.cat(
+            (
+                relative_switch_pos_m,
+                relative_switch_quat_xyzw,
+                column(pose_confidence),
+                column(pose_age_s),
+                column(detection_valid),
+                body_lin_vel_mps,
+                body_ang_vel_radps,
+                attitude_quat_xyzw,
+                column(pusher_compression_m),
+                column(pusher_compression_rate_mps),
+                column(contact_valid),
+                column(contact_flag),
+                column(lamp_state),
+                column(lamp_confidence),
+                column(lamp_age_s),
+                previous_action,
+                column(handoff_mode),
+                column(estimator_health),
+                column(obs_mask),
+            ),
+            dim=-1,
+        )
+
+    relative_position = np.asarray(relative_switch_pos_m, dtype=np.float64)
+    batched = relative_position.ndim == 2
+
+    def array(value, width: int):
+        result = np.asarray(value, dtype=np.float64)
+        return result.reshape((-1, width) if batched else (width,))
+
+    axis = -1 if batched else 0
+    vector = np.concatenate(
+        (
+            array(relative_position, 3),
+            array(relative_switch_quat_xyzw, 4),
+            array(pose_confidence, 1),
+            array(pose_age_s, 1),
+            array(detection_valid, 1),
+            array(body_lin_vel_mps, 3),
+            array(body_ang_vel_radps, 3),
+            array(attitude_quat_xyzw, 4),
+            array(pusher_compression_m, 1),
+            array(pusher_compression_rate_mps, 1),
+            array(contact_valid, 1),
+            array(contact_flag, 1),
+            array(lamp_state, 1),
+            array(lamp_confidence, 1),
+            array(lamp_age_s, 1),
+            array(previous_action, np.asarray(previous_action).shape[-1]),
+            array(handoff_mode, 1),
+            array(estimator_health, 1),
+            array(obs_mask, 1),
+        ),
+        axis=axis,
+    )
+    expected_dim = 30 + np.asarray(previous_action).shape[-1]
+    if vector.shape[-1] != expected_dim:
+        raise ValueError(
+            f"press observation has {vector.shape[-1]} values, expected {expected_dim}"
+        )
+    return vector

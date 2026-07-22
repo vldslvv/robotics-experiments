@@ -2,11 +2,54 @@
 
 from __future__ import annotations
 
+import importlib
+from dataclasses import dataclass
 from importlib.util import find_spec
 
-__all__ = ["DRONE_HOVER_TASK_ID", "register_isaac_lab_tasks"]
+__all__ = [
+    "DRONE_HOVER_TASK_ID",
+    "SWITCH_PRESS_TASK_ID",
+    "make_isaac_lab_env",
+    "register_isaac_lab_tasks",
+]
 
 DRONE_HOVER_TASK_ID = "Isaac-Drone-Hover-Direct-v0"
+SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v0"
+
+
+@dataclass(frozen=True)
+class _TaskRegistration:
+    entry_point: str
+    cfg_entry_point: str
+    cfg_factory: str
+
+
+_TASKS = {
+    DRONE_HOVER_TASK_ID: _TaskRegistration(
+        entry_point=(
+            "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnv"
+        ),
+        cfg_entry_point=(
+            "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnvCfg"
+        ),
+        cfg_factory=(
+            "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:"
+            "make_drone_hover_env_cfg"
+        ),
+    ),
+    SWITCH_PRESS_TASK_ID: _TaskRegistration(
+        entry_point=(
+            "robotics_experiments.workflows.isaac_lab.tasks.switch_press_env:" "SwitchPressEnv"
+        ),
+        cfg_entry_point=(
+            "robotics_experiments.workflows.isaac_lab.tasks.switch_press_env:" "SwitchPressEnvCfg"
+        ),
+        cfg_factory=(
+            "robotics_experiments.workflows.isaac_lab.tasks.switch_press_env:"
+            "make_switch_press_env_cfg"
+        ),
+    ),
+}
 
 
 def _dependency_available(module_name: str) -> bool:
@@ -24,7 +67,7 @@ def register_isaac_lab_tasks() -> bool:
     """Register this project's Isaac Lab tasks when dependencies are available.
 
     Returns:
-        True when Gymnasium/Isaac Lab are available and the task is registered;
+        True when Gymnasium/Isaac Lab are available and the tasks are registered;
         False when called in a host environment without those dependencies.
     """
 
@@ -33,19 +76,44 @@ def register_isaac_lab_tasks() -> bool:
 
     import gymnasium as gym
 
-    if _gym_has_task(gym, DRONE_HOVER_TASK_ID):
-        return True
-
-    gym.register(
-        id=DRONE_HOVER_TASK_ID,
-        entry_point=(
-            "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnv"
-        ),
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": (
-                "robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env:" "DroneHoverEnvCfg"
-            )
-        },
-    )
+    for task_id, task in _TASKS.items():
+        if _gym_has_task(gym, task_id):
+            continue
+        gym.register(
+            id=task_id,
+            entry_point=task.entry_point,
+            disable_env_checker=True,
+            kwargs={"env_cfg_entry_point": task.cfg_entry_point},
+        )
     return True
+
+
+def make_isaac_lab_env(
+    *,
+    task_id: str,
+    experiment_config,
+    seed: int | None = None,
+    num_envs: int | None = None,
+):
+    """Build any registered project task through its registry-owned cfg factory."""
+    import gymnasium as gym
+
+    if not register_isaac_lab_tasks():
+        raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
+    try:
+        registration = _TASKS[task_id]
+    except KeyError as exc:
+        raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
+    module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)
+    factory = getattr(importlib.import_module(module_name), factory_name)
+    env_cfg = factory(experiment_config=experiment_config)
+    if seed is not None and hasattr(env_cfg, "seed"):
+        env_cfg.seed = seed
+    if num_envs is not None:
+        env_cfg.scene.num_envs = num_envs
+    env = gym.make(
+        task_id,
+        cfg=env_cfg,
+        experiment_config=experiment_config,
+    ).unwrapped
+    return env, env_cfg

@@ -15,10 +15,10 @@ Run inside the Isaac Lab container (make train-rl):
 from __future__ import annotations
 
 import argparse
-import importlib
 import os
 import random
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,12 +72,50 @@ def _policy_out_root(training_root: Path, policy_name: str) -> Path:
     return training_root / _validate_policy_name(policy_name)
 
 
+def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
+    git = ["git", "-c", f"safe.directory={repo_root.resolve()}"]
+    commit = subprocess.run(
+        [*git, "rev-parse", "--verify", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        [*git, "status", "--porcelain", "--untracked-files=normal"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return {"source_commit": commit, "source_dirty": bool(status)}
+
+
 def _update_latest_symlink(out_root: Path, run_dir: Path) -> None:
     link = out_root / _LATEST_LINK
     temp = out_root / f".{_LATEST_LINK}.tmp"
     temp.unlink(missing_ok=True)
     temp.symlink_to(run_dir.name)
     temp.replace(link)
+
+
+def _checkpoint_run_dir(*, checkpoint_path: Path, out_root: Path) -> Path:
+    checkpoint_path = checkpoint_path.resolve()
+    if not checkpoint_path.is_file() or checkpoint_path.parent.name != "logs":
+        raise ValueError(
+            "--export-checkpoint must name an existing "
+            ".build/training/<policy>/<run>/logs checkpoint"
+        )
+    run_dir = checkpoint_path.parent.parent
+    try:
+        relative_run = run_dir.relative_to(out_root.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"checkpoint {checkpoint_path} is outside policy artifact root {out_root}"
+        ) from exc
+    if len(relative_run.parts) != 1:
+        raise ValueError(f"checkpoint {checkpoint_path} is not inside one policy run directory")
+    return run_dir
 
 
 def _build_env(
@@ -87,31 +125,31 @@ def _build_env(
     num_envs: int | None,
     experiment_config: ExperimentConfig,
 ):
-    # Isaac Lab task code; imported after AppLauncher.
-    import gymnasium as gym
+    from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
-    from robotics_experiments.workflows.isaac_lab import register_isaac_lab_tasks
-
-    if not register_isaac_lab_tasks():
-        raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
-    cfg_entry = gym.spec(task_id).kwargs["env_cfg_entry_point"]
-    module_name, _class_name = cfg_entry.split(":")
-    env_cfg = importlib.import_module(module_name).make_drone_hover_env_cfg(
-        experiment_config=experiment_config
-    )
-    if hasattr(env_cfg, "seed"):
-        env_cfg.seed = seed
-    if num_envs is not None:
-        env_cfg.scene.num_envs = num_envs
-    return gym.make(
-        task_id,
-        cfg=env_cfg,
+    return make_isaac_lab_env(
+        task_id=task_id,
         experiment_config=experiment_config,
-    ).unwrapped, env_cfg
+        seed=seed,
+        num_envs=num_envs,
+    )
+
+
+def _artifact_metadata(
+    *, config: ExperimentConfig, env_cfg, source_metadata: dict[str, str | bool]
+):
+    import robotics_experiments.rl.press as press
+
+    metadata = press.policy_metadata(
+        action_cfg=config.rl.action,
+        obs_schema_version=int(env_cfg.observation_schema_version),
+        obs_dim=int(env_cfg.observation_space),
+        policy_rate_hz=config.rl.policy_rate_hz,
+    )
+    return metadata | source_metadata
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
-    import robotics_experiments.rl.press as press
     import robotics_experiments.rl.training.rsl_rl as training
 
     training_cfg = config.rl.training
@@ -122,12 +160,23 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     _seed_everything(seed)
 
     out_root = _policy_out_root(_repo_root() / ".build" / "training", training_cfg.policy_name)
-    run_dir = _make_run_dir(out_root)
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    _report(
-        f"training {training_cfg.task_id} for {iterations} iterations "
-        f"(policy={training_cfg.policy_name}, seed={seed}, device={device}) -> {run_dir}"
+    checkpoint_path = args.export_checkpoint
+    run_dir = (
+        _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
+        if checkpoint_path is not None
+        else _make_run_dir(out_root)
     )
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if checkpoint_path is None:
+        _report(
+            f"training {training_cfg.task_id} for {iterations} iterations "
+            f"(policy={training_cfg.policy_name}, seed={seed}, device={device}) -> {run_dir}"
+        )
+    else:
+        _report(
+            f"exporting {training_cfg.task_id} checkpoint {checkpoint_path} "
+            f"(policy={training_cfg.policy_name}, device={device}) -> {run_dir}"
+        )
 
     env, env_cfg = _build_env(
         task_id=training_cfg.task_id,
@@ -142,22 +191,34 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             log_dir=str(run_dir / "logs"),
             device=device,
         )
-        result = training.train(runner, iterations)
-        metadata = press.policy_metadata(
-            action_cfg=config.rl.action,
-            obs_schema_version=press.HOVER_OBSERVATION_SCHEMA_VERSION,
-            obs_dim=int(env_cfg.observation_space),
-            policy_rate_hz=config.rl.policy_rate_hz,
+        if checkpoint_path is None:
+            result = training.train(runner, iterations)
+        else:
+            training.load_checkpoint(
+                runner=runner,
+                checkpoint_path=checkpoint_path,
+                device=device,
+            )
+        metadata = _artifact_metadata(
+            config=config,
+            env_cfg=env_cfg,
+            source_metadata=_git_source_metadata(repo_root=_repo_root()),
         )
         training.export_policy(runner, run_dir, metadata=metadata)
     finally:
         env.close()
 
     _update_latest_symlink(out_root, run_dir)
-    _report(
-        f"train-rl COMPLETE iterations={result.iterations} "
-        f"artifact={run_dir} latest={out_root / _LATEST_LINK}"
-    )
+    if checkpoint_path is None:
+        _report(
+            f"train-rl COMPLETE iterations={result.iterations} "
+            f"artifact={run_dir} latest={out_root / _LATEST_LINK}"
+        )
+    else:
+        _report(
+            f"train-rl EXPORT COMPLETE checkpoint={checkpoint_path} "
+            f"artifact={run_dir} latest={out_root / _LATEST_LINK}"
+        )
 
 
 def main() -> None:
@@ -174,6 +235,12 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=None, help="override rl.training.seed")
     parser.add_argument("--num-envs", type=int, default=None, help="override rl.num_envs")
+    parser.add_argument(
+        "--export-checkpoint",
+        type=Path,
+        default=None,
+        help="export an existing run checkpoint without additional training",
+    )
     args, _unknown = parser.parse_known_args()
     if args.max_iterations is not None and args.max_iterations < 1:
         raise SystemExit("--max-iterations must be >= 1")

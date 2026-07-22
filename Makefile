@@ -39,10 +39,13 @@ help:
 		'  make test-integration      Run container-backed integration tests' \
 		'  make test-integration-all  Run all integration tests in parallel with a summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \
+		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
 		'  make test-integration-px4-takeoff Run the Isaac/PX4 takeoff stability test' \
 		'  make test-integration-px4-navigation Run the PX4 waypoint navigation test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test' \
 		'  make benchmark-isaac-core  Run and gate the Isaac core performance benchmark' \
 		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline' \
 		'  make benchmark-flight      Run the diagnostic full-GUI two-drone benchmark' \
+		'  make train-rl              Train the configured Isaac Lab task' \
+		'  make eval-press            Evaluate the latest ground-truth press policy' \
 		'  make benchmark-flight-compare REFERENCE=... CANDIDATE=... Compare flight reports'
