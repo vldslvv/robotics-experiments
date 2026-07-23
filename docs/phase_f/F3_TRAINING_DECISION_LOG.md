@@ -1253,3 +1253,50 @@ file before launching the server, checks the scalar-tags endpoint, and then
 prints the URL and run identity. This replaces starting TensorBoard against a
 log directory that did not yet exist, which could leave it reporting no active
 dashboards.
+
+### 29. Establish a deterministic press baseline before retreat training
+
+#### Stop after the press behavior is established
+
+Plain-language view: Run `20260723T215635Z.61663` learned to press the switch
+reliably. The active training population first showed confirmed toggles at
+iteration 6, exceeded 25% near iteration 29, and spent later windows mostly
+between about 75% and 92%. Mean episode length remained near the 200-step
+horizon instead of collapsing to the previous 18-step crash behavior. Training
+was stopped after checkpoint 150 because confirmed pressing was established
+while full retreat remained at zero; the immediate goal was a measurable press
+rate, not the full 80% end-to-end acceptance target.
+
+Technical view: The run started clean from source commit `0f69dfc` with 49,152
+environments and the corrected 100.0 terminal failure weight. Saved
+checkpoints are iterations 0, 50, 100, and 150. The run-scoped TensorBoard
+telemetry showed cumulative completed-episode toggles reaching 66.2% by
+iteration 150, with active-window values peaking above 90%. Cumulative failure
+fell from more than 20% early in training to 5.6%. The training process was
+interrupted only after checkpoint 150 was safely written.
+
+#### Publish checkpoint 50 as the diagnostic fallback
+
+Plain-language view: Deterministic evaluation found that checkpoints 50 and
+100 both pressed the switch in every episode. Checkpoint 50 made the gentler
+first contact and therefore won the fallback ranking. It still does not back
+away after pressing, so it is published for diagnosis and manual press testing,
+not described as accepted.
+
+Technical view: Selection evaluated each saved checkpoint for 100 episodes on
+seeds 101, 202, and 303. Iteration 50 achieved a 1.0 confirmed-toggle rate,
+0.3666666667 stable-first-contact rate, and 0.0 post-toggle-retreat rate.
+Iteration 100 achieved 1.0, 0.2033333333, and 0.0 respectively. Iteration 150
+achieved 0.7233333333, 0.23, and 0.0. The
+`press-gated-maximin-v2` selector therefore published iteration 50 with
+`accepted: false` and advanced `.build/training/press/latest` to run
+`20260723T215635Z.61663`.
+
+Independent evaluation of the selected artifact reproduced 300 confirmed
+toggles in 300 episodes, a 0.3666666667 stable-first-contact rate, zero retreat
+and full completion, a 1.075 s median toggle time, and 1.92 mm peak compression
+overshoot. It correctly failed acceptance on first-contact stability and
+post-toggle retreat. The next objective should preserve this confirmed-toggle
+baseline while improving approach/contact gentleness and teaching the
+post-toggle reverse trajectory; increasing the toggle target or learning rate
+is not the next constraint.
