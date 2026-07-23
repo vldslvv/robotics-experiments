@@ -293,11 +293,14 @@ run ID, and shutdown mode, default to
 `.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
 ordinary integration and policy artifacts remain in `.build/docker/integration`
 and `.build/training`.
-The wrapper also starts `tensorboard-rl` in the pinned Isaac Lab image, serves
-the `.build/training` tree on `http://127.0.0.1:6006/`, prints that URL to the
-terminal and combined console log after the server is ready, and stops the
-named TensorBoard container on every wrapper exit path. A TensorBoard startup
-failure stops the workflow before training.
+The wrapper also starts `tensorboard-rl` in the pinned Isaac Lab image. It
+resolves `rl.training.policy_name` from the selected Hydra config and serves
+only `.build/training/<policy-name>/<artifact-run-id>/logs` on
+`http://127.0.0.1:6006/`, so the dashboard contains exactly the current run.
+After the server is ready, the wrapper prints both the URL and
+`<policy-name>/<artifact-run-id>` label to the terminal and combined console
+log. It stops the named TensorBoard container on every wrapper exit path. A
+TensorBoard startup failure stops the workflow before training.
 
 For explicit unattended shutdown, add the flag:
 

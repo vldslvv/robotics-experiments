@@ -51,6 +51,13 @@ exit 0
 """,
     )
     _write_executable(
+        path=fake_bin / "uv",
+        body="""#!/usr/bin/env bash
+printf 'press\\n'
+exit 0
+""",
+    )
+    _write_executable(
         path=fake_bin / "curl",
         body="""#!/usr/bin/env bash
 exit 0
@@ -151,6 +158,12 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     assert len(artifact_ids) == 1
     assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[0]
     assert "RL_TENSORBOARD_PORT=6006" in call_lines[0]
+    tensorboard_logdir = next(
+        part.removeprefix("RL_TENSORBOARD_LOGDIR=")
+        for part in call_lines[0].split()
+        if part.startswith("RL_TENSORBOARD_LOGDIR=")
+    )
+    assert tensorboard_logdir == f".build/training/press/{artifact_ids.pop()}/logs"
     assert "TRAIN_ARGS=--iterations 3" in call_lines[1]
     assert "SELECT_ARGS=--selection-note test" in call_lines[2]
     assert "EVAL_ARGS=--episodes 4" in call_lines[3]
@@ -163,8 +176,8 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     assert "shutdown=disabled shutdown_exit=not-requested" in status
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/" in result.stdout
+    assert "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
+    assert "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

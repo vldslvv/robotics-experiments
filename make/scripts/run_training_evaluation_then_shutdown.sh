@@ -139,6 +139,14 @@ if [ ! -f "${hydra_config}" ]; then
     exit 2
 fi
 
+policy_name="$(
+    ROBOTICS_EXPERIMENT_CONFIG_PATH="${hydra_config}" \
+        PYTHONPATH="src${PYTHONPATH:+:${PYTHONPATH}}" \
+        uv run python -c \
+        'import os; from robotics_experiments.config import load_config; print(load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).rl.training.policy_name)'
+)"
+validate_name "policy name" "${policy_name}"
+
 mkdir -p "${log_dir}"
 artifact_run_id="$(date -u +%Y%m%dT%H%M%SZ).$$"
 run_id="${run_label}.${artifact_run_id}"
@@ -154,6 +162,7 @@ tensorboard_host="127.0.0.1"
 tensorboard_port="6006"
 tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
+tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
 shutdown_mode="disabled"
 if [ "${shutdown_requested}" = true ]; then
     shutdown_mode="enabled"
@@ -245,6 +254,7 @@ start_tensorboard() {
     make tensorboard-rl \
         "RL_TENSORBOARD_CONTAINER_NAME=${tensorboard_container_name}" \
         "RL_TENSORBOARD_HOST=${tensorboard_host}" \
+        "RL_TENSORBOARD_LOGDIR=${tensorboard_logdir}" \
         "RL_TENSORBOARD_PORT=${tensorboard_port}" \
         >>"${console_log}" 2>&1 &
     tensorboard_pid=$!
@@ -255,9 +265,11 @@ start_tensorboard() {
             return 1
         fi
         if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
-            printf '[%s] TensorBoard URL: %s\n' \
+            printf '[%s] TensorBoard URL: %s (run: %s/%s)\n' \
                 "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                "${tensorboard_url}" |
+                "${tensorboard_url}" \
+                "${policy_name}" \
+                "${artifact_run_id}" |
                 tee -a "${console_log}"
             return 0
         fi

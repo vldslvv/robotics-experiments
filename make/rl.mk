@@ -14,6 +14,7 @@ EVAL_ARGS ?=
 RL_TENSORBOARD_HOST ?= 127.0.0.1
 RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
+RL_TENSORBOARD_LOGDIR ?= .build/training
 
 # Training owns optimization, stored metadata, and checkpoints only. A direct
 # run is intentionally unpublished until select-rl-checkpoint selects it.
@@ -63,7 +64,7 @@ tensorboard-rl:
 	    --entrypoint /isaac-sim/python.sh \
 	    '$(ISAAC_LAB_IMAGE)' \
 	    -m tensorboard.main \
-	    --logdir '$(ISAAC_PROJECT_DIR)/.build/training' \
+	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
 	    --host '$(RL_TENSORBOARD_HOST)' \
 	    --port '$(RL_TENSORBOARD_PORT)'
 
