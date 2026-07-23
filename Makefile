@@ -6,8 +6,8 @@ include make/images.mk
 include make/containers.mk
 include make/tests.mk
 include make/integration-tests.mk
+include make/rl.mk
 include make/benchmarks.mk
-include make/training.mk
 include make/flight-analysis.mk
 
 .PHONY: help
@@ -40,14 +40,23 @@ help:
 		'  make test-integration      Run container-backed integration tests' \
 		'  make test-integration-all  Run all integration tests in parallel with a summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \
-		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
-		'  make test-integration-press-routine Run the trained press full-mission gate' \
 		'  make test-integration-px4-takeoff Run the Isaac/PX4 takeoff stability test' \
 		'  make test-integration-px4-navigation Run the PX4 waypoint navigation test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test' \
+		'' \
+		'RL, Isaac Lab, and press workflow targets:' \
+		'' \
+		'  make train-rl              Train checkpoints without publishing an artifact' \
+		'  make select-rl-checkpoint  Evaluate checkpoints and publish the accepted winner' \
+		'  make eval-press            Independently evaluate the selected press artifact' \
+		'  make test-integration-press-hover-goto Run the in-Lab hover/goto gate' \
+		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
+		'  make test-integration-press-policy Run the trained hover-policy PX4 gate' \
+		'  make test-integration-press-routine Run the selected press full-mission gate' \
+		'' \
+		'Benchmark targets:' \
+		'' \
 		'  make benchmark-isaac-core  Run and gate the Isaac core performance benchmark' \
 		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline' \
 		'  make benchmark-flight      Run the diagnostic full-GUI two-drone benchmark' \
-		'  make train-rl              Train the configured Isaac Lab task' \
-		'  make eval-press            Evaluate the latest ground-truth press policy' \
 		'  make benchmark-flight-compare REFERENCE=... CANDIDATE=... Compare flight reports'

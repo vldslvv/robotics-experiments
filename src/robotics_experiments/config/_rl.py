@@ -238,7 +238,8 @@ class RlTrainingConfig(_FreezableConfig):
             (``Isaac-Drone-Hover-Direct-v0`` for the F2b pipeline; F3 points it
             at the press task).
         policy_name: Required artifact namespace under ``.build/training``;
-            for example ``hover`` writes ``.build/training/hover/latest``.
+            selection publishes accepted artifacts to that namespace's
+            ``latest`` symlink.
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
         save_interval: Checkpoint save interval, iterations.

@@ -4,7 +4,7 @@ This is the architecture and rationale for the container-backed integration
 tests. Use the Make targets as the public entrypoints; run harness scripts
 directly only when debugging the harness itself. The orchestration, caching,
 artifact-isolation, and timing details live here. The authoritative definitions
-are `make/integration-tests.mk`, `make/config.mk`,
+are `make/integration-tests.mk`, `make/rl.mk`, `make/config.mk`,
 `make/scripts/run_isaac_integration_test.sh`,
 `make/scripts/run_px4_integration_test.sh`,
 `make/scripts/run_isaac_test_in_container.sh`,
@@ -15,6 +15,13 @@ files win and this doc should be corrected.
 The standalone Isaac test scripts these targets run live under
 `isaac/runtime/standalone/tests/`; see that directory's `README.md` for
 scenario-specific notes.
+
+`make/integration-tests.mk` owns the general integration harness variables,
+aggregate suite, and non-RL target definitions. `make/rl.mk` owns training,
+checkpoint selection, independent press evaluation, and all press/Isaac Lab
+target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
+`make/integration-tests.mk`; GNU Make resolves the included definitions from
+`make/rl.mk` when the aggregate runs.
 
 ## Targets
 
@@ -30,7 +37,7 @@ scenario-specific notes.
 - `make test-integration-press-hover-goto` runs the F1 in-Lab actuation gate: the
   Isaac Lab `DroneHoverEnv` driven by an analytic velocity controller (no PX4
   container) that must hold a hover and track a 2 m goto across all parallel envs
-  for the final 1.0 s validation windows. It is the one target that runs on the
+  for the final 1.0 s validation windows. It runs on the
   Isaac Lab image (`ISAAC_LAB_IMAGE`, the Dockerfile `isaac-lab` stage layered
   `FROM isaac-sim`) instead of the default `isaac-sim` image (`ISAAC_IMAGE`),
   because it imports `isaaclab`. The target sets the override with a
@@ -48,10 +55,11 @@ scenario-specific notes.
   stability envelope. It is part of `test-integration-all` and requires no PX4
   container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
-  Isaac Lab image. It needs a prior `make train-rl`, so it is deliberately not
-  part of `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy
-  artifact contract and routine config. Policy metadata includes the active
-  policy rate, so artifacts trained before that field was introduced must be
+  Isaac Lab image. It needs a published artifact from `make train-rl` followed
+  by `make select-rl-checkpoint`, so it is deliberately not part of
+  `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
+  contract and routine config. Policy metadata includes the active policy
+  rate, so artifacts trained before that field was introduced must be
   retrained.
 - `make test-integration-press-routine` runs the complete F3 deployment sanity
   flight from `configs/policy_press_quad.yaml`: takeoff, goto the press handoff

@@ -3,8 +3,8 @@
 Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path (the lazy
 ``robotics_experiments.rl`` package root defers it). The package-root contract --
-``build_runner`` / ``train`` / ``load_checkpoint`` / ``export_policy`` plus
-``TrainingResult`` over a private runner Protocol -- is what a future
+``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
+``export_policy`` plus ``TrainingResult`` over a private runner Protocol -- is what a future
 ``skrl.py`` / ``rl_games.py`` re-implements.
 """
 
@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-__all__ = ["TrainingResult", "build_runner", "export_policy", "load_checkpoint", "train"]
+__all__ = [
+    "TrainingResult",
+    "build_runner",
+    "deterministic_actor",
+    "export_policy",
+    "load_checkpoint",
+    "train",
+]
 
 
 class _PolicyRunner(Protocol):
@@ -113,6 +120,13 @@ def _actor_module(runner: _PolicyRunner) -> Any:
     if policy is None:
         policy = runner.alg.actor_critic
     return policy.actor
+
+
+def deterministic_actor(*, runner: _PolicyRunner) -> Any:
+    """Return the checkpoint-loaded actor mean in evaluation mode."""
+    actor = _actor_module(runner)
+    actor.eval()
+    return actor
 
 
 def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, Any]) -> None:

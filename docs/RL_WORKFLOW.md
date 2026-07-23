@@ -19,9 +19,9 @@ separate container. It is built from `isaac-sim/IsaacLab` pinned by the
 Isaac Sim 5.1). The image installs only the Isaac Lab base package, its rsl_rl
 adapter, and the pinned closure in
 `isaac/docker/lab-runtime-requirements.txt`; unused RL frameworks and device
-retargeting stacks are excluded. Only the RL workflow needs it -- the
-`test-integration-press-hover-goto` and `test-integration-press-policy` gates
-and `make train-rl` run on `ISAAC_LAB_IMAGE`; every other integration target
+retargeting stacks are excluded. Only the RL workflow needs it -- training,
+checkpoint selection, independent press evaluation, and the press/Lab targets
+defined in `make/rl.mk` run on `ISAAC_LAB_IMAGE`; every other integration target
 and the persistent containers stay on the leaner `isaac-sim` image
 (`ISAAC_IMAGE`). Rebuild it after changing `ISAACLAB_REF` or when moving Isaac
 Sim versions.
@@ -122,8 +122,9 @@ preventing timeout-hover and early-exit reward shortcuts.
 
 ## Task->policy pipeline (F2b)
 
-The pipeline is `task YAML -> make train-rl -> policy artifact ->
-{kind: policy} routine step -> FleetState lifecycle`. The runtime injects the
+The pipeline is `task YAML -> make train-rl -> make select-rl-checkpoint ->
+policy artifact -> make eval-press -> {kind: policy} routine step ->
+FleetState lifecycle`. The runtime injects the
 artifact-selected adapter and, when its interface requires one, the task-owned
 observation assembled from live resources. Commanding remains task-neutral.
 Pieces:
@@ -140,39 +141,44 @@ Pieces:
   `AbstractPoseProvider` / `PoseSample`; ground truth is the lazy Isaac-only
   `GroundTruthPoseProvider`, and the nav->contact handoff is the pure
   `handoff_ready` gate (thresholds in `rl.press.handoff`). See ADR 0014.
-- **Training** (`rl/training/`; `rsl_rl.py` is the only rsl_rl importer): import
-  `build_runner`/`train`/`export_policy`/`TrainingResult` from
+- **Training and selection** (`rl/training/`; `rsl_rl.py` is the only rsl_rl
+  importer): import `build_runner`/`train`/`load_checkpoint`/
+  `deterministic_actor`/`export_policy`/`TrainingResult` from
   `robotics_experiments.rl.training.rsl_rl`. The contract runs
   over `RlTrainingConfig` (the `rl.training` block, incl. explicit `task_id`
   and `policy_name`).
-  `make train-rl` (thin target in `make/training.mk`, runs
+  `make train-rl` (thin target in `make/rl.mk`, runs
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
-  image) writes the artifact under `.build/training/<policy-name>/<run-id>/`
-  and atomically updates the named
-  `.build/training/<policy-name>/latest` symlink only after metadata and
-  TorchScript export complete;
+  image) writes the stored policy contract, Git provenance, and all checkpoints
+  under `.build/training/<policy-name>/<run-id>/`; it does not export
+  `policy.pt` or advance `latest`.
   `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
-  task config owns its observation schema version and dimension, so exported
+  task config owns its observation schema version and dimension, so stored
   metadata contains no task-ID conditional. Before PPO begins, the run writes
   the complete policy contract and Git provenance to its run directory.
-  Normal export rereads that stored metadata, rather than regenerating it from
-  the current config. rsl_rl comes from the
-  pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
-  exists for tooling only.
-  If training finishes but artifact export is interrupted, recover the
-  checkpoint without another optimization run:
+  rsl_rl comes from the pinned Lab image requirements; the host `training`
+  extra (`rsl-rl-lib`) exists for tooling only.
+  `make select-rl-checkpoint RL_RUN_ID=<run-id>` resumes selection without
+  retraining. The task-neutral selector enumerates every numeric checkpoint,
+  builds one compatible environment and runner, and dispatches by stored
+  `policy_interface`. `press-v1` evaluates every checkpoint with the full
+  workload shared with `eval-press`; an interface without a scorer warns and
+  selects its final checkpoint with `selection_method: final-no-scorer`.
+  Selection reloads the winner without optimizer state, stages the TorchScript
+  actor, selected metadata, and `checkpoint_selection.json`, then atomically
+  advances the relative `.build/training/<policy-name>/latest` symlink.
+  Explicit export remains available for manual checkpoint diagnostics:
 
   ```console
   make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml \
     TRAIN_ARGS='--num-envs 2 --export-checkpoint /isaac-sim/proj/.build/training/press/<run-id>/logs/model_<iteration>.pt'
   ```
 
-  Export recovery loads policy weights without optimizer state, reuses the
+  Manual export loads policy weights without optimizer state, reuses the
   contract and provenance captured in that run before training, writes the
-  artifact back into the checkpoint's existing run directory, and updates the
-  policy namespace's `latest` symlink. Recovery rejects a run missing its
-  stored metadata. The checkpoint must be below that namespace's
-  `.build/training/<policy-name>/<run-id>/logs/` directory.
+  artifact back into the checkpoint's existing run directory, and deliberately
+  does not publish `latest`. It rejects a run missing stored metadata. The
+  checkpoint must be below that namespace's run-local `logs/` directory.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json`
   (`policy_interface`, obs schema version/dim, policy rate, action kind/dim,
   action scales, source Git commit, and dirty-worktree flag). The interface is
@@ -195,7 +201,8 @@ Pieces:
 - **Gate**: `make test-integration-press-policy` flies
   `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
   takeoff -> policy hover hold -> land) strict over PX4 SITL on
-  `ISAAC_LAB_IMAGE`. It needs a prior `make train-rl` (the routine
+  `ISAAC_LAB_IMAGE`. It needs a published artifact from `make train-rl`
+  followed by `make select-rl-checkpoint` (the routine
   references `.build/training/hover/latest`), so it is deliberately NOT part of
   `test-integration-all`. The hover+goto gate additionally runs the F2
   side-channel validation (ground-truth provider + `PressObservation` +
@@ -207,27 +214,46 @@ Pieces:
 `press` artifact namespace, ten-second episodes, and press PPO settings. Run:
 
 ```console
-make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml
+make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
+make select-rl-checkpoint HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
 make eval-press
 ```
 
-`make eval-press` loads `.build/training/press/latest` and evaluates 100
-deterministic episodes for each of three non-training seeds. It reports reward
-term means, latch-confirmed press success, first-contact stability among
-contacted episodes, retreat among toggled episodes, median time-to-toggle, and
-peak compression overshoot. The Lab environment uses the artifact's action
-kind, dimension, physical scales, and cadence, while controller gains and
-physical task settings continue to come from the training YAML. The command
-fails below the configured 80% press,
-85% stable-contact, or 95% retreat thresholds. Artifacts remain ignored under
-`.build/training`; no policy binary is committed.
+For `press-v1`, selection creates one 100-environment scene and compatible
+runner, then loads every numeric `model_<iteration>.pt` once, including
+`model_0`, periodic checkpoints, and the final checkpoint. Each candidate runs
+100 deterministic episodes for seeds 101, 202, and 303. There is no screening,
+TensorBoard-reward shortcut, or reduced episode count. The shared evaluator
+records every reward-term mean, confirmed toggle rate, stable first contact
+among contacted episodes, retreat among toggled episodes, full completion,
+median toggle time, and peak compression overshoot.
 
-For a logged train-then-evaluate run, use the reusable wrapper:
+A press candidate is eligible only at the configured 80% confirmed-toggle,
+85% stable-first-contact, and 95% post-toggle-retreat thresholds. Eligible
+candidates are ranked by the lexicographically largest sorted tuple of each
+acceptance rate divided by its threshold, maximizing the weakest normalized
+gate first. Exact ties prefer higher full completion, lower peak compression
+overshoot, lower median toggle time, then earlier iteration.
+`checkpoint_selection.json` retains the run/interface identity, seeds,
+thresholds, all candidates and metrics, ranking values, reward means, and the
+selected iteration. If no candidate passes, selection retains the report and
+checkpoints, fails, and leaves the previous `latest` untouched.
+
+`make eval-press` independently evaluates the selected artifact with the
+identical rollout and aggregation logic. With `RL_RUN_ID` it reads that exact
+published run; otherwise it resolves `.build/training/press/latest`. The Lab
+environment uses the artifact's action kind, dimension, physical scales, and
+cadence, while controller gains and physical task settings continue to come
+from the training YAML. Artifacts remain ignored under `.build/training`; no
+policy binary is committed.
+
+For the canonical logged train-select-evaluate workflow, use the wrapper:
 
 ```console
 make/scripts/run_training_evaluation_then_shutdown.sh \
   --hydra-config configs/train_press_quad.yaml \
   --train-target train-rl \
+  --select-target select-rl-checkpoint \
   --eval-target eval-press \
   --train-args '--num-envs 49152 --max-iterations 300' \
   --label press-overnight
@@ -238,12 +264,15 @@ sudo authorization, calls `sync`, or requests power-off. Add the valueless
 `--shutdown` flag for an unattended run that powers off after a successful
 evaluation, a failed stage, or a handled interrupt. In that mode the wrapper
 validates sudo access before training and refreshes the authorization while the
-workload runs. In both modes it skips evaluation when training fails and
-preserves the workflow exit status unless the explicitly requested shutdown
-command fails. Its target names, Hydra config, stage arguments, label, and log
-directory are command-line options so the same script can run later RL
-workflows. The combined console log and final per-stage exit status, including
-the selected shutdown mode, default to
+workload runs. The wrapper creates one artifact run ID and passes it as
+`RL_RUN_ID` to all three stages. Training failure skips selection and
+evaluation; selection failure skips evaluation and cannot change the previous
+`latest`; independent evaluation runs against the successfully selected run.
+The wrapper preserves the terminal stage status unless the explicitly
+requested shutdown command fails. Its target names, Hydra config, per-stage
+arguments, label, and log directory are command-line options. The combined
+console log and final three-stage exit status, including target names, artifact
+run ID, and shutdown mode, default to
 `.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
 ordinary integration and policy artifacts remain in `.build/docker/integration`
 and `.build/training`.
@@ -263,11 +292,13 @@ The zero-manual-update deployment sequence is:
 
 1. Run the wrapper with `--hydra-config configs/train_press_quad.yaml`, adding
    `--shutdown` only when power-off is wanted.
-2. Successful training export advances `.build/training/press/latest`.
-3. Evaluation reads that same symlink. A rejected policy does not roll it back:
-   `latest` means the newest successfully exported policy, not the newest
-   accepted policy.
-4. Run `make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; the
+2. Training writes an unpublished checkpoint run under the wrapper's
+   `RL_RUN_ID`.
+3. Selection publishes only an acceptance-passing winner and advances
+   `.build/training/press/latest`; failure preserves the previous link.
+4. Independent evaluation reads the exact selected run. `latest` means the
+   newest run with an acceptance-passing selected checkpoint.
+5. Run `make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; the
    composed `policy_press` routine reads the same symlink, while action kind,
    dimensions, scales, and cadence come from `policy_meta.json`.
 

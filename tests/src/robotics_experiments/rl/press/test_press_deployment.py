@@ -14,31 +14,30 @@ from robotics_experiments.rl.press import (
 
 
 def _observation(**overrides) -> PressObservation:
-    values = {
-        "relative_switch_pos_m": np.array([0.2, 0.0, 0.0]),
-        "relative_switch_quat_xyzw": np.array([0.0, 0.0, 0.0, 1.0]),
-        "pose_confidence": 1.0,
-        "pose_age_s": 0.0,
-        "detection_valid": True,
-        "body_lin_vel_mps": np.zeros(3),
-        "body_ang_vel_radps": np.zeros(3),
-        "attitude_quat_xyzw": np.array([0.0, 0.0, 0.0, 1.0]),
-        "pusher_compression_m": 0.0,
-        "pusher_compression_rate_mps": 0.0,
-        "contact_valid": True,
-        "contact_flag": False,
-        "lamp_state": 0,
-        "lamp_confidence": 1.0,
-        "lamp_age_s": 0.0,
-        "previous_action": np.zeros(4),
-        "handoff_mode": 1,
-        "estimator_health": 1.0,
-        "obs_mask": int(
+    observation = PressObservation(
+        relative_switch_pos_m=np.array([0.2, 0.0, 0.0]),
+        relative_switch_quat_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        pose_confidence=1.0,
+        pose_age_s=0.0,
+        detection_valid=True,
+        body_lin_vel_mps=np.zeros(3),
+        body_ang_vel_radps=np.zeros(3),
+        attitude_quat_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        pusher_compression_m=0.0,
+        pusher_compression_rate_mps=0.0,
+        contact_valid=True,
+        contact_flag=False,
+        lamp_state=0,
+        lamp_confidence=1.0,
+        lamp_age_s=0.0,
+        previous_action=np.zeros(4),
+        handoff_mode=1,
+        estimator_health=1.0,
+        obs_mask=int(
             PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
         ),
-    }
-    values.update(overrides)
-    return PressObservation(**values)
+    )
+    return replace(observation, **overrides)
 
 
 _GATE = HandoffGate(

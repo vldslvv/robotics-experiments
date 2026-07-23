@@ -36,6 +36,7 @@ ISAAC_INTEGRATION_COMMON_ENV = \
     ISAAC_TEST_LOG_FILTER='$(ISAAC_TEST_LOG_FILTER)' \
     ISAAC_TEST_EXTRA_ARGS='$(ISAAC_TEST_EXTRA_ARGS)' \
     ISAAC_PROFILE_TRACE_NAME='$(ISAAC_PROFILE_TRACE_NAME)' \
+    RL_RUN_ID='$(RL_RUN_ID)' \
     SCENE='$(SCENE)'
 
 .PHONY: test-integration-warm-isaac-cache
@@ -69,30 +70,6 @@ test-integration-drone-articulation: generate-drone-usd
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
 
-# The in-Lab actuation gate needs Isaac Lab, so it runs on the isaac-lab image
-# (a superset of isaac-sim) instead of the default isaac-sim image. Only this
-# target overrides ISAAC_IMAGE; ISAAC_INTEGRATION_COMMON_ENV expands it at recipe
-# time, so the override flows through to the runner with no other change.
-.PHONY: test-integration-press-hover-goto
-test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-hover-goto: generate-drone-usd
-	@TEST_TARGET='test-integration-press-hover-goto' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
-	    $(ISAAC_INTEGRATION_COMMON_ENV) \
-	    bash "$(ISAAC_INTEGRATION_RUNNER)"
-
-.PHONY: test-integration-press-contact-chain
-test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_quad.yaml
-test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
-test-integration-press-contact-chain: generate-drone-usd
-	@TEST_TARGET='test-integration-press-contact-chain' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
-	    $(ISAAC_INTEGRATION_COMMON_ENV) \
-	    bash "$(ISAAC_INTEGRATION_RUNNER)"
-
 PX4_INTEGRATION_RUNNER = make/scripts/run_px4_integration_test.sh
 
 PX4_INTEGRATION_COMMON_ENV = \
@@ -113,43 +90,6 @@ test-integration-px4-takeoff: generate-drone-usd
 	    ISAAC_TEST_LOG='$(ISAAC_PX4_TAKEOFF_TEST_LOG)' \
 	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
 	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-px4-takeoff' \
-	    STRICT='1' \
-	    $(PX4_INTEGRATION_COMMON_ENV) \
-	    bash "$(PX4_INTEGRATION_RUNNER)"
-
-# F2b task->policy pipeline gate: arm -> takeoff -> trained RL policy holds the
-# hover over PX4 SITL -> land, strict, through the unchanged orchestrator. Runs
-# the generic takeoff scenario with the policy_hover routine on the Isaac Lab
-# image (torch for the TorchScript artifact). Requires a trained artifact at
-# .build/training/hover/latest (`make train-rl` first), so it is deliberately
-# NOT in INTEGRATION_TEST_TARGETS / test-integration-all.
-.PHONY: test-integration-press-policy
-test-integration-press-policy: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-policy: HYDRA_CONFIG = configs/policy_hover_quad.yaml
-test-integration-press-policy: generate-drone-usd
-	@TEST_TARGET='test-integration-press-policy' \
-	    HOST_ISAAC_LOG_BASENAME='test_press_policy_hover.log' \
-	    HOST_PX4_LOG_BASENAME='test_press_policy_hover_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_POLICY_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PX4_TAKEOFF_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-policy' \
-	    STRICT='1' \
-	    $(PX4_INTEGRATION_COMMON_ENV) \
-	    bash "$(PX4_INTEGRATION_RUNNER)"
-
-# Artifact-dependent full mission sanity gate. It is intentionally excluded
-# from test-integration-all until a press artifact passes acceptance.
-.PHONY: test-integration-press-routine
-test-integration-press-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-routine: HYDRA_CONFIG = configs/policy_press_quad.yaml
-test-integration-press-routine: SCENE = @config
-test-integration-press-routine: generate-drone-usd
-	@TEST_TARGET='test-integration-press-routine' \
-	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_routine.log' \
-	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_routine_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_ROUTINE_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_ROUTINE_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-routine' \
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"

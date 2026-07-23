@@ -8,20 +8,24 @@ Usage:
     --hydra-config PATH \
     --eval-target TARGET \
     [--train-target TARGET] \
+    [--select-target TARGET] \
     [--train-args ARGS] \
+    [--select-args ARGS] \
     [--eval-args ARGS] \
     [--label LABEL] \
     [--log-dir PATH] \
     [--shutdown]
 
-Run one Make training target followed by one Make evaluation target, preserving
-console and status logs. Evaluation is skipped when training fails. Power-off
-after success, failure, or a handled interrupt is disabled by default and must
-be requested with --shutdown.
+Run Make training, checkpoint-selection, and independent-evaluation targets in
+that order, preserving console and status logs. A failed stage skips every
+later stage. Power-off after success, failure, or a handled interrupt is
+disabled by default and must be requested with --shutdown.
 
 Defaults:
   --train-target train-rl
+  --select-target select-rl-checkpoint
   --train-args   ""
+  --select-args  ""
   --eval-args    ""
   --label        rl-training-evaluation
   --log-dir      .build/overnight
@@ -52,8 +56,10 @@ validate_name() {
 
 hydra_config=""
 train_target="train-rl"
+select_target="select-rl-checkpoint"
 eval_target=""
 train_args=""
+select_args=""
 eval_args=""
 run_label="rl-training-evaluation"
 log_dir=".build/overnight"
@@ -76,12 +82,21 @@ while [ "$#" -gt 0 ]; do
             eval_target="$2"
             shift 2
             ;;
+        --select-target)
+            require_value "$1" "${2:-}"
+            select_target="$2"
+            shift 2
+            ;;
         --train-args)
             train_args="${2-}"
             shift 2
             ;;
         --eval-args)
             eval_args="${2-}"
+            shift 2
+            ;;
+        --select-args)
+            select_args="${2-}"
             shift 2
             ;;
         --label)
@@ -113,6 +128,7 @@ done
 require_value "--hydra-config" "${hydra_config}"
 require_value "--eval-target" "${eval_target}"
 validate_name "training target" "${train_target}"
+validate_name "selection target" "${select_target}"
 validate_name "evaluation target" "${eval_target}"
 validate_name "label" "${run_label}"
 
@@ -122,10 +138,12 @@ if [ ! -f "${hydra_config}" ]; then
 fi
 
 mkdir -p "${log_dir}"
-run_id="${run_label}.$(date -u +%Y%m%dT%H%M%SZ).$$"
+artifact_run_id="$(date -u +%Y%m%dT%H%M%SZ).$$"
+run_id="${run_label}.${artifact_run_id}"
 console_log="${log_dir}/${run_id}.console.log"
 status_log="${log_dir}/${run_id}.status"
 train_status="not-run"
+select_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
 sudo_validated=false
@@ -135,13 +153,11 @@ if [ "${shutdown_requested}" = true ]; then
 fi
 
 keep_sudo_alive() {
-    local sleep_pid=""
-
-    trap 'kill "${sleep_pid}" 2>/dev/null; exit 0' TERM
+    # shellcheck disable=SC2154 # `read` assigns job inside the single-quoted trap.
+    trap 'jobs -pr | while read -r job; do kill "${job}" 2>/dev/null; done; exit 0' TERM
     while sudo -n true; do
         sleep 60 &
-        sleep_pid=$!
-        wait "${sleep_pid}"
+        wait "$!"
     done
 }
 
@@ -153,9 +169,14 @@ write_status() {
     local status_line
 
     status_line="$(printf \
-        'run_id=%s train_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
+        'run_id=%s artifact_run_id=%s train_target=%s select_target=%s eval_target=%s train_exit=%s select_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
         "${run_id}" \
+        "${artifact_run_id}" \
+        "${train_target}" \
+        "${select_target}" \
+        "${eval_target}" \
         "${train_status}" \
+        "${select_status}" \
         "${eval_status}" \
         "${overall_status}" \
         "${shutdown_mode}" \
@@ -208,11 +229,13 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-printf '[%s] run_id=%s config=%s train_target=%s eval_target=%s shutdown=%s\n' \
+printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
+    "${artifact_run_id}" \
     "${hydra_config}" \
     "${train_target}" \
+    "${select_target}" \
     "${eval_target}" \
     "${shutdown_mode}" |
     tee -a "${console_log}"
@@ -227,6 +250,7 @@ fi
 set +e
 make "${train_target}" \
     "HYDRA_CONFIG=${hydra_config}" \
+    "RL_RUN_ID=${artifact_run_id}" \
     "TRAIN_ARGS=${train_args}" \
     2>&1 | tee -a "${console_log}"
 train_pipeline=("${PIPESTATUS[@]}")
@@ -241,8 +265,26 @@ if [ "${train_status}" -ne 0 ]; then
 fi
 
 set +e
+make "${select_target}" \
+    "HYDRA_CONFIG=${hydra_config}" \
+    "RL_RUN_ID=${artifact_run_id}" \
+    "SELECT_ARGS=${select_args}" \
+    2>&1 | tee -a "${console_log}"
+select_pipeline=("${PIPESTATUS[@]}")
+set -e
+select_status="${select_pipeline[0]}"
+if [ "${select_status}" -eq 0 ] && [ "${select_pipeline[1]}" -ne 0 ]; then
+    select_status="${select_pipeline[1]}"
+fi
+
+if [ "${select_status}" -ne 0 ]; then
+    exit "${select_status}"
+fi
+
+set +e
 make "${eval_target}" \
     "HYDRA_CONFIG=${hydra_config}" \
+    "RL_RUN_ID=${artifact_run_id}" \
     "EVAL_ARGS=${eval_args}" \
     2>&1 | tee -a "${console_log}"
 eval_pipeline=("${PIPESTATUS[@]}")
