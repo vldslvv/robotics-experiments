@@ -1,499 +1,369 @@
-"""Backend-neutral frozen transition for the ground-truth press task."""
+"""Backend-neutral frozen transition for the press approach curriculum stage."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Generic, TypeAlias, TypeVar
 
 import numpy as np
+import torch
+
+from robotics_experiments.config import (
+    PressApproachGoalConfig,
+    PressApproachRewardConfig,
+    PressApproachTerminationConfig,
+    PressApproachVelocityReferenceConfig,
+)
 
 __all__ = [
-    "PressRewardTerms",
-    "PressStepMetrics",
-    "PressTaskInput",
-    "PressTaskResult",
-    "PressTaskState",
-    "PressTerminationFlags",
-    "initial_press_task_state",
-    "reset_press_task_state",
-    "step_press_task",
+    "PressApproachInput",
+    "PressApproachResult",
+    "PressApproachRewardTerms",
+    "PressApproachState",
+    "PressApproachTerminationFlags",
+    "initial_press_approach_state",
+    "press_approach_goal_satisfied",
+    "press_approach_target_velocity",
+    "reset_press_approach_state",
+    "step_press_approach",
 ]
 
-_PHASE_PRECONTACT = 0
-_PHASE_CONTACT = 1
-_PHASE_TOGGLED = 2
+ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
+Scalar: TypeAlias = bool | int | float
+EnvironmentIndices: TypeAlias = Sequence[int] | np.ndarray | torch.Tensor
 
 
 @dataclass(frozen=True)
-class PressTaskState:
-    """Per-environment latch, phase, history, and evaluation progress."""
+class PressApproachState(Generic[ArrayT]):
+    """Batched approach memory.
 
-    press_steps: Any
-    toggle_latched: Any
-    lamp_state: Any
-    phase: Any
-    initial_range_m: Any
-    previous_range_m: Any
-    previous_button_position_m: Any
-    previous_compression_m: Any
-    previous_contact_flag: Any
-    previous_action: Any
-    first_contact_seen: Any
-    first_contact_stable: Any
-    toggle_time_s: Any
-    peak_compression_m: Any
-    retreat_stable_steps: Any
-    misalignment_steps: Any
+    Scalar fields have shape ``[N]`` and ``previous_action`` has shape
+    ``[N, action_dim]``.
+    """
+
+    previous_range_m: ArrayT
+    previous_action: ArrayT
+    stable_goal_steps: ArrayT
+    closest_range_m: ArrayT
 
 
 @dataclass(frozen=True)
-class PressTaskInput:
-    """One batched sample consumed by :func:`step_press_task`."""
+class PressApproachInput(Generic[ArrayT]):
+    """One batched physical sample consumed by :func:`step_press_approach`.
 
-    relative_switch_pos_m: Any
-    body_linear_velocity_mps: Any
-    body_angular_velocity_radps: Any
-    body_z_world_z: Any
-    altitude_m: Any
-    pusher_compression_m: Any
-    pusher_compression_rate_mps: Any
-    button_position_m: Any
-    button_rate_mps: Any
-    contact_flag: Any
-    action: Any
-    elapsed_s: Any
-    time_out: Any
+    Collision flags are privileged training facts latched across the preceding
+    policy interval. They are not part of :class:`PressApproachState` or the
+    policy observation.
+    """
 
-
-@dataclass(frozen=True)
-class PressRewardTerms:
-    """Named signed reward contributions and their total."""
-
-    alive: Any
-    stability: Any
-    approach: Any
-    gentle_contact: Any
-    compression_progress: Any
-    button_progress: Any
-    latch_progress: Any
-    toggle: Any
-    retreat: Any
-    retreat_alignment: Any
-    retreat_overspeed: Any
-    success: Any
-    action_energy: Any
-    action_delta: Any
-    contact_oscillation: Any
-    scraping: Any
-    misalignment: Any
-    failure: Any
-    timeout: Any
-    total: Any
+    relative_switch_pos_m: ArrayT
+    linear_velocity_mps: ArrayT
+    angular_velocity_radps: ArrayT
+    body_z_world_z: ArrayT
+    altitude_m: ArrayT
+    body_collision_flag: ArrayT
+    pusher_collision_flag: ArrayT
+    action: ArrayT
+    time_out: ArrayT
 
 
 @dataclass(frozen=True)
-class PressTerminationFlags:
-    """Distinct successful, failure, and timeout outcomes."""
+class PressApproachRewardTerms(Generic[ArrayT]):
+    """The nine signed per-step Stage 1 reward contributions."""
 
-    success: Any
-    crash: Any
-    altitude: Any
-    relative_envelope: Any
-    time_out: Any
-    terminated: Any
+    range_progress: ArrayT
+    alignment_error: ArrayT
+    velocity_tracking: ArrayT
+    upright_error: ArrayT
+    action_delta: ArrayT
+    success: ArrayT
+    collision: ArrayT
+    flight_failure: ArrayT
+    timeout: ArrayT
+
+    @property
+    def total(self) -> ArrayT:
+        """Sum every named reward contribution."""
+        return (
+            self.range_progress
+            + self.alignment_error
+            + self.velocity_tracking
+            + self.upright_error
+            + self.action_delta
+            + self.success
+            + self.collision
+            + self.flight_failure
+            + self.timeout
+        )
 
 
 @dataclass(frozen=True)
-class PressStepMetrics:
-    """Per-step facts accumulated by the rollout evaluator."""
+class PressApproachTerminationFlags(Generic[ArrayT]):
+    """Per-step success, failure, and truncation facts."""
 
-    toggled_this_step: Any
-    first_contact_this_step: Any
-    first_contact_stable: Any
-    toggle_time_s: Any
-    peak_compression_overshoot_m: Any
-    contacted: Any
-    toggled: Any
-    retreated: Any
+    success: ArrayT
+    body_collision: ArrayT
+    pusher_collision: ArrayT
+    crash: ArrayT
+    altitude: ArrayT
+    relative_envelope: ArrayT
+    time_out: ArrayT
+    terminated: ArrayT
+
+    @property
+    def flight_failure(self) -> ArrayT:
+        """Return raw flight-envelope failures, including collision-coincident ones."""
+        return self.crash | self.altitude | self.relative_envelope
+
+    @property
+    def collision(self) -> ArrayT:
+        """Return the combined privileged collision fact."""
+        return self.body_collision | self.pusher_collision
 
 
 @dataclass(frozen=True)
-class PressTaskResult:
-    """Successor state plus reward, termination, and metric outputs."""
+class PressApproachResult(Generic[ArrayT]):
+    """Successor state plus reward and termination records."""
 
-    state: PressTaskState
-    rewards: PressRewardTerms
-    termination: PressTerminationFlags
-    metrics: PressStepMetrics
-
-
-def _is_torch(value: Any) -> bool:
-    return type(value).__module__.startswith("torch")
+    state: PressApproachState[ArrayT]
+    rewards: PressApproachRewardTerms[ArrayT]
+    termination: PressApproachTerminationFlags[ArrayT]
 
 
-def _where(condition: Any, yes: Any, no: Any) -> Any:
-    if _is_torch(condition):
-        import torch
-
+def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
+    if isinstance(condition, torch.Tensor):
         return torch.where(condition, yes, no)
     return np.where(condition, yes, no)
 
 
-def _zeros_like(*, value: Any, boolean: bool = False, integer: bool = False) -> Any:
-    if _is_torch(value):
-        import torch
-
-        dtype = torch.bool if boolean else torch.long if integer else value.dtype
-        return torch.zeros_like(value, dtype=dtype)
-    dtype = bool if boolean else np.int64 if integer else None
-    return np.zeros_like(value, dtype=dtype)
+def _zeros_like(*, value: ArrayT, integer: bool = False) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return torch.zeros_like(value, dtype=torch.long if integer else value.dtype)
+    return np.zeros_like(value, dtype=np.int64 if integer else None)
 
 
-def _full_like(*, value: Any, fill: float, integer: bool = False) -> Any:
-    if _is_torch(value):
-        import torch
-
-        return torch.full_like(value, fill, dtype=torch.long if integer else value.dtype)
-    return np.full_like(value, fill, dtype=np.int64 if integer else None)
-
-
-def _norm(value: Any) -> Any:
-    if _is_torch(value):
-        import torch
-
+def _norm(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return torch.linalg.norm(value, dim=-1)
     return np.linalg.norm(value, axis=-1)
 
 
-def _mean_square(value: Any) -> Any:
-    if _is_torch(value):
+def _mean_square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.square().mean(dim=-1)
     return np.square(value).mean(axis=-1)
 
 
-def _square(value: Any) -> Any:
-    if _is_torch(value):
+def _sum_square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return value.square().sum(dim=-1)
+    return np.square(value).sum(axis=-1)
+
+
+def _square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.square()
     return np.square(value)
 
 
-def _maximum(value: Any, minimum: float) -> Any:
-    if _is_torch(value):
-        return value.clamp_min(minimum)
-    return np.maximum(value, minimum)
+def _clip(value: ArrayT, minimum: float, maximum: float) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return value.clamp(minimum, maximum)
+    return np.clip(value, minimum, maximum)
 
 
-def _minimum(value: Any, maximum: float) -> Any:
-    if _is_torch(value):
-        return value.clamp_max(maximum)
-    return np.minimum(value, maximum)
-
-
-def _elementwise_minimum(*, left: Any, right: Any) -> Any:
-    if _is_torch(left):
-        import torch
-
+def _minimum(left: ArrayT, right: ArrayT) -> ArrayT:
+    if isinstance(left, torch.Tensor):
         return torch.minimum(left, right)
     return np.minimum(left, right)
 
 
-def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> PressTaskState:
-    """Create a zero-progress state matching a NumPy or torch batch."""
-    zeros = _zeros_like(value=relative_switch_range_m)
-    false = _zeros_like(value=relative_switch_range_m, boolean=True)
-    integers = _zeros_like(value=relative_switch_range_m, integer=True)
-    return PressTaskState(
-        press_steps=integers,
-        toggle_latched=false,
-        lamp_state=false,
-        phase=integers,
-        initial_range_m=relative_switch_range_m,
+def initial_press_approach_state(
+    *,
+    relative_switch_range_m: ArrayT,
+    action: ArrayT,
+) -> PressApproachState[ArrayT]:
+    """Create zero progress matching a NumPy or torch batch."""
+    return PressApproachState(
         previous_range_m=relative_switch_range_m,
-        previous_button_position_m=zeros,
-        previous_compression_m=zeros,
-        previous_contact_flag=false,
         previous_action=_zeros_like(value=action),
-        first_contact_seen=false,
-        first_contact_stable=false,
-        toggle_time_s=_full_like(value=relative_switch_range_m, fill=-1.0),
-        peak_compression_m=zeros,
-        retreat_stable_steps=integers,
-        misalignment_steps=integers,
+        stable_goal_steps=_zeros_like(value=relative_switch_range_m, integer=True),
+        closest_range_m=relative_switch_range_m,
     )
 
 
-def reset_press_task_state(
-    *, state: PressTaskState, env_ids: Any, relative_switch_range_m: Any, action: Any
-) -> PressTaskState:
+def reset_press_approach_state(
+    *,
+    state: PressApproachState[ArrayT],
+    env_ids: EnvironmentIndices,
+    relative_switch_range_m: ArrayT,
+    action: ArrayT,
+) -> PressApproachState[ArrayT]:
     """Return ``state`` with only the selected environments reset."""
-    fresh = initial_press_task_state(
+    fresh = initial_press_approach_state(
         relative_switch_range_m=relative_switch_range_m,
         action=action,
     )
 
-    def replaced(current: Any, replacement: Any) -> Any:
-        successor = current.clone() if _is_torch(current) else current.copy()
+    def replaced(current: ArrayT, replacement: ArrayT) -> ArrayT:
+        if isinstance(current, torch.Tensor):
+            successor = current.clone()
+        else:
+            successor = current.copy()
         successor[env_ids] = replacement
         return successor
 
-    return PressTaskState(
+    return PressApproachState(
         **{
             field: replaced(getattr(state, field), getattr(fresh, field))
-            for field in PressTaskState.__dataclass_fields__
+            for field in PressApproachState.__dataclass_fields__
         }
     )
 
 
-def _advance_latch(
-    *, state: PressTaskState, button_position_m: Any, press_threshold_m: float, confirm_steps: int
-) -> tuple[Any, Any, Any, Any]:
-    """Vectorized twin of ``environment.apply_button_sample``."""
-    pressed = button_position_m >= press_threshold_m
-    press_steps = _where(
-        pressed,
-        state.press_steps + 1,
-        _zeros_like(value=state.press_steps),
+def press_approach_target_velocity(
+    *,
+    relative_switch_pos_m: ArrayT,
+    reference_cfg: PressApproachVelocityReferenceConfig,
+) -> ArrayT:
+    """Return the clipped three-axis contact-frame approach velocity."""
+    if isinstance(relative_switch_pos_m, torch.Tensor):
+        wall_normal = (
+            reference_cfg.wall_normal_gain_per_s
+            * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m)
+        ).clamp(
+            reference_cfg.wall_normal_min_mps,
+            reference_cfg.wall_normal_max_mps,
+        )
+        tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
+        tangential_norm = torch.linalg.norm(tangential, dim=-1)
+        denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
+        scale = reference_cfg.tangential_speed_max_mps / denominator
+        return torch.cat((wall_normal[..., None], tangential * scale[..., None]), dim=-1)
+    wall_normal = np.clip(
+        reference_cfg.wall_normal_gain_per_s
+        * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
+        reference_cfg.wall_normal_min_mps,
+        reference_cfg.wall_normal_max_mps,
     )
-    toggled = pressed & (press_steps >= confirm_steps) & ~state.toggle_latched
-    toggle_latched = _where(pressed, state.toggle_latched | toggled, False)
-    lamp_state = state.lamp_state ^ toggled
-    return press_steps, toggle_latched, lamp_state, toggled
+    tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
+    tangential_norm = np.linalg.norm(tangential, axis=-1)
+    denominator = np.maximum(
+        tangential_norm,
+        reference_cfg.tangential_speed_max_mps,
+    )
+    scale = reference_cfg.tangential_speed_max_mps / denominator
+    return np.concatenate(
+        (wall_normal[..., None], tangential * scale[..., None]),
+        axis=-1,
+    )
 
 
-def _termination(
-    *, sample: PressTaskInput, success: Any, termination_cfg: Any
-) -> PressTerminationFlags:
-    relative = sample.relative_switch_pos_m
+def press_approach_goal_satisfied(
+    *,
+    relative_switch_pos_m: ArrayT,
+    linear_velocity_mps: ArrayT,
+    angular_velocity_radps: ArrayT,
+    body_z_world_z: ArrayT,
+    contact_flag: ArrayT,
+    goal_cfg: PressApproachGoalConfig,
+) -> ArrayT:
+    """Return the shared per-sample stable-approach predicate."""
+    current_range = relative_switch_pos_m[..., 0]
+    return (
+        (current_range >= goal_cfg.range_min_m)
+        & (current_range <= goal_cfg.range_max_m)
+        & (_norm(relative_switch_pos_m[..., 1:3]) <= goal_cfg.alignment_error_max_m)
+        & (_norm(linear_velocity_mps) <= goal_cfg.linear_speed_max_mps)
+        & (_norm(angular_velocity_radps) <= goal_cfg.angular_speed_max_radps)
+        & (_clip(body_z_world_z, 0.0, 1.0) >= goal_cfg.body_z_alignment_min)
+        & ~contact_flag
+    )
+
+
+def step_press_approach(
+    *,
+    state: PressApproachState[ArrayT],
+    sample: PressApproachInput[ArrayT],
+    goal_cfg: PressApproachGoalConfig,
+    reward_cfg: PressApproachRewardConfig,
+    termination_cfg: PressApproachTerminationConfig,
+) -> PressApproachResult[ArrayT]:
+    """Advance the stable, contact-free approach objective exactly once."""
+    current_range = sample.relative_switch_pos_m[..., 0]
+    alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
+    upright_alignment = _clip(sample.body_z_world_z, 0.0, 1.0)
+    target_velocity = press_approach_target_velocity(
+        relative_switch_pos_m=sample.relative_switch_pos_m,
+        reference_cfg=goal_cfg.velocity_reference,
+    )
+
+    stable_goal = press_approach_goal_satisfied(
+        relative_switch_pos_m=sample.relative_switch_pos_m,
+        linear_velocity_mps=sample.linear_velocity_mps,
+        angular_velocity_radps=sample.angular_velocity_radps,
+        body_z_world_z=sample.body_z_world_z,
+        contact_flag=sample.pusher_collision_flag,
+        goal_cfg=goal_cfg,
+    )
+    stable_goal_steps = _where(
+        stable_goal,
+        state.stable_goal_steps + 1,
+        _zeros_like(value=state.stable_goal_steps),
+    )
+
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
     relative_envelope = (
-        (abs(relative[..., 0]) > termination_cfg.max_wall_normal_distance_m)
-        | (abs(relative[..., 1]) > termination_cfg.max_lateral_error_m)
-        | (abs(relative[..., 2]) > termination_cfg.max_vertical_error_m)
+        (abs(current_range) > termination_cfg.max_wall_normal_distance_m)
+        | (abs(sample.relative_switch_pos_m[..., 1]) > termination_cfg.max_lateral_error_m)
+        | (abs(sample.relative_switch_pos_m[..., 2]) > termination_cfg.max_vertical_error_m)
     )
-    success = success & ~crash & ~altitude & ~relative_envelope
-    terminated = success | crash | altitude | relative_envelope
-    return PressTerminationFlags(
+    flight_failure = crash | altitude | relative_envelope
+    collision = sample.body_collision_flag | sample.pusher_collision_flag
+    ordinary_flight_failure = flight_failure & ~collision
+    failure = collision | ordinary_flight_failure
+    success = (stable_goal_steps >= goal_cfg.stable_steps) & ~failure
+    terminated = success | failure
+    time_out = sample.time_out & ~terminated
+    termination = PressApproachTerminationFlags(
         success=success,
+        body_collision=sample.body_collision_flag,
+        pusher_collision=sample.pusher_collision_flag,
         crash=crash,
         altitude=altitude,
         relative_envelope=relative_envelope,
-        time_out=sample.time_out,
+        time_out=time_out,
         terminated=terminated,
     )
 
-
-def step_press_task(
-    *,
-    state: PressTaskState,
-    sample: PressTaskInput,
-    reward_cfg: Any,
-    termination_cfg: Any,
-    press_threshold_m: float,
-    confirm_steps: int,
-) -> PressTaskResult:
-    """Advance the latch, phase, reward, termination, and metrics exactly once."""
-    press_steps, toggle_latched, lamp_state, toggled = _advance_latch(
-        state=state,
-        button_position_m=sample.button_position_m,
-        press_threshold_m=press_threshold_m,
-        confirm_steps=confirm_steps,
-    )
-    current_range = sample.relative_switch_pos_m[..., 0]
-    lateral_error = _norm(sample.relative_switch_pos_m[..., 1:3])
-    linear_speed = _norm(sample.body_linear_velocity_mps)
-    angular_speed = _norm(sample.body_angular_velocity_radps)
-    first_contact = sample.contact_flag & ~state.first_contact_seen
-    first_contact_stable_now = (linear_speed <= termination_cfg.first_contact_speed_max_mps) & (
-        angular_speed <= termination_cfg.first_contact_angular_speed_max_radps
-    )
-    first_contact_seen = state.first_contact_seen | sample.contact_flag
-    first_contact_stable = state.first_contact_stable | (first_contact & first_contact_stable_now)
-    phase = _where(first_contact_seen, _PHASE_CONTACT, _PHASE_PRECONTACT)
-    first_toggle = toggled & (state.toggle_time_s < 0.0)
-    toggle_time = _where(
-        first_toggle,
-        sample.elapsed_s,
-        state.toggle_time_s,
-    )
-    phase = _where(toggle_time >= 0.0, _PHASE_TOGGLED, phase)
-    peak_compression = _where(
-        sample.pusher_compression_m > state.peak_compression_m,
-        sample.pusher_compression_m,
-        state.peak_compression_m,
-    )
-    misaligned = sample.contact_flag & (lateral_error > reward_cfg.misalignment_tolerance_m)
-    misalignment_steps = _where(
-        misaligned,
-        state.misalignment_steps + 1,
-        _zeros_like(value=state.misalignment_steps),
-    )
-    retreat_target = _maximum(state.initial_range_m, termination_cfg.retreat_distance_m)
-    retreat_candidate = (
-        (state.phase == _PHASE_TOGGLED)
-        & lamp_state
-        & ~sample.contact_flag
-        & (current_range >= retreat_target)
-        & (linear_speed <= termination_cfg.retreat_speed_max_mps)
-        & (lateral_error <= termination_cfg.retreat_alignment_tolerance_m)
-        & (angular_speed <= termination_cfg.retreat_angular_speed_max_radps)
-    )
-    retreat_stable_steps = _where(
-        retreat_candidate,
-        state.retreat_stable_steps + 1,
-        _zeros_like(value=state.retreat_stable_steps),
-    )
-    success = retreat_stable_steps >= termination_cfg.stable_retreat_steps
-    termination = _termination(
-        sample=sample,
-        success=success,
-        termination_cfg=termination_cfg,
-    )
-    success = termination.success
-
-    precontact = state.phase == _PHASE_PRECONTACT
-    contact_phase = (phase == _PHASE_CONTACT) & ~first_toggle
-    toggled_phase = state.phase == _PHASE_TOGGLED
-    approach_progress = state.previous_range_m - current_range
-    compression_progress = sample.pusher_compression_m - state.previous_compression_m
-    button_progress = sample.button_position_m - state.previous_button_position_m
-    latch_progress = (press_steps - state.press_steps) / confirm_steps
-    capped_range = _elementwise_minimum(left=current_range, right=retreat_target)
-    previous_capped_range = _elementwise_minimum(
-        left=state.previous_range_m,
-        right=retreat_target,
-    )
-    retreat_progress = capped_range - previous_capped_range
-    contact_changed = sample.contact_flag != state.previous_contact_flag
-    scraping_speed = _norm(sample.body_linear_velocity_mps[..., 1:3])
-
-    alive = _full_like(value=current_range, fill=reward_cfg.alive_weight)
-    upright_alignment = _minimum(_maximum(sample.body_z_world_z, 0.0), 1.0)
-    stability = -reward_cfg.stability_weight * _square(1.0 - upright_alignment)
-    approach = reward_cfg.approach_progress_weight * approach_progress * precontact
-    gentle_contact_stable = first_contact_stable_now & (
-        linear_speed <= reward_cfg.gentle_contact_speed_max_mps
-    )
-    gentle_contact = (
-        reward_cfg.gentle_contact_weight
-        * first_contact
-        * _where(
-            gentle_contact_stable,
-            1.0,
-            -1.0,
-        )
-    )
-    compression_term = reward_cfg.compression_progress_weight * compression_progress * contact_phase
-    button_term = reward_cfg.button_progress_weight * button_progress * contact_phase
-    latch_term = reward_cfg.latch_progress_weight * latch_progress * (state.toggle_time_s < 0.0)
-    # Generic contact never earns this reward: only the N-step button latch can.
-    toggle = reward_cfg.toggle_weight * first_toggle
-    retreat = reward_cfg.retreat_progress_weight * retreat_progress * toggled_phase
-    retreat_alignment = (
-        -reward_cfg.retreat_alignment_weight * _square(lateral_error) * toggled_phase
-    )
-    retreat_overspeed = (
-        -reward_cfg.retreat_overspeed_weight
-        * _maximum(linear_speed - termination_cfg.retreat_speed_max_mps, 0.0) ** 2
-        * toggled_phase
-    )
-    success_term = reward_cfg.success_weight * success
-    action_energy = -reward_cfg.action_energy_weight * _mean_square(sample.action)
-    action_delta = -reward_cfg.action_delta_weight * _mean_square(
-        sample.action - state.previous_action
-    )
-    contact_oscillation = (
-        -reward_cfg.contact_oscillation_weight * contact_changed * state.first_contact_seen
-    )
-    scraping = -reward_cfg.scraping_weight * scraping_speed * sample.contact_flag
-    misalignment = (
-        -reward_cfg.misalignment_weight
-        * _maximum(lateral_error - reward_cfg.misalignment_tolerance_m, 0.0)
-        * (misalignment_steps >= confirm_steps)
-    )
-    failure = -reward_cfg.failure_weight * (
-        termination.crash | termination.altitude | termination.relative_envelope
-    )
-    timeout = -reward_cfg.timeout_weight * sample.time_out
-    total = (
-        alive
-        + stability
-        + approach
-        + gentle_contact
-        + compression_term
-        + button_term
-        + latch_term
-        + toggle
-        + retreat
-        + retreat_alignment
-        + retreat_overspeed
-        + success_term
-        + action_energy
-        + action_delta
-        + contact_oscillation
-        + scraping
-        + misalignment
-        + failure
-        + timeout
-    )
-    rewards = PressRewardTerms(
-        alive=alive,
-        stability=stability,
-        approach=approach,
-        gentle_contact=gentle_contact,
-        compression_progress=compression_term,
-        button_progress=button_term,
-        latch_progress=latch_term,
-        toggle=toggle,
-        retreat=retreat,
-        retreat_alignment=retreat_alignment,
-        retreat_overspeed=retreat_overspeed,
-        success=success_term,
-        action_energy=action_energy,
-        action_delta=action_delta,
-        contact_oscillation=contact_oscillation,
-        scraping=scraping,
-        misalignment=misalignment,
-        failure=failure,
-        timeout=timeout,
-        total=total,
-    )
-    successor = PressTaskState(
-        press_steps=press_steps,
-        toggle_latched=toggle_latched,
-        lamp_state=lamp_state,
-        phase=phase,
-        initial_range_m=state.initial_range_m,
-        previous_range_m=current_range,
-        previous_button_position_m=sample.button_position_m,
-        previous_compression_m=sample.pusher_compression_m,
-        previous_contact_flag=sample.contact_flag,
-        previous_action=sample.action,
-        first_contact_seen=first_contact_seen,
-        first_contact_stable=first_contact_stable,
-        toggle_time_s=toggle_time,
-        peak_compression_m=peak_compression,
-        retreat_stable_steps=retreat_stable_steps,
-        misalignment_steps=misalignment_steps,
-    )
-    metrics = PressStepMetrics(
-        toggled_this_step=first_toggle,
-        first_contact_this_step=first_contact,
-        first_contact_stable=first_contact_stable,
-        toggle_time_s=toggle_time,
-        peak_compression_overshoot_m=_maximum(
-            peak_compression
-            - reward_cfg.compression_target_m
-            - reward_cfg.compression_overshoot_tolerance_m,
-            0.0,
+    rewards = PressApproachRewardTerms(
+        range_progress=(
+            reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
-        contacted=first_contact_seen,
-        toggled=toggle_time >= 0.0,
-        retreated=success,
+        alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
+        velocity_tracking=(
+            -reward_cfg.velocity_tracking_weight
+            * _sum_square(sample.linear_velocity_mps - target_velocity)
+        ),
+        upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
+        action_delta=(
+            -reward_cfg.action_delta_weight * _mean_square(sample.action - state.previous_action)
+        ),
+        success=reward_cfg.success_weight * success,
+        collision=-reward_cfg.collision_weight * collision,
+        flight_failure=-reward_cfg.flight_failure_weight * ordinary_flight_failure,
+        timeout=-reward_cfg.timeout_weight * time_out,
     )
-    return PressTaskResult(
+    successor = PressApproachState(
+        previous_range_m=current_range,
+        previous_action=sample.action,
+        stable_goal_steps=stable_goal_steps,
+        closest_range_m=_minimum(state.closest_range_m, current_range),
+    )
+    return PressApproachResult(
         state=successor,
         rewards=rewards,
         termination=termination,
-        metrics=metrics,
     )

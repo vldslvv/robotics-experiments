@@ -271,10 +271,13 @@ RUN git clone https://github.com/isaac-sim/IsaacLab.git /isaac-lab \
       --no-build-isolation \
       -r /tmp/isaac-lab-requirements.txt \
  && /isaac-sim/python.sh -m pip install --disable-pip-version-check --no-deps \
-      --no-build-isolation -e source/isaaclab -e source/isaaclab_rl \
+      --no-build-isolation \
+      -e source/isaaclab \
+      -e source/isaaclab_contrib \
+      -e source/isaaclab_rl \
  && rm /tmp/isaac-lab-requirements.txt \
  && /isaac-sim/python.sh -c \
-      "import flatdict, gymnasium, isaaclab, isaaclab_rl, rsl_rl; print('isaaclab OK:', isaaclab.__file__)"
+      "import flatdict, gymnasium, isaaclab, isaaclab_contrib, isaaclab_rl, rsl_rl; print('isaaclab OK:', isaaclab.__file__)"
 
 
 # PX4 SITL stands in for the flight controller on a real drone; kept in its own

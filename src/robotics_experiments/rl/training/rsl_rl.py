@@ -1,34 +1,59 @@
 """rsl_rl training adapter: the ONLY module importing ``rsl_rl``.
 
 Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
-``isaaclab.sh --install``); it is never imported on the core path (the lazy
-``robotics_experiments.rl`` package root defers it). The package-root contract --
+``isaaclab.sh --install``); it is never imported on the core path. The ordinary
+``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
+deferred until the application is running. The package-root contract --
 ``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
-``export_policy`` plus ``TrainingResult`` over a private runner Protocol -- is what a future
-``skrl.py`` / ``rl_games.py`` re-implements.
+``initialize_actor_output`` / ``initialize_actor_from_checkpoint`` /
+``export_policy`` plus ``TrainingResult``
+over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
+re-implements.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+import torch
+from rsl_rl.runners import OnPolicyRunner
+
+from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig
+from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
+
+if TYPE_CHECKING:
+    from isaaclab.envs import DirectRLEnv
 
 __all__ = [
     "TrainingResult",
     "build_runner",
     "deterministic_actor",
     "export_policy",
+    "initialize_actor_from_checkpoint",
+    "initialize_actor_output",
     "load_checkpoint",
     "train",
 ]
 
 
+class _ActorCritic(Protocol):
+    actor: torch.nn.Module
+
+
+class _Algorithm(Protocol):
+    policy: _ActorCritic
+    actor_critic: _ActorCritic
+
+
 class _PolicyRunner(Protocol):
     """The runner surface the adapter contract relies on."""
 
-    alg: Any
+    alg: _Algorithm
+    log_dir: str
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -39,7 +64,7 @@ class _PolicyRunner(Protocol):
         path: str,
         load_optimizer: bool = True,
         map_location: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Restore a runner checkpoint."""
         del path, load_optimizer, map_location
         return {}
@@ -53,50 +78,67 @@ class TrainingResult:
     log_dir: str
 
 
-def _train_cfg(training_cfg: Any) -> dict[str, Any]:
-    """Map ``RlTrainingConfig`` onto the rsl_rl OnPolicyRunner cfg dict."""
+def _train_cfg(
+    *, training_config: RlTrainingConfig, policy_config: RlPolicyConfig
+) -> dict[str, Any]:
+    """Map PPO and task-owned policy config onto the rsl_rl runner dict."""
     return {
         # Single observation group: the env emits {"policy": tensor} and the
         # critic shares it (no privileged observations yet).
         "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
-        "num_steps_per_env": int(training_cfg.num_steps_per_env),
-        "save_interval": int(training_cfg.save_interval),
+        "num_steps_per_env": int(training_config.num_steps_per_env),
+        "save_interval": int(training_config.save_interval),
         "empirical_normalization": False,
         "policy": {
             "class_name": "ActorCritic",
-            "init_noise_std": float(training_cfg.init_noise_std),
+            "init_noise_std": float(policy_config.actor.initial_noise_std),
             "noise_std_type": "scalar",
             "actor_obs_normalization": False,
             "critic_obs_normalization": False,
-            "actor_hidden_dims": [int(d) for d in training_cfg.actor_hidden_dims],
-            "critic_hidden_dims": [int(d) for d in training_cfg.critic_hidden_dims],
-            "activation": str(training_cfg.activation),
+            "actor_hidden_dims": [int(d) for d in policy_config.actor.hidden_dims],
+            "critic_hidden_dims": [int(d) for d in policy_config.critic.hidden_dims],
+            "activation": str(policy_config.activation),
         },
         "algorithm": {
             "class_name": "PPO",
-            "learning_rate": float(training_cfg.learning_rate),
-            "schedule": "adaptive",
-            "gamma": float(training_cfg.gamma),
-            "lam": float(training_cfg.lam),
-            "entropy_coef": float(training_cfg.entropy_coef),
-            "clip_param": float(training_cfg.clip_param),
-            "value_loss_coef": float(training_cfg.value_loss_coef),
+            "learning_rate": float(training_config.learning_rate),
+            "schedule": str(training_config.schedule),
+            "gamma": float(training_config.gamma),
+            "lam": float(training_config.lam),
+            "entropy_coef": float(training_config.entropy_coef),
+            "clip_param": float(training_config.clip_param),
+            "value_loss_coef": float(training_config.value_loss_coef),
             "use_clipped_value_loss": True,
-            "num_learning_epochs": int(training_cfg.num_learning_epochs),
-            "num_mini_batches": int(training_cfg.num_mini_batches),
-            "desired_kl": float(training_cfg.desired_kl),
-            "max_grad_norm": float(training_cfg.max_grad_norm),
+            "num_learning_epochs": int(training_config.num_learning_epochs),
+            "num_mini_batches": int(training_config.num_mini_batches),
+            "desired_kl": float(training_config.desired_kl),
+            "max_grad_norm": float(training_config.max_grad_norm),
         },
     }
 
 
-def build_runner(env: Any, training_cfg: Any, *, log_dir: str, device: str) -> _PolicyRunner:
+def build_runner(
+    *,
+    env: DirectRLEnv,
+    training_config: RlTrainingConfig,
+    policy_config: RlPolicyConfig,
+    log_dir: str,
+    device: str,
+) -> _PolicyRunner:
     """Wrap a DirectRLEnv for rsl_rl and build the OnPolicyRunner."""
+    # Isaac Lab must be imported only after AppLauncher starts.
     from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
-    from rsl_rl.runners import OnPolicyRunner
 
     wrapped = RslRlVecEnvWrapper(env, clip_actions=1.0)
-    return OnPolicyRunner(wrapped, _train_cfg(training_cfg), log_dir=log_dir, device=device)
+    return OnPolicyRunner(
+        wrapped,
+        _train_cfg(
+            training_config=training_config,
+            policy_config=policy_config,
+        ),
+        log_dir=log_dir,
+        device=device,
+    )
 
 
 def train(runner: _PolicyRunner, iterations: int) -> TrainingResult:
@@ -114,15 +156,70 @@ def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str
     )
 
 
-def _actor_module(runner: _PolicyRunner) -> Any:
+def _policy_module(runner: _PolicyRunner) -> _ActorCritic:
     # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
     policy = getattr(runner.alg, "policy", None)
-    if policy is None:
-        policy = runner.alg.actor_critic
-    return policy.actor
+    return policy if policy is not None else runner.alg.actor_critic
 
 
-def deterministic_actor(*, runner: _PolicyRunner) -> Any:
+def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
+    """Apply a task-neutral near-zero initialization to the actor output."""
+    if method != "scratch-neutral-output":
+        raise ValueError(f"unsupported actor output initialization {method!r}")
+    actor = _policy_module(runner).actor
+    output_layers = tuple(
+        module for module in actor.modules() if isinstance(module, torch.nn.Linear)
+    )
+    if not output_layers:
+        raise ValueError("actor has no linear output layer")
+    output = output_layers[-1]
+    torch.nn.init.orthogonal_(output.weight, gain=0.01)
+    if output.bias is not None:
+        torch.nn.init.zeros_(output.bias)
+
+
+def initialize_actor_from_checkpoint(
+    *,
+    runner: _PolicyRunner,
+    checkpoint_path: Path,
+    device: str,
+) -> None:
+    """Load only compatible actor parameters into a freshly built runner.
+
+    The critic, action standard deviation, optimizer, and runner iteration are
+    deliberately left exactly as initialized by ``build_runner``.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model_state = checkpoint.get("model_state_dict")
+    if not isinstance(model_state, dict):
+        raise ValueError(f"checkpoint {checkpoint_path} has no model_state_dict")
+    source_actor = {
+        name.removeprefix("actor."): value
+        for name, value in model_state.items()
+        if name.startswith("actor.")
+    }
+    target_actor = _policy_module(runner).actor
+    target_state = target_actor.state_dict()
+    if source_actor.keys() != target_state.keys():
+        raise ValueError("initialization checkpoint actor architecture is incompatible")
+    incompatible_shapes = {
+        name: (tuple(source_actor[name].shape), tuple(target.shape))
+        for name, target in target_state.items()
+        if source_actor[name].shape != target.shape
+    }
+    if incompatible_shapes:
+        raise ValueError(
+            "initialization checkpoint observation/action dimensions or actor "
+            f"architecture are incompatible: {incompatible_shapes}"
+        )
+    target_actor.load_state_dict(source_actor, strict=True)
+
+
+def _actor_module(runner: _PolicyRunner) -> torch.nn.Module:
+    return _policy_module(runner).actor
+
+
+def deterministic_actor(*, runner: _PolicyRunner) -> torch.nn.Module:
     """Return the checkpoint-loaded actor mean in evaluation mode."""
     actor = _actor_module(runner)
     actor.eval()
@@ -136,12 +233,6 @@ def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, A
     ``[N, action_dim]`` action mean (deterministic inference); the metadata is
     the runtime policy-step loader validates at load time.
     """
-    import copy
-
-    import torch
-
-    from robotics_experiments.rl.press import METADATA_FILENAME, POLICY_FILENAME
-
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     actor = copy.deepcopy(_actor_module(runner)).to("cpu").eval()

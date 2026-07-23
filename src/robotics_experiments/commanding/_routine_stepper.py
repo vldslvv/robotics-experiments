@@ -7,8 +7,10 @@ import numpy as np
 from robotics_experiments._cadence import _advance_cadence, _CadenceState
 from robotics_experiments.commanding._routine_model import (
     FailureKind,
+    PolicyInput,
     RoutineDecision,
     RoutineState,
+    RoutineStep,
     StreamSetpoint,
     VehicleRoutine,
     _OffboardState,
@@ -27,7 +29,7 @@ def _anchored_cadence(*, sim_time_us: int) -> _CadenceState:
     return _CadenceState(previous_time_ns=sim_time_us * 1_000)
 
 
-def _advanced(*, state: RoutineState, policy_progress=None) -> RoutineState:
+def _advanced(*, state: RoutineState, policy_state: Optional[object] = None) -> RoutineState:
     """Advance without interrupting a compatible OFFBOARD stream."""
     return replace(
         state,
@@ -36,15 +38,57 @@ def _advanced(*, state: RoutineState, policy_progress=None) -> RoutineState:
         baseline_position_enu=None,
         step_started_us=None,
         hold_since_us=None,
+        guided_confirmation_sent=False,
         offboard=replace(
             state.offboard,
-            policy_progress=None,
+            policy_state=None,
+            policy_reference_position_enu=(math.nan, math.nan, math.nan),
             policy_complete=False,
             policy_failure_reason=None,
         ),
-        last_policy_progress=(
-            state.last_policy_progress if policy_progress is None else policy_progress
+        last_policy_state=(state.last_policy_state if policy_state is None else policy_state),
+    )
+
+
+def _command_for_step(
+    *,
+    step: RoutineStep,
+    baseline: Optional[np.ndarray],
+) -> Optional[MavlinkCommand]:
+    command = step.command
+    if command is None or step.guided is None or baseline is None:
+        return command
+    east, north, _up = step.guided.target_enu
+    de = east - float(baseline[0])
+    dn = north - float(baseline[1])
+    yaw_rad = math.nan
+    if math.hypot(de, dn) >= step.guided.min_heading_dist_m:
+        yaw_rad = math.atan2(de, dn)
+    params = command.params
+    return replace(
+        command,
+        params=(
+            params[0],
+            params[1],
+            params[2],
+            yaw_rad,
+            params[4],
+            params[5],
+            params[6],
         ),
+    )
+
+
+def _policy_input(
+    *,
+    reference_position_enu: tuple[float, float, float],
+    observation: RoutineObservation,
+) -> PolicyInput:
+    return PolicyInput(
+        vehicle_state=observation.vehicle_state,
+        sim_time_us=int(observation.sim_time_us),
+        task_observation=observation.task_observation,
+        reference_position_enu=reference_position_enu,
     )
 
 
@@ -53,37 +97,45 @@ def _advance_stream_cadences(
     routine: VehicleRoutine,
     offboard: _OffboardState,
     spec: Optional[_StreamingSpec],
-    baseline: Optional[np.ndarray],
     observation: RoutineObservation,
     requested: bool,
     accepted: bool,
     prime_ticks: int,
     command: Optional[MavlinkCommand],
     retry_deferred: bool,
-) -> tuple[_OffboardState, Optional[StreamSetpoint], Optional[MavlinkCommand]]:
+) -> tuple[
+    _OffboardState,
+    Optional[StreamSetpoint],
+    Optional[MavlinkCommand],
+    tuple[str, ...],
+]:
     """Calculate one OFFBOARD successor plus independent wire effects."""
     now_ns = int(observation.sim_time_us) * 1_000
     policy_cadence = offboard.policy_cadence
     cached_setpoint = offboard.cached_setpoint
-    policy_progress = offboard.policy_progress
+    policy_state = offboard.policy_state
     policy_complete = offboard.policy_complete
     policy_failure_reason = offboard.policy_failure_reason
+    diagnostics: tuple[str, ...] = ()
     if spec is not None and spec.policy is not None:
         policy_cadence, policy_due = _advance_cadence(
             state=policy_cadence,
             time_ns=now_ns,
-            rate_hz=spec.policy.rate_hz,
+            rate_hz=spec.policy.policy_rate_hz,
         )
         if policy_due:
-            result = spec.policy.step(
-                observation,
-                baseline,
-                (spec.policy.initial_progress if policy_progress is None else policy_progress),
+            result = spec.policy.advance(
+                policy_input=_policy_input(
+                    reference_position_enu=offboard.policy_reference_position_enu,
+                    observation=observation,
+                ),
+                state=spec.policy.initial_state if policy_state is None else policy_state,
             )
             cached_setpoint = result.setpoint
-            policy_progress = result.progress
+            policy_state = result.state
             policy_complete = result.complete
             policy_failure_reason = result.failure_reason
+            diagnostics = result.diagnostics
     assert cached_setpoint is not None
 
     transmitter_cadence, transmit_due = _advance_cadence(
@@ -104,11 +156,12 @@ def _advance_stream_cadences(
         cached_setpoint=cached_setpoint,
         requested=requested,
         accepted=accepted,
-        policy_progress=policy_progress,
+        policy_state=policy_state,
+        policy_reference_position_enu=offboard.policy_reference_position_enu,
         policy_complete=policy_complete,
         policy_failure_reason=policy_failure_reason,
     )
-    return successor, cached_setpoint if transmit_due else None, command_effect
+    return successor, cached_setpoint if transmit_due else None, command_effect, diagnostics
 
 
 def _enter_stream(
@@ -119,25 +172,42 @@ def _enter_stream(
     baseline: np.ndarray,
     observation: RoutineObservation,
     command: Optional[MavlinkCommand],
-) -> tuple[_OffboardState, Optional[StreamSetpoint], Optional[MavlinkCommand]]:
+) -> tuple[
+    _OffboardState,
+    Optional[StreamSetpoint],
+    Optional[MavlinkCommand],
+    tuple[str, ...],
+]:
     """Enter a streaming step without resetting an active OFFBOARD phase."""
     now_us = int(observation.sim_time_us)
+    policy_reference_position_enu = offboard.policy_reference_position_enu
+    if spec.policy is not None:
+        policy_reference_position_enu = (
+            (float(baseline[0]), float(baseline[1]), float(baseline[2]))
+            if spec.policy_reference_is_entry
+            else spec.policy_reference_position_enu
+        )
     if offboard.cached_setpoint is None:
         if spec.policy is None:
             setpoint = _setpoint_for(spec=spec, baseline=baseline)
-            policy_progress = None
+            policy_state = None
             policy_complete = False
             policy_failure_reason = None
         else:
-            result = spec.policy.step(
-                observation,
-                baseline,
-                spec.policy.initial_progress,
+            result = spec.policy.advance(
+                policy_input=_policy_input(
+                    reference_position_enu=policy_reference_position_enu,
+                    observation=observation,
+                ),
+                state=spec.policy.initial_state,
             )
             setpoint = result.setpoint
-            policy_progress = result.progress
+            policy_state = result.state
             policy_complete = result.complete
             policy_failure_reason = result.failure_reason
+            diagnostics = result.diagnostics
+        if spec.policy is None:
+            diagnostics = ()
         transmitter_cadence = _anchored_cadence(sim_time_us=now_us)
         policy_cadence = transmitter_cadence if spec.policy is not None else _CadenceState()
         requested = spec.prime_ticks <= 1
@@ -148,28 +218,51 @@ def _enter_stream(
             cached_setpoint=setpoint,
             requested=requested,
             accepted=False,
-            policy_progress=policy_progress,
+            policy_state=policy_state,
+            policy_reference_position_enu=policy_reference_position_enu,
             policy_complete=policy_complete,
             policy_failure_reason=policy_failure_reason,
         )
-        return successor, setpoint, command if requested else None
+        return successor, setpoint, command if requested else None, diagnostics
 
     if spec.policy is None:
         offboard = replace(
             offboard,
             cached_setpoint=_setpoint_for(spec=spec, baseline=baseline),
         )
-    return _advance_stream_cadences(
+    else:
+        result = spec.policy.advance(
+            policy_input=_policy_input(
+                reference_position_enu=policy_reference_position_enu,
+                observation=observation,
+            ),
+            state=spec.policy.initial_state,
+        )
+        offboard = replace(
+            offboard,
+            policy_cadence=_anchored_cadence(sim_time_us=now_us),
+            cached_setpoint=result.setpoint,
+            policy_state=result.state,
+            policy_reference_position_enu=policy_reference_position_enu,
+            policy_complete=result.complete,
+            policy_failure_reason=result.failure_reason,
+        )
+    successor, setpoint, command_effect, diagnostics = _advance_stream_cadences(
         routine=routine,
         offboard=offboard,
         spec=spec,
-        baseline=baseline,
         observation=observation,
         requested=offboard.requested,
         accepted=offboard.accepted,
         prime_ticks=spec.prime_ticks,
         command=command,
         retry_deferred=False,
+    )
+    return (
+        successor,
+        setpoint,
+        command_effect,
+        result.diagnostics if spec.policy is not None else diagnostics,
     )
 
 
@@ -186,9 +279,10 @@ def _enter_step(
 
     offboard = state.offboard
     setpoint = None
-    command = step.command
+    command = _command_for_step(step=step, baseline=baseline)
+    diagnostics: tuple[str, ...] = ()
     if step.streaming is not None:
-        offboard, setpoint, command = _enter_stream(
+        offboard, setpoint, command, diagnostics = _enter_stream(
             routine=routine,
             offboard=offboard,
             spec=step.streaming,
@@ -199,11 +293,10 @@ def _enter_step(
     elif step.command is not None:
         offboard = _OffboardState()
     elif offboard.cached_setpoint is not None:
-        offboard, setpoint, _ = _advance_stream_cadences(
+        offboard, setpoint, _, diagnostics = _advance_stream_cadences(
             routine=routine,
             offboard=offboard,
             spec=None,
-            baseline=baseline,
             observation=observation,
             requested=offboard.requested,
             accepted=offboard.accepted,
@@ -220,7 +313,11 @@ def _enter_step(
         hold_since_us=None,
         offboard=offboard,
     )
-    return entered, RoutineDecision.continue_(setpoint=setpoint, command=command)
+    return entered, RoutineDecision.continue_(
+        setpoint=setpoint,
+        command=command,
+        diagnostics=diagnostics,
+    )
 
 
 def decide(
@@ -263,7 +360,7 @@ def decide(
         if step.hold_s <= 0.0:
             return _advanced(
                 state=state,
-                policy_progress=(state.offboard.policy_progress if policy_complete else None),
+                policy_state=(state.offboard.policy_state if policy_complete else None),
             ), RoutineDecision.advance()
         hold_since_us = state.hold_since_us
         if hold_since_us is None:
@@ -290,10 +387,32 @@ def decide(
         and not ack.accepted
     ):
         if step.retry_on_temporarily_rejected and ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
-            return state, RoutineDecision.continue_(command=step.command)
+            return state, RoutineDecision.continue_(
+                command=_command_for_step(
+                    step=step,
+                    baseline=state.baseline_position_enu,
+                )
+            )
         return state, RoutineDecision.fail(
             f"step {step.label!r} rejected: command={step.command.command_id} result={ack.result}",
             failure_kind=FailureKind.COMMAND,
+        )
+    if (
+        ack is not None
+        and ack.accepted
+        and step.guided is not None
+        and step.command is not None
+        and ack.command_id == step.command.command_id
+        and not state.guided_confirmation_sent
+    ):
+        return replace(
+            state,
+            guided_confirmation_sent=True,
+        ), RoutineDecision.continue_(
+            command=_command_for_step(
+                step=step,
+                baseline=state.baseline_position_enu,
+            )
         )
 
     step_started_us = state.step_started_us
@@ -307,11 +426,10 @@ def decide(
         )
 
     if step.command is None and state.offboard.cached_setpoint is not None:
-        offboard, setpoint, _ = _advance_stream_cadences(
+        offboard, setpoint, _, diagnostics = _advance_stream_cadences(
             routine=routine,
             offboard=state.offboard,
             spec=None,
-            baseline=state.baseline_position_enu,
             observation=observation,
             requested=state.offboard.requested,
             accepted=state.offboard.accepted,
@@ -320,7 +438,10 @@ def decide(
             retry_deferred=True,
         )
         successor = state if offboard == state.offboard else replace(state, offboard=offboard)
-        return successor, RoutineDecision.continue_(setpoint=setpoint)
+        return successor, RoutineDecision.continue_(
+            setpoint=setpoint,
+            diagnostics=diagnostics,
+        )
     return state, RoutineDecision.continue_()
 
 
@@ -337,7 +458,7 @@ def _decide_streaming(
     elapsed_us = int(observation.sim_time_us) - step_started_us
     if elapsed_us > step.timeout_s * 1_000_000:
         if spec.policy is not None:
-            detail = f"policy did not complete; policy progress={state.offboard.policy_progress!r}"
+            detail = f"policy did not complete; policy state={state.offboard.policy_state!r}"
         else:
             detail = "did not reach the waypoint"
         return state, RoutineDecision.fail(
@@ -372,11 +493,10 @@ def _decide_streaming(
                     failure_kind=FailureKind.COMMAND,
                 )
 
-    offboard, setpoint, command = _advance_stream_cadences(
+    offboard, setpoint, command, diagnostics = _advance_stream_cadences(
         routine=routine,
         offboard=state.offboard,
         spec=spec,
-        baseline=state.baseline_position_enu,
         observation=observation,
         requested=requested,
         accepted=accepted,
@@ -388,7 +508,11 @@ def _decide_streaming(
         successor = state
     else:
         successor = replace(state, offboard=offboard, hold_since_us=hold_since_us)
-    return successor, RoutineDecision.continue_(setpoint=setpoint, command=command)
+    return successor, RoutineDecision.continue_(
+        setpoint=setpoint,
+        command=command,
+        diagnostics=diagnostics,
+    )
 
 
 def _setpoint_for(

@@ -57,6 +57,13 @@ exactly one `RoutineDriverState`; empty `steps` follows the normal driver
 lifecycle, sends no commands, and completes. Routine descriptors use the typed
 `RoutineStepConfig` mapping and are validated by the routine builder.
 
+A `goto` descriptor may author a finite positive `ground_speed_m_s`. That form
+uses PX4's guided `MAV_CMD_DO_REPOSITION` speed parameter, so PX4 owns trajectory
+generation and braking; it is a target speed rather than a hard velocity limit.
+A `goto` without the field retains the original streamed OFFBOARD lifecycle.
+Future motion controls remain typed sibling fields rather than an untyped
+parameter map.
+
 Strict integration runs execute the same routines as live runs; only failure
 reporting differs. `routine.failure_recovery_timeout_s` bounds layered landing
 recovery after an armed failure. Fleet-wide waits derive from the active
@@ -78,7 +85,46 @@ is constructed. PX4 `bridge.enabled` does not affect Lab because Lab bypasses PX
 
 `rl.lab_vehicle` owns Lab-only spawn height, rigid-body velocity caps, and
 pusher effort/velocity limits. Pusher stiffness and damping are inherited from
-the generated vehicle USD. `rl.press` owns the press reward, reset geometry,
-contact threshold, termination envelopes, deterministic evaluation seeds/count,
-and acceptance targets. `configs/train_press_quad.yaml` selects the press task,
-the `press` artifact namespace, ten-second episodes, and its PPO settings.
+the generated vehicle USD. `rl.hover` owns the hover task definition and its
+`policy`; `rl.press` composes the named `approach` curriculum option and owns
+its separate `policy`.
+Each policy contains a shared activation, actor hidden dimensions, initial
+noise, output initialization, and critic hidden dimensions. Hidden dimensions
+must be positive, the activation must be non-empty, initial noise must be
+finite and non-negative, and the output initialization is
+`scratch-neutral-output`.
+
+`rl.press.curriculum_stage` is required and currently accepts only `approach`.
+`handoff` owns the single actor-entry envelope used by both Lab reset and live
+deployment; `goal` owns the stable range/alignment/speed/upright predicate and
+three-axis velocity reference; `reward` owns the nine non-negative reward
+magnitudes; `reset` owns only the physical scene; `termination` owns contact
+sensing and flight envelopes; and `evaluation` owns deterministic seeds/count
+plus the 95% success and 1% maximum-contact gates. Independent reset
+velocity/range tunables are intentionally absent so training and deployment
+cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
+bounds, negative or non-finite reward weights, invalid rates, and unknown
+stages fail during `load_config`.
+
+`rl.training` owns the explicit `scratch` / `actor-only` training mode, PPO
+optimization, rollout, checkpoint cadence, task selection, artifact namespace,
+seed settings, and
+`alignment_artifact`. The latter defaults to
+`.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
+constructed. `ALIGNMENT_ARTIFACT` or the training CLI override selects an exact
+run for reproduction.
+
+`rl.action` is task-neutral and contains only normalized action kind,
+dimension, and scales. Controller gains, command delay, maximum tilt, and
+thruster response are not Hydra RL tunables; they are complete
+`ControllerSettings` loaded from alignment and embedded in policy metadata.
+New runs capture both the task contract and alignment provenance before PPO,
+then automatically evaluate every checkpoint and publish the chosen actor.
+`rl.press.evaluation` owns the held-out metric name, penalties, continuous
+quality weights, seeds, workload size, and advisory thresholds. `latest`
+always advances after successful selection; `best` advances only for a
+strictly higher comparable score. Manual export reloads the stored contract
+without optimizer state and publishes neither label. Only the actor is
+exported.
+`configs/train_press_approach_quad.yaml` selects the press task, the
+`press-approach` artifact namespace, ten-second episodes, and its PPO settings.

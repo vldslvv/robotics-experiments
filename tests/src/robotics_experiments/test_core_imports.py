@@ -1,5 +1,6 @@
 import importlib
 import importlib.abc
+import subprocess
 import sys
 import tomllib
 
@@ -28,8 +29,8 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
     # state into other tests (some mock module-level state by import).
     saved_modules = dict(sys.modules)
     try:
-        _drop_modules("carb", "pxr", "isaacsim", "torch", "robotics_experiments")
-        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim", "torch"})
+        _drop_modules("carb", "omni", "pxr", "isaacsim", "isaaclab", "robotics_experiments")
+        blocker = _BlockedDependencyFinder({"carb", "omni", "pxr", "isaacsim", "isaaclab"})
         monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
         importlib.import_module("robotics_experiments")
@@ -56,6 +57,15 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         simulation = importlib.import_module("robotics_experiments.simulation")
         assert simulation.__all__ == ["apply_settings"]
         importlib.import_module("robotics_experiments.px4_bridge")
+        alignment = importlib.import_module("robotics_experiments.alignment")
+        assert alignment.__all__ == [
+            "AlignmentArtifact",
+            "ControllerDefinition",
+            "ControllerSettings",
+            "align",
+            "load_alignment_artifact",
+            "load_controller_definition",
+        ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
         # must import without carb/omni present.
         runtime = importlib.import_module("robotics_experiments.runtime")
@@ -81,62 +91,64 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "teardown",
             "tick_drivers",
         ]
-        # RL owning packages must import with Isaac, torch, rsl_rl, and Isaac
-        # Lab absent; the parent package provides no forwarding facade.
+        # RL owning packages eagerly import ordinary dependencies but must still
+        # import with Isaac Sim, Kit, and Isaac Lab absent.
         rl = importlib.import_module("robotics_experiments.rl")
-        assert rl.__all__ == []
+        assert "robotics_experiments.rl.press" not in sys.modules
+        assert rl.__all__ == [
+            "ActuationParams",
+            "ActuationState",
+            "HOVER_OBSERVATION_DIM",
+            "HOVER_OBSERVATION_SCHEMA_VERSION",
+            "LoadedPolicy",
+            "METADATA_FILENAME",
+            "MixerGeometry",
+            "POLICY_FILENAME",
+            "PolicyContract",
+            "PolicyInterface",
+            "PolicyMetadata",
+            "action_to_rotor_omega",
+            "build_actuation_params",
+            "hover_action",
+            "hover_observation_from_state",
+            "load_policy",
+            "load_policy_metadata",
+            "pack_hover_observation",
+            "policy_action_to_offboard",
+            "policy_metadata",
+            "rotor_forces_to_body_wrench",
+            "validate_policy_artifact",
+        ]
         press = importlib.import_module("robotics_experiments.rl.press")
         assert press.__all__ == [
             "AbstractPoseProvider",
-            "ActuationParams",
-            "ActuationState",
             "GroundTruthPoseProvider",
-            "HOVER_OBSERVATION_DIM",
-            "HOVER_OBSERVATION_SCHEMA_VERSION",
-            "HOVER_POLICY_INTERFACE",
             "HandoffGate",
             "HandoffReason",
             "HandoffResult",
-            "LoadedVectorPolicy",
-            "METADATA_FILENAME",
-            "MixerGeometry",
             "OBSERVATION_SCHEMA_VERSION",
             "PRESS_OBSERVATION_DIM",
-            "POLICY_FILENAME",
-            "PRESS_POLICY_INTERFACE",
-            "PolicyContract",
             "PoseSample",
-            "PressDeploymentDecision",
-            "PressDeploymentState",
+            "PressApproachExecutionParams",
+            "PressApproachExecutionResult",
+            "PressApproachExecutionState",
+            "PressApproachInput",
+            "PressApproachResult",
+            "PressApproachRewardTerms",
+            "PressApproachState",
+            "PressApproachTerminationFlags",
             "PressObservation",
             "PressObservationMask",
-            "PressRewardTerms",
-            "PressStepMetrics",
-            "PressTaskInput",
-            "PressTaskResult",
-            "PressTaskState",
-            "PressTerminationFlags",
-            "action_to_rotor_omega",
-            "build_actuation_params",
-            "build_policy_step_fn",
+            "advance_press_approach_execution",
             "handoff_ready",
-            "hover_action",
-            "hover_observation_from_state",
-            "initial_press_task_state",
-            "initial_press_deployment_state",
-            "load_policy_contract",
-            "load_policy_metadata",
-            "load_vector_policy",
-            "pack_hover_observation",
+            "initial_press_approach_execution_state",
+            "initial_press_approach_state",
             "pack_press_observation",
-            "policy_metadata",
-            "press_action_to_offboard",
-            "reset_press_task_state",
-            "rotor_forces_to_body_wrench",
-            "step_press_task",
-            "step_press_deployment",
+            "press_approach_goal_satisfied",
+            "press_approach_target_velocity",
+            "reset_press_approach_state",
+            "step_press_approach",
             "to_vector",
-            "validate_policy_artifact",
             "world_switch_to_contact_frame",
         ]
         training = importlib.import_module("robotics_experiments.rl.training")
@@ -146,22 +158,22 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "DRONE_HOVER_TASK_ID",
             "DroneHoverEnv",
             "DroneHoverEnvCfg",
-            "PressEpisodeMetrics",
-            "PressEvaluationResult",
-            "PressEvaluationSummary",
+            "PressApproachEpisodeMetrics",
+            "PressApproachEvaluationResult",
+            "PressApproachEvaluationSummary",
             "SWITCH_PRESS_TASK_ID",
             "SwitchPressEnv",
             "SwitchPressEnvCfg",
             "compute_lab_rotor_omega",
-            "evaluate_press_policy",
+            "evaluate_press_approach_policy",
             "make_drone_hover_env_cfg",
             "make_isaac_lab_env",
             "make_switch_press_env_cfg",
             "register_isaac_lab_tasks",
-            "summarize_press_episodes",
+            "summarize_press_approach_episodes",
         ]
 
-        # The Isaac-only / torch leaf modules must stay off the core import path:
+        # Isaac-only leaf modules must stay off the core import path:
         # lazy package initializers must not eager-import them.
         for leaf in (
             "robotics_experiments.drone.spawn",
@@ -236,23 +248,19 @@ def test_px4_bridge_orchestrator_import_without_isaac():
     ]
 
 
-def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
-    # The command layer is a core domain leaf: importing it (including the
-    # concrete MavlinkCommandPort) must not pull in Isaac or pymavlink, which
-    # the port imports only inside its methods.
+def test_commanding_imports_without_isaac(monkeypatch):
+    # The command layer eagerly owns pymavlink but remains independent of Isaac.
     saved_modules = dict(sys.modules)
     try:
-        _drop_modules("carb", "pxr", "isaacsim", "pymavlink", "robotics_experiments.commanding")
-        blocker = _BlockedDependencyFinder({"carb", "pxr", "isaacsim", "pymavlink"})
+        _drop_modules("carb", "omni", "pxr", "isaacsim", "robotics_experiments.commanding")
+        blocker = _BlockedDependencyFinder({"carb", "omni", "pxr", "isaacsim"})
         monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
         commanding = importlib.import_module("robotics_experiments.commanding")
-        # Constructing the MavlinkCommandPort must not import pymavlink either;
-        # only connect()/send() do, inside their bodies.
         commanding.MavlinkCommandPort(gcs_endpoint="udp:127.0.0.1:14550", heartbeat_period_s=1.0)
         # The config-driven routine builder is pure too (it is what the live
         # extension driver calls), so it must build a routine with Isaac and
-        # pymavlink blocked.
+        # Isaac blocked.
         gates = commanding.EnvelopeGates(
             max_tilt_deg=35.0,
             max_lateral_drift_m=2.0,
@@ -286,9 +294,9 @@ def test_commanding_imports_without_isaac_or_pymavlink(monkeypatch):
         )
         assert [s.label for s in routine.steps] == ["arm", "takeoff", "hover"]
         # The per-drone routine driver is pure too (its phase machine imports no
-        # carb/omni/pymavlink); it must be importable with the deps blocked.
+        # carb/omni); it must be importable with the simulator deps blocked.
         assert hasattr(commanding, "RoutineDriverState")
-        assert "pymavlink" not in sys.modules
+        assert "pymavlink" in sys.modules
     finally:
         sys.modules.clear()
         sys.modules.update(saved_modules)
@@ -321,8 +329,8 @@ def test_commanding_public_api_contract_is_explicit():
         "MavlinkCommandPort",
         "MavlinkCommand",
         "PolicyAdapter",
-        "PolicyStepFn",
-        "PolicyStepResult",
+        "PolicyInput",
+        "PolicyResult",
         "PositionSetpoint",
         "RecoveryOutcome",
         "RecoveryStage",
@@ -358,43 +366,59 @@ def test_commanding_public_api_contract_is_explicit():
     ]
 
 
-def test_lightweight_config_and_simulation_import_without_hydra(monkeypatch):
-    _drop_modules(
-        "hydra",
-        "omegaconf",
-        "robotics_experiments.config",
-        "robotics_experiments.simulation",
-    )
-    blocker = _BlockedDependencyFinder({"hydra", "omegaconf"})
-    monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
-
+def test_config_eagerly_imports_hydra() -> None:
+    _drop_modules("hydra", "omegaconf", "robotics_experiments.config")
     config = importlib.import_module("robotics_experiments.config")
     assert config.__all__ == [
         "BoundingBox",
         "DroneSpawnConfig",
         "ExperimentConfig",
+        "HoverTaskConfig",
         "IsaacLabVehicleConfig",
         "LightSwitchConfig",
-        "PressActionConfig",
-        "PressEvaluationConfig",
+        "PressApproachEvaluationConfig",
+        "PressApproachGoalConfig",
+        "PressApproachRewardConfig",
+        "PressApproachTerminationConfig",
+        "PressApproachVelocityReferenceConfig",
         "PressResetConfig",
-        "PressRewardConfig",
-        "PressTerminationConfig",
         "Px4BridgeConfig",
+        "RlActionConfig",
+        "RlPolicyActorConfig",
+        "RlPolicyConfig",
+        "RlPolicyCriticConfig",
+        "RlTrainingConfig",
+        "RoutineStepConfig",
         "SimSettings",
         "VehicleConfig",
         "load_config",
     ]
+    assert "hydra" in sys.modules
+    assert "omegaconf" in sys.modules
 
+
+def test_simulation_package_remains_lazy_without_isaac(monkeypatch):
+    _drop_modules("carb", "omni", "pxr", "isaacsim", "robotics_experiments.simulation")
+    blocker = _BlockedDependencyFinder({"carb", "omni", "pxr", "isaacsim"})
+    monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
     simulation = importlib.import_module("robotics_experiments.simulation")
     assert simulation.__all__ == ["apply_settings"]
 
-    try:
-        _ = config.load_config
-    except ModuleNotFoundError as exc:
-        assert exc.name == "hydra" or exc.name.startswith("hydra.")
-    else:
-        raise AssertionError("Expected lazy load_config access to require hydra")
+
+def test_ordinary_dependencies_load_eagerly_from_owning_modules():
+    code = """
+import sys
+sys.path.insert(0, "src")
+import robotics_experiments.commanding
+import robotics_experiments.rl
+import robotics_experiments.rl.press
+import robotics_experiments.rl.training.rsl_rl
+import robotics_experiments.workflows.isaac_lab.registration
+required = {"gymnasium", "pymavlink", "rsl_rl", "torch"}
+missing = required - sys.modules.keys()
+raise SystemExit(f"ordinary dependencies not loaded: {sorted(missing)}" if missing else 0)
+"""
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_experiment_runtime_manifest_exposes_extension_module():

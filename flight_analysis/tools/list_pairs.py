@@ -69,13 +69,17 @@ def _nearest(reference: _LogFile, candidates: list[_LogFile]) -> tuple[_LogFile 
         return exact[0], 0
     if reference.seconds is None:
         return None, None
+    reference_seconds = reference.seconds
     with_seconds = [candidate for candidate in candidates if candidate.seconds is not None]
     if not with_seconds:
         return None, None
-    candidate = min(with_seconds, key=lambda item: abs(item.seconds - reference.seconds))
-    return candidate, abs(
-        candidate.seconds - reference.seconds
-    ) if candidate.seconds is not None else None
+
+    def distance(item: _LogFile, /) -> int:
+        assert item.seconds is not None
+        return abs(item.seconds - reference_seconds)
+
+    candidate = min(with_seconds, key=distance)
+    return candidate, distance(candidate)
 
 
 def _format_delta(seconds: int | None) -> str:
@@ -119,8 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print("status  delta  ulog  bridge")
-    for status, delta, ulog, bridge in rows:
-        print(f"{status:6}  {delta:5}  {ulog}  {bridge}")
+    for row_status, row_delta, ulog_path, bridge_path in rows:
+        print(f"{row_status:6}  {row_delta:5}  {ulog_path}  {bridge_path}")
     return 0
 
 

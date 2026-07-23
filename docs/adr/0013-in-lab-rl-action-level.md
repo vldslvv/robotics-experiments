@@ -31,14 +31,14 @@ levels, defaulting to `velocity`:
 - `attitude` / `rotor` / `residual` / `hierarchical` remain seam options that raise
   if selected until implemented.
 
-The pure single-env reference models are exported through `robotics_experiments.rl.press`
-and live in `rl/press/actuation.py` (numpy, the
+The pure single-env reference models are exported through `robotics_experiments.rl`
+and live in `rl/actuation.py` (numpy, the
 test oracle); the batched torch versions the env runs live in
 `workflows/isaac_lab/tasks/flight.py`. Both invert the PX4 bridge's
 `PegasusQuadraticThrustModel` allocation, so an action reproduces the commanded
 wrench. F1 also added the OFFBOARD deploy plumbing (both levels): `velocity` ->
 `SET_POSITION_TARGET_LOCAL_NED` (body velocity), `ctbr` -> `SET_ATTITUDE_TARGET`
-(thrust + body rates), with a pure `robotics_experiments.rl.press.press_action_to_offboard`
+(thrust + body rates), with a pure `robotics_experiments.rl.policy_action_to_offboard`
 mapper. The handoff-gated contact step is planned in F3b and aligned with
 frozen state transitions; only the port-level plumbing and mapper landed in F1,
 and no separate `PressDriver` class is implemented.

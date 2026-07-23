@@ -4,16 +4,21 @@ from typing import List, Tuple
 from robotics_experiments.config._immutability import _FreezableConfig
 
 __all__ = [
+    "HoverTaskConfig",
     "IsaacLabVehicleConfig",
-    "PressActionConfig",
-    "PressEvaluationConfig",
+    "RlActionConfig",
+    "PressApproachEvaluationConfig",
+    "PressApproachGoalConfig",
+    "PressApproachRewardConfig",
+    "PressApproachTerminationConfig",
+    "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
-    "PressHoverTaskConfig",
     "PressResetConfig",
-    "PressRewardConfig",
     "PressTaskConfig",
-    "PressTerminationConfig",
     "RlConfig",
+    "RlPolicyActorConfig",
+    "RlPolicyConfig",
+    "RlPolicyCriticConfig",
     "RlTrainingConfig",
 ]
 
@@ -35,14 +40,14 @@ class IsaacLabVehicleConfig(_FreezableConfig):
 
 
 @dataclass
-class PressActionConfig(_FreezableConfig):
-    """RL action-level (``kind``) selection plus its controller tunables.
+class RlActionConfig(_FreezableConfig):
+    """Normalized policy-action interpretation, independent of its controller.
 
     The ``kind`` picks the in-Lab actuation model (see
     :mod:`robotics_experiments.rl`): ``velocity`` (cascaded PD:
     body-frame velocity + yaw rate) or ``ctbr`` (collective thrust + body-rate
-    setpoint). The gains/limits below are a superset covering both; the selected
-    ``kind`` reads the subset it needs, so switching is a one-line ``kind`` edit.
+    setpoint). Controller gains, command delay, tilt limit, and actuator response
+    are owned separately by the selected alignment artifact.
 
     Attributes:
         kind: Action level selecting the actuation model (``velocity`` /
@@ -56,19 +61,9 @@ class PressActionConfig(_FreezableConfig):
             ``velocity`` action.
         max_body_rate_radps: Body-rate command scale (rad/s) for a normalized
             ``ctbr`` action.
-        max_tilt_cmd_deg: Saturation on the commanded tilt of the desired thrust
-            axis in the ``velocity`` cascade, degrees.
         hover_thrust_fraction: Collective thrust at hover as a fraction of the
             summed per-rotor static max thrust; centers the ``ctbr`` collective
             command and the ``velocity`` thrust feed-forward.
-        controller_kp_vel: Per-axis P gain on world-frame velocity error
-            (``velocity`` cascade), length 3.
-        controller_kd_vel: Per-axis damping gain on world-frame velocity
-            (``velocity`` cascade), length 3.
-        controller_kp_att: Per-axis P gain mapping geometric attitude error to a
-            body-rate setpoint (``velocity`` cascade), length 3.
-        controller_kp_rate: Per-axis P gain mapping body-rate error to desired
-            body torque (both models), length 3.
     """
 
     kind: str
@@ -76,16 +71,36 @@ class PressActionConfig(_FreezableConfig):
     max_body_velocity_mps: float
     max_yaw_rate_radps: float
     max_body_rate_radps: float
-    max_tilt_cmd_deg: float
     hover_thrust_fraction: float
-    controller_kp_vel: List[float]
-    controller_kd_vel: List[float]
-    controller_kp_att: List[float]
-    controller_kp_rate: List[float]
 
 
 @dataclass
-class PressHoverTaskConfig(_FreezableConfig):
+class RlPolicyActorConfig(_FreezableConfig):
+    """Actor topology and exploration initialization."""
+
+    hidden_dims: List[int]
+    initial_noise_std: float
+    output_initialization: str
+
+
+@dataclass
+class RlPolicyCriticConfig(_FreezableConfig):
+    """Critic topology."""
+
+    hidden_dims: List[int]
+
+
+@dataclass
+class RlPolicyConfig(_FreezableConfig):
+    """Task-owned rsl_rl ``ActorCritic`` topology."""
+
+    activation: str
+    actor: RlPolicyActorConfig
+    critic: RlPolicyCriticConfig
+
+
+@dataclass
+class HoverTaskConfig(_FreezableConfig):
     """The hover task definition: reward weights, termination, and reset ranges.
 
     The task half of the ``task definition -> policy`` contract for the hover
@@ -108,6 +123,7 @@ class PressHoverTaskConfig(_FreezableConfig):
             around the hover target, meters.
     """
 
+    policy: RlPolicyConfig
     reward_pos_weight: float
     reward_linvel_weight: float
     reward_angvel_weight: float
@@ -129,57 +145,74 @@ class PressHandoffConfig(_FreezableConfig):
     Attributes:
         pose_confidence_min: Minimum pose confidence, [0, 1].
         pose_age_max_s: Maximum pose-estimate age, seconds.
+        switch_range_min_m: Minimum wall-normal range to the switch, meters.
         switch_range_max_m: Maximum wall-normal range to the switch, meters.
         lateral_align_max_m: Maximum lateral (in-plate) alignment error, meters.
         wall_normal_speed_max_mps: Maximum speed along the press axis, m/s.
         lateral_speed_max_mps: Maximum in-plate speed, m/s.
         angular_speed_max_radps: Maximum body angular speed, rad/s.
+        body_z_alignment_min: Minimum body-Z/world-Z alignment cosine.
         estimator_health_min: Minimum aggregate estimator health, [0, 1].
     """
 
     pose_confidence_min: float
     pose_age_max_s: float
+    switch_range_min_m: float
     switch_range_max_m: float
     lateral_align_max_m: float
     wall_normal_speed_max_mps: float
     lateral_speed_max_mps: float
     angular_speed_max_radps: float
+    body_z_alignment_min: float
     estimator_health_min: float
 
 
 @dataclass
-class PressRewardConfig(_FreezableConfig):
-    """Weights and gates for the ground-truth switch-press reward."""
+class PressApproachRewardConfig(_FreezableConfig):
+    """Weights for the nine signed approach-stage reward contributions."""
 
-    alive_weight: float
-    stability_weight: float
-    approach_progress_weight: float
-    gentle_contact_weight: float
-    compression_progress_weight: float
-    button_progress_weight: float
-    latch_progress_weight: float
-    toggle_weight: float
-    retreat_progress_weight: float
-    retreat_alignment_weight: float
-    retreat_overspeed_weight: float
-    success_weight: float
-    action_energy_weight: float
+    range_progress_weight: float
+    alignment_error_weight: float
+    velocity_tracking_weight: float
+    upright_error_weight: float
     action_delta_weight: float
-    contact_oscillation_weight: float
-    scraping_weight: float
-    misalignment_weight: float
-    failure_weight: float
+    success_weight: float
+    collision_weight: float
+    flight_failure_weight: float
     timeout_weight: float
-    gentle_contact_speed_max_mps: float
-    compression_target_m: float
-    compression_overshoot_tolerance_m: float
-    misalignment_tolerance_m: float
+
+
+@dataclass
+class PressApproachVelocityReferenceConfig(_FreezableConfig):
+    """Dense contact-frame velocity reference for the approach stage."""
+
+    range_center_m: float
+    wall_normal_gain_per_s: float
+    wall_normal_min_mps: float
+    wall_normal_max_mps: float
+    tangential_gain_per_s: float
+    tangential_speed_max_mps: float
+
+
+@dataclass
+class PressApproachGoalConfig(_FreezableConfig):
+    """Stable approach target and dense velocity reference."""
+
+    range_min_m: float
+    range_max_m: float
+    alignment_error_max_m: float
+    linear_speed_max_mps: float
+    angular_speed_max_radps: float
+    body_z_alignment_min: float
+    stable_steps: int
+    velocity_reference: PressApproachVelocityReferenceConfig
 
 
 @dataclass
 class PressResetConfig(_FreezableConfig):
-    """Easy-task geometry and initial-state ranges for switch pressing."""
+    """Easy-task physical-scene parameters for switch pressing."""
 
+    physical_contact_enabled: bool
     button_geometry_scale: float
     button_stiffness_scale: float
     button_threshold_scale: float
@@ -187,43 +220,39 @@ class PressResetConfig(_FreezableConfig):
     switch_wall_offset_m: float
     switch_height_m: float
     wall_half_extents_m: Tuple[float, float, float]
-    wall_normal_min_m: float
-    wall_normal_max_m: float
-    lateral_error_min_m: float
-    lateral_error_max_m: float
-    vertical_error_min_m: float
-    vertical_error_max_m: float
-    initial_linear_velocity_max_mps: float
-    initial_angular_velocity_max_radps: float
 
 
 @dataclass
-class PressTerminationConfig(_FreezableConfig):
-    """Success and failure envelopes for the switch-press task."""
+class PressApproachTerminationConfig(_FreezableConfig):
+    """Contact and flight-envelope failure conditions for approach."""
 
     crash_tilt_cos: float
     min_altitude_m: float
     max_wall_normal_distance_m: float
     max_lateral_error_m: float
     max_vertical_error_m: float
-    retreat_distance_m: float
-    retreat_speed_max_mps: float
-    retreat_alignment_tolerance_m: float
-    retreat_angular_speed_max_radps: float
-    stable_retreat_steps: int
-    first_contact_speed_max_mps: float
-    first_contact_angular_speed_max_radps: float
+    contact_force_threshold_n: float
 
 
 @dataclass
-class PressEvaluationConfig(_FreezableConfig):
-    """Deterministic press-policy evaluation workload and acceptance targets."""
+class PressApproachEvaluationConfig(_FreezableConfig):
+    """Deterministic approach-policy workload, advisory gates, and ranking."""
 
     seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
-    first_contact_stability_min: float
-    retreat_rate_min: float
+    collision_rate_max: float
+    selection_metric: str
+    collision_penalty: float
+    flight_failure_penalty: float
+    timeout_penalty: float
+    non_success_penalty: float
+    terminal_range_weight: float
+    trajectory_alignment_weight: float
+    velocity_tracking_weight: float
+    upright_error_weight: float
+    action_delta_weight: float
+    completion_time_weight: float
 
 
 @dataclass
@@ -240,10 +269,15 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
+        training_mode: Weight-initialization mode (``scratch`` or
+            ``actor-only``).
+        alignment_artifact: Controller alignment run directory or publication
+            link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
         save_interval: Checkpoint save interval, iterations.
-        learning_rate: PPO learning rate (adaptive schedule).
+        learning_rate: PPO learning rate.
+        schedule: PPO learning-rate schedule (``adaptive`` or ``fixed``).
         gamma: Discount factor.
         lam: GAE lambda.
         entropy_coef: Entropy bonus coefficient.
@@ -253,20 +287,19 @@ class RlTrainingConfig(_FreezableConfig):
         num_mini_batches: Minibatches per epoch.
         desired_kl: Adaptive-schedule KL target.
         max_grad_norm: Gradient clipping norm.
-        init_noise_std: Initial action noise std (normalized action units).
-        actor_hidden_dims: Actor MLP hidden layer sizes.
-        critic_hidden_dims: Critic MLP hidden layer sizes.
-        activation: MLP activation name (e.g. ``elu``).
         seed: Training seed (env reset + torch).
     """
 
     task_id: str
     vehicle_id: int
     policy_name: str
+    training_mode: str
+    alignment_artifact: str
     max_iterations: int
     num_steps_per_env: int
     save_interval: int
     learning_rate: float
+    schedule: str
     gamma: float
     lam: float
     entropy_coef: float
@@ -276,34 +309,32 @@ class RlTrainingConfig(_FreezableConfig):
     num_mini_batches: int
     desired_kl: float
     max_grad_norm: float
-    init_noise_std: float
-    actor_hidden_dims: List[int]
-    critic_hidden_dims: List[int]
-    activation: str
     seed: int
 
 
 @dataclass
 class PressTaskConfig(_FreezableConfig):
-    """Press-task-specific RL config.
+    """Named press curriculum-stage config.
 
     Attributes:
-        hover_task: The hover task definition (reward/termination/reset).
-        handoff: Thresholds for the nav -> contact handoff gate.
-        reward: Ground-truth press reward weights and gates.
-        reset: Easy-task geometry and initial-state ranges.
-        termination: Press success/failure envelopes.
-        evaluation: Deterministic evaluation workload and acceptance targets.
-        contact_force_threshold_n: Pad force norm that marks real contact.
+        curriculum_stage: Required stage name written to artifacts.
+        policy: Task-owned actor/critic topology.
+        handoff: Thresholds for the nav -> policy handoff gate.
+        goal: Stable approach target and dense velocity reference.
+        reward: Approach-stage reward weights.
+        reset: Physical scene and initial-state ranges.
+        termination: Contact and flight-envelope failure conditions.
+        evaluation: Deterministic approach workload and acceptance targets.
     """
 
-    hover_task: PressHoverTaskConfig
+    curriculum_stage: str
+    policy: RlPolicyConfig
     handoff: PressHandoffConfig
-    reward: PressRewardConfig
+    goal: PressApproachGoalConfig
+    reward: PressApproachRewardConfig
     reset: PressResetConfig
-    termination: PressTerminationConfig
-    evaluation: PressEvaluationConfig
-    contact_force_threshold_n: float
+    termination: PressApproachTerminationConfig
+    evaluation: PressApproachEvaluationConfig
 
 
 @dataclass
@@ -318,16 +349,18 @@ class RlConfig(_FreezableConfig):
     Attributes:
         action: The RL action-level selection and controller tunables.
         training: PPO hyperparameters + task selection for training runs.
-        press: Press-task-specific config.
+        hover: Hover-task-specific config and policy topology.
+        press: Press-task-specific config and policy topology.
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
         episode_length_s: Episode timeout, seconds.
         policy_rate_hz: Exact-average RL policy decision rate.
     """
 
-    action: PressActionConfig
+    action: RlActionConfig
     lab_vehicle: IsaacLabVehicleConfig
     training: RlTrainingConfig
+    hover: HoverTaskConfig
     press: PressTaskConfig
     num_envs: int
     env_spacing: float

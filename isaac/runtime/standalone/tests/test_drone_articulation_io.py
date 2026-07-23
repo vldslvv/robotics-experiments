@@ -19,19 +19,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from _benchmark import StandaloneBenchmarkCapture, advance_physics_ticks
 from _runtime import SceneTestContext, run_scene_test
+from numpy.typing import ArrayLike
 
+from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.px4_bridge import (
     IsaacArticulationIO,
     RotorDynamics,
+    VehicleState,
     discover_px4_rotor_mapping,
 )
 from robotics_experiments.simulation import apply_settings
 
 if TYPE_CHECKING:
     from pxr import Usd
-
-    from robotics_experiments.config import ExperimentConfig
-    from robotics_experiments.px4_bridge import VehicleState
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "drone_articulation_io"
@@ -45,7 +45,7 @@ _BENCHMARK_RENDERER = "RaytracedLighting"
 _BENCHMARK_RENDER_RESOLUTION = (1280, 720)
 
 
-def _assert_finite_array(value: Any, shape: tuple[int, ...], label: str) -> None:
+def _assert_finite_array(value: ArrayLike, shape: tuple[int, ...], label: str) -> None:
     array = np.asarray(value, dtype=np.float64)
     if array.shape != shape:
         raise AssertionError(f"{label}: expected shape {shape}, got {array.shape}")

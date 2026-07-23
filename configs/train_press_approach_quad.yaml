@@ -1,0 +1,39 @@
+defaults:
+  - base
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - _self_
+
+# Stage 1 contact-free approach training selection.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+rl:
+  num_envs: 32768
+  episode_length_s: 10.0
+  action:
+    max_body_velocity_mps: 2.0
+  training:
+    task_id: Isaac-Switch-Press-Direct-v0
+    vehicle_id: 0
+    policy_name: press-approach
+    training_mode: scratch
+    max_iterations: 300
+    num_steps_per_env: 32
+    save_interval: 10
+    learning_rate: 1.0e-4
+    schedule: adaptive
+    gamma: 0.995
+    lam: 0.95
+    entropy_coef: 0.0001
+    clip_param: 0.2
+    value_loss_coef: 1.0
+    num_learning_epochs: 5
+    num_mini_batches: 8
+    desired_kl: 0.01
+    max_grad_norm: 1.0
+    seed: 42
+
+vehicles:
+  x500_01:
+    id: 0
+    ros: {namespace: /x500_01}
+    spawn: {position_xy: [0.0, 0.0]}

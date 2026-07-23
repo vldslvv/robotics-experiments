@@ -113,7 +113,8 @@ class TimingReporter:
     ) -> Iterator[None]:
         """Report one timed stage, optionally including simulated elapsed time."""
         start_s = time.monotonic()
-        start_us = int(sim_time_us()) if sim_time_us is not None else None
+        sim_clock = sim_time_us
+        start_us = int(sim_clock()) if sim_clock is not None else None
         status = "ok"
         try:
             yield
@@ -130,8 +131,8 @@ class TimingReporter:
                 f"total_s={now_s - self._total_start_s:.3f}",
                 f"status={status}",
             ]
-            if start_us is not None:
-                end_us = int(sim_time_us())
+            if start_us is not None and sim_clock is not None:
+                end_us = int(sim_clock())
                 parts.append(f"sim_elapsed_s={(end_us - start_us) * 1e-6:.3f}")
             self._emit(" ".join(parts))
 

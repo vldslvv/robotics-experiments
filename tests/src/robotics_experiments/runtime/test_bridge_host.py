@@ -174,8 +174,12 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             self.__dict__.update(kwargs)
 
     fake_px4_bridge.LockstepSettings = LockstepSettings
+    fake_px4_bridge.BridgeStatus = object
+    fake_px4_bridge.DiscoveredRotorMapping = object
     fake_px4_bridge.PegasusQuadraticThrustModel = PegasusQuadraticThrustModel
+    fake_px4_bridge.Px4BridgeState = Px4BridgeState
     fake_px4_bridge.Px4MavlinkPort = Px4MavlinkPort
+    fake_px4_bridge.SimClockState = object
     fake_px4_bridge.advance_sim_clock = advance_sim_clock
     fake_px4_bridge.bridge_time_us = bridge_time_us
     fake_px4_bridge.create_px4_bridge = create_px4_bridge
@@ -297,10 +301,10 @@ def test_bridge_host_delays_px4_connection_until_startup_settle(monkeypatch):
 
     _step(host, 0.004)
 
-    # The host-side clock keeps advancing once running.
-    assert module.read_bridge_host_status(host=host).sim_time_us == 16000
+    # Public time is the same post-settle time sent to PX4 HIL.
+    assert module.read_bridge_host_status(host=host).sim_time_us == 4000
     host.stop()
-    assert module.read_bridge_host_status(host=host).sim_time_us == 16000
+    assert module.read_bridge_host_status(host=host).sim_time_us == 4000
 
 
 def test_bridge_host_rejects_send_before_start(monkeypatch):

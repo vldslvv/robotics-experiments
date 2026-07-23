@@ -24,15 +24,20 @@ import os
 import random
 import sys
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.alignment import (
+    ControllerSettings,
+    load_alignment_artifact,
+    load_controller_definition,
+)
+from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
 
 if TYPE_CHECKING:
-    from robotics_experiments.config import PressActionConfig
     from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
@@ -45,18 +50,20 @@ _POSITION_KP = 1.0
 _HOVER_SETTLE_S = 4.0
 _HOVER_TOLERANCE_M = 0.1
 _GOTO_DISTANCE_M = 2.0
-_GOTO_SETTLE_S = 6.0
+_GOTO_SETTLE_S = 8.0
 _GOTO_TOLERANCE_M = 0.2
 _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
+_TARGET_DEFINITION = "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
 # target along +X, outward plate normal facing the approaching drone. This keeps
 # the fully deployed pusher clear during the non-contact goto while leaving the
 # settled drone inside the configured handoff range.
-_SWITCH_BEYOND_GOTO_M = 0.45
+_SWITCH_BEYOND_GOTO_M = 0.48
 _SWITCH_PRIM_PATH = "/World/PressValidationSwitch"
 _CONTACT_LAMP_PRIM_PATH = "/World/envs/env_0/Lamp"
 
@@ -214,7 +221,7 @@ def _make_env(
 
 
 def _ctbr_hover_action(
-    env: DroneHoverEnv, action_cfg: PressActionConfig
+    env: DroneHoverEnv, action_cfg: RlActionConfig
 ) -> tuple[torch.Tensor, float]:
     mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
     max_total_thrust = float(env.actuation_params.max_total_thrust)
@@ -228,7 +235,8 @@ def _run_ctbr_sanity(
     *,
     args: argparse.Namespace,
     config: ExperimentConfig,
-    action_cfg: PressActionConfig,
+    action_cfg: RlActionConfig,
+    controller_settings: ControllerSettings,
     env_cls: type[DroneHoverEnv],
 ) -> None:
     # Isaac Lab workflow code is imported after AppLauncher.
@@ -243,6 +251,7 @@ def _run_ctbr_sanity(
             num_envs=num_envs,
         ),
         experiment_config=config,
+        controller_settings=controller_settings,
     )
     try:
         _reset_env(env, args.seed)
@@ -411,11 +420,30 @@ def _pusher_tool_geometry_summary(stage, root_path: str) -> str:
     )
 
 
-def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+def _run_contact_chain(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    controller_settings: ControllerSettings,
+) -> None:
     from pxr import UsdLux
 
     from robotics_experiments.environment import SwitchState, step_switches
     from robotics_experiments.workflows.isaac_lab import SwitchPressEnv, make_switch_press_env_cfg
+
+    class _ContactChainEnv(SwitchPressEnv):
+        """Test-local physical path independent of Stage 1 policy behavior."""
+
+        def _pre_physics_step(self, actions, /):
+            super()._pre_physics_step(actions)
+            self._applied_actions = self.actions
+
+        def _get_dones(self):
+            no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            return no_done, no_done
+
+        def _get_rewards(self):
+            return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
     if config.rl.action.kind != "velocity":
         raise AssertionError("contact-chain gate requires rl.action.kind=velocity")
@@ -427,7 +455,11 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
     cfg.episode_length_s = config.rl.episode_length_s + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
         cfg.seed = args.seed
-    env = SwitchPressEnv(cfg=cfg, experiment_config=config)
+    env = _ContactChainEnv(
+        cfg=cfg,
+        experiment_config=config,
+        controller_settings=controller_settings,
+    )
     try:
         _reset_env(env, args.seed)
         stage = _spawn_contact_chain_lamp(lamp_usd_path=config.switches.lamp_usd_path)
@@ -452,11 +484,15 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
         max_contact_force = 0.0
         retreat_started = False
         stable_retreat = False
+        stable_retreat_steps = 0
         max_tilt = 0.0
         steps = round(config.rl.episode_length_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
-        approach_speed = config.rl.press.reward.gentle_contact_speed_max_mps
-        retreat_speed = config.rl.press.termination.retreat_speed_max_mps * 0.75
+        # This deterministic physical-actuation gate is independent of the
+        # approach reward's dense velocity reference.
+        approach_speed = 2.0 * config.rl.press.goal.linear_speed_max_mps
+        retreat_speed = approach_speed * 0.75
+        initial_range = float((env.switch.data.root_pos_w - env.drone.data.root_pos_w)[0, 0].item())
         _report(
             "contact geometry: "
             f"switch_bodies={env.switch.body_names} drone_bodies={env.drone.body_names} "
@@ -491,10 +527,7 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
             action[:, 0] = speed / max_velocity
             action[:, 1] = torch.clamp(2.0 * switch_offset[:, 1] / max_velocity, -0.2, 0.2)
             action[:, 2] = torch.clamp(2.0 * switch_offset[:, 2] / max_velocity, -0.2, 0.2)
-            _observation, _reward, terminated, truncated, _info = env.step(action)
-            result = env.press_task_result
-            if result is None:
-                raise AssertionError("press task did not advance")
+            _observation, _reward, _terminated, _truncated, _info = env.step(action)
             pusher = float(
                 env.drone.data.joint_pos_limits[0, pusher_joint_id, 1].item()
                 - env.drone.data.joint_pos[0, pusher_joint_id].item()
@@ -502,11 +535,12 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
             button = float(env.switch.data.joint_pos[0, joint_id].item())
             max_pusher = max(max_pusher, pusher)
             max_button = max(max_button, button)
-            contact_seen = contact_seen or bool(result.metrics.contacted[0].item())
-            max_contact_force = max(
-                max_contact_force,
-                float(torch.linalg.norm(env.contact_sensor.data.net_forces_w, dim=-1).max().item()),
+            contact_force = float(
+                torch.linalg.norm(env.contact_sensor.data.net_forces_w, dim=-1).max().item()
             )
+            max_contact_force = max(max_contact_force, contact_force)
+            contact_now = contact_force >= config.rl.press.termination.contact_force_threshold_n
+            contact_seen = contact_seen or contact_now
             switch_state = step_switches(
                 stage=stage,
                 switch_state=switch_state,
@@ -518,13 +552,24 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
                 retreat_started = True
             _yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
             max_tilt = max(max_tilt, float(tilt[0].item()))
-            if retreat_started and bool(result.metrics.retreated[0].item()):
+            relative = env.switch.data.root_pos_w - env.drone.data.root_pos_w
+            linear_speed = float(torch.linalg.norm(env.drone.data.root_lin_vel_b[0]).item())
+            angular_speed = float(torch.linalg.norm(env.drone.data.root_ang_vel_b[0]).item())
+            retreat_stable_now = (
+                retreat_started
+                and not contact_now
+                and float(relative[0, 0].item()) >= initial_range
+                and float(torch.linalg.norm(relative[0, 1:3]).item())
+                <= config.rl.press.goal.alignment_error_max_m
+                and linear_speed <= config.rl.press.goal.linear_speed_max_mps
+                and angular_speed <= config.rl.press.goal.angular_speed_max_radps
+            )
+            stable_retreat_steps = stable_retreat_steps + 1 if retreat_stable_now else 0
+            if stable_retreat_steps >= config.rl.press.goal.stable_steps:
                 stable_retreat = True
                 break
-            if bool(truncated[0].item()):
-                break
-            if bool(terminated[0].item()) and not bool(result.termination.success[0].item()):
-                raise AssertionError("contact-chain drone breached its stability envelope")
+            if float(tilt[0].item()) > math.acos(config.rl.press.termination.crash_tilt_cos):
+                raise AssertionError("contact-chain drone breached its tilt envelope")
 
         light_prim = stage.GetPrimAtPath(f"{_CONTACT_LAMP_PRIM_PATH}/Lamp/SphereLight")
         intensity = float(UsdLux.SphereLight(light_prim).GetIntensityAttr().Get())
@@ -596,6 +641,7 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     from robotics_experiments.px4_bridge import quat_wxyz_to_xyzw, world_enu_to_body_flu
     from robotics_experiments.rl.press import (
         PressObservation,
+        PressObservationMask,
         to_vector,
         world_switch_to_contact_frame,
     )
@@ -625,15 +671,17 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
         attitude_quat_xyzw=quat_wxyz_to_xyzw(quat_wxyz),
         pusher_compression_m=0.0,
         pusher_compression_rate_mps=0.0,
-        contact_valid=False,
+        contact_valid=True,
         contact_flag=False,
-        lamp_state=-1,
-        lamp_confidence=0.0,
+        lamp_state=0,
+        lamp_confidence=1.0,
         lamp_age_s=0.0,
         previous_action=np.zeros(action_dim),
-        handoff_mode=0,
+        handoff_mode=1,
         estimator_health=1.0,
-        obs_mask=0,
+        obs_mask=int(
+            PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
+        ),
     )
     assert to_vector(observation).shape == (30 + action_dim,)
     return observation
@@ -666,9 +714,26 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
         )
 
 
+def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
+    repo_root = Path(__file__).resolve().parents[4]
+    explicit = os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
+    authored = explicit or config.rl.training.alignment_artifact
+    artifact_path = Path(authored)
+    if not artifact_path.is_absolute():
+        artifact_path = repo_root / artifact_path
+    if explicit or artifact_path.exists():
+        return load_alignment_artifact(artifact_path).selected_settings
+    return load_controller_definition(repo_root / _TARGET_DEFINITION).base_settings
+
+
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    controller_settings = _controller_settings(config=config)
     if args.contact_chain:
-        _run_contact_chain(args=args, config=config)
+        _run_contact_chain(
+            args=args,
+            config=config,
+            controller_settings=controller_settings,
+        )
         return
     action_cfg = config.rl.action
     if args.ctbr_sanity:
@@ -684,6 +749,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             args=args,
             config=config,
             action_cfg=action_cfg,
+            controller_settings=controller_settings,
             env_cls=DroneHoverEnv,
         )
         return
@@ -707,6 +773,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             num_envs=num_envs,
         ),
         experiment_config=config,
+        controller_settings=controller_settings,
     )
     try:
         _reset_env(env, args.seed)

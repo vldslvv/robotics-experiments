@@ -113,6 +113,7 @@ make test-integration-all
 | `make test-integration-px4-takeoff`, `make test-integration-px4-navigation`, instability and multi-drone variants | PX4 lockstep, routines, flight envelopes, and fleet isolation | Isaac/PX4 images, NVIDIA runtime |
 | `make test-integration-press-policy` | Trained policy artifact deployment | Training artifact plus Isaac Lab image |
 | `make test-integration-all` | Seven stable Isaac, RL, and PX4 integration targets | Built runtime images, NVIDIA runtime |
+| `make benchmark-commanding` | Isolated routine stepper and driver performance gate | Quiet comparable host, host Python environment |
 | `make benchmark-isaac-core` | Isaac core upgrade regression gate and contributor attribution | Quiet comparable host, built Isaac image, NVIDIA runtime |
 | `make benchmark-flight` | Diagnostic full-GUI warehouse/two-drone Isaac comparison | X11 GUI, comparable host, NVIDIA runtime, fresh Isaac/PX4 images |
 
@@ -123,6 +124,8 @@ in [Runtime operations](docs/RUNTIME_OPERATIONS.md) and
 [Integration test architecture](docs/INTEGRATION_TEST_ARCHITECTURE.md). The
 three-repeat upgrade benchmark and explicit baseline workflow are documented in
 [Isaac core performance benchmark](docs/ISAAC_CORE_BENCHMARK.md).
+The host-only nine-worker command-layer gate is documented in
+[Commanding performance benchmark](docs/COMMANDING_BENCHMARK.md).
 The production-path Isaac 5/6 diagnostic and its cross-version report command
 are documented in [Full-GUI flight benchmark](docs/FLIGHT_BENCHMARK.md).
 

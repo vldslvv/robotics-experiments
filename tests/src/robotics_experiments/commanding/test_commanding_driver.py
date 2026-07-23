@@ -6,10 +6,15 @@ Isaac, or pymavlink, and exercise the failure reactions (envelope / command /
 failsafe / timeout) and the per-step advance callback.
 """
 
+import json
+import math
 from dataclasses import fields, replace
+
+import pytest
 
 from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_REPOSITION,
     MAV_CMD_DO_SET_MODE,
     MAV_CMD_NAV_LAND,
     MAV_RESULT_TEMPORARILY_REJECTED,
@@ -21,7 +26,7 @@ from robotics_experiments.commanding import (
     EnvelopeGates,
     FailureKind,
     PolicyAdapter,
-    PolicyStepResult,
+    PolicyResult,
     RecoveryOutcome,
     RecoveryStage,
     RoutineDriverState,
@@ -201,6 +206,22 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
     assert env.advanced_steps == ["arm", "takeoff", "hover"]
     assert routine_driver_is_done(state=driver)
     assert env.failures == []
+    stage_events = [
+        json.loads(message.split("ROUTINE_STAGE ", maxsplit=1)[1])
+        for message in env.logs
+        if "ROUTINE_STAGE " in message
+    ]
+    assert [(event["kind"], event["event"]) for event in stage_events] == [
+        ("arm", "start"),
+        ("arm", "complete"),
+        ("takeoff", "start"),
+        ("takeoff", "complete"),
+        ("hover", "start"),
+        ("hover", "complete"),
+    ]
+    assert [event["index"] for event in stage_events] == [0, 0, 1, 1, 2, 2]
+    assert all(isinstance(event["sim_time_us"], int) for event in stage_events)
+    assert all("ground_speed_m_s" not in event for event in stage_events)
 
 
 def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
@@ -459,22 +480,69 @@ def test_routine_driver_goto_streams_setpoints_and_engages_offboard():
     assert env.failures == []
 
 
+def test_routine_driver_speed_authored_goto_logs_speed_and_uses_reposition():
+    steps = [
+        {
+            "kind": "goto",
+            "x": 3.0,
+            "y": 0.0,
+            "z": 2.0,
+            "ground_speed_m_s": 0.5,
+            "timeout_s": 20.0,
+        }
+    ]
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    context = DriverContext(params=_params(steps), port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
+    )
+    env.connected = True
+    port.set_handshaked()
+    port.set_global_position((47.0, 8.0, 488.0))
+    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
+    for _ in range(20):
+        driver = _tick_driver(context=context, state=driver)
+        if driver.phase is DriverPhase.DRIVE:
+            break
+
+    driver = _tick_driver(context=context, state=driver)
+    assert [command.command_id for command in port.sent] == [MAV_CMD_DO_REPOSITION]
+    assert port.sent[0].params[0] == 0.5
+    assert port.sent[0].params[3] == pytest.approx(math.pi / 2.0)
+    assert port.setpoints == []
+
+    env.observation = make_routine_observation(position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    driver = _tick_driver(context=context, state=driver)
+    assert routine_driver_is_done(state=driver)
+    stage_events = [
+        json.loads(message.split("ROUTINE_STAGE ", maxsplit=1)[1])
+        for message in env.logs
+        if "ROUTINE_STAGE " in message
+    ]
+    assert [(event["event"], event["ground_speed_m_s"]) for event in stage_events] == [
+        ("start", 0.5),
+        ("complete", 0.5),
+    ]
+
+
 _POLICY_STEPS = [
     {"kind": "policy", "artifact": "does/not/matter", "hold_s": 1.0, "timeout_s": 10.0}
 ]
 
 
-def _fake_policy_step(observation, target_enu, progress):
-    del target_enu
-    return PolicyStepResult(
-        progress=progress + 1,
+def _fake_policy_advance(*, policy_input, state):
+    return PolicyResult(
+        state=state + 1,
         setpoint=VelocitySetpoint(
             forward_mps=0.2,
             right_mps=0.0,
             down_mps=0.0,
             yaw_rate_radps=0.0,
         ),
-        complete=observation.sim_time_us >= 3_000_000,
+        complete=policy_input.sim_time_us >= 3_000_000,
+        diagnostics=('PRESS_POLICY {"event":"test_actor_evaluation"}',),
     )
 
 
@@ -497,10 +565,10 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
         offboard_setpoint_rate_hz=50.0,
-        policy_fn_factory=lambda descriptor: PolicyAdapter(
-            rate_hz=20.0,
-            initial_progress=0,
-            step=_fake_policy_step,
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=0,
+            advance=_fake_policy_advance,
         ),
     )
     context = DriverContext(params=params, port=port, env=env, label="d0")
@@ -528,6 +596,21 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
     assert [c.label for c in port.sent] == ["set_offboard_mode"]
     command_index = next(i for i, effect in enumerate(port.effects) if effect[0] == "command")
     assert port.effects[command_index - 1][0] == "setpoint"
+    assert any("test_actor_evaluation" in message for message in env.logs)
+    transmitted = [
+        json.loads(message.split("POLICY_SETPOINT ", maxsplit=1)[1])
+        for message in env.logs
+        if "POLICY_SETPOINT " in message
+    ]
+    assert transmitted
+    assert transmitted[0]["event"] == "setpoint_transmitted"
+    assert transmitted[0]["setpoint"] == {
+        "down_mps": 0.0,
+        "forward_mps": 0.2,
+        "kind": "VelocitySetpoint",
+        "right_mps": 0.0,
+        "yaw_rate_radps": 0.0,
+    }
 
     # It does not complete before PX4 accepts OFFBOARD, even when the adapter
     # would otherwise be allowed to complete.
@@ -552,10 +635,9 @@ def test_policy_timeout_stops_streaming_and_starts_landing_recovery():
     port = FakeCommandPort()
     env = FakeDriverEnvironment()
 
-    def never_complete(observation, target_enu, progress):
-        del observation, target_enu
-        return PolicyStepResult(
-            progress=progress + 1,
+    def never_complete(*, policy_input, state):
+        return PolicyResult(
+            state=state + 1,
             setpoint=VelocitySetpoint(
                 forward_mps=0.2,
                 right_mps=0.0,
@@ -566,10 +648,10 @@ def test_policy_timeout_stops_streaming_and_starts_landing_recovery():
 
     params = replace(
         _params(_POLICY_STEPS),
-        policy_fn_factory=lambda descriptor: PolicyAdapter(
-            rate_hz=20.0,
-            initial_progress=0,
-            step=never_complete,
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=0,
+            advance=never_complete,
         ),
     )
     context = DriverContext(params=params, port=port, env=env, label="d0")
@@ -625,4 +707,4 @@ def test_routine_driver_policy_step_without_factory_fails_at_build():
             break
     assert env.failures
     kind, message = env.failures[0]
-    assert "policy_fn_factory" in message
+    assert "policy_factory" in message

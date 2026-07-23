@@ -1,381 +1,380 @@
-# RL workflow (Isaac Lab tasks, actuation, training, deployment)
+# RL workflow (Isaac Lab, training, artifacts, and deployment)
 
-This is the single source for the reinforcement-learning workflow detail:
-the Isaac Lab image, the in-Lab task/actuation seam, and the task->policy
-pipeline (training, artifact, deploy-time routine step, gates). `AGENTS.md`
-keeps only the short summary and points here. The deploy-time `{kind: policy}`
-routine step's execution semantics live in `docs/COMMAND_ROUTINE_CONTRACT.md`;
-the phase F design notes live under `docs/phase_f/` and the ADRs under
-`docs/adr/` (notably 0013 and 0014).
+This is the single source for the reinforcement-learning workflow: the Isaac
+Lab image, task and actuation seams, training and checkpoint selection, policy
+artifacts, deterministic evaluation, and deploy-time `{kind: policy}` behavior.
+The generic routine executor contract lives in
+`docs/COMMAND_ROUTINE_CONTRACT.md`.
 
-## Isaac Lab image
+## Isaac Lab image and task boundary
 
-The Isaac Lab image (`make build-isaac-lab`, `ISAAC_LAB_IMAGE` =
-`vv-isaac-lab-custom:<tag>`) is the Dockerfile `isaac-lab` stage layered
-`FROM isaac-sim`: Isaac Lab shares the same kit python (`/isaac-sim/python.sh`),
-USD, and PhysX and cannot run standalone, so it is a superset image, not a
-separate container. It is built from `isaac-sim/IsaacLab` pinned by the
-`ISAACLAB_REF` build ARG / Make variable (the immutable `v2.3.2` commit for
-Isaac Sim 5.1). The image installs only the Isaac Lab base package, its rsl_rl
-adapter, and the pinned closure in
-`isaac/docker/lab-runtime-requirements.txt`; unused RL frameworks and device
-retargeting stacks are excluded. Only the RL workflow needs it -- training,
-checkpoint selection, independent press evaluation, and the press/Lab targets
-defined in `make/rl.mk` run on `ISAAC_LAB_IMAGE`; every other integration target
-and the persistent containers stay on the leaner `isaac-sim` image
-(`ISAAC_IMAGE`). Rebuild it after changing `ISAACLAB_REF` or when moving Isaac
-Sim versions.
+RL targets run on `ISAAC_LAB_IMAGE` (`vv-isaac-lab-custom:<tag>`), built from
+the `isaac-lab` Dockerfile stage layered on the project Isaac Sim image. Isaac
+Lab and Isaac Sim therefore share Kit Python, USD, and PhysX. The image uses
+the `ISAACLAB_REF` pin and installs the base Lab and rsl_rl packages. Ordinary
+integration and persistent runtime containers remain on the leaner Isaac Sim
+image.
 
-## In-Lab task and actuation seam
+Importable Lab workflow code lives under
+`src/robotics_experiments/workflows/isaac_lab/`. Its lazy package root exports
+task registration, environment factories, and host-safe evaluation records
+without importing Kit or Isaac Lab on the host. The registered direct tasks
+are `Isaac-Drone-Hover-Direct-v0` and `Isaac-Switch-Press-Direct-v0`.
 
-Importable Isaac Lab task/env code lives under
-`src/robotics_experiments/workflows/isaac_lab/`; `isaac/runtime/lab/` is the
-workflow/design-note area for Isaac Lab runtime files. Code outside that package
-imports only from `robotics_experiments.workflows.isaac_lab`; its lazy package
-root is the public contract and exposes guarded task registration, both task
-IDs/env/config factories, the generic `make_isaac_lab_env(...)`, and the named
-batched rotor-omega diagnostic seam without eager-importing Isaac Lab task
-modules during host-side package imports.
+Both tasks use the task-neutral actuation seam from
+`robotics_experiments.rl`. The configured `rl.action.kind` selects either the
+body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
+control (`ctbr`). NumPy is the pure reference; the batched torch implementation
+is its Lab twin. The allocation geometry and derived arrays are immutable.
+PX4 is bypassed in Lab, but the pinned Isaac Lab
+`isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
+references. Controller gains, command delay, tilt, and thruster response come
+from an immutable alignment artifact rather than `rl.action`.
+The project still owns allocation, per-rotor yaw reaction, drag, and the sole
+body-wrench sink because the pusher-equipped articulation is not a pure
+multirotor asset.
 
-Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
-for direct-workflow environments. The registered tasks are
-`Isaac-Drone-Hover-Direct-v0` and `Isaac-Switch-Press-Direct-v0`; registration
-is independently idempotent for each. Both fly N parallel drones through the
-pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
-normalized RL action to per-rotor angular-velocity references (and thence to
-forces) without a PX4 lockstep per env. The action level is a config switch
-(`rl.action.kind`): `velocity` (default; cascaded PD tracking body-frame
-velocity + yaw rate) or `ctbr` (collective thrust + body-rate setpoint). The
-actuation is written functionally -- state in frozen params dataclasses built
-once (`build_actuation_params` / `build_flight_actuation_params`, both
-precomputing the allocation pseudoinverse), behavior in pure functions
-(`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
-a future pipeline composes it as plain functions with the RL policy as one
-stage. The public single-env reference contract is exported only from
-`robotics_experiments.rl.press` (implemented in `rl/press/actuation.py`; numpy, the
-test oracle) and the Lab package exposes the env diagnostic entry point as
-`robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega`; both mirror
-the PX4 bridge's `PegasusQuadraticThrustModel` allocation so an action
-reproduces the commanded wrench.
-The NumPy reference builder copies the caller's mixer geometry and marks every
-geometry, gain, and derived-allocation array read-only, so its frozen parameter
-graph cannot be mutated through an external alias.
+The shared exact-average cadence derives policy stepping from `sim.physics_hz`
+and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler
+alternates 13 and 12 physics samples while `step_dt` remains 0.05 s. Exported
+artifacts own evaluation and deployment cadence and action scaling.
 
-The action contract for a new training run lives in the Hydra `rl` group, with
-matching bare annotations in `src/robotics_experiments/config/_rl.py`.
-Hydra owns the action kind, dimensions, physical scales, and cadence until the
-run captures them in `policy_meta.json`; the exported artifact owns those
-values for evaluation and deployment. Controller gains, tilt limits, vehicle
-dynamics, and physical task settings remain YAML-owned.
-`rl.training.vehicle_id` selects the experiment vehicle whose spawn asset and
-airframe-enriched bridge dynamics configure the Lab task; selection fails when
-the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
-because Lab deliberately bypasses PX4.
-The standalone training root passes the resolved `ExperimentConfig` into the
-generic registry-owned factory; the Isaac Lab leaf never reloads global config. The
-physics decimation is selected per policy step by the shared exact-average
-cadence, not authored. At 250 Hz physics and the default 20 Hz policy rate it
-alternates 13 and 12 physics steps (52/48 ms), while `step_dt` remains the
-nominal 50 ms. The source period is derived from `cfg.sim.dt`; there is no
-redundant physics-rate field in the Lab config. `max_episode_length` is fixed to
-`ceil(episode_length_s * policy_rate_hz)`, so the alternating decimation cannot
-shorten an episode (20 steps per simulated second and exactly 100 steps for the
-default five-second episode). The fixed render interval uses the ceiling
-decimation. The hover task's
-reward/termination/reset values are the `rl.press.hover_task` block (task
-definition = one YAML block; no task-tuning literal in the env module). The RL
-action also maps to a PX4 OFFBOARD setpoint at deploy time
-(`press_action_to_offboard` + the commanding-layer velocity / attitude-rate
-setpoint seams).
+PX4 SITL is the response reference for the separate, policy-independent
+alignment subsystem. Run `make align-controllers`, then
+`make test-integration-alignment-target`; see
+`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
+`.build/alignment/<alignment-id>/best` by default and may select an exact run
+with `ALIGNMENT_ARTIFACT`. The command buffer and thruster state are cleared on
+every environment reset.
 
-The private flight base owns cadence, action buffering, rotor force application,
-pusher hold, and drone reset. Task leaves own scene and task behavior. The press
-task clones one real switch articulation and static wall per environment, reads
-batched switch-root poses as ground truth, measures pusher-pad contact with an
-Isaac Lab contact sensor, and reads pusher/button joints directly. Its easy-task
-geometry and initial pose ranges, contact threshold, reward, reset, termination,
-and evaluation values live under `rl.press`; Lab-only vehicle limits live under
-`rl.lab_vehicle`. Pusher stiffness and damping are inherited from the generated
-USD rather than duplicated in Lab config. The generated pusher is a complete
-tool: a fixed bracket and 265 mm body-mounted boom, a visible moving plunger,
-and a flat forward-facing pad. The length keeps the compressed pad face ahead
-of the 13-inch forward rotor sweep. Arm capsules remain collidable and each
-propeller has an invisible swept-disc collider authored as a stationary sibling
-of its animated visual marker. The compliant body and sensor paths remain
-`/pusher_joint` and `/pusher/pad/geom`. Fixed/moving masses are explicit; the
-fixed body is 2.3372 kg and the 0.010 kg moving pad/plunger makes the complete
-X500 articulation 2.3472 kg.
+`rl.action` now contains only normalized action kind, dimension, and scales.
+The selected alignment's complete `ControllerSettings` is supplied explicitly
+to both the NumPy reference and torch twin. Changing the controller requires a
+new alignment artifact and new training; an existing actor is never silently
+upgraded to current `best`.
 
-Press progression is the backend-neutral frozen `PressTaskState` advanced by
-`step_press_task(...)`. Its vector latch matches the production scalar
-`apply_button_sample` semantics. DirectRLEnv advances it once from `_get_dones`
-and caches the result for rewards and observations. Success is a confirmed
-toggle plus stable retreat; generic contact alone never earns toggle reward.
-Confirmation progress is signed: every uninterrupted above-threshold sample
-earns part of the latch-progress reward, while releasing before confirmation
-removes the accumulated progress credit. Approach and retreat progress are also
-signed. Retreat returns toward at least the episode's initial wall-normal
-range, stops earning distance reward there, penalizes lateral/vertical drift
-and excess speed, and completes only while contact-free, aligned, and stable.
-Crash/altitude/envelope termination has an explicit terminal failure cost,
-preventing timeout-hover and early-exit reward shortcuts.
+After Lab evaluation, `make test-integration-press-policy-transfer` runs the
+trained actor at three PX4 entry ranges in the production warehouse with
+physical wall and switch contact enabled. It requires every approach to finish
+without body contact, pusher contact, or a lamp transition. This is downstream
+transfer acceptance, not a fitting input. The 95% success, 1% collision, and
+0.40 m minimum-range thresholds are advisory publication diagnostics; a
+failing independent evaluation still blocks this PX4 acceptance workflow.
 
-## Task->policy pipeline (F2b)
+## Press observation and approach stage
 
-The pipeline is `task YAML -> make train-rl -> make select-rl-checkpoint ->
-policy artifact -> make eval-press -> {kind: policy} routine step ->
-FleetState lifecycle`. The runtime injects the
-artifact-selected adapter and, when its interface requires one, the task-owned
-observation assembled from live resources. Commanding remains task-neutral.
-Pieces:
+The press actor contract remains the schema-v1 34-value observation and
+four-value normalized action. `PressObservation` contains switch-relative pose,
+vehicle velocity and attitude, pusher compression and rate, contact, lamp,
+previous action, handoff mode, estimator health, and availability bits.
+Training and deployment use the same packing function. The contact frame is
+fixed by `world_switch_to_contact_frame`; switch-relative +X points from the
+drone toward the surface. `contact_flag` means pusher/pad contact only; it does
+not represent contact by the frame, arms, propellers, or wall.
 
-- **Observation layouts** (exported from `robotics_experiments.rl.press`, pure,
-  versioned): the
-  13-dim hover layout (`HOVER_OBSERVATION_SCHEMA_VERSION`,
-  `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
-  velocity) and the press-task `PressObservation`/`to_vector`
-  (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
-  (`world_switch_to_contact_frame`; canonical switch `+X` = outward plate
-  normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
-  and the live runtime at deploy. The pose-provider seam is
-  `AbstractPoseProvider` / `PoseSample`; ground truth is the lazy Isaac-only
-  `GroundTruthPoseProvider`, and the nav->contact handoff is the pure
-  `handoff_ready` gate (thresholds in `rl.press.handoff`). See ADR 0014.
-- **Training and selection** (`rl/training/`; `rsl_rl.py` is the only rsl_rl
-  importer): import `build_runner`/`train`/`load_checkpoint`/
-  `deterministic_actor`/`export_policy`/`TrainingResult` from
-  `robotics_experiments.rl.training.rsl_rl`. The contract runs
-  over `RlTrainingConfig` (the `rl.training` block, incl. explicit `task_id`
-  and `policy_name`).
-  `make train-rl` (thin target in `make/rl.mk`, runs
-  `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
-  image) writes the stored policy contract, Git provenance, and all checkpoints
-  under `.build/training/<policy-name>/<run-id>/`; it does not export
-  `policy.pt` or advance `latest`.
-  `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
-  task config owns its observation schema version and dimension, so stored
-  metadata contains no task-ID conditional. Before PPO begins, the run writes
-  the complete policy contract and Git provenance to its run directory.
-  rsl_rl comes from the pinned Lab image requirements; the host `training`
-  extra (`rsl-rl-lib`) exists for tooling only.
-  `make select-rl-checkpoint RL_RUN_ID=<run-id>` resumes selection without
-  retraining. The task-neutral selector enumerates every numeric checkpoint,
-  builds one compatible environment and runner, and dispatches by stored
-  `policy_interface`. `press-v1` evaluates every checkpoint with the full
-  workload shared with `eval-press`; an interface without a scorer warns and
-  selects its final checkpoint with `selection_method: final-no-scorer`.
-  Selection reloads the winner without optimizer state, stages the TorchScript
-  actor, selected metadata, and `checkpoint_selection.json`, then atomically
-  advances the relative `.build/training/<policy-name>/latest` symlink.
-  A scorer always selects a checkpoint: it prefers acceptance-passing
-  candidates and otherwise publishes the highest-ranked candidate as an
-  explicitly rejected fallback. The independent evaluator remains the
-  acceptance gate.
-  Explicit export remains available for manual checkpoint diagnostics:
+The pose-provider seam is `AbstractPoseProvider` / `PoseSample`.
+`GroundTruthPoseProvider` is the lazy Isaac-only implementation.
+`handoff_ready` is the pure navigation-to-policy gate configured by
+`rl.press.handoff`. That config is the shared actor-entry contract for Lab
+resets and deployment: 0.45-0.50 m wall-normal range, at most 0.08 m combined
+lateral/vertical error, at most 0.02 m/s wall-normal and lateral speed, at most
+0.05 rad/s angular speed, upright attitude, valid pose/contact samples, no
+contact, zero previous action, pre-contact mode, and a healthy estimator.
 
-  ```console
-  make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml \
-    TRAIN_ARGS='--num-envs 2 --export-checkpoint /isaac-sim/proj/.build/training/press/<run-id>/logs/model_<iteration>.pt'
-  ```
+The curriculum is intentionally staged:
 
-  Manual export loads policy weights without optimizer state, reuses the
-  contract and provenance captured in that run before training, writes the
-  artifact back into the checkpoint's existing run directory, and deliberately
-  does not publish `latest`. It rejects a run missing stored metadata. The
-  checkpoint must be below that namespace's run-local `logs/` directory.
-- **Artifact** = TorchScript `policy.pt` + `policy_meta.json`
-  (`policy_interface`, obs schema version/dim, policy rate, action kind/dim,
-  action scales, source Git commit, and dirty-worktree flag). The interface is
-  the runtime adapter selector (`hover-v1` or `press-v1`), not a commanding
-  routine kind. Train accepted policies from a clean revision;
-  `source_dirty: true` is diagnostic provenance, not a claim that the commit
-  alone reproduces the artifact. The frozen `PolicyContract` is the typed
-  runtime authority for the interface, observation layout, cadence, action
-  shape, and physical action scales. `load_vector_policy(...)` validates that
-  the runtime supplies the artifact's supported observation contract and
-  returns a `LoadedVectorPolicy` carrying both the contract and inference
-  callable. It never compares against deployment `rl.action` or
-  `rl.policy_rate_hz`. `validate_policy_artifact(...)` performs the same
-  contract validation without importing Torch and backs the pre-launch Make
-  preflight. Malformed, missing, non-finite, structurally invalid, and
-  unsupported contracts fail before simulator startup. Exact schema-v1 hover
-  and press artifacts made before `policy_interface` are recognized only from
-  their complete contract fields; legacy press inference retains its exact
-  34-value, 20 Hz, four-value velocity tuple and warns.
-  A scored selected artifact also records `selected_checkpoint_iteration`,
-  `selection_method`, and `checkpoint_evaluation`. The last field copies the
-  selected checkpoint's acceptance result, evaluation seeds and episode count,
-  thresholds, metrics, normalized margins, ranking tuple, and reward-term
-  means. These additional fields are strict-JSON diagnostic provenance and do
-  not change the policy runtime contract.
-- **Gate**: `make test-integration-press-policy` flies
-  `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
-  takeoff -> policy hover hold -> land) strict over PX4 SITL on
-  `ISAAC_LAB_IMAGE`. It needs a published artifact from `make train-rl`
-  followed by `make select-rl-checkpoint` (the routine
-  references `.build/training/hover/latest`), so it is deliberately NOT part of
-  `test-integration-all`. The hover+goto gate additionally runs the F2
-  side-channel validation (ground-truth provider + `PressObservation` +
-  handoff flip) without touching the env's training observation.
+1. Stage 1, the implemented `approach` stage, learns a controlled contact-free
+   approach, alignment, and stable stop.
+2. Stage 2 will learn contact and switch activation.
+3. Stage 3 will learn controlled post-contact retreat and may initialize from a
+   compatible earlier stage.
 
-## Ground-truth press training and evaluation (F3)
+There is no automatic promotion and no fixed multi-stage enum. Each future
+stage adds its own Hydra option, policy namespace, transition, reward record,
+evaluator, and runtime completion predicate. The routine's ordinary return
+`goto` remains downstream of Stage 1 and is not learned retreat behavior.
 
-`configs/train_press_quad.yaml` selects `Isaac-Switch-Press-Direct-v0`, the
-`press` artifact namespace, ten-second episodes, and press PPO settings. Run:
+Stage 1 is the frozen `PressApproachState` advanced by
+`step_press_approach(...)`. State contains previous range, previous action,
+consecutive stable-goal steps, and closest range. The full observation remains
+packed for later actor compatibility; compression and contact are measured,
+the lamp remains off, and `handoff_mode` remains pre-contact.
+
+Collision is privileged training state, not policy state. During each 20 Hz
+policy interval, Isaac advances 12 or 13 physics substeps while separate PhysX
+contact sensors latch collisions on the drone body and pusher pad. The
+environment supplies the two latched flags only to `PressApproachInput` after
+the interval. They are absent from `PressApproachState`, the schema-v1
+34-value actor observation, and the critic input. PPO receives only the
+resulting reward and terminal flag. Collision terminates and resets the
+episode, so no collision value persists into successor policy state.
+
+Success requires five consecutive 20 Hz policy samples satisfying all of:
+
+- Wall-normal range from 0.40 through 0.42 m.
+- Combined lateral/vertical error no greater than 0.03 m.
+- Total linear speed no greater than 0.10 m/s.
+- Angular speed no greater than 0.40 rad/s.
+- Body-Z/world-Z alignment at least 0.965926.
+- No pusher collision during the policy interval.
+
+Body collision, pusher collision, crash, altitude, or relative-envelope failure
+terminates the episode.
+Timeout is a truncation and is mutually exclusive with terminal success or
+failure. Reset samples range from 0.45 through 0.50 m and samples lateral and
+vertical offsets uniformly inside the shared 0.08 m radial bound. Initial
+linear velocity is sampled in the contact frame inside the shared wall-normal
+and lateral speed limits, initial angular velocity is sampled inside the shared
+0.05 rad/s ball, attitude is upright, previous action is zero, and mode is
+pre-contact. Reset owns no independent entry-velocity tunables.
+
+`PressApproachRewardTerms` has exactly nine signed contributions:
+
+- `range_progress = 50 * (previous_range - current_range)`.
+- `alignment_error = -50 * ||relative_yz||^2`.
+- `velocity_tracking = -100 * ||measured_velocity - target_velocity||^2`.
+- `upright_error = -5 * (1 - clamped_body_z_alignment)^2`.
+- `action_delta = -0.004 * mean((action - previous_action)^2)`.
+- `success = 150` on the successful terminal step.
+- `collision = -300` on a body or pusher collision.
+- `flight_failure = -100` on an ordinary flight-envelope failure.
+- `timeout = -25` on truncation.
+
+The contact-frame velocity target is dense in all three axes. Its wall-normal
+component is `clip(1.25 * (range - 0.41), -0.04, 0.08)` m/s. Its tangential
+components are twice the lateral and vertical switch errors, radially limited
+to 0.10 m/s. This target teaches braking, small controlled retreat after range
+undershoot, and simultaneous alignment without encoding a task-specific actor.
+Collision overrides success and the ordinary flight-failure penalty;
+simultaneous body and pusher collision produces one collision reward penalty.
+`PressApproachTerminationFlags` still retains both collision sources for
+diagnostics. `Reward/` TensorBoard scalars enumerate every contribution plus
+`total`. `Press/` reports completed episodes, success, combined collision,
+body-collision, pusher-collision, other-flight-failure, and timeout percentages.
+
+The actor action drives training physics directly. No deterministic
+near-wall governor changes the forward command in training or deployment.
+Collision reward and termination must therefore produce the learned braking
+behavior; a flat zero-collision run from the initial checkpoint is not evidence
+of learning unless the unguided actor already satisfies the independent gates.
+
+The physical switch, wall, pusher, arm, and propeller-collision assets remain
+present. Pusher stiffness and damping remain authored in the generated USD.
+The policy observation's pad contact sensor remains on `/pusher/pad`, while
+training additionally monitors `/body`; collisions from child frame, arm, and
+swept-propeller colliders resolve through that body. The pusher joint remains
+`/pusher_joint`. `make test-integration-press-contact-chain` exercises physical
+contact, button travel, production latch/lamp behavior, and retreat through a
+test-local no-dones environment. Contact in that gate does not invoke or reset
+the approach transition.
+
+## Training, initialization, and export
+
+`configs/train_press_approach_quad.yaml` selects the press task, the
+`approach` Hydra option, ten-second episodes, and the `press-approach` policy
+namespace. The actor and critic remain independent `[256, 256, 128]` MLPs with
+ELU activation; the actor still maps 34 values to four action means.
+`rl.training` owns the explicit training mode, PPO settings, rollout length,
+checkpoints, seed, task ID, vehicle ID, and policy namespace. Scratch training
+uses 32,768 parallel environments, 300 iterations, 32 steps per environment,
+an adaptive `1e-4` learning rate, `0.0001` entropy coefficient, five epochs,
+eight minibatches, and checkpoints every ten iterations. This is approximately
+315 million transitions and about 35 minutes of PPO on the measured GPU. A
+49,152-environment run remains an explicit capacity probe rather than the
+production default.
+
+A new run writes checkpoints and `policy_meta.json` below
+`.build/training/<policy-name>/<run-id>/`. Before it constructs the
+environment, training loads
+`rl.training.alignment_artifact` (defaulting to the controller alignment
+namespace's `best` link), validates vehicle, airframe, cadence, interface, and
+action dimension, and stores the alignment digest, run identity, fingerprints,
+quality status, and complete settings in `policy_meta.json`. Normalized action
+scales remain task-owned and may differ from the scale used by the
+policy-independent alignment probe experiment. This happens before PPO begins.
+An explicit `ALIGNMENT_ARTIFACT` or
+`--alignment-artifact` overrides the configured link for reproduction.
+After PPO, `make train-rl` automatically evaluates every saved checkpoint,
+exports the highest-scoring checkpoint, always advances the relative `latest`
+link, and advances `best` only when the score strictly improves within the
+same comparison fingerprint.
+
+`training_mode: scratch` forbids `--initialize-checkpoint`. After rsl_rl builds
+the actor and critic from random weights, the task-neutral
+`scratch-neutral-output` method orthogonally initializes the final actor layer
+with gain `0.01` and zero bias. The initial action mean is therefore near zero,
+while Gaussian exploration starts at standard deviation `0.03`. Metadata
+records this initialization method before PPO begins.
+
+`training_mode: actor-only` requires `--initialize-checkpoint` and copies only
+compatible `actor.*` tensors into a fresh run. Critic, optimizer, exploration
+standard deviation, and iteration counter remain fresh. The separate
+`configs/train_press_approach_quad_finetune.yaml` retains the former
+50-iteration, fixed `1e-6`, 0.01-noise, zero-entropy recipe:
 
 ```console
-make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
-make select-rl-checkpoint HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
-make eval-press
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \
+  RL_RUN_ID=<run-id> \
+  TRAIN_ARGS='--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/<source-run>/logs/model_<iteration>.pt'
 ```
 
-For `press-v1`, selection creates one 100-environment scene and compatible
-runner, then loads every numeric `model_<iteration>.pt` once, including
-`model_0`, periodic checkpoints, and the final checkpoint. Each candidate runs
-100 deterministic episodes for seeds 101, 202, and 303. There is no screening,
-TensorBoard-reward shortcut, or reduced episode count. The shared evaluator
-records every reward-term mean, confirmed toggle rate, stable first contact
-among contacted episodes, retreat among toggled episodes, full completion,
-median toggle time, and peak compression overshoot.
+The source may be any validated
+`.build/training/<source-policy>/<run>/logs/model_N.pt`; observation/action
+dimensions and actor tensor layout must match. Initialization provenance
+records method, source policy, source stage, source run, iteration, path, and
+source commit.
 
-A press candidate is accepted only at the configured 80% confirmed-toggle,
-85% stable-first-contact, and 95% post-toggle-retreat thresholds. Accepted
-candidates are always preferred. Within that set, candidates are ranked by the
-lexicographically largest sorted tuple of each acceptance rate divided by its
-threshold, maximizing the weakest normalized gate first. Exact ties prefer
-higher full completion, lower peak compression overshoot, lower median toggle
-time, then earlier iteration. If no candidate is accepted, the same ranking
-and tie-breakers select the best fallback from all evaluated checkpoints; PPO
-return is never a selection input.
-Schema-2 `checkpoint_selection.json` uses
-`selection_method: press-gated-maximin-v2` and retains the run/interface
-identity, seeds, thresholds, all candidates and metrics, normalized margins,
-ranking values, reward means, selected iteration, and `selected_accepted`.
-Selection publishes either the accepted winner or the explicitly marked
-fallback and advances `latest`.
+Manual export remains restricted to the configured namespace that owns the
+checkpoint:
 
-`make eval-press` independently evaluates the selected artifact with the
-identical rollout and aggregation logic. With `RL_RUN_ID` it reads that exact
-published run; otherwise it resolves `.build/training/press/latest`. The Lab
-environment uses the artifact's action kind, dimension, physical scales, and
-cadence, while controller gains and physical task settings continue to come
-from the training YAML. Artifacts remain ignored under `.build/training`; no
-policy binary is committed.
+```console
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
+  TRAIN_ARGS='--export-checkpoint /isaac-sim/proj/.build/training/press-approach/<run-id>/logs/model_<iteration>.pt'
+```
 
-For the canonical logged train-select-evaluate workflow, use the wrapper:
+Manual export does not publish either label.
+
+## Artifact and curriculum contract
+
+An artifact is `policy.pt` plus `policy_meta.json`. The metadata owns
+`policy_interface`, observation schema/dimension, policy rate, action
+kind/dimension/scales, aligned controller settings and provenance, source
+commit, and dirty-worktree status. A `press-v1`
+artifact also requires `curriculum_stage: approach`. `press-v1` describes the
+shared 34-by-4 family; `curriculum_stage` selects stage-specific evaluation and
+runtime completion.
+
+Malformed, missing, non-finite, stage-less press, unknown-stage press, and
+stage-mismatched artifacts fail during loading, selection, evaluation, and
+runtime preflight. Historical press or hover artifacts without alignment
+provenance are unsupported and are never upgraded into the current comparison
+generation.
+Checkpoint selection, manual export, and independent evaluation reconstruct
+the exact controller settings embedded before PPO. Runtime deployment validates
+that record, while its OFFBOARD mapper continues to consume only
+`PolicyContract`.
+
+## Automatic checkpoint selection and independent evaluation
+
+`make train-rl` performs checkpoint selection automatically. To repeat
+selection for an existing run:
+
+```console
+make select-rl-checkpoint \
+  HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
+  RL_RUN_ID=<run-id>
+make eval-press RL_RUN_ID=<run-id>
+```
+
+Selection evaluates every numeric checkpoint, including iteration zero and the
+final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
+303. It records:
+
+- Approach success rate.
+- Combined simulated collision rate.
+- Body-collision and pusher-collision source rates.
+- Other-flight-failure rate.
+- Timeout rate.
+- Mean closest range.
+- Minimum closest range.
+- Median successful completion time.
+- Normalized terminal range, trajectory alignment, target-velocity tracking,
+  upright, action-change, and completion-time costs.
+- Every reward-term mean.
+
+`held-out-press-task-quality-v2` subtracts configured collision, other-flight-
+failure, timeout, and non-success penalties plus the six normalized continuous
+costs. Higher scores are better; PPO return is never a selection input. The
+95% success, 1% collision, 0.40 m minimum-range, finite completed trace, and
+zero flight-envelope-failure gates are recorded as `advisory_accepted` and
+never block a structurally valid publication.
+
+```text
+score = -(4.00 * collision_rate
+        + 3.00 * other_flight_failure_rate
+        + 2.00 * timeout_rate
+        + 1.00 * (1 - success_rate)
+        + 0.25 * terminal_range_cost
+        + 0.20 * trajectory_alignment_cost
+        + 0.20 * velocity_tracking_cost
+        + 0.10 * upright_error_cost
+        + 0.10 * action_delta_cost
+        + 0.15 * completion_time_fraction)
+```
+
+Schema-7 `checkpoint_selection.json` records policy/stage identity, metric and
+comparison fingerprint, seeds, advisory thresholds, every candidate and score
+component, reward means, and the selected checkpoint. `latest` always points
+to the newest completed selection. `best` changes only for a strictly higher
+score under the same fingerprint; the first run under a new metric or
+evaluation fingerprint initializes a new `best`.
+
+`make eval-press` independently repeats the same workload and gates. With
+`RL_RUN_ID`, it evaluates that published run; otherwise it resolves
+`.build/training/press-approach/latest`.
+
+For a logged training and evaluation run, use:
 
 ```console
 make/scripts/run_training_evaluation_then_shutdown.sh \
-  --hydra-config configs/train_press_quad.yaml \
+  --hydra-config configs/train_press_approach_quad.yaml \
   --train-target train-rl \
-  --select-target select-rl-checkpoint \
   --eval-target eval-press \
-  --train-args '--num-envs 49152 --max-iterations 300' \
-  --label press-overnight
+  --label press-approach
 ```
 
-Shutdown is disabled by default, so this form never invokes `sudo`, refreshes
-sudo authorization, calls `sync`, or requests power-off. Add the valueless
-`--shutdown` flag for an unattended run that powers off after a successful
-evaluation, a failed stage, or a handled interrupt. In that mode the wrapper
-validates sudo access before training and refreshes the authorization while the
-workload runs. The wrapper creates one artifact run ID and passes it as
-`RL_RUN_ID` to all three stages. Training failure skips selection and
-evaluation; an operational selection/export failure skips evaluation and
-cannot change the previous `latest`. A gate-rejected fallback is a successful
-selection, so independent evaluation runs against that exact published run and
-fails the overall workflow when the artifact still misses a threshold.
-The wrapper preserves the terminal stage status unless the explicitly
-requested shutdown command fails. Its target names, Hydra config, per-stage
-arguments, label, and log directory are command-line options. The combined
-console log and final three-stage exit status, including target names, artifact
-run ID, and shutdown mode, default to
-`.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
-ordinary integration and policy artifacts remain in `.build/docker/integration`
-and `.build/training`.
-The wrapper also starts `tensorboard-rl` in the pinned Isaac Lab image, serves
-the `.build/training` tree on `http://127.0.0.1:6006/`, prints that URL to the
-terminal and combined console log after the server is ready, and stops the
-named TensorBoard container on every wrapper exit path. A TensorBoard startup
-failure stops the workflow before training.
+The wrapper uses one run ID, serves only that run in TensorBoard, preserves the
+terminal stage status, and does not shut down unless `--shutdown` is supplied.
+When an agent launches training directly instead of through the wrapper, it
+must likewise provide run-scoped monitoring, report the TensorBoard URL and log
+directory to the user, and leave monitoring available while the run remains
+active unless asked to stop it.
 
-For explicit unattended shutdown, add the flag:
+## Approach deployment mission
+
+`configs/policy_press_approach_quad.yaml` runs arm -> takeoff -> hover -> goto
+a safe staging point approximately 0.59 m from the switch -> hover -> make a
+short goto into the approximately 0.48 m handoff range -> hover -> generic
+`policy` -> return goto -> land. Splitting the approach keeps braking from the
+long navigation leg outside the pusher-to-wall clearance. The staging and
+return gotos request PX4-guided 0.5 m/s motion; the final 0.11 m approach
+requests 0.08 m/s and has a 10 s timeout. The policy descriptor reads
+`.build/training/press-approach/latest` and selects switch index zero.
+
+The runtime preflights metadata before simulator mutation. The `approach`
+adapter enters the policy stage with a zero velocity command and continues
+streaming zero until the complete shared `handoff_ready` gate passes. It then
+applies inference output directly, supplies the preceding action to the next
+observation, tracks initial and closest range, and uses the same stable-goal
+predicate as training. Completion cannot accrue before handoff and returns a
+zero terminal setpoint. Contact or an invalid observation returns a policy
+failure. The generic routine driver remains task-neutral and retains the
+opaque final policy state. The preceding 0.48 m `goto` uses a 0.02 m completion
+tolerance so its settled position remains inside the entry range.
+
+Deployment logs machine-readable `PRESS_POLICY` JSON at every policy
+evaluation, including the first-handoff marker, exact 34-value observation,
+raw and clipped normalized actions, derived setpoint, stable-goal count,
+contact state, and completion/failure value. `POLICY_SETPOINT` records every
+setpoint successfully handed to the MAVLink port, while `ROUTINE_STAGE` records
+the policy-stage start and terminal boundary. All timestamps use the same
+post-startup-settle simulation clock sent to PX4 HIL.
+
+Deployment continues to use deployable providers for pusher compression and
+contact plus lamp state. No any-body collision detector or new real-drone
+sensor is part of `press-v1`. The real policy may react indirectly to measured
+linear or angular-rate disturbances, but that is not reliable collision
+detection. If Lab evaluation passes while the live PX4 approach still visibly
+contacts the wall, record the dynamics mismatch and stop; do not add collision
+to the observation or artifact contract.
+
+After `make eval-press` and the physical warehouse
+`make test-integration-press-policy-transfer` acceptance pass, run:
 
 ```console
-make/scripts/run_training_evaluation_then_shutdown.sh \
-  --hydra-config configs/train_press_quad.yaml \
-  --eval-target eval-press \
-  --train-args '--num-envs 49152 --max-iterations 300' \
-  --label press-overnight \
-  --shutdown
+make test-integration-press-approach-routine
 ```
 
-The zero-manual-update deployment sequence is:
-
-1. Run the wrapper with `--hydra-config configs/train_press_quad.yaml`, adding
-   `--shutdown` only when power-off is wanted.
-2. Training writes an unpublished checkpoint run under the wrapper's
-   `RL_RUN_ID`.
-3. Selection publishes the best checkpoint and advances
-   `.build/training/press/latest`; metadata marks whether it passed acceptance
-   or is the best ranked fallback.
-4. Independent evaluation reads the exact selected run and remains the
-   acceptance gate. `latest` means the newest selected artifact, which may be
-   an explicitly rejected fallback rather than an accepted policy.
-5. Run `make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; the
-   composed `policy_press` routine reads the same symlink, while action kind,
-   dimensions, scales, and cadence come from `policy_meta.json`.
-
-From another terminal, follow the newest wrapper log with:
-
-```console
-tail -F "$(ls -1t .build/overnight/*.console.log | head -n 1)"
-```
-
-## Full press-policy mission gate
-
-`configs/policy_press_quad.yaml` is the deployment sanity routine in the same
-top-level Hydra format as `configs/takeoff_quad_quad.yaml`. It runs one X500 in
-the warehouse through arm -> takeoff -> hover -> goto handoff pose -> hover ->
-generic `policy` -> return goto -> land. The policy descriptor carries
-`artifact: .build/training/press/latest` and `switch_index: 0`; the artifact's
-`policy_interface: press-v1` selects the runtime adapter. The deployment config
-does not repeat action scales or policy cadence: OFFBOARD conversion, press
-observation action shape, adapter scheduling, and the production switch latch
-use artifact metadata. A fleet with press artifacts at conflicting cadences is
-rejected before spawn; when no press policy is present, the switch latch uses
-the configured training cadence.
-
-The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
-before physics starts, creates a pad `ContactSensor`, and reads canonical
-switch pose, vehicle state, pusher compression/rate, contact, and lamp state.
-The non-policy contact-chain gate also requires the fixed mount/boom, visible
-plunger, a +X-facing collidable pad, full initial joint deployment, enabled arm
-and swept-propeller collision, wall collision, and rotor-sweep clearance before
-attempting a press. The Lab task owns a cloned static wall per environment; the
-live warehouse adapter adds an invisible collision proxy behind the selected
-switch so deployment cannot pass through decorative warehouse geometry. It
-packs the exact 34-value `PressObservation`. The pure frozen deployment
-transition waits for the handoff gate, supplies the preceding normalized action
-to the next observation, rejects an initially-on lamp or repeated lamp toggle,
-records first-contact stability plus diagnostic approach/compression/action
-peaks, and completes only after one toggle plus the configured stable retreat.
-Its normalized output is mapped through the same
-`press_action_to_offboard` seam as training.
-
-After an artifact passes `make eval-press`, run:
-
-```console
-make test-integration-press-routine
-```
-
-This artifact-dependent PX4/Isaac gate is intentionally outside
-`test-integration-all`. It requires exactly one off-to-on event, stable first
-contact, one toggle, stable retreat, return waypoint, landing, and disarm. The
-current legacy artifact can be run only as a diagnostic at its recorded 0.5 m/s
-action scale. It was trained against the obsolete pad-only geometry, so it is
-not a parity-valid candidate after the complete pusher tool was introduced. Its
-measured 0% toggles and 0% retreat already blocked this gate; the next accepted
-export must be trained on the complete tool and carry `press-v1` explicitly. No
-new training was started while adding the deployment path or correcting the
-pusher geometry.
+The strict gate requires stable contact-free approach completion, no lamp
+transition, return flight, landing, and disarm. It is artifact-dependent and
+therefore excluded from `test-integration-all`.

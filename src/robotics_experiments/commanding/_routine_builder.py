@@ -1,15 +1,16 @@
 import math
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Optional
+from collections.abc import Sequence
+from typing import Optional
 
 import numpy as np
 
 from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
-    PolicyAdapter,
     RoutineStep,
     VehicleRoutine,
+    _GuidedSpec,
     _Invariant,
+    _PolicyFactory,
     _StepPredicate,
     _StreamingSpec,
 )
@@ -37,6 +38,7 @@ from robotics_experiments.commanding.commands import (
     takeoff,
 )
 from robotics_experiments.commanding.observation import RoutineObservation
+from robotics_experiments.config import RoutineStepConfig
 from robotics_experiments.px4_bridge import synth_gps_from_enu
 
 __all__ = ["build_vehicle_routine"]
@@ -65,7 +67,7 @@ def _build_arm_step(*, command_ack_timeout_s: float) -> RoutineStep:
 
 def _build_takeoff_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     target_latitude_deg: float,
     target_longitude_deg: float,
@@ -91,7 +93,7 @@ def _build_takeoff_step(
 
 def _build_hover_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     gates: EnvelopeGates,
     hover_settle_s: float,
@@ -115,7 +117,7 @@ def _build_hover_step(
 
 def _build_forward_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     target_latitude_deg: float,
     target_longitude_deg: float,
@@ -146,7 +148,7 @@ def _build_forward_step(
 
 def _build_goto_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     gates: EnvelopeGates,
     home_lat_deg: float,
@@ -192,6 +194,34 @@ def _build_goto_step(
     ) -> bool:
         return reached(observation, baseline) and aligned(observation, baseline)
 
+    if "ground_speed_m_s" in descriptor:
+        ground_speed_m_s = float(descriptor["ground_speed_m_s"])
+        if not math.isfinite(ground_speed_m_s) or ground_speed_m_s <= 0.0:
+            raise ValueError(
+                f"routine step {index} (goto) ground_speed_m_s must be finite "
+                f"and positive, got {ground_speed_m_s!r}"
+            )
+        return RoutineStep(
+            command=reposition(
+                float(gps["latitude"]),
+                float(gps["longitude"]),
+                float(gps["altitude"]),
+                ground_speed_m_s,
+            ),
+            is_complete=_reached_and_aligned,
+            label=f"goto[{x_m:.1f},{y_m:.1f},{z_m:.1f}]",
+            timeout_s=float(descriptor["timeout_s"]),
+            retry_on_temporarily_rejected=True,
+            invariants=_invariants(
+                gates,
+                cross_track_to_segment_below(x_m, y_m, goto_cross_track_m),
+            ),
+            guided=_GuidedSpec(
+                target_enu=(x_m, y_m, z_m),
+                min_heading_dist_m=float(goto_min_heading_dist_m),
+            ),
+        )
+
     return RoutineStep(
         command=set_offboard_mode(),
         is_complete=_reached_and_aligned,
@@ -204,21 +234,27 @@ def _build_goto_step(
 
 def _build_policy_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     flight_invariants: tuple[_Invariant, ...],
     goto_offboard_prime_ticks: int,
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]],
+    policy_factory: Optional[_PolicyFactory],
 ) -> RoutineStep:
+    for obsolete, replacement in (("name", "label"), ("target", "target_enu")):
+        if obsolete in descriptor:
+            raise ValueError(
+                f"routine step {index} (policy) uses unsupported {obsolete!r}; "
+                f"use {replacement!r}"
+            )
     for field in ("artifact", "timeout_s"):
         if field not in descriptor:
             raise ValueError(f"routine step {index} (policy) is missing required {field!r}")
-    if policy_fn_factory is None:
+    if policy_factory is None:
         raise ValueError(
-            f"routine step {index} (policy) requires an injected policy_fn_factory "
+            f"routine step {index} (policy) requires an injected policy_factory "
             "(the runtime composes it from robotics_experiments.rl)"
         )
-    target = descriptor.get("target")
+    target = descriptor.get("target_enu")
     if target is None:
         target_enu = None
     else:
@@ -226,32 +262,18 @@ def _build_policy_step(
             target_values = [float(v) for v in target]
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                f"routine step {index} (policy) target must be a 3-item numeric sequence"
+                f"routine step {index} (policy) target_enu must be a 3-item numeric sequence"
             ) from exc
-        if len(target_values) != 3:
+        if len(target_values) != 3 or not all(math.isfinite(value) for value in target_values):
             raise ValueError(
-                f"routine step {index} (policy) target must be a 3-item numeric sequence"
+                f"routine step {index} (policy) target_enu must be a 3-item numeric sequence"
             )
-        target_enu = np.asarray(target_values, dtype=np.float64)
-    adapter = policy_fn_factory(descriptor)
-    if target_enu is not None:
-        original_step = adapter.step
-
-        def _targeted_policy(
-            observation: RoutineObservation,
-            baseline: Optional[np.ndarray],
-            progress,
-            original_step=original_step,
-            target_enu=target_enu,
-        ):
-            del baseline
-            return original_step(observation, target_enu, progress)
-
-        adapter = PolicyAdapter(
-            rate_hz=adapter.rate_hz,
-            initial_progress=adapter.initial_progress,
-            step=_targeted_policy,
-        )
+        target_enu = (target_values[0], target_values[1], target_values[2])
+    hold_s = float(descriptor["hold_s"]) if "hold_s" in descriptor else None
+    adapter = policy_factory(
+        artifact=str(descriptor["artifact"]),
+        hold_s=hold_s,
+    )
 
     spec = _StreamingSpec(
         target_enu=(math.nan, math.nan, math.nan),
@@ -260,11 +282,15 @@ def _build_policy_step(
         altitude_m=math.nan,
         prime_ticks=int(goto_offboard_prime_ticks),
         policy=adapter,
+        policy_reference_position_enu=(
+            (math.nan, math.nan, math.nan) if target_enu is None else target_enu
+        ),
+        policy_reference_is_entry=target_enu is None,
     )
     return RoutineStep(
         command=set_offboard_mode(),
         is_complete=_always,
-        label=(f"policy[{descriptor['name']}]" if "name" in descriptor else "policy"),
+        label=(f"policy[{descriptor['label']}]" if "label" in descriptor else "policy"),
         timeout_s=float(descriptor["timeout_s"]),
         hold_s=0.0,
         invariants=flight_invariants,
@@ -272,7 +298,7 @@ def _build_policy_step(
     )
 
 
-def _build_land_step(*, descriptor: Mapping[str, Any], index: int) -> RoutineStep:
+def _build_land_step(*, descriptor: RoutineStepConfig, index: int) -> RoutineStep:
     if "timeout_s" not in descriptor:
         raise ValueError(f"routine step {index} (land) is missing required 'timeout_s'")
     return RoutineStep(
@@ -286,7 +312,7 @@ def _build_land_step(*, descriptor: Mapping[str, Any], index: int) -> RoutineSte
 
 def build_vehicle_routine(
     *,
-    steps: Sequence[Mapping[str, Any]],
+    steps: Sequence[RoutineStepConfig],
     target_latitude_deg: float,
     target_longitude_deg: float,
     target_altitude_m: float,
@@ -303,7 +329,7 @@ def build_vehicle_routine(
     goto_offboard_prime_ticks: int,
     offboard_setpoint_rate_hz: float,
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None,
+    policy_factory: Optional[_PolicyFactory] = None,
 ) -> VehicleRoutine:
     """Build a :class:`VehicleRoutine` from authored step descriptors and a target.
 
@@ -330,23 +356,27 @@ def build_vehicle_routine(
       ``distance_m`` along world +X/east and completes once that displacement is
       observed from the active step baseline; flight gates apply.
     - ``goto`` (requires ``x``, ``y``, ``z`` and ``timeout_s``; optional
-      ``position_tol_m`` / ``heading_tol_deg``): streams OFFBOARD position
-      setpoints toward the absolute world-ENU waypoint (converted to a geodetic
-      target via ``synth_gps_from_enu`` against ``home_*``, frame-consistent with
-      the bridge's synthesized GPS), yawing toward the leg direction; completes
-      once within ``goto_position_tol_m`` of the waypoint and heading-aligned. A
-      cross-track-to-path gate plus tilt / vertical / angular gates apply.
-    - ``policy`` (requires ``artifact``, ``hold_s`` and ``timeout_s``; optional
-      ``target`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
+      ``ground_speed_m_s`` / ``position_tol_m`` / ``heading_tol_deg``): converts
+      the absolute world-ENU waypoint to a geodetic target via
+      ``synth_gps_from_enu`` against ``home_*``, frame-consistent with the
+      bridge's synthesized GPS. Without a speed it streams the original
+      OFFBOARD position target, yawing toward the leg. With a finite positive
+      speed it sends an acknowledged ``MAV_CMD_DO_REPOSITION`` carrying that
+      guided target speed and lets PX4 generate and brake the trajectory.
+      Both forms complete once position and heading are aligned and retain the
+      same cross-track, tilt, vertical, angular, and timeout gates.
+    - ``policy`` (requires ``artifact`` and ``timeout_s``; optional ``hold_s`` /
+      ``label`` / ``target_enu`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
       produced by a trained policy at its artifact-owned cadence -- the injected
-      ``policy_fn_factory(descriptor)`` loads the artifact and returns the pure
-      :data:`PolicyStepFn` (raising ``ValueError`` for a missing or mismatched
+      ``policy_factory(artifact=..., hold_s=...)`` loads the artifact and returns
+      a :class:`PolicyAdapter` (raising ``ValueError`` for a missing or mismatched
       artifact, so a bad config fails at build time). Reuses the ``goto``
-      OFFBOARD prime/engage/stream lifecycle. Without an authored ``target``
-      the policy holds the position captured when the step began. Completes
-      after PX4 accepts OFFBOARD and then ``hold_s`` of continuous in-envelope
-      flight (the flight gates are the invariants, so a bad policy fails as
-      ``ENVELOPE``). A routine should follow a policy step with an
+      OFFBOARD prime/engage/stream lifecycle. Without an authored ``target_enu``
+      the adapter receives the position captured when the step began. The
+      adapter owns completion; ``hover-v1`` requires ``hold_s``, while
+      ``press-v1`` does not. Completion advances only after PX4 accepts OFFBOARD,
+      and the flight gates remain invariants so a bad policy fails as
+      ``ENVELOPE``. A routine should follow a policy step with an
       explicit-command step (e.g. ``land``): a command-less verifier would keep
       re-streaming the last policy payload.
     - ``land`` (requires ``timeout_s``): commands a landing at the current
@@ -357,7 +387,7 @@ def build_vehicle_routine(
 
     Raises:
         ValueError: on an unknown ``kind``, a required descriptor field missing,
-            or a ``policy`` step without an injected ``policy_fn_factory``
+            or a ``policy`` step without an injected ``policy_factory``
             (invalid configuration must not pass silently).
     """
     flight_invariants = _invariants(gates, _lateral_drift_below(gates.max_lateral_drift_m))
@@ -422,7 +452,7 @@ def build_vehicle_routine(
                     index=index,
                     flight_invariants=flight_invariants,
                     goto_offboard_prime_ticks=goto_offboard_prime_ticks,
-                    policy_fn_factory=policy_fn_factory,
+                    policy_factory=policy_factory,
                 )
             )
         elif kind == "land":

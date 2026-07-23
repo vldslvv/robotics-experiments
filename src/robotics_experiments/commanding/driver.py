@@ -8,20 +8,21 @@ the imperative boundary.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+import json
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, replace
 from enum import Enum, auto
-from typing import Any, Optional, Protocol
+from typing import Optional, Protocol
 
 from robotics_experiments.commanding._routine_builder import build_vehicle_routine
 from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     FailureKind,
-    PolicyAdapter,
     RoutineDecision,
     RoutineState,
     VehicleRoutine,
+    _PolicyFactory,
 )
 from robotics_experiments.commanding._routine_predicates import EnvelopeGates
 from robotics_experiments.commanding._routine_stepper import decide
@@ -40,6 +41,7 @@ from robotics_experiments.commanding.observation import (
 from robotics_experiments.commanding.port import (
     MavlinkCommandPort,
 )
+from robotics_experiments.config import RoutineStepConfig
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,
@@ -111,7 +113,7 @@ class DriverFailure:
 class DriverParams:
     """The per-drone routine knobs required by the command driver."""
 
-    steps: Sequence[Mapping[str, Any]]
+    steps: Sequence[RoutineStepConfig]
     gates: EnvelopeGates
     command_ack_timeout_s: float
     failure_recovery_timeout_s: float
@@ -133,7 +135,7 @@ class DriverParams:
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None
+    policy_factory: Optional[_PolicyFactory] = None
 
 
 class DriverEnvironment(Protocol):
@@ -393,6 +395,58 @@ def _apply_decision(*, port: MavlinkCommandPort, decision: RoutineDecision) -> N
         port.send(decision.command)
 
 
+def _log_routine_stage(
+    *,
+    context: DriverContext,
+    state: RoutineDriverState,
+    index: int,
+    event: str,
+    sim_time_us: int,
+) -> None:
+    """Emit one machine-readable boundary for a configured routine stage."""
+    assert state.routine is not None
+    payload = {
+        "event": event,
+        "index": index,
+        "kind": context.params.steps[index]["kind"],
+        "label": state.routine.steps[index].label,
+        "sim_time_us": int(sim_time_us),
+    }
+    descriptor = context.params.steps[index]
+    if "ground_speed_m_s" in descriptor:
+        payload["ground_speed_m_s"] = float(descriptor["ground_speed_m_s"])
+    context.env.log(
+        f"[{context.label}] ROUTINE_STAGE "
+        f"{json.dumps(payload, separators=(',', ':'), sort_keys=True)}"
+    )
+
+
+def _log_policy_setpoint(
+    *,
+    context: DriverContext,
+    state: RoutineDriverState,
+    index: int,
+    setpoint: AttitudeRateSetpoint | VelocitySetpoint,
+    sim_time_us: int,
+) -> None:
+    """Emit the exact policy setpoint successfully handed to the MAVLink port."""
+    assert state.routine is not None
+    payload = {
+        "event": "setpoint_transmitted",
+        "index": index,
+        "label": state.routine.steps[index].label,
+        "setpoint": {
+            "kind": type(setpoint).__name__,
+            **asdict(setpoint),
+        },
+        "sim_time_us": int(sim_time_us),
+    }
+    context.env.log(
+        f"[{context.label}] POLICY_SETPOINT "
+        f"{json.dumps(payload, separators=(',', ':'), sort_keys=True)}"
+    )
+
+
 def _tick_drive(
     *, context: DriverContext, state: RoutineDriverState, tick: DriverTick
 ) -> RoutineDriverState:
@@ -410,11 +464,60 @@ def _tick_drive(
         observation=observation,
     )
     if failed is not None:
+        if state.routine_state.sent and state.routine_state.cursor < len(state.routine.steps):
+            _log_routine_stage(
+                context=context,
+                state=state,
+                index=state.routine_state.cursor,
+                event="failed",
+                sim_time_us=observation.sim_time_us,
+            )
         return failed
+    prior_routine_state = state.routine_state
     routine_state, decision = decide(state.routine, state.routine_state, observation)
+    if (
+        not prior_routine_state.sent
+        and routine_state.sent
+        and routine_state.cursor == prior_routine_state.cursor
+    ):
+        assert routine_state.step_started_us is not None
+        _log_routine_stage(
+            context=context,
+            state=state,
+            index=routine_state.cursor,
+            event="start",
+            sim_time_us=routine_state.step_started_us,
+        )
     _apply_decision(port=context.port, decision=decision)
+    for diagnostic in decision.diagnostics:
+        context.env.log(f"[{context.label}] {diagnostic}")
+    active_index = prior_routine_state.cursor
+    active_step = (
+        state.routine.steps[active_index] if active_index < len(state.routine.steps) else None
+    )
+    if (
+        decision.setpoint is not None
+        and active_step is not None
+        and active_step.streaming is not None
+        and active_step.streaming.policy is not None
+    ):
+        assert isinstance(decision.setpoint, (AttitudeRateSetpoint, VelocitySetpoint))
+        _log_policy_setpoint(
+            context=context,
+            state=state,
+            index=active_index,
+            setpoint=decision.setpoint,
+            sim_time_us=observation.sim_time_us,
+        )
     if decision.kind is DecisionKind.FAIL:
         assert decision.failure_kind is not None
+        _log_routine_stage(
+            context=context,
+            state=state,
+            index=routine_state.cursor,
+            event="failed",
+            sim_time_us=observation.sim_time_us,
+        )
         return _start_failure(
             context=context,
             state=replace(
@@ -428,6 +531,13 @@ def _tick_drive(
         )
     previous_cursor = state.previous_cursor
     while previous_cursor < routine_state.cursor:
+        _log_routine_stage(
+            context=context,
+            state=state,
+            index=previous_cursor,
+            event="complete",
+            sim_time_us=observation.sim_time_us,
+        )
         context.env.on_step_advanced(state.routine.steps[previous_cursor].label)
         previous_cursor += 1
     if routine_state.cursor >= len(state.routine.steps):
@@ -577,6 +687,15 @@ def tick_routine_driver(
                 sim_time_us=tick.control_time_us,
                 last_ack=last_ack,
             )
+            assert state.routine is not None
+            if state.routine_state.sent and state.routine_state.cursor < len(state.routine.steps):
+                _log_routine_stage(
+                    context=context,
+                    state=state,
+                    index=state.routine_state.cursor,
+                    event="failed",
+                    sim_time_us=observation.sim_time_us,
+                )
         return _start_failure(
             context=context,
             state=state,
@@ -672,7 +791,7 @@ def tick_routine_driver(
                 goto_offboard_prime_ticks=context.params.goto_offboard_prime_ticks,
                 offboard_setpoint_rate_hz=context.params.offboard_setpoint_rate_hz,
                 goto_min_heading_dist_m=context.params.goto_min_heading_dist_m,
-                policy_fn_factory=context.params.policy_fn_factory,
+                policy_factory=context.params.policy_factory,
             )
         except ValueError as exc:
             return _start_failure(

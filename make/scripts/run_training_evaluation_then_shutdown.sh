@@ -8,16 +8,14 @@ Usage:
     --hydra-config PATH \
     --eval-target TARGET \
     [--train-target TARGET] \
-    [--select-target TARGET] \
     [--train-args ARGS] \
-    [--select-args ARGS] \
     [--eval-args ARGS] \
     [--label LABEL] \
     [--log-dir PATH] \
     [--shutdown]
 
-Run Make training, checkpoint-selection, and independent-evaluation targets in
-that order, preserving console and status logs. The wrapper also serves the
+Run Make training/publication and independent-evaluation targets in that order,
+preserving console and status logs. The wrapper also serves the
 training logs through TensorBoard for the lifetime of the workflow and prints
 its URL. A failed stage skips every later stage. Power-off after success,
 failure, or a handled interrupt is disabled by default and must be requested
@@ -25,9 +23,7 @@ with --shutdown.
 
 Defaults:
   --train-target train-rl
-  --select-target select-rl-checkpoint
   --train-args   ""
-  --select-args  ""
   --eval-args    ""
   --label        rl-training-evaluation
   --log-dir      .build/overnight
@@ -58,10 +54,8 @@ validate_name() {
 
 hydra_config=""
 train_target="train-rl"
-select_target="select-rl-checkpoint"
 eval_target=""
 train_args=""
-select_args=""
 eval_args=""
 run_label="rl-training-evaluation"
 log_dir=".build/overnight"
@@ -84,21 +78,12 @@ while [ "$#" -gt 0 ]; do
             eval_target="$2"
             shift 2
             ;;
-        --select-target)
-            require_value "$1" "${2:-}"
-            select_target="$2"
-            shift 2
-            ;;
         --train-args)
             train_args="${2-}"
             shift 2
             ;;
         --eval-args)
             eval_args="${2-}"
-            shift 2
-            ;;
-        --select-args)
-            select_args="${2-}"
             shift 2
             ;;
         --label)
@@ -130,7 +115,6 @@ done
 require_value "--hydra-config" "${hydra_config}"
 require_value "--eval-target" "${eval_target}"
 validate_name "training target" "${train_target}"
-validate_name "selection target" "${select_target}"
 validate_name "evaluation target" "${eval_target}"
 validate_name "label" "${run_label}"
 
@@ -139,21 +123,30 @@ if [ ! -f "${hydra_config}" ]; then
     exit 2
 fi
 
+policy_name="$(
+    ROBOTICS_EXPERIMENT_CONFIG_PATH="${hydra_config}" \
+        PYTHONPATH="src${PYTHONPATH:+:${PYTHONPATH}}" \
+        uv run python -c \
+        'import os; from robotics_experiments.config import load_config; print(load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).rl.training.policy_name)'
+)"
+validate_name "policy name" "${policy_name}"
+
 mkdir -p "${log_dir}"
 artifact_run_id="$(date -u +%Y%m%dT%H%M%SZ).$$"
 run_id="${run_label}.${artifact_run_id}"
 console_log="${log_dir}/${run_id}.console.log"
 status_log="${log_dir}/${run_id}.status"
 train_status="not-run"
-select_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
-tensorboard_pid=""
+tensorboard_monitor_pid=""
 sudo_validated=false
 tensorboard_host="127.0.0.1"
 tensorboard_port="6006"
 tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
+tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
+tensorboard_ready_file="${log_dir}/${run_id}.tensorboard-ready"
 shutdown_mode="disabled"
 if [ "${shutdown_requested}" = true ]; then
     shutdown_mode="enabled"
@@ -176,14 +169,12 @@ write_status() {
     local status_line
 
     status_line="$(printf \
-        'run_id=%s artifact_run_id=%s train_target=%s select_target=%s eval_target=%s train_exit=%s select_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
+        'run_id=%s artifact_run_id=%s train_target=%s eval_target=%s train_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
         "${run_id}" \
         "${artifact_run_id}" \
         "${train_target}" \
-        "${select_target}" \
         "${eval_target}" \
         "${train_status}" \
-        "${select_status}" \
         "${eval_status}" \
         "${overall_status}" \
         "${shutdown_mode}" \
@@ -200,11 +191,12 @@ finish_run() {
 
     set +e
     trap - EXIT HUP INT TERM
-    if [ -n "${tensorboard_pid}" ]; then
-        kill "${tensorboard_pid}" 2>/dev/null
+    if [ -n "${tensorboard_monitor_pid}" ]; then
+        kill "${tensorboard_monitor_pid}" 2>/dev/null
         docker stop "${tensorboard_container_name}" >/dev/null 2>&1
-        wait "${tensorboard_pid}" 2>/dev/null
+        wait "${tensorboard_monitor_pid}" 2>/dev/null
     fi
+    rm -f "${tensorboard_ready_file}"
     if [ -n "${sudo_keeper_pid}" ]; then
         kill "${sudo_keeper_pid}" 2>/dev/null
         wait "${sudo_keeper_pid}" 2>/dev/null
@@ -241,46 +233,104 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-start_tensorboard() {
+serve_tensorboard_when_ready() {
+    local environment=""
+    local server_pid=""
+    local scalar_tags=""
+
+    trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi; exit 0' HUP INT TERM
+    until find "${tensorboard_logdir}" \
+        -maxdepth 1 \
+        -type f \
+        -name 'events.out.tfevents.*' \
+        -size +0c \
+        -print \
+        -quit \
+        2>/dev/null |
+        grep -q .; do
+        sleep 1
+    done
     make tensorboard-rl \
         "RL_TENSORBOARD_CONTAINER_NAME=${tensorboard_container_name}" \
         "RL_TENSORBOARD_HOST=${tensorboard_host}" \
+        "RL_TENSORBOARD_LOGDIR=${tensorboard_logdir}" \
         "RL_TENSORBOARD_PORT=${tensorboard_port}" \
         >>"${console_log}" 2>&1 &
-    tensorboard_pid=$!
+    server_pid=$!
     for _ in {1..30}; do
-        if ! kill -0 "${tensorboard_pid}" 2>/dev/null; then
+        if ! kill -0 "${server_pid}" 2>/dev/null; then
             printf 'ERROR: TensorBoard exited before becoming ready; see %s\n' \
-                "${console_log}" >&2
+                "${console_log}" |
+                tee -a "${console_log}" >&2
             return 1
         fi
         if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
-            printf '[%s] TensorBoard URL: %s\n' \
-                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                "${tensorboard_url}" |
-                tee -a "${console_log}"
-            return 0
+            environment="$(
+                curl --fail --silent \
+                    "${tensorboard_url}data/environment" ||
+                    true
+            )"
+            scalar_tags="$(
+                curl --fail --silent \
+                    "${tensorboard_url}data/plugin/scalars/tags" ||
+                    true
+            )"
+            if [[ "${environment}" == *'"data_location":'*"${tensorboard_logdir}"'"'* ]] &&
+                [[ "${scalar_tags}" == *\"* ]]; then
+                printf '[%s] TensorBoard URL: %s (run: %s/%s; scalar data loaded)\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    "${tensorboard_url}" \
+                    "${policy_name}" \
+                    "${artifact_run_id}" |
+                    tee -a "${console_log}"
+                : >"${tensorboard_ready_file}"
+                wait "${server_pid}"
+                return $?
+            fi
         fi
         sleep 1
     done
     printf 'ERROR: TensorBoard did not become ready at %s; see %s\n' \
         "${tensorboard_url}" \
-        "${console_log}" >&2
+        "${console_log}" |
+        tee -a "${console_log}" >&2
+    kill "${server_pid}" 2>/dev/null
+    wait "${server_pid}" 2>/dev/null
     return 1
 }
 
-printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_target=%s eval_target=%s shutdown=%s\n' \
+run_stage() {
+    local target="$1"
+    local argument_name="$2"
+    local argument_value="$3"
+    local -a pipeline_status
+
+    set +e
+    make "${target}" \
+        "HYDRA_CONFIG=${hydra_config}" \
+        "RL_RUN_ID=${artifact_run_id}" \
+        "${argument_name}=${argument_value}" \
+        2>&1 | tee -a "${console_log}"
+    pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    stage_status="${pipeline_status[0]}"
+    if [ "${stage_status}" -eq 0 ] && [ "${pipeline_status[1]}" -ne 0 ]; then
+        stage_status="${pipeline_status[1]}"
+    fi
+}
+
+printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
     "${artifact_run_id}" \
     "${hydra_config}" \
     "${train_target}" \
-    "${select_target}" \
     "${eval_target}" \
     "${shutdown_mode}" |
     tee -a "${console_log}"
 
-start_tensorboard
+serve_tensorboard_when_ready &
+tensorboard_monitor_pid=$!
 
 if [ "${shutdown_requested}" = true ]; then
     sudo -v
@@ -289,51 +339,28 @@ if [ "${shutdown_requested}" = true ]; then
     sudo_keeper_pid=$!
 fi
 
-set +e
-make "${train_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "TRAIN_ARGS=${train_args}" \
-    2>&1 | tee -a "${console_log}"
-train_pipeline=("${PIPESTATUS[@]}")
-set -e
-train_status="${train_pipeline[0]}"
-if [ "${train_status}" -eq 0 ] && [ "${train_pipeline[1]}" -ne 0 ]; then
-    train_status="${train_pipeline[1]}"
-fi
+run_stage "${train_target}" "TRAIN_ARGS" "${train_args}"
+train_status="${stage_status}"
 
 if [ "${train_status}" -ne 0 ]; then
     exit "${train_status}"
 fi
+while [ ! -f "${tensorboard_ready_file}" ]; do
+    if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
+        set +e
+        wait "${tensorboard_monitor_pid}"
+        tensorboard_status=$?
+        set -e
+        tensorboard_monitor_pid=""
+        if [ "${tensorboard_status}" -ne 0 ]; then
+            exit "${tensorboard_status}"
+        fi
+        break
+    fi
+    sleep 0.1
+done
 
-set +e
-make "${select_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "SELECT_ARGS=${select_args}" \
-    2>&1 | tee -a "${console_log}"
-select_pipeline=("${PIPESTATUS[@]}")
-set -e
-select_status="${select_pipeline[0]}"
-if [ "${select_status}" -eq 0 ] && [ "${select_pipeline[1]}" -ne 0 ]; then
-    select_status="${select_pipeline[1]}"
-fi
-
-if [ "${select_status}" -ne 0 ]; then
-    exit "${select_status}"
-fi
-
-set +e
-make "${eval_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "EVAL_ARGS=${eval_args}" \
-    2>&1 | tee -a "${console_log}"
-eval_pipeline=("${PIPESTATUS[@]}")
-set -e
-eval_status="${eval_pipeline[0]}"
-if [ "${eval_status}" -eq 0 ] && [ "${eval_pipeline[1]}" -ne 0 ]; then
-    eval_status="${eval_pipeline[1]}"
-fi
+run_stage "${eval_target}" "EVAL_ARGS" "${eval_args}"
+eval_status="${stage_status}"
 
 exit "${eval_status}"

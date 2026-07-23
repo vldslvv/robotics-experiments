@@ -88,7 +88,8 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
     fake_commanding.PolicyAdapter = object
-    fake_commanding.PolicyStepResult = object
+    fake_commanding.PolicyInput = object
+    fake_commanding.PolicyResult = object
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
     fake_commanding.VelocitySetpoint = object
@@ -104,7 +105,7 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
 
     fake_environment = types.ModuleType("robotics_experiments.environment")
-    fake_environment.PressObservationIO = object
+    fake_environment.SwitchesRuntimeState = object
     fake_environment.create_switches_runtime = lambda *, config, stage: SimpleNamespace(
         config=config,
         stage=stage,
@@ -133,6 +134,9 @@ def _import_orchestrator(monkeypatch):
             "robotics_experiments.runtime."
         ):
             sys.modules.pop(name, None)
+    fake_press_io = types.ModuleType("robotics_experiments.runtime._press_io")
+    fake_press_io.PressObservationIO = object
+    monkeypatch.setitem(sys.modules, "robotics_experiments.runtime._press_io", fake_press_io)
     module = importlib.import_module("robotics_experiments.runtime")
 
     spawned: list = []
@@ -273,10 +277,39 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
         module.spawn_fleet(state=fleet)
 
 
+def test_fleet_driver_log_is_mirrored_to_vehicle_bridge_log(monkeypatch, caplog):
+    module, _rec = _import_orchestrator(monkeypatch)
+    messages = []
+    spawned = module.SpawnedDrone(
+        vehicle=SimpleNamespace(id=7),
+        label="drone7",
+        articulation_path="/World/Drone7",
+        host=object(),
+        observer=object(),
+    )
+    env = module.FleetDriverEnv(
+        spawned,
+        _FakePort(gcs_endpoint="", heartbeat_period_s=1.0, label="drone7"),
+        log=messages.append,
+        on_failure=lambda _kind, _message: None,
+        on_step_advanced=lambda _label: None,
+    )
+
+    with caplog.at_level(
+        "INFO",
+        logger="robotics_experiments.px4_bridge.routine",
+    ):
+        env.log('[drone7] ROUTINE_STAGE {"event":"start","sim_time_us":123000}')
+
+    assert messages == ['[drone7] ROUTINE_STAGE {"event":"start","sim_time_us":123000}']
+    assert caplog.messages[-1] == messages[-1]
+
+
 def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
 
-    def fail_preflight(*, config):
+    def fail_preflight(*, config, repo_root):
+        del config, repo_root
         raise ValueError("incompatible policy metadata")
 
     orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
@@ -301,6 +334,40 @@ def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
     assert rec.despawned == []
 
 
+def test_injected_policy_factory_skips_production_preflight(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "_preflight_policy_artifacts",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("production policy preflight must not run")
+        ),
+    )
+    vehicle = _vehicle(
+        0,
+        "Drone",
+        (0.0, 0.0),
+        enabled=True,
+        steps=[{"kind": "policy", "artifact": "alignment-probe"}],
+    )
+    fleet = replace(module.create_fleet(config=_env(vehicle)), stage=object())
+    factory = object()
+
+    fleet = module.spawn_fleet(
+        state=fleet,
+        preflight_policy_artifacts=False,
+    )
+    fleet = module.build_drivers(
+        state=fleet,
+        make_env=lambda spawned, port: object(),
+        policy_factory=factory,
+    )
+
+    assert rec.spawned == [("Drone", (0.0, 0.0))]
+    assert fleet.flying[0].context.params.policy_factory is factory
+
+
 def test_spawn_fleet_rolls_back_drones_after_observer_failure(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
     env = _env(
@@ -312,7 +379,7 @@ def test_spawn_fleet_rolls_back_drones_after_observer_failure(monkeypatch):
     monkeypatch.setattr(
         orchestrator,
         "_prepare_policy_observer",
-        lambda *, state, spawned: (_ for _ in ()).throw(RuntimeError("observer failed")),
+        lambda *, state, spawned, preflight: (_ for _ in ()).throw(RuntimeError("observer failed")),
     )
 
     with pytest.raises(RuntimeError, match="observer failed"):
@@ -370,9 +437,11 @@ def test_switch_latch_uses_artifact_selected_cadence(monkeypatch):
         switch_rate_hz=10.0,
     )
     steps = []
-    environment = sys.modules["robotics_experiments.environment"]
-    environment.step_switches_runtime = (
-        lambda *, state, on_toggle=None: steps.append(state) or state
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "step_switches_runtime",
+        lambda *, state, on_toggle=None: steps.append(state) or state,
     )
 
     for _ in range(250):

@@ -2,3 +2,11 @@ For isaac sim upgrade:
  - build detailed timings for bridge and physics step
  - have two parallel dockers, version 5.1.0 and 6.0.1 and investigate them in parallel
  - check what chatgpt investigated
+
+The driver should allow for policy to repeat from previous waypoint if policy failed but could be recovered
+Limit the number of attempts
+
+For sim to sim alignment use more variables instead of just delay
+Before doing that, refactor the alignment into a clear modules with clear inputs and outputs
+
+Consider some model registry/experiment tracker

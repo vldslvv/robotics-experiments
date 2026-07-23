@@ -12,6 +12,8 @@ from tests.support.paths import REPO_ROOT
 
 REPORTER = REPO_ROOT / "make/scripts/flight_benchmark_report.py"
 PHASES = ("connected_disarmed", "armed_takeoff", "airborne")
+_REPORT_ENV = os.environ.copy()
+_REPORT_ENV["PYTHONPATH"] = str(REPO_ROOT / "src")
 
 
 def _write_json(path: Path, payload: Any, /) -> None:
@@ -183,6 +185,7 @@ def _build(*, root: Path, frame_ms: float) -> subprocess.CompletedProcess[str]:
             "--fingerprint",
             str(root / "fingerprint.json"),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
@@ -212,11 +215,11 @@ def _fingerprint(*, config: Path, output: Path) -> subprocess.CompletedProcess[s
             "--source-commit",
             "abc",
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")},
     )
 
 
@@ -258,6 +261,7 @@ def test_incomplete_phase_is_invalid(tmp_path: Path) -> None:
             "--fingerprint",
             str(root / "fingerprint.json"),
         ],
+        env=_REPORT_ENV,
         check=False,
     )
     assert completed.returncode == 2
@@ -310,6 +314,7 @@ def test_build_accepts_lifecycle_overhead_diagnostic(tmp_path: Path) -> None:
             "--fingerprint",
             str(root / "fingerprint.json"),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
@@ -344,6 +349,7 @@ def test_build_rejects_repetition_environment_mismatch(tmp_path: Path) -> None:
             "--fingerprint",
             str(root / "fingerprint.json"),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
@@ -370,6 +376,7 @@ def test_compare_writes_cross_version_json_and_markdown(tmp_path: Path) -> None:
             "--output-root",
             str(output),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
@@ -428,6 +435,7 @@ def test_compare_represents_zero_baseline_as_absolute_delta(tmp_path: Path) -> N
             "--output-root",
             str(output),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,
@@ -466,6 +474,7 @@ def test_compare_rejects_different_numeric_metric_trees(tmp_path: Path) -> None:
             "--output-root",
             str(tmp_path / "comparison"),
         ],
+        env=_REPORT_ENV,
         check=False,
         capture_output=True,
         text=True,

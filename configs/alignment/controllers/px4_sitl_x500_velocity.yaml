@@ -1,0 +1,89 @@
+alignment_id: x500-velocity-px4-v1
+controller_id: px4-sitl-x500-velocity-v1
+backend: px4-sitl
+experiment_config: configs/alignment_px4_x500_velocity.yaml
+vehicle: x500_01
+airframe: holybro_x500_v2.usda
+image: vv-px4-sitl
+command_rate_hz: 20.0
+
+command_interface:
+  kind: body-flu-velocity-yaw-rate-v1
+  dimension: 4
+  frame: body-flu
+  linear_scale_mps: 3.0
+  yaw_rate_scale_radps: 1.5
+
+# PX4 owns its internal cascades. These values make the definition structurally
+# complete; the reference evaluator records PX4 response and does not apply them.
+settings:
+  command_delay_s: 0.0
+  kp_vel: [0.0, 0.0, 0.0]
+  kd_vel: [0.0, 0.0, 0.0]
+  kp_att: [0.0, 0.0, 0.0]
+  kp_rate: [0.0, 0.0, 0.0]
+  max_tilt_cmd_deg: 30.0
+  thruster_tau_inc_s: 0.0
+  thruster_tau_dec_s: 0.0
+  thruster_max_thrust_rate_nps: 100000.0
+
+parameters: []
+selection_metric: worst-axis-validation-velocity-nrmse-v1
+publication_metrics:
+  - velocity_rmse_mps
+  - worst_axis_velocity_nrmse
+  - overshoot_mps
+  - settling_rmse_mps
+
+probes:
+  - name: fit-x-steps
+    split: fit
+    axis: x
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.8, 0.0, 0.0], duration_s: 1.5}
+      - {velocity_body_flu_mps: [-0.6, 0.0, 0.0], duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+  - name: fit-y-steps
+    split: fit
+    axis: y
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.8, 0.0], duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, -0.6, 0.0], duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+  - name: fit-z-steps
+    split: fit
+    axis: z
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.5], duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.4], duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+  - name: validation-x-ramp-reversal
+    split: validation
+    axis: x
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.25, 0.0, 0.0], duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.5, 0.0, 0.0], duration_s: 0.5}
+      - {velocity_body_flu_mps: [-0.35, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+  - name: validation-y-ramp-reversal
+    split: validation
+    axis: y
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.25, 0.0], duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.5, 0.0], duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, -0.35, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+  - name: validation-z-ramp-reversal
+    split: validation
+    axis: z
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.15], duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.3], duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.2], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}

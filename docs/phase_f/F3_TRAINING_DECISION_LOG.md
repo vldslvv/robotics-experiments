@@ -558,9 +558,11 @@ connector explains how this particular tool is wired.
 Technical view: `policy_meta.json` now includes `policy_interface` in addition
 to observation schema/version, action contract, policy rate, action scales,
 `source_commit`, and `source_dirty`. The commanding layer receives a
-`PolicyAdapter` and stores opaque frozen progress. Each inference returns a
-`PolicyStepResult(progress, setpoint, complete, failure_reason)`, so commanding
-owns cadence and OFFBOARD transport without importing `PressObservation` or
+`PolicyAdapter` and stores opaque frozen state. Each transition receives a
+`PolicyInput(vehicle_state, sim_time_us, task_observation,
+reference_position_enu)` and returns a
+`PolicyResult(state, setpoint, complete, failure_reason)`, so commanding owns
+cadence and OFFBOARD transport without importing `PressObservation` or
 branching on task IDs. The runtime selects `hover-v1` or `press-v1` from
 metadata. Exact 13-value hover schema-v1 artifacts without the new field retain
 a narrow legacy inference; a 34-value press artifact without it fails closed
@@ -591,10 +593,10 @@ and pusher settings before standalone physics starts, reads the real stage and
 articulations, converts the source asset's local `-Y` outward normal to
 canonical `+X` with `Rz(-pi/2)`, and packs the schema-v1 34-value
 `PressObservation`. The previous normalized action is injected from frozen
-runtime progress rather than guessed from the physical state.
+runtime state rather than guessed from the physical state.
 
-`PressDeploymentState` records handoff, first-contact evidence, previous lamp
-state, transition count, and consecutive stable-retreat samples. The transition
+`PressPolicyExecutionState` records handoff, first-contact evidence, previous
+lamp state, transition count, and consecutive stable-retreat samples. The transition
 holds a zero action until the existing handoff gate passes; rejects missing or
 non-finite observation groups, an initially-on lamp, malformed policy output,
 and a second lamp transition; and completes only after one transition plus the
@@ -702,11 +704,11 @@ far enough. The runtime now keeps a small scorecard of the attempt: whether the
 handoff happened, how close the drone came, its largest action and pusher
 compression, first-contact quality, lamp changes, and retreat samples.
 
-Technical view: The frozen `PressDeploymentState` adds initial and minimum
+Technical view: The frozen `PressPolicyExecutionState` adds initial and minimum
 wall-normal range, peak pusher compression, and peak absolute normalized action.
 These are deployment diagnostics only and do not alter the 34-value observation,
 policy weights, rewards, or action mapping. Generic commanding still treats
-progress as opaque, but includes its final representation in a policy timeout
+state as opaque, but includes its final representation in a policy timeout
 instead of the incorrect goto-specific "did not reach the waypoint" message.
 
 #### Fail before launching containers and clean partial simulator state
@@ -1199,3 +1201,1192 @@ still requires at least 80% toggles, 85% stable first contact, and 95%
 post-toggle retreat. Only a passing artifact proceeds to
 `test-integration-press-routine`; a fallback remains diagnostic evidence while
 the workflow remains failed.
+
+### 28. Remove the early-crash return shortcut and expose press progress
+
+#### Diagnose the second objective run
+
+Plain-language view: Run `20260723T213105Z.38183` did not merely fail to find
+the switch. It learned that crashing quickly was cheaper than continuing an
+unsuccessful attempt. Mean episode length briefly reached about 173 steps at
+iteration 5, then collapsed to about 18 steps by iteration 10 and stayed there
+through the stopped run. Mean reward settled near -28 while no press-specific
+training signals were available. Raising the adaptive learning rate would make
+that locally preferred behavior learn faster, not correct what the reward asks
+for.
+
+Technical view: The run began at a configured learning rate of `1e-4`; the
+adaptive schedule ranged from `1e-5` to approximately `3.84e-4` and was about
+`3.38e-5` near iteration 74. A terminal failure cost 30, while an unsuccessful
+ten-second attempt could accumulate the 25 timeout cost plus stability and
+control penalties. Approach progress before a crash could reduce the terminal
+episode loss further. This reward ordering explains the stable short-episode
+solution without invoking insufficient optimizer step size.
+
+#### Make controlled failure preferable to crashing
+
+Plain-language view: A crash now costs substantially more than reaching the
+end of an unsuccessful but controlled attempt. The policy still receives no
+passive survival or upright credit, and the existing approach, contact, button,
+latch, retreat, action, and stability terms are unchanged. The correction is
+therefore aimed only at removing the demonstrated shortcut.
+
+Technical view: `reward.failure_weight` changes from 30.0 to 100.0;
+`timeout_weight` remains 25.0. The crash angle remains 35 degrees and the PPO
+learning rate, adaptive schedule, noise, rollout, checkpoint, and action
+settings are unchanged. New training starts from scratch because checkpoints
+from the stopped run optimize the old return.
+
+#### Report task percentages while PPO is running
+
+Plain-language view: Mean reward alone no longer has to stand in for whether
+the drone is reaching or pressing the switch. TensorBoard now shows cumulative
+percentages for completed episodes that contacted, toggled, fully succeeded,
+or failed, plus active-episode progress. Each run is served by itself and its
+URL is announced only after scalar data is actually loaded.
+
+Technical view: `SwitchPressEnv` adds `Press/contact_percent`,
+`Press/toggle_percent`, `Press/success_percent`, and
+`Press/failure_percent`, along with completed-episode count and active contact
+and toggle percentages. Key signed reward terms are logged under `Reward/`.
+These counters are training diagnostics and do not change checkpoint ranking.
+The training wrapper now waits for the exact run's non-empty TensorBoard event
+file before launching the server, checks the scalar-tags endpoint, and then
+prints the URL and run identity. This replaces starting TensorBoard against a
+log directory that did not yet exist, which could leave it reporting no active
+dashboards.
+
+### 29. Establish a deterministic press baseline before retreat training
+
+#### Stop after the press behavior is established
+
+Plain-language view: Run `20260723T215635Z.61663` learned to press the switch
+reliably. The active training population first showed confirmed toggles at
+iteration 6, exceeded 25% near iteration 29, and spent later windows mostly
+between about 75% and 92%. Mean episode length remained near the 200-step
+horizon instead of collapsing to the previous 18-step crash behavior. Training
+was stopped after checkpoint 150 because confirmed pressing was established
+while full retreat remained at zero; the immediate goal was a measurable press
+rate, not the full 80% end-to-end acceptance target.
+
+Technical view: The run started clean from source commit `0f69dfc` with 49,152
+environments and the corrected 100.0 terminal failure weight. Saved
+checkpoints are iterations 0, 50, 100, and 150. The run-scoped TensorBoard
+telemetry showed cumulative completed-episode toggles reaching 66.2% by
+iteration 150, with active-window values peaking above 90%. Cumulative failure
+fell from more than 20% early in training to 5.6%. The training process was
+interrupted only after checkpoint 150 was safely written.
+
+#### Publish checkpoint 50 as the diagnostic fallback
+
+Plain-language view: Deterministic evaluation found that checkpoints 50 and
+100 both pressed the switch in every episode. Checkpoint 50 made the gentler
+first contact and therefore won the fallback ranking. It still does not back
+away after pressing, so it is published for diagnosis and manual press testing,
+not described as accepted.
+
+Technical view: Selection evaluated each saved checkpoint for 100 episodes on
+seeds 101, 202, and 303. Iteration 50 achieved a 1.0 confirmed-toggle rate,
+0.3666666667 stable-first-contact rate, and 0.0 post-toggle-retreat rate.
+Iteration 100 achieved 1.0, 0.2033333333, and 0.0 respectively. Iteration 150
+achieved 0.7233333333, 0.23, and 0.0. The
+`press-gated-maximin-v2` selector therefore published iteration 50 with
+`accepted: false` and advanced `.build/training/press/latest` to run
+`20260723T215635Z.61663`.
+
+Independent evaluation of the selected artifact reproduced 300 confirmed
+toggles in 300 episodes, a 0.3666666667 stable-first-contact rate, zero retreat
+and full completion, a 1.075 s median toggle time, and 1.92 mm peak compression
+overshoot. It correctly failed acceptance on first-contact stability and
+post-toggle retreat. The next objective should preserve this confirmed-toggle
+baseline while improving approach/contact gentleness and teaching the
+post-toggle reverse trajectory; increasing the toggle target or learning rate
+is not the next constraint.
+
+### 30. Fine-tune stable contact and learned retreat from the press actor
+
+#### Preserve the learned press while resetting PPO state
+
+Plain-language view: The next run starts from checkpoint 50's deterministic
+press behavior but learns with a fresh critic, optimizer, action noise, and
+iteration count. It is a new run with explicit provenance, not a continuation
+of the old optimization trajectory. Checkpoint 50 remains the protected
+published fallback.
+
+Technical view: `train_rl.py --initialize-checkpoint PATH` accepts a numeric
+checkpoint below the selected policy namespace, verifies the stored
+observation and action dimensions, and copies only compatible `actor.*`
+parameters into a freshly built runner. The exact actor keys and tensor shapes
+must match. Strict-JSON metadata records the `actor-only` method, source run,
+checkpoint iteration/path, and source commit. Export-only checkpoint loading is
+unchanged.
+
+#### Correct the objective around contact and retreat
+
+Plain-language view: The actor is now strongly encouraged to slow down near the
+switch, make a stable first contact, release after the lamp turns on, and back
+away without lateral drift. Lingering in contact, waiting after the toggle, or
+toggling the lamp again is explicitly costly.
+
+Technical view: Gentle-contact weight is 20.0. While precontact and within
+0.42 m, squared linear overspeed above 0.20 m/s has weight 20.0 and squared
+angular overspeed above 0.50 rad/s has weight 5.0. Retreat progress weight is
+300.0. Retreat alignment is a squared hinge beyond the existing 0.05 m
+tolerance with weight 50.0. Post-toggle contact costs 0.5 per step and delay
+before stable retreat costs 0.05 per step. A later confirmed toggle costs
+100.0 once on its transition. Success pays 150.0 only after a stable first
+contact. Approach, compression, latch, toggle, failure, timeout, action
+authority, tilt gate, and signed progress cancellation remain unchanged.
+
+#### Conservative run and evidence plan
+
+Plain-language view: Fine-tuning uses small, fixed updates and frequent
+checkpoints so deterministic press behavior can be retained if later updates
+forget it. TensorBoard now directly exposes the three acceptance populations
+and repeated-toggle failures.
+
+Technical view: The press config uses a fixed `1e-4` learning rate, 0.20 fresh
+action noise, checkpoints every 25 iterations, and a 150-iteration maximum.
+Network architecture, 32-step rollout, clipping, entropy, GAE, and minibatch
+settings are unchanged. Cumulative telemetry reports stable first contact
+among contacted episodes, retreat and repeat toggles among toggled episodes,
+plus all new reward means. Run with 49,152 environments from
+`20260723T215635Z.61663/logs/model_50.pt`. Stop for catastrophic forgetting if
+active toggles remain below 50% for ten iterations after iteration 25, or as
+unproductive if retreat is still exactly zero at iteration 50. Evaluate every
+25-iteration checkpoint over seeds 101, 202, and 303. Only an independently
+accepted selection proceeds to `test-integration-press-routine`.
+
+If actor-only fine-tuning still has zero retreat at iteration 50 while toggles
+remain high, stop it and run one 100-iteration from-scratch comparison under
+the identical corrected objective. Selection may publish a better candidate,
+but the existing checkpoint-50 fallback is not overwritten merely because a
+comparison run completed.
+
+### 31. Actor-only fine-tuning learned retreat but not stable contact
+
+#### Complete the run without triggering either stop rule
+
+Plain-language view: The actor-only run preserved reliable pressing and began
+to learn retreat just before iteration 50, so it was allowed to finish. It did
+not spend ten consecutive post-25 iterations below 50% active toggles. The
+from-scratch contingency was therefore not triggered.
+
+Technical view: Run `20260723T231822Z.117549` trained 49,152 environments for
+150 iterations from source commit `f15597d`, with `source_dirty: false`.
+Initialization metadata identifies method `actor-only`, source run
+`20260723T215635Z.61663`, checkpoint iteration 50, and source commit
+`0f69dfc`. At training iteration 50, active toggles were 91.65% and cumulative
+retreat among toggled episodes was 0.026%, no longer exactly zero. The run
+saved periodic checkpoints 0, 25, 50, 75, 100, and 125 plus rsl_rl's final
+checkpoint 149. The run-scoped TensorBoard URL was
+`http://127.0.0.1:6006/`; its environment endpoint was independently verified
+to identify only this run's log directory. The wrapper stopped the server on
+exit.
+
+#### Select and independently reject the best fallback
+
+Plain-language view: Checkpoint 75 learned essentially perfect retreat but made
+unstable first contact. Later checkpoints traded retreat reliability for a
+small contact-stability improvement. None met all three gates, so the selector
+published the best balanced fallback rather than describing it as accepted.
+
+Technical view: Deterministic 300-episode results for iterations
+0/25/50/75/100/125/149 respectively were:
+
+- Confirmed toggles: 0.9967 / 0.9967 / 1.0 / 0.9967 / 1.0 / 1.0 / 0.9833.
+- Stable first contact among contacted episodes: 0.3700 / 0.1100 / 0.1667 /
+  0.1767 / 0.2033 / 0.3000 / 0.2367.
+- Retreat among toggled episodes: 0.0 / 0.0 / 0.0 / 1.0 / 0.4733 / 0.0 /
+  0.3356.
+
+The maximin selector chose iteration 149 because its weakest normalized
+acceptance margin, contact stability at 0.2784 of target, exceeded iteration
+75's 0.2078 and iteration 100's 0.2392. It published the artifact with
+`accepted: false` and advanced `latest`; the original checkpoint-50 run remains
+intact. Independent evaluation reproduced 0.9833 confirmed toggles, 0.2367
+stable first contact, 0.3356 retreat, 0.3300 full completion, a 0.700 s median
+toggle time, and 2.00 mm peak compression overshoot. It failed first-contact
+stability and retreat acceptance. Consequently
+`test-integration-press-routine` was not run.
+
+### 32. Improve joint safe completion before changing actor capacity
+
+#### Interpret the current completion metric correctly
+
+Plain-language view: The current network has already demonstrated that it can
+press and retreat, but it has not learned to combine a gentle first contact
+with a reliable retreat. More hidden layers are therefore not the next
+experiment. The immediate problem is objective alignment and optimization
+stability across the precontact and post-toggle phases.
+
+Technical view: `full_completion_rate` currently counts episodes that reached
+stable retreat, regardless of whether first contact was stable. Checkpoint 75
+therefore achieved 0.9967 raw full completion while achieving only 0.1767
+stable first contact. Iterations 75/100/125/149 then achieved retreat rates of
+1.0/0.4733/0.0/0.3356 while contact stability moved to
+0.1767/0.2033/0.3000/0.2367. This rapid, partly opposing movement with the
+unchanged `[256, 256, 128]` actor is evidence of phase interference and
+destructive PPO updates, not an established representation-capacity limit.
+
+Add a diagnostic `safe_full_completion_rate` that requires stable first
+contact, confirmed toggle, and stable retreat in the same episode. Preserve
+the three existing acceptance gates because their separate denominators explain
+which phase failed. Do not publish checkpoint 75 merely for its raw completion:
+it remains unsafe and rejected.
+
+#### Diagnose the failing predicate before retuning
+
+Extend deterministic evaluation diagnostics before the next training run.
+Record wall-normal, lateral, total linear, and angular velocity at first
+contact; approach speed by range; the delay from toggle to contact release and
+first retreat command; and the final failed retreat predicate (contact release,
+distance, alignment, linear speed, angular speed, crash, or timeout). Report
+per-seed distributions and margins to the configured thresholds, not only
+means or booleans. Re-evaluate existing checkpoints 0, 50, 75, 100, 125, and
+149 with these diagnostics.
+
+Also inspect PPO KL, clip fraction, action standard deviation, value loss, and
+explained variance when available. A KL or clip-fraction spike indicates
+oversized actor updates. Persistently poor value estimates, especially early in
+actor-only fine-tuning with a fresh critic, indicate a critic warm-up or
+separate actor/critic learning-rate experiment rather than a larger actor.
+
+#### Align downstream credit with stable first contact
+
+Plain-language view: An unstable hit can currently remain profitable because it
+may still collect latch, toggle, retreat-progress, and physical retreat success
+credit. Gating only the terminal bonus does not make gentle contact a
+prerequisite for the learned task.
+
+Technical view: In the next objective experiment, make stable first contact a
+prerequisite for downstream task credit. Prefer terminating an unstable
+first-contact episode with an explicit failure-scale cost because it produces a
+clear advantage signal. If preserving post-contact diagnostic experience is
+more important, continue the physical episode but gate latch, toggle, retreat,
+and terminal-success reward on stable first contact. Continue to report the
+physical toggle and retreat events independently.
+
+Replace the short near-contact total-speed penalty with dense braking guidance
+over the complete 0.40-0.50 m reset envelope. Use wall-normal closing velocity,
+with a distance-dependent target that approaches the configured contact-speed
+limit near the switch. Keep separate lateral and angular control terms. Do not
+begin by increasing the one-shot gentle-contact weight again: the policy needs
+a useful slowing gradient before contact, not only a larger reward after the
+outcome is already determined.
+
+#### Run a conservative checkpoint-75 experiment
+
+Warm-start from run `20260723T231822Z.117549`, checkpoint 75, because that actor
+already owns reliable post-toggle retreat. Keep the observation, action
+authority, and `[256, 256, 128]` MLP unchanged for the first comparison. Use a
+smaller actor update, initially comparing a fixed `5e-5` learning rate and 0.10
+initial action noise, save every 5-10 iterations, and evaluate a 50-75
+iteration run. If KL or clip fraction remains high, compare `2e-5`, fewer PPO
+epochs, or a smaller clip range. Change one material variable per comparison
+and rank deterministic checkpoints by the existing acceptance gates plus the
+new joint diagnostic.
+
+If retreat is still forgotten while contact improves, preserve checkpoint 75's
+post-toggle behavior explicitly with an anchor/distillation loss on
+post-toggle observations or balanced precontact/post-toggle reset sampling.
+This is a more direct response to catastrophic forgetting than increasing
+generic network depth.
+
+#### Escalate architecture only with phase-interference evidence
+
+Do not add hidden layers or recurrence initially. The existing observation
+already supplies pose, velocity, angular velocity, contact, compression and
+compression rate, lamp state, and previous action. There is no current evidence
+that missing history requires an LSTM.
+
+If corrected rewards, smaller updates, and retreat anchoring repeatedly show
+that contact improvement destroys retreat, test a shared trunk with separate
+pre-toggle and post-toggle actor heads selected by lamp state. This
+phase-specific architecture directly isolates the behaviors that are
+interfering. Test generic actor capacity only if training and deterministic
+evaluation both plateau under an aligned objective while KL, clipping, and
+critic learning remain stable. If value learning alone is inadequate, change
+critic capacity before actor capacity.
+
+Use these decision signals:
+
+- High wall-normal impact speed: improve dense braking and stable-contact
+  prerequisite.
+- Near-threshold contact misses: adjust shaping margin and reduce update noise.
+- Alignment-dominated retreat failures: retune retreat alignment behavior.
+- Large checkpoint-to-checkpoint phase swings: reduce update size, checkpoint
+  more frequently, and anchor the learned phase.
+- High training performance but low deterministic evaluation: inspect
+  exploration dependence and train/evaluation mismatch.
+- Passing Lab evaluation but failing the live routine: inspect observation,
+  controller, and simulator-to-deployment parity instead of model capacity.
+- Stable optimization and a repeatable capacity plateau: only then compare a
+  larger actor under identical seeds, objective, and sample budget.
+
+### 33. Replace the joint objective with an explicit approach curriculum stage
+
+Date: 2026-07-26.
+
+Decision: Retire the approach/contact/toggle/retreat transition and train one
+small, named `approach` stage first. Keep the 34-value observation, four-value
+action, pusher/switch assets, and `[256, 256, 128]` actor so a later stage can
+initialize from the Stage 1 actor. Curriculum progression is manual through
+separate Hydra options and policy namespaces; no automatic promotion or fixed
+stage enum is introduced.
+
+Reason: The earlier joint objective showed strong phase interference:
+checkpoints alternated between contact quality and retreat reliability without
+meeting the joint gates. Stage 1 isolates the prerequisite flight behavior:
+reach 0.40-0.42 m, align, brake, and hold stably without touching the switch.
+Its reward contains only range progress, alignment, braking, upright, action
+delta, and terminal outcome terms. Contact is a failure, which removes
+post-contact credit ambiguity.
+
+Implementation contract:
+
+- Hydra option:
+  `configs/experiment/rl/press/approach.yaml`.
+- Training config and namespace:
+  `configs/train_press_approach_quad.yaml` and `press-approach`.
+- Deployment config:
+  `configs/policy_press_approach_quad.yaml`.
+- Acceptance: at least 80% approach success and at most 5% contact failure on
+  100 episodes for each seed 101, 202, and 303.
+- Ranking: worst normalized gate margin, then fewer other flight failures,
+  fewer timeouts, faster successful completion, and earlier iteration.
+- Metadata: `policy_interface: press-v1` plus required
+  `curriculum_stage: approach`; historical stage-less press artifacts are
+  rejected.
+- Physical contact validation remains in
+  `test-integration-press-contact-chain`, using a test-local no-dones
+  environment so approach termination cannot reset the physical scenario.
+
+Initial training decision: preserve the existing PPO topology, conservative
+fixed `1e-4` schedule, and 2.0 m/s action authority for the first Stage 1 run.
+An attempted reduction to 0.5 m/s was rejected before training because the
+physical contact-chain gate then produced only 2.31 mm of button travel against
+the 5 mm latch threshold. Precision remains the dense braking objective's job;
+the shared physical/action contract retains enough authority for later stages.
+Do not initialize from the old joint press actor for the first run: its learned
+contact/retreat behavior is not a clean approach baseline, while the new task
+is small enough to train directly.
+
+### 34. Reduce exploration scale after the first approach run
+
+Date: 2026-07-26.
+
+Decision: Reject run `approach-20260726a` and repeat Stage 1 from scratch with
+0.05 initial action noise, a fixed `5e-5` learning rate, `0.0001` entropy
+coefficient, and 300 iterations. Keep the 2.0 m/s action authority, reward,
+reset distribution, network topology, rollout length, and acceptance gates
+unchanged.
+
+Evidence: The 150-iteration baseline completed in 545 seconds. Selection over
+300 deterministic episodes per checkpoint found iteration 50 best, but it
+achieved only 0.2033 approach success with zero contacts and 0.7967 timeouts.
+Iteration 75 achieved 0.1933 success, iteration 100 achieved 0.1833, iteration
+125 failed the flight envelope in every episode, and iteration 149 timed out
+in every episode. The iteration-50 mean closest range was 0.40714 m, showing
+that wall-normal braking was learned while lateral/vertical correction was
+not. Its mean alignment contribution was -0.16143 per active step.
+
+Diagnosis: A generated frame-aware proportional actor passed the unchanged
+evaluator at 1.000 success, zero contacts, zero other flight failures, and zero
+timeouts across all 300 episodes, with a 1.225 s median completion time. The
+task geometry, contact frame, action mapping, goal predicate, and evaluator are
+therefore capable of passing. At the configured 2.0 m/s action scale, the old
+0.20 standard deviation injected roughly 0.40 m/s per-axis exploratory
+commands around a goal requiring at most 0.10 m/s total speed and offsets no
+larger than 0.08 m. Reduce fresh exploration to approximately the terminal
+speed scale, halve the update size, and double the checkpoint horizon to avoid
+the observed post-50 collapse while preserving the shared action contract.
+
+Publication rule correction: The rejected selector result exposed that a
+fallback checkpoint was still exported and advanced as `latest`. Selection may
+rank rejected checkpoints for diagnostics, but it must now write the report,
+fail the make gate, and leave publication unchanged unless the selected
+checkpoint passes both acceptance thresholds.
+
+### 35. Warm-start the approach actor with the task's affine flight prior
+
+Date: 2026-07-26.
+
+Decision: Reject run `approach-20260726b` and actor-only initialize the next
+run from an architecture-compatible affine approach prior. Fine-tune for 25
+iterations with `1e-6` fixed learning rate, 0.01 fresh action noise, zero
+entropy bonus, and checkpoints every five iterations. Keep the final task,
+reward, reset distribution, 2.0 m/s action authority, and actor/critic topology
+unchanged.
+
+Evidence: Run b completed 300 iterations in 1,128 seconds, but its strict
+selector failed as intended. Iteration 125 ranked best at 0.1967 success, zero
+contacts, zero other flight failures, and 0.8033 timeouts. Direct actor probes
+showed that its lateral and vertical outputs changed by only about 0.01 across
+the complete 0.16 m reset width, while retaining a much larger constant action
+bias. More iterations and smaller random exploration therefore reproduced the
+same local optimum instead of learning feedback.
+
+Prior: Use the unchanged `[256, 256, 128]` ELU actor as a sparse affine
+controller. Positive hidden biases keep three pass-through units in ELU's
+linear region. The output commands a 0.42 m wall-normal equilibrium with
+normalized gain 0.625 per meter and commands lateral/vertical normalized
+velocities equal to their signed switch-relative offsets; yaw is zero. This is
+an initialization, not a runtime fallback or an added reward term. The prior
+passed the exact 300-episode evaluator at 1.000 success with zero contact,
+flight failure, or timeout and 1.900 s median completion. The final artifact
+must still come from PPO checkpoint selection and independently pass all
+publication and deployment gates. Initialization provenance records policy,
+stage, run, iteration, and checkpoint path through the standard actor-only
+contract.
+
+The first 1.25-gain fine-tune, run `approach-20260726c`, passed Lab selection
+and independent evaluation at 1.000 success and zero failures. The live PX4
+routine nevertheless contacted the switch at 0.3828 m while still moving
+0.1122 m/s. Halving the prior's wall-normal gain limits its commanded speed to
+0.10 m/s at 0.50 m and addresses the measured velocity-loop overshoot without
+changing the configured 0.20 m/s reward target or any acceptance threshold.
+
+### 36. Publish the slower Stage 1 actor after every gate passes
+
+Date: 2026-07-26.
+
+Decision: Publish run `approach-20260726d`, checkpoint 24, as the accepted
+`press-approach` Stage 1 artifact. Its actor-only provenance is source policy
+`press-approach`, stage `approach`, run `approach-affine-prior-slow`, checkpoint
+0. One identical training attempt crashed during Isaac/Kit startup before
+creating a run; the immediate retry completed all 25 PPO iterations in 77
+seconds.
+
+Selection evidence: Every saved checkpoint passed 300 deterministic episodes.
+Iteration 24 ranked first with 1.000 approach success, zero contact failures,
+zero other flight failures, zero timeouts, 0.41244 m mean closest range, and
+1.500 s median completion. Its reward means were 0.103331 range progress,
+-0.070378 alignment error, -0.088123 closing-speed error, effectively zero
+upright/action-delta error, 4.980631 success, zero failure/timeout, and 4.925460
+total.
+
+Independent and deployment evidence: `make eval-press
+RL_RUN_ID=approach-20260726d` reproduced 1.000 success, zero
+contact/fault/timeout, 0.41244 m mean closest range, and 1.500 s median
+completion. `make test-integration-press-approach-routine` then completed the
+handoff, five-sample stable approach, contact-free terminal zero setpoint,
+return waypoint, landing, and disarm without a lamp transition. The physical
+contact-chain gate also remained independent and passed with 14.02 mm maximum
+pusher travel, 10.90 mm button travel, one toggle, 11.821 N maximum contact
+force, and stable retreat.
+
+Final repository validation: the full host suite passed with 578 tests and one
+skip; all pre-commit hooks passed; the aggregate container suite passed 8/8
+targets; and the independent `test-integration-press-policy` gate passed.
+
+### 37. Penalize collision through privileged Lab state
+
+Date: 2026-07-27.
+
+Decision: Keep the deployed `press-v1` contract unchanged and add collision
+only to the Stage 1 Lab transition. The policy interface remains a schema-v1
+34-value observation and four normalized body-FLU velocity/yaw-rate actions at
+20 Hz, with 2.0 m/s velocity and 1.5 rad/s yaw-rate scaling. `contact_flag`
+continues to mean pusher/pad contact only. No body, arm, propeller, frame, or
+wall collision value enters `PressApproachState`, the actor observation, the
+critic input, artifact contract metadata, or deploy-time sensing.
+
+Training mechanics: Separate PhysX contact sensors monitor the drone body and
+pusher pad. Their boolean collision facts latch across every one of the 12 or
+13 physics substeps in a policy interval and enter only
+`PressApproachInput`. The pure transition retains both sources for diagnostics,
+applies one combined collision penalty, and terminates the episode. PPO stores
+the reward and terminal flag, while reset prevents collision from entering a
+successor policy state.
+
+Reward decision:
+
+- Range progress: `50 * (previous_range - current_range)`.
+- Alignment: `-50 * ||relative_yz||^2`.
+- Closing overspeed: `-100 * max(closing_speed - safe_target, 0)^2`.
+- Upright error: `-5 * (1 - alignment)^2`.
+- Action delta: `-0.004 * mean((action - previous_action)^2)`.
+- Success: `+150`.
+- Collision: `-300`.
+- Ordinary flight failure: `-100`.
+- Timeout: `-25`.
+
+The safe closing-speed target is 0.08 m/s at 0.50 m and tapers linearly to zero
+at 0.44 m. Slower motion has no closing-speed penalty. Collision overrides
+success and the ordinary flight-failure reward; simultaneous body and pusher
+contact still produces one collision penalty.
+
+Evaluation decision: Selection and independent evaluation report combined
+collision rate plus body and pusher source rates. Publication continues to
+require at least 0.80 approach success and at most 0.05 simulated collision
+rate over 100 episodes for each seed 101, 202, and 303. Artifact identity and
+inference metadata do not gain a collision field; checkpoint evaluation
+results retain the diagnostic rates.
+
+Deployment decision: Continue using the deployable pusher compression/contact
+and lamp providers. Do not introduce a real-world any-body collision detector
+or new drone sensor. Velocity and angular-rate disturbances may affect the
+policy indirectly, but they are not reliable collision sensing. If Lab passes
+and the live PX4 approach still visibly contacts the wall, record a dynamics
+mismatch and stop instead of changing the policy contract.
+
+Training plan: Actor-only initialize run `approach-20260727a` from
+`approach-20260726d/logs/model_24.pt`. Train for 50 iterations with fixed
+`1e-6` learning rate, 0.01 initial action noise, zero entropy, and checkpoints
+every five iterations. Then run checkpoint selection, independent approach
+evaluation, and the live PX4 routine only after publication.
+
+Training and selection evidence: The 50-iteration run completed in 75.982
+seconds. Selection evaluated iterations 0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+and 49 over all 300 deterministic episodes; every checkpoint passed both
+publication gates. Iteration 49 ranked first and was published. It achieved
+1.000 approach success; zero combined, body, and pusher collisions; zero other
+flight failures and timeouts; 0.408096 m mean closest range; and 1.300 s median
+completion. Its per-active-step reward means were 0.128475 range progress,
+-0.081518 alignment error, -0.235154 closing overspeed, effectively zero
+upright and action-delta error, 5.788526 success, zero collision,
+flight-failure, and timeout terms, and 5.600329 total.
+
+Independent evaluation evidence: `make eval-press
+RL_RUN_ID=approach-20260727a` reproduced the selected checkpoint's complete
+300-episode result: 1.000 success; zero combined, body, and pusher collisions;
+zero other flight failures and timeouts; 0.40810 m mean closest range; and
+1.300 s median completion.
+
+Deployment result: Stop on a Lab-to-PX4 dynamics mismatch. The strict live
+approach routine detected real pusher contact at 0.3807 m while the vehicle was
+still moving 0.0782 m/s. Landing recovery began, then the PX4 bridge actuator
+poll timed out after 1.000 s; PX4 reported invalid setpoints and blind-land
+failsafe. This is a failed deployment gate even though Lab selection and
+independent evaluation passed. Do not add body collision sensing to
+`press-v1`, do not retrain around a deploy-only collision observation, and do
+not claim the collision-aware artifact as live-deployment accepted. Preserve
+the run and its diagnostics for controller/simulator dynamics investigation.
+
+Repository and integration evidence: The host gate passed with 582 tests and
+one skip, and every pre-commit hook passed. The deterministic contact-chain
+gate passed with 14.02 mm maximum pusher travel, 10.90 mm button travel, one
+toggle, 11.821 N maximum contact force, and stable retreat. The independent
+press-policy gate passed. The first aggregate integration attempt passed seven
+of eight targets; multi-drone navigation hit a one-off x500 actuator-poll
+timeout after the hexacopter completed. The navigation target then passed in
+isolation, and a complete serial aggregate rerun passed all eight targets.
+
+### 38. Trial the official Isaac Lab thruster and a shared governor
+
+Date: 2026-07-27.
+
+Decision: Restore `approach-20260726d` as the deployment baseline. Use the
+official `isaaclab_contrib.actuators.Thruster` from the already pinned Isaac Lab
+v2.3.2 commit for batched motor realization, without replacing the
+pusher-equipped articulation with `Multirotor`. Keep Pegasus and the live PX4
+SITL path as the deployment oracle. Do not adopt `rlPx4Controller`: it is a
+CPU/Eigen controller with hard-coded gains, incomplete yaw-rate behavior, and
+no indexed reset contract, so maintaining it would not remove the project-owned
+PX4-parity work.
+
+Dynamics diagnosis: Paired bridge/ULog evidence from the failed live run showed
+healthy 4 ms actuator lag but a braking mismatch. At 0.4459 m the configured
+safe target was approximately 0.008 m/s, the actor still requested 0.084 m/s,
+and PX4 measured 0.103 m/s. At 0.4032 m the actor requested 0.031 m/s while PX4
+still measured 0.104 m/s. The vehicle reached 0.3712 m. This is controller
+response mismatch, not missed privileged collision state.
+
+Implementation: Convert controller rotor-speed references to desired per-rotor
+thrust, pass them through the official actuator, then reconstruct the existing
+per-rotor yaw reaction, drag, and body wrench. Rise/fall time constants and the
+thrust-rate limit live in Hydra. They initially preserve the instantaneous
+Pegasus motor response with zero time constants until a deterministic paired
+trace supplies measured values.
+
+Safety decision: Apply one deterministic near-wall governor in both Lab and
+deployment. It follows the reward's safe closing-speed schedule, subtracts
+measured overspeed with configured braking gain, and caps reverse speed. Physics
+and PX4 receive the governed action. The actor observation, stored previous
+action, and action-delta reward retain the raw actor action, preserving
+`press-v1`, schema 1, dimension 34, and the existing reward contract. No body
+collision signal or new real sensor is introduced.
+
+Verification and publication decision: Re-run actor-only training from
+`approach-20260726d/logs/model_24.pt` for 50 iterations at fixed `1e-6`, 0.01
+noise, zero entropy, and five-iteration checkpoints. Serve only that run through
+TensorBoard. Selection, independent evaluation, host/pre-commit/integration
+gates, and three consecutive contact-free live approach routines are required
+before publication. If Lab passes but a live run contacts the wall, stop and
+record the remaining dynamics mismatch.
+
+### 39. Pause retraining and isolate controller conformance
+
+Date: 2026-07-27.
+
+Training result: Run `20260727T195222Z.162535` completed all 50 requested
+iterations, but it did not demonstrate learned collision avoidance. Combined,
+body, and pusher collision rates were zero from the first iteration through the
+last. Selection evaluated iterations 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, and
+49 over 300 episodes each; all reported 1.000 success and zero collision,
+failure, and timeout rates. Iteration 0 won
+`press-approach-gated-maximin-v3`, with 0.417999 m mean closest range,
+0.417608 m minimum closest range, and 4.050 s median completion. Independent
+evaluation reproduced those results. Selecting the warm-start checkpoint and a
+flat zero-collision curve means this run provides no evidence that PPO learned
+to reconcile the Lab/PX4 approach behavior. Keep training paused.
+
+Monitoring result: The run was exposed through a run-scoped TensorBoard on port
+6007. Its event file did not contain governor-intervention scalars, so actor
+intent could not be separated from the applied command after the run.
+
+Live result: The first governed PX4 routine did not report approach contact, but
+the later `land` step timed out after 30 simulated seconds and recovery disarmed
+the vehicle. Do not use that end-to-end failure to tune approach-controller
+gains; the mission contains unrelated navigation, landing, and lifecycle
+behavior.
+
+Isolation decision: Reconcile equivalent layers before another reward run.
+Static rotor realization compares identical rotor commands through the
+quadratic thrust/body-wrench path and the pinned Isaac Lab `Thruster`.
+Controller conformance compares identical estimator state and velocity intent
+at the physical rotor-speed/body-wrench boundary. Closed-loop conformance then
+compares deterministic forward/stop/reverse velocity traces without a wall,
+policy, reward, or mission landing step. Training may resume only after the
+instantaneous and temporal comparisons have reviewed tolerances.
+
+Initial controller replay: `flight_analysis/tools/controller_conformance.py`
+replayed the governed live ULog window 28.3-30.7 s through the numpy twin of the
+Isaac Lab controller. Across 24 matched samples, PX4 versus Isaac rotor-speed
+RMSE was 3.212 rad/s, or 0.00612 of the configured 1100 rad/s full scale; maximum
+absolute rotor error was 6.911 rad/s. Mean collective thrust was 23.012 N for
+PX4 and 23.045 N for Isaac, with 0.0494 N collective RMSE. Body-torque RMSE was
+0.0319, 0.0737, and 0.00088 N m. This provisional result says the instantaneous
+controller/allocation boundary is already close. The remaining investigation
+therefore targets cadence, delay, braking distance, overshoot, and settling in
+the closed loop rather than blind gain retuning.
+
+### 40. Remove the governor and require learned collision avoidance
+
+Date: 2026-07-27.
+
+Latest live evidence: The full autorun completed approach, return, landing, and
+disarm. Its applied PX4 forward setpoint peaked at 0.0778 m/s, reversed at
+0.4458 m range, and took approximately 0.8 s and 0.030 m to stop. It reached
+0.4158 m without a logged pusher contact. In the earlier failed run, the actor
+requested up to 0.1414 m/s and did not reverse until 0.3713 m; the vehicle had
+already entered the collision region. The successful autorun therefore
+demonstrates that the governor prevented the bump, not that PPO learned safer
+braking.
+
+Controller evidence: Replaying the latest approach window through the Isaac
+controller produced 3.353 rad/s rotor-speed RMSE (0.00639 of full scale),
+0.0209 N collective-thrust RMSE, and body-torque RMSE of 0.0281, 0.0792, and
+0.00119 N m. The bridge remained healthy at 4 ms actuator lag. Instantaneous
+controller and allocation math are already close; the remaining mismatch is
+temporal closed-loop response.
+
+Decision: Remove the governor from both training and deployment. The actor
+action again drives physics and PX4 directly, and `previous_action` remains the
+actual preceding command. Keep privileged body/pusher collision reward and
+termination unchanged. A new actor-only run must show collision rate falling
+through training and pass checkpoint selection plus independent evaluation
+without a safety layer. Defer new safety and closed-loop conformance harnesses
+until the raw policy has proved correct behavior.
+
+### 41. Actor-only retraining still does not expose the live collision
+
+Date: 2026-07-27.
+
+Run `20260727T204645Z.223589` removed the governor from both training and
+deployment and actor-only initialized from
+`approach-20260726d/logs/model_24.pt`. The requested 50 iterations completed
+with the fixed `1e-6` learning rate, 0.01 noise, zero entropy, and checkpoints
+every five iterations. A run-scoped TensorBoard was available at port 6006
+throughout training.
+
+Result: Training collision, body-collision, and pusher-collision percentages
+remained zero. All eleven checkpoints produced 1.000 success and zero
+collisions across 300 selection episodes. Selection chose iteration 45 because
+it completed faster than the earlier checkpoints. Independent evaluation
+reproduced 1.000 success, zero failures, 0.408605 m mean closest range,
+0.403935 m minimum closest range, and 1.300 s median completion.
+
+Interpretation: Removing the safety layer was necessary, but it did not make
+the Lab environment reproduce the PX4 failure. The unguided warm-start actor
+already succeeds without contact in Lab, so PPO never receives the privileged
+collision penalty and no falling collision curve can appear. Across
+checkpoints, median completion improved from 1.500 s to 1.300 s while minimum
+closest range moved from 0.411114 m to 0.403935 m. The selected actor is faster
+and uses more of the range margin, which is not evidence of safer live braking.
+Do not claim learned collision reconciliation from this run. Leave the raw
+artifact available for the requested manual routine, and use that result before
+changing training dynamics or selection policy.
+
+### 42. Stage-filtered live comparison confirms a settling mismatch
+
+Date: 2026-07-27.
+
+Scope correction: Compare only the configured `policy[press-approach]` routine
+step. The preceding arm, takeoff, hover, and waypoint steps establish the live
+handoff state and are not learned-policy behavior; the return and landing steps
+are also excluded. In the existing run, the PX4 trajectory-setpoint transition
+from position to velocity identifies the policy interval at raw simulated time
+28.120-46.720 s, or ULog-relative time 27.940-46.540 s.
+
+Live result: The policy step began at 0.500645 m wall-normal switch range and
+lasted 18.600 s. It first entered the 0.40-0.42 m goal band after 1.280 s at
+0.416357 m, but speed was 0.107596 m/s, just above the 0.10 m/s stable-goal
+limit. The applied forward setpoint did not reverse until 1.600 s, when the
+ground-truth range was already approximately 0.380 m; the body was still
+closing at 0.0400 m/s. Closest range was 0.380348 m at 1.680 s, and sampled
+ground truth remained below 0.40 m for 16.8 s before the vehicle backed out and
+completed at 0.402134 m. No pusher-contact failure was reported; this does not
+exclude a body, arm, propeller, or wall collision.
+
+Lab comparison: The independently evaluated selected checkpoint completes in a
+1.300 s median with 0.408605 m mean closest range and 0.403935 m minimum closest
+range. The live vehicle therefore reaches the goal band at approximately the Lab
+completion time, but does not settle there and overshoots the Lab minimum by
+23.6 mm. This is a policy-stage behavior mismatch, not an artifact of including
+takeoff or waypoint travel in the comparison.
+
+Controller comparison: Replaying the full policy-only ULog window through the
+Isaac controller produced 3.225 rad/s rotor-speed RMSE, 0.00614 normalized
+rotor-speed RMSE, 8.523 rad/s maximum rotor error, 0.0238 N collective-thrust
+RMSE, and body-torque RMSE of 0.0241, 0.0765, and 0.00145 N m. Instantaneous
+allocation remains close. Investigate the closed-loop transient, plant setup,
+cadence, and handoff-state distribution before changing the reward or training
+again.
+
+Logging decision: Every routine step now emits structured `ROUTINE_STAGE`
+records with start/complete/failed event, configured kind, label, index, and
+exact simulation time. The fleet runtime mirrors them into the per-vehicle
+bridge log so future analysis can select the policy interval directly rather
+than infer it from setpoint type.
+
+### 43. Matched policy entry isolates the remaining plant response
+
+Date: 2026-07-27.
+
+Entry reconciliation: Training resets and deployment now share one
+`rl.press.handoff` actor-entry contract: 0.45-0.50 m wall-normal range, at most
+0.08 m radial lateral/vertical error, at most 0.02 m/s wall-normal and lateral
+speed, at most 0.05 rad/s angular speed, upright attitude, valid pose and
+estimator state, no contact, zero previous action, and pre-contact mode. The
+policy routine retains its 0.48 m waypoint, tightened to 0.02 m settling
+tolerance, but transmits zero velocity until this complete gate passes.
+
+Matched Lab result: The existing iteration-45 actor from run
+`20260727T204645Z.223589` was independently evaluated over 300 episodes using
+the reconciled reset envelope. It achieved 1.000 success, zero body or pusher
+collisions, zero other flight failures and timeouts, 0.40864 m mean closest
+range, 0.40726 m minimum closest range, and 1.300 s median completion. The
+evidence is under
+`.build/docker/integration/eval-press.20260727T220447Z.283068`. This passes the
+80% success, 5% collision, and 0.40 m minimum-range acceptance thresholds.
+
+Matched PX4 entry: The corrected manual routine entered the policy at HIL time
+50.084 s with the following exact 34-value observation:
+
+```text
+[0.48916839599609224, -0.007876251824200153, 0.020658969879150394,
+ 0.0007149667336627738, -0.0009180963702619456, -0.0034416273301046685,
+ 0.9999934005396961, 1.0, 0.0, 1.0, -0.006910835427534126,
+ 0.005143429205436118, -0.001968258445456121, -0.003251545146200264,
+ -0.006700190542363499, 1.736254838224173e-05, 0.0011547500034794211,
+ -0.00014363434456754476, 0.7046685218811035, 0.7095357179641724,
+ 2.6640482246875763e-05, 0.0034139060880988836, 1.0, 0.0, 0.0, 1.0,
+ 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 7.0]
+```
+
+The raw normalized action was
+`[0.0627968311, -0.0075850487, 0.0221121311, -0.0005383986]`, and the
+transmitted velocity setpoint was 0.125594 m/s forward, 0.015170 m/s right,
+-0.044224 m/s down, and 0.000808 rad/s yaw rate. The gate admitted the actor
+with only 0.00691 m/s initial wall-normal speed. The policy accumulated four
+stable samples at 0.415001, 0.411734, 0.407021, and 0.404009 m, but retained
+0.08286-0.07400 m/s closing speed through those samples. It first commanded
+reverse at 1.76 s, when range was already 0.387520 m and closing speed was
+0.052732 m/s. Pusher contact followed at 1.86 s and 0.3834 m, so the policy
+stage failed without completing five stable samples. The evidence is under
+`.build/docker/integration/test-integration-press-approach-routine.20260727T220835Z.286190`.
+
+Isolated replay: Reconstructing the captured contact-relative entry in Lab and
+running the actor closed-loop completed in 1.45 s without collision, with a
+0.409990 m closest range. Replaying the captured PX4 normalized-action sequence
+through the same Lab plant also completed without collision in 1.40 s, with a
+0.406557 m closest range. Lab policy intervals alternate 52/48 ms at 250 Hz;
+the 50 Hz routine driver quantizes the same 20 Hz policy to alternating 60/40
+ms intervals. Both average exactly 50 ms, while the materially different
+closing-speed and braking traces remain.
+
+Decision: Entry-state mismatch is reconciled, but it was not the complete
+cause. Lab succeeds from the matched entry while PX4 overshoots, so do not
+resume PPO and do not run another manual approach yet. The identical-action
+replay and the already-close instantaneous controller/allocation comparison
+localize the remaining work to temporal closed-loop plant response, including
+velocity tracking, braking distance, and settling. Reconcile that response
+before another wall run.
+
+### 44. Fit temporal response, retrain, and stop before the wall
+
+Date: 2026-07-27.
+
+Trace capture: The wall-free production actor ran at nominal 0.460, 0.475, and
+0.490 m entry ranges with switch and wall collision disabled. The measured
+entry ranges were 0.456251, 0.481800, and 0.498089 m. PX4 closest ranges were
+0.406414, 0.401356, and 0.326529 m; peak closing speeds were 0.062576,
+0.089772, and 0.115816 m/s. The 0.490 m case required 0.057806 m of braking
+distance and settled after 4.96 s. The policy cadence retained its exact 40/60
+ms quantization around a 50 ms mean. Every routine step had a timeout of at
+most 20 s; nearby staging points kept the complete 19-step, three-case mission
+to 52.884 s of simulation time. Raw traces and the combined report are under
+`.build/benchmarks/press-temporal/`.
+
+Temporal fit: A first-order fit to the two outer PX4 cases estimated 0.260 s
+command delay and a 0.660 s response time constant, with 0.017398 m/s training
+velocity RMSE and 0.015558 m/s held-out-middle RMSE. Exact isolated-Lab replay
+then evaluated the production controller in physics ticks and selected a
+0.440 s Lab-only action delay from the outer cases. Outer-case velocity RMSE
+was 0.017951 m/s; the held-out 0.475 m case was 0.023553 m/s. Its middle-case
+braking-distance delta was 0.0 m and closest-range delta was +0.011787 m.
+This is an equivalent closed-loop response parameter, not evidence of a
+literal 440 ms wait in one PX4 component. PX4, actor cadence, and `press-v1`
+remain unchanged.
+
+Actor decision: The existing iteration-45 actor from
+`20260727T204645Z.223589` failed reconciled Lab evaluation over 300 episodes:
+0.517 success, 0.483 pusher collision, 0.39414 m mean closest range, and
+0.38285 m minimum closest range. Run
+`temporal-reconcile-440ms-20260728T0040Z` therefore actor-only initialized
+from that iteration and completed the prescribed 50 iterations at fixed
+`1e-6` learning rate, 0.01 initial noise, zero entropy, and five-iteration
+checkpoints. Each iteration collected 8,192 transitions from 256 environments
+and 32 policy steps. Run-scoped TensorBoard used
+`.build/training/press-approach/temporal-reconcile-440ms-20260728T0040Z/logs`.
+
+Selection outcome: No checkpoint passed all three gates. Iterations 45 and 49
+were the two best. Iteration 49 ranked first with 0.940 success, 0.060
+collisions, 0.404974 m mean closest range, and 0.383841 m minimum closest
+range. It missed both the 0.050 collision ceiling and 0.400 m minimum-range
+floor. Selection retained iteration 49 only as the rejected diagnostic and
+did not export it or advance `latest`.
+
+Publication override: At the user's explicit direction, iteration 49 was
+manually exported and `.build/training/press-approach/latest` was advanced to
+`temporal-reconcile-440ms-20260728T0040Z`. This makes the 94.0%-success model
+available for later work but does not change its rejected selection result or
+waive the virtual and physical acceptance gates.
+
+Decision: Stop at the published diagnostic actor. The required three virtual
+PX4 acceptance runs were not started, and the physical wall run was not
+performed. Physical completion, five stable samples, closest range, pusher
+contact, and visible body/arm/propeller contact therefore have no outcome for
+this cycle. To continue actor-only work later, initialize a new run from
+`.build/training/press-approach/temporal-reconcile-440ms-20260728T0040Z/logs/model_49.pt`;
+the full rejected metrics remain in that run's `checkpoint_selection.json`.
+
+### 45. Verify per-goto PX4 ground-speed control without the wall
+
+Date: 2026-07-28.
+
+Manual verification command:
+
+```text
+make test-integration-px4-navigation
+```
+
+Wall-free result: The dual-airframe navigation gate passed using a 0.5 m/s
+PX4-guided reposition leg followed by the existing streamed OFFBOARD leg. The
+x500 observed 0.568615 m/s peak and 0.453339 m/s average horizontal speed,
+0.656407 m braking distance, 0.489171 m error when the waypoint predicate
+completed, 0.069953 m final error after the following hover, zero overshoot,
+and 0.035061 m maximum cross-track error. The s550 observed 0.538365 m/s peak
+and 0.440375 m/s average horizontal speed, 2.129739 m braking distance,
+0.489472 m completion error, 0.060672 m final error, 0.039235 m overshoot, and
+0.056772 m maximum cross-track error. Both completion errors remained within
+the existing 0.5 m position gate and both cross-track errors remained within
+the existing 2.0 m gate. Run-scoped evidence is under
+`.build/docker/integration/test-integration-px4-navigation.20260728T220018Z.1260490`.
+
+Virtual approach result: The 0.5 m/s staging leg, 0.08 m/s final 0.11 m leg,
+fresh OFFBOARD policy entry, policy completion, and 0.5 m/s return leg all
+completed. The mission then failed only because the land step reached its
+required 20.0 s timeout before PX4 disarmed; ULog showed that PX4 accepted the
+Land command and the vehicle reached ground level well inside that interval.
+Recovery subsequently disarmed the vehicle. The failed run is preserved under
+`.build/docker/integration/test-integration-press-approach-routine.20260728T215628Z.1258179`;
+the timeout was not raised above the required 20 s cap.
+
+Decision: PX4-guided speed control is accepted for wall-free navigation, while
+the physical approach remains unapproved because its complete virtual routine
+did not pass. No physical-wall command was run. Do not infer a hard velocity
+limit from the requested speed: the observed peak speeds demonstrate that it is
+a PX4 trajectory target, and PX4 retains braking responsibility.
+
+### 46. Record the successful manual mission without upgrading the actor
+
+Date: 2026-07-28.
+
+Reproducible manual command:
+
+```text
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_approach_quad.yaml
+```
+
+Run result: The complete ten-stage routine finished, including the 0.5 m/s
+staging leg, hover and final approach, policy, 0.5 m/s return, landing, and
+disarm. The bridge evidence is
+`px4/logs/2026-07-28/22_41_53_v0_bridge.log`; the paired ULog is
+`px4/logs/0/2026-07-28/22_41_53.ulg`.
+
+Policy-only result: The policy ran for 2.2 s over 45 actor samples. It moved
+from 0.47949 to 0.40823 m switch range, with 0.03223 m/s average and
+0.06621 m/s peak closing speed. Contact sensing remained valid and false,
+the lamp stayed off, and maximum pusher compression was approximately
+0.027 mm. Classify this policy interval as contact-free. The terminal actor
+sample emitted zero velocity; the following 0.5 m/s PX4-guided `goto`, not the
+policy, performed the controlled retreat.
+
+Speed interpretation: The 0.08 m/s final `goto` completed after one 20 ms
+driver tick because the preceding braking and hover had already brought the
+vehicle inside the configured 0.02 m position tolerance. This run therefore
+does not independently validate sustained PX4-guided motion at 0.08 m/s.
+
+Acceptance decision: Preserve this successful manual mission separately from
+the earlier formal approach-gate run in section 45, which failed on the landing
+timeout before later recovery disarmed. The manual result does not convert
+iteration 49 into an accepted actor, waive its rejected 6.0% collision and
+0.383841 m minimum-range selection metrics, or replace the formal gates. No
+additional warehouse-wall run is authorized by this evidence.
+
+### 47. Retrain the held-out delay candidate and analyze the manual mission
+
+Date: 2026-07-29.
+
+Retraining command:
+
+```text
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_approach_quad.yaml \
+  --train-target train-rl \
+  --select-target select-rl-checkpoint \
+  --eval-target eval-press \
+  --train-args '--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/latest/logs/model_49.pt' \
+  --label press-approach-200ms
+```
+
+Run `20260729T024615Z.21141` actor-only initialized from iteration 49 of the
+rejected 0.440 s diagnostic run and trained for 50 iterations with the
+held-out-best 0.200 s Lab response proxy. All eleven checkpoints passed
+selection. Iteration 49 was selected and published to
+`.build/training/press-approach/latest`. Independent evaluation over 300
+episodes achieved 1.000 success, zero body or pusher collisions, zero other
+flight failures and timeouts, 0.406831 m mean closest range, 0.401545 m
+minimum closest range, and 1.450 s median completion.
+
+GPU observation: This run inherited the conservative 256-environment config
+and sustained approximately 45-59% GPU utilization with about 6.5 GB of
+24.6 GB VRAM. Earlier capacity measurements placed 32,768 environments near
+the throughput peak at approximately 86-89% utilization and 17.5 GB VRAM,
+while 49,152 used approximately 22.5 GB without improving throughput. New
+training therefore uses 32,768 environments in the tracked Hydra config;
+49,152 remains an explicit capacity probe.
+
+Manual command:
+
+```text
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_approach_quad.yaml
+```
+
+The complete ten-stage mission finished, including return, landing, and
+disarm. Evidence is in
+`px4/logs/2026-07-29/02_51_45_v0_bridge.log` and the paired ULog
+`px4/logs/0/2026-07-29/02_51_46.ulg`. The policy ran for 2.2 s over 45 actor
+samples, moved from 0.485541 to 0.404858 m, and had 0.036674 m/s average and
+0.081813 m/s peak observed closing speed. Contact sensing stayed valid and
+false, the lamp stayed off, and maximum pusher compression was approximately
+0.028 mm, so classify the policy interval as contact-free.
+
+The policy ended with a zero-velocity command. The following 0.5 m/s
+PX4-guided `goto`, not the policy, performed the retreat. Residual momentum
+continued for approximately 0.364 s and 14.6 mm after the return command,
+placing the estimated closest post-policy range near 0.390 m before reversal.
+There was no logged contact or lamp activation. This successful mission is
+strong deployment evidence, but post-policy coasting below the Lab 0.40 m
+floor keeps temporal plant alignment open.
+
+Instantaneous ULog replay remained close: normalized rotor-speed RMSE was
+0.00794, collective-thrust RMSE was 0.03701 N, and mean collective thrust was
+23.0303 N in PX4 versus 23.0542 N in the Lab controller reference. These are
+diagnostics, not accepted publication thresholds.
+
+### 48. Revalidate the 0.200 s proxy on fresh wall-free traces
+
+Date: 2026-07-29.
+
+The calibrated wall-free temporal mission passed under
+`.build/docker/integration/test-integration-press-temporal-conformance.20260729T031246Z.41668`.
+The measured policy-entry ranges were 0.473103, 0.495020, and 0.499409 m;
+the analyzer uses these measured observations even though the stable labels
+remain nominal 0.460, 0.475, and 0.490 cases. PX4 closest ranges were
+0.406176, 0.403244, and 0.401688 m, and peak closing speeds were 0.063719,
+0.090268, and 0.096454 m/s.
+
+Exact-action Isaac Lab replay evaluated zero, 0.200, and 0.440 s delay
+candidates. Outer-trace RMSE was 0.031966, 0.024226, and 0.025795 m/s,
+respectively. Held-out-middle RMSE was 0.030365, 0.020706, and 0.025401 m/s.
+The fresh evidence therefore selects 0.200 s on both fitted and held-out
+metrics. The first-order PX4-only fit estimated 0.164 s delay and a 0.612 s
+response time constant; this supports interpreting the Lab delay as an
+equivalent proxy rather than literal transport latency.
+
+The 0.200 s Lab replay still ended 0.04117, 0.02319, and 0.01234 m closer than
+PX4 across the three traces. Decision: retain the accepted 0.200 s actor and
+configured proxy, but do not call sim-to-sim alignment complete. The remaining
+work is to identify response bandwidth, per-axis dynamics, and braking
+separately from delay, then validate on new held-out commands. Do not
+automatically run another warehouse-wall mission.
+
+### 49. Sweep horizontal controller response and retain the hover gate
+
+Date: 2026-07-29.
+
+Identification input: Reuse the wall-free PX4 traces from section 48 while
+holding the actor, captured normalized actions, 40/60 ms cadence, initial
+observations, and 0.200 s command-delay proxy fixed. The first diagnostic
+swept 30 combinations of velocity proportional- and damping-gain scales. A
+second 15-combination sweep changed only the two horizontal axes, leaving the
+unexcited vertical gains unchanged. Reports are
+`.build/benchmarks/press-temporal/20260729T031246Z/controller-grid-conformance.json`
+and
+`.build/benchmarks/press-temporal/20260729T031246Z/horizontal-controller-grid-conformance.json`.
+
+Selected horizontal candidate: Scale the horizontal proportional gains by
+0.75 and horizontal damping gains by 1.50. Against the current controller,
+outer-trace velocity RMSE fell from 0.024226 to 0.012599 m/s and
+held-out-middle RMSE fell from 0.020706 to 0.007104 m/s. Closest-range deltas
+changed from -0.04117, -0.02319, and -0.01234 m to -0.01641, +0.00333, and
++0.01200 m. The all-axis exploratory sweep produced materially identical
+forward-response metrics, confirming that the observed improvement came from
+the horizontal gains.
+
+Independent flight gate: Applying the selected absolute gains
+`controller_kp_vel=[1.5, 1.5, 3.0]` and
+`controller_kd_vel=[1.8, 1.8, 1.5]` failed
+`make test-integration-press-hover-goto`: the final hover error was 0.093 m,
+but the last-one-second maximum was 0.135 m against the 0.100 m limit. A
+conservative damping-only candidate kept horizontal proportional gain at 2.0
+and raised horizontal damping to 2.4. It also failed, with 0.087 m final error
+and 0.129 m last-window maximum. Evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040349Z.12744`
+and
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040426Z.13390`.
+
+A 1.50x damping candidate, absolute horizontal damping 1.8, narrowly failed:
+final hover error was 0.065 m, but its last-window maximum was 0.101 m. The
+1.25x candidate, absolute horizontal damping 1.5, passed. Its last-window
+maximum hover error was 0.086 m, settled goto error was 0.016 m, and the press
+side-channel handoff was ready at 0.464 m. Evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040516Z.14088`
+and
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040540Z.14769`.
+The retained candidate reduces outer/held-out velocity RMSE from
+0.024226/0.020706 to 0.020522/0.016336 m/s.
+
+Decision: Retain `controller_kp_vel=[2.0, 2.0, 3.0]` and
+`controller_kd_vel=[1.5, 1.5, 1.5]`. This is the strongest measured response
+change that preserves the independent hover/goto precondition. Retraining may
+proceed from the latest accepted actor; it must repeat selection and
+independent evaluation before PX4 acceptance.
+
+Bounded delay refinement: With the retained damping fixed, delays 0.120,
+0.160, 0.200, 0.240, and 0.280 s produced held-out RMSE of 0.019700,
+0.017700, 0.016336, 0.015804, and 0.016014 m/s. The nominal 0.240 s winner
+improves on 0.200 s by only 0.000532 m/s, or approximately 3.3%. Because the
+same middle trace already informed the delay and damping decisions, this
+marginal result is insufficient independent evidence for another config
+change. Keep `controller_command_delay_s=0.200`; validate any future delay
+change on a new command shape.
+
+### 50. Retrain the hover-safe damping plant at production parallelism
+
+Date: 2026-07-29.
+
+Run command:
+
+```text
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_approach_quad.yaml \
+  --train-target train-rl \
+  --select-target select-rl-checkpoint \
+  --eval-target eval-press \
+  --train-args '--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/latest/logs/model_49.pt' \
+  --label press-approach-damped-200ms
+```
+
+Run `20260729T041316Z.27604` used source commit `468e408`, 32,768 parallel
+environments, the retained 0.200 s delay, and horizontal damping 1.5. It
+actor-only initialized from iteration 49 of accepted run
+`20260729T024615Z.21141`. Fifty iterations collected 52,428,800 transitions
+in 328.8 s. Mean reported throughput across iterations 1-49 was approximately
+174,104 steps/s, ranging from 159,369 to 186,917 steps/s. Live GPU sampling
+showed 84% utilization, 16.8-18.0 GB of 24.6 GB VRAM, and 229-278 W. This
+confirms that the tracked 32,768-environment default materially uses the GPU
+while retaining VRAM headroom.
+
+All eleven saved checkpoints passed the 300-episode selection gates with
+1.000 success and zero collisions, other flight failures, or timeouts.
+Maximin selection chose iteration 20 and published it to
+`.build/training/press-approach/latest`. Independent evaluation of that exact
+artifact reproduced 1.000 success, zero body and pusher collisions, zero other
+flight failures and timeouts, 0.405855 m mean closest range, 0.400629 m
+minimum closest range, and 1.400 s median completion.
+
+Decision: Accept iteration 20 as the Lab artifact for the retained
+delay-and-damping plant. This completes retraining, checkpoint selection, and
+independent Lab evaluation, but it does not by itself complete sim-to-sim
+alignment or authorize an automatic warehouse-wall run. The next acceptance
+evidence is a fresh wall-free PX4 temporal capture using this actor, followed
+by exact-action Lab replay on a command shape not used to select the current
+delay and damping.
+
+### 51. Reject the retrained actor at fresh PX4 temporal validation
+
+Date: 2026-07-29.
+
+Command:
+
+```text
+make test-integration-press-temporal-conformance
+```
+
+The fresh wall-free mission used selected iteration 20 from run
+`20260729T041316Z.27604`. Its first two policy stages completed, but their
+PX4 trajectories overshot the Lab safety floor before recovering:
+
+| Trace | Measured entry | Closest range | Terminal range | Peak closing speed | Duration |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `temporal-0.460` | 0.470444 m | 0.355108 m | 0.403326 m | 0.083668 m/s | 4.66 s |
+| `temporal-0.475` | 0.491539 m | 0.348231 m | 0.402060 m | 0.106641 m/s | 4.80 s |
+
+Both stages eventually accumulated five stable-goal samples, but closest
+range was approximately 45-52 mm below the 0.40 m Lab collision floor. This
+is a material PX4/Lab braking-response mismatch and rejects the actor for a
+warehouse-wall run despite its perfect Lab evaluation.
+
+The third stage did not exercise the actor. Its `goto`/hover sequence entered
+at 0.523123 m, outside the shared 0.45-0.50 m handoff envelope. The policy
+correctly transmitted zero velocity with `handoff_reason=too_far` until the
+20 s stage timeout. Landing recovery was accepted but exhausted its 30 s
+disarm wait. Treat this separately as a temporal-harness staging failure, not
+an actor or contact failure. Evidence is under
+`.build/docker/integration/test-integration-press-temporal-conformance.20260729T042714Z.46121`.
+
+Decision: The 0.200 s delay plus horizontal damping 1.5 improves trace RMSE
+for the previous actor but is insufficient to transfer the retrained actor's
+braking behavior. Keep iteration 20 as a Lab-accepted diagnostic artifact,
+not a PX4-accepted actor. Do not run a warehouse-wall mission. The next
+alignment cycle should use policy-independent step/ramp/reversal excitation
+and fit response bandwidth and braking dynamics separately from pure delay;
+identified ranges should then be randomized during training. The temporal
+staging harness also needs a wall-normal entry predicate that does not rely on
+one three-dimensional waypoint tolerance before it can provide three valid
+acceptance traces.

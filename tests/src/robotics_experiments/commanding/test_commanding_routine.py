@@ -8,7 +8,7 @@ through the package-root contract. The per-drone driver itself is covered by
 """
 
 import math
-from dataclasses import replace
+from dataclasses import fields, replace
 
 import numpy as np
 import pytest
@@ -26,7 +26,8 @@ from robotics_experiments.commanding import (
     EnvelopeGates,
     FailureKind,
     PolicyAdapter,
-    PolicyStepResult,
+    PolicyInput,
+    PolicyResult,
     RoutineState,
     RoutineStep,
     VehicleRoutine,
@@ -44,6 +45,7 @@ from robotics_experiments.commanding import (
     hovering_stable,
     moved_forward_at_least,
     reached_world_position,
+    reposition,
     takeoff,
     tilt_below,
 )
@@ -180,7 +182,7 @@ def test_armed_predicate_reads_bridge_status():
     assert predicate(make_routine_observation(is_armed=True), None) is True
 
 
-def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy_fn_factory=None):
+def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy_factory=None):
     return build_vehicle_routine(
         steps=steps,
         target_latitude_deg=47.0,
@@ -198,7 +200,7 @@ def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
         offboard_setpoint_rate_hz=50.0,
-        policy_fn_factory=policy_fn_factory,
+        policy_factory=policy_factory,
     )
 
 
@@ -760,6 +762,135 @@ def test_build_vehicle_routine_goto():
     assert goto_step.invariants
 
 
+def test_reposition_serializes_default_and_authored_ground_speed():
+    default_speed = reposition(47.0, 8.0, 490.0)
+    authored_speed = reposition(47.0, 8.0, 490.0, 0.08)
+
+    assert default_speed.params[0] == -1.0
+    assert authored_speed.params[:3] == (
+        0.08,
+        float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE),
+        0.0,
+    )
+    assert math.isnan(authored_speed.params[3])
+    assert authored_speed.params[4:] == (47.0, 8.0, 490.0)
+
+
+def test_build_vehicle_routine_speed_authored_goto_uses_guided_reposition():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    goto_step = routine.steps[0]
+
+    assert goto_step.command.command_id == MAV_CMD_DO_REPOSITION
+    assert goto_step.command.params[0] == pytest.approx(0.5)
+    assert goto_step.command.params[4] == pytest.approx(47.0)
+    assert goto_step.command.params[5] != pytest.approx(8.0)
+    assert goto_step.command.params[6] == pytest.approx(490.0)
+    assert goto_step.retry_on_temporarily_rejected is True
+    assert goto_step.streaming is None
+    assert goto_step.guided is not None
+    assert goto_step.guided.target_enu == (3.0, 0.0, 2.0)
+    assert goto_step.invariants
+
+
+@pytest.mark.parametrize("ground_speed_m_s", [0.0, -0.1, math.inf, -math.inf, math.nan])
+def test_build_vehicle_routine_rejects_invalid_goto_ground_speed(ground_speed_m_s):
+    with pytest.raises(ValueError, match="ground_speed_m_s must be finite and positive"):
+        _goto_routine(ground_speed_m_s=ground_speed_m_s)
+
+
+def test_decide_speed_authored_goto_preserves_ack_completion_heading_and_gates():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, decision = decide(routine, RoutineState(), _far(0))
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert decision.command.params[3] == pytest.approx(math.pi / 2.0)
+    assert decision.setpoint is None
+
+    temporary = CommandAck.from_result(
+        MAV_CMD_DO_REPOSITION,
+        MAV_RESULT_TEMPORARILY_REJECTED,
+    )
+    state, decision = decide(routine, state, _far(1, last_ack=temporary))
+    assert decision.kind is DecisionKind.CONTINUE
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert decision.command.params[3] == pytest.approx(math.pi / 2.0)
+
+    misaligned = make_routine_observation(
+        sim_time_us=60_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=90.0,
+    )
+    state, decision = decide(routine, state, misaligned)
+    assert decision.kind is DecisionKind.CONTINUE
+
+    aligned = make_routine_observation(
+        sim_time_us=80_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = decide(routine, state, aligned)
+    assert decision.kind is DecisionKind.ADVANCE
+
+    breach_routine = _goto_routine(ground_speed_m_s=0.5)
+    breach_state, _ = decide(breach_routine, RoutineState(), _far(0))
+    _, breach = decide(
+        breach_routine,
+        breach_state,
+        make_routine_observation(
+            sim_time_us=20_000,
+            position_enu=(1.0, 3.0, 2.0),
+        ),
+    )
+    assert breach.kind is DecisionKind.FAIL
+    assert breach.failure_kind is FailureKind.ENVELOPE
+
+
+def test_speed_authored_goto_derives_ned_yaw_from_step_baseline():
+    routine = _goto_routine(x=0.0, y=3.0, ground_speed_m_s=0.5)
+
+    _, decision = decide(routine, RoutineState(), _far(0))
+
+    assert decision.command.params[3] == pytest.approx(0.0)
+
+
+def test_speed_authored_goto_reconfirms_once_after_accepted_ack():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, _ = decide(routine, RoutineState(), _far(0))
+    accepted = CommandAck.from_result(MAV_CMD_DO_REPOSITION, 0)
+
+    state, confirmation = decide(routine, state, _far(1, last_ack=accepted))
+    assert confirmation.command.command_id == MAV_CMD_DO_REPOSITION
+    assert confirmation.command.params[3] == pytest.approx(math.pi / 2.0)
+    assert state.guided_confirmation_sent is True
+
+    state, successor = decide(routine, state, _far(2, last_ack=accepted))
+    assert successor.kind is DecisionKind.CONTINUE
+    assert successor.command is None
+    assert state.guided_confirmation_sent is True
+
+
+def test_decide_speed_authored_goto_preserves_hard_rejection_and_timeout():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, _ = decide(routine, RoutineState(), _far(0))
+    denied = CommandAck.from_result(MAV_CMD_DO_REPOSITION, 2)
+    _, rejected = decide(routine, state, _far(1, last_ack=denied))
+    assert rejected.kind is DecisionKind.FAIL
+    assert rejected.failure_kind is FailureKind.COMMAND
+    assert "rejected" in rejected.reason
+
+    state, _ = decide(routine, RoutineState(), _far(0))
+    _, timed_out = decide(
+        routine,
+        state,
+        make_routine_observation(
+            sim_time_us=21_000_000,
+            position_enu=(0.0, 0.0, 2.0),
+        ),
+    )
+    assert timed_out.kind is DecisionKind.FAIL
+    assert timed_out.failure_kind is FailureKind.COMMAND
+    assert "timed out" in timed_out.reason
+
+
 def test_build_vehicle_routine_rejects_goto_without_coordinate():
     with pytest.raises(ValueError, match="'x'"):
         _build([{"kind": "goto", "y": 0.0, "z": 1.0, "timeout_s": 10.0}])
@@ -910,42 +1041,65 @@ def test_decide_hover_step_holds_before_advancing():
 # ---- policy (OFFBOARD RL policy) --------------------------------------------
 
 
-class _FakePolicyFn:
-    """Records goals and completes after two seconds of policy time."""
+def test_policy_transition_values_have_explicit_fields():
+    assert [field.name for field in fields(PolicyInput)] == [
+        "vehicle_state",
+        "sim_time_us",
+        "task_observation",
+        "reference_position_enu",
+    ]
+    assert [field.name for field in fields(PolicyAdapter)] == [
+        "policy_rate_hz",
+        "initial_state",
+        "advance",
+    ]
+    assert [field.name for field in fields(PolicyResult)] == [
+        "state",
+        "setpoint",
+        "complete",
+        "failure_reason",
+        "diagnostics",
+    ]
+
+
+class _FakePolicyAdvance:
+    """Records narrowed inputs and completes after two seconds of policy time."""
 
     def __init__(self):
-        self.goals = []
+        self.inputs = []
+        self.states = []
 
-    def __call__(self, observation, target_enu, progress):
-        self.goals.append(np.asarray(target_enu, dtype=np.float64))
-        started_us = observation.sim_time_us if progress is None else progress
-        return PolicyStepResult(
-            progress=started_us,
+    def __call__(self, *, policy_input, state):
+        self.inputs.append(policy_input)
+        self.states.append(state)
+        started_us = policy_input.sim_time_us if state == () else state
+        return PolicyResult(
+            state=started_us,
             setpoint=VelocitySetpoint(
                 forward_mps=0.1,
                 right_mps=0.0,
                 down_mps=0.0,
                 yaw_rate_radps=0.0,
             ),
-            complete=observation.sim_time_us - started_us >= 2_000_000,
+            complete=policy_input.sim_time_us - started_us >= 2_000_000,
         )
 
 
-def _policy_routine(policy_fn, *, rate_hz=20.0, **overrides):
+def _policy_routine(policy_advance, *, policy_rate_hz=20.0, **overrides):
     descriptor = {"kind": "policy", "artifact": "does/not/matter", "hold_s": 2.0, "timeout_s": 10.0}
     descriptor.update(overrides)
     return _build(
         [descriptor],
-        policy_fn_factory=lambda d: PolicyAdapter(
-            rate_hz=rate_hz,
-            initial_progress=None,
-            step=policy_fn,
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=policy_rate_hz,
+            initial_state=(),
+            advance=policy_advance,
         ),
     )
 
 
 def test_build_vehicle_routine_policy_requires_factory():
-    with pytest.raises(ValueError, match="policy_fn_factory"):
+    with pytest.raises(ValueError, match="policy_factory"):
         _build([{"kind": "policy", "artifact": "a", "hold_s": 1.0, "timeout_s": 5.0}])
 
 
@@ -956,17 +1110,69 @@ def test_build_vehicle_routine_policy_requires_fields():
         with pytest.raises(ValueError, match=missing):
             _build(
                 [descriptor],
-                policy_fn_factory=lambda d: PolicyAdapter(
-                    rate_hz=20.0,
-                    initial_progress=None,
-                    step=_FakePolicyFn(),
+                policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+                    policy_rate_hz=20.0,
+                    initial_state=(),
+                    advance=_FakePolicyAdvance(),
                 ),
             )
 
 
-def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
-    policy_fn = _FakePolicyFn()
-    routine = _policy_routine(policy_fn)
+@pytest.mark.parametrize(
+    ("obsolete", "replacement", "value"),
+    [
+        ("name", "label", "hover"),
+        ("target", "target_enu", [1.0, 2.0, 3.0]),
+    ],
+)
+def test_build_vehicle_routine_policy_rejects_obsolete_keys(
+    obsolete,
+    replacement,
+    value,
+):
+    descriptor = {
+        "kind": "policy",
+        "artifact": "a",
+        "timeout_s": 5.0,
+        obsolete: value,
+    }
+    with pytest.raises(ValueError, match=rf"{obsolete!r}.*{replacement!r}"):
+        _build(
+            [descriptor],
+            policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+                policy_rate_hz=20.0,
+                initial_state=(),
+                advance=_FakePolicyAdvance(),
+            ),
+        )
+
+
+def test_policy_adapter_rejects_none_and_mutable_initial_state():
+    with pytest.raises(ValueError, match="initial state must not be None"):
+        PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=None,
+            advance=_FakePolicyAdvance(),
+        )
+    with pytest.raises(TypeError, match="initial state must be an immutable value"):
+        PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=[],
+            advance=_FakePolicyAdvance(),
+        )
+
+
+def test_policy_result_rejects_none_and_mutable_successor_state():
+    setpoint = VelocitySetpoint(0.0, 0.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="successor state must not be None"):
+        PolicyResult(state=None, setpoint=setpoint)
+    with pytest.raises(TypeError, match="successor state must be an immutable value"):
+        PolicyResult(state={}, setpoint=setpoint)
+
+
+def test_decide_policy_primes_engages_offboard_streams_velocity_and_completes():
+    policy_advance = _FakePolicyAdvance()
+    routine = _policy_routine(policy_advance)
     state = RoutineState()
 
     # Entry + priming ticks stream the policy's payload (a VelocitySetpoint).
@@ -1000,15 +1206,16 @@ def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
     assert decision.kind is DecisionKind.CONTINUE
     assert state.offboard.accepted is True
 
-    # hold_s=2.0 of continuous in-envelope flight after accepted OFFBOARD -> ADVANCE.
+    # Adapter completion advances only after OFFBOARD acceptance.
     state, decision = decide(routine, state, make_routine_observation(sim_time_us=5 + 4_000_000))
     assert decision.kind is DecisionKind.ADVANCE
     assert state.cursor == 1
+    assert state.last_policy_state == 0
 
 
 def test_policy_and_setpoint_cadences_are_independent_exact_averages():
-    policy_fn = _FakePolicyFn()
-    routine = _policy_routine(policy_fn)
+    policy_advance = _FakePolicyAdvance()
+    routine = _policy_routine(policy_advance)
     state = RoutineState()
     transmitted = 0
 
@@ -1020,14 +1227,14 @@ def test_policy_and_setpoint_cadences_are_independent_exact_averages():
         )
         transmitted += int(decision.setpoint is not None)
 
-    assert len(policy_fn.goals) == 20
+    assert len(policy_advance.inputs) == 20
     assert transmitted == 50
     assert state.offboard.transmissions == 50
 
 
 def test_policy_adapter_owns_its_exact_average_cadence():
-    policy_fn = _FakePolicyFn()
-    routine = _policy_routine(policy_fn, rate_hz=10.0)
+    policy_advance = _FakePolicyAdvance()
+    routine = _policy_routine(policy_advance, policy_rate_hz=10.0)
     state = RoutineState()
 
     for cycle in range(50):
@@ -1037,86 +1244,175 @@ def test_policy_adapter_owns_its_exact_average_cadence():
             make_routine_observation(sim_time_us=cycle * 20_000),
         )
 
-    assert len(policy_fn.goals) == 10
+    assert len(policy_advance.inputs) == 10
 
 
-def test_decide_policy_without_target_hovers_at_step_baseline():
-    policy_fn = _FakePolicyFn()
-    routine = _policy_routine(policy_fn)
+def test_policy_entry_replaces_retained_goto_payload_immediately():
+    goto = _goto_routine()
+    goto_state = RoutineState()
+    for t in range(5):
+        goto_state, _decision = decide(goto, goto_state, _far(t))
+    retained_position_setpoint = goto_state.offboard.cached_setpoint
+
+    policy_advance = _FakePolicyAdvance()
+    policy = _policy_routine(policy_advance)
+    policy_entry_state = replace(
+        goto_state,
+        cursor=0,
+        sent=False,
+        baseline_position_enu=None,
+        step_started_us=None,
+        hold_since_us=None,
+    )
+    successor, decision = decide(
+        policy,
+        policy_entry_state,
+        make_routine_observation(sim_time_us=100_000),
+    )
+
+    assert len(policy_advance.inputs) == 1
+    assert isinstance(decision.setpoint, VelocitySetpoint)
+    assert decision.setpoint is not retained_position_setpoint
+    assert successor.offboard.cached_setpoint is decision.setpoint
+
+
+def test_speed_authored_goto_hover_policy_transition_primes_offboard_fresh():
+    policy_advance = _FakePolicyAdvance()
+    routine = _build(
+        [
+            {
+                "kind": "goto",
+                "x": 3.0,
+                "y": 0.0,
+                "z": 2.0,
+                "ground_speed_m_s": 0.5,
+                "timeout_s": 20.0,
+            },
+            {"kind": "hover", "hold_s": 0.0},
+            {
+                "kind": "policy",
+                "artifact": "does/not/matter",
+                "timeout_s": 10.0,
+            },
+        ],
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=(),
+            advance=policy_advance,
+        ),
+    )
+    state, decision = decide(routine, RoutineState(), _far(0))
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert state.offboard.transmissions == 0
+    assert state.offboard.cached_setpoint is None
+
+    reached = make_routine_observation(
+        sim_time_us=20_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = decide(routine, state, reached)
+    assert decision.kind is DecisionKind.ADVANCE
+
+    state, decision = decide(routine, state, reached)
+    assert decision.kind is DecisionKind.CONTINUE
+    assert decision.setpoint is None
+    state, decision = decide(routine, state, replace(reached, sim_time_us=40_000))
+    assert decision.kind is DecisionKind.ADVANCE
+
+    state, decision = decide(routine, state, replace(reached, sim_time_us=60_000))
+    assert decision.kind is DecisionKind.CONTINUE
+    assert isinstance(decision.setpoint, VelocitySetpoint)
+    assert decision.command is None
+    assert state.offboard.transmissions == 1
+    assert state.offboard.requested is False
+
+
+def test_decide_policy_input_is_narrow_and_uses_step_baseline_reference():
+    policy_advance = _FakePolicyAdvance()
+    routine = _policy_routine(policy_advance)
     state = RoutineState()
-    start = make_routine_observation(sim_time_us=0, position_enu=(1.0, 2.0, 3.0))
+    task_observation = ("task", 7)
+    start = make_routine_observation(
+        sim_time_us=0,
+        position_enu=(1.0, 2.0, 3.0),
+        task_observation=task_observation,
+    )
     state, decision = decide(routine, state, start)
     assert decision.kind is DecisionKind.CONTINUE
-    np.testing.assert_allclose(policy_fn.goals[-1], [1.0, 2.0, 3.0])
+    assert policy_advance.inputs[-1] == PolicyInput(
+        vehicle_state=start.vehicle_state,
+        sim_time_us=0,
+        task_observation=task_observation,
+        reference_position_enu=(1.0, 2.0, 3.0),
+    )
 
 
 def test_decide_policy_with_authored_target_uses_it():
-    policy_fn = _FakePolicyFn()
-    routine = _policy_routine(policy_fn, target=[5.0, 6.0, 7.0])
+    policy_advance = _FakePolicyAdvance()
+    routine = _policy_routine(policy_advance, target_enu=[5.0, 6.0, 7.0])
     state = RoutineState()
     state, _decision = decide(routine, state, make_routine_observation(sim_time_us=0))
-    np.testing.assert_allclose(policy_fn.goals[-1], [5.0, 6.0, 7.0])
+    assert policy_advance.inputs[-1].reference_position_enu == (5.0, 6.0, 7.0)
 
 
 def test_build_vehicle_routine_policy_rejects_bad_target_shape():
-    for target in ([1.0, 2.0], [1.0, 2.0, 3.0, 4.0], "bad"):
+    for target in ([1.0, 2.0], [1.0, 2.0, 3.0, 4.0], [math.nan, 2.0, 3.0], "bad"):
         with pytest.raises(ValueError, match="3-item numeric sequence"):
-            _policy_routine(_FakePolicyFn(), target=target)
+            _policy_routine(_FakePolicyAdvance(), target_enu=target)
 
 
-def test_build_vehicle_routine_policy_supports_multiple_artifacts():
-    hover_policy = _FakePolicyFn()
-    press_policy = _FakePolicyFn()
-    policies = {"hover": hover_policy, "press": press_policy}
+def test_build_vehicle_routine_policy_factory_receives_only_artifact_and_hold():
+    hover_policy = _FakePolicyAdvance()
+    press_policy = _FakePolicyAdvance()
+    policies = {
+        ".build/training/hover/latest": hover_policy,
+        ".build/training/press-approach/latest": press_policy,
+    }
     descriptors = [
         {
             "kind": "policy",
-            "name": "hover",
+            "label": "hover",
             "artifact": ".build/training/hover/latest",
             "hold_s": 1.0,
             "timeout_s": 5.0,
-            "target": [1.0, 2.0, 3.0],
+            "target_enu": [1.0, 2.0, 3.0],
         },
         {
             "kind": "policy",
-            "name": "press",
-            "artifact": ".build/training/press/latest",
-            "hold_s": 1.0,
+            "label": "press",
+            "artifact": ".build/training/press-approach/latest",
             "timeout_s": 5.0,
-            "target": [4.0, 5.0, 6.0],
+            "target_enu": [4.0, 5.0, 6.0],
         },
     ]
-    seen_artifacts = []
+    calls = []
 
-    def factory(descriptor):
-        seen_artifacts.append(descriptor["artifact"])
+    def factory(*, artifact, hold_s):
+        calls.append((artifact, hold_s))
         return PolicyAdapter(
-            rate_hz=10.0 if descriptor["name"] == "hover" else 25.0,
-            initial_progress=None,
-            step=policies[descriptor["name"]],
+            policy_rate_hz=10.0 if "hover" in artifact else 25.0,
+            initial_state=(),
+            advance=policies[artifact],
         )
 
-    routine = _build(descriptors, policy_fn_factory=factory)
+    routine = _build(descriptors, policy_factory=factory)
 
     assert [step.label for step in routine.steps] == ["policy[hover]", "policy[press]"]
-    assert seen_artifacts == [".build/training/hover/latest", ".build/training/press/latest"]
-
-    obs = make_routine_observation(sim_time_us=0)
+    assert calls == [
+        (".build/training/hover/latest", 1.0),
+        (".build/training/press-approach/latest", None),
+    ]
     first_stream = routine.steps[0].streaming
     second_stream = routine.steps[1].streaming
     assert first_stream is not None and first_stream.policy is not None
     assert second_stream is not None and second_stream.policy is not None
-    assert first_stream.policy.rate_hz == 10.0
-    assert second_stream.policy.rate_hz == 25.0
-    first_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
-    second_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
-
-    np.testing.assert_allclose(hover_policy.goals[-1], [1.0, 2.0, 3.0])
-    np.testing.assert_allclose(press_policy.goals[-1], [4.0, 5.0, 6.0])
+    assert first_stream.policy.policy_rate_hz == 10.0
+    assert second_stream.policy.policy_rate_hz == 25.0
 
 
 def test_decide_policy_envelope_breach_fails():
-    routine = _policy_routine(_FakePolicyFn())
+    routine = _policy_routine(_FakePolicyAdvance())
     state = RoutineState()
     state, _decision = decide(routine, state, make_routine_observation(sim_time_us=0))
     tilted = make_routine_observation(sim_time_us=1, tilt_deg=60.0)
@@ -1125,8 +1421,8 @@ def test_decide_policy_envelope_breach_fails():
     assert decision.failure_kind is FailureKind.ENVELOPE
 
 
-def test_decide_policy_timeout_reports_opaque_progress_not_waypoint() -> None:
-    routine = _policy_routine(_FakePolicyFn(), timeout_s=1.0)
+def test_decide_policy_timeout_reports_opaque_state_not_waypoint() -> None:
+    routine = _policy_routine(_FakePolicyAdvance(), timeout_s=1.0)
     state, _decision = decide(
         routine,
         RoutineState(),
@@ -1141,5 +1437,5 @@ def test_decide_policy_timeout_reports_opaque_progress_not_waypoint() -> None:
 
     assert decision.kind is DecisionKind.FAIL
     assert "policy did not complete" in str(decision.reason)
-    assert "policy progress=0" in str(decision.reason)
+    assert "policy state=0" in str(decision.reason)
     assert "waypoint" not in str(decision.reason)

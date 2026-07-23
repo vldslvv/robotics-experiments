@@ -31,9 +31,15 @@ Read area docs on demand when a task touches that area:
 - Command/routine: `docs/COMMAND_ROUTINE_CONTRACT.md` for
   `src/robotics_experiments/commanding/`, routine config, GCS MAVLink commands,
   `{kind: goto}` / `{kind: policy}`, and driver orchestration.
+- Commanding benchmark: `docs/COMMANDING_BENCHMARK.md` for the isolated host
+  routine-stepper/driver performance gate, statistical comparison, artifacts,
+  and baseline acceptance.
 - RL workflow: `docs/RL_WORKFLOW.md` for `src/robotics_experiments/rl/`,
   `src/robotics_experiments/workflows/isaac_lab/`, Isaac Lab images, training,
   policy artifacts, and RL integration gates.
+- Controller alignment: `docs/SIM_TO_SIM_ALIGNMENT.md` for the host-safe
+  alignment package, task-neutral PX4/Isaac Lab probes, artifact publication,
+  controller settings, metric registry, and training provenance.
 - Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
   target mechanics, harness scripts, caching, artifacts, concurrency, and
   multi-instance PX4.
@@ -64,6 +70,9 @@ Read area docs on demand when a task touches that area:
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
+- `src/robotics_experiments/alignment/` -> Host-safe controller definitions,
+  generic candidate fitting/ranking, immutable alignment artifacts, and
+  publication. Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
 - `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
   `FleetState` lifecycle transitions (the one runtime pipeline) and the PX4
   `BridgeHost` /
@@ -120,16 +129,22 @@ the current contents and the intended home for that kind of code.
   Construct the dataclass directly at the call site; reserve a builder function
   for construction that carries real logic (nontrivial derivation, validation,
   or branching).
-- Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus
-  dependencies from loading during lightweight package imports.
+- Import standard-library modules, project modules, and ordinary installable
+  dependencies eagerly. Lazy imports and `TYPE_CHECKING` dependency imports are
+  permitted only for container-only Isaac Sim / Kit / Isaac Lab modules or
+  where `SimulationApp` / `AppLauncher` must start before Kit-dependent imports.
+  Resolve circular dependencies structurally instead of hiding them behind
+  function-scoped or type-only imports. The vendored Pegasus tree and its
+  consuming import behavior are outside this policy.
 - Use absolute imports for project modules (`from robotics_experiments...`)
   instead of relative imports. The only exception is a narrowly scoped workaround
   for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
   Docker environment; keep those workarounds in Isaac-only lazy leaf modules so
   core imports still work on the host.
-- Package layering runs `config -> domain (drone / environment / simulation /
-  px4_bridge) -> Isaac extensions`, and `import robotics_experiments` (plus its
-  subpackages) must succeed with Isaac absent. A domain leaf module that is
+- Package layering runs `config -> alignment -> rl -> workflows` for controller
+  alignment and learning, alongside `config -> domain (drone / environment /
+  simulation / px4_bridge) -> Isaac extensions`; `import robotics_experiments`
+  (plus its subpackages) must succeed with Isaac absent. A domain leaf module that is
   wholly Isaac-only (every function operates on a live USD stage) may keep
   top-level `carb`/`pxr`/`isaacsim` imports rather than scattering function-scope
   imports, but it must (a) carry a module docstring declaring the exception and
@@ -182,9 +197,43 @@ the current contents and the intended home for that kind of code.
   small local `config.py` adapter when they need feature-specific config access.
 - RL invariants: read `docs/RL_WORKFLOW.md` before touching RL code; keep Isaac
   Lab task/env package imports lazy; keep the in-Lab actuation seam pure and
-  aligned with its numpy reference and torch twin; keep RL tunables in the Hydra
-  `rl` group; keep task IDs, policy artifacts, and RL gates aligned with that
-  doc and the command/routine contract.
+  aligned with its numpy reference and torch twin; use the pinned
+  `isaaclab_contrib.actuators.Thruster` for in-Lab motor rise/fall and slew
+  dynamics while the project retains the pusher-equipped articulation, rotor
+  allocation, yaw reaction, drag, and wrench sink; keep RL tunables in the
+  Hydra `rl` group; keep task IDs, policy artifacts, and RL gates aligned with
+  that doc and the command/routine contract. `robotics_experiments.rl` is the public
+  boundary for task-neutral actuation, hover observation, artifact, and
+  normalized-action-to-OFFBOARD concepts; `robotics_experiments.rl.press`
+  exports only press observation, handoff, task, provider, and policy-progress
+  concepts. Runtime policy interface dispatch and adapter composition belong in
+  the private `runtime/_policy.py`, not the fleet orchestrator or commanding.
+  `rl.action` owns only normalized action interpretation and scales. Those
+  scales remain task-owned and need not equal the alignment probe experiment's
+  normalized command scales.
+  Controller/actuator internals come from
+  `robotics_experiments.alignment.ControllerSettings`. Training must load and
+  validate an alignment artifact before building Isaac Lab, embed its complete
+  settings/digest/fingerprints before PPO, and selection/evaluation must reuse
+  that embedded record. Policy artifacts without alignment provenance are
+  unsupported. `make train-rl` automatically evaluates every checkpoint and
+  publishes the selected run: `latest` always advances, while `best` advances
+  only for a strictly higher held-out score within the same comparison
+  fingerprint. Press acceptance gates are advisory publication diagnostics;
+  the task-owned held-out metric and weights live in Hydra.
+- Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
+  `src/robotics_experiments/alignment/`, controller definitions, alignment Make
+  targets, or training alignment provenance. Existing `ControllerSettings`
+  fields are added to a fit only through declarative `ParameterSpec` candidates.
+  Search and replacement stay generic. Selection metrics are stable registered
+  names; changing a metric/schema, definition, probe suite, environment, image,
+  or controller interface starts a new comparison fingerprint. Structurally
+  valid poor-quality results remain consumable and report advisory failure.
+  `latest` always advances and `best` compares only within one fingerprint.
+- When launching an RL training run for the user, provide a run-scoped
+  monitoring path (TensorBoard by default) and report the local URL and log
+  directory. Keep monitoring available while the run is active unless the user
+  asks otherwise.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor
@@ -204,7 +253,8 @@ the current contents and the intended home for that kind of code.
 - `commanding` mirrors the PX4 bridge as a pure contract
   (`RoutineObservation` -> `decide(...)` -> `RoutineDecision` over
   the PX4-specific `MavlinkCommandPort`) and must stay import-clean with
-  Isaac/pymavlink absent.
+  Isaac absent. Its concrete port eagerly owns the ordinary `pymavlink`
+  dependency.
 - `decide` and completion/invariant predicates are pure. The port is the only
   MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
   bridge simulator port.
@@ -253,11 +303,14 @@ the current contents and the intended home for that kind of code.
 - Key persistent targets: `make build`, `make run-isaac`, `make run-ros`,
   `make run-px4`, `make stop`, and `make destroy`.
 - General integration targets and the aggregate suite are defined in
-  `make/integration-tests.mk`; RL, Isaac Lab, and press workflow targets are
-  defined in `make/rl.mk`. Read
+  `make/integration-tests.mk`; controller-alignment targets are defined in
+  `make/alignment.mk`; RL, Isaac Lab, and press workflow targets are defined in
+  `make/rl.mk`. Read
   `docs/INTEGRATION_TEST_ARCHITECTURE.md` before changing the harness,
   standalone integration scripts, or targets such as `make test-integration`,
   `make test-integration-all`, `make test-integration-press-hover-goto`,
+  `make test-integration-alignment-target`,
+  `make test-integration-press-policy-transfer`,
   `make test-integration-press-policy`, `make test-integration-px4-takeoff`,
   `make test-integration-px4-navigation`,
   `make test-integration-px4-takeoff-instability`, or
@@ -298,7 +351,11 @@ the current contents and the intended home for that kind of code.
   would otherwise fail silently, continue with an incorrect result without
   notice, or when a genuinely distinct state must be represented. Do not wrap a
   value in `Optional`/`None`, add routine `is not None` checks, or carry a
-  `<= 0 disables` special case when a plain concrete default works.
+  `<= 0 disables` special case when a plain concrete default works. Prefer a
+  domain-appropriate concrete sentinel such as `NaN` for floating-point values
+  (and the equivalent concrete sentinel for other applicable types) over
+  `None`; use `None` only when absence is genuinely necessary and no concrete
+  value represents the state correctly.
 - Every behavior change must be reflected in `AGENTS.md` or the relevant
   referenced doc when it changes project conventions, error handling policy,
   runtime assumptions, public behavior, or developer workflow expectations.
@@ -313,6 +370,11 @@ the current contents and the intended home for that kind of code.
 - Do NOT add new lint/type ignores to `pyproject.toml` to get past quality
   gates. If a suppression is genuinely necessary, use the narrowest inline
   ignore at the offending line with a brief reason.
+- Do not make clear, correct code more indirect or verbose solely to appease a
+  static type checker. When an elegant expression is valid at runtime but the
+  checker cannot represent its behavior accurately, keep the expression and
+  use the narrowest per-case inline suppression with a brief reason. Do not
+  broaden this into a global ignore unless explicitly requested.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.

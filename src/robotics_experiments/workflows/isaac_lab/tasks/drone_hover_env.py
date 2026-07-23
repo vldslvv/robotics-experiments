@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import MISSING
-from typing import Any, cast
+from typing import cast
 
 import torch
 from isaaclab.assets import Articulation, ArticulationCfg
@@ -28,10 +28,11 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from robotics_experiments.config import ExperimentConfig
-from robotics_experiments.rl.press import (
+from robotics_experiments.config import ExperimentConfig, HoverTaskConfig, RlPolicyConfig
+from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
+    PolicyContract,
 )
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
@@ -52,7 +53,7 @@ def _hover_observation(
 ) -> torch.Tensor:
     """Pack the 13-dim hover observation ``[pos_err, quat, lin_vel_w, ang_vel_b]``.
 
-    The batched twin of the pure ``rl.press.pack_hover_observation``
+    The batched twin of the pure ``rl.pack_hover_observation``
     layout (`HOVER_OBSERVATION_SCHEMA_VERSION`): the angular velocity is
     body-frame, matching ``VehicleState.angular_velocity_flu`` so the same
     vector is assemblable at deploy time.
@@ -61,7 +62,7 @@ def _hover_observation(
 
 
 def _hover_reward(
-    task,
+    task: HoverTaskConfig,
     position_w: torch.Tensor,
     target_w: torch.Tensor,
     lin_vel_w: torch.Tensor,
@@ -79,7 +80,7 @@ def _hover_reward(
 
 
 def _hover_terminated(
-    task,
+    task: HoverTaskConfig,
     position_w: torch.Tensor,
     target_w: torch.Tensor,
     quat_w: torch.Tensor,
@@ -100,23 +101,24 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
 
     # Isaac Lab's configclass requires the dataclasses.MISSING sentinel for
     # explicitly supplied fields; the cast keeps their consumer-facing types.
-    decimation: int = cast(Any, MISSING)
-    policy_rate_hz: float = cast(Any, MISSING)
-    episode_length_s: float = cast(Any, MISSING)
-    action_space: int = cast(Any, MISSING)
-    observation_schema_version: int = cast(Any, MISSING)
-    observation_space: int = cast(Any, MISSING)
-    policy_interface: str = cast(Any, MISSING)
+    decimation: int = cast(int, MISSING)
+    policy_rate_hz: float = cast(float, MISSING)
+    episode_length_s: float = cast(float, MISSING)
+    action_space: int = cast(int, MISSING)
+    observation_schema_version: int = cast(int, MISSING)
+    observation_space: int = cast(int, MISSING)
+    policy_interface: str = cast(str, MISSING)
+    policy_config: RlPolicyConfig = cast(RlPolicyConfig, MISSING)
     state_space = 0
-    sim: SimulationCfg = cast(Any, MISSING)
-    drone_cfg: ArticulationCfg = cast(Any, MISSING)
-    scene: InteractiveSceneCfg = cast(Any, MISSING)
+    sim: SimulationCfg = cast(SimulationCfg, MISSING)
+    drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
+    scene: InteractiveSceneCfg = cast(InteractiveSceneCfg, MISSING)
 
 
 def make_drone_hover_env_cfg(
     *,
-    experiment_config,
-    policy_contract=None,
+    experiment_config: ExperimentConfig,
+    policy_contract: PolicyContract | None = None,
 ) -> DroneHoverEnvCfg:
     """Build the Isaac Lab task config from one resolved experiment."""
     vehicle = _training_vehicle(experiment_config)
@@ -139,6 +141,7 @@ def make_drone_hover_env_cfg(
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
         policy_interface="hover-v1",
+        policy_config=experiment_config.rl.hover.policy,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -189,7 +192,7 @@ class DroneHoverEnv(_FlightDirectRLEnv):
             **kwargs,
         )
         self._hover_target_w = torch.zeros((self.num_envs, 3), device=self.device)
-        self._task = self._experiment_config.rl.press.hover_task
+        self._task = self._experiment_config.rl.hover
 
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)

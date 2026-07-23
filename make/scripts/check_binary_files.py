@@ -44,8 +44,8 @@ def _main(paths: list[str]) -> int:
 
     if rejected:
         print("Binary files are not allowed outside .binary-asset-allowlist:")
-        for path in rejected:
-            print(f"  {path}")
+        for rejected_path in rejected:
+            print(f"  {rejected_path}")
         return 1
     return 0
 

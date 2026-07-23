@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Any, Optional, Union
+from typing import Optional, Protocol, Union
 
 import numpy as np
 
@@ -15,13 +15,14 @@ from robotics_experiments.commanding.commands import (
     VelocitySetpoint,
 )
 from robotics_experiments.commanding.observation import RoutineObservation
+from robotics_experiments.px4_bridge import VehicleState
 
 __all__ = [
     "DecisionKind",
     "FailureKind",
     "PolicyAdapter",
-    "PolicyStepFn",
-    "PolicyStepResult",
+    "PolicyInput",
+    "PolicyResult",
     "RoutineDecision",
     "RoutineState",
     "RoutineStep",
@@ -44,35 +45,69 @@ _Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
 
 
+def _policy_state_is_immutable(*, state: object) -> bool:
+    if state is None:
+        return True
+    if isinstance(state, (bool, bytes, float, frozenset, int, str, tuple)):
+        values = state if isinstance(state, (frozenset, tuple)) else ()
+        return all(_policy_state_is_immutable(state=value) for value in values)
+    if not is_dataclass(state):
+        return False
+    params = vars(type(state))["__dataclass_params__"]
+    return bool(params.frozen) and all(
+        _policy_state_is_immutable(state=getattr(state, field.name)) for field in fields(state)
+    )
+
+
+def _require_immutable_policy_state(*, state: object, source: str) -> None:
+    if state is None:
+        raise ValueError(f"{source} must not be None")
+    if not _policy_state_is_immutable(state=state):
+        raise TypeError(f"{source} must be an immutable value, got {type(state).__name__}")
+
+
 @dataclass(frozen=True)
-class PolicyStepResult:
-    """One task-neutral policy inference result.
+class PolicyInput:
+    """The complete task-neutral input for one policy transition."""
 
-    ``progress`` is an opaque frozen value owned by the adapter. Commanding
-    stores it but never inspects it. ``complete`` and ``failure_reason`` are
-    likewise adapter decisions, allowing hover-duration and contact/latch
-    completion to use the same routine kind.
-    """
+    vehicle_state: VehicleState
+    sim_time_us: int
+    task_observation: object
+    reference_position_enu: tuple[float, float, float]
 
-    progress: Any
+
+@dataclass(frozen=True)
+class PolicyResult:
+    """One task-neutral policy transition result."""
+
+    state: object
     setpoint: StreamSetpoint
     complete: bool = False
     failure_reason: Optional[str] = None
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_immutable_policy_state(state=self.state, source="policy successor state")
 
 
-PolicyStepFn = Callable[
-    [RoutineObservation, Optional[np.ndarray], Any],
-    PolicyStepResult,
-]
+class _PolicyAdvance(Protocol):
+    def __call__(self, *, policy_input: PolicyInput, state: object) -> PolicyResult: ...
+
+
+class _PolicyFactory(Protocol):
+    def __call__(self, *, artifact: str, hold_s: Optional[float]) -> "PolicyAdapter": ...
 
 
 @dataclass(frozen=True)
 class PolicyAdapter:
-    """Injected policy implementation, cadence, and immutable initial progress."""
+    """Injected policy transition, cadence, and immutable initial state."""
 
-    rate_hz: float
-    initial_progress: Any
-    step: PolicyStepFn
+    policy_rate_hz: float
+    initial_state: object
+    advance: _PolicyAdvance
+
+    def __post_init__(self) -> None:
+        _require_immutable_policy_state(state=self.initial_state, source="policy initial state")
 
 
 class DecisionKind(Enum):
@@ -119,6 +154,7 @@ class RoutineDecision:
     setpoint: Optional[StreamSetpoint] = None
     reason: Optional[str] = None
     failure_kind: Optional[FailureKind] = None
+    diagnostics: tuple[str, ...] = ()
 
     @classmethod
     def continue_(
@@ -126,8 +162,14 @@ class RoutineDecision:
         *,
         command: Optional[MavlinkCommand] = None,
         setpoint: Optional[StreamSetpoint] = None,
+        diagnostics: tuple[str, ...] = (),
     ) -> "RoutineDecision":
-        return cls(DecisionKind.CONTINUE, command=command, setpoint=setpoint)
+        return cls(
+            DecisionKind.CONTINUE,
+            command=command,
+            setpoint=setpoint,
+            diagnostics=diagnostics,
+        )
 
     @classmethod
     def advance(cls) -> "RoutineDecision":
@@ -171,11 +213,14 @@ class RoutineStep:
         invariants: Continuous flight-envelope gates evaluated every tick the
             step is active; the first breach fails the routine with
             ``FailureKind.ENVELOPE``.
-        streaming: When set, this is a streamed OFFBOARD step (a ``goto``): the
-            stepper primes setpoints, sends ``command`` once to engage offboard,
-            then streams the held setpoint at the configured rate until completion. When
-            ``None`` (every other kind) the step uses the send-once-then-verify
+        streaming: When set, this is a streamed OFFBOARD step (a speedless
+            ``goto`` or a ``policy``): the stepper primes setpoints, sends
+            ``command`` once to engage offboard, then streams the held setpoint
+            at the configured rate until completion. A speed-authored ``goto``
+            has no streaming spec and uses the acknowledged send-once-then-verify
             flow.
+        guided: When set, derives the one-shot reposition yaw from the active
+            step baseline and target while preserving the authored ground speed.
     """
 
     command: Optional[MavlinkCommand]
@@ -186,16 +231,26 @@ class RoutineStep:
     hold_s: float = 0.0
     invariants: tuple[_Invariant, ...] = ()
     streaming: Optional["_StreamingSpec"] = None
+    guided: Optional["_GuidedSpec"] = None
+
+
+@dataclass(frozen=True)
+class _GuidedSpec:
+    """Dynamic world target needed to orient a guided reposition command."""
+
+    target_enu: tuple[float, float, float]
+    min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
 
 
 @dataclass(frozen=True)
 class _StreamingSpec:
-    """The streamed-setpoint target for an OFFBOARD ``goto`` step.
+    """The streamed-setpoint target for an OFFBOARD ``goto`` or policy step.
 
     Attributes:
         target_enu: The absolute world-ENU waypoint ``(east, north, up)`` in
             metres, used to compute the streamed heading and (with the captured
-            baseline) the cross-track gate.
+            baseline) the cross-track gate. Policy specs retain concrete
+            ``NaN`` placeholders so these numeric fields stay non-optional.
         latitude_deg, longitude_deg, altitude_m: The same waypoint precomputed
             (by :func:`build_vehicle_routine` via ``synth_gps_from_enu``) as the
             geodetic target the port streams, kept consistent by construction with
@@ -205,10 +260,15 @@ class _StreamingSpec:
         min_heading_dist_m: Below this horizontal baseline-to-target distance
             the leg has no meaningful heading and the streamed setpoint holds
             the current heading (yaw ``NaN``).
-        policy: When set, the scheduled generic policy adapter. It receives the
-            full command observation, optional target/baseline, and its opaque
-            frozen progress, then returns a task-neutral result. The OFFBOARD
+        policy: When set, the scheduled generic policy adapter. It receives one
+            explicit policy input and its opaque frozen state, then returns a
+            task-neutral result. The OFFBOARD
             prime/engage/stream lifecycle is identical for every adapter.
+        policy_reference_position_enu: An authored policy reference, or an
+            all-``NaN`` sentinel. Commanding resolves the sentinel to the
+            immutable step-entry baseline before invoking the adapter.
+        policy_reference_is_entry: Whether the policy reference must be
+            resolved from the step-entry baseline.
     """
 
     target_enu: tuple[float, float, float]
@@ -218,6 +278,12 @@ class _StreamingSpec:
     prime_ticks: int
     min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
     policy: Optional[PolicyAdapter] = None
+    policy_reference_position_enu: tuple[float, float, float] = (
+        float("nan"),
+        float("nan"),
+        float("nan"),
+    )
+    policy_reference_is_entry: bool = False
 
 
 @dataclass(frozen=True)
@@ -238,7 +304,12 @@ class _OffboardState:
     cached_setpoint: Optional[StreamSetpoint] = None
     requested: bool = False
     accepted: bool = False
-    policy_progress: Any = None
+    policy_state: Optional[object] = None
+    policy_reference_position_enu: tuple[float, float, float] = (
+        float("nan"),
+        float("nan"),
+        float("nan"),
+    )
     policy_complete: bool = False
     policy_failure_reason: Optional[str] = None
 
@@ -260,11 +331,13 @@ class RoutineState:
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
             ``False`` again. Used to enforce ``RoutineStep.hold_s``.
+        guided_confirmation_sent: Whether a guided goto has reissued its
+            reposition target once after the first accepted acknowledgement.
         offboard: Continuous OFFBOARD progress: policy and transmitter cadence,
             zero-order-held payload, actual transmission count, and mode request
             / acceptance flags. Compatible streaming and command-less verifier
             steps retain this value so cadence phase remains continuous.
-        last_policy_progress: Final opaque adapter progress from the most
+        last_policy_state: Final opaque adapter state from the most
             recently completed policy step. Integration/evaluation code may
             inspect its adapter-owned type; commanding never does.
     """
@@ -274,5 +347,6 @@ class RoutineState:
     baseline_position_enu: Optional[np.ndarray] = None
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
+    guided_confirmation_sent: bool = False
     offboard: _OffboardState = _OffboardState()
-    last_policy_progress: Any = None
+    last_policy_state: Optional[object] = None

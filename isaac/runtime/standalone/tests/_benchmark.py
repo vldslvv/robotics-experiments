@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import torch
+
 __all__ = ["StandaloneBenchmarkCapture", "advance_physics_ticks"]
 
 _METHODOLOGY_VERSION = 3
@@ -43,8 +45,6 @@ def _isaac_version() -> str:
 
 
 def _gpu_models() -> list[str]:
-    import torch
-
     models = [torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())]
     if not models:
         raise RuntimeError("benchmark could not determine any CUDA GPU models")
@@ -197,9 +197,9 @@ class StandaloneBenchmarkCapture:
             metadata=self._metadata,
         )
         self._on_tick = on_physics_step
-        self._physics_subscription = None
-        self._app_subscription = None
-        self._render_subscription = None
+        self._physics_subscription: object | None = None
+        self._app_subscription: object | None = None
+        self._render_subscription: object | None = None
         self._started = False
         self._stopped = False
         self._last_step_ns = 0

@@ -22,10 +22,10 @@ def _run_wrapper(
     *,
     tmp_path: Path,
     train_exit: int,
-    select_exit: int = 0,
     eval_exit: int = 0,
     shutdown: bool = False,
     shutdown_exit: int = 0,
+    stale_tensorboard: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -51,8 +51,30 @@ exit 0
 """,
     )
     _write_executable(
+        path=fake_bin / "uv",
+        body="""#!/usr/bin/env bash
+printf 'press\\n'
+exit 0
+""",
+    )
+    _write_executable(
         path=fake_bin / "curl",
         body="""#!/usr/bin/env bash
+printf 'curl\\n' >>"${WRAPPER_CALLS}"
+if [[ "$*" == *data/environment* ]]; then
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        printf '{"data_location": "/fake/.build/training/press/stale/logs"}\\n'
+    else
+        logdir="$(
+            sed -n 's/.*RL_TENSORBOARD_LOGDIR=\\([^ ]*\\).*/\\1/p' \
+                "${WRAPPER_CALLS}" |
+                tail -n 1
+        )"
+        printf '{"data_location": "/fake/%s"}\\n' "${logdir}"
+    fi
+    exit 0
+fi
+printf '{"Train/mean_reward": {}}\\n'
 exit 0
 """,
     )
@@ -68,6 +90,10 @@ exit 0
         body="""#!/usr/bin/env bash
 printf 'make %s\\n' "$*" >>"${WRAPPER_CALLS}"
 if [ "$1" = "tensorboard-rl" ]; then
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        sleep 2
+        exit 1
+    fi
     trap 'exit 0' TERM INT
     while true; do
         sleep 1 &
@@ -75,10 +101,26 @@ if [ "$1" = "tensorboard-rl" ]; then
     done
 fi
 if [ "$1" = "train-test" ]; then
+    for argument in "$@"; do
+        case "${argument}" in
+            RL_RUN_ID=*)
+                artifact_id="${argument#RL_RUN_ID=}"
+                ;;
+        esac
+    done
+    mkdir -p ".build/training/press/${artifact_id}/logs"
+    printf 'event-data\\n' \
+        >".build/training/press/${artifact_id}/logs/events.out.tfevents.test"
+    for _ in {1..300}; do
+        if grep -q '^curl$' "${WRAPPER_CALLS}"; then
+            break
+        fi
+        sleep 0.01
+    done
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        sleep 3
+    fi
     exit "${TRAIN_EXIT}"
-fi
-if [ "$1" = "select-test" ]; then
-    exit "${SELECT_EXIT}"
 fi
 exit "${EVAL_EXIT}"
 """,
@@ -89,8 +131,8 @@ exit "${EVAL_EXIT}"
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
             "EVAL_EXIT": str(eval_exit),
-            "SELECT_EXIT": str(select_exit),
             "SHUTDOWN_EXIT": str(shutdown_exit),
+            "STALE_TENSORBOARD": str(stale_tensorboard).lower(),
             "TRAIN_EXIT": str(train_exit),
             "WRAPPER_CALLS": str(calls),
         }
@@ -104,14 +146,10 @@ exit "${EVAL_EXIT}"
         "train-test",
         "--eval-target",
         "eval-test",
-        "--select-target",
-        "select-test",
         "--train-args",
         "--iterations 3",
         "--eval-args",
         "--episodes 4",
-        "--select-args",
-        "--selection-note test",
         "--label",
         "test-run",
         "--log-dir",
@@ -123,12 +161,13 @@ exit "${EVAL_EXIT}"
         command,
         check=False,
         capture_output=True,
+        cwd=tmp_path,
         env=env,
         text=True,
     )
 
 
-def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_default(
+def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
     tmp_path: Path,
 ) -> None:
     result = _run_wrapper(tmp_path=tmp_path, train_exit=0)
@@ -137,9 +176,8 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     call_lines = [line for line in calls.splitlines() if line.startswith("make ")]
     assert [line.split()[1] for line in call_lines] == [
-        "tensorboard-rl",
         "train-test",
-        "select-test",
+        "tensorboard-rl",
         "eval-test",
     ]
     artifact_ids = {
@@ -149,22 +187,33 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
         if part.startswith("RL_RUN_ID=")
     }
     assert len(artifact_ids) == 1
-    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[0]
-    assert "RL_TENSORBOARD_PORT=6006" in call_lines[0]
-    assert "TRAIN_ARGS=--iterations 3" in call_lines[1]
-    assert "SELECT_ARGS=--selection-note test" in call_lines[2]
-    assert "EVAL_ARGS=--episodes 4" in call_lines[3]
+    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[1]
+    assert "RL_TENSORBOARD_PORT=6006" in call_lines[1]
+    tensorboard_logdir = next(
+        part.removeprefix("RL_TENSORBOARD_LOGDIR=")
+        for part in call_lines[1].split()
+        if part.startswith("RL_TENSORBOARD_LOGDIR=")
+    )
+    assert tensorboard_logdir == f".build/training/press/{artifact_ids.pop()}/logs"
+    assert "TRAIN_ARGS=--iterations 3" in call_lines[0]
+    assert "EVAL_ARGS=--episodes 4" in call_lines[2]
     assert "sudo " not in calls
     assert "sync" not in calls
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
     assert "artifact_run_id=" in status
-    assert "select_target=select-test" in status
-    assert "train_exit=0 select_exit=0 eval_exit=0 overall_exit=0" in status
+    assert "train_exit=0 eval_exit=0 overall_exit=0" in status
     assert "shutdown=disabled shutdown_exit=not-requested" in status
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/" in result.stdout
+    assert (
+        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
+        and "scalar data loaded" in console
+    )
+    assert (
+        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
+        and "scalar data loaded" in result.stdout
+    )
+    assert "unbound variable" not in result.stderr
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
@@ -173,13 +222,29 @@ def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
     assert result.returncode == 0
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     assert "make train-test " in calls
-    assert "make select-test " in calls
     assert "make eval-test " in calls
     assert "sync" in calls
     assert "sudo -n shutdown -P now" in calls
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
-    assert "train_exit=0 select_exit=0 eval_exit=0 overall_exit=0" in status
+    assert "train_exit=0 eval_exit=0 overall_exit=0" in status
     assert "shutdown=enabled shutdown_exit=0" in status
+
+
+def test_wrapper_rejects_scalar_data_from_another_tensorboard_run(
+    tmp_path: Path,
+) -> None:
+    result = _run_wrapper(
+        tmp_path=tmp_path,
+        train_exit=0,
+        stale_tensorboard=True,
+    )
+
+    assert result.returncode != 0
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
+    assert "make train-test " in calls
+    assert "make eval-test " not in calls
+    assert "data_location" not in result.stdout
+    assert "TensorBoard URL:" not in result.stdout
 
 
 @pytest.mark.parametrize("shutdown", [False, True])
@@ -193,37 +258,13 @@ def test_wrapper_skips_evaluation_after_training_failure(
     assert result.returncode == 42
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     assert "make train-test " in calls
-    assert "make select-test " not in calls
     assert "make eval-test " not in calls
     assert ("sudo -n shutdown -P now" in calls) is shutdown
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
-    assert "train_exit=42 select_exit=not-run eval_exit=not-run overall_exit=42" in status
+    assert "train_exit=42 eval_exit=not-run overall_exit=42" in status
 
 
-@pytest.mark.parametrize("shutdown", [False, True])
-def test_wrapper_skips_evaluation_after_selection_failure(
-    *,
-    tmp_path: Path,
-    shutdown: bool,
-) -> None:
-    result = _run_wrapper(
-        tmp_path=tmp_path,
-        train_exit=0,
-        select_exit=31,
-        shutdown=shutdown,
-    )
-
-    assert result.returncode == 31
-    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
-    assert "make train-test " in calls
-    assert "make select-test " in calls
-    assert "make eval-test " not in calls
-    assert ("sudo -n shutdown -P now" in calls) is shutdown
-    status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
-    assert "train_exit=0 select_exit=31 eval_exit=not-run overall_exit=31" in status
-
-
-def test_wrapper_evaluates_selected_fallback_and_propagates_evaluation_failure(
+def test_wrapper_propagates_independent_evaluation_failure(
     tmp_path: Path,
 ) -> None:
     result = _run_wrapper(tmp_path=tmp_path, train_exit=0, eval_exit=23, shutdown=True)
@@ -234,7 +275,7 @@ def test_wrapper_evaluates_selected_fallback_and_propagates_evaluation_failure(
     assert "make eval-test " in calls
     assert "sudo -n shutdown -P now" in calls
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
-    assert "train_exit=0 select_exit=0 eval_exit=23 overall_exit=23" in status
+    assert "train_exit=0 eval_exit=23 overall_exit=23" in status
 
 
 def test_wrapper_returns_shutdown_failure(tmp_path: Path) -> None:
@@ -247,7 +288,7 @@ def test_wrapper_returns_shutdown_failure(tmp_path: Path) -> None:
 
     assert result.returncode == 17
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
-    assert "train_exit=0 select_exit=0 eval_exit=0 overall_exit=17" in status
+    assert "train_exit=0 eval_exit=0 overall_exit=17" in status
     assert "shutdown=enabled shutdown_exit=17" in status
 
 
@@ -260,5 +301,5 @@ def test_wrapper_help_reports_shutdown_disabled_by_default() -> None:
     )
 
     assert result.returncode == 0
-    assert "--select-target select-rl-checkpoint" in result.stdout
+    assert "--select-target" not in result.stdout
     assert "--shutdown     disabled" in result.stdout

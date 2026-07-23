@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import warnings
@@ -13,16 +15,16 @@ __all__ = [
     "CandidateEvaluation",
     "CheckpointCandidate",
     "CheckpointSelection",
+    "CheckpointScorer",
     "MetricValue",
     "RewardMean",
-    "SelectedCheckpoint",
     "enumerate_checkpoints",
-    "publish_latest",
-    "register_checkpoint_scorer",
+    "publish_policy_labels",
     "select_checkpoint",
 ]
 
 _CHECKPOINT_PATTERN = re.compile(r"model_(\d+)\.pt")
+_SELECTION_REPORT = "checkpoint_selection.json"
 
 
 @dataclass(frozen=True)
@@ -56,17 +58,9 @@ class CandidateEvaluation:
     candidate: CheckpointCandidate
     accepted: bool
     metrics: tuple[MetricValue, ...]
-    normalized_margins: tuple[float, float, float]
+    normalized_margins: tuple[float, ...]
     ranking_values: tuple[float, ...]
     reward_means: tuple[RewardMean, ...]
-
-
-@dataclass(frozen=True)
-class SelectedCheckpoint:
-    """The checkpoint chosen for artifact export."""
-
-    iteration: int
-    path: Path
 
 
 @dataclass(frozen=True)
@@ -74,16 +68,14 @@ class CheckpointSelection:
     """All scorer results and the selected checkpoint."""
 
     selection_method: str
-    candidates: tuple[CandidateEvaluation, ...]
-    selected: SelectedCheckpoint | None
+    evaluations: tuple[CandidateEvaluation, ...]
+    selected: CheckpointCandidate
 
 
 CheckpointScorer = Callable[
     [tuple[CheckpointCandidate, ...]],
     tuple[CandidateEvaluation, ...],
 ]
-
-_SCORERS: dict[str, tuple[str, CheckpointScorer]] = {}
 
 
 def enumerate_checkpoints(*, logs_dir: Path) -> tuple[CheckpointCandidate, ...]:
@@ -99,60 +91,103 @@ def enumerate_checkpoints(*, logs_dir: Path) -> tuple[CheckpointCandidate, ...]:
     return tuple(candidates)
 
 
-def register_checkpoint_scorer(
-    *,
-    policy_interface: str,
-    selection_method: str,
-    scorer: CheckpointScorer,
-) -> None:
-    """Register the checkpoint scorer for one artifact policy interface."""
-    _SCORERS[policy_interface] = (selection_method, scorer)
-
-
 def select_checkpoint(
     *,
     policy_interface: str,
     candidates: tuple[CheckpointCandidate, ...],
+    selection_method: str = "final-no-scorer",
+    scorer: CheckpointScorer | None = None,
 ) -> CheckpointSelection:
-    """Score candidates or select the final checkpoint when no scorer exists."""
+    """Select from explicit scorer results, or use the final checkpoint."""
     if not candidates:
         raise ValueError("checkpoint selection requires at least one candidate")
-    registration = _SCORERS.get(policy_interface)
-    if registration is None:
+    if scorer is None:
         final = candidates[-1]
         warnings.warn(
-            f"no checkpoint scorer registered for policy_interface={policy_interface!r}; "
+            f"no checkpoint scorer provided for policy_interface={policy_interface!r}; "
             f"selecting final checkpoint iteration {final.iteration}",
             RuntimeWarning,
             stacklevel=2,
         )
         return CheckpointSelection(
             selection_method="final-no-scorer",
-            candidates=(),
-            selected=SelectedCheckpoint(iteration=final.iteration, path=final.path),
+            evaluations=(),
+            selected=final,
         )
 
-    selection_method, scorer = registration
     evaluations = scorer(candidates)
     if tuple(evaluation.candidate for evaluation in evaluations) != candidates:
         raise ValueError("checkpoint scorer did not evaluate every candidate in order")
-    accepted = tuple(evaluation for evaluation in evaluations if evaluation.accepted)
-    ranked = accepted or evaluations
-    selected = max(ranked, key=lambda evaluation: evaluation.ranking_values)
+    selected = max(evaluations, key=lambda evaluation: evaluation.ranking_values)
     return CheckpointSelection(
         selection_method=selection_method,
-        candidates=evaluations,
-        selected=SelectedCheckpoint(
-            iteration=selected.candidate.iteration,
-            path=selected.candidate.path,
-        ),
+        evaluations=evaluations,
+        selected=selected.candidate,
     )
 
 
-def publish_latest(*, policy_root: Path, run_dir: Path) -> None:
-    """Atomically advance the policy namespace's relative ``latest`` symlink."""
-    link = policy_root / "latest"
-    temp = policy_root / f".latest.{os.getpid()}.tmp"
+def _publish_label(*, policy_root: Path, run_dir: Path, label: str) -> None:
+    link = policy_root / label
+    temp = policy_root / f".{label}.{os.getpid()}.tmp"
     temp.unlink(missing_ok=True)
     temp.symlink_to(run_dir.name)
     temp.replace(link)
+
+
+def _comparable_best_score(
+    *,
+    policy_root: Path,
+    comparison_fingerprint: str,
+) -> float | None:
+    best = policy_root / "best"
+    if not best.is_symlink():
+        return None
+    target = Path(os.readlink(best))
+    if target.is_absolute() or len(target.parts) != 1:
+        return None
+    report_path = policy_root / target / _SELECTION_REPORT
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if report.get("comparison_fingerprint") != comparison_fingerprint:
+        return None
+    score = report.get("selected_score")
+    if not isinstance(score, int | float) or isinstance(score, bool):
+        return None
+    score = float(score)
+    return score if math.isfinite(score) else None
+
+
+def publish_policy_labels(
+    *,
+    policy_root: Path,
+    run_dir: Path,
+    comparison_fingerprint: str | None,
+    score: float | None,
+) -> bool:
+    """Advance ``latest`` and conditionally advance comparable ``best``.
+
+    Returns:
+        Whether ``best`` advanced. Policy families without a comparison metric
+        pass ``None`` for both comparison values and publish only ``latest``.
+    """
+    if (comparison_fingerprint is None) != (score is None):
+        raise ValueError(
+            "comparison fingerprint and score must either both be set or both be absent"
+        )
+    if score is not None and not math.isfinite(score):
+        raise ValueError("policy comparison score must be finite")
+    best_score = (
+        None
+        if comparison_fingerprint is None
+        else _comparable_best_score(
+            policy_root=policy_root,
+            comparison_fingerprint=comparison_fingerprint,
+        )
+    )
+    advance_best = score is not None and (best_score is None or score > best_score)
+    _publish_label(policy_root=policy_root, run_dir=run_dir, label="latest")
+    if advance_best:
+        _publish_label(policy_root=policy_root, run_dir=run_dir, label="best")
+    return advance_best

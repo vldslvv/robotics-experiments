@@ -35,11 +35,16 @@ import numpy as np
 import torch
 from numpy.typing import ArrayLike
 
+from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.config import RlActionConfig
+from robotics_experiments.rl import PolicyContract
+
 __all__ = [
     "action_to_rotor_omega",
     "apply_body_wrench",
     "build_flight_actuation_params",
     "rotor_omega_to_body_wrench",
+    "rotor_thrust_to_body_wrench",
 ]
 
 _GRAVITY_M_S2 = 9.81
@@ -221,8 +226,9 @@ def build_flight_actuation_params(
     rolling_moment_coefficient: ArrayLike,
     min_rotor_velocity: ArrayLike,
     max_rotor_velocity: ArrayLike,
-    action_cfg,
-    policy_contract=None,
+    action_cfg: RlActionConfig,
+    controller_settings: ControllerSettings,
+    policy_contract: PolicyContract | None,
     mass: float,
     device,
 ) -> _FlightActuationParams:
@@ -266,7 +272,7 @@ def build_flight_actuation_params(
         max_rotor_velocity=max_velocity,
         allocation_pinv=torch.linalg.pinv(allocation),  # (N, 4)
         max_total_thrust=float((constants * max_velocity.square()).sum().item()),
-        kp_rate=_tensor(action_cfg.controller_kp_rate),
+        kp_rate=_tensor(controller_settings.kp_rate),
         max_body_rate_radps=float(
             action_cfg.max_body_rate_radps
             if policy_contract is None
@@ -277,9 +283,9 @@ def build_flight_actuation_params(
             if policy_contract is None
             else policy_contract.hover_thrust_fraction
         ),
-        kp_vel=_tensor(action_cfg.controller_kp_vel),
-        kd_vel=_tensor(action_cfg.controller_kd_vel),
-        kp_att=_tensor(action_cfg.controller_kp_att),
+        kp_vel=_tensor(controller_settings.kp_vel),
+        kd_vel=_tensor(controller_settings.kd_vel),
+        kp_att=_tensor(controller_settings.kp_att),
         max_body_velocity_mps=float(
             action_cfg.max_body_velocity_mps
             if policy_contract is None
@@ -290,7 +296,7 @@ def build_flight_actuation_params(
             if policy_contract is None
             else policy_contract.max_yaw_rate_radps
         ),
-        max_tilt_rad=float(np.radians(action_cfg.max_tilt_cmd_deg)),
+        max_tilt_rad=float(np.radians(controller_settings.max_tilt_cmd_deg)),
     )
 
 
@@ -323,6 +329,22 @@ def rotor_omega_to_body_wrench(
     """
     omega_squared = omega.square()
     forces = params.rotor_constant * omega_squared
+    return rotor_thrust_to_body_wrench(
+        params,
+        forces,
+        body_velocity_flu,
+        linear_drag,
+    )
+
+
+def rotor_thrust_to_body_wrench(
+    params: _FlightActuationParams,
+    forces: torch.Tensor,
+    body_velocity_flu: torch.Tensor,
+    linear_drag: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Realize official-actuator per-rotor thrust as one body-frame wrench."""
+    omega_squared = forces / params.rotor_constant
     yaw_reaction = (params.rolling_moment_coefficient * omega_squared * params.rot_dir).sum(dim=-1)
     zeros = torch.zeros_like(yaw_reaction)
     body_torque = torch.stack([zeros, zeros, yaw_reaction], dim=-1)

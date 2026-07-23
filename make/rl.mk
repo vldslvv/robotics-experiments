@@ -14,21 +14,38 @@ EVAL_ARGS ?=
 RL_TENSORBOARD_HOST ?= 127.0.0.1
 RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
+RL_TENSORBOARD_LOGDIR ?= .build/training
 
-# Training owns optimization, stored metadata, and checkpoints only. A direct
-# run is intentionally unpublished until select-rl-checkpoint selects it.
+# Training evaluates every saved checkpoint after PPO, exports the best
+# checkpoint in the run, always advances latest, and conditionally advances
+# the comparable best label.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-train-rl: ISAAC_TEST_EXTRA_ARGS = $(TRAIN_ARGS)
 train-rl: generate-drone-usd
-	@TEST_TARGET='train-rl' \
-	    ISAAC_TEST_LOG='$(TRAIN_RL_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(TRAIN_RL_SCRIPT)' \
-	    $(ISAAC_INTEGRATION_COMMON_ENV) \
-	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+	@set -e; \
+	    run_id='$(RL_RUN_ID)'; \
+	    if [ -z "$$run_id" ]; then \
+	        run_id="$$(date -u +%Y%m%dT%H%M%SZ).$$$$"; \
+	    fi; \
+	    TEST_TARGET='train-rl' \
+	        ISAAC_TEST_LOG='$(TRAIN_RL_LOG)' \
+	        ISAAC_TEST_SCRIPT='$(TRAIN_RL_SCRIPT)' \
+	        $(ISAAC_INTEGRATION_COMMON_ENV) \
+	        ISAAC_TEST_EXTRA_ARGS='$(TRAIN_ARGS)' \
+	        RL_RUN_ID="$$run_id" \
+	        bash "$(ISAAC_INTEGRATION_RUNNER)"; \
+	    case '$(TRAIN_ARGS)' in \
+	        *--export-checkpoint*) exit 0 ;; \
+	    esac; \
+	    TEST_TARGET='select-rl-checkpoint' \
+	        ISAAC_TEST_LOG='$(SELECT_RL_LOG)' \
+	        ISAAC_TEST_SCRIPT='$(SELECT_RL_SCRIPT)' \
+	        $(ISAAC_INTEGRATION_COMMON_ENV) \
+	        ISAAC_TEST_EXTRA_ARGS='$(SELECT_ARGS)' \
+	        RL_RUN_ID="$$run_id" \
+	        bash "$(ISAAC_INTEGRATION_RUNNER)"
 
-# Selection evaluates the checkpoints from RL_RUN_ID, exports the winner, and
-# is the sole automatic owner of the policy namespace's latest symlink.
+# Explicit selection re-evaluates an existing run and republishes its labels.
 .PHONY: select-rl-checkpoint
 select-rl-checkpoint: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 select-rl-checkpoint: ISAAC_TEST_EXTRA_ARGS = $(SELECT_ARGS)
@@ -43,7 +60,7 @@ select-rl-checkpoint: generate-drone-usd
 # supplied it evaluates that exact published run instead of resolving latest.
 .PHONY: eval-press
 eval-press: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-eval-press: HYDRA_CONFIG = configs/train_press_quad.yaml
+eval-press: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
 eval-press: ISAAC_TEST_EXTRA_ARGS = $(EVAL_ARGS)
 eval-press: generate-drone-usd
 	@TEST_TARGET='eval-press' \
@@ -63,7 +80,7 @@ tensorboard-rl:
 	    --entrypoint /isaac-sim/python.sh \
 	    '$(ISAAC_LAB_IMAGE)' \
 	    -m tensorboard.main \
-	    --logdir '$(ISAAC_PROJECT_DIR)/.build/training' \
+	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
 	    --host '$(RL_TENSORBOARD_HOST)' \
 	    --port '$(RL_TENSORBOARD_PORT)'
 
@@ -78,7 +95,7 @@ test-integration-press-hover-goto: generate-drone-usd
 
 .PHONY: test-integration-press-contact-chain
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_quad.yaml
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
 test-integration-press-contact-chain: generate-drone-usd
 	@TEST_TARGET='test-integration-press-contact-chain' \
@@ -101,17 +118,34 @@ test-integration-press-policy: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
-.PHONY: test-integration-press-routine
-test-integration-press-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-routine: HYDRA_CONFIG = configs/policy_press_quad.yaml
-test-integration-press-routine: SCENE = @config
-test-integration-press-routine: generate-drone-usd
-	@TEST_TARGET='test-integration-press-routine' \
-	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_routine.log' \
-	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_routine_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_ROUTINE_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_ROUTINE_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-routine' \
+.PHONY: test-integration-press-approach-routine
+test-integration-press-approach-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-approach-routine: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-approach-routine: SCENE = @config
+test-integration-press-approach-routine: generate-drone-usd
+	@TEST_TARGET='test-integration-press-approach-routine' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_approach_routine.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_approach_routine_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-approach-routine' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+# Physical warehouse trained-policy acceptance remains downstream of alignment
+# and never fits or publishes controller settings.
+.PHONY: test-integration-press-policy-transfer
+test-integration-press-policy-transfer: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-policy-transfer: HYDRA_CONFIG = configs/policy_transfer_press_approach_quad.yaml
+test-integration-press-policy-transfer: SCENE = @config
+test-integration-press-policy-transfer: generate-drone-usd
+	@TEST_TARGET='test-integration-press-policy-transfer' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_transfer.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_transfer_px4.log' \
+	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/test_px4_press_policy_transfer.log' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_POLICY_TRANSFER_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-policy-transfer' \
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"

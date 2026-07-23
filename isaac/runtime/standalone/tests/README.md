@@ -23,6 +23,13 @@ Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
 It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
+`alignment_capture_reference.py` is the PX4-backed alignment capture shell. It
+uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
+lifecycle, with a test-only injected adapter that emits the controller
+definition's x/y/z probes. It writes exact command timing, initial state, and
+measured body-FLU velocity to the selected alignment run directory. It is not a
+press-policy scenario and adds no commanding routine kind.
+
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the
@@ -31,7 +38,11 @@ visible plunger, forward-facing collidable pad, fully deployed joint, enabled
 arm and swept-propeller colliders, and the static wall collider. It then
 commands a slow press, verifies pad contact plus pusher and button displacement,
 advances the production N-step latch, requires exactly one lamp transition, and
-retreats within the stability envelope.
+retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
+returns no dones and no approach reward, so Stage 1's privileged collision
+termination cannot reset this physical measurement path. Its test-local
+press/retreat speed derives from the stable-flight speed limit rather than the
+approach reward's dense velocity reference.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
@@ -92,19 +103,33 @@ navigation routine as one multi-drone scene
 (id 1, the `hexacopter_s550.usda` asset, so its PX4 instance launches the derived
 generic hexarotor-x airframe) fly the same routine concurrently in parallel lanes
 (the hex `goto` waypoints offset by its spawn so the absolute waypoints never
-converge), and the test passes only when both hold their envelope. The single
-thin entrypoint `test_px4_navigation_routine.py` runs the shared
+converge), and the test passes only when both hold their envelope. The first
+leg uses PX4 guided repositioning at 0.5 m/s and is followed by hover so the
+test can report requested, peak, and average horizontal speed, braking
+distance, final error, and overshoot in `GOTO_SPEED_DIAGNOSTIC` JSON. The
+second leg remains a speedless OFFBOARD goto followed by hover, preserving the
+stream-continuity integration check. The single thin entrypoint
+`test_px4_navigation_routine.py` runs the shared
 `_px4_navigation_scenario.py`: its `_assert_navigation_routine_config` asserts
 each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
-transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
-OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
-to completion.
+transition. Its speed collector additionally requires one guided goto followed
+by hover, while the other transition checks that OFFBOARD streaming remains
+continuous. It then drives the same strict `_px4_takeoff_scenario.py` flight to
+completion.
 
-`make test-integration-press-routine` runs the artifact-dependent full press
-mission in `configs/policy_press_quad.yaml`: takeoff, navigate to the configured
-handoff point, execute the `press-v1` artifact through the generic `policy`
-step, return, land, and disarm. The strict post-routine hook requires stable
-first contact, exactly one off-to-on lamp event, and stable retreat. Run it only
-after `make select-rl-checkpoint` publishes `.build/training/press/latest` and
-`make eval-press` independently verifies it; it is excluded from
-`test-integration-all` for that reason.
+`make test-integration-press-approach-routine` runs the artifact-dependent
+Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
+to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
+move into the 0.48 m handoff range at 0.08 m/s, execute the `press-v1` /
+`approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
+and disarm. The strict hook requires stable contact-free completion and no lamp
+transition. Run it only after selection
+within `make train-rl` publishes `.build/training/press-approach/latest` and
+`make eval-press` independently accepts it; it is excluded from
+`test-integration-all`.
+
+`make test-integration-press-policy-transfer` is the separate post-training PX4
+acceptance in the production warehouse. It runs the trained press actor at
+three entry ranges with physical wall and switch contact enabled, and requires
+no body contact, pusher contact, or lamp transition. Its observations and
+actions are not controller-fitting inputs.

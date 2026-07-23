@@ -6,6 +6,12 @@ import importlib
 from dataclasses import dataclass
 from importlib.util import find_spec
 
+import gymnasium as gym
+
+from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.rl import PolicyContract, PolicyInterface
+
 __all__ = [
     "DRONE_HOVER_TASK_ID",
     "SWITCH_PRESS_TASK_ID",
@@ -59,7 +65,7 @@ def _dependency_available(module_name: str) -> bool:
         return False
 
 
-def _gym_has_task(gym, task_id: str) -> bool:
+def _gym_has_task(task_id: str) -> bool:
     return task_id in gym.registry
 
 
@@ -71,13 +77,11 @@ def register_isaac_lab_tasks() -> bool:
         False when called in a host environment without those dependencies.
     """
 
-    if not _dependency_available("gymnasium") or not _dependency_available("isaaclab"):
+    if not _dependency_available("isaaclab"):
         return False
 
-    import gymnasium as gym
-
     for task_id, task in _TASKS.items():
-        if _gym_has_task(gym, task_id):
+        if _gym_has_task(task_id):
             continue
         gym.register(
             id=task_id,
@@ -91,14 +95,13 @@ def register_isaac_lab_tasks() -> bool:
 def make_isaac_lab_env(
     *,
     task_id: str,
-    experiment_config,
+    experiment_config: ExperimentConfig,
+    controller_settings: ControllerSettings,
     seed: int | None = None,
     num_envs: int | None = None,
-    policy_contract=None,
-):
+    policy_contract: PolicyContract | None = None,
+) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
-    import gymnasium as gym
-
     if not register_isaac_lab_tasks():
         raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
     try:
@@ -106,12 +109,12 @@ def make_isaac_lab_env(
     except KeyError as exc:
         raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
     expected_interface = {
-        DRONE_HOVER_TASK_ID: "hover-v1",
-        SWITCH_PRESS_TASK_ID: "press-v1",
+        DRONE_HOVER_TASK_ID: PolicyInterface.HOVER_V1,
+        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS_V1,
     }[task_id]
     if policy_contract is not None and policy_contract.policy_interface != expected_interface:
         raise ValueError(
-            f"task {task_id!r} requires policy_interface={expected_interface!r}, "
+            f"task {task_id!r} requires policy_interface={expected_interface.value!r}, "
             f"artifact provides {policy_contract.policy_interface!r}"
         )
     module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)
@@ -129,5 +132,6 @@ def make_isaac_lab_env(
         cfg=env_cfg,
         experiment_config=experiment_config,
         policy_contract=policy_contract,
+        controller_settings=controller_settings,
     ).unwrapped
     return env, env_cfg

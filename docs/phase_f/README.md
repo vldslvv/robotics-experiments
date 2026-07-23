@@ -1,53 +1,46 @@
 # Phase F implementation status
 
-Phase F builds the local switch-contact policy from a flyable Isaac Lab task,
-then hardens it from ground-truth geometry to randomized contact physics and a
-degraded pose provider. The detailed files in this directory are executable
-plans: completed plans record the implementation that landed; planned files
-must follow the current repository contracts summarized below.
+Phase F now uses explicit, separately named curriculum stages. The first stage
+is contact-free approach. There is no automatic stage promotion and no fixed
+three-stage enum.
 
-Status as of 2026-07-22:
+Status as of 2026-07-26:
 
 | Plan | Status | Executable evidence or blocker |
 |------|--------|--------------------------------|
 | F1 in-Lab flight | Validated | `make test-integration-press-hover-goto` flies the hover/goto gate. |
 | F1b controller tuning | Validated | The recorded gains are live and the seeded gate passed repeatedly. |
-| F2 observation and handoff | Validated | Pure observation/provider/handoff tests pass; the hover/goto side channel reaches the handoff. |
-| F2b task-to-policy pipeline | Validated | `make train-rl` produced the hover artifact and `make test-integration-press-policy` passed strict deployment through PX4. |
-| F3 ground-truth press task | Implemented; acceptance tuning paused | Baseline: 100% toggles, 8% stable contact, 0% retreat. First tune/current `latest`: 0% toggles, 100% stable contact, 0% retreat. The staged second tune is untrained. |
-| F3b generic contact-policy deployment | Partially implemented; mission blocked by F3 acceptance | The `press-v1` adapter, live 34-value observation, pure completion transition, and full `{kind: policy}` flight routine exist. The strict mission awaits an accepted newly exported artifact; scripted comparison remains planned. |
-| F4 curriculum/randomization | Planned; blocked by F3 | No press curriculum or contact-domain randomization exists. |
-| F5 synthetic pose | Planned; blocked by F4 | Only the ground-truth provider exists; no synthetic estimator/provider exists. |
+| F2 observation and handoff | Validated | Pure observation/provider/handoff tests pass; the hover/goto side channel reaches handoff. |
+| F2b task-to-policy pipeline | Validated | Hover training, artifact publication, and strict PX4 deployment passed. |
+| F3 Stage 1 approach | Lab accepted | Collision-aware run `approach-20260727a`, checkpoint 49 passed selection and independent evaluation at 100% success with zero combined/body/pusher collisions, flight failures, or timeouts. |
+| F3 physical contact chain | Implemented | The real pusher/button/latch/lamp/retreat gate uses a test-local no-dones environment and is independent of Stage 1 termination. |
+| F3b approach deployment | Dynamics mismatch recorded; failed | The accepted Lab policy contacted the pusher at 0.3807 m and 0.0782 m/s in the live PX4 routine. Keep collision privileged and investigate controller/simulator dynamics instead of changing `press-v1`. |
+| Later contact/toggle/retreat stage | Planned | It must be a new named Hydra option and policy namespace initialized actor-only from a compatible checkpoint. |
+| F4 randomization | Planned | Add stage-owned randomization without changing the shared 34-by-4 actor contract. |
+| F5 synthetic pose | Planned | Only the ground-truth provider exists. |
 
-## Current contracts for remaining work
+## Current contracts
 
-- The config boundary is immutable `ExperimentConfig`. Shared Lab scale,
-  action, and training config live under `rl`; press-task config lives under
-  `rl.press`, composed from `configs/experiment/rl/press/default.yaml`.
-- The default policy rate is 20 Hz. Isaac Lab schedules it from
-  `sim.physics_hz` with the shared exact-average cadence while training.
-  Exported artifacts own evaluation and deployment cadence; deployment
-  transmits at
-  `driver.offboard_setpoint_rate_hz`, and ticks drivers at
-  `driver.control_rate_hz`. Do not collapse these into one fixed decimation or
-  assume they are equal.
-- Policy metadata includes observation schema/dimension, action contract, and
-  `policy_rate_hz`. These values are artifact-owned after export; changing
-  training YAML does not reinterpret an existing artifact.
-- Project-owned evolving state in `runtime`, `commanding`, and `px4_bridge` is a
-  frozen dataclass advanced by stateless transitions. The remaining Phase F
-  pure state machines, curriculum state, estimator state, and retry progress
-  must follow the same model; mutable classes are reserved for external
-  Isaac/PX4/torch adapters.
-- Consumers import config values from `robotics_experiments.config`, press APIs
-  from `robotics_experiments.rl.press`, and Isaac Lab workflow APIs from
-  `robotics_experiments.workflows.isaac_lab`. New public exports are added only
-  for production consumers.
-- Host tests mirror source paths under `tests/src/robotics_experiments/`; Isaac
-  standalone tests live under `isaac/runtime/standalone/tests/`.
+- Press task config is composed from
+  `configs/experiment/rl/press/approach.yaml`.
+- `robotics_experiments.rl.press` publicly exposes approach-specific task and
+  deployment records. The removed phase/latch task API has no compatibility
+  aliases.
+- The Stage 1 observation remains 34 values and the action remains four values.
+  Compression, contact, and lamp fields remain packed for checkpoint reuse by
+  later stages.
+- PhysX body/pusher collision flags are training-only inputs to reward and
+  termination. They are absent from policy state, observations, critic inputs,
+  and deployment sensing.
+- Press artifacts require both `policy_interface: press-v1` and
+  `curriculum_stage: approach`. Stage-less and unknown-stage artifacts fail.
+- Actor-only initialization may read any validated
+  `.build/training/<source-policy>/<run>/logs/model_N.pt`; manual export remains
+  restricted to the checkpoint's owning configured namespace.
+- Project-owned progress is a frozen dataclass advanced by a stateless
+  transition. Mutable classes remain external Isaac, PX4, and torch adapters.
+- The generic commanding driver interprets only policy completion/failure and
+  retains the opaque final policy state.
 
-The learned-policy mission gate and F4 must wait until F3 produces a policy
-that meets the recorded metrics. The generic F3b deployment plumbing is
-implemented, but its artifact-dependent integration target must not be treated
-as validated until that gate passes. The scripted baseline can then proceed
-without adding a task-specific commanding kind.
+Training, selection, evaluation, and mission evidence is recorded in
+`F3_TRAINING_DECISION_LOG.md`.

@@ -14,12 +14,23 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
+
+from robotics_experiments.config import load_config
 
 __all__ = ["main"]
 
 _PHASES = ("connected_disarmed", "armed_takeoff", "airborne")
 _REPETITIONS = 3
+
+
+class _MetricComparison(TypedDict):
+    metric: str
+    reference: float
+    candidate: float
+    delta: float
+    percent_change: float | None
+    ratio: float | None
 
 
 def _read_json(path: Path, /) -> Any:
@@ -54,8 +65,6 @@ def _canonical_config(value: Any, /) -> Any:
 
 
 def _fingerprint(args: argparse.Namespace, /) -> int:
-    from robotics_experiments.config import load_config
-
     config_path = Path(args.config).resolve()
     config = load_config(config_path)
     resolved = _canonical_config(config)
@@ -603,7 +612,7 @@ def _compare(args: argparse.Namespace, /) -> int:
     candidate_values = _numeric_leaves(candidate["metrics"])
     if set(ref_values) != set(candidate_values):
         raise ValueError("flight benchmark reports expose different numeric metric trees")
-    comparisons = []
+    comparisons: list[_MetricComparison] = []
     for metric in sorted(ref_values):
         baseline = ref_values[metric]
         value = candidate_values[metric]

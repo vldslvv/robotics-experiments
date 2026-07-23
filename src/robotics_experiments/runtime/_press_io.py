@@ -6,15 +6,16 @@ runtime leaf stays off the host import path until a press artifact is selected.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 import numpy as np
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils.types import ArticulationAction
 from isaacsim.sensors.physics import ContactSensor
-from pxr import Gf, PhysxSchema, UsdGeom, UsdLux, UsdPhysics
+from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdLux, UsdPhysics
 
 from robotics_experiments.px4_bridge import (
+    VehicleState,
     body_velocity_flu_from_state,
     quat_wxyz_to_xyzw,
 )
@@ -28,17 +29,26 @@ from robotics_experiments.rl.press import (
 __all__ = ["PressObservationIO"]
 
 
+@dataclass(frozen=True)
+class _PressContactDiagnostics:
+    body_contact: bool = False
+    pusher_contact: bool = False
+    max_body_force_n: float = 0.0
+    max_pusher_force_n: float = 0.0
+
+
 class PressObservationIO:
     """Mutable handles for one drone/pusher, paired switch, lamp, and pad sensor."""
 
     def __init__(
         self,
         *,
-        stage: Any,
+        stage: Usd.Stage,
         articulation_path: str,
         switch_index: int,
         action_dim: int,
         contact_force_threshold_n: float,
+        physical_contact_enabled: bool,
         button_geometry_scale: float,
         button_stiffness_scale: float,
         switch_wall_offset_m: float,
@@ -55,9 +65,11 @@ class PressObservationIO:
         self._drone: SingleArticulation | None = None
         self._pusher_joint_index = -1
         self._pusher_extension_m = 0.0
+        self._contact_diagnostics = _PressContactDiagnostics()
         self._pose_provider = GroundTruthPoseProvider(stage, self._switch_path)
 
         self._configure_switch(
+            physical_contact_enabled=physical_contact_enabled,
             geometry_scale=float(button_geometry_scale),
             stiffness_scale=float(button_stiffness_scale),
             wall_offset_m=float(switch_wall_offset_m),
@@ -78,10 +90,17 @@ class PressObservationIO:
             max_threshold=100_000.0,
             radius=-1.0,
         )
+        self._body_contact_sensor = ContactSensor(
+            prim_path=f"{articulation_path}/body/press_body_contact_sensor",
+            min_threshold=self._contact_force_threshold_n,
+            max_threshold=100_000.0,
+            radius=-1.0,
+        )
 
     def _configure_switch(
         self,
         *,
+        physical_contact_enabled: bool,
         geometry_scale: float,
         stiffness_scale: float,
         wall_offset_m: float,
@@ -90,6 +109,12 @@ class PressObservationIO:
         root = self._stage.GetPrimAtPath(self._switch_path)
         if not root.IsValid():
             raise ValueError(f"switch prim not found at {self._switch_path!r}")
+        if not physical_contact_enabled:
+            for prim in self._stage.Traverse():
+                if prim.GetPath().HasPrefix(root.GetPath()) and prim.HasAPI(
+                    UsdPhysics.CollisionAPI
+                ):
+                    UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
         buttons = [
             prim
             for prim in self._stage.Traverse()
@@ -129,6 +154,9 @@ class PressObservationIO:
         if stiffness is None:
             raise RuntimeError("switch button drive has no authored stiffness")
         drive.GetStiffnessAttr().Set(float(stiffness) * stiffness_scale)
+
+        if not physical_contact_enabled:
+            return
 
         # The source switch's local -Y is the outward normal, so its wall lies
         # behind it along local +Y. Author a collision-only proxy as a child of
@@ -202,12 +230,17 @@ class PressObservationIO:
         self._pusher_extension_m = float(drone.dof_properties["upper"][index])
         self._pusher_joint_index = index
         self._contact_sensor.initialize()
+        self._body_contact_sensor.initialize()
         self._drone = drone
+
+    def read_contact_diagnostics(self) -> _PressContactDiagnostics:
+        """Return the immutable body/pusher collision latch for acceptance."""
+        return self._contact_diagnostics
 
     def read(
         self,
         *,
-        vehicle_state: Any,
+        vehicle_state: VehicleState,
         sim_time_s: float,
     ) -> PressObservation:
         """Assemble the exact 34-value policy input from live resources."""
@@ -226,6 +259,20 @@ class PressObservationIO:
         contact_force = float(frame.get("force", 0.0))
         contact_flag = bool(frame.get("in_contact", False)) and (
             contact_force >= self._contact_force_threshold_n
+        )
+        body_frame = self._body_contact_sensor.get_current_frame()
+        body_force = float(body_frame.get("force", 0.0))
+        body_contact = bool(body_frame.get("in_contact", False)) and (
+            body_force >= self._contact_force_threshold_n
+        )
+        self._contact_diagnostics = _PressContactDiagnostics(
+            body_contact=self._contact_diagnostics.body_contact or body_contact,
+            pusher_contact=self._contact_diagnostics.pusher_contact or contact_flag,
+            max_body_force_n=max(self._contact_diagnostics.max_body_force_n, body_force),
+            max_pusher_force_n=max(
+                self._contact_diagnostics.max_pusher_force_n,
+                contact_force,
+            ),
         )
 
         pose = self._pose_provider.sample(sim_time_s)

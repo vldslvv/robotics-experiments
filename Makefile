@@ -6,6 +6,7 @@ include make/images.mk
 include make/containers.mk
 include make/tests.mk
 include make/integration-tests.mk
+include make/alignment.mk
 include make/rl.mk
 include make/benchmarks.mk
 include make/flight-analysis.mk
@@ -44,18 +45,29 @@ help:
 		'  make test-integration-px4-navigation Run the PX4 waypoint navigation test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test' \
 		'' \
+		'Controller alignment targets:' \
+		'' \
+		'  make align-controllers     Capture PX4 probes, sweep Lab, fit, and publish' \
+		'  make alignment-capture-reference Capture task-neutral PX4 velocity probes' \
+		'  make alignment-sweep-target Replay all declarative Isaac Lab candidates' \
+		'  make alignment-fit         Score candidates and update latest/best links' \
+		'  make test-integration-alignment-target Validate the selected target envelope' \
+		'' \
 		'RL, Isaac Lab, and press workflow targets:' \
 		'' \
-		'  make train-rl              Train checkpoints without publishing an artifact' \
-		'  make select-rl-checkpoint  Evaluate checkpoints and publish the accepted winner' \
+		'  make train-rl              Train, select, and publish latest/best policy labels' \
+		'  make select-rl-checkpoint  Re-evaluate and republish an existing checkpoint run' \
 		'  make eval-press            Independently evaluate the selected press artifact' \
 		'  make test-integration-press-hover-goto Run the in-Lab hover/goto gate' \
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
 		'  make test-integration-press-policy Run the trained hover-policy PX4 gate' \
-		'  make test-integration-press-routine Run the selected press full-mission gate' \
+		'  make test-integration-press-policy-transfer Run warehouse press transfer acceptance' \
+		'  make test-integration-press-approach-routine Run the selected approach mission gate' \
 		'' \
 		'Benchmark targets:' \
 		'' \
+		'  make benchmark-commanding    Run the isolated host commanding performance gate' \
+		'  make benchmark-commanding-accept RESULT=... Accept a commanding baseline' \
 		'  make benchmark-isaac-core  Run and gate the Isaac core performance benchmark' \
 		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline' \
 		'  make benchmark-flight      Run the diagnostic full-GUI two-drone benchmark' \

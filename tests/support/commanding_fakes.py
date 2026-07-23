@@ -95,6 +95,7 @@ def make_routine_observation(
     is_armed=False,
     last_ack=None,
     failsafe=False,
+    task_observation=None,
 ):
     """Build a synthetic ``RoutineObservation`` for the pure command-layer tests.
 
@@ -130,6 +131,7 @@ def make_routine_observation(
         last_ack=last_ack,
         failsafe=failsafe,
         sim_time_us=int(sim_time_us),
+        task_observation=task_observation,
     )
 
 

@@ -4,7 +4,8 @@ This is the architecture and rationale for the container-backed integration
 tests. Use the Make targets as the public entrypoints; run harness scripts
 directly only when debugging the harness itself. The orchestration, caching,
 artifact-isolation, and timing details live here. The authoritative definitions
-are `make/integration-tests.mk`, `make/rl.mk`, `make/config.mk`,
+are `make/integration-tests.mk`, `make/alignment.mk`, `make/rl.mk`,
+`make/config.mk`,
 `make/scripts/run_isaac_integration_test.sh`,
 `make/scripts/run_px4_integration_test.sh`,
 `make/scripts/run_isaac_test_in_container.sh`,
@@ -19,7 +20,9 @@ scenario-specific notes.
 `make/integration-tests.mk` owns the general integration harness variables,
 aggregate suite, and non-RL target definitions. `make/rl.mk` owns training,
 checkpoint selection, independent press evaluation, and all press/Isaac Lab
-target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
+task targets. `make/alignment.mk` exclusively owns controller capture, target
+sweep, fit/publication, and the alignment target-envelope gate.
+`INTEGRATION_TEST_TARGETS` deliberately remains in
 `make/integration-tests.mk`; GNU Make resolves the included definitions from
 `make/rl.mk` when the aggregate runs.
 
@@ -52,26 +55,37 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   full initial pusher deployment. It then drives a slow press, requires real
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
-  stability envelope. It is part of `test-integration-all` and requires no PX4
-  container or trained policy.
+  stability envelope. A test-local no-dones environment keeps these physical
+  measurements independent of Stage 1's contact-failure termination. It is
+  part of `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
-  Isaac Lab image. It needs a published artifact from `make train-rl` followed
-  by `make select-rl-checkpoint`, so it is deliberately not part of
+  Isaac Lab image. It needs the automatically published artifact from
+  `make train-rl`, so it is deliberately not part of
   `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
   contract and routine config. Policy metadata includes the active policy
-  rate, so artifacts trained before that field was introduced must be
-  retrained.
-- `make test-integration-press-routine` runs the complete F3 deployment sanity
-  flight from `configs/policy_press_quad.yaml`: takeoff, goto the press handoff
-  pose, execute the artifact-selected generic policy against the real spawned
-  switch/lamp and pusher, return to the landing point, land, and disarm. It
-  requires one lamp transition, stable first contact, and stable post-toggle
-  retreat. Like the hover artifact gate, it is deliberately excluded from
-  `test-integration-all` because it needs an accepted
-  independently accepted artifact whose metadata declares `press-v1`.
-  Selection may publish an explicitly rejected diagnostic fallback at
-  `.build/training/press/latest`; that fallback does not satisfy this gate's
-  workflow precondition.
+  rate and alignment provenance; every legacy artifact without the alignment
+  record must be retrained.
+- `make test-integration-press-approach-routine` runs the Stage 1 deployment
+  flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
+  safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
+  the short move into the 0.48 m handoff range at 0.08 m/s, execute the
+  artifact-selected approach policy, return at 0.5 m/s to the landing point,
+  land, and disarm. It requires stable contact-free approach completion and no
+  lamp transition. Like the hover artifact gate, it is excluded from
+  `test-integration-all` because it needs an independently accepted artifact
+  declaring `policy_interface: press-v1` and `curriculum_stage: approach`.
+  Advisory selection failure does not block `latest` publication, but this
+  integration target remains an independent workflow gate.
+- `make test-integration-alignment-target` runs the analytic hover/goto
+  stability envelope with the selected alignment `best` artifact. It is owned
+  by `make/alignment.mk` and excluded from `test-integration-all` because it
+  requires an alignment publication.
+- `make test-integration-press-policy-transfer` runs the trained press actor
+  through three PX4 policy stages at distinct entry ranges in the production
+  warehouse. Physical wall and switch contact remain enabled, and the gate
+  requires no body contact, pusher contact, or lamp transition. This is a
+  downstream transfer gate and never fits or publishes controller settings. It
+  is artifact-dependent and excluded from `test-integration-all`.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.
@@ -91,16 +105,22 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   its spawn, so the absolute world-ENU waypoints never converge), each on its
   own PX4 SITL instance with the per-asset airframe derived from its USD asset
   (the quad's `none_x500_v2`/`22000` and the hex's generated Hex X
-  `none_hexa_x`/`22001`). It protects OFFBOARD setpoint and transmitter-phase
-  continuity across `goto` -> `goto` and `goto` -> `hover` transitions and
-  passes only when **both** drones hold their
-  envelope. It reuses the generic multi-PX4 launch path
+  `none_hexa_x`/`22001`). Each first leg is a wall-free guided goto at 0.5 m/s
+  followed by hover; the scenario emits one `GOTO_SPEED_DIAGNOSTIC` JSON record
+  per vehicle with requested, peak, and average horizontal speed, braking
+  distance, completion/final error, overshoot, and cross-track values. The
+  braking distance starts at the last sample at or above the requested speed
+  (or the peak when the vehicle never reaches it) and ends at maximum
+  along-track progress after that sample. The
+  second leg remains speedless and protects OFFBOARD setpoint continuity across
+  `goto` -> `hover`. The target passes only when **both** drones complete
+  without breaching their position, cross-track, or flight-envelope gates. It
+  reuses the generic multi-PX4 launch path
   (`run_px4_integration_test.sh` over the enabled vehicles returned by
   `load_config(path)`, like
   the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
-  whose
-  `_assert_navigation_routine_config` validates the `goto`/`goto -> hover`
-  config per flying vehicle before running the strict takeoff scenario.
+  whose `_assert_navigation_routine_config` validates the `goto`/`goto ->
+  hover` config per flying vehicle before running the strict takeoff scenario.
 
 ## Concurrency
 

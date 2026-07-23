@@ -123,6 +123,287 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
+def test_press_approach_config_preserves_actor_contract_and_stage_settings():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_approach_quad.yaml")
+    training = config.rl.training
+    reward = config.rl.press.reward
+    policy = config.rl.press.policy
+
+    assert config.rl.action.action_dim == 4
+    assert config.rl.action.max_body_velocity_mps == 2.0
+    assert training.alignment_artifact == ".build/alignment/x500-velocity-px4-v1/best"
+    assert config.rl.press.reset.physical_contact_enabled
+    assert config.rl.num_envs == 32768
+    assert training.policy_name == "press-approach"
+    assert training.training_mode == "scratch"
+    assert config.rl.press.curriculum_stage == "approach"
+    assert training.max_iterations == 300
+    assert training.learning_rate == 1.0e-4
+    assert training.entropy_coef == 0.0001
+    assert training.save_interval == 10
+    assert training.schedule == "adaptive"
+    assert policy.actor.initial_noise_std == 0.03
+    assert policy.actor.output_initialization == "scratch-neutral-output"
+    assert policy.actor.hidden_dims == (256, 256, 128)
+    assert policy.critic.hidden_dims == (256, 256, 128)
+    assert policy.activation == "elu"
+    assert reward.range_progress_weight == 50.0
+    assert reward.velocity_tracking_weight == 100.0
+    assert reward.success_weight == 150.0
+    assert reward.collision_weight == 300.0
+    assert reward.flight_failure_weight == 100.0
+    assert config.rl.press.goal.stable_steps == 5
+    reference = config.rl.press.goal.velocity_reference
+    assert reference.range_center_m == 0.41
+    assert reference.wall_normal_gain_per_s == 1.25
+    assert reference.wall_normal_min_mps == -0.04
+    assert reference.wall_normal_max_mps == 0.08
+    assert reference.tangential_gain_per_s == 2.0
+    assert reference.tangential_speed_max_mps == 0.10
+    assert config.rl.press.handoff.switch_range_min_m == 0.45
+    assert config.rl.press.handoff.switch_range_max_m == 0.50
+    assert config.rl.press.handoff.lateral_align_max_m == 0.08
+    assert config.rl.press.handoff.wall_normal_speed_max_mps == 0.02
+    assert config.rl.press.handoff.lateral_speed_max_mps == 0.02
+    assert config.rl.press.handoff.angular_speed_max_radps == 0.05
+    assert config.rl.press.handoff.body_z_alignment_min == 0.965926
+    assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
+    assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
+    assert config.rl.press.evaluation.success_rate_min == 0.95
+    assert config.rl.press.evaluation.collision_rate_max == 0.01
+    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v2"
+    assert config.rl.press.evaluation.collision_penalty == 4.0
+    assert config.rl.press.evaluation.completion_time_weight == 0.15
+    assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+def test_press_approach_finetune_config_preserves_low_noise_actor_only_recipe():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
+
+    assert config.rl.training.training_mode == "actor-only"
+    assert config.rl.training.max_iterations == 50
+    assert config.rl.training.learning_rate == 1.0e-6
+    assert config.rl.training.entropy_coef == 0.0
+    assert config.rl.training.save_interval == 5
+    assert config.rl.training.schedule == "fixed"
+    assert config.rl.press.policy.actor.initial_noise_std == 0.01
+
+
+def test_training_and_manual_press_configs_share_one_actor_entry_contract():
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl.press import HandoffGate
+
+    training = load_config(_ROOT / "train_press_approach_quad.yaml")
+    deployment = load_config(_ROOT / "policy_press_approach_quad.yaml")
+
+    assert HandoffGate.from_config(training.rl.press.handoff) == HandoffGate.from_config(
+        deployment.rl.press.handoff
+    )
+    assert deployment.vehicles["x500_01"].routine.takeoff_timeout_s == 20.0
+    steps = deployment.vehicles["x500_01"].routine.steps
+    assert tuple(step["kind"] for step in steps) == (
+        "arm",
+        "takeoff",
+        "hover",
+        "goto",
+        "hover",
+        "goto",
+        "hover",
+        "policy",
+        "goto",
+        "land",
+    )
+    assert steps[3]["y"] == 17.40
+    assert steps[3]["ground_speed_m_s"] == 0.5
+    assert steps[3]["position_tol_m"] == 0.05
+    assert steps[5]["y"] == 17.51
+    assert steps[5]["ground_speed_m_s"] == 0.08
+    assert steps[5]["position_tol_m"] == 0.02
+    assert steps[5]["timeout_s"] == 10.0
+    assert steps[8]["ground_speed_m_s"] == 0.5
+    assert "ground_speed_m_s" not in steps[2]
+    assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
+
+
+def test_policy_transfer_config_uses_distinct_entry_targets():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "policy_transfer_press_approach_quad.yaml")
+    steps = config.vehicles["x500_01"].routine.steps
+
+    assert config.scene == "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+    assert config.rl.press.reset.physical_contact_enabled
+    assert tuple(steps[index]["label"] for index in (7, 12, 17)) == (
+        "policy-transfer-0.460",
+        "policy-transfer-0.475",
+        "policy-transfer-0.490",
+    )
+    assert tuple(steps[index]["y"] for index in (5, 10, 15)) == (
+        17.563,
+        17.507,
+        17.476,
+    )
+    assert all(steps[index]["position_tol_m"] == 0.05 for index in (5, 10, 15))
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"rl": {"training": {"actor_hidden_dims": [64, 64]}}},
+        {"rl": {"press": {"reward": {"alive_weight": 1.0}}}},
+        {"rl": {"press": {"hover_task": {"reward_alive": 1.0}}}},
+        {"rl": {"press": {"reset": {"initial_linear_velocity_max_mps": 0.0}}}},
+    ],
+)
+def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
+    from hydra.errors import ConfigCompositionException
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "old_rl_path", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
+
+    with pytest.raises(ConfigCompositionException):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [
+        (
+            {"rl": {"press": {"policy": {"actor": {"hidden_dims": [256, 0]}}}}},
+            "actor.hidden_dims values must be positive",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"critic": {"hidden_dims": [-1]}}}}},
+            "critic.hidden_dims values must be positive",
+        ),
+        (
+            {"rl": {"press": {"policy": {"activation": "  "}}}},
+            "activation must be non-empty",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"actor": {"initial_noise_std": -0.1}}}}},
+            "initial_noise_std must be finite and non-negative",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"actor": {"initial_noise_std": float("inf")}}}}},
+            "initial_noise_std must be finite and non-negative",
+        ),
+        (
+            {"rl": {"training": {"alignment_artifact": "  "}}},
+            "alignment_artifact must be non-empty",
+        ),
+        (
+            {"rl": {"training": {"training_mode": "resume"}}},
+            "training_mode",
+        ),
+        (
+            {"rl": {"press": {"policy": {"actor": {"output_initialization": "task-controller"}}}}},
+            "output_initialization",
+        ),
+    ],
+)
+def test_task_policy_validation(tmp_path, override, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_policy", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
+
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [
+        ({"rl": {"press": {"curriculum_stage": "future"}}}, "unknown"),
+        (
+            {"rl": {"press": {"goal": {"range_min_m": 0.43}}}},
+            "range bounds",
+        ),
+        (
+            {"rl": {"press": {"goal": {"velocity_reference": {"range_center_m": 0.43}}}}},
+            "range_center_m",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "goal": {
+                            "velocity_reference": {
+                                "wall_normal_min_mps": 0.1,
+                            }
+                        }
+                    }
+                }
+            },
+            "wall-normal limits",
+        ),
+        (
+            {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},
+            "switch_range_min_m",
+        ),
+        (
+            {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},
+            "finite and non-negative",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "evaluation": {
+                            "collision_rate_max": 1.1,
+                        }
+                    }
+                }
+            },
+            "between 0 and 1",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "evaluation": {
+                            "selection_metric": "unknown",
+                        }
+                    }
+                }
+            },
+            "selection_metric",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "evaluation": {
+                            "collision_penalty": -1.0,
+                        }
+                    }
+                }
+            },
+            "finite and non-negative",
+        ),
+    ],
+)
+def test_press_approach_validation(tmp_path, override, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_press_approach", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
@@ -222,6 +503,19 @@ def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():
     assert "VehicleConfig" in str(get_type_hints(ExperimentConfig)["vehicles"])
     routine_type = get_type_hints(VehicleConfig)["routine"]
     assert "RoutineStepConfig" in str(get_type_hints(routine_type)["steps"])
+
+
+def test_policy_routine_uses_label_and_target_enu_contract():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "policy_hover_quad.yaml")
+    policy_step = next(
+        step for step in config.vehicles["x500_01"].routine.steps if step["kind"] == "policy"
+    )
+
+    assert policy_step["label"] == "hover"
+    assert "name" not in policy_step
+    assert "target" not in policy_step
 
 
 def test_empty_fleet_is_valid(tmp_path):

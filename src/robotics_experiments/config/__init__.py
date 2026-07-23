@@ -6,40 +6,49 @@ details; callers consume the stable config model types and loader entrypoints
 exported here.
 """
 
+from robotics_experiments.config._commanding import RoutineStepConfig
 from robotics_experiments.config._environment import ExperimentConfig, VehicleConfig
 from robotics_experiments.config._px4 import Px4BridgeConfig
 from robotics_experiments.config._rl import (
+    HoverTaskConfig,
     IsaacLabVehicleConfig,
-    PressActionConfig,
-    PressEvaluationConfig,
+    PressApproachEvaluationConfig,
+    PressApproachGoalConfig,
+    PressApproachRewardConfig,
+    PressApproachTerminationConfig,
+    PressApproachVelocityReferenceConfig,
     PressResetConfig,
-    PressRewardConfig,
-    PressTerminationConfig,
+    RlActionConfig,
+    RlPolicyActorConfig,
+    RlPolicyConfig,
+    RlPolicyCriticConfig,
+    RlTrainingConfig,
 )
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
+from robotics_experiments.config.loading import load_config
 
 __all__ = [
     "BoundingBox",
     "DroneSpawnConfig",
     "ExperimentConfig",
+    "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "LightSwitchConfig",
-    "PressActionConfig",
-    "PressEvaluationConfig",
+    "PressApproachEvaluationConfig",
+    "PressApproachGoalConfig",
+    "PressApproachRewardConfig",
+    "PressApproachTerminationConfig",
+    "PressApproachVelocityReferenceConfig",
     "PressResetConfig",
-    "PressRewardConfig",
-    "PressTerminationConfig",
     "Px4BridgeConfig",
+    "RlActionConfig",
+    "RlPolicyActorConfig",
+    "RlPolicyConfig",
+    "RlPolicyCriticConfig",
+    "RlTrainingConfig",
+    "RoutineStepConfig",
     "SimSettings",
     "VehicleConfig",
     "load_config",
 ]
-
-
-def __getattr__(name: str):
-    if name == "load_config":
-        from robotics_experiments.config.loading import load_config
-
-        return load_config
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

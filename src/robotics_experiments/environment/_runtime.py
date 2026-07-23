@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, auto
-from typing import Any
+from typing import TYPE_CHECKING
 
 import carb
 
@@ -22,6 +22,10 @@ from robotics_experiments.environment.stage import (
 )
 from robotics_experiments.environment.step import init_articulations, step_switches
 from robotics_experiments.environment.switches import SwitchState
+
+if TYPE_CHECKING:
+    from isaacsim.core.prims import SingleArticulation
+    from pxr import Usd
 
 __all__ = [
     "SwitchesRuntimePhase",
@@ -51,13 +55,15 @@ class SwitchesRuntimeState:
     """Immutable switch progress plus live Isaac resource references."""
 
     config: LightSwitchConfig
-    stage: Any
+    stage: Usd.Stage | None
     switches: tuple[SwitchState, ...]
-    articulations: tuple[Any, ...]
+    articulations: tuple[SingleArticulation, ...]
     phase: SwitchesRuntimePhase
 
 
-def create_switches_runtime(*, config: LightSwitchConfig, stage: Any) -> SwitchesRuntimeState:
+def create_switches_runtime(
+    *, config: LightSwitchConfig, stage: Usd.Stage | None
+) -> SwitchesRuntimeState:
     """Create an idle runtime bound to the current stage."""
     return SwitchesRuntimeState(
         config=config,
@@ -79,7 +85,7 @@ def teardown_switches_runtime(*, state: SwitchesRuntimeState) -> SwitchesRuntime
     )
 
 
-def adopt_switches_stage(*, state: SwitchesRuntimeState, stage: Any) -> SwitchesRuntimeState:
+def adopt_switches_stage(*, state: SwitchesRuntimeState, stage: Usd.Stage) -> SwitchesRuntimeState:
     """Adopt a newly opened stage and clear runtime progress on that stage."""
     return teardown_switches_runtime(state=replace(state, stage=stage))
 

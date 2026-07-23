@@ -1,6 +1,7 @@
 import functools
 import math
 from collections.abc import Iterable
+from dataclasses import fields
 from os import PathLike
 from pathlib import Path
 from typing import cast
@@ -168,6 +169,147 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
 
 
+def _validate_rl_policies(experiment: ExperimentConfig) -> None:
+    if not experiment.rl.training.alignment_artifact.strip():
+        raise ValueError("rl.training.alignment_artifact must be non-empty")
+    if experiment.rl.training.training_mode not in {"scratch", "actor-only"}:
+        raise ValueError("rl.training.training_mode must be either 'scratch' or 'actor-only'")
+    policies = {
+        "rl.hover.policy": experiment.rl.hover.policy,
+        "rl.press.policy": experiment.rl.press.policy,
+    }
+    for path, policy in policies.items():
+        if not policy.activation.strip():
+            raise ValueError(f"{path}.activation must be non-empty")
+        dimensions = {
+            f"{path}.actor.hidden_dims": policy.actor.hidden_dims,
+            f"{path}.critic.hidden_dims": policy.critic.hidden_dims,
+        }
+        for dimensions_path, hidden_dims in dimensions.items():
+            bad_dimension = next((dimension for dimension in hidden_dims if dimension <= 0), None)
+            if bad_dimension is not None:
+                raise ValueError(
+                    f"{dimensions_path} values must be positive, got {bad_dimension!r}"
+                )
+        noise = policy.actor.initial_noise_std
+        if not math.isfinite(noise) or noise < 0.0:
+            raise ValueError(
+                f"{path}.actor.initial_noise_std must be finite and non-negative, got {noise!r}"
+            )
+        if policy.actor.output_initialization != "scratch-neutral-output":
+            raise ValueError(
+                f"{path}.actor.output_initialization must be " "'scratch-neutral-output'"
+            )
+
+
+def _validate_press_approach(experiment: ExperimentConfig) -> None:
+    press = experiment.rl.press
+    if press.curriculum_stage != "approach":
+        raise ValueError(
+            f"unknown rl.press.curriculum_stage={press.curriculum_stage!r}; " "expected 'approach'"
+        )
+    handoff = press.handoff
+    if not (
+        math.isfinite(handoff.switch_range_min_m)
+        and math.isfinite(handoff.switch_range_max_m)
+        and 0.0 < handoff.switch_range_min_m <= handoff.switch_range_max_m
+    ):
+        raise ValueError("rl.press.handoff switch range bounds must be positive and ordered")
+    positive_handoff_values = {
+        "lateral_align_max_m": handoff.lateral_align_max_m,
+        "wall_normal_speed_max_mps": handoff.wall_normal_speed_max_mps,
+        "lateral_speed_max_mps": handoff.lateral_speed_max_mps,
+        "angular_speed_max_radps": handoff.angular_speed_max_radps,
+    }
+    for name, value in positive_handoff_values.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"rl.press.handoff.{name} must be finite and positive")
+    if not math.isfinite(handoff.pose_age_max_s) or handoff.pose_age_max_s < 0.0:
+        raise ValueError("rl.press.handoff.pose_age_max_s must be finite and non-negative")
+    bounded_handoff_values = {
+        "pose_confidence_min": handoff.pose_confidence_min,
+        "body_z_alignment_min": handoff.body_z_alignment_min,
+        "estimator_health_min": handoff.estimator_health_min,
+    }
+    for name, value in bounded_handoff_values.items():
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
+
+    goal = press.goal
+    if not 0.0 < goal.range_min_m <= goal.range_max_m:
+        raise ValueError("rl.press.goal range bounds must be positive and ordered")
+    reference = goal.velocity_reference
+    if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
+        raise ValueError(
+            "rl.press.goal.velocity_reference.range_center_m must lie inside " "the goal range"
+        )
+    if not (
+        math.isfinite(reference.wall_normal_min_mps)
+        and math.isfinite(reference.wall_normal_max_mps)
+        and reference.wall_normal_min_mps < reference.wall_normal_max_mps
+        and reference.wall_normal_min_mps <= 0.0 <= reference.wall_normal_max_mps
+    ):
+        raise ValueError(
+            "rl.press.goal.velocity_reference wall-normal limits must be " "finite and ordered"
+        )
+    if not 0.0 <= goal.body_z_alignment_min <= 1.0:
+        raise ValueError("rl.press.goal.body_z_alignment_min must be between 0 and 1")
+    positive_goal_values = {
+        "alignment_error_max_m": goal.alignment_error_max_m,
+        "linear_speed_max_mps": goal.linear_speed_max_mps,
+        "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
+        "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
+        "velocity_reference.tangential_speed_max_mps": (reference.tangential_speed_max_mps),
+    }
+    for name, value in positive_goal_values.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"rl.press.goal.{name} must be finite and positive")
+    if goal.stable_steps <= 0:
+        raise ValueError("rl.press.goal.stable_steps must be positive")
+
+    if handoff.switch_range_min_m <= goal.range_max_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
+        )
+
+    for field in fields(press.reward):
+        name = field.name
+        value = getattr(press.reward, name)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(
+                f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
+            )
+    evaluation = press.evaluation
+    if evaluation.episodes_per_seed <= 0 or not evaluation.seeds:
+        raise ValueError("rl.press.evaluation requires seeds and positive episodes_per_seed")
+    for name, value in {
+        "success_rate_min": evaluation.success_rate_min,
+        "collision_rate_max": evaluation.collision_rate_max,
+    }.items():
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
+    if evaluation.selection_metric != "held-out-press-task-quality-v2":
+        raise ValueError(
+            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v2'"
+        )
+    for name in (
+        "collision_penalty",
+        "flight_failure_penalty",
+        "timeout_penalty",
+        "non_success_penalty",
+        "terminal_range_weight",
+        "trajectory_alignment_weight",
+        "velocity_tracking_weight",
+        "upright_error_weight",
+        "action_delta_weight",
+        "completion_time_weight",
+    ):
+        value = getattr(evaluation, name)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"rl.press.evaluation.{name} must be finite and non-negative")
+
+
 def _validate_switches(experiment: ExperimentConfig) -> None:
     switches = experiment.switches
     positive_integers = {
@@ -306,5 +448,7 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
+    _validate_rl_policies(experiment)
+    _validate_press_approach(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

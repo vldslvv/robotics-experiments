@@ -114,18 +114,24 @@ def takeoff(
     )
 
 
-def reposition(latitude_deg: float, longitude_deg: float, altitude_m: float) -> MavlinkCommand:
+def reposition(
+    latitude_deg: float,
+    longitude_deg: float,
+    altitude_m: float,
+    ground_speed_m_s: float = -1.0,
+    /,
+) -> MavlinkCommand:
     """Reposition to a geographic point and altitude (``MAV_CMD_DO_REPOSITION``).
 
-    Forward-looking scaffolding for navigate-to-point / set-altitude routines:
-    param1=-1 keeps the default ground speed, param2 asks PX4 to switch into the
-    mode needed to execute the reposition, param4 yaw is ``NaN`` (unchanged), and
-    param5/6/7 are the target lat/lon/altitude.
+    Param1 selects the guided ground speed; its default ``-1`` retains PX4's
+    configured speed for existing consumers. Param2 asks PX4 to switch into the
+    mode needed to execute the reposition, param4 yaw is ``NaN`` (unchanged),
+    and param5/6/7 are the target lat/lon/altitude.
     """
     return MavlinkCommand(
         command_id=MAV_CMD_DO_REPOSITION,
         params=(
-            -1.0,
+            float(ground_speed_m_s),
             float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE),
             0.0,
             math.nan,
@@ -204,7 +210,7 @@ class VelocitySetpoint:
     ``SET_POSITION_TARGET_LOCAL_NED`` in ``MAV_FRAME_BODY_NED`` with the velocity
     fields enabled and position/acceleration ignored. Components are in the PX4
     body-FRD convention (forward / right / down), so the pure action->setpoint
-    mapper (``robotics_experiments.rl.press.press_action_to_offboard``) converts the body-FLU RL
+    mapper (``robotics_experiments.rl.policy_action_to_offboard``) converts the body-FLU RL
     action into these.
 
     Attributes:

@@ -48,7 +48,7 @@ points are model citizens:
   mutable holder (callbacks ignore return values), the state is a frozen
   `_BridgeHostState` replaced by module-level transitions; the class is a
   minimal cell.
-- `src/robotics_experiments/rl/press/actuation.py`: frozen params + pure
+- `src/robotics_experiments/rl/actuation.py`: frozen params + pure
   `f(params, inputs) -> outputs` pipeline, explicitly kept as the numpy oracle
   for the torch twin.
 - `src/robotics_experiments/config/`: the whole resolved config graph is

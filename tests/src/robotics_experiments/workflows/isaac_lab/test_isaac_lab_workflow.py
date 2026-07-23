@@ -24,8 +24,8 @@ def _drop_modules(*prefixes: str) -> None:
 
 
 def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
-    _drop_modules("gymnasium", "isaaclab", "robotics_experiments.workflows.isaac_lab")
-    blocker = _BlockedDependencyFinder({"gymnasium", "isaaclab"})
+    _drop_modules("isaaclab", "robotics_experiments.workflows.isaac_lab")
+    blocker = _BlockedDependencyFinder({"isaaclab"})
     monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
     module = importlib.import_module("robotics_experiments.workflows.isaac_lab")
@@ -34,19 +34,19 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "DRONE_HOVER_TASK_ID",
         "DroneHoverEnv",
         "DroneHoverEnvCfg",
-        "PressEpisodeMetrics",
-        "PressEvaluationResult",
-        "PressEvaluationSummary",
+        "PressApproachEpisodeMetrics",
+        "PressApproachEvaluationResult",
+        "PressApproachEvaluationSummary",
         "SWITCH_PRESS_TASK_ID",
         "SwitchPressEnv",
         "SwitchPressEnvCfg",
         "compute_lab_rotor_omega",
-        "evaluate_press_policy",
+        "evaluate_press_approach_policy",
         "make_drone_hover_env_cfg",
         "make_isaac_lab_env",
         "make_switch_press_env_cfg",
         "register_isaac_lab_tasks",
-        "summarize_press_episodes",
+        "summarize_press_approach_episodes",
     ]
     assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v0"
     assert module.SWITCH_PRESS_TASK_ID == "Isaac-Switch-Press-Direct-v0"
@@ -54,11 +54,9 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
 
 
 def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
-    from robotics_experiments.workflows.isaac_lab import (
-        DRONE_HOVER_TASK_ID,
-        SWITCH_PRESS_TASK_ID,
-        register_isaac_lab_tasks,
-    )
+    registration = importlib.import_module("robotics_experiments.workflows.isaac_lab.registration")
+    DRONE_HOVER_TASK_ID = registration.DRONE_HOVER_TASK_ID
+    SWITCH_PRESS_TASK_ID = registration.SWITCH_PRESS_TASK_ID
 
     fake_gym = types.ModuleType("gymnasium")
     fake_gym.__spec__ = importlib.machinery.ModuleSpec("gymnasium", loader=None)
@@ -74,11 +72,11 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
         }
 
     fake_gym.register = register
-    monkeypatch.setitem(sys.modules, "gymnasium", fake_gym)
+    monkeypatch.setattr(registration, "gym", fake_gym)
     monkeypatch.setitem(sys.modules, "isaaclab", fake_isaaclab)
 
-    assert register_isaac_lab_tasks() is True
-    assert register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
 
     spec = fake_gym.registry[DRONE_HOVER_TASK_ID]
     assert spec == {
@@ -93,7 +91,7 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
         },
     }
     fake_gym.registry.pop(SWITCH_PRESS_TASK_ID)
-    assert register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
     assert fake_gym.registry[DRONE_HOVER_TASK_ID] is spec
     assert fake_gym.registry[SWITCH_PRESS_TASK_ID] == {
         "entry_point": (
@@ -124,7 +122,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
         return types.SimpleNamespace(unwrapped="environment")
 
     fake_gym.make = make
-    monkeypatch.setitem(sys.modules, "gymnasium", fake_gym)
+    monkeypatch.setattr(registration, "gym", fake_gym)
     monkeypatch.setattr(registration, "register_isaac_lab_tasks", lambda: True)
     monkeypatch.setattr(
         registration.importlib,
@@ -135,6 +133,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     env, returned_cfg = registration.make_isaac_lab_env(
         task_id=registration.SWITCH_PRESS_TASK_ID,
         experiment_config="training-yaml",
+        controller_settings="aligned-controller",
         seed=123,
         num_envs=8,
         policy_contract=contract,
@@ -144,6 +143,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert returned_cfg is env_cfg
     assert calls["factory"]["policy_contract"] is contract
     assert calls["gym"][1]["policy_contract"] is contract
+    assert calls["gym"][1]["controller_settings"] == "aligned-controller"
     assert env_cfg.scene.num_envs == 8
 
 
@@ -167,6 +167,8 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     cfg = make_drone_hover_env_cfg(experiment_config=load_config("configs/takeoff_quad.yaml"))
     assert cfg.action_space == 4
     assert cfg.observation_space == 13
+    assert cfg.policy_config.actor.hidden_dims == (128, 128)
+    assert cfg.policy_config.critic.hidden_dims == (128, 128)
     assert not hasattr(cfg, "physics_rate_hz")
     assert cfg.sim.dt == pytest.approx(1.0 / 250.0)
     assert (
