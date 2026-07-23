@@ -71,7 +71,7 @@ class SelectedCheckpoint:
 
 @dataclass(frozen=True)
 class CheckpointSelection:
-    """All scorer results and the selected checkpoint, when one is eligible."""
+    """All scorer results and the selected checkpoint."""
 
     selection_method: str
     candidates: tuple[CandidateEvaluation, ...]
@@ -136,18 +136,15 @@ def select_checkpoint(
     evaluations = scorer(candidates)
     if tuple(evaluation.candidate for evaluation in evaluations) != candidates:
         raise ValueError("checkpoint scorer did not evaluate every candidate in order")
-    eligible = tuple(evaluation for evaluation in evaluations if evaluation.accepted)
-    selected = max(eligible, key=lambda evaluation: evaluation.ranking_values) if eligible else None
+    accepted = tuple(evaluation for evaluation in evaluations if evaluation.accepted)
+    ranked = accepted or evaluations
+    selected = max(ranked, key=lambda evaluation: evaluation.ranking_values)
     return CheckpointSelection(
         selection_method=selection_method,
         candidates=evaluations,
-        selected=(
-            SelectedCheckpoint(
-                iteration=selected.candidate.iteration,
-                path=selected.candidate.path,
-            )
-            if selected is not None
-            else None
+        selected=SelectedCheckpoint(
+            iteration=selected.candidate.iteration,
+            path=selected.candidate.path,
         ),
     )
 

@@ -11,9 +11,12 @@ SELECT_ARGS ?=
 EVAL_PRESS_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/eval_press.py
 EVAL_PRESS_LOG = /isaac-sim/.nvidia-omniverse/logs/eval_press.log
 EVAL_ARGS ?=
+RL_TENSORBOARD_HOST ?= 127.0.0.1
+RL_TENSORBOARD_PORT ?= 6006
+RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 
 # Training owns optimization, stored metadata, and checkpoints only. A direct
-# run is intentionally unpublished until select-rl-checkpoint accepts it.
+# run is intentionally unpublished until select-rl-checkpoint selects it.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 train-rl: ISAAC_TEST_EXTRA_ARGS = $(TRAIN_ARGS)
@@ -48,6 +51,21 @@ eval-press: generate-drone-usd
 	    ISAAC_TEST_SCRIPT='$(EVAL_PRESS_SCRIPT)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+# The training wrapper runs this foreground server in the existing Isaac Lab
+# image and stops its named container on exit.
+.PHONY: tensorboard-rl
+tensorboard-rl:
+	@docker run --rm \
+	    --network=host \
+	    --name '$(RL_TENSORBOARD_CONTAINER_NAME)' \
+	    -v '$(CURDIR):$(ISAAC_PROJECT_DIR):ro' \
+	    --entrypoint /isaac-sim/python.sh \
+	    '$(ISAAC_LAB_IMAGE)' \
+	    -m tensorboard.main \
+	    --logdir '$(ISAAC_PROJECT_DIR)/.build/training' \
+	    --host '$(RL_TENSORBOARD_HOST)' \
+	    --port '$(RL_TENSORBOARD_PORT)'
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

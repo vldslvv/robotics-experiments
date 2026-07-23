@@ -14,8 +14,10 @@ import pytest
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
+    CheckpointSelection,
     MetricValue,
     RewardMean,
+    SelectedCheckpoint,
     enumerate_checkpoints,
     register_checkpoint_scorer,
     select_checkpoint,
@@ -154,7 +156,7 @@ def test_press_ranking_without_a_toggle_time_is_strict_json_serializable() -> No
     json.dumps(evaluation.ranking_values, allow_nan=False)
 
 
-def test_registered_scorer_selects_only_eligible_candidates() -> None:
+def test_accepted_candidate_always_outranks_rejected_candidate() -> None:
     candidates = (
         CheckpointCandidate(0, Path("model_0.pt")),
         CheckpointCandidate(50, Path("model_50.pt")),
@@ -190,6 +192,38 @@ def test_registered_scorer_selects_only_eligible_candidates() -> None:
 
     assert selection.selected is not None
     assert selection.selected.iteration == 50
+
+
+def test_scorer_selects_highest_ranked_fallback_when_none_are_accepted() -> None:
+    candidates = (
+        CheckpointCandidate(100, Path("model_100.pt")),
+        CheckpointCandidate(150, Path("model_150.pt")),
+        CheckpointCandidate(200, Path("model_200.pt")),
+    )
+    evaluations = tuple(
+        CandidateEvaluation(
+            candidate=candidate,
+            accepted=False,
+            metrics=(MetricValue("score", ranking),),
+            normalized_margins=(ranking, ranking, ranking),
+            ranking_values=(ranking,),
+            reward_means=(),
+        )
+        for candidate, ranking in zip(candidates, (0.1, 0.3, 0.0), strict=True)
+    )
+    register_checkpoint_scorer(
+        policy_interface="test-fallback-v1",
+        selection_method="test-maximin-v2",
+        scorer=lambda _candidates: evaluations,
+    )
+
+    selection = select_checkpoint(
+        policy_interface="test-fallback-v1",
+        candidates=candidates,
+    )
+
+    assert selection.selected is not None
+    assert selection.selected.iteration == 150
 
 
 def test_press_selection_evaluates_every_candidate_with_one_runner_and_environment(
@@ -252,54 +286,14 @@ def test_no_scorer_warns_and_selects_final_checkpoint() -> None:
     assert selection.selected.iteration == 299
 
 
-def test_no_passing_press_candidate_retains_report_and_previous_latest(
-    tmp_path: Path,
-) -> None:
-    selector = _load_selector_module()
-    candidate = CheckpointCandidate(0, tmp_path / "run" / "logs" / "model_0.pt")
-    evaluation = selector._score_press_result(  # noqa: SLF001
-        candidate=candidate,
-        result=_result(toggle=0.1, contact=0.1, retreat=0.1),
-        evaluation_config=SimpleNamespace(
-            success_rate_min=0.8,
-            first_contact_stability_min=0.85,
-            retreat_rate_min=0.95,
-        ),
-    )
-    register_checkpoint_scorer(
-        policy_interface="press-no-pass-v1",
-        selection_method="press-acceptance-maximin-v1",
-        scorer=lambda _candidates: (evaluation,),
-    )
-    selection = select_checkpoint(
-        policy_interface="press-no-pass-v1",
-        candidates=(candidate,),
-    )
-    policy_root = tmp_path / "press"
-    run_dir = policy_root / tmp_path.name
-    old_run = policy_root / "old"
-    run_dir.mkdir(parents=True)
-    old_run.mkdir()
-    (policy_root / "latest").symlink_to(old_run.name)
-    report_path = run_dir / "checkpoint_selection.json"
-
-    selector._atomic_write_report(  # noqa: SLF001
-        path=report_path,
-        report={"selected_iteration": None},
-    )
-
-    assert selection.selected is None
-    assert json.loads(report_path.read_text())["selected_iteration"] is None
-    assert os.readlink(policy_root / "latest") == old_run.name
-
-
-def test_publish_reloads_winner_and_advances_relative_latest_only_after_export(
+@pytest.mark.parametrize("accepted", [False, True])
+def test_publish_records_exact_evaluation_and_advances_relative_latest(
     monkeypatch,
     tmp_path: Path,
+    accepted: bool,
 ) -> None:
     selector = _load_selector_module()
     import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl.training.selection import CheckpointSelection, SelectedCheckpoint
 
     policy_root = tmp_path / "press"
     old_run = policy_root / "old"
@@ -321,15 +315,38 @@ def test_publish_reloads_winner_and_advances_relative_latest_only_after_export(
         lambda **kwargs: loaded.append(kwargs["checkpoint_path"]),
     )
     monkeypatch.setattr(training, "export_policy", fake_export)
+    evaluation = CandidateEvaluation(
+        candidate=CheckpointCandidate(iteration=50, path=checkpoint),
+        accepted=accepted,
+        metrics=(
+            MetricValue("confirmed_toggle_rate", 0.75),
+            MetricValue("median_toggle_time_s", None),
+        ),
+        normalized_margins=(0.9375, 1.0, 1.0),
+        ranking_values=(0.9375, 1.0, 1.0, 0.75, -0.01, -sys.float_info.max, -50.0),
+        reward_means=(RewardMean("toggle", 0.125),),
+    )
     selection = CheckpointSelection(
-        selection_method="press-acceptance-maximin-v1",
-        candidates=(),
+        selection_method="press-gated-maximin-v2",
+        candidates=(evaluation,),
         selected=SelectedCheckpoint(iteration=50, path=checkpoint),
     )
+    thresholds = {
+        "confirmed_toggle_rate_min": 0.8,
+        "stable_first_contact_rate_min": 0.85,
+        "post_toggle_retreat_rate_min": 0.95,
+    }
+    report = {
+        "selected_iteration": 50,
+        "selected_accepted": accepted,
+        "seeds": [101, 202, 303],
+        "episodes_per_seed": 100,
+        "thresholds": thresholds,
+    }
 
     selector._publish_selection(  # noqa: SLF001 - focused publication contract test.
         selection=selection,
-        report={"selected_iteration": 50},
+        report=report,
         metadata={"policy_interface": "press-v1"},
         runner=object(),
         run_dir=run_dir,
@@ -341,14 +358,70 @@ def test_publish_reloads_winner_and_advances_relative_latest_only_after_export(
     assert os.readlink(policy_root / "latest") == run_dir.name
     metadata = json.loads((run_dir / "policy_meta.json").read_text())
     assert metadata["selected_checkpoint_iteration"] == 50
-    assert metadata["selection_method"] == "press-acceptance-maximin-v1"
+    assert metadata["selection_method"] == "press-gated-maximin-v2"
+    assert metadata["checkpoint_evaluation"] == {
+        "accepted": accepted,
+        "seeds": [101, 202, 303],
+        "episodes_per_seed": 100,
+        "thresholds": thresholds,
+        "metrics": {
+            "confirmed_toggle_rate": 0.75,
+            "median_toggle_time_s": None,
+        },
+        "normalized_margins": [0.9375, 1.0, 1.0],
+        "ranking_values": [
+            0.9375,
+            1.0,
+            1.0,
+            0.75,
+            -0.01,
+            -sys.float_info.max,
+            -50.0,
+        ],
+        "reward_means": {"toggle": 0.125},
+    }
     assert (run_dir / "checkpoint_selection.json").is_file()
+
+
+def test_schema_two_report_marks_selected_fallback() -> None:
+    selector = _load_selector_module()
+    candidate = CheckpointCandidate(150, Path("/tmp/run/logs/model_150.pt"))
+    evaluation = _evaluation(
+        selector=selector,
+        iteration=150,
+        result=_result(toggle=1 / 300, contact=1.0, retreat=0.0),
+    )
+    selection = CheckpointSelection(
+        selection_method="press-gated-maximin-v2",
+        candidates=(evaluation,),
+        selected=SelectedCheckpoint(iteration=150, path=candidate.path),
+    )
+
+    report = selector._selection_report(  # noqa: SLF001
+        selection=selection,
+        run_dir=Path("/tmp/run"),
+        policy_name="press",
+        policy_interface="press-v1",
+        seeds=(101, 202, 303),
+        episodes_per_seed=100,
+        evaluation_config=SimpleNamespace(
+            success_rate_min=0.8,
+            first_contact_stability_min=0.85,
+            retreat_rate_min=0.95,
+        ),
+        all_candidates=(candidate,),
+    )
+
+    assert report["schema_version"] == 2
+    assert report["selected_iteration"] == 150
+    assert report["selected_accepted"] is False
+    assert report["candidates"][0]["normalized_margins"] == list(evaluation.normalized_margins)
+    json.dumps(report, allow_nan=False)
 
 
 def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -> None:
     selector = _load_selector_module()
     import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl.training.selection import CheckpointSelection, SelectedCheckpoint
 
     policy_root = tmp_path / "press"
     old_run = policy_root / "old"
@@ -365,7 +438,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        selection_method="press-acceptance-maximin-v1",
+        selection_method="press-gated-maximin-v2",
         candidates=(),
         selected=SelectedCheckpoint(iteration=50, path=checkpoint),
     )

@@ -158,7 +158,7 @@ def _artifact_metadata(
 def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
     from robotics_experiments.rl.press import METADATA_FILENAME
 
-    (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2) + "\n")
+    (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
 
 
 def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:

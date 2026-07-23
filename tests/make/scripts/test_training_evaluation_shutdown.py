@@ -51,9 +51,29 @@ exit 0
 """,
     )
     _write_executable(
+        path=fake_bin / "curl",
+        body="""#!/usr/bin/env bash
+exit 0
+""",
+    )
+    _write_executable(
+        path=fake_bin / "docker",
+        body="""#!/usr/bin/env bash
+printf 'docker %s\\n' "$*" >>"${WRAPPER_CALLS}"
+exit 0
+""",
+    )
+    _write_executable(
         path=fake_bin / "make",
         body="""#!/usr/bin/env bash
 printf 'make %s\\n' "$*" >>"${WRAPPER_CALLS}"
+if [ "$1" = "tensorboard-rl" ]; then
+    trap 'exit 0' TERM INT
+    while true; do
+        sleep 1 &
+        wait "$!"
+    done
+fi
 if [ "$1" = "train-test" ]; then
     exit "${TRAIN_EXIT}"
 fi
@@ -117,6 +137,7 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     call_lines = [line for line in calls.splitlines() if line.startswith("make ")]
     assert [line.split()[1] for line in call_lines] == [
+        "tensorboard-rl",
         "train-test",
         "select-test",
         "eval-test",
@@ -128,9 +149,11 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
         if part.startswith("RL_RUN_ID=")
     }
     assert len(artifact_ids) == 1
-    assert "TRAIN_ARGS=--iterations 3" in call_lines[0]
-    assert "SELECT_ARGS=--selection-note test" in call_lines[1]
-    assert "EVAL_ARGS=--episodes 4" in call_lines[2]
+    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[0]
+    assert "RL_TENSORBOARD_PORT=6006" in call_lines[0]
+    assert "TRAIN_ARGS=--iterations 3" in call_lines[1]
+    assert "SELECT_ARGS=--selection-note test" in call_lines[2]
+    assert "EVAL_ARGS=--episodes 4" in call_lines[3]
     assert "sudo " not in calls
     assert "sync" not in calls
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
@@ -140,6 +163,8 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     assert "shutdown=disabled shutdown_exit=not-requested" in status
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
+    assert "TensorBoard URL: http://127.0.0.1:6006/" in console
+    assert "TensorBoard URL: http://127.0.0.1:6006/" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
@@ -198,7 +223,9 @@ def test_wrapper_skips_evaluation_after_selection_failure(
     assert "train_exit=0 select_exit=31 eval_exit=not-run overall_exit=31" in status
 
 
-def test_wrapper_requests_power_off_after_evaluation_failure(tmp_path: Path) -> None:
+def test_wrapper_evaluates_selected_fallback_and_propagates_evaluation_failure(
+    tmp_path: Path,
+) -> None:
     result = _run_wrapper(tmp_path=tmp_path, train_exit=0, eval_exit=23, shutdown=True)
 
     assert result.returncode == 23

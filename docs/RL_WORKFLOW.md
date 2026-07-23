@@ -167,6 +167,10 @@ Pieces:
   Selection reloads the winner without optimizer state, stages the TorchScript
   actor, selected metadata, and `checkpoint_selection.json`, then atomically
   advances the relative `.build/training/<policy-name>/latest` symlink.
+  A scorer always selects a checkpoint: it prefers acceptance-passing
+  candidates and otherwise publishes the highest-ranked candidate as an
+  explicitly rejected fallback. The independent evaluator remains the
+  acceptance gate.
   Explicit export remains available for manual checkpoint diagnostics:
 
   ```console
@@ -198,6 +202,12 @@ Pieces:
   and press artifacts made before `policy_interface` are recognized only from
   their complete contract fields; legacy press inference retains its exact
   34-value, 20 Hz, four-value velocity tuple and warns.
+  A scored selected artifact also records `selected_checkpoint_iteration`,
+  `selection_method`, and `checkpoint_evaluation`. The last field copies the
+  selected checkpoint's acceptance result, evaluation seeds and episode count,
+  thresholds, metrics, normalized margins, ranking tuple, and reward-term
+  means. These additional fields are strict-JSON diagnostic provenance and do
+  not change the policy runtime contract.
 - **Gate**: `make test-integration-press-policy` flies
   `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
   takeoff -> policy hover hold -> land) strict over PX4 SITL on
@@ -228,16 +238,21 @@ records every reward-term mean, confirmed toggle rate, stable first contact
 among contacted episodes, retreat among toggled episodes, full completion,
 median toggle time, and peak compression overshoot.
 
-A press candidate is eligible only at the configured 80% confirmed-toggle,
-85% stable-first-contact, and 95% post-toggle-retreat thresholds. Eligible
-candidates are ranked by the lexicographically largest sorted tuple of each
-acceptance rate divided by its threshold, maximizing the weakest normalized
-gate first. Exact ties prefer higher full completion, lower peak compression
-overshoot, lower median toggle time, then earlier iteration.
-`checkpoint_selection.json` retains the run/interface identity, seeds,
-thresholds, all candidates and metrics, ranking values, reward means, and the
-selected iteration. If no candidate passes, selection retains the report and
-checkpoints, fails, and leaves the previous `latest` untouched.
+A press candidate is accepted only at the configured 80% confirmed-toggle,
+85% stable-first-contact, and 95% post-toggle-retreat thresholds. Accepted
+candidates are always preferred. Within that set, candidates are ranked by the
+lexicographically largest sorted tuple of each acceptance rate divided by its
+threshold, maximizing the weakest normalized gate first. Exact ties prefer
+higher full completion, lower peak compression overshoot, lower median toggle
+time, then earlier iteration. If no candidate is accepted, the same ranking
+and tie-breakers select the best fallback from all evaluated checkpoints; PPO
+return is never a selection input.
+Schema-2 `checkpoint_selection.json` uses
+`selection_method: press-gated-maximin-v2` and retains the run/interface
+identity, seeds, thresholds, all candidates and metrics, normalized margins,
+ranking values, reward means, selected iteration, and `selected_accepted`.
+Selection publishes either the accepted winner or the explicitly marked
+fallback and advances `latest`.
 
 `make eval-press` independently evaluates the selected artifact with the
 identical rollout and aggregation logic. With `RL_RUN_ID` it reads that exact
@@ -266,8 +281,10 @@ evaluation, a failed stage, or a handled interrupt. In that mode the wrapper
 validates sudo access before training and refreshes the authorization while the
 workload runs. The wrapper creates one artifact run ID and passes it as
 `RL_RUN_ID` to all three stages. Training failure skips selection and
-evaluation; selection failure skips evaluation and cannot change the previous
-`latest`; independent evaluation runs against the successfully selected run.
+evaluation; an operational selection/export failure skips evaluation and
+cannot change the previous `latest`. A gate-rejected fallback is a successful
+selection, so independent evaluation runs against that exact published run and
+fails the overall workflow when the artifact still misses a threshold.
 The wrapper preserves the terminal stage status unless the explicitly
 requested shutdown command fails. Its target names, Hydra config, per-stage
 arguments, label, and log directory are command-line options. The combined
@@ -276,6 +293,11 @@ run ID, and shutdown mode, default to
 `.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
 ordinary integration and policy artifacts remain in `.build/docker/integration`
 and `.build/training`.
+The wrapper also starts `tensorboard-rl` in the pinned Isaac Lab image, serves
+the `.build/training` tree on `http://127.0.0.1:6006/`, prints that URL to the
+terminal and combined console log after the server is ready, and stops the
+named TensorBoard container on every wrapper exit path. A TensorBoard startup
+failure stops the workflow before training.
 
 For explicit unattended shutdown, add the flag:
 
@@ -294,10 +316,12 @@ The zero-manual-update deployment sequence is:
    `--shutdown` only when power-off is wanted.
 2. Training writes an unpublished checkpoint run under the wrapper's
    `RL_RUN_ID`.
-3. Selection publishes only an acceptance-passing winner and advances
-   `.build/training/press/latest`; failure preserves the previous link.
-4. Independent evaluation reads the exact selected run. `latest` means the
-   newest run with an acceptance-passing selected checkpoint.
+3. Selection publishes the best checkpoint and advances
+   `.build/training/press/latest`; metadata marks whether it passed acceptance
+   or is the best ranked fallback.
+4. Independent evaluation reads the exact selected run and remains the
+   acceptance gate. `latest` means the newest selected artifact, which may be
+   an explicitly rejected fallback rather than an accepted policy.
 5. Run `make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; the
    composed `policy_press` routine reads the same symlink, while action kind,
    dimensions, scales, and cadence come from `policy_meta.json`.

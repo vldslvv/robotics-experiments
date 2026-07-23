@@ -18,13 +18,13 @@ from robotics_experiments.rl.press import (
 
 def _reward_cfg():
     return SimpleNamespace(
-        alive_weight=0.025,
-        stability_weight=0.025,
-        approach_progress_weight=10.0,
-        gentle_contact_weight=10.0,
-        compression_progress_weight=100.0,
-        button_progress_weight=100.0,
-        latch_progress_weight=10.0,
+        alive_weight=0.0,
+        stability_weight=5.0,
+        approach_progress_weight=50.0,
+        gentle_contact_weight=5.0,
+        compression_progress_weight=200.0,
+        button_progress_weight=200.0,
+        latch_progress_weight=30.0,
         toggle_weight=30.0,
         retreat_progress_weight=200.0,
         retreat_alignment_weight=50.0,
@@ -46,7 +46,7 @@ def _reward_cfg():
 
 def _termination_cfg(**overrides):
     values = dict(
-        crash_tilt_cos=0.5,
+        crash_tilt_cos=0.819152,
         min_altitude_m=0.25,
         max_wall_normal_distance_m=1.0,
         max_lateral_error_m=0.3,
@@ -228,6 +228,23 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
     assert toggled_off.metrics.toggled[0]
 
 
+def test_upright_has_no_passive_credit_and_tilt_is_penalized_until_failure() -> None:
+    result = _step(
+        state=_initial(batch=4),
+        sample=_sample(
+            button=[0.0, 0.0, 0.0, 0.0],
+            body_z=[1.0, 0.95, 0.82, 0.819151],
+        ),
+    )
+
+    np.testing.assert_allclose(result.rewards.alive, 0.0)
+    assert result.rewards.stability[0] == pytest.approx(0.0)
+    assert result.rewards.stability[1] < result.rewards.stability[0]
+    assert result.rewards.stability[2] < result.rewards.stability[1]
+    np.testing.assert_array_equal(result.termination.crash, [False, False, False, True])
+    assert result.rewards.failure[3] == -_reward_cfg().failure_weight
+
+
 def test_latch_progress_rewards_hold_and_charges_full_regression() -> None:
     state = _initial()
     first = _step(
@@ -246,9 +263,9 @@ def test_latch_progress_rewards_hold_and_charges_full_regression() -> None:
         confirm_steps=3,
     )
 
-    assert first.rewards.latch_progress[0] == pytest.approx(10.0 / 3.0)
-    assert second.rewards.latch_progress[0] == pytest.approx(10.0 / 3.0)
-    assert released.rewards.latch_progress[0] == pytest.approx(-20.0 / 3.0)
+    assert first.rewards.latch_progress[0] == pytest.approx(30.0 / 3.0)
+    assert second.rewards.latch_progress[0] == pytest.approx(30.0 / 3.0)
+    assert released.rewards.latch_progress[0] == pytest.approx(-60.0 / 3.0)
     assert first.rewards.latch_progress[0] + second.rewards.latch_progress[
         0
     ] + released.rewards.latch_progress[0] == pytest.approx(0.0)

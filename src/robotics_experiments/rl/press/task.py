@@ -368,7 +368,8 @@ def step_press_task(
     scraping_speed = _norm(sample.body_linear_velocity_mps[..., 1:3])
 
     alive = _full_like(value=current_range, fill=reward_cfg.alive_weight)
-    stability = reward_cfg.stability_weight * _minimum(_maximum(sample.body_z_world_z, 0.0), 1.0)
+    upright_alignment = _minimum(_maximum(sample.body_z_world_z, 0.0), 1.0)
+    stability = -reward_cfg.stability_weight * _square(1.0 - upright_alignment)
     approach = reward_cfg.approach_progress_weight * approach_progress * precontact
     gentle_contact_stable = first_contact_stable_now & (
         linear_speed <= reward_cfg.gentle_contact_speed_max_mps
