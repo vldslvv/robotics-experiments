@@ -1,12 +1,11 @@
-"""Train a press-pipeline policy and export the validated artifact.
+"""Train a configured RL policy and retain its complete checkpoint run.
 
 The F2b task->policy entrypoint: composes the Hydra config, builds the
 config-selected Gymnasium task (``rl.training.task_id`` -- the hover task
 for F2b; F3 points it at the press task), runs the ``rl.training`` adapter,
-and writes the policy artifact (TorchScript + metadata sidecar) under
-``.build/training/<policy-name>/<run-id>/``, updating the named
-``.build/training/<policy-name>/latest`` symlink the deploy-side routine configs
-reference.
+and writes checkpoints plus the policy contract under
+``.build/training/<policy-name>/<run-id>/``. Automatic artifact export and
+publication are owned by ``make select-rl-checkpoint``.
 
 Run inside the Isaac Lab container (make train-rl):
     /isaac-sim/python.sh /isaac-sim/proj/isaac/runtime/standalone/train_rl.py
@@ -29,9 +28,10 @@ import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
 
-_LATEST_LINK = "latest"
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+_RUN_ID_ENV = "RL_RUN_ID"
 
 
 def _report(message: str) -> None:
@@ -51,8 +51,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _make_run_dir(out_root: Path) -> Path:
-    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.{os.getpid()}"
+def _make_run_dir(out_root: Path, run_id: str | None = None) -> Path:
+    if run_id is None:
+        run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.{os.getpid()}"
+    if _RUN_ID_PATTERN.fullmatch(run_id) is None:
+        raise ValueError(
+            "RL_RUN_ID must be a non-empty single path component using only "
+            "letters, digits, '.', '_' or '-'"
+        )
     run_dir = out_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     return run_dir
@@ -90,14 +96,6 @@ def _git_source_metadata(*, repo_root: Path) -> dict[str, str | bool]:
         text=True,
     ).stdout
     return {"source_commit": commit, "source_dirty": bool(status)}
-
-
-def _update_latest_symlink(out_root: Path, run_dir: Path) -> None:
-    link = out_root / _LATEST_LINK
-    temp = out_root / f".{_LATEST_LINK}.tmp"
-    temp.unlink(missing_ok=True)
-    temp.symlink_to(run_dir.name)
-    temp.replace(link)
 
 
 def _checkpoint_run_dir(*, checkpoint_path: Path, out_root: Path) -> Path:
@@ -139,7 +137,11 @@ def _build_env(
 
 
 def _artifact_metadata(
-    *, config: ExperimentConfig, env_cfg, source_metadata: dict[str, str | bool]
+    *,
+    config: ExperimentConfig,
+    env_cfg,
+    source_metadata: dict[str, str | bool],
+    artifact_run_id: str,
 ):
     import robotics_experiments.rl.press as press
 
@@ -150,7 +152,7 @@ def _artifact_metadata(
         policy_rate_hz=config.rl.policy_rate_hz,
         policy_interface=str(env_cfg.policy_interface),
     )
-    return metadata | source_metadata
+    return metadata | source_metadata | {"artifact_run_id": artifact_run_id}
 
 
 def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
@@ -192,7 +194,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     run_dir = (
         _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
         if checkpoint_path is not None
-        else _make_run_dir(out_root)
+        else _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
     )
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     if checkpoint_path is None:
@@ -222,6 +224,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
                 config=config,
                 env_cfg=env_cfg,
                 source_metadata=_git_source_metadata(repo_root=_repo_root()),
+                artifact_run_id=run_dir.name,
             )
             _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
@@ -238,21 +241,21 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
                 checkpoint_path=checkpoint_path,
                 device=device,
             )
-        metadata, _contract = _stored_artifact_metadata(run_dir=run_dir)
-        training.export_policy(runner, run_dir, metadata=metadata)
+        if checkpoint_path is not None:
+            metadata, _contract = _stored_artifact_metadata(run_dir=run_dir)
+            training.export_policy(runner, run_dir, metadata=metadata)
     finally:
         env.close()
 
-    _update_latest_symlink(out_root, run_dir)
     if checkpoint_path is None:
         _report(
             f"train-rl COMPLETE iterations={result.iterations} "
-            f"artifact={run_dir} latest={out_root / _LATEST_LINK}"
+            f"run={run_dir} publication=pending-selection"
         )
     else:
         _report(
             f"train-rl EXPORT COMPLETE checkpoint={checkpoint_path} "
-            f"artifact={run_dir} latest={out_root / _LATEST_LINK}"
+            f"artifact={run_dir} publication=manual-only"
         )
 
 

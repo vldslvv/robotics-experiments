@@ -249,7 +249,9 @@ the current contents and the intended home for that kind of code.
   the host. Runtime command details live in `docs/RUNTIME_OPERATIONS.md`.
 - Key persistent targets: `make build`, `make run-isaac`, `make run-ros`,
   `make run-px4`, `make stop`, and `make destroy`.
-- Integration targets are defined in `make/integration-tests.mk`. Read
+- General integration targets and the aggregate suite are defined in
+  `make/integration-tests.mk`; RL, Isaac Lab, and press workflow targets are
+  defined in `make/rl.mk`. Read
   `docs/INTEGRATION_TEST_ARCHITECTURE.md` before changing the harness,
   standalone integration scripts, or targets such as `make test-integration`,
   `make test-integration-all`, `make test-integration-press-hover-goto`,

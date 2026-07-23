@@ -85,6 +85,7 @@ done
 : "${ISAAC_DOCKER_RUNTIME:=}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
 : "${ISAAC_PROFILE_TRACE_NAME:=}"
+: "${RL_RUN_ID:=}"
 
 SCRIPT_START_MS="$(now_ms)"
 run_root="$(make_run_root)"
@@ -128,6 +129,7 @@ if docker run --rm \
     -e "ISAAC_TEST_FAILURE_FILTER=${ISAAC_TEST_FAILURE_FILTER}" \
     -e "ISAAC_TEST_LOG=${ISAAC_TEST_LOG}" \
     -e "ISAAC_TEST_LOG_FILTER=${ISAAC_TEST_LOG_FILTER}" \
+    -e "RL_RUN_ID=${RL_RUN_ID}" \
     -e "ISAAC_TEST_SCRIPT=${ISAAC_TEST_SCRIPT}" \
     -e "ISAAC_TEST_EXTRA_ARGS=${ISAAC_TEST_EXTRA_ARGS}" \
     -e "SCENE=${SCENE}" \

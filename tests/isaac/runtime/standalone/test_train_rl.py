@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,27 +22,23 @@ def _load_train_rl_module():
     return module
 
 
-def test_train_rl_paths_are_namespaced_by_policy_name(tmp_path: Path) -> None:
+def test_train_rl_uses_the_requested_artifact_run_id(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     training_root = tmp_path / "training"
     policy_root = train_rl._policy_out_root(  # noqa: SLF001 - helper contract.
         training_root,
         "hover",
     )
-    old_run = policy_root / "old-run"
-    old_run.mkdir(parents=True)
-    (policy_root / "latest").symlink_to(old_run.name)
+    requested_run_id = tmp_path.name
 
-    run_dir = train_rl._make_run_dir(policy_root)  # noqa: SLF001 - helper contract.
-    train_rl._update_latest_symlink(  # noqa: SLF001 - helper contract.
+    run_dir = train_rl._make_run_dir(  # noqa: SLF001 - helper contract.
         policy_root,
-        run_dir,
+        requested_run_id,
     )
 
     assert run_dir.parent == training_root / "hover"
-    assert run_dir.name != "latest"
-    assert os.readlink(policy_root / "latest") == run_dir.name
-    assert not (policy_root / ".latest.tmp").exists()
+    assert run_dir.name == requested_run_id
+    assert not (policy_root / "latest").exists()
 
 
 @pytest.mark.parametrize("policy_name", ["", ".", "..", "/hover", "hover/latest", "hover.latest"])
@@ -78,6 +73,7 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         config=config,
         env_cfg=env_cfg,
         source_metadata={"source_commit": "abc123", "source_dirty": False},
+        artifact_run_id="run-1",
     )
 
     assert metadata["obs_schema_version"] == 1
@@ -86,6 +82,7 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
     assert metadata["policy_rate_hz"] == 20.0
     assert metadata["source_commit"] == "abc123"
     assert metadata["source_dirty"] is False
+    assert metadata["artifact_run_id"] == "run-1"
 
 
 def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path) -> None:
@@ -172,7 +169,7 @@ def test_checkpoint_export_rejects_run_without_stored_contract(tmp_path: Path) -
         train_rl._stored_artifact_metadata(run_dir=tmp_path)  # noqa: SLF001
 
 
-def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
+def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -205,7 +202,8 @@ def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
         policy_interface="press-v1",
     )
     runner = object()
-    observed = {}
+    before_ppo = {}
+    export_calls = []
 
     monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(train_rl, "_build_env", lambda **_kwargs: (env, env_cfg))
@@ -218,7 +216,7 @@ def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
 
     def build_runner(*_args, log_dir, **_kwargs):
         run_dir = Path(log_dir).parent
-        observed["before_ppo"] = json.loads((run_dir / "policy_meta.json").read_text())
+        before_ppo.update(json.loads((run_dir / "policy_meta.json").read_text()))
         return runner
 
     monkeypatch.setattr(training, "build_runner", build_runner)
@@ -230,7 +228,7 @@ def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
     monkeypatch.setattr(
         training,
         "export_policy",
-        lambda _runner, _run_dir, *, metadata: observed.update(exported=metadata),
+        lambda _runner, _run_dir, *, metadata: export_calls.append(metadata),
     )
     args = SimpleNamespace(
         seed=None,
@@ -241,9 +239,11 @@ def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
 
     train_rl._run(args=args, config=config)  # noqa: SLF001
 
-    assert observed["before_ppo"]["policy_rate_hz"] == 17.0
-    assert observed["before_ppo"]["action_scales"]["max_body_velocity_mps"] == 0.75
-    assert observed["exported"] == observed["before_ppo"]
+    assert before_ppo["policy_rate_hz"] == 17.0
+    assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
+    assert before_ppo["artifact_run_id"]
+    assert export_calls == []
+    assert not (tmp_path / ".build" / "training" / "press" / "latest").exists()
 
 
 def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
@@ -260,3 +260,22 @@ def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
     )
 
     assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
+
+
+def test_deterministic_actor_returns_actor_mean_in_evaluation_mode() -> None:
+    from robotics_experiments.rl.training import rsl_rl
+
+    class FakeActor:
+        def __init__(self) -> None:
+            self.evaluating = False
+
+        def eval(self) -> None:
+            self.evaluating = True
+
+    actor = FakeActor()
+    runner = SimpleNamespace(alg=SimpleNamespace(policy=SimpleNamespace(actor=actor)))
+
+    observed = rsl_rl.deterministic_actor(runner=runner)
+
+    assert observed is actor
+    assert actor.evaluating

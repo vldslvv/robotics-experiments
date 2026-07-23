@@ -105,5 +105,6 @@ mission in `configs/policy_press_quad.yaml`: takeoff, navigate to the configured
 handoff point, execute the `press-v1` artifact through the generic `policy`
 step, return, land, and disarm. The strict post-routine hook requires stable
 first contact, exactly one off-to-on lamp event, and stable retreat. Run it only
-after `make eval-press` accepts `.build/training/press/latest`; it is excluded
-from `test-integration-all` for that reason.
+after `make select-rl-checkpoint` publishes `.build/training/press/latest` and
+`make eval-press` independently verifies it; it is excluded from
+`test-integration-all` for that reason.

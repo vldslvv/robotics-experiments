@@ -79,7 +79,7 @@ def _write_torch_artifact(path: Path, metadata: dict) -> Path:
 
 
 def test_missing_artifact_raises_with_hint(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="train one first"):
+    with pytest.raises(ValueError, match="train and select one first"):
         build_policy_step_fn(artifact_dir=tmp_path)
 
 

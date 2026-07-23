@@ -146,14 +146,19 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "DRONE_HOVER_TASK_ID",
             "DroneHoverEnv",
             "DroneHoverEnvCfg",
+            "PressEpisodeMetrics",
+            "PressEvaluationResult",
+            "PressEvaluationSummary",
             "SWITCH_PRESS_TASK_ID",
             "SwitchPressEnv",
             "SwitchPressEnvCfg",
             "compute_lab_rotor_omega",
+            "evaluate_press_policy",
             "make_drone_hover_env_cfg",
             "make_isaac_lab_env",
             "make_switch_press_env_cfg",
             "register_isaac_lab_tasks",
+            "summarize_press_episodes",
         ]
 
         # The Isaac-only / torch leaf modules must stay off the core import path:

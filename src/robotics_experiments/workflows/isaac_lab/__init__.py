@@ -20,6 +20,11 @@ from robotics_experiments.workflows.isaac_lab.registration import (
 if TYPE_CHECKING:
     import torch
 
+    from robotics_experiments.workflows.isaac_lab.press_evaluation import (
+        PressEpisodeMetrics,
+        PressEvaluationResult,
+        PressEvaluationSummary,
+    )
     from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
@@ -36,14 +41,19 @@ __all__ = [
     "DRONE_HOVER_TASK_ID",
     "DroneHoverEnv",
     "DroneHoverEnvCfg",
+    "PressEpisodeMetrics",
+    "PressEvaluationResult",
+    "PressEvaluationSummary",
     "SWITCH_PRESS_TASK_ID",
     "SwitchPressEnv",
     "SwitchPressEnvCfg",
     "compute_lab_rotor_omega",
+    "evaluate_press_policy",
     "make_drone_hover_env_cfg",
     "make_isaac_lab_env",
     "make_switch_press_env_cfg",
     "register_isaac_lab_tasks",
+    "summarize_press_episodes",
 ]
 
 
@@ -76,6 +86,28 @@ def __getattr__(name: str):
         from robotics_experiments.workflows.isaac_lab.tasks.flight import action_to_rotor_omega
 
         return action_to_rotor_omega
+    if name in {
+        "PressEpisodeMetrics",
+        "PressEvaluationResult",
+        "PressEvaluationSummary",
+        "evaluate_press_policy",
+        "summarize_press_episodes",
+    }:
+        from robotics_experiments.workflows.isaac_lab.press_evaluation import (
+            PressEpisodeMetrics,
+            PressEvaluationResult,
+            PressEvaluationSummary,
+            evaluate_press_policy,
+            summarize_press_episodes,
+        )
+
+        return {
+            "PressEpisodeMetrics": PressEpisodeMetrics,
+            "PressEvaluationResult": PressEvaluationResult,
+            "PressEvaluationSummary": PressEvaluationSummary,
+            "evaluate_press_policy": evaluate_press_policy,
+            "summarize_press_episodes": summarize_press_episodes,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
