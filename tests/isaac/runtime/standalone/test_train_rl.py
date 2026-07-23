@@ -30,6 +30,9 @@ def test_train_rl_paths_are_namespaced_by_policy_name(tmp_path: Path) -> None:
         training_root,
         "hover",
     )
+    old_run = policy_root / "old-run"
+    old_run.mkdir(parents=True)
+    (policy_root / "latest").symlink_to(old_run.name)
 
     run_dir = train_rl._make_run_dir(policy_root)  # noqa: SLF001 - helper contract.
     train_rl._update_latest_symlink(  # noqa: SLF001 - helper contract.
@@ -40,6 +43,7 @@ def test_train_rl_paths_are_namespaced_by_policy_name(tmp_path: Path) -> None:
     assert run_dir.parent == training_root / "hover"
     assert run_dir.name != "latest"
     assert os.readlink(policy_root / "latest") == run_dir.name
+    assert not (policy_root / ".latest.tmp").exists()
 
 
 @pytest.mark.parametrize("policy_name", ["", ".", "..", "/hover", "hover/latest", "hover.latest"])

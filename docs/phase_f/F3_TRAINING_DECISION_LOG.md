@@ -1051,3 +1051,79 @@ then run the acceptance evaluator. The evaluator remains the statistical gate:
 it measures learned-policy reliability over the configured non-training seeds,
 whereas the deterministic contact-chain test only proves that one scripted
 physical press is possible.
+
+### 26. Reward an uninterrupted latch hold and a controlled return to the handoff range
+
+#### Interpret the manual sanity run before tuning
+
+Plain-language view: The drone's approach looked useful, but the latest run did
+not actually reach the retreat stage. It tilted beyond its safety limit before
+the lamp changed. What looked like a retreat or a second charge was therefore
+still the old policy acting before a successful press. This distinction matters:
+we should improve both the hold objective and the future retreat objective,
+rather than assume the old policy demonstrated a bad learned retreat.
+
+Technical view: The Isaac Sim 5.1 log
+`kit_20260723_150118.log` records policy start at approximately 15:02:07 and an
+envelope failure one second later: tilt 38.5 degrees exceeded the configured
+35.0-degree limit. No lamp transition was confirmed. An earlier attempt also
+timed out with `first_contact_seen=False`, `toggle_count=0`, an initial range of
+0.49459 m, a closest range of 0.36435 m, and 4.74 mm peak compression. These
+observations support the user's diagnosis that the approach is partly learned
+but the physical latch hold is not.
+
+#### Add signed confirmation progress
+
+Plain-language view: The policy now receives a small part of the latch reward
+for every consecutive sample that keeps the button past its threshold. If it
+lets go before confirmation, those partial rewards are taken back. Holding
+steadily is therefore useful, while tapping the button repeatedly cannot build
+free reward.
+
+Technical view: `PressTaskState.press_steps` remains the exact vectorized twin
+of the production `apply_button_sample` latch. The new `latch_progress` reward
+is `latch_progress_weight * (new_press_steps - old_press_steps) /
+confirm_steps`, gated to the period before the first confirmed toggle. A normal
+sample contributes positive progress, the confirming sample contributes the
+last increment plus the existing one-shot toggle reward, and premature release
+contributes the negative of all accumulated increments. The configured total
+confirmation-progress budget is 10.0; the one-shot toggle remains 30.0. Lamp
+state alone is not paid continuously because that would favor loitering after a
+toggle instead of completing the task.
+
+#### Define retreat as a reverse approach, not clearing an obsolete threshold
+
+Plain-language view: The old success line was 0.35 m from the switch. With the
+longer pusher, the drone can still touch the wall around 0.36 m, so crossing
+that line is not a real retreat. Each episode must now return to at least where
+it began, along a centered, slow, stable path. Flying back toward the wall loses
+the signed distance reward, drifting across the wall or moving too fast is
+penalized, and overshooting the starting point earns no extra distance reward.
+
+Technical view: `PressTaskState` now stores `initial_range_m`. The retreat target
+is `max(initial_range_m, termination.retreat_distance_m)`, retaining 0.35 m only
+as a minimum. Signed wall-normal progress is capped at that target. Post-toggle
+lateral/vertical error receives a quadratic penalty with weight 50.0, and
+linear speed above 0.20 m/s receives a quadratic penalty with weight 50.0.
+Success requires the lamp to remain on, contact to be absent, range to meet the
+dynamic target, lateral/vertical error at most 0.05 m, linear speed at most
+0.20 m/s, angular speed at most 0.50 rad/s, and five consecutive stable samples.
+The deployment transition uses the same dynamic target and stability gates so
+an evaluator success and a runtime routine completion mean the same thing.
+
+#### Verification and continuation
+
+Plain-language view: Unit tests cover early-release reward cancellation and
+show that a drone starting 0.50 m away cannot succeed at 0.40 m, while a
+centered, slow return to 0.50 m can. No new training was started. The existing
+model cannot benefit from a changed reward; it must be retrained after the code
+and deterministic gates are clean.
+
+Technical view: Focused NumPy transition and deployment tests pass. Before a
+new full run, complete the repository quality gate and the Isaac Sim 5.1
+deterministic contact-chain/hover checks. Then train from a clean revision and
+run the separate acceptance evaluator over the configured 300 non-training
+episodes. Acceptance remains at least 80% confirmed-latch success, 85% stable
+first contact among contacted episodes, and 95% stable retreat among toggled
+episodes. The evaluator is still required because reward improvement and unit
+tests establish objective semantics, not statistical policy reliability.

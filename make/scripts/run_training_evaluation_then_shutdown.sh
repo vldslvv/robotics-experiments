@@ -11,11 +11,13 @@ Usage:
     [--train-args ARGS] \
     [--eval-args ARGS] \
     [--label LABEL] \
-    [--log-dir PATH]
+    [--log-dir PATH] \
+    [--shutdown]
 
 Run one Make training target followed by one Make evaluation target, preserving
-console and status logs and powering off after success, failure, or a handled
-interrupt. Evaluation is skipped when training fails.
+console and status logs. Evaluation is skipped when training fails. Power-off
+after success, failure, or a handled interrupt is disabled by default and must
+be requested with --shutdown.
 
 Defaults:
   --train-target train-rl
@@ -23,6 +25,7 @@ Defaults:
   --eval-args    ""
   --label        rl-training-evaluation
   --log-dir      .build/overnight
+  --shutdown     disabled
 EOF
 }
 
@@ -54,6 +57,7 @@ train_args=""
 eval_args=""
 run_label="rl-training-evaluation"
 log_dir=".build/overnight"
+shutdown_requested=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -90,6 +94,10 @@ while [ "$#" -gt 0 ]; do
             log_dir="$2"
             shift 2
             ;;
+        --shutdown)
+            shutdown_requested=true
+            shift
+            ;;
         --help)
             usage
             exit 0
@@ -120,6 +128,11 @@ status_log="${log_dir}/${run_id}.status"
 train_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
+sudo_validated=false
+shutdown_mode="disabled"
+if [ "${shutdown_requested}" = true ]; then
+    shutdown_mode="enabled"
+fi
 
 keep_sudo_alive() {
     local sleep_pid=""
@@ -132,12 +145,30 @@ keep_sudo_alive() {
     done
 }
 
-# Called indirectly by the EXIT trap installed after sudo validation.
-# shellcheck disable=SC2317
-finish_and_power_off() {
-    local workflow_status=$?
-    local shutdown_status
+# Called only by the EXIT-trap handler below.
+# shellcheck disable=SC2329
+write_status() {
+    local overall_status="$1"
+    local shutdown_status="$2"
     local status_line
+
+    status_line="$(printf \
+        'run_id=%s train_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
+        "${run_id}" \
+        "${train_status}" \
+        "${eval_status}" \
+        "${overall_status}" \
+        "${shutdown_mode}" \
+        "${shutdown_status}")"
+    printf '%s\n' "${status_line}" | tee -a "${console_log}" >"${status_log}"
+}
+
+# Called indirectly by the EXIT trap installed before the workflow starts.
+# shellcheck disable=SC2329
+finish_run() {
+    local workflow_status=$?
+    local overall_status="${workflow_status}"
+    local shutdown_status="not-requested"
 
     set +e
     trap - EXIT HUP INT TERM
@@ -145,13 +176,13 @@ finish_and_power_off() {
         kill "${sudo_keeper_pid}" 2>/dev/null
         wait "${sudo_keeper_pid}" 2>/dev/null
     fi
-    status_line="$(printf \
-        'run_id=%s train_exit=%s eval_exit=%s overall_exit=%s' \
-        "${run_id}" \
-        "${train_status}" \
-        "${eval_status}" \
-        "${workflow_status}")"
-    printf '%s\n' "${status_line}" | tee -a "${console_log}" >"${status_log}"
+    if [ "${shutdown_requested}" = true ]; then
+        shutdown_status="not-run"
+    fi
+    write_status "${overall_status}" "${shutdown_status}"
+    if [ "${shutdown_requested}" = false ] || [ "${sudo_validated}" = false ]; then
+        exit "${workflow_status}"
+    fi
     printf '[%s] Power-off requested after workflow exit %s\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "${workflow_status}" |
@@ -159,6 +190,10 @@ finish_and_power_off() {
     sync
     sudo -n shutdown -P now
     shutdown_status=$?
+    if [ "${shutdown_status}" -ne 0 ]; then
+        overall_status="${shutdown_status}"
+    fi
+    write_status "${overall_status}" "${shutdown_status}"
     if [ "${shutdown_status}" -ne 0 ]; then
         printf 'ERROR: automatic power-off failed with exit %s\n' \
             "${shutdown_status}" |
@@ -168,21 +203,26 @@ finish_and_power_off() {
     exit "${workflow_status}"
 }
 
-sudo -v
-keep_sudo_alive &
-sudo_keeper_pid=$!
-trap finish_and_power_off EXIT
+trap finish_run EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-printf '[%s] run_id=%s config=%s train_target=%s eval_target=%s\n' \
+printf '[%s] run_id=%s config=%s train_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
     "${hydra_config}" \
     "${train_target}" \
-    "${eval_target}" |
+    "${eval_target}" \
+    "${shutdown_mode}" |
     tee -a "${console_log}"
+
+if [ "${shutdown_requested}" = true ]; then
+    sudo -v
+    sudo_validated=true
+    keep_sudo_alive &
+    sudo_keeper_pid=$!
+fi
 
 set +e
 make "${train_target}" \

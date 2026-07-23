@@ -24,8 +24,11 @@ def _reward_cfg():
         gentle_contact_weight=10.0,
         compression_progress_weight=100.0,
         button_progress_weight=100.0,
+        latch_progress_weight=10.0,
         toggle_weight=30.0,
         retreat_progress_weight=200.0,
+        retreat_alignment_weight=50.0,
+        retreat_overspeed_weight=50.0,
         success_weight=100.0,
         action_energy_weight=0.001,
         action_delta_weight=0.004,
@@ -50,6 +53,8 @@ def _termination_cfg(**overrides):
         max_vertical_error_m=0.3,
         retreat_distance_m=0.35,
         retreat_speed_max_mps=0.2,
+        retreat_alignment_tolerance_m=0.05,
+        retreat_angular_speed_max_radps=0.5,
         stable_retreat_steps=1,
         first_contact_speed_max_mps=0.25,
         first_contact_angular_speed_max_radps=0.5,
@@ -103,9 +108,9 @@ def _sample(
     )
 
 
-def _initial(*, batch=1):
+def _initial(*, batch=1, switch_range_m=0.3):
     return initial_press_task_state(
-        relative_switch_range_m=np.full(batch, 0.3),
+        relative_switch_range_m=np.full(batch, switch_range_m),
         action=np.zeros((batch, 4)),
     )
 
@@ -223,6 +228,32 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
     assert toggled_off.metrics.toggled[0]
 
 
+def test_latch_progress_rewards_hold_and_charges_full_regression() -> None:
+    state = _initial()
+    first = _step(
+        state=state,
+        sample=_sample(button=[0.02], contact=[True]),
+        confirm_steps=3,
+    )
+    second = _step(
+        state=first.state,
+        sample=_sample(button=[0.02], contact=[True]),
+        confirm_steps=3,
+    )
+    released = _step(
+        state=second.state,
+        sample=_sample(button=[0.0], contact=[False]),
+        confirm_steps=3,
+    )
+
+    assert first.rewards.latch_progress[0] == pytest.approx(10.0 / 3.0)
+    assert second.rewards.latch_progress[0] == pytest.approx(10.0 / 3.0)
+    assert released.rewards.latch_progress[0] == pytest.approx(-20.0 / 3.0)
+    assert first.rewards.latch_progress[0] + second.rewards.latch_progress[
+        0
+    ] + released.rewards.latch_progress[0] == pytest.approx(0.0)
+
+
 @pytest.mark.parametrize(
     ("sample", "flag"),
     [
@@ -267,6 +298,62 @@ def test_success_requires_latch_and_stable_retreat() -> None:
     )
     assert retreat.termination.success[0]
     assert retreat.rewards.success[0] > 0.0
+
+
+def test_retreat_returns_to_initial_range_with_alignment_and_speed_control() -> None:
+    state = _initial(switch_range_m=0.5)
+    toggled = _step(
+        state=state,
+        sample=_sample(
+            button=[0.02],
+            relative=[[0.36, 0.0, 0.0]],
+            contact=[True],
+        ),
+        confirm_steps=1,
+    )
+    partial_retreat = _step(
+        state=toggled.state,
+        sample=_sample(button=[0.0], relative=[[0.4, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert partial_retreat.rewards.retreat[0] > 0.0
+    assert not partial_retreat.termination.success[0]
+
+    misaligned = _step(
+        state=partial_retreat.state,
+        sample=_sample(button=[0.0], relative=[[0.5, 0.06, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert misaligned.rewards.retreat_alignment[0] < 0.0
+    assert not misaligned.termination.success[0]
+
+    too_fast = _step(
+        state=misaligned.state,
+        sample=_sample(
+            button=[0.0],
+            relative=[[0.5, 0.0, 0.0]],
+            contact=[False],
+            linear_velocity=[[0.3, 0.0, 0.0]],
+        ),
+        confirm_steps=1,
+    )
+    assert too_fast.rewards.retreat_overspeed[0] < 0.0
+    assert not too_fast.termination.success[0]
+
+    stable = _step(
+        state=too_fast.state,
+        sample=_sample(button=[0.0], relative=[[0.5, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert stable.termination.success[0]
+    assert stable.rewards.success[0] > 0.0
+
+    overshot = _step(
+        state=stable.state,
+        sample=_sample(button=[0.0], relative=[[0.6, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert overshot.rewards.retreat[0] == 0.0
 
 
 def test_failure_cannot_also_be_success() -> None:
