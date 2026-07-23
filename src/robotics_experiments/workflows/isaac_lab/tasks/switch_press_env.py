@@ -49,6 +49,18 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # about Z faces the physical button toward world -X; applying this same fixed
 # correction to its root pose yields the canonical pi-about-Z provider pose.
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
+_TRAINING_REWARD_TERMS = (
+    "stability",
+    "approach",
+    "gentle_contact",
+    "compression_progress",
+    "button_progress",
+    "latch_progress",
+    "toggle",
+    "failure",
+    "timeout",
+    "total",
+)
 
 
 @configclass
@@ -192,6 +204,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             action=self.actions,
         )
         self._task_result: PressTaskResult | None = None
+        self._completed_episode_count = torch.zeros((), device=self.device)
+        self._contacted_episode_count = torch.zeros((), device=self.device)
+        self._toggled_episode_count = torch.zeros((), device=self.device)
+        self._successful_episode_count = torch.zeros((), device=self.device)
+        self._failed_episode_count = torch.zeros((), device=self.device)
 
     @property
     def press_task_result(self):
@@ -314,7 +331,36 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         if self._task_result is None:
             raise RuntimeError("press transition must advance in _get_dones before rewards")
-        return self._task_result.rewards.total
+        result = self._task_result
+        ended = self.reset_buf
+        failures = (
+            result.termination.crash
+            | result.termination.altitude
+            | result.termination.relative_envelope
+        )
+        self._completed_episode_count += ended.count_nonzero()
+        self._contacted_episode_count += (ended & result.metrics.contacted).count_nonzero()
+        self._toggled_episode_count += (ended & result.metrics.toggled).count_nonzero()
+        self._successful_episode_count += (ended & result.termination.success).count_nonzero()
+        self._failed_episode_count += (ended & failures).count_nonzero()
+        episode_denominator = self._completed_episode_count.clamp_min(1.0)
+        self.extras["log"] = {
+            "Press/completed_episodes": self._completed_episode_count,
+            "Press/contact_percent": 100.0 * self._contacted_episode_count / episode_denominator,
+            "Press/toggle_percent": 100.0 * self._toggled_episode_count / episode_denominator,
+            "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
+            "Press/failure_percent": 100.0 * self._failed_episode_count / episode_denominator,
+            "Press/active_contact_percent": 100.0
+            * result.metrics.contacted.to(torch.float32).mean(),
+            "Press/active_toggle_percent": 100.0 * result.metrics.toggled.to(torch.float32).mean(),
+        }
+        self.extras["log"].update(
+            {
+                f"Reward/{name}": getattr(result.rewards, name).mean()
+                for name in _TRAINING_REWARD_TERMS
+            }
+        )
+        return result.rewards.total
 
     def _get_observations(self) -> dict[str, torch.Tensor]:
         relative_position, relative_quat_xyzw = self._relative_switch_pose()

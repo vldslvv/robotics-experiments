@@ -60,6 +60,8 @@ exit 0
     _write_executable(
         path=fake_bin / "curl",
         body="""#!/usr/bin/env bash
+printf 'curl\\n' >>"${WRAPPER_CALLS}"
+printf '{"Train/mean_reward": {}}\\n'
 exit 0
 """,
     )
@@ -82,6 +84,22 @@ if [ "$1" = "tensorboard-rl" ]; then
     done
 fi
 if [ "$1" = "train-test" ]; then
+    for argument in "$@"; do
+        case "${argument}" in
+            RL_RUN_ID=*)
+                artifact_id="${argument#RL_RUN_ID=}"
+                ;;
+        esac
+    done
+    mkdir -p ".build/training/press/${artifact_id}/logs"
+    printf 'event-data\\n' \
+        >".build/training/press/${artifact_id}/logs/events.out.tfevents.test"
+    for _ in {1..100}; do
+        if grep -q '^curl$' "${WRAPPER_CALLS}"; then
+            break
+        fi
+        sleep 0.01
+    done
     exit "${TRAIN_EXIT}"
 fi
 if [ "$1" = "select-test" ]; then
@@ -130,6 +148,7 @@ exit "${EVAL_EXIT}"
         command,
         check=False,
         capture_output=True,
+        cwd=tmp_path,
         env=env,
         text=True,
     )
@@ -144,8 +163,8 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
     call_lines = [line for line in calls.splitlines() if line.startswith("make ")]
     assert [line.split()[1] for line in call_lines] == [
-        "tensorboard-rl",
         "train-test",
+        "tensorboard-rl",
         "select-test",
         "eval-test",
     ]
@@ -156,15 +175,15 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
         if part.startswith("RL_RUN_ID=")
     }
     assert len(artifact_ids) == 1
-    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[0]
-    assert "RL_TENSORBOARD_PORT=6006" in call_lines[0]
+    assert "RL_TENSORBOARD_HOST=127.0.0.1" in call_lines[1]
+    assert "RL_TENSORBOARD_PORT=6006" in call_lines[1]
     tensorboard_logdir = next(
         part.removeprefix("RL_TENSORBOARD_LOGDIR=")
-        for part in call_lines[0].split()
+        for part in call_lines[1].split()
         if part.startswith("RL_TENSORBOARD_LOGDIR=")
     )
     assert tensorboard_logdir == f".build/training/press/{artifact_ids.pop()}/logs"
-    assert "TRAIN_ARGS=--iterations 3" in call_lines[1]
+    assert "TRAIN_ARGS=--iterations 3" in call_lines[0]
     assert "SELECT_ARGS=--selection-note test" in call_lines[2]
     assert "EVAL_ARGS=--episodes 4" in call_lines[3]
     assert "sudo " not in calls
@@ -176,8 +195,14 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
     assert "shutdown=disabled shutdown_exit=not-requested" in status
     console = next((tmp_path / "logs").glob("*.console.log")).read_text(encoding="utf-8")
     assert "shutdown=disabled" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
-    assert "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
+    assert (
+        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in console
+        and "scalar data loaded" in console
+    )
+    assert (
+        "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
+        and "scalar data loaded" in result.stdout
+    )
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

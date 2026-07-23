@@ -156,7 +156,7 @@ train_status="not-run"
 select_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
-tensorboard_pid=""
+tensorboard_monitor_pid=""
 sudo_validated=false
 tensorboard_host="127.0.0.1"
 tensorboard_port="6006"
@@ -209,10 +209,10 @@ finish_run() {
 
     set +e
     trap - EXIT HUP INT TERM
-    if [ -n "${tensorboard_pid}" ]; then
-        kill "${tensorboard_pid}" 2>/dev/null
+    if [ -n "${tensorboard_monitor_pid}" ]; then
+        kill "${tensorboard_monitor_pid}" 2>/dev/null
         docker stop "${tensorboard_container_name}" >/dev/null 2>&1
-        wait "${tensorboard_pid}" 2>/dev/null
+        wait "${tensorboard_monitor_pid}" 2>/dev/null
     fi
     if [ -n "${sudo_keeper_pid}" ]; then
         kill "${sudo_keeper_pid}" 2>/dev/null
@@ -250,34 +250,59 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-start_tensorboard() {
+serve_tensorboard_when_ready() {
+    local server_pid=""
+    local scalar_tags=""
+
+    trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi' EXIT HUP INT TERM
+    until find "${tensorboard_logdir}" \
+        -maxdepth 1 \
+        -type f \
+        -name 'events.out.tfevents.*' \
+        -size +0c \
+        -print \
+        -quit \
+        2>/dev/null |
+        grep -q .; do
+        sleep 1
+    done
     make tensorboard-rl \
         "RL_TENSORBOARD_CONTAINER_NAME=${tensorboard_container_name}" \
         "RL_TENSORBOARD_HOST=${tensorboard_host}" \
         "RL_TENSORBOARD_LOGDIR=${tensorboard_logdir}" \
         "RL_TENSORBOARD_PORT=${tensorboard_port}" \
         >>"${console_log}" 2>&1 &
-    tensorboard_pid=$!
+    server_pid=$!
     for _ in {1..30}; do
-        if ! kill -0 "${tensorboard_pid}" 2>/dev/null; then
+        if ! kill -0 "${server_pid}" 2>/dev/null; then
             printf 'ERROR: TensorBoard exited before becoming ready; see %s\n' \
-                "${console_log}" >&2
+                "${console_log}" |
+                tee -a "${console_log}" >&2
             return 1
         fi
         if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
-            printf '[%s] TensorBoard URL: %s (run: %s/%s)\n' \
-                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                "${tensorboard_url}" \
-                "${policy_name}" \
-                "${artifact_run_id}" |
-                tee -a "${console_log}"
-            return 0
+            scalar_tags="$(
+                curl --fail --silent \
+                    "${tensorboard_url}data/plugin/scalars/tags" ||
+                    true
+            )"
+            if [[ "${scalar_tags}" == *\"* ]]; then
+                printf '[%s] TensorBoard URL: %s (run: %s/%s; scalar data loaded)\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    "${tensorboard_url}" \
+                    "${policy_name}" \
+                    "${artifact_run_id}" |
+                    tee -a "${console_log}"
+                wait "${server_pid}"
+                return $?
+            fi
         fi
         sleep 1
     done
     printf 'ERROR: TensorBoard did not become ready at %s; see %s\n' \
         "${tensorboard_url}" \
-        "${console_log}" >&2
+        "${console_log}" |
+        tee -a "${console_log}" >&2
     return 1
 }
 
@@ -292,7 +317,8 @@ printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_targe
     "${shutdown_mode}" |
     tee -a "${console_log}"
 
-start_tensorboard
+serve_tensorboard_when_ready &
+tensorboard_monitor_pid=$!
 
 if [ "${shutdown_requested}" = true ]; then
     sudo -v
@@ -316,6 +342,16 @@ fi
 
 if [ "${train_status}" -ne 0 ]; then
     exit "${train_status}"
+fi
+if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
+    set +e
+    wait "${tensorboard_monitor_pid}"
+    tensorboard_status=$?
+    set -e
+    tensorboard_monitor_pid=""
+    if [ "${tensorboard_status}" -ne 0 ]; then
+        exit "${tensorboard_status}"
+    fi
 fi
 
 set +e

@@ -118,7 +118,16 @@ signed. Retreat returns toward at least the episode's initial wall-normal
 range, stops earning distance reward there, penalizes lateral/vertical drift
 and excess speed, and completes only while contact-free, aligned, and stable.
 Crash/altitude/envelope termination has an explicit terminal failure cost,
-preventing timeout-hover and early-exit reward shortcuts.
+preventing timeout-hover and early-exit reward shortcuts. The configured
+terminal failure cost is larger than the timeout cost so an uncontrolled early
+exit cannot outscore a controlled but unsuccessful full attempt.
+
+During training, the press environment publishes cumulative completed-episode
+contact, confirmed-toggle, full-success, and failure percentages under the
+`Press/` TensorBoard namespace. It also publishes the active-episode contact
+and toggle percentages and the principal signed reward terms under `Reward/`.
+These are diagnostic training signals; deterministic checkpoint evaluation
+remains the source of selection and acceptance metrics.
 
 ## Task->policy pipeline (F2b)
 
@@ -294,13 +303,17 @@ run ID, and shutdown mode, default to
 ordinary integration and policy artifacts remain in `.build/docker/integration`
 and `.build/training`.
 The wrapper also starts `tensorboard-rl` in the pinned Isaac Lab image. It
-resolves `rl.training.policy_name` from the selected Hydra config and serves
-only `.build/training/<policy-name>/<artifact-run-id>/logs` on
-`http://127.0.0.1:6006/`, so the dashboard contains exactly the current run.
-After the server is ready, the wrapper prints both the URL and
-`<policy-name>/<artifact-run-id>` label to the terminal and combined console
-log. It stops the named TensorBoard container on every wrapper exit path. A
-TensorBoard startup failure stops the workflow before training.
+resolves `rl.training.policy_name` from the selected Hydra config, begins
+training, waits for that run's non-empty event file, and then serves only
+`.build/training/<policy-name>/<artifact-run-id>/logs` on
+`http://127.0.0.1:6006/`. Starting after the event file exists avoids a
+TensorBoard process whose initially absent log root never activates any
+dashboard, while exact scoping keeps unrelated runs out of the UI. The wrapper
+prints the URL and `<policy-name>/<artifact-run-id>` label to the terminal and
+combined console log only after the scalar-tags endpoint reports loaded data.
+It stops the named TensorBoard container on every wrapper exit path. If the
+server exits or does not load scalar data, the error is logged and a
+successfully completed training stage does not proceed to selection.
 
 For explicit unattended shutdown, add the flag:
 

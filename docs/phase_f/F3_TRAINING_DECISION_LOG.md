@@ -1199,3 +1199,57 @@ still requires at least 80% toggles, 85% stable first contact, and 95%
 post-toggle retreat. Only a passing artifact proceeds to
 `test-integration-press-routine`; a fallback remains diagnostic evidence while
 the workflow remains failed.
+
+### 28. Remove the early-crash return shortcut and expose press progress
+
+#### Diagnose the second objective run
+
+Plain-language view: Run `20260723T213105Z.38183` did not merely fail to find
+the switch. It learned that crashing quickly was cheaper than continuing an
+unsuccessful attempt. Mean episode length briefly reached about 173 steps at
+iteration 5, then collapsed to about 18 steps by iteration 10 and stayed there
+through the stopped run. Mean reward settled near -28 while no press-specific
+training signals were available. Raising the adaptive learning rate would make
+that locally preferred behavior learn faster, not correct what the reward asks
+for.
+
+Technical view: The run began at a configured learning rate of `1e-4`; the
+adaptive schedule ranged from `1e-5` to approximately `3.84e-4` and was about
+`3.38e-5` near iteration 74. A terminal failure cost 30, while an unsuccessful
+ten-second attempt could accumulate the 25 timeout cost plus stability and
+control penalties. Approach progress before a crash could reduce the terminal
+episode loss further. This reward ordering explains the stable short-episode
+solution without invoking insufficient optimizer step size.
+
+#### Make controlled failure preferable to crashing
+
+Plain-language view: A crash now costs substantially more than reaching the
+end of an unsuccessful but controlled attempt. The policy still receives no
+passive survival or upright credit, and the existing approach, contact, button,
+latch, retreat, action, and stability terms are unchanged. The correction is
+therefore aimed only at removing the demonstrated shortcut.
+
+Technical view: `reward.failure_weight` changes from 30.0 to 100.0;
+`timeout_weight` remains 25.0. The crash angle remains 35 degrees and the PPO
+learning rate, adaptive schedule, noise, rollout, checkpoint, and action
+settings are unchanged. New training starts from scratch because checkpoints
+from the stopped run optimize the old return.
+
+#### Report task percentages while PPO is running
+
+Plain-language view: Mean reward alone no longer has to stand in for whether
+the drone is reaching or pressing the switch. TensorBoard now shows cumulative
+percentages for completed episodes that contacted, toggled, fully succeeded,
+or failed, plus active-episode progress. Each run is served by itself and its
+URL is announced only after scalar data is actually loaded.
+
+Technical view: `SwitchPressEnv` adds `Press/contact_percent`,
+`Press/toggle_percent`, `Press/success_percent`, and
+`Press/failure_percent`, along with completed-episode count and active contact
+and toggle percentages. Key signed reward terms are logged under `Reward/`.
+These counters are training diagnostics and do not change checkpoint ranking.
+The training wrapper now waits for the exact run's non-empty TensorBoard event
+file before launching the server, checks the scalar-tags endpoint, and then
+prints the URL and run identity. This replaces starting TensorBoard against a
+log directory that did not yet exist, which could leave it reporting no active
+dashboards.

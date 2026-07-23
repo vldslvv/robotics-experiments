@@ -35,7 +35,7 @@ def _reward_cfg():
         contact_oscillation_weight=0.2,
         scraping_weight=0.1,
         misalignment_weight=0.2,
-        failure_weight=30.0,
+        failure_weight=100.0,
         timeout_weight=25.0,
         gentle_contact_speed_max_mps=0.2,
         compression_target_m=0.01,
@@ -243,6 +243,19 @@ def test_upright_has_no_passive_credit_and_tilt_is_penalized_until_failure() -> 
     assert result.rewards.stability[2] < result.rewards.stability[1]
     np.testing.assert_array_equal(result.termination.crash, [False, False, False, True])
     assert result.rewards.failure[3] == -_reward_cfg().failure_weight
+
+
+def test_terminal_failure_cost_is_worse_than_unsuccessful_timeout() -> None:
+    crash = _step(
+        state=_initial(),
+        sample=_sample(button=[0.0], body_z=[0.0]),
+    )
+    timeout = _step(
+        state=_initial(),
+        sample=_sample(button=[0.0], time_out=[True]),
+    )
+
+    assert crash.rewards.total[0] < timeout.rewards.total[0]
 
 
 def test_latch_progress_rewards_hold_and_charges_full_regression() -> None:

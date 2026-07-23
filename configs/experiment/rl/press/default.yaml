@@ -51,7 +51,9 @@ reward:
   contact_oscillation_weight: 0.2
   scraping_weight: 0.1
   misalignment_weight: 0.2
-  failure_weight: 30.0
+  # A terminal failure must be worse than timing out after a controlled
+  # unsuccessful attempt; otherwise PPO can improve return by crashing early.
+  failure_weight: 100.0
   timeout_weight: 25.0
   gentle_contact_speed_max_mps: 0.20
   compression_target_m: 0.010
