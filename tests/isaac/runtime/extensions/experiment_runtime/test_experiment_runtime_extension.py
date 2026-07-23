@@ -8,6 +8,7 @@ logic is covered by ``test_fleet_orchestrator.py``).
 
 import importlib
 import sys
+import tomllib
 import types
 from enum import IntEnum
 from types import SimpleNamespace
@@ -96,6 +97,8 @@ class _FakeOrchestrator:
         self.env = env
         self.stage = None
         self.flying = []
+        self.switch_events = ()
+        self.fail_spawn = False
         self.calls: list[str] = []
         type(self).last.append(self)
 
@@ -111,6 +114,8 @@ class _FakeOrchestrator:
 
     def spawn_fleet(self):
         self.calls.append("spawn_fleet")
+        if self.fail_spawn:
+            raise ValueError("bad policy artifact")
 
     def start_bridges(self):
         self.calls.append("start_bridges")
@@ -168,6 +173,7 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
 
     fake_runtime = types.ModuleType("robotics_experiments.runtime")
     fake_runtime.FleetDriverEnv = lambda *a, **k: object()
+    fake_runtime.SwitchToggleEvent = object
     fake_runtime.create_fleet = lambda *, config: _FakeOrchestrator(config)
     fake_runtime.open_scene = lambda *, state: state.open_scene() or state
     fake_runtime.adopt_current_stage = lambda *, state: state.adopt_current_stage() or state
@@ -322,6 +328,7 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
             completed_steps=2,
         ),
     )
+    assert status.switch_events == ()
     with pytest.raises(AttributeError):
         status.scene_ready = False
 
@@ -363,6 +370,34 @@ def test_play_before_stage_open_does_not_spawn(monkeypatch):
     _fire_timeline(timeline, _TimelineEventType.PLAY)
 
     assert orch.calls == []
+
+
+def test_setup_failure_is_recorded_cleaned_and_retryable(monkeypatch):
+    _module, extension, orch, usd_context, timeline, app = _started_extension(monkeypatch)
+    app.ready = True
+    _fire_app_update(app)
+    _fire_stage_opened(usd_context)
+    orch.fail_spawn = True
+
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+
+    assert extension.read_status().failure == "fleet setup failed: ValueError: bad policy artifact"
+    assert orch.calls[-1] == "teardown"
+    assert app.physics.callbacks == []
+
+    orch.fail_spawn = False
+    _fire_timeline(timeline, _TimelineEventType.PLAY)
+
+    assert extension.read_status().failure is None
+    assert app.physics.callbacks
+
+
+def test_manifest_declares_direct_press_observation_dependencies() -> None:
+    manifest_path = REPO_ROOT / "isaac/runtime/extensions/experiment_runtime/config/extension.toml"
+    manifest = tomllib.loads(manifest_path.read_text())
+
+    assert "isaacsim.core.prims" in manifest["dependencies"]
+    assert "isaacsim.sensors.physics" in manifest["dependencies"]
 
 
 def test_stop_drops_control_and_tears_down(monkeypatch):

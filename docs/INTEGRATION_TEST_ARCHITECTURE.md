@@ -51,6 +51,14 @@ scenario-specific notes.
   artifact contract and routine config. Policy metadata includes the active
   policy rate, so artifacts trained before that field was introduced must be
   retrained.
+- `make test-integration-press-routine` runs the complete F3 deployment sanity
+  flight from `configs/policy_press_quad.yaml`: takeoff, goto the press handoff
+  pose, execute the artifact-selected generic policy against the real spawned
+  switch/lamp and pusher, return to the landing point, land, and disarm. It
+  requires one lamp transition, stable first contact, and stable post-toggle
+  retreat. Like the hover artifact gate, it is deliberately excluded from
+  `test-integration-all` because it needs an accepted
+  `.build/training/press/latest` whose metadata declares `press-v1`.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

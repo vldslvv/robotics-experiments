@@ -22,6 +22,7 @@ help:
 		'  make print-airframes       Print the generated PX4 airframe manifest (review)' \
 		'' \
 		'  make run-isaac             Start or attach the Isaac Sim container' \
+		'  make preflight-policy-artifacts  Validate policy artifacts before launch' \
 		'  make run-ros               Start or attach the ROS 2 container' \
 		'  make run-px4               Start or attach the PX4 SITL container' \
 		'  make run                   Start Isaac, ROS 2, and PX4 in terminals' \
@@ -40,6 +41,7 @@ help:
 		'  make test-integration-all  Run all integration tests in parallel with a summary' \
 		'  make test-integration-isaac Run the Isaac standalone integration test' \
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
+		'  make test-integration-press-routine Run the trained press full-mission gate' \
 		'  make test-integration-px4-takeoff Run the Isaac/PX4 takeoff stability test' \
 		'  make test-integration-px4-navigation Run the PX4 waypoint navigation test' \
 		'  make test-integration-px4-takeoff-instability Run the PX4 takeoff negative test' \

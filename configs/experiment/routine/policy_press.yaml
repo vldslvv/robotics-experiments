@@ -1,0 +1,33 @@
+defaults:
+  - default
+
+# Full deployment sanity flight: navigate to a stable handoff pose, let the
+# artifact-selected generic policy complete its task, return, and land.
+steps:
+  - kind: arm
+  - kind: takeoff
+    climb_m: 2.5
+    min_climb_m: 1.5
+  - kind: hover
+    hold_s: 2.0
+  - kind: goto
+    x: 0.0
+    y: 17.74
+    z: 2.5
+    position_tol_m: 0.08
+    timeout_s: 30.0
+  - kind: hover
+    hold_s: 1.0
+  - kind: policy
+    name: press
+    artifact: .build/training/press/latest
+    switch_index: 0
+    timeout_s: 20.0
+  - kind: goto
+    x: 0.0
+    y: 14.0
+    z: 2.5
+    position_tol_m: 0.15
+    timeout_s: 30.0
+  - kind: land
+    timeout_s: 30.0

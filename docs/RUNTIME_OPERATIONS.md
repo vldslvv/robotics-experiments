@@ -36,6 +36,11 @@ the host. They are meant to be used in the Dockerized environment.
   tmux CMD so the first pane auto-launches the custom runtime
   (`isaac/runtime/standalone/runapp_custom.sh`) and then drops to a login shell,
   leaving the second pane a plain shell.
+- `make preflight-policy-artifacts HYDRA_CONFIG=<experiment.yaml>` validates
+  every configured policy artifact without importing Torch or starting a
+  container. `run` and `run-isaac` invoke it automatically so a missing model,
+  incompatible observation contract, or action-scale mismatch fails before
+  Isaac, ROS, or PX4 startup work begins.
 - `make run-all-autorun` is the convenience target for `run-all` with
   `ISAAC_AUTORUN=1`, propagated to the kitty-spawned `run-isaac` sub-make. The
   selected startup command is passed to `run_persistent_container.sh` as
@@ -75,6 +80,11 @@ are reported. The `experiment_runtime` extension reads the required
 resolved `scene`; `runapp_custom.sh` does not run a separate scene-resolution
 subprocess. Startup failures may precede structured Kit logging, so diagnose a
 blank stage from `docker logs` first.
+
+Policy metadata is checked again inside the live runtime before any switch or
+drone is spawned. A later setup failure is recorded in the runtime status,
+cleans partial resources, and leaves a subsequent Play attempt safe. This
+second check covers Isaac launched outside the Make targets.
 
 Kit's own log is written inside the container at
 `/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/<ver>/kit_<timestamp>.log`

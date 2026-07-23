@@ -86,6 +86,8 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.EnvelopeGates = SimpleNamespace
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
+    fake_commanding.PolicyAdapter = object
+    fake_commanding.PolicyStepResult = object
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
     creation_ticks = []
@@ -98,6 +100,31 @@ def _import_orchestrator(monkeypatch):
         lambda *, context, state, tick: driver_ticks.append((context, state, tick)) or state
     )
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
+
+    fake_environment = types.ModuleType("robotics_experiments.environment")
+    fake_environment.PressObservationIO = object
+    fake_environment.create_switches_runtime = lambda *, config, stage: SimpleNamespace(
+        config=config,
+        stage=stage,
+        phase="idle",
+    )
+    fake_environment.adopt_switches_stage = lambda *, state, stage: SimpleNamespace(
+        config=state.config,
+        stage=stage,
+        phase="idle",
+    )
+    fake_environment.play_switches_runtime = lambda *, state: SimpleNamespace(
+        config=state.config,
+        stage=state.stage,
+        phase="running",
+    )
+    fake_environment.step_switches_runtime = lambda *, state, on_toggle=None: state
+    fake_environment.teardown_switches_runtime = lambda *, state: SimpleNamespace(
+        config=state.config,
+        stage=state.stage,
+        phase="idle",
+    )
+    monkeypatch.setitem(sys.modules, "robotics_experiments.environment", fake_environment)
 
     for name in list(sys.modules):
         if name == "robotics_experiments.runtime" or name.startswith(
@@ -176,6 +203,7 @@ def _env(*vehicles):
     return SimpleNamespace(
         scene="@scene.usd",
         sim=SimpleNamespace(physics_hz=250.0),
+        switches=SimpleNamespace(num_switches=1),
         rl=SimpleNamespace(
             policy_rate_hz=20.0,
             action=SimpleNamespace(),
@@ -240,6 +268,55 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
     fleet = module.create_fleet(config=_env(_vehicle(0, "Drone", (0.0, 0.0), enabled=True)))
     with pytest.raises(RuntimeError):
         module.spawn_fleet(state=fleet)
+
+
+def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+
+    def fail_preflight(*, config):
+        raise ValueError("incompatible policy metadata")
+
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "_preflight_policy_artifacts",
+        fail_preflight,
+    )
+    vehicle = _vehicle(
+        0,
+        "Drone",
+        (0.0, 0.0),
+        enabled=True,
+        steps=[{"kind": "policy", "artifact": "missing"}],
+    )
+    fleet = replace(module.create_fleet(config=_env(vehicle)), stage=object())
+
+    with pytest.raises(ValueError, match="incompatible policy metadata"):
+        module.spawn_fleet(state=fleet)
+
+    assert rec.spawned == []
+    assert rec.despawned == []
+
+
+def test_spawn_fleet_rolls_back_drones_after_observer_failure(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+    env = _env(
+        _vehicle(0, "D0", (0.0, 0.0), enabled=True),
+        _vehicle(1, "D1", (2.0, 0.0), enabled=True),
+    )
+    fleet = replace(module.create_fleet(config=env), stage=object())
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "_prepare_policy_observer",
+        lambda *, state, spawned: (_ for _ in ()).throw(RuntimeError("observer failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="observer failed"):
+        module.spawn_fleet(state=fleet)
+
+    assert rec.spawned == [("D0", (0.0, 0.0)), ("D1", (2.0, 0.0))]
+    assert sorted(rec.despawned) == ["D0", "D1"]
 
 
 def test_build_drivers_for_every_bridge_enabled_drone(monkeypatch):

@@ -14,6 +14,8 @@ writeTarget.kit = true
 "robotics_experiments_core" = {}
 "px4_sitl_brigde" = {}
 "isaacsim.core.api" = {}
+"isaacsim.core.prims" = {}
+"isaacsim.sensors.physics" = {}
 "isaacsim.gui.components" = {}
 "omni.kit.uiapp" = {}
 

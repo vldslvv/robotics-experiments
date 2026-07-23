@@ -3,9 +3,11 @@
 Status: IMPLEMENTED; POLICY TRAINED; ACCEPTANCE TUNING IN PROGRESS (2026-07-22).
 
 F3 provides the easy, ground-truth contact task that precedes curriculum,
-randomization, and synthetic perception. It does not add production
-`{kind: press}` behavior, live observation injection, mission retry/abort
-logic, or a committed policy binary; those remain F3b/F4/F5 work.
+randomization, and synthetic perception. Deployment now uses the existing
+generic `{kind: policy}` command with a live ground-truth observation adapter;
+there is intentionally no `{kind: press}` command. Scripted behavior,
+curriculum/randomization, synthetic perception, mission-level retry/abort, and
+a committed policy binary remain later work.
 
 ## Implemented task contract
 
@@ -18,7 +20,8 @@ ID branches.
 
 Each press environment contains the real pusher-enabled `holybro_x500_v2`, one
 cloned real switch articulation, and a static wall. The source switch's local
-outward normal is converted to canonical contact-frame `+X`, and only the
+`-Y` outward normal is converted to canonical switch-frame `+X` with the same
+fixed `Rz(-pi/2)` correction in Lab and the live provider, and only the
 button geometry is enlarged for the easy task. The source plate and joint
 physics remain authoritative. The pad contact sensor, pusher joint, and button
 joint provide the ground-truth contact, compression, and actuation inputs.
@@ -65,7 +68,7 @@ checks stability. The current 2026-07-22 run passed with:
 - stable retreat beyond 0.35 m: true; maximum tilt: 0.448 rad
 
 The passing evidence is stored under
-`.build/docker/integration/test-integration-press-contact-chain.20260722T160119Z.248449`.
+`.build/docker/integration/test-integration-press-contact-chain.20260722T174404Z.332722`.
 
 Switch/lamp scene spawning is atomic and fail-closed: both assets are
 preflighted, every configured pair is validated, partial canonical prims are
@@ -82,9 +85,10 @@ make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml
 make eval-press
 ```
 
-Each task config owns `observation_schema_version` and `observation_space`, and
-artifact metadata is exported from those fields. `load_vector_policy(...)` is
-the generic validated observation-vector loader; `build_policy_step_fn(...)`
+Each task config owns `observation_schema_version`, `observation_space`, and
+`policy_interface`; artifact metadata is exported from those fields alongside
+the source commit and dirty-worktree flag. `load_vector_policy(...)` is the
+generic validated observation-vector loader; `build_policy_step_fn(...)`
 remains the hover-specific `VehicleState` to OFFBOARD composer.
 
 The evaluator loads `.build/training/press/latest` and runs 100 deterministic
@@ -122,6 +126,25 @@ documented in the decision log. Evaluate every new artifact with:
 ```console
 make -o generate-drone-usd eval-press
 ```
+
+Once that evaluator passes all three acceptance thresholds, run the complete
+deployment sanity flight:
+
+```console
+make test-integration-press-routine
+```
+
+It uses `configs/policy_press_quad.yaml` and
+`configs/experiment/routine/policy_press.yaml` to arm, take off, navigate to
+the handoff point, run the generic policy, return, land, and disarm. The live
+Isaac Sim 5.1 adapter supplies the exact 34-value observation and the pure
+deployment transition requires an initially-off lamp, stable first contact,
+exactly one transition, and stable retreat. The current `latest` artifact
+predates `policy_interface`; the runtime recognizes its exact legacy contract
+for diagnostic use at the recorded 0.5 m/s scale. It still fails acceptance and
+is not a valid candidate for this gate. The next exported press artifact will
+include `press-v1` automatically. No new training cycle was started while
+implementing this path.
 
 The evaluator lifecycle diagnosis, baseline reward-term means, and current
 evidence-based tuning decisions are recorded in the separate decision log.

@@ -544,3 +544,246 @@ reward and acceptance checks still use actual measured velocity, so the larger
 action range does not redefine a gentle contact; it makes safe approach and
 post-contact force control a learning problem instead of making the real latch
 unreachable under action saturation.
+
+### 19. Keep commanding generic and identify the policy interface in metadata
+
+Plain-language view: The flight commander should not need a new command every
+time a neural network learns a new skill. Hovering and pressing therefore both
+remain `kind: policy`. The model's small metadata file now says which input
+contract it expects (`hover-v1` or `press-v1`), and the runtime connects the
+right observations and completion checks. This is similar to labeling a tool's
+connector: the person scheduling the job still says "use this tool," while the
+connector explains how this particular tool is wired.
+
+Technical view: `policy_meta.json` now includes `policy_interface` in addition
+to observation schema/version, action contract, policy rate, action scales,
+`source_commit`, and `source_dirty`. The commanding layer receives a
+`PolicyAdapter` and stores opaque frozen progress. Each inference returns a
+`PolicyStepResult(progress, setpoint, complete, failure_reason)`, so commanding
+owns cadence and OFFBOARD transport without importing `PressObservation` or
+branching on task IDs. The runtime selects `hover-v1` or `press-v1` from
+metadata. Exact 13-value hover schema-v1 artifacts without the new field retain
+a narrow legacy inference; a 34-value press artifact without it fails closed
+and must be re-exported. This avoids silently interpreting a future 34-value
+policy as the switch task merely because its tensor has the same length.
+
+No PPO parameters changed in this decision. The next exported training artifact
+will carry `press-v1` automatically. The current first-tuned artifact predates
+the field and remains unsuitable regardless because its accepted metrics are
+0% toggles, 100% stable first contact, and 0% retreat.
+
+### 20. Build the deploy-time observation and completion logic against Isaac Sim 5.1
+
+Plain-language view: A trained policy cannot press a real simulated switch from
+its model file alone. During the flight, something must measure where the
+switch is, whether the pusher touched it, how far the pusher compressed, and
+whether the lamp changed. A small runtime adapter now gathers exactly those 34
+values. A separate, testable state machine prevents "success" from meaning only
+that the drone touched the wall: it requires one lamp change and a controlled
+back-away.
+
+Technical view: The adapter was verified against the installed
+`vv-isaac-sim-custom:5.1.0` APIs, specifically
+`isaacsim.sensors.physics.ContactSensor`,
+`isaacsim.core.prims.SingleArticulation`, `ArticulationAction`, and
+`PhysxSchema.PhysxJointAPI.maxJointVelocity`. It applies the easy-task switch
+and pusher settings before standalone physics starts, reads the real stage and
+articulations, converts the source asset's local `-Y` outward normal to
+canonical `+X` with `Rz(-pi/2)`, and packs the schema-v1 34-value
+`PressObservation`. The previous normalized action is injected from frozen
+runtime progress rather than guessed from the physical state.
+
+`PressDeploymentState` records handoff, first-contact evidence, previous lamp
+state, transition count, and consecutive stable-retreat samples. The transition
+holds a zero action until the existing handoff gate passes; rejects missing or
+non-finite observation groups, an initially-on lamp, malformed policy output,
+and a second lamp transition; and completes only after one transition plus the
+configured retreat. The action remains the existing four-value normalized
+velocity action and maps through the same `press_action_to_offboard` contract.
+This is deployment safety/completion logic, not a new reward and not a change
+to PPO optimization.
+
+### 21. Add the full-flight sanity gate, but stop before new training
+
+Plain-language view: Passing the acceptance evaluator means the model can solve
+the contact task inside its training-style environment. It does not prove that
+the entire vehicle can take off, navigate to the switch, hand control to the
+model, return, and land through PX4. A second test now covers that full journey.
+It is intentionally waiting for a good model; running it with the current
+gentle-touch policy would only reconfirm a known failure.
+
+Technical view: `configs/policy_press_quad.yaml` and routine
+`policy_press.yaml` define arm -> takeoff -> hover -> goto handoff -> hover ->
+generic policy -> return goto -> land. `make test-integration-press-routine`
+requires stable first contact, exactly one off-to-on toggle event, the configured
+stable-retreat sample count, routine completion, landing, and disarm. The shared
+`FleetState` now owns switch spawning/latching and ordered toggle events; the
+light-switch extension only publishes those events to ROS, eliminating duplicate
+physical ownership.
+
+The acceptance evaluator remains the statistical model gate: 300 deterministic
+episodes over three non-training seeds, with minimum 80% confirmed toggles, 85%
+stable first contact among contacted episodes, and 95% retreat among toggled
+episodes. The full-flight routine is a system-integration gate run only after
+those percentages pass. This separation matters because a single successful
+mission can miss a fragile policy, while 300 Lab episodes cannot expose PX4,
+OFFBOARD, live-observation, or landing integration mistakes.
+
+Per the pause request, no new training cycle, checkpoint export, acceptance
+evaluation, or artifact-dependent mission run was started during this work.
+Resume with the exact command in entry 17, run `make -o generate-drone-usd
+eval-press`, and only then run `make test-integration-press-routine` if all
+three evaluator thresholds pass.
+
+The shared hover-policy regression gate initially exposed a narrow legacy
+metadata bug: adapter selection inferred `hover-v1`, but vector validation
+reread the unnormalized sidecar and rejected the same artifact. Both paths now
+use one metadata reader, guarded by a host test. The rerun passed the complete
+PX4 arm/takeoff/policy-hover/land routine in artifact
+`.build/docker/integration/test-integration-press-policy.20260722T174538Z.335593`.
+The real contact-chain gate also passed under Isaac Sim 5.1.0 in
+`.build/docker/integration/test-integration-press-contact-chain.20260722T174404Z.332722`.
+Neither command performed PPO updates.
+
+### 22. Run the existing gentle-contact policy faithfully before tuning again
+
+#### Diagnose the launch failure before changing policy behavior
+
+Plain-language view: The failed launch did not prove that the model was broken.
+The simulator stopped while deciding how to connect the model, before the model
+received an observation or commanded the drone. The visible Fabric warning and
+the warehouse's missing optional quadcopter payload were unrelated startup
+messages. The actionable error was the missing policy-interface label in the
+model's metadata.
+
+Technical view: `spawn_fleet()` reached `load_policy_metadata()` for
+`.build/training/press/20260722T150005Z.19` and raised because its schema-v1
+sidecar predates `policy_interface`. The failure happened after stage mutation,
+which also exposed a cleanup weakness. The loaded application and APIs were
+verified against `vv-isaac-sim-custom:5.1.0`; no Isaac Sim 6.x behavior or
+extension identifier was used.
+
+#### Infer only the one unambiguous legacy press contract
+
+Plain-language view: Rewriting the saved model's label by hand would make this
+one copy start, but would hide the rule needed to interpret other older copies.
+The loader now recognizes this old model only because all of its identifying
+measurements agree with the press-policy connector. If any identifying value is
+different, startup still stops and asks for a proper export.
+
+Technical view: Missing-interface inference selects `press-v1` only for schema
+version 1, observation dimension 34, policy rate 20 Hz, velocity action kind,
+action dimension 4, and all four action-scale fields. It emits a runtime warning
+and does not modify `policy_meta.json`. Explicit interfaces and the existing
+13-value legacy-hover inference are unchanged; incomplete or ambiguous tuples
+still fail closed.
+
+#### Preserve the action scale that the network learned
+
+Plain-language view: A neural network outputs a normalized request, not meters
+per second directly. Multiplying its old output by 2.0 instead of the trained
+0.5 would make every translation command four times stronger. That might look
+more decisive, but it would no longer answer the question "what did the trained
+policy learn?" The diagnostic flight therefore uses 0.5 m/s.
+
+Technical view: The artifact sidecar records
+`action_scales.max_body_velocity_mps=0.5`, while the staged next-training config
+uses 2.0 m/s because the real contact-chain test found that authority necessary
+to latch. `configs/policy_press_quad.yaml` now uses 0.5 so strict metadata
+validation passes without rescaling the deployed policy. The future training
+config remains at 2.0; promoting a future artifact requires updating the
+deployment scale in the same change.
+
+#### Make a failed attempt produce useful behavioral evidence
+
+Plain-language view: "Timed out" alone cannot distinguish a motionless drone
+from one that approached gently, touched the switch, and merely failed to push
+far enough. The runtime now keeps a small scorecard of the attempt: whether the
+handoff happened, how close the drone came, its largest action and pusher
+compression, first-contact quality, lamp changes, and retreat samples.
+
+Technical view: The frozen `PressDeploymentState` adds initial and minimum
+wall-normal range, peak pusher compression, and peak absolute normalized action.
+These are deployment diagnostics only and do not alter the 34-value observation,
+policy weights, rewards, or action mapping. Generic commanding still treats
+progress as opaque, but includes its final representation in a policy timeout
+instead of the incorrect goto-specific "did not reach the waypoint" message.
+
+#### Fail before launching containers and clean partial simulator state
+
+Plain-language view: Configuration mistakes should be reported immediately,
+not after waiting for Isaac and PX4 to start. If a later simulator-specific
+operation fails, pressing Play again should not collide with half-created drones
+or switches from the first attempt.
+
+Technical view: `make preflight-policy-artifacts` loads the Hydra experiment and
+validates every policy file, interface, schema, cadence, action contract, and
+scale without importing Torch. `run` and `run-isaac` depend on that target. The
+live runtime repeats preflight before stage mutation for non-Make launch paths;
+`spawn_fleet()` tears down locally accumulated switches, drones, observers, and
+bridge resources on exceptions. The Kit lifecycle boundary records one setup
+failure, installs no PhysX callback, and supports a clean subsequent Play. The
+extension manifest now directly declares the Isaac Sim 5.1
+`isaacsim.core.prims` and `isaacsim.sensors.physics` dependencies it imports.
+
+#### Keep the manual probe separate from the acceptance evaluator
+
+Plain-language view: Watching one flight answers "does this model do anything
+that resembles pressing?" It cannot answer "does it work reliably?" The
+acceptance evaluator repeats the task across many initial conditions and seeds,
+then counts success. It prevents a visually convincing lucky attempt from being
+mistaken for a dependable policy.
+
+Technical view: The diagnostic run classifies handoff, approach, contact,
+compression, toggle, and retreat for one PX4/Isaac mission. The acceptance
+evaluator remains the deterministic 300-episode statistical gate: at least 80%
+confirmed toggles over all episodes, 85% stable first contact conditioned on
+contacted episodes, and 95% stable retreat conditioned on toggled episodes.
+Legacy compatibility does not waive those thresholds. The current artifact's
+existing evaluator result remains 0% toggles, 100% stable first contact, and 0%
+retreat, so a likely diagnostic outcome is gentle contact followed by timeout.
+No new PPO training or acceptance-evaluation cycle is part of this decision.
+
+#### Verification and the remaining manual Play step
+
+Plain-language view: The corrected launch now accepts the saved model and opens
+the Isaac Sim 5.1 warehouse without the old metadata failure. The automated
+checks also proved that the physical switch can still latch and that the older
+hover-policy route was not broken. The final live flight did not start because
+the desktop required a human click to grant remote-control permission before an
+automated Play click; leaving the simulators idle would provide no evidence, so
+they were stopped cleanly. No claim about live PX4 press behavior is made from
+that non-started attempt.
+
+Technical view: The full pre-commit suite passed: 459 host tests passed and one
+was skipped, with Ruff, format, mypy, vulture, shell, YAML, TOML, and binary
+asset checks green. Taplo initially could not fetch the public pyproject schema
+through the sandbox proxy and passed when rerun with network access. The real
+contact-chain gate passed at
+`.build/docker/integration/test-integration-press-contact-chain.20260722T182633Z.356810`
+with 12.19 mm pusher compression, 10.47 mm button displacement, 10.432 N peak
+force, one lamp toggle, and stable retreat. The hover-policy PX4 regression
+passed at
+`.build/docker/integration/test-integration-press-policy.20260722T182653Z.357371`.
+
+The live preflight accepted the legacy artifact at 0.5 m/s and reported source
+commit `c6ef12cadcedaf28c50bebdf3535c0f927b34ab9` with `source_dirty: true`.
+Isaac Sim 5.1 reached "Press Play to fly the configured routine" in
+`kit_20260722_183049.log` with no policy-interface, action-scale, or setup error.
+The Wayland remote-control confirmation prevented an injected Play event, so no
+drone was spawned and no `PressDeploymentState` metrics were produced. Isaac,
+PX4, and ROS were then stopped with `make stop-all`.
+
+To finish the one-flight diagnostic, run:
+
+```console
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml
+```
+
+When Isaac displays the warehouse and logs that it is ready, click Play once.
+The likely result, based on the 300-episode evaluator, is a completed handoff,
+stable first contact, zero toggles, zero retreat, and a 20-second policy timeout.
+The timeout now prints the exact approach, action, compression, contact, toggle,
+and retreat progress needed to confirm or reject that expectation. Stop with
+`make stop-all` after capturing it. Do not resume the staged 2.0 m/s training
+cycle until this diagnostic record has been added here.

@@ -23,6 +23,7 @@ class RoutineStepConfig(TypedDict, total=False):
     artifact: NotRequired[str]
     name: NotRequired[str]
     target: NotRequired[List[float]]
+    switch_index: NotRequired[int]
 
 
 @dataclass

@@ -40,8 +40,11 @@ the entire fleet cycle.
   are named int constants so the module never imports pymavlink.
 - **`observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
-  CommandAck | None`, `failsafe: bool`, `sim_time_us`). `MAV_RESULT_*` are named
-  int constants; `CommandAck.from_result` derives `accepted`.
+  CommandAck | None`, `failsafe: bool`, `sim_time_us`) and an opaque
+  `policy_observation`. The runtime may inject a task-owned frozen observation
+  there; commanding passes it to the selected adapter without importing or
+  interpreting its type. `MAV_RESULT_*` are named int constants;
+  `CommandAck.from_result` derives `accepted`.
 - **Pure routine implementation** -- `_routine_model.py`, `_routine_stepper.py`,
   `_routine_predicates.py`, and `_routine_builder.py` separately own the pure
   model, decision state machine, predicates/gates, and descriptor assembly.
@@ -100,28 +103,38 @@ the entire fleet cycle.
   on step entry and replaces the cache, then is sent on the next scheduled
   emission; routine boundaries never create an extra transmission.
 
-  The **`policy` step** is the RL deploy plug-in over the same streaming
-  lifecycle: its `_StreamingSpec` carries a `setpoint_fn` (built from the
-  injected `PolicyStepFn`) instead of a fixed geodetic target. It evaluates
+  The **`policy` step** is the task-neutral policy plug-in over the same streaming
+  lifecycle. Its `_StreamingSpec` carries an injected `PolicyAdapter` instead
+  of a fixed geodetic target. It evaluates
   when a new OFFBOARD stream starts and then only when the continuous
   exact-average `rl.policy_rate_hz` cadence is due; its latest payload is held
   without interpolation while the independent setpoint streamer runs. A
   compatible OFFBOARD-step boundary does not reset either cadence. The payload is a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
-  The `PolicyStepFn` is composed at the runtime layer
-  (`robotics_experiments.rl.press.build_policy_step_fn`: validated artifact load + hover
-  observation packing + `press_action_to_offboard`) and injected as
+  Each adapter owns opaque frozen progress and returns a `PolicyStepResult`
+  containing the successor progress, setpoint, completion flag, and optional
+  failure reason. Commanding stores those values but never interprets the
+  policy's task, observation schema, contact phase, or network architecture.
+  Adapters are composed at the runtime layer and injected as
   `DriverParams.policy_fn_factory`; `build_vehicle_routine` calls the factory
-  per `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` descriptor
+  per `{kind: policy, artifact, timeout_s[, name, target, switch_index]}` descriptor
   and raises `ValueError` without it (or on a missing/mismatched artifact), which
   the driver's BUILD phase routes through `on_failure` as `FailureKind.COMMAND`.
+  Artifact metadata contains `policy_interface`, which currently selects
+  `hover-v1` or `press-v1` in runtime without adding a task-specific routine kind.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
   `.build/training/hover/latest` followed by `.build/training/press/latest`.
-  Without an authored `target` the policy holds the position captured when the
-  step began. The step's completion predicate is `_always` + `hold_s`, gated by
-  accepted OFFBOARD entry, so it completes after PX4 accepts OFFBOARD and then
-  `hold_s` of continuous in-envelope flight. A bad policy fails as
+  `hover-v1` uses the authored target, or the entry position when target is
+  omitted, and requires `hold_s`; its adapter completes after that duration.
+  `press-v1` consumes the injected exact 34-value `PressObservation`, waits for
+  the configured handoff gate, and completes only after one lamp transition and
+  stable retreat. Policy completion never advances before PX4 accepts OFFBOARD.
+  A policy timeout reports the adapter's final opaque progress rather than the
+  goto-specific "did not reach the waypoint" text. For `press-v1` this exposes
+  handoff, approach, contact, compression, toggle, and retreat evidence while
+  commanding remains unaware of those fields.
+  An adapter failure becomes `FailureKind.COMMAND`; a bad flight still fails as
   `FailureKind.ENVELOPE` through the unchanged flight gates. Follow a policy
   step with an explicit-command step (e.g. `land`), not a command-less verifier:
   the verifier would keep re-streaming the last policy payload.
@@ -154,9 +167,9 @@ the entire fleet cycle.
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `robotics_experiments.rl.press.press_action_to_offboard`; the `{kind: policy}` routine step
-  streams them in production (F2b), and the handoff-gated contact behavior
-  (`{kind: press}`) is F3b on the same mechanism.
+  `robotics_experiments.rl.press.press_action_to_offboard`; every learned task,
+  including handoff-gated switch pressing, remains a `{kind: policy}` routine
+  step. There is intentionally no `{kind: press}` branch in commanding.
 - **`driver.py`** -- the frozen, per-drone `DriverContext` (parameters, port,
   environment, and label), progress-only `RoutineDriverState`,
   and stateless `create_routine_driver` / `tick_routine_driver` transition
@@ -229,7 +242,9 @@ is **forgiving**: `on_failure` (a `FAIL`,
 a PX4 failsafe, or a phase timeout) logs a warning and the driver idles (it never
 raises into the sim); after `DONE` the driver keeps the GCS link warm so
 PX4-console control returns to the user. STOP/PAUSE and shutdown drop the tick and
-tear down.
+tear down. Setup errors are caught at this lifecycle boundary, recorded in the
+public failure field, and cleaned before a later Play retry; a failed setup never
+installs the PhysX control subscription.
 
 The live shell also exposes an immutable status snapshot for dependent Kit
 plugins. It reports each vehicle label, simulated time, completed-step count,

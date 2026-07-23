@@ -105,6 +105,7 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     action_space: int = cast(Any, MISSING)
     observation_schema_version: int = cast(Any, MISSING)
     observation_space: int = cast(Any, MISSING)
+    policy_interface: str = cast(Any, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(Any, MISSING)
     drone_cfg: ArticulationCfg = cast(Any, MISSING)
@@ -122,6 +123,7 @@ def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
         action_space=experiment_config.rl.action.action_dim,
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
+        policy_interface="hover-v1",
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,

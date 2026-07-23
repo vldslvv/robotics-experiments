@@ -25,6 +25,8 @@ from robotics_experiments.commanding import (
     DecisionKind,
     EnvelopeGates,
     FailureKind,
+    PolicyAdapter,
+    PolicyStepResult,
     RoutineState,
     RoutineStep,
     VehicleRoutine,
@@ -914,20 +916,33 @@ def test_decide_hover_step_holds_before_advancing():
 
 
 class _FakePolicyFn:
-    """Records (vehicle_state, goal) calls and returns a fixed velocity payload."""
+    """Records goals and completes after two seconds of policy time."""
 
     def __init__(self):
         self.goals = []
 
-    def __call__(self, vehicle_state, target_enu):
+    def __call__(self, observation, target_enu, progress):
         self.goals.append(np.asarray(target_enu, dtype=np.float64))
-        return VelocitySetpoint(forward_mps=0.1, right_mps=0.0, down_mps=0.0, yaw_rate_radps=0.0)
+        started_us = observation.sim_time_us if progress is None else progress
+        return PolicyStepResult(
+            progress=started_us,
+            setpoint=VelocitySetpoint(
+                forward_mps=0.1,
+                right_mps=0.0,
+                down_mps=0.0,
+                yaw_rate_radps=0.0,
+            ),
+            complete=observation.sim_time_us - started_us >= 2_000_000,
+        )
 
 
 def _policy_routine(policy_fn, **overrides):
     descriptor = {"kind": "policy", "artifact": "does/not/matter", "hold_s": 2.0, "timeout_s": 10.0}
     descriptor.update(overrides)
-    return _build([descriptor], policy_fn_factory=lambda d: policy_fn)
+    return _build(
+        [descriptor],
+        policy_fn_factory=lambda d: PolicyAdapter(initial_progress=None, step=policy_fn),
+    )
 
 
 def test_build_vehicle_routine_policy_requires_factory():
@@ -936,11 +951,17 @@ def test_build_vehicle_routine_policy_requires_factory():
 
 
 def test_build_vehicle_routine_policy_requires_fields():
-    for missing in ("artifact", "hold_s", "timeout_s"):
+    for missing in ("artifact", "timeout_s"):
         descriptor = {"kind": "policy", "artifact": "a", "hold_s": 1.0, "timeout_s": 5.0}
         descriptor.pop(missing)
         with pytest.raises(ValueError, match=missing):
-            _build([descriptor], policy_fn_factory=lambda d: _FakePolicyFn())
+            _build(
+                [descriptor],
+                policy_fn_factory=lambda d: PolicyAdapter(
+                    initial_progress=None,
+                    step=_FakePolicyFn(),
+                ),
+            )
 
 
 def test_decide_policy_primes_engages_offboard_streams_velocity_and_holds():
@@ -1054,7 +1075,7 @@ def test_build_vehicle_routine_policy_supports_multiple_artifacts():
 
     def factory(descriptor):
         seen_artifacts.append(descriptor["artifact"])
-        return policies[descriptor["name"]]
+        return PolicyAdapter(initial_progress=None, step=policies[descriptor["name"]])
 
     routine = _build(descriptors, policy_fn_factory=factory)
 
@@ -1064,10 +1085,10 @@ def test_build_vehicle_routine_policy_supports_multiple_artifacts():
     obs = make_routine_observation(sim_time_us=0)
     first_stream = routine.steps[0].streaming
     second_stream = routine.steps[1].streaming
-    assert first_stream is not None and first_stream.setpoint_fn is not None
-    assert second_stream is not None and second_stream.setpoint_fn is not None
-    first_stream.setpoint_fn(obs, np.zeros(3, dtype=np.float64))
-    second_stream.setpoint_fn(obs, np.zeros(3, dtype=np.float64))
+    assert first_stream is not None and first_stream.policy is not None
+    assert second_stream is not None and second_stream.policy is not None
+    first_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
+    second_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
 
     np.testing.assert_allclose(hover_policy.goals[-1], [1.0, 2.0, 3.0])
     np.testing.assert_allclose(press_policy.goals[-1], [4.0, 5.0, 6.0])
@@ -1081,3 +1102,23 @@ def test_decide_policy_envelope_breach_fails():
     _state, decision = decide(routine, state, tilted)
     assert decision.kind is DecisionKind.FAIL
     assert decision.failure_kind is FailureKind.ENVELOPE
+
+
+def test_decide_policy_timeout_reports_opaque_progress_not_waypoint() -> None:
+    routine = _policy_routine(_FakePolicyFn(), timeout_s=1.0)
+    state, _decision = decide(
+        routine,
+        RoutineState(),
+        make_routine_observation(sim_time_us=0),
+    )
+
+    _state, decision = decide(
+        routine,
+        state,
+        make_routine_observation(sim_time_us=1_000_001),
+    )
+
+    assert decision.kind is DecisionKind.FAIL
+    assert "policy did not complete" in str(decision.reason)
+    assert "policy progress=0" in str(decision.reason)
+    assert "waypoint" not in str(decision.reason)

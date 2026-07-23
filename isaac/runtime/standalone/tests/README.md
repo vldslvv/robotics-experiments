@@ -96,3 +96,11 @@ each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
 transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
 OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
 to completion.
+
+`make test-integration-press-routine` runs the artifact-dependent full press
+mission in `configs/policy_press_quad.yaml`: takeoff, navigate to the configured
+handoff point, execute the `press-v1` artifact through the generic `policy`
+step, return, land, and disarm. The strict post-routine hook requires stable
+first contact, exactly one off-to-on lamp event, and stable retreat. Run it only
+after `make eval-press` accepts `.build/training/press/latest`; it is excluded
+from `test-integration-all` for that reason.

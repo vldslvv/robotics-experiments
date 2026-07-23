@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -16,13 +16,12 @@ from robotics_experiments.commanding.commands import (
 )
 from robotics_experiments.commanding.observation import RoutineObservation
 
-if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge import VehicleState
-
 __all__ = [
     "DecisionKind",
     "FailureKind",
+    "PolicyAdapter",
     "PolicyStepFn",
+    "PolicyStepResult",
     "RoutineDecision",
     "RoutineState",
     "RoutineStep",
@@ -44,12 +43,35 @@ _Invariant = Callable[[RoutineObservation, Optional[np.ndarray]], Optional[str]]
 # dispatches on the concrete type to the matching port send method.
 StreamSetpoint = Union[PositionSetpoint, VelocitySetpoint, AttitudeRateSetpoint]
 
-# The injected pure function evaluated at a ``policy`` step's cadence: maps the live
-# vehicle state and the step's world-ENU target to the OFFBOARD setpoint
-# payload to stream (composed at the runtime layer from the observation
-# packing, the loaded policy, and the deploy action mapping -- see
-# ``robotics_experiments.rl.press.build_policy_step_fn``).
-PolicyStepFn = Callable[["VehicleState", np.ndarray], StreamSetpoint]
+
+@dataclass(frozen=True)
+class PolicyStepResult:
+    """One task-neutral policy inference result.
+
+    ``progress`` is an opaque frozen value owned by the adapter. Commanding
+    stores it but never inspects it. ``complete`` and ``failure_reason`` are
+    likewise adapter decisions, allowing hover-duration and contact/latch
+    completion to use the same routine kind.
+    """
+
+    progress: Any
+    setpoint: StreamSetpoint
+    complete: bool = False
+    failure_reason: Optional[str] = None
+
+
+PolicyStepFn = Callable[
+    [RoutineObservation, Optional[np.ndarray], Any],
+    PolicyStepResult,
+]
+
+
+@dataclass(frozen=True)
+class PolicyAdapter:
+    """Injected policy implementation and its immutable initial progress."""
+
+    initial_progress: Any
+    step: PolicyStepFn
 
 
 class DecisionKind(Enum):
@@ -182,11 +204,10 @@ class _StreamingSpec:
         min_heading_dist_m: Below this horizontal baseline-to-target distance
             the leg has no meaningful heading and the streamed setpoint holds
             the current heading (yaw ``NaN``).
-        setpoint_fn: When set (a ``policy`` step), the scheduled setpoint source:
-            a pure function of the observation and the step baseline returning
-            the payload to stream, replacing the fixed geodetic target (whose
-            fields are then unused, ``NaN``). The OFFBOARD prime/engage/stream
-            lifecycle is identical either way.
+        policy: When set, the scheduled generic policy adapter. It receives the
+            full command observation, optional target/baseline, and its opaque
+            frozen progress, then returns a task-neutral result. The OFFBOARD
+            prime/engage/stream lifecycle is identical for every adapter.
     """
 
     target_enu: tuple[float, float, float]
@@ -195,9 +216,7 @@ class _StreamingSpec:
     altitude_m: float
     prime_ticks: int
     min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
-    setpoint_fn: Optional[Callable[[RoutineObservation, Optional[np.ndarray]], StreamSetpoint]] = (
-        None
-    )
+    policy: Optional[PolicyAdapter] = None
 
 
 @dataclass(frozen=True)
@@ -219,6 +238,9 @@ class _OffboardState:
     cached_setpoint: Optional[StreamSetpoint] = None
     requested: bool = False
     accepted: bool = False
+    policy_progress: Any = None
+    policy_complete: bool = False
+    policy_failure_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +264,9 @@ class RoutineState:
             zero-order-held payload, actual transmission count, and mode request
             / acceptance flags. Compatible streaming and command-less verifier
             steps retain this value so cadence phase remains continuous.
+        last_policy_progress: Final opaque adapter progress from the most
+            recently completed policy step. Integration/evaluation code may
+            inspect its adapter-owned type; commanding never does.
     """
 
     cursor: int = 0
@@ -250,3 +275,4 @@ class RoutineState:
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
     offboard: _OffboardState = _OffboardState()
+    last_policy_progress: Any = None

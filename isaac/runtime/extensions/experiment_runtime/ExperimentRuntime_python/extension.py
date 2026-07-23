@@ -45,6 +45,7 @@ from robotics_experiments.config import load_config
 from robotics_experiments.px4_bridge import BridgeStatus
 from robotics_experiments.runtime import (
     FleetDriverEnv,
+    SwitchToggleEvent,
     adopt_current_stage,
     apply_settings,
     build_drivers,
@@ -86,6 +87,7 @@ class ExperimentRuntimeSnapshot:
     scene_ready: bool
     failure: str | None
     vehicles: tuple[VehicleRuntimeSnapshot, ...]
+    switch_events: tuple[SwitchToggleEvent, ...]
 
 
 class Extension(omni.ext.IExt):
@@ -170,6 +172,7 @@ class Extension(omni.ext.IExt):
             scene_ready=self._fleet.stage is not None,
             failure=self._failure,
             vehicles=tuple(vehicles),
+            switch_events=self._fleet.switch_events,
         )
 
     def _on_stage_event(self, event):
@@ -211,14 +214,21 @@ class Extension(omni.ext.IExt):
         # Re-adopt at the imperative PLAY boundary before any stage mutation.
         # Adoption replaces only FleetState.stage, retaining the existing fleet
         # resources; teardown must follow it so despawning uses the valid wrapper.
-        self._fleet = adopt_current_stage(state=self._fleet)
-        self._fleet = teardown(state=self._fleet)
-        self._fleet = spawn_fleet(state=self._fleet)
-        self._fleet = start_bridges(state=self._fleet)
-        self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
-        self._physics_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(
-            self._on_physics_step
-        )
+        try:
+            self._fleet = adopt_current_stage(state=self._fleet)
+            self._fleet = teardown(state=self._fleet)
+            self._fleet = spawn_fleet(state=self._fleet)
+            self._fleet = start_bridges(state=self._fleet)
+            self._fleet = build_drivers(state=self._fleet, make_env=self._make_env)
+            self._physics_sub = omni.physx.get_physx_interface().subscribe_physics_step_events(
+                self._on_physics_step
+            )
+        except Exception as exc:
+            self._physics_sub = None
+            self._fleet = teardown(state=self._fleet)
+            message = f"fleet setup failed: {type(exc).__name__}: {exc}"
+            self._failure = message
+            carb.log_error(f"{_LOG_PREFIX} {message}")
 
     def _stop_control(self):
         """Drop the control tick subscription (the orchestrator owns the ports)."""

@@ -31,6 +31,7 @@ from robotics_experiments.rl.press import (
     reset_press_task_state,
     step_press_task,
 )
+from robotics_experiments.rl.press._switch_asset import ASSET_TO_CANONICAL_WXYZ, SQRT_HALF
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
 from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
     _DRONE_PRIM_PATH,
@@ -47,8 +48,7 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # contract defines canonical switch +X as outward. Spawning the asset at -pi/2
 # about Z faces the physical button toward world -X; applying this same fixed
 # correction to its root pose yields the canonical pi-about-Z provider pose.
-_SQRT_HALF = math.sqrt(0.5)
-_SWITCH_ASSET_ROT_WXYZ = (_SQRT_HALF, 0.0, 0.0, -_SQRT_HALF)
+_SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 
 
 @configclass
@@ -61,6 +61,7 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     action_space: int = cast(Any, MISSING)
     observation_schema_version: int = cast(Any, MISSING)
     observation_space: int = cast(Any, MISSING)
+    policy_interface: str = cast(Any, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(Any, MISSING)
     drone_cfg: ArticulationCfg = cast(Any, MISSING)
@@ -93,6 +94,7 @@ def make_switch_press_env_cfg(*, experiment_config: ExperimentConfig) -> SwitchP
         action_space=rl.action.action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
+        policy_interface="press-v1",
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -250,8 +252,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _relative_switch_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
         switch_quat = self.switch.data.root_quat_w
         asset_to_canonical = torch.zeros_like(switch_quat)
-        asset_to_canonical[:, 0] = _SQRT_HALF
-        asset_to_canonical[:, 3] = -_SQRT_HALF
+        asset_to_canonical[:, :] = torch.as_tensor(
+            ASSET_TO_CANONICAL_WXYZ,
+            dtype=switch_quat.dtype,
+            device=switch_quat.device,
+        )
         canonical_switch_quat = math_utils.quat_mul(switch_quat, asset_to_canonical)
         half_turn_z = torch.zeros_like(switch_quat)
         half_turn_z[:, 3] = 1.0

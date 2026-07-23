@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 from pxr import Usd, UsdGeom
 
+from robotics_experiments.rl.press._switch_asset import canonical_switch_quat_wxyz
 from robotics_experiments.rl.press.provider import PoseSample
 
 __all__ = ["GroundTruthPoseProvider"]
@@ -20,8 +21,8 @@ __all__ = ["GroundTruthPoseProvider"]
 class GroundTruthPoseProvider:
     """Exact switch pose from the stage: ``confidence=1``, ``age=0``, valid.
 
-    The switch prim's local ``+X`` must be the outward plate normal (the
-    contact-frame convention exported by :mod:`robotics_experiments.rl`).
+    The source asset's raw local ``-Y`` outward normal is converted here to the
+    canonical policy-frame local ``+X`` convention.
     """
 
     def __init__(self, stage, switch_prim_path: str) -> None:
@@ -36,8 +37,14 @@ class GroundTruthPoseProvider:
         translation = transform.ExtractTranslation()
         rotation = transform.ExtractRotationQuat()
         imaginary = rotation.GetImaginary()
+        quat_wxyz = canonical_switch_quat_wxyz(
+            np.array(
+                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]],
+                dtype=np.float64,
+            )
+        )
         quat_xyzw = np.array(
-            [imaginary[0], imaginary[1], imaginary[2], rotation.GetReal()],
+            [quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]],
             dtype=np.float64,
         )
         return PoseSample(

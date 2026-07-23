@@ -27,7 +27,7 @@ def _anchored_cadence(*, sim_time_us: int) -> _CadenceState:
     return _CadenceState(previous_time_ns=sim_time_us * 1_000)
 
 
-def _advanced(*, state: RoutineState) -> RoutineState:
+def _advanced(*, state: RoutineState, policy_progress=None) -> RoutineState:
     """Advance without interrupting a compatible OFFBOARD stream."""
     return replace(
         state,
@@ -36,6 +36,15 @@ def _advanced(*, state: RoutineState) -> RoutineState:
         baseline_position_enu=None,
         step_started_us=None,
         hold_since_us=None,
+        offboard=replace(
+            state.offboard,
+            policy_progress=None,
+            policy_complete=False,
+            policy_failure_reason=None,
+        ),
+        last_policy_progress=(
+            state.last_policy_progress if policy_progress is None else policy_progress
+        ),
     )
 
 
@@ -56,18 +65,25 @@ def _advance_stream_cadences(
     now_ns = int(observation.sim_time_us) * 1_000
     policy_cadence = offboard.policy_cadence
     cached_setpoint = offboard.cached_setpoint
-    if spec is not None and spec.setpoint_fn is not None:
+    policy_progress = offboard.policy_progress
+    policy_complete = offboard.policy_complete
+    policy_failure_reason = offboard.policy_failure_reason
+    if spec is not None and spec.policy is not None:
         policy_cadence, policy_due = _advance_cadence(
             state=policy_cadence,
             time_ns=now_ns,
             rate_hz=routine.policy_rate_hz,
         )
         if policy_due:
-            cached_setpoint = _setpoint_for(
-                spec=spec,
-                baseline=baseline,
-                observation=observation,
+            result = spec.policy.step(
+                observation,
+                baseline,
+                (spec.policy.initial_progress if policy_progress is None else policy_progress),
             )
+            cached_setpoint = result.setpoint
+            policy_progress = result.progress
+            policy_complete = result.complete
+            policy_failure_reason = result.failure_reason
     assert cached_setpoint is not None
 
     transmitter_cadence, transmit_due = _advance_cadence(
@@ -88,6 +104,9 @@ def _advance_stream_cadences(
         cached_setpoint=cached_setpoint,
         requested=requested,
         accepted=accepted,
+        policy_progress=policy_progress,
+        policy_complete=policy_complete,
+        policy_failure_reason=policy_failure_reason,
     )
     return successor, cached_setpoint if transmit_due else None, command_effect
 
@@ -104,9 +123,23 @@ def _enter_stream(
     """Enter a streaming step without resetting an active OFFBOARD phase."""
     now_us = int(observation.sim_time_us)
     if offboard.cached_setpoint is None:
-        setpoint = _setpoint_for(spec=spec, baseline=baseline, observation=observation)
+        if spec.policy is None:
+            setpoint = _setpoint_for(spec=spec, baseline=baseline)
+            policy_progress = None
+            policy_complete = False
+            policy_failure_reason = None
+        else:
+            result = spec.policy.step(
+                observation,
+                baseline,
+                spec.policy.initial_progress,
+            )
+            setpoint = result.setpoint
+            policy_progress = result.progress
+            policy_complete = result.complete
+            policy_failure_reason = result.failure_reason
         transmitter_cadence = _anchored_cadence(sim_time_us=now_us)
-        policy_cadence = transmitter_cadence if spec.setpoint_fn is not None else _CadenceState()
+        policy_cadence = transmitter_cadence if spec.policy is not None else _CadenceState()
         requested = spec.prime_ticks <= 1
         successor = _OffboardState(
             policy_cadence=policy_cadence,
@@ -115,17 +148,16 @@ def _enter_stream(
             cached_setpoint=setpoint,
             requested=requested,
             accepted=False,
+            policy_progress=policy_progress,
+            policy_complete=policy_complete,
+            policy_failure_reason=policy_failure_reason,
         )
         return successor, setpoint, command if requested else None
 
-    if spec.setpoint_fn is None:
+    if spec.policy is None:
         offboard = replace(
             offboard,
-            cached_setpoint=_setpoint_for(
-                spec=spec,
-                baseline=baseline,
-                observation=observation,
-            ),
+            cached_setpoint=_setpoint_for(spec=spec, baseline=baseline),
         )
     return _advance_stream_cadences(
         routine=routine,
@@ -213,12 +245,26 @@ def decide(
             )
 
     completion_enabled = (
-        not (step.streaming is not None and step.streaming.setpoint_fn is not None)
+        not (step.streaming is not None and step.streaming.policy is not None)
         or state.offboard.accepted
     )
-    if completion_enabled and step.is_complete(observation, state.baseline_position_enu):
+    policy_complete = step.streaming is not None and step.streaming.policy is not None
+    if policy_complete and state.offboard.policy_failure_reason is not None:
+        return state, RoutineDecision.fail(
+            f"step {step.label!r} policy failed: {state.offboard.policy_failure_reason}",
+            failure_kind=FailureKind.COMMAND,
+        )
+    completed = (
+        state.offboard.policy_complete
+        if policy_complete
+        else step.is_complete(observation, state.baseline_position_enu)
+    )
+    if completion_enabled and completed:
         if step.hold_s <= 0.0:
-            return _advanced(state=state), RoutineDecision.advance()
+            return _advanced(
+                state=state,
+                policy_progress=(state.offboard.policy_progress if policy_complete else None),
+            ), RoutineDecision.advance()
         hold_since_us = state.hold_since_us
         if hold_since_us is None:
             hold_since_us = int(observation.sim_time_us)
@@ -290,9 +336,12 @@ def _decide_streaming(
     assert step_started_us is not None
     elapsed_us = int(observation.sim_time_us) - step_started_us
     if elapsed_us > step.timeout_s * 1_000_000:
+        if spec.policy is not None:
+            detail = f"policy did not complete; policy progress={state.offboard.policy_progress!r}"
+        else:
+            detail = "did not reach the waypoint"
         return state, RoutineDecision.fail(
-            f"step {step.label!r} timed out after {step.timeout_s:.1f}s "
-            "(did not reach the waypoint)",
+            f"step {step.label!r} timed out after {step.timeout_s:.1f}s ({detail})",
             failure_kind=FailureKind.COMMAND,
         )
 
@@ -309,7 +358,7 @@ def _decide_streaming(
         ):
             if ack.accepted:
                 accepted = True
-                if spec.setpoint_fn is not None and hold_since_us is None:
+                if spec.policy is not None and hold_since_us is None:
                     hold_since_us = int(observation.sim_time_us)
             elif ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
                 retry_deferred = True
@@ -346,10 +395,8 @@ def _setpoint_for(
     *,
     spec: _StreamingSpec,
     baseline: Optional[np.ndarray],
-    observation: RoutineObservation,
 ) -> StreamSetpoint:
-    if spec.setpoint_fn is not None:
-        return spec.setpoint_fn(observation, baseline)
+    assert spec.policy is None
     east, north, _up = spec.target_enu
     yaw_rad = math.nan
     if baseline is not None:

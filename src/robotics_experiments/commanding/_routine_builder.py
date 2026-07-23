@@ -6,9 +6,8 @@ import numpy as np
 
 from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
-    PolicyStepFn,
+    PolicyAdapter,
     RoutineStep,
-    StreamSetpoint,
     VehicleRoutine,
     _Invariant,
     _StepPredicate,
@@ -209,9 +208,9 @@ def _build_policy_step(
     index: int,
     flight_invariants: tuple[_Invariant, ...],
     goto_offboard_prime_ticks: int,
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]],
+    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]],
 ) -> RoutineStep:
-    for field in ("artifact", "hold_s", "timeout_s"):
+    for field in ("artifact", "timeout_s"):
         if field not in descriptor:
             raise ValueError(f"routine step {index} (policy) is missing required {field!r}")
     if policy_fn_factory is None:
@@ -219,7 +218,6 @@ def _build_policy_step(
             f"routine step {index} (policy) requires an injected policy_fn_factory "
             "(the runtime composes it from robotics_experiments.rl)"
         )
-    hold_s = float(descriptor["hold_s"])
     target = descriptor.get("target")
     if target is None:
         target_enu = None
@@ -235,17 +233,21 @@ def _build_policy_step(
                 f"routine step {index} (policy) target must be a 3-item numeric sequence"
             )
         target_enu = np.asarray(target_values, dtype=np.float64)
-    policy_fn = policy_fn_factory(descriptor)
+    adapter = policy_fn_factory(descriptor)
+    if target_enu is not None:
+        original_step = adapter.step
 
-    def _policy_setpoint(
-        observation: RoutineObservation,
-        baseline: Optional[np.ndarray],
-        policy_fn: PolicyStepFn = policy_fn,
-        target_enu: Optional[np.ndarray] = target_enu,
-    ) -> StreamSetpoint:
-        goal = target_enu if target_enu is not None else baseline
-        assert goal is not None  # baseline is captured on the entry tick
-        return policy_fn(observation.vehicle_state, goal)
+        def _targeted_policy(
+            observation: RoutineObservation,
+            baseline: Optional[np.ndarray],
+            progress,
+            original_step=original_step,
+            target_enu=target_enu,
+        ):
+            del baseline
+            return original_step(observation, target_enu, progress)
+
+        adapter = PolicyAdapter(initial_progress=adapter.initial_progress, step=_targeted_policy)
 
     spec = _StreamingSpec(
         target_enu=(math.nan, math.nan, math.nan),
@@ -253,14 +255,14 @@ def _build_policy_step(
         longitude_deg=math.nan,
         altitude_m=math.nan,
         prime_ticks=int(goto_offboard_prime_ticks),
-        setpoint_fn=_policy_setpoint,
+        policy=adapter,
     )
     return RoutineStep(
         command=set_offboard_mode(),
         is_complete=_always,
         label=(f"policy[{descriptor['name']}]" if "name" in descriptor else "policy"),
         timeout_s=float(descriptor["timeout_s"]),
-        hold_s=hold_s,
+        hold_s=0.0,
         invariants=flight_invariants,
         streaming=spec,
     )
@@ -298,7 +300,7 @@ def build_vehicle_routine(
     policy_rate_hz: float,
     offboard_setpoint_rate_hz: float,
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None,
+    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None,
 ) -> VehicleRoutine:
     """Build a :class:`VehicleRoutine` from authored step descriptors and a target.
 
