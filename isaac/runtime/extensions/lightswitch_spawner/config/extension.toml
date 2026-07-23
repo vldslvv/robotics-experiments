@@ -12,6 +12,7 @@ writeTarget.kit = true
 
 [dependencies]
 "robotics_experiments_core" = {}
+"experiment_runtime" = {}
 "isaacsim.core.prims" = {}
 "isaacsim.ros2.bridge" = {}
 

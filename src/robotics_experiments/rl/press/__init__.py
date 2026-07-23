@@ -18,6 +18,12 @@ from robotics_experiments.rl.press.actuation import (
     rotor_forces_to_body_wrench,
 )
 from robotics_experiments.rl.press.deploy import press_action_to_offboard
+from robotics_experiments.rl.press.deployment import (
+    PressDeploymentDecision,
+    PressDeploymentState,
+    initial_press_deployment_state,
+    step_press_deployment,
+)
 from robotics_experiments.rl.press.handoff import (
     HandoffGate,
     HandoffReason,
@@ -38,11 +44,15 @@ from robotics_experiments.rl.press.observation import (
     world_switch_to_contact_frame,
 )
 from robotics_experiments.rl.press.policy import (
+    HOVER_POLICY_INTERFACE,
     METADATA_FILENAME,
     POLICY_FILENAME,
+    PRESS_POLICY_INTERFACE,
     build_policy_step_fn,
+    load_policy_metadata,
     load_vector_policy,
     policy_metadata,
+    validate_policy_artifact,
 )
 from robotics_experiments.rl.press.provider import AbstractPoseProvider, PoseSample
 from robotics_experiments.rl.press.task import (
@@ -64,6 +74,7 @@ __all__ = [
     "GroundTruthPoseProvider",
     "HOVER_OBSERVATION_DIM",
     "HOVER_OBSERVATION_SCHEMA_VERSION",
+    "HOVER_POLICY_INTERFACE",
     "HandoffGate",
     "HandoffReason",
     "HandoffResult",
@@ -72,7 +83,10 @@ __all__ = [
     "OBSERVATION_SCHEMA_VERSION",
     "PRESS_OBSERVATION_DIM",
     "POLICY_FILENAME",
+    "PRESS_POLICY_INTERFACE",
     "PoseSample",
+    "PressDeploymentDecision",
+    "PressDeploymentState",
     "PressObservation",
     "PressObservationMask",
     "PressRewardTerms",
@@ -88,6 +102,8 @@ __all__ = [
     "hover_action",
     "hover_observation_from_state",
     "initial_press_task_state",
+    "initial_press_deployment_state",
+    "load_policy_metadata",
     "load_vector_policy",
     "pack_hover_observation",
     "pack_press_observation",
@@ -96,7 +112,9 @@ __all__ = [
     "reset_press_task_state",
     "rotor_forces_to_body_wrench",
     "step_press_task",
+    "step_press_deployment",
     "to_vector",
+    "validate_policy_artifact",
     "world_switch_to_contact_frame",
 ]
 

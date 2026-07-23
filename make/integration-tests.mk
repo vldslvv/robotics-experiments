@@ -137,6 +137,23 @@ test-integration-press-policy: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
+# Artifact-dependent full mission sanity gate. It is intentionally excluded
+# from test-integration-all until a press artifact passes acceptance.
+.PHONY: test-integration-press-routine
+test-integration-press-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-routine: HYDRA_CONFIG = configs/policy_press_quad.yaml
+test-integration-press-routine: SCENE = @config
+test-integration-press-routine: generate-drone-usd
+	@TEST_TARGET='test-integration-press-routine' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_routine.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_routine_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_ROUTINE_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_ROUTINE_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-routine' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
 # Multi-drone navigation. A quad (id 0) and a hexacopter (id 1) fly the full
 # absolute-waypoint navigation routine concurrently in one scene, each on its own
 # PX4 SITL instance with the per-asset airframe derived from its USD asset. Uses

@@ -50,6 +50,12 @@ before teardown or spawn. Kit can replace the Python `Usd.Stage` wrapper while
 finishing a scene or timeline transition; retaining the wrapper captured by the
 earlier `OPENED` event is therefore not a valid cross-event identity guarantee.
 
+Policy descriptors are metadata-preflighted before `spawn_fleet` mutates the
+stage. If later switch, drone, or policy-observer composition raises,
+`spawn_fleet` tears down every locally accumulated resource before propagating
+the error. The live shell records setup failures without installing its PhysX
+control callback, and a later `PLAY` starts from the cleaned state.
+
 ## Per-vehicle composition
 
 `spawn_fleet` iterates `ExperimentConfig.vehicles` in authored order. Every

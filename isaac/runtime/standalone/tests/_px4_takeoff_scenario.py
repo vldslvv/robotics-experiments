@@ -28,7 +28,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
@@ -450,6 +450,8 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
 
         with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
             fleet = _drive_to_done(context, fleet)
+        if options.post_routine_hook is not None:
+            options.post_routine_hook(context, fleet)
 
         bridge_logs = [(h.label, _bridge_debug_log_path(h.host)) for h in _bridged(fleet)]
     finally:
@@ -482,6 +484,7 @@ class Px4TakeoffScenarioOptions:
     test_name: str
     px4_container_log_name: str
     post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None = None
+    post_routine_hook: Callable[[SceneTestContext, Any], None] | None = None
     success_label: str = "configured routine"
 
 

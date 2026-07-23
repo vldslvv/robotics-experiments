@@ -6,7 +6,7 @@ degraded pose provider. The detailed files in this directory are executable
 plans: completed plans record the implementation that landed; planned files
 must follow the current repository contracts summarized below.
 
-Status as of 2026-07-21:
+Status as of 2026-07-22:
 
 | Plan | Status | Executable evidence or blocker |
 |------|--------|--------------------------------|
@@ -14,8 +14,8 @@ Status as of 2026-07-21:
 | F1b controller tuning | Validated | The recorded gains are live and the seeded gate passed repeatedly. |
 | F2 observation and handoff | Validated | Pure observation/provider/handoff tests pass; the hover/goto side channel reaches the handoff. |
 | F2b task-to-policy pipeline | Validated | `make train-rl` produced the hover artifact and `make test-integration-press-policy` passed strict deployment through PX4. |
-| F3 ground-truth press task | Implemented; evaluation paused | The contact-chain gate, smoke, and full policy training completed; `make eval-press` was stopped before seed 101 completed, so acceptance metrics remain pending. |
-| F3b contact behavior | Planned; blocked by F3 | No production contact-behavior transition or `{kind: press}` routine step exists. |
+| F3 ground-truth press task | Implemented; acceptance tuning paused | Baseline: 100% toggles, 8% stable contact, 0% retreat. First tune/current `latest`: 0% toggles, 100% stable contact, 0% retreat. The staged second tune is untrained. |
+| F3b generic contact-policy deployment | Partially implemented; mission blocked by F3 acceptance | The `press-v1` adapter, live 34-value observation, pure completion transition, and full `{kind: policy}` flight routine exist. The strict mission awaits an accepted newly exported artifact; scripted comparison remains planned. |
 | F4 curriculum/randomization | Planned; blocked by F3 | No press curriculum or contact-domain randomization exists. |
 | F5 synthetic pose | Planned; blocked by F4 | Only the ground-truth provider exists; no synthetic estimator/provider exists. |
 
@@ -45,6 +45,8 @@ Status as of 2026-07-21:
 - Host tests mirror source paths under `tests/src/robotics_experiments/`; Isaac
   standalone tests live under `isaac/runtime/standalone/tests/`.
 
-F3b must not start until the paused F3 evaluation gate has produced a
-policy that meets the recorded metrics. F4 may proceed in parallel with F3b
-only after that gate.
+The learned-policy mission gate and F4 must wait until F3 produces a policy
+that meets the recorded metrics. The generic F3b deployment plumbing is
+implemented, but its artifact-dependent integration target must not be treated
+as validated until that gate passes. The scripted baseline can then proceed
+without adding a task-specific commanding kind.

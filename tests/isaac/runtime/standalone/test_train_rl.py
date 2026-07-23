@@ -63,7 +63,11 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         hover_thrust_fraction=0.4,
     )
     config = SimpleNamespace(rl=SimpleNamespace(action=action, policy_rate_hz=20.0))
-    env_cfg = SimpleNamespace(observation_schema_version=1, observation_space=13)
+    env_cfg = SimpleNamespace(
+        observation_schema_version=1,
+        observation_space=13,
+        policy_interface="hover-v1",
+    )
 
     metadata = train_rl._artifact_metadata(  # noqa: SLF001
         config=config,
@@ -73,6 +77,7 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
 
     assert metadata["obs_schema_version"] == 1
     assert metadata["obs_dim"] == 13
+    assert metadata["policy_interface"] == "hover-v1"
     assert metadata["policy_rate_hz"] == 20.0
     assert metadata["source_commit"] == "abc123"
     assert metadata["source_dirty"] is False

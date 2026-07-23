@@ -92,7 +92,15 @@ Isaac Lab contact sensor, and reads pusher/button joints directly. Its easy-task
 geometry and initial pose ranges, contact threshold, reward, reset, termination,
 and evaluation values live under `rl.press`; Lab-only vehicle limits live under
 `rl.lab_vehicle`. Pusher stiffness and damping are inherited from the generated
-USD rather than duplicated in Lab config.
+USD rather than duplicated in Lab config. The generated pusher is a complete
+tool: a fixed bracket and 265 mm body-mounted boom, a visible moving plunger,
+and a flat forward-facing pad. The length keeps the compressed pad face ahead
+of the 13-inch forward rotor sweep. Arm capsules remain collidable and each
+propeller has an invisible swept-disc collider authored as a stationary sibling
+of its animated visual marker. The compliant body and sensor paths remain
+`/pusher_joint` and `/pusher/pad/geom`. Fixed/moving masses are explicit; the
+fixed body is 2.3372 kg and the 0.010 kg moving pad/plunger makes the complete
+X500 articulation 2.3472 kg.
 
 Press progression is the backend-neutral frozen `PressTaskState` advanced by
 `step_press_task(...)`. Its vector latch matches the production scalar
@@ -106,9 +114,10 @@ reward shortcuts.
 ## Task->policy pipeline (F2b)
 
 The pipeline is `task YAML -> make train-rl -> policy artifact ->
-{kind: policy} routine step -> FleetState lifecycle` (the runtime itself is
-unchanged apart from injecting the artifact-loader factory into
-`DriverParams`). Pieces:
+{kind: policy} routine step -> FleetState lifecycle`. The runtime injects the
+artifact-selected adapter and, when its interface requires one, the task-owned
+observation assembled from live resources. Commanding remains task-neutral.
+Pieces:
 
 - **Observation layouts** (exported from `robotics_experiments.rl.press`, pure,
   versioned): the
@@ -118,8 +127,7 @@ unchanged apart from injecting the artifact-loader factory into
   (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
   (`world_switch_to_contact_frame`; canonical switch `+X` = outward plate
   normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
-  and `VehicleState` at deploy; a field the deploy side cannot assemble is
-  forbidden in a layout. The pose-provider seam is
+  and the live runtime at deploy. The pose-provider seam is
   `AbstractPoseProvider` / `PoseSample`; ground truth is the lazy Isaac-only
   `GroundTruthPoseProvider`, and the nav->contact handoff is the pure
   `handoff_ready` gate (thresholds in `rl.press.handoff`). See ADR 0014.
@@ -149,17 +157,24 @@ unchanged apart from injecting the artifact-loader factory into
   artifact back into the checkpoint's existing run directory, and updates the
   policy namespace's `latest` symlink. The checkpoint must be below that
   namespace's `.build/training/<policy-name>/<run-id>/logs/` directory.
-- **Artifact** = TorchScript `policy.pt` + `policy_meta.json` (obs schema
-  version/dim, policy rate, action kind/dim, action scales, source Git commit,
-  and dirty-worktree flag). Train accepted policies from a clean revision;
+- **Artifact** = TorchScript `policy.pt` + `policy_meta.json`
+  (`policy_interface`, obs schema version/dim, policy rate, action kind/dim,
+  action scales, source Git commit, and dirty-worktree flag). The interface is
+  the runtime adapter selector (`hover-v1` or `press-v1`), not a commanding
+  routine kind. Train accepted policies from a clean revision;
   `source_dirty: true` is diagnostic provenance, not a claim that the commit
   alone reproduces the artifact. `build_policy_step_fn` raises
   `ValueError` on ANY metadata/config mismatch at load (a bare checkpoint is
   not a valid artifact) and composes the generic `load_vector_policy(...)` + hover-observation
-  packing + `press_action_to_offboard` into the `PolicyStepFn` the
-  `{kind: policy}` routine step streams.
-  Artifacts without the active `rl.policy_rate_hz` are invalid and must be
-  retrained; deployment provides no legacy metadata fallback.
+  packing + `press_action_to_offboard` into the hover-specific callable.
+  `load_vector_policy(...)` is the schema-validated vector interface used by
+  the press adapter. `validate_policy_artifact(...)` performs the same contract
+  validation without importing Torch and backs the pre-launch Make preflight.
+  Exact schema-v1 hover artifacts made before `policy_interface` are recognized
+  as `hover-v1`. A legacy press artifact is recognized as `press-v1` only when
+  its complete tuple is schema 1, dimension 34, 20 Hz, four-value velocity
+  action, and complete action scales; this compatibility path warns, and new
+  exports must carry the field explicitly.
 - **Gate**: `make test-integration-press-policy` flies
   `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
   takeoff -> policy hover hold -> land) strict over PX4 SITL on
@@ -186,3 +201,46 @@ contacted episodes, retreat among toggled episodes, median time-to-toggle, and
 peak compression overshoot. The command fails below the configured 80% press,
 85% stable-contact, or 95% retreat thresholds. Artifacts remain ignored under
 `.build/training`; no policy binary is committed.
+
+## Full press-policy mission gate
+
+`configs/policy_press_quad.yaml` is the deployment sanity routine in the same
+top-level Hydra format as `configs/takeoff_quad_quad.yaml`. It runs one X500 in
+the warehouse through arm -> takeoff -> hover -> goto handoff pose -> hover ->
+generic `policy` -> return goto -> land. The policy descriptor carries
+`artifact: .build/training/press/latest` and `switch_index: 0`; the artifact's
+`policy_interface: press-v1` selects the runtime adapter.
+
+The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
+before physics starts, creates a pad `ContactSensor`, and reads canonical
+switch pose, vehicle state, pusher compression/rate, contact, and lamp state.
+The non-policy contact-chain gate also requires the fixed mount/boom, visible
+plunger, a +X-facing collidable pad, full initial joint deployment, enabled arm
+and swept-propeller collision, wall collision, and rotor-sweep clearance before
+attempting a press. The Lab task owns a cloned static wall per environment; the
+live warehouse adapter adds an invisible collision proxy behind the selected
+switch so deployment cannot pass through decorative warehouse geometry. It
+packs the exact 34-value `PressObservation`. The pure frozen deployment
+transition waits for the handoff gate, supplies the preceding normalized action
+to the next observation, rejects an initially-on lamp or repeated lamp toggle,
+records first-contact stability plus diagnostic approach/compression/action
+peaks, and completes only after one toggle plus the configured stable retreat.
+Its normalized output is mapped through the same
+`press_action_to_offboard` seam as training.
+
+After an artifact passes `make eval-press`, run:
+
+```console
+make test-integration-press-routine
+```
+
+This artifact-dependent PX4/Isaac gate is intentionally outside
+`test-integration-all`. It requires exactly one off-to-on event, stable first
+contact, one toggle, stable retreat, return waypoint, landing, and disarm. The
+current legacy artifact can be run only as a diagnostic at its recorded 0.5 m/s
+action scale. It was trained against the obsolete pad-only geometry, so it is
+not a parity-valid candidate after the complete pusher tool was introduced. Its
+measured 0% toggles and 0% retreat already blocked this gate; the next accepted
+export must be trained on the complete tool and carry `press-v1` explicitly. No
+new training was started while adding the deployment path or correcting the
+pusher geometry.

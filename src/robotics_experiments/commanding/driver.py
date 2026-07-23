@@ -18,7 +18,7 @@ from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     FailureKind,
-    PolicyStepFn,
+    PolicyAdapter,
     RoutineDecision,
     RoutineState,
     VehicleRoutine,
@@ -92,7 +92,7 @@ class DriverParams:
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyStepFn]] = None
+    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None
 
 
 class DriverEnvironment(Protocol):

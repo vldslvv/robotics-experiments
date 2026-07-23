@@ -40,17 +40,27 @@ scenario-specific notes.
   `make build`).
 - `make test-integration-press-contact-chain` runs the F3 deterministic
   real-asset gate on the Isaac Lab image with one environment. It spawns the
-  paired switch/lamp, drives a slow pusher press, requires real pad contact and
-  pusher/button displacement, advances the production N-step latch, verifies
-  exactly one lamp transition, then retreats within the stability envelope.
-  It is part of `test-integration-all` and requires no PX4 container or trained
-  policy.
+  paired switch/lamp; requires enabled arm, swept-propeller, and wall collision
+  geometry; and verifies the complete visible mount/boom/plunger/pad tool plus
+  full initial pusher deployment. It then drives a slow press, requires real
+  forward-pad contact and pusher/button displacement, advances the production
+  N-step latch, verifies exactly one lamp transition, and retreats within the
+  stability envelope. It is part of `test-integration-all` and requires no PX4
+  container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs a prior `make train-rl`, so it is deliberately not
   part of `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy
   artifact contract and routine config. Policy metadata includes the active
   policy rate, so artifacts trained before that field was introduced must be
   retrained.
+- `make test-integration-press-routine` runs the complete F3 deployment sanity
+  flight from `configs/policy_press_quad.yaml`: takeoff, goto the press handoff
+  pose, execute the artifact-selected generic policy against the real spawned
+  switch/lamp and pusher, return to the landing point, land, and disarm. It
+  requires one lamp transition, stable first contact, and stable post-toggle
+  retreat. Like the hover artifact gate, it is deliberately excluded from
+  `test-integration-all` because it needs an accepted
+  `.build/training/press/latest` whose metadata declares `press-v1`.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

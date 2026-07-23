@@ -11,7 +11,7 @@ rl:
   num_envs: 256
   episode_length_s: 10.0
   action:
-    # The 0.20-0.30 m easy-task start range does not need the shared 3 m/s
+    # The 0.40-0.50 m collision-safe start range does not need the shared 3 m/s
     # navigation scale. The policy can command a gentle first contact while
     # retaining enough post-contact authority to cross the real latch threshold.
     max_body_velocity_mps: 2.0

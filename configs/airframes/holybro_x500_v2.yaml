@@ -182,29 +182,48 @@ battery:
 # BOM SKUs if the physical build needs line-by-line procurement verification.
 wiring:
   # Lump for hardware not modeled as its own geometry (per the no-new-geometry
-  # scope). Tuned so the body mass sum (excluding the 0.040 kg pusher pad) is
-  # ~2.299 kg, giving ~2.339 kg AUW with the pad -- BOM Stage 1 weight budget.
+  # scope). The previous 10g implicit pusher-mount allowance is now represented
+  # explicitly by the fixed mount/boom below. Together with those fixed parts,
+  # the body is ~2.337 kg; the complete articulation is ~2.347 kg.
   name: PM07 + GPS + prop guards + RC + connectors
   size: [0.060, 0.040, 0.012]
   position: [0.0, 0.0, 0.0]
-  mass: 0.327  # residual lump: PM07 + GPS + guards + RC + connectors + cabling
+  mass: 0.317  # residual lump after removing the implicit 10g pusher allowance
 
-# Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
-# false to build this airframe without the pusher (the geometry/drive below stay
-# defined for an easy re-enable). The pad is a sibling rigid body linked to the
-# body by a spring-damper prismatic joint (`pusher_joint`).
+# Compliant pusher tool. The mount and 265mm carbon boom are fixed to the body;
+# the plunger and orange forward-facing pad are the moving rigid body linked by
+# the spring-damper prismatic `pusher_joint`. `enabled: false` omits the complete
+# assembly while retaining its configuration for an easy re-enable.
 # Custom assembly: no vendor SKU is currently defined for the compliant pusher.
 # Verification note: add links for the exact spring, linear guide/plunger, pad,
 # and printed/machined mount once selected. Current dimensions are design
 # requirements from the roadmap: ~30 mm pad and 10-15 mm compliant travel.
 pusher:
   enabled: true
+  mount:
+    name: Pusher center-plate bracket
+    size: [0.020, 0.040, 0.020]
+    position: [0.065, 0.0, 0.01]
+    mass: 0.005  # M3 mounting hardware + bracket -- BOM 1.8
+  boom:
+    name: 6mm OD carbon-fiber pusher boom
+    radius: 0.003
+    height: 0.265
+    position: [0.2045, 0.0, 0.01]
+    rotation_deg: [0.0, 90.0, 0.0]
+    # Includes the fixed spring housing and guide bushing; only the plunger and
+    # pad mass belongs to the moving pusher body.
+    mass: 0.043
+  plunger:
+    name: Pusher linear-guide plunger
+    radius: 0.002
+    length: 0.025
   pad:
     name: Spring-loaded pusher pad
     radius: 0.015  # ~30mm pad diameter -- BOM 1.8
     height: 0.008
-    position: [0.11, 0.0, 0.01]  # forward of the body, clear of the 0.165m prop disc
-    mass: 0.040  # pusher mechanism ~50g, 10g folded into frame -- BOM 1.8
+    position: [0.345, 0.0, 0.01]
+    mass: 0.010  # moving pad and plunger only -- BOM 1.8
   drive:
     travel: 0.015  # 10-15mm compliant travel -- BOM 1.8
     stiffness: 800.0

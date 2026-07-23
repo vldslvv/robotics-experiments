@@ -23,6 +23,7 @@ __all__ = [
     "CylinderPart",
     "PusherConfig",
     "PusherDriveConfig",
+    "PusherPlungerConfig",
     "compute_body_mass_properties",
     "load_builder_config",
 ]
@@ -130,8 +131,18 @@ class PusherDriveConfig:
 
 
 @dataclass(frozen=True)
+class PusherPlungerConfig:
+    name: str
+    radius: float
+    length: float
+
+
+@dataclass(frozen=True)
 class PusherConfig:
     enabled: bool
+    mount: BoxPart
+    boom: CylinderPart
+    plunger: PusherPlungerConfig
     pad: CylinderPart
     drive: PusherDriveConfig
 
@@ -205,8 +216,16 @@ def _pusher_config(data: dict[str, Any] | None) -> PusherConfig | None:
     if data is None:
         return None
     drive = data["drive"]
+    plunger = data["plunger"]
     return PusherConfig(
         enabled=bool(data["enabled"]),
+        mount=_box(data["mount"], "airframes.pusher.mount"),
+        boom=_cylinder(data["boom"], "airframes.pusher.boom"),
+        plunger=PusherPlungerConfig(
+            name=str(plunger["name"]),
+            radius=float(plunger["radius"]),
+            length=float(plunger["length"]),
+        ),
         pad=_cylinder(data["pad"], "airframes.pusher.pad"),
         drive=PusherDriveConfig(
             travel=float(drive["travel"]),
@@ -274,7 +293,8 @@ def _available_airframe_config_names(config_dir: str | os.PathLike[str] = CONFIG
 
 
 # Body mass properties are derived from the same component placements consumed
-# by USD authoring. The separate pusher pad and massless booms are excluded.
+# by USD authoring. The moving pusher pad/plunger body and massless arm booms are
+# excluded; the fixed pusher mount and boom are part of the drone body.
 def _euler_xyz_matrix(rotation_deg: tuple[float, float, float]) -> np.ndarray:
     """Rotation matrix for USD ``XformCommonAPI`` SetRotate (XYZ Euler degrees)."""
     rx, ry, rz = (math.radians(angle) for angle in rotation_deg)
@@ -373,6 +393,13 @@ def compute_body_mass_properties(
     )
     parts.append(_part_body_properties(cfg.battery, identity, np.asarray(cfg.battery.position)))
     parts.append(_part_body_properties(cfg.wiring, identity, np.asarray(cfg.wiring.position)))
+    if cfg.pusher is not None and cfg.pusher.enabled:
+        parts.append(
+            _part_body_properties(cfg.pusher.mount, identity, np.asarray(cfg.pusher.mount.position))
+        )
+        parts.append(
+            _part_body_properties(cfg.pusher.boom, identity, np.asarray(cfg.pusher.boom.position))
+        )
 
     total_mass = sum(mass for mass, _, _ in parts)
     com = sum((mass * pos for mass, _, pos in parts), start=np.zeros(3)) / total_mass

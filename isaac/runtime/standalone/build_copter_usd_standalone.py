@@ -60,10 +60,18 @@ def _build_all_airframe_usds(
 # --- USD authoring helpers --------------------------------------------------
 
 Vec3 = tuple[float, float, float]
+_PUSHER_MOUNT_COLOR = (0.18, 0.18, 0.20)
+_PUSHER_BOOM_COLOR = (0.06, 0.06, 0.07)
+_PUSHER_PLUNGER_COLOR = (0.65, 0.68, 0.72)
+_PUSHER_PAD_COLOR = (1.0, 0.32, 0.04)
 
 
 def _set_mass(prim: Usd.Prim, mass_kg: float) -> None:
     UsdPhysics.MassAPI.Apply(prim).CreateMassAttr(mass_kg)
+
+
+def _set_display_color(gprim: UsdGeom.Gprim, color: Vec3) -> None:
+    gprim.CreateDisplayColorAttr([Gf.Vec3f(*color)])
 
 
 def _apply_pose(
@@ -98,12 +106,15 @@ def _author_cylinder(stage: Usd.Stage, prim_path: str, part: CylinderPart) -> Us
 def _author_propeller_visual(
     stage: Usd.Stage, prop_path: str, prop_part: CylinderPart, num_blades: int
 ) -> None:
-    """Author the cosmetic propeller geometry under the rotor marker Xform.
+    """Author cosmetic propeller geometry under the animated rotor marker.
 
     A small central hub cylinder plus ``num_blades`` thin blade boxes fanned
-    evenly about Z. All geometry is collision-free and visual only; it derives
-    its dimensions from the propeller radius/height (no extra geometry knobs) and
-    spins as a unit because it is parented under the marker's RotateZ op.
+    evenly about Z provide the visual. All dimensions derive from the configured
+    propeller, and the subtree spins as a unit because it is parented under the
+    marker's RotateZ op. Collision must not be parented here: changing a
+    collision shape's ancestor transform invalidates Isaac's physics tensor
+    views, so the stationary swept-disc collider is authored beside this marker
+    by :func:`_author_arm`.
     """
     if num_blades < 1:
         raise ValueError(
@@ -180,6 +191,18 @@ def _author_arm(
     _set_mass(prop.GetPrim(), prop_part.mass)
     _author_propeller_visual(stage, f"{arm_path}/prop", prop_part, geom.prop_num_blades)
 
+    # The prop marker above is animated for cosmetic spin. Keep the complete
+    # swept-disc collision envelope on a stationary sibling under the arm so a
+    # visual RotateZ update never rebuilds a PhysX shape or invalidates tensor
+    # views. The cylinder is rotationally symmetric, so it represents the same
+    # occupied volume without inheriting the cosmetic animation.
+    prop_collision = UsdGeom.Cylinder.Define(stage, f"{arm_path}/prop_collision")
+    prop_collision.CreateRadiusAttr(prop_part.radius)
+    prop_collision.CreateHeightAttr(prop_part.height)
+    _apply_pose(prop_collision, prop_part.position, prop_part.rotation_deg)
+    UsdPhysics.CollisionAPI.Apply(prop_collision.GetPrim())
+    prop_collision.MakeInvisible()
+
 
 def build_drone_usd(
     cfg: AirframeConfig,
@@ -249,12 +272,28 @@ def build_drone_usd(
     _author_box(stage, f"{power_path}/battery", cfg.battery)
     _author_box(stage, f"{power_path}/wiring", cfg.wiring)
 
-    # Pusher (sibling rigid body + prismatic joint). Authored only when the
-    # airframe defines a pusher and it is enabled, so a single config parameter
-    # (airframes.pusher.enabled) builds the drone with or without it.
+    # Pusher tool. The mount and carbon boom are fixed children of the drone
+    # body. The plunger and forward-facing pad form the moving rigid body linked
+    # by pusher_joint. Keeping the pad collision at /pusher/pad/geom preserves
+    # the training/runtime contact-sensor contract.
     if cfg.pusher is not None and cfg.pusher.enabled:
+        mount = cfg.pusher.mount
+        boom = cfg.pusher.boom
+        plunger = cfg.pusher.plunger
         pad = cfg.pusher.pad
         pusher_drive = cfg.pusher.drive
+
+        fixed_path = f"{root_path}/pusher"
+        UsdGeom.Xform.Define(stage, fixed_path)
+        mount_xform = _author_box(stage, f"{fixed_path}/mount", mount)
+        UsdPhysics.CollisionAPI.Apply(mount_xform.GetPrim())
+        mount_geom = UsdGeom.Cube(stage.GetPrimAtPath(f"{fixed_path}/mount/geom"))
+        _set_display_color(mount_geom, _PUSHER_MOUNT_COLOR)
+
+        boom_geom = _author_cylinder(stage, f"{fixed_path}/fixed_boom", boom)
+        UsdPhysics.CollisionAPI.Apply(boom_geom.GetPrim())
+        _set_display_color(boom_geom, _PUSHER_BOOM_COLOR)
+
         pusher_grp = f"{wrapper_path}/pusher"
         UsdGeom.Xform.Define(stage, pusher_grp)
         pad_path = f"{pusher_grp}/pad"
@@ -262,12 +301,22 @@ def build_drone_usd(
         pad_xform = UsdGeom.Xform.Define(stage, pad_path)
         UsdPhysics.RigidBodyAPI.Apply(pad_xform.GetPrim())
         _set_mass(pad_xform.GetPrim(), pad.mass)
-        _apply_pose(pad_xform, pad.position, pad.rotation_deg)
+        _apply_pose(pad_xform, pad.position)
+
+        plunger_geom = UsdGeom.Cylinder.Define(stage, f"{pad_path}/plunger")
+        plunger_geom.CreateAxisAttr("X")
+        plunger_geom.CreateRadiusAttr(plunger.radius)
+        plunger_geom.CreateHeightAttr(plunger.length)
+        plunger_center_x = -(pad.height + plunger.length) / 2.0
+        _apply_pose(plunger_geom, (plunger_center_x, 0.0, 0.0))
+        _set_display_color(plunger_geom, _PUSHER_PLUNGER_COLOR)
 
         pad_geom = UsdGeom.Cylinder.Define(stage, f"{pad_path}/geom")
+        pad_geom.CreateAxisAttr("X")
         pad_geom.CreateRadiusAttr(pad.radius)
         pad_geom.CreateHeightAttr(pad.height)
         UsdPhysics.CollisionAPI.Apply(pad_geom.GetPrim())
+        _set_display_color(pad_geom, _PUSHER_PAD_COLOR)
 
         joint = UsdPhysics.PrismaticJoint.Define(stage, f"{wrapper_path}/pusher_joint")
         joint.CreateBody0Rel().SetTargets([root_path])

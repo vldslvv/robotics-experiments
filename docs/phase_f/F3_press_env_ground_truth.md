@@ -3,9 +3,11 @@
 Status: IMPLEMENTED; POLICY TRAINED; ACCEPTANCE TUNING IN PROGRESS (2026-07-22).
 
 F3 provides the easy, ground-truth contact task that precedes curriculum,
-randomization, and synthetic perception. It does not add production
-`{kind: press}` behavior, live observation injection, mission retry/abort
-logic, or a committed policy binary; those remain F3b/F4/F5 work.
+randomization, and synthetic perception. Deployment now uses the existing
+generic `{kind: policy}` command with a live ground-truth observation adapter;
+there is intentionally no `{kind: press}` command. Scripted behavior,
+curriculum/randomization, synthetic perception, mission-level retry/abort, and
+a committed policy binary remain later work.
 
 ## Implemented task contract
 
@@ -17,11 +19,15 @@ registration-owned config factory, so training and evaluation contain no task
 ID branches.
 
 Each press environment contains the real pusher-enabled `holybro_x500_v2`, one
-cloned real switch articulation, and a static wall. The source switch's local
-outward normal is converted to canonical contact-frame `+X`, and only the
-button geometry is enlarged for the easy task. The source plate and joint
-physics remain authoritative. The pad contact sensor, pusher joint, and button
-joint provide the ground-truth contact, compression, and actuation inputs.
+cloned real switch articulation, and a static wall. Arm capsules remain
+collidable and each propeller has an invisible swept-disc collider. The
+265 mm pusher keeps its compressed pad face ahead of that rotor envelope. The
+source switch's local `-Y` outward normal is converted to canonical switch-frame
+`+X` with the same fixed `Rz(-pi/2)` correction in Lab and the live provider,
+and only the button geometry is enlarged for the easy task. The source plate
+and joint physics remain authoritative. The pad contact sensor, pusher joint,
+and button joint provide the ground-truth contact, compression, and actuation
+inputs.
 
 The 34-value observation uses the existing `PressObservation` field order and
 the named `PressObservationMask` bits. Pose, contact, and lamp values are marked
@@ -54,18 +60,21 @@ values.
 ## Contact-chain prerequisite
 
 `make test-integration-press-contact-chain` runs one real switch/lamp pair,
-rotates it into the contact frame, performs a slow scripted press, advances the
-production N-step latch, verifies exactly one lamp transition, retreats, and
-checks stability. The current 2026-07-22 run passed with:
+rotates it into the contact frame, requires enabled arm, swept-propeller, and
+wall collision, performs a slow scripted press, advances the production N-step
+latch, verifies exactly one lamp transition, retreats, and checks stability.
+The current 2026-07-23 Isaac Sim 5.1 run passed with:
 
-- maximum pusher displacement: 0.01219 m
-- maximum button displacement: 0.01047 m
-- maximum contact force: 10.432 N
+- arm colliders: 4; swept-propeller colliders: 4; wall colliders: 1
+- initial pusher deployment: 0.01500 m
+- maximum pusher displacement: 0.01404 m
+- maximum button displacement: 0.01090 m
+- maximum contact force: 11.962 N
 - lamp transitions: 1; final intensity: 5000
-- stable retreat beyond 0.35 m: true; maximum tilt: 0.448 rad
+- stable retreat beyond 0.35 m: true; maximum tilt: 0.514 rad
 
 The passing evidence is stored under
-`.build/docker/integration/test-integration-press-contact-chain.20260722T160119Z.248449`.
+`.build/docker/integration/test-integration-press-contact-chain.20260723T041406Z.35316`.
 
 Switch/lamp scene spawning is atomic and fail-closed: both assets are
 preflighted, every configured pair is validated, partial canonical prims are
@@ -82,9 +91,10 @@ make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml
 make eval-press
 ```
 
-Each task config owns `observation_schema_version` and `observation_space`, and
-artifact metadata is exported from those fields. `load_vector_policy(...)` is
-the generic validated observation-vector loader; `build_policy_step_fn(...)`
+Each task config owns `observation_schema_version`, `observation_space`, and
+`policy_interface`; artifact metadata is exported from those fields alongside
+the source commit and dirty-worktree flag. `load_vector_policy(...)` is the
+generic validated observation-vector loader; `build_policy_step_fn(...)`
 remains the hover-specific `VehicleState` to OFFBOARD composer.
 
 The evaluator loads `.build/training/press/latest` and runs 100 deterministic
@@ -116,12 +126,37 @@ The second-cycle settings are staged with 2.0 m/s action authority but
 deliberately untrained. Its attempted
 2026-07-22 launch was stopped after about 19 seconds at the user's request,
 before it produced any checkpoint. F3 is therefore not yet validated. Resume
-the exact staged command and then rerun the complete three-seed evaluation as
-documented in the decision log. Evaluate every new artifact with:
+only after committing the collision-safe geometry and recording that clean
+source revision in the run metadata. The reset wall-normal range is now
+0.40-0.50 m so neither the deployed pusher nor swept propeller discs begin
+inside the wall; the handoff maximum is 0.50 m. Resume the exact staged command
+and then rerun the complete three-seed evaluation as documented in the decision
+log. Evaluate every new artifact with:
 
 ```console
 make -o generate-drone-usd eval-press
 ```
+
+Once that evaluator passes all three acceptance thresholds, run the complete
+deployment sanity flight:
+
+```console
+make test-integration-press-routine
+```
+
+It uses `configs/policy_press_quad.yaml` and
+`configs/experiment/routine/policy_press.yaml` to arm, take off, navigate to
+the handoff point, run the generic policy, return, land, and disarm. The live
+Isaac Sim 5.1 adapter supplies the exact 34-value observation and the pure
+deployment transition requires an initially-off lamp, stable first contact,
+exactly one transition, and stable retreat. The current `latest` artifact
+predates `policy_interface`; the runtime recognizes its exact legacy contract
+for diagnostic use at the recorded 0.5 m/s scale. It also predates the complete
+fixed-boom/plunger/forward-pad geometry and is no longer a training/deployment
+parity candidate. It still fails acceptance and is not valid for this gate. The
+next exported press artifact must be trained with the corrected tool and will
+include `press-v1` automatically. No new training cycle was started while
+implementing or correcting this path.
 
 The evaluator lifecycle diagnosis, baseline reward-term means, and current
 evidence-based tuning decisions are recorded in the separate decision log.

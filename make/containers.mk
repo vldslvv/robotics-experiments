@@ -28,8 +28,12 @@ ros_DOCKER_ARGS = \
 generate-drone-usd:
 	@uv run --extra simulation python isaac/runtime/standalone/build_copter_usd_standalone.py --all
 
+.PHONY: preflight-policy-artifacts
+preflight-policy-artifacts:
+	@uv run python -m robotics_experiments.workflows._policy_preflight '$(HYDRA_CONFIG_HOST_PATH)'
+
 .PHONY: run-isaac
-run-isaac: generate-drone-usd $(isaac_RUN_DEPS)
+run-isaac: preflight-policy-artifacts generate-drone-usd $(isaac_RUN_DEPS)
 	@mkdir -p $(isaac_RUNTIME_DIRS)
 	@EXPECTED_CMD="$(ISAAC_CONTAINER_CMD)" \
 	make/scripts/run_persistent_container.sh \
@@ -118,7 +122,7 @@ remove-cache-images:
 	@echo "Removed Docker build cache anchor images (if they existed)."
 
 .PHONY: run
-run:
+run: preflight-policy-artifacts
 	kitty --title ROS2 --hold $(MAKE) run-ros &
 	kitty --title IsaacSim --hold $(MAKE) run-isaac &
 	$(MAKE) run-px4

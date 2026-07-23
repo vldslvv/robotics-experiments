@@ -544,3 +544,510 @@ reward and acceptance checks still use actual measured velocity, so the larger
 action range does not redefine a gentle contact; it makes safe approach and
 post-contact force control a learning problem instead of making the real latch
 unreachable under action saturation.
+
+### 19. Keep commanding generic and identify the policy interface in metadata
+
+Plain-language view: The flight commander should not need a new command every
+time a neural network learns a new skill. Hovering and pressing therefore both
+remain `kind: policy`. The model's small metadata file now says which input
+contract it expects (`hover-v1` or `press-v1`), and the runtime connects the
+right observations and completion checks. This is similar to labeling a tool's
+connector: the person scheduling the job still says "use this tool," while the
+connector explains how this particular tool is wired.
+
+Technical view: `policy_meta.json` now includes `policy_interface` in addition
+to observation schema/version, action contract, policy rate, action scales,
+`source_commit`, and `source_dirty`. The commanding layer receives a
+`PolicyAdapter` and stores opaque frozen progress. Each inference returns a
+`PolicyStepResult(progress, setpoint, complete, failure_reason)`, so commanding
+owns cadence and OFFBOARD transport without importing `PressObservation` or
+branching on task IDs. The runtime selects `hover-v1` or `press-v1` from
+metadata. Exact 13-value hover schema-v1 artifacts without the new field retain
+a narrow legacy inference; a 34-value press artifact without it fails closed
+and must be re-exported. This avoids silently interpreting a future 34-value
+policy as the switch task merely because its tensor has the same length.
+
+No PPO parameters changed in this decision. The next exported training artifact
+will carry `press-v1` automatically. The current first-tuned artifact predates
+the field and remains unsuitable regardless because its accepted metrics are
+0% toggles, 100% stable first contact, and 0% retreat.
+
+### 20. Build the deploy-time observation and completion logic against Isaac Sim 5.1
+
+Plain-language view: A trained policy cannot press a real simulated switch from
+its model file alone. During the flight, something must measure where the
+switch is, whether the pusher touched it, how far the pusher compressed, and
+whether the lamp changed. A small runtime adapter now gathers exactly those 34
+values. A separate, testable state machine prevents "success" from meaning only
+that the drone touched the wall: it requires one lamp change and a controlled
+back-away.
+
+Technical view: The adapter was verified against the installed
+`vv-isaac-sim-custom:5.1.0` APIs, specifically
+`isaacsim.sensors.physics.ContactSensor`,
+`isaacsim.core.prims.SingleArticulation`, `ArticulationAction`, and
+`PhysxSchema.PhysxJointAPI.maxJointVelocity`. It applies the easy-task switch
+and pusher settings before standalone physics starts, reads the real stage and
+articulations, converts the source asset's local `-Y` outward normal to
+canonical `+X` with `Rz(-pi/2)`, and packs the schema-v1 34-value
+`PressObservation`. The previous normalized action is injected from frozen
+runtime progress rather than guessed from the physical state.
+
+`PressDeploymentState` records handoff, first-contact evidence, previous lamp
+state, transition count, and consecutive stable-retreat samples. The transition
+holds a zero action until the existing handoff gate passes; rejects missing or
+non-finite observation groups, an initially-on lamp, malformed policy output,
+and a second lamp transition; and completes only after one transition plus the
+configured retreat. The action remains the existing four-value normalized
+velocity action and maps through the same `press_action_to_offboard` contract.
+This is deployment safety/completion logic, not a new reward and not a change
+to PPO optimization.
+
+### 21. Add the full-flight sanity gate, but stop before new training
+
+Plain-language view: Passing the acceptance evaluator means the model can solve
+the contact task inside its training-style environment. It does not prove that
+the entire vehicle can take off, navigate to the switch, hand control to the
+model, return, and land through PX4. A second test now covers that full journey.
+It is intentionally waiting for a good model; running it with the current
+gentle-touch policy would only reconfirm a known failure.
+
+Technical view: `configs/policy_press_quad.yaml` and routine
+`policy_press.yaml` define arm -> takeoff -> hover -> goto handoff -> hover ->
+generic policy -> return goto -> land. `make test-integration-press-routine`
+requires stable first contact, exactly one off-to-on toggle event, the configured
+stable-retreat sample count, routine completion, landing, and disarm. The shared
+`FleetState` now owns switch spawning/latching and ordered toggle events; the
+light-switch extension only publishes those events to ROS, eliminating duplicate
+physical ownership.
+
+The acceptance evaluator remains the statistical model gate: 300 deterministic
+episodes over three non-training seeds, with minimum 80% confirmed toggles, 85%
+stable first contact among contacted episodes, and 95% retreat among toggled
+episodes. The full-flight routine is a system-integration gate run only after
+those percentages pass. This separation matters because a single successful
+mission can miss a fragile policy, while 300 Lab episodes cannot expose PX4,
+OFFBOARD, live-observation, or landing integration mistakes.
+
+Per the pause request, no new training cycle, checkpoint export, acceptance
+evaluation, or artifact-dependent mission run was started during this work.
+Resume with the exact command in entry 17, run `make -o generate-drone-usd
+eval-press`, and only then run `make test-integration-press-routine` if all
+three evaluator thresholds pass.
+
+The shared hover-policy regression gate initially exposed a narrow legacy
+metadata bug: adapter selection inferred `hover-v1`, but vector validation
+reread the unnormalized sidecar and rejected the same artifact. Both paths now
+use one metadata reader, guarded by a host test. The rerun passed the complete
+PX4 arm/takeoff/policy-hover/land routine in artifact
+`.build/docker/integration/test-integration-press-policy.20260722T174538Z.335593`.
+The real contact-chain gate also passed under Isaac Sim 5.1.0 in
+`.build/docker/integration/test-integration-press-contact-chain.20260722T174404Z.332722`.
+Neither command performed PPO updates.
+
+### 22. Run the existing gentle-contact policy faithfully before tuning again
+
+#### Diagnose the launch failure before changing policy behavior
+
+Plain-language view: The failed launch did not prove that the model was broken.
+The simulator stopped while deciding how to connect the model, before the model
+received an observation or commanded the drone. The visible Fabric warning and
+the warehouse's missing optional quadcopter payload were unrelated startup
+messages. The actionable error was the missing policy-interface label in the
+model's metadata.
+
+Technical view: `spawn_fleet()` reached `load_policy_metadata()` for
+`.build/training/press/20260722T150005Z.19` and raised because its schema-v1
+sidecar predates `policy_interface`. The failure happened after stage mutation,
+which also exposed a cleanup weakness. The loaded application and APIs were
+verified against `vv-isaac-sim-custom:5.1.0`; no Isaac Sim 6.x behavior or
+extension identifier was used.
+
+#### Infer only the one unambiguous legacy press contract
+
+Plain-language view: Rewriting the saved model's label by hand would make this
+one copy start, but would hide the rule needed to interpret other older copies.
+The loader now recognizes this old model only because all of its identifying
+measurements agree with the press-policy connector. If any identifying value is
+different, startup still stops and asks for a proper export.
+
+Technical view: Missing-interface inference selects `press-v1` only for schema
+version 1, observation dimension 34, policy rate 20 Hz, velocity action kind,
+action dimension 4, and all four action-scale fields. It emits a runtime warning
+and does not modify `policy_meta.json`. Explicit interfaces and the existing
+13-value legacy-hover inference are unchanged; incomplete or ambiguous tuples
+still fail closed.
+
+#### Preserve the action scale that the network learned
+
+Plain-language view: A neural network outputs a normalized request, not meters
+per second directly. Multiplying its old output by 2.0 instead of the trained
+0.5 would make every translation command four times stronger. That might look
+more decisive, but it would no longer answer the question "what did the trained
+policy learn?" The diagnostic flight therefore uses 0.5 m/s.
+
+Technical view: The artifact sidecar records
+`action_scales.max_body_velocity_mps=0.5`, while the staged next-training config
+uses 2.0 m/s because the real contact-chain test found that authority necessary
+to latch. `configs/policy_press_quad.yaml` now uses 0.5 so strict metadata
+validation passes without rescaling the deployed policy. The future training
+config remains at 2.0; promoting a future artifact requires updating the
+deployment scale in the same change.
+
+#### Make a failed attempt produce useful behavioral evidence
+
+Plain-language view: "Timed out" alone cannot distinguish a motionless drone
+from one that approached gently, touched the switch, and merely failed to push
+far enough. The runtime now keeps a small scorecard of the attempt: whether the
+handoff happened, how close the drone came, its largest action and pusher
+compression, first-contact quality, lamp changes, and retreat samples.
+
+Technical view: The frozen `PressDeploymentState` adds initial and minimum
+wall-normal range, peak pusher compression, and peak absolute normalized action.
+These are deployment diagnostics only and do not alter the 34-value observation,
+policy weights, rewards, or action mapping. Generic commanding still treats
+progress as opaque, but includes its final representation in a policy timeout
+instead of the incorrect goto-specific "did not reach the waypoint" message.
+
+#### Fail before launching containers and clean partial simulator state
+
+Plain-language view: Configuration mistakes should be reported immediately,
+not after waiting for Isaac and PX4 to start. If a later simulator-specific
+operation fails, pressing Play again should not collide with half-created drones
+or switches from the first attempt.
+
+Technical view: `make preflight-policy-artifacts` loads the Hydra experiment and
+validates every policy file, interface, schema, cadence, action contract, and
+scale without importing Torch. `run` and `run-isaac` depend on that target. The
+live runtime repeats preflight before stage mutation for non-Make launch paths;
+`spawn_fleet()` tears down locally accumulated switches, drones, observers, and
+bridge resources on exceptions. The Kit lifecycle boundary records one setup
+failure, installs no PhysX callback, and supports a clean subsequent Play. The
+extension manifest now directly declares the Isaac Sim 5.1
+`isaacsim.core.prims` and `isaacsim.sensors.physics` dependencies it imports.
+
+#### Keep the manual probe separate from the acceptance evaluator
+
+Plain-language view: Watching one flight answers "does this model do anything
+that resembles pressing?" It cannot answer "does it work reliably?" The
+acceptance evaluator repeats the task across many initial conditions and seeds,
+then counts success. It prevents a visually convincing lucky attempt from being
+mistaken for a dependable policy.
+
+Technical view: The diagnostic run classifies handoff, approach, contact,
+compression, toggle, and retreat for one PX4/Isaac mission. The acceptance
+evaluator remains the deterministic 300-episode statistical gate: at least 80%
+confirmed toggles over all episodes, 85% stable first contact conditioned on
+contacted episodes, and 95% stable retreat conditioned on toggled episodes.
+Legacy compatibility does not waive those thresholds. The current artifact's
+existing evaluator result remains 0% toggles, 100% stable first contact, and 0%
+retreat, so a likely diagnostic outcome is gentle contact followed by timeout.
+No new PPO training or acceptance-evaluation cycle is part of this decision.
+
+#### Verification and the remaining manual Play step
+
+Plain-language view: The corrected launch now accepts the saved model and opens
+the Isaac Sim 5.1 warehouse without the old metadata failure. The automated
+checks also proved that the physical switch can still latch and that the older
+hover-policy route was not broken. The final live flight did not start because
+the desktop required a human click to grant remote-control permission before an
+automated Play click; leaving the simulators idle would provide no evidence, so
+they were stopped cleanly. No claim about live PX4 press behavior is made from
+that non-started attempt.
+
+Technical view: The full pre-commit suite passed: 459 host tests passed and one
+was skipped, with Ruff, format, mypy, vulture, shell, YAML, TOML, and binary
+asset checks green. Taplo initially could not fetch the public pyproject schema
+through the sandbox proxy and passed when rerun with network access. The real
+contact-chain gate passed at
+`.build/docker/integration/test-integration-press-contact-chain.20260722T182633Z.356810`
+with 12.19 mm pusher compression, 10.47 mm button displacement, 10.432 N peak
+force, one lamp toggle, and stable retreat. The hover-policy PX4 regression
+passed at
+`.build/docker/integration/test-integration-press-policy.20260722T182653Z.357371`.
+
+The live preflight accepted the legacy artifact at 0.5 m/s and reported source
+commit `c6ef12cadcedaf28c50bebdf3535c0f927b34ab9` with `source_dirty: true`.
+Isaac Sim 5.1 reached "Press Play to fly the configured routine" in
+`kit_20260722_183049.log` with no policy-interface, action-scale, or setup error.
+The Wayland remote-control confirmation prevented an injected Play event, so no
+drone was spawned and no `PressDeploymentState` metrics were produced. Isaac,
+PX4, and ROS were then stopped with `make stop-all`.
+
+To finish the one-flight diagnostic, run:
+
+```console
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml
+```
+
+When Isaac displays the warehouse and logs that it is ready, click Play once.
+The likely result, based on the 300-episode evaluator, is a completed handoff,
+stable first contact, zero toggles, zero retreat, and a 20-second policy timeout.
+The timeout now prints the exact approach, action, compression, contact, toggle,
+and retreat progress needed to confirm or reject that expectation. Stop with
+`make stop-all` after capturing it. Do not resume the staged 2.0 m/s training
+cycle until this diagnostic record has been added here.
+
+### 23. Replace the floating contact puck before any further training
+
+#### Verify the observed missing-tool problem
+
+Plain-language view: The drone did have a small simulated contact piece, and the
+simulator extended it, but the observation that there was no visible pusher
+stick was correct. The model contained only a tiny round puck floating ahead of
+the frame. It had no bracket, boom, shaft, spring guide, or other visible
+connection to the drone.
+
+Technical view: The tracked X500 USDA contained only the moving rigid body
+`/pusher/pad` with a 30 mm diameter by 8 mm cylinder at body X=0.11 m and a
+15 mm prismatic joint. The cylinder retained OpenUSD's default Z axis while the
+joint translated on X, so switch contact occurred on the cylinder's curved edge
+instead of a flat forward face. Isaac Sim 5.1 evidence showed that the joint did
+extend and that this simplified collision shape could toggle the switch; the
+missing element was the intended mechanical geometry, not the PhysX joint.
+
+#### Author the complete tool while preserving the software contract
+
+Plain-language view: The drone now has a dark body bracket, an 80 mm carbon
+boom, a visible metal-colored sliding plunger, and an orange flat pad facing the
+switch. Existing code still looks for the same joint and contact-pad names, so
+the mechanical correction does not create a second policy interface.
+
+Technical view: The USD builder now authors fixed body geometry at
+`/body/pusher/mount` and `/body/pusher/fixed_boom`, moving plunger geometry at
+`/pusher/pad/plunger`, and the existing collidable sensor sink at
+`/pusher/pad/geom`. The pad and plunger explicitly use cylinder axis X.
+`/pusher_joint` remains a 15 mm X-axis spring-damper articulation and the
+contact-sensor path is unchanged. The placeholder hexacopter receives the same
+schema with an under-frame placement so its centerline front arm is not
+overlapped.
+
+#### Preserve mass and clearance rather than hiding a dynamics change
+
+Plain-language view: Adding visible parts should not quietly make the vehicle
+heavier. Weight that was previously bundled into generic frame numbers was
+moved into the explicit bracket and boom. The complete X500 remains about
+2.339 kg, and the pad stays safely below the propeller plane.
+
+Technical view: The X500 fixed body is now 2.3062 kg and the moving
+pad/plunger body is 0.033 kg, preserving the prior 2.3392 kg articulation mass.
+The 5 g bracket and 12 g boom are included in body mass, while 10 g of the old
+implicit pusher allowance was removed from the wiring residual. Static tests
+require the mount to overlap the center-plate front edge, the 80 mm boom to
+begin there, the plunger to remain captured at the full 15 mm extension, and at
+least 10 mm vertical clearance between the pad and propeller plane.
+
+#### Turn visible deployment into a prerequisite gate
+
+Plain-language view: Future tests cannot pass merely because an invisible
+collision shape happens to press the switch. The check now requires every
+visible tool component, verifies that the pad faces forward, and confirms the
+pusher starts fully extended before the drone approaches.
+
+Technical view: `make test-integration-press-contact-chain` inspects the real
+Isaac Sim 5.1 stage for a collidable mount and fixed boom, visible display
+colors on mount/boom/plunger/pad, X-axis plunger and pad geometry, the preserved
+pad collision API, and an initial pusher joint position equal to its upper
+limit. It then runs the unchanged real contact, production latch, lamp, and
+retreat assertions.
+
+#### Verification result and training consequence
+
+Plain-language view: The corrected tool started fully deployed, pressed the
+real switch, turned on exactly one lamp, and retreated stably. No policy was
+trained or evaluated. The old model learned with the floating puck, so its
+results cannot validate the corrected tool; the next meaningful policy must be
+trained from this geometry.
+
+Technical view: The Isaac Sim 5.1 gate passed in
+`.build/docker/integration/test-integration-press-contact-chain.20260723T035112Z.15799`.
+It measured 15.00 mm initial deployment, 12.39 mm peak pusher compression,
+10.61 mm button displacement, 10.471 N peak pad force, one off-to-on lamp
+transition, stable retreat, and 0.454 rad peak tilt. The existing artifact at
+`.build/training/press/20260722T150005Z.19` predates this contact geometry and
+is now explicitly non-parity diagnostic evidence. Keep training paused until
+the repository revision containing this geometry is the recorded clean source
+revision for a new run.
+
+### 24. Make the entire approach geometry collidable before retraining
+
+#### Verify the reported collision gap
+
+Plain-language view: The report was correct. The arm tubes had collision shapes
+in the generated drone, but both press execution paths explicitly turned those
+collisions off. The visible propellers had no collision shape at all. The Lab
+training task had a real wall collider, while the warehouse deployment path
+assumed the surrounding scene supplied a suitable wall and did not guarantee
+one behind the chosen switch.
+
+Technical view: `SwitchPressEnv._disable_boom_collisions()` and the live
+`PressObservationIO` adapter set `physics:collisionEnabled=false` on every arm
+boom. Propeller hubs and blades were cosmetic `UsdGeom` only. The Lab
+`RigidObjectCfg` wall already used `CollisionPropertiesCfg`, but no equivalent
+collision proxy was authored for `/Root/LightSwitch_<index>` during live policy
+setup. This meant training and deployment could permit physically impossible
+arm or rotor penetration, and their wall contracts differed.
+
+#### Enable arm, swept-rotor, and wall collision as one contract
+
+Plain-language view: The simulator now treats the drone's arms and the complete
+area swept by each spinning propeller as solid. The training wall is checked,
+and live warehouse policy execution creates an invisible solid wall immediately
+behind the selected switch. A policy must therefore approach with the pusher
+instead of passing the airframe or propellers through the surface.
+
+Technical view: Both boom-disabling paths were removed. The USD builder now
+authors one invisible cylinder collider at each
+`/body/arms/*/prop_collision`, using the configured propeller radius and
+thickness. The collider is a stationary sibling of the animated `/prop` marker;
+parenting it under `/prop` made cosmetic spin rebuild the PhysX shape and
+invalidate Isaac's tensor simulation view during the first manual run. Runtime
+setup fails closed if any arm boom is disabled or the arm-to-prop-collider
+count is not one-to-one. It also authors
+`/Root/LightSwitch_<index>/PressWallCollider/geom`, positioned along the source
+asset's local `+Y` behind its local `-Y` outward face. The proxy dimensions come
+from `rl.press.reset.wall_half_extents_m`; no new hardcoded wall geometry was
+introduced.
+
+#### Lengthen the tool and move mass to the correct rigid body
+
+Plain-language view: Once the propeller sweep is solid, the old short pusher
+cannot reach the wall first. The X500 boom is now 265 mm long, placing the
+compressed pad face about 7 mm ahead of the forward rotor envelope. The spring
+housing and guide bushing stay on the fixed drone body; only the 10 g pad and
+plunger move. This keeps hover behavior stable without pretending the hardware
+is lighter.
+
+Technical view: The forward rotor envelope is approximately 0.342 m from the
+body origin. The compressed pad face is at 0.349 m and the deployed face at
+0.364 m. The complete articulation mass is 2.3472 kg: 2.3372 kg fixed body plus
+0.0100 kg moving pad/plunger. An intermediate model incorrectly placed 0.033 kg
+of spring/bushing/plunger mass on the distant moving body; the hover gate then
+missed its 0.10 m limit (`last1.0s_max=0.130 m`). Moving the fixed mechanism
+mass back to the fixed boom restored the gate without changing total mass or
+controller gains.
+
+#### Move reset and handoff geometry outside the collision envelope
+
+Plain-language view: A training episode must not begin with a propeller or
+pusher already inside the wall. Starts are now 0.40-0.50 m from the switch, and
+the navigation-to-policy handoff accepts up to 0.50 m. The warehouse routine's
+handoff point is 0.40 m from its switch.
+
+Technical view: `rl.press.reset.wall_normal_min_m/max_m` changed from
+0.20-0.30 m to 0.40-0.50 m, `rl.press.handoff.switch_range_max_m` changed from
+0.35 m to 0.50 m, and the configured warehouse goto changed correspondingly.
+The hover/goto side-channel switch was also moved to 0.45 m so that this
+non-contact gate does not hit the 0.364 m deployed tool. While rerunning that
+gate, a stale source-asset orientation was exposed: its raw `-Y` normal now
+uses `Rz(-pi/2)`, matching the provider's canonical conversion.
+
+#### Verification result and training consequence
+
+Plain-language view: Collision hardening passed both deterministic checks. The
+drone hovers and navigates normally, then a separate scripted routine contacts
+the real switch with the pusher, toggles one lamp, and retreats without the arms
+or propellers crossing the wall. No training or policy evaluation was started.
+
+Technical view: Isaac Sim 5.1 hover/goto evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260723T041342Z.34723`:
+hover last-window error 0.084 m, goto last-window error 0.040 m, and
+ground-truth range 2.397 m to 0.458 m. Contact-chain evidence is under
+`.build/docker/integration/test-integration-press-contact-chain.20260723T041406Z.35316`:
+four arm colliders, four swept-propeller colliders, one wall collider, 14.04 mm
+peak pusher compression, 10.90 mm button travel, 11.962 N peak force, one lamp
+toggle, stable retreat, and 0.514 rad peak tilt.
+
+The previous artifacts were trained without this collision contract and are
+not parity-valid. Keep training paused. Before continuing, commit this state,
+confirm the exported metadata records that clean commit and
+`source_dirty: false`, rerun both deterministic gates, then start the staged
+training command already documented above. The separate acceptance evaluator
+is still required afterward because one scripted contact-chain success proves
+mechanical executability, not learned-policy reliability across the configured
+300 episodes and three non-training seeds.
+
+### 25. Keep physics collision outside the animated propeller marker
+
+#### Diagnose the first manual policy-run failure
+
+Plain-language view: The manual run did start, but it broke almost immediately
+inside the simulator. Each propeller's invisible safety disc had been attached
+to the visible propeller marker. The runtime rotates that marker every frame to
+make the propeller look as if it is spinning. Moving a collision shape in this
+way caused PhysX to replace the shape while the flight runtime was still using
+it. Once that physics connection was invalid, later drone and switch errors
+were consequences rather than independent failures.
+
+Technical view: The first causal warning in the Isaac Sim 5.1 log
+`/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/5.1/kit_20260723_041940.log`
+occurred at `2026-07-23T04:20:30Z`:
+`prim '/Root/DroneSpawned/body/arms/arm_4/prop/collision' was deleted while
+being used by a shape in a tensor view class`. The following
+`physics.tensors simulationView was invalidated` message explains the repeated
+transform and switch-joint read failures. `IsaacArticulationIO` intentionally
+writes the `RotateZ` operation on each `/prop` marker for cosmetic rotor spin;
+therefore a collider below that marker violates the invariant that tensor-view
+physics shapes remain structurally stable during simulation.
+
+#### Author the swept-disc collider as a stationary sibling
+
+Plain-language view: The visible propeller can still spin, but its invisible
+safety disc now stays fixed relative to the drone arm. A circular swept area is
+rotationally symmetric, so visually rotating that collision disc never added
+physical accuracy. Keeping it stationary prevents the simulator from replacing
+the shape.
+
+Technical view: The USD builder now authors
+`/body/arms/arm_<index>/prop_collision` beside `/prop`, with the same configured
+pose, radius, and thickness. Only the hub and blades remain descendants of the
+animated marker. Runtime and deterministic geometry checks were updated to
+require exactly one `prop_collision` sibling per arm. Both tracked drone USDA
+files were regenerated from the existing YAML definitions; no binary asset was
+changed. A host-test fake was also completed with the two commanding setpoint
+types imported transitively by press deployment, eliminating an
+order-dependent test isolation failure exposed by the focused verification
+run.
+
+#### Add a regression that reproduces the invalidation sequence
+
+Plain-language view: The drone articulation test now does more than check that
+the drone can be read and pushed. It spins the visible rotors while physics is
+active, advances the simulator, and then reads and controls the drone again. A
+collider accidentally placed under the animated marker will make this test fail
+in the same way as the manual run.
+
+Technical view: `test-integration-drone-articulation` now calls
+`update_rotor_spin(...)` with live tensor views, advances Kit, reads the
+articulation again, and applies rotor forces. It passed in Isaac Sim 5.1 with
+artifacts at
+`.build/docker/integration/test-integration-drone-articulation.20260723T042751Z.46232`.
+The collision-hardened hover/goto gate passed at
+`.build/docker/integration/test-integration-press-hover-goto.20260723T042807Z.47008`
+with 0.084 m last-window hover error, 0.040 m last-window goto error, and a
+ready handoff at 0.458 m. The real contact-chain gate passed at
+`.build/docker/integration/test-integration-press-contact-chain.20260723T042833Z.47715`
+with four arm colliders, four stationary propeller colliders, one wall
+collider, 14.04 mm peak pusher compression, 10.90 mm button travel, one toggle,
+11.962 N peak force, and stable retreat.
+
+#### Training and continuation decision
+
+Plain-language view: Do not train yet. The simulator fault is fixed, but these
+checks demonstrate mechanics and runtime stability, not that the old learned
+policy can press the switch. The next step is to rerun the manual
+takeoff-to-policy-to-landing sanity routine and observe whether the existing
+policy attempts a plausible approach. Retraining remains paused until that
+diagnostic is reviewed.
+
+Technical view: No training or acceptance evaluation was started for this
+decision. The old artifact still lacks parity with the corrected pusher and
+collision geometry. Resume with
+`make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; inspect the
+structured Isaac Sim 5.1 log and routine telemetry for approach, contact,
+toggle, retreat, and landing behavior. If its behavior is not useful, begin a
+new clean-revision training run using the staged commands in this document,
+then run the acceptance evaluator. The evaluator remains the statistical gate:
+it measures learned-policy reliability over the configured non-training seeds,
+whereas the deterministic contact-chain test only proves that one scripted
+physical press is possible.

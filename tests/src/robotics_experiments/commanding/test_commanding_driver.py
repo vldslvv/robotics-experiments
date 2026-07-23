@@ -18,6 +18,8 @@ from robotics_experiments.commanding import (
     DriverTick,
     EnvelopeGates,
     FailureKind,
+    PolicyAdapter,
+    PolicyStepResult,
     RoutineDriverState,
     VelocitySetpoint,
     create_routine_driver,
@@ -328,8 +330,18 @@ _POLICY_STEPS = [
 ]
 
 
-def _fake_policy_fn(vehicle_state, target_enu):
-    return VelocitySetpoint(forward_mps=0.2, right_mps=0.0, down_mps=0.0, yaw_rate_radps=0.0)
+def _fake_policy_step(observation, target_enu, progress):
+    del target_enu
+    return PolicyStepResult(
+        progress=progress + 1,
+        setpoint=VelocitySetpoint(
+            forward_mps=0.2,
+            right_mps=0.0,
+            down_mps=0.0,
+            yaw_rate_radps=0.0,
+        ),
+        complete=observation.sim_time_us >= 3_000_000,
+    )
 
 
 def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
@@ -351,7 +363,10 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         goto_offboard_prime_ticks=3,
         policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
-        policy_fn_factory=lambda descriptor: _fake_policy_fn,
+        policy_fn_factory=lambda descriptor: PolicyAdapter(
+            initial_progress=0,
+            step=_fake_policy_step,
+        ),
     )
     context = DriverContext(params=params, port=port, env=env, label="d0")
     driver = create_routine_driver(
@@ -379,16 +394,19 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
     command_index = next(i for i, effect in enumerate(port.effects) if effect[0] == "command")
     assert port.effects[command_index - 1][0] == "setpoint"
 
-    # It does not complete before PX4 accepts OFFBOARD, even after hold_s elapses.
+    # It does not complete before PX4 accepts OFFBOARD, even when the adapter
+    # would otherwise be allowed to complete.
     env.sim_us = 2_000_000
     driver = _tick_driver(context=context, state=driver)
     assert env.advanced_steps == []
     assert not routine_driver_is_done(state=driver)
 
-    # hold_s of calm in-envelope sim time after OFFBOARD acceptance -> complete.
+    # The adapter owns completion; after OFFBOARD acceptance it finishes once
+    # its task-specific condition is true.
     port.feedback.append(CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0))
     driver = _tick_driver(context=context, state=driver)
     env.sim_us = 4_000_000
+    driver = _tick_driver(context=context, state=driver)
     driver = _tick_driver(context=context, state=driver)
     assert env.advanced_steps == ["policy"]
     assert routine_driver_is_done(state=driver)

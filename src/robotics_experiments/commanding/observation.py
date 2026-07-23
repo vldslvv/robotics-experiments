@@ -15,7 +15,7 @@ the ``MAV_CMD_*`` ids are named in the command payload layer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from robotics_experiments.px4_bridge import BridgeStatus, VehicleState
 
@@ -75,6 +75,9 @@ class RoutineObservation:
             stepper itself progresses purely on commands, acks, and timeouts.
         sim_time_us: Simulation time in microseconds (the stepper's clock for
             step timeouts).
+        policy_observation: Optional immutable task-specific snapshot assembled
+            by the runtime boundary. Commanding treats it as opaque and passes
+            it only to the active generic policy adapter.
     """
 
     vehicle_state: VehicleState
@@ -82,3 +85,4 @@ class RoutineObservation:
     last_ack: Optional[CommandAck]
     failsafe: bool
     sim_time_us: int
+    policy_observation: Any = None

@@ -24,7 +24,9 @@ def test_airframe_mass_properties_are_computed_from_components() -> None:
 
     total_mass, center_of_mass, diagonal_inertia = compute_body_mass_properties(airframe)
 
-    assert total_mass == pytest.approx(2.2992)
+    assert airframe.pusher is not None
+    assert total_mass == pytest.approx(2.3372)
+    assert total_mass + airframe.pusher.pad.mass == pytest.approx(2.3472)
     assert center_of_mass[1] == pytest.approx(0.0, abs=1e-6)
     assert diagonal_inertia[2] > diagonal_inertia[0]
     assert diagonal_inertia[2] > diagonal_inertia[1]

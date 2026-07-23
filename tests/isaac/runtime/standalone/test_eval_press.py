@@ -130,7 +130,11 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
     def fake_factory(**kwargs):
         factory_calls.append(kwargs)
-        return env, SimpleNamespace(observation_schema_version=1, observation_space=34)
+        return env, SimpleNamespace(
+            observation_schema_version=1,
+            observation_space=34,
+            policy_interface="press-v1",
+        )
 
     def fake_run_seed(*, env, policy, seed, episode_count):
         del env, policy
@@ -183,7 +187,11 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         "make_isaac_lab_env",
         lambda **_kwargs: (
             env,
-            SimpleNamespace(observation_schema_version=1, observation_space=34),
+            SimpleNamespace(
+                observation_schema_version=1,
+                observation_space=34,
+                policy_interface="press-v1",
+            ),
         ),
     )
     monkeypatch.setattr(press, "load_vector_policy", lambda **_kwargs: None)

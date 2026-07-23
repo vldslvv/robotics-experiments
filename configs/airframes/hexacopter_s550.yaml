@@ -116,18 +116,34 @@ wiring:
   position: [0.0, 0.0, 0.0]
   mass: 0.120
 
-# Compliant pusher appendage. `enabled` is the per-drone on/off switch: set it
-# false to build this airframe without the pusher (the geometry/drive below stay
-# defined for an easy re-enable). The pad is a sibling rigid body linked to the
-# body by a spring-damper prismatic joint (`pusher_joint`).
+# Compliant pusher tool. This placeholder hex uses the under-frame fallback so
+# its fixed boom does not overlap the centerline front arm.
 pusher:
   enabled: true
+  mount:
+    name: Under-frame pusher bracket
+    size: [0.020, 0.040, 0.020]
+    position: [0.072, 0.0, -0.015]
+    mass: 0.005
+  boom:
+    name: 6mm OD carbon-fiber pusher boom
+    radius: 0.003
+    height: 0.322
+    position: [0.241, 0.0, -0.025]
+    rotation_deg: [0.0, 90.0, 0.0]
+    # Includes the fixed spring housing and guide bushing; only the plunger and
+    # pad mass belongs to the moving pusher body.
+    mass: 0.037
+  plunger:
+    name: Pusher linear-guide plunger
+    radius: 0.002
+    length: 0.025
   pad:
     name: Spring-loaded pusher pad
     radius: 0.015
     height: 0.008
-    position: [0.13, 0.0, 0.01]
-    mass: 0.040
+    position: [0.410, 0.0, -0.025]
+    mass: 0.010
   drive:
     travel: 0.015
     stiffness: 800.0

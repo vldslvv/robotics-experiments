@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import math
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,9 @@ def test_usd_builder_default_hydra_config_loads_holybro_x500_v2():
     assert config.output_dir == "isaac/assets/LightSwitchWarehouse"
     assert config.airframe.pusher is not None
     assert config.airframe.pusher.enabled is True
+    assert config.airframe.pusher.boom.height == 0.265
+    assert config.airframe.pusher.plunger.length == 0.025
+    assert config.airframe.pusher.pad.rotation_deg == (0.0, 0.0, 0.0)
     assert config.airframe.pusher.drive.travel == 0.015
     assert config.airframe.name == "holybro_x500_v2"
     assert config.airframe.output_filename == "holybro_x500_v2.usda"
@@ -40,10 +44,11 @@ def test_usd_builder_computes_body_mass_properties_from_components():
 
     total_mass, com, diagonal_inertia = builder.compute_body_mass_properties(cfg)
 
-    # total_mass is the sum of every body component mass, EXCLUDING the pusher
-    # pad (a separate rigid body) and the massless booms. Computing it from the
-    # cited component masses is the single source -- editing one mass propagates.
+    # total_mass is the sum of every fixed body component, including the pusher
+    # mount/boom but excluding its moving pad/plunger body and the massless arm
+    # booms. Computing it from cited component masses is the single source.
     arm = cfg.arm_geometry
+    assert cfg.pusher is not None
     expected_mass = (
         cfg.center_plate.mass
         + len(cfg.arms) * (arm.motor.mass + arm.esc.mass + arm.propeller.mass)
@@ -54,9 +59,12 @@ def test_usd_builder_computes_body_mass_properties_from_components():
         + cfg.lidar.mass
         + cfg.battery.mass
         + cfg.wiring.mass
+        + cfg.pusher.mount.mass
+        + cfg.pusher.boom.mass
     )
     assert total_mass == pytest.approx(expected_mass)
-    assert total_mass == pytest.approx(2.2992)
+    assert total_mass == pytest.approx(2.3372)
+    assert total_mass + cfg.pusher.pad.mass == pytest.approx(2.3472)
 
     # Symmetric quad: yaw inertia is the largest principal moment, and the two
     # horizontal moments are close (the forward sensors break exact equality).
@@ -176,7 +184,7 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
         assert prim.GetAttribute("drone:spinDir").Get() == spin_dir
 
         # The marker is an Xform carrying a cosmetic RotateZ spin op (initial 0,
-        # ordered after the translate) plus the propeller visual (hub + blades).
+        # ordered after the translate) and the propeller visual.
         assert prim.IsA(UsdGeom.Xform)
         xformable = UsdGeom.Xformable(prim)
         op_order = [op.GetOpName() for op in xformable.GetOrderedXformOps()]
@@ -191,11 +199,18 @@ def test_usd_builder_generates_quad_with_rotor_metadata(tmp_path):
         assert rotate_ops[0].Get() == 0.0
 
         assert stage.GetPrimAtPath(f"{path}/hub").IsA(UsdGeom.Cylinder)
+        # The swept-disc collider is a stationary sibling. Parenting it under
+        # the animated marker would make each visual spin rebuild a PhysX shape
+        # and invalidate physics tensor views.
+        collision = stage.GetPrimAtPath(f"{path.rsplit('/', 1)[0]}/prop_collision")
+        assert collision.IsA(UsdGeom.Cylinder)
+        assert collision.HasAPI(UsdPhysics.CollisionAPI)
+        assert UsdGeom.Imageable(collision).ComputeVisibility() == UsdGeom.Tokens.invisible
         blades = [child for child in prim.GetChildren() if child.GetName().startswith("blade_")]
         assert len(blades) == 2  # num_blades from the quad config
 
 
-def test_usd_builder_default_quad_has_pusher(tmp_path):
+def test_usd_builder_default_quad_has_complete_pusher_tool(tmp_path):
     builder = _load_builder_module()
     config = builder.load_builder_config(
         config_dir=_CONFIG_DIR,
@@ -204,19 +219,80 @@ def test_usd_builder_default_quad_has_pusher(tmp_path):
 
     stage_path = builder.build_drone_usd(config.airframe, output_dir=config.output_dir)
     stage = Usd.Stage.Open(stage_path)
+    pusher = config.airframe.pusher
+    assert pusher is not None
 
-    # Pad rigid body + its collision geom exist under the pusher group.
+    # The fixed bracket and carbon boom are visible, collidable body geometry.
+    mount = stage.GetPrimAtPath("/holybro_x500_v2/body/pusher/mount")
+    mount_geom = UsdGeom.Cube(stage.GetPrimAtPath("/holybro_x500_v2/body/pusher/mount/geom"))
+    fixed_boom = UsdGeom.Cylinder(stage.GetPrimAtPath("/holybro_x500_v2/body/pusher/fixed_boom"))
+    assert mount.IsValid()
+    assert mount.HasAPI(UsdPhysics.CollisionAPI)
+    assert mount_geom
+    assert mount_geom.GetDisplayColorAttr().Get()
+    assert fixed_boom
+    assert fixed_boom.GetPrim().HasAPI(UsdPhysics.CollisionAPI)
+    assert fixed_boom.GetDisplayColorAttr().Get()
+
+    # The moving plunger and flat forward-facing pad retain the runtime paths.
     pad = stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad")
+    plunger = UsdGeom.Cylinder(stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad/plunger"))
+    pad_geom = UsdGeom.Cylinder(stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad/geom"))
     assert pad.IsValid()
     assert pad.HasAPI(UsdPhysics.RigidBodyAPI)
-    assert stage.GetPrimAtPath("/holybro_x500_v2/pusher/pad/geom").IsA(UsdGeom.Cylinder)
+    assert plunger
+    assert plunger.GetAxisAttr().Get() == "X"
+    assert plunger.GetDisplayColorAttr().Get()
+    assert pad_geom
+    assert pad_geom.GetAxisAttr().Get() == "X"
+    assert pad_geom.GetPrim().HasAPI(UsdPhysics.CollisionAPI)
+    assert pad_geom.GetDisplayColorAttr().Get()
 
     # Prismatic spring-damper joint with travel from airframes.pusher.drive.travel.
     joint_prim = stage.GetPrimAtPath("/holybro_x500_v2/pusher_joint")
     assert joint_prim.IsValid()
     joint = UsdPhysics.PrismaticJoint(joint_prim)
     assert joint.GetAxisAttr().Get() == "X"
-    assert joint.GetUpperLimitAttr().Get() == pytest.approx(config.airframe.pusher.drive.travel)
+    assert joint.GetUpperLimitAttr().Get() == pytest.approx(pusher.drive.travel)
+
+    # The mount overlaps the center plate, the fixed boom starts at its front
+    # edge, and the plunger remains inside the boom even at full extension.
+    plate_front = config.airframe.center_plate.position[0] + (
+        config.airframe.center_plate.size[0] / 2.0
+    )
+    mount_back = pusher.mount.position[0] - pusher.mount.size[0] / 2.0
+    mount_front = pusher.mount.position[0] + pusher.mount.size[0] / 2.0
+    boom_back = pusher.boom.position[0] - pusher.boom.height / 2.0
+    boom_front = pusher.boom.position[0] + pusher.boom.height / 2.0
+    assert mount_back < plate_front < mount_front
+    assert boom_back == pytest.approx(plate_front)
+    extended_plunger_back = (
+        pusher.pad.position[0]
+        + pusher.drive.travel
+        - pusher.pad.height / 2.0
+        - pusher.plunger.length
+    )
+    extended_plunger_front = pusher.pad.position[0] + pusher.drive.travel - pusher.pad.height / 2.0
+    assert extended_plunger_back < boom_front < extended_plunger_front
+
+    # The pad stays below the rotor plane even though the front propeller discs
+    # overlap its centerline horizontally.
+    pad_top = pusher.pad.position[2] + pusher.pad.radius
+    propeller_bottom = (
+        config.airframe.arm_geometry.propeller.position[2]
+        - config.airframe.arm_geometry.propeller.height / 2.0
+    )
+    assert propeller_bottom - pad_top >= 0.01
+
+    # Even with the spring fully compressed, the pad's flat contact face remains
+    # ahead of the complete forward rotor sweep.
+    propeller = config.airframe.arm_geometry.propeller
+    rotor_forward = max(
+        math.cos(math.radians(arm.azimuth_deg)) * propeller.position[0] + propeller.radius
+        for arm in config.airframe.arms
+    )
+    compressed_pad_face = pusher.pad.position[0] + pusher.pad.height / 2.0
+    assert compressed_pad_face - rotor_forward >= 0.005
 
 
 def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
@@ -233,6 +309,7 @@ def test_usd_builder_pusher_disabled_omits_pusher(tmp_path):
     # No pusher subtree is authored when disabled.
     assert not stage.GetPrimAtPath("/holybro_x500_v2/pusher_joint").IsValid()
     assert not stage.GetPrimAtPath("/holybro_x500_v2/pusher").IsValid()
+    assert not stage.GetPrimAtPath("/holybro_x500_v2/body/pusher").IsValid()
 
     # The rest of the airframe is intact (rotor markers still present).
     for path in (

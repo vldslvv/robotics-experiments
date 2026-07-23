@@ -182,6 +182,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> None:
             obs_schema_version=int(env_cfg.observation_schema_version),
             obs_dim=int(env_cfg.observation_space),
             policy_rate_hz=config.rl.policy_rate_hz,
+            policy_interface=str(env_cfg.policy_interface),
         )
         policy = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location=env.device)
         policy.eval()

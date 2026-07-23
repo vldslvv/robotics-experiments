@@ -21,7 +21,7 @@ hover_task:
 handoff:
   pose_confidence_min: 0.85
   pose_age_max_s: 0.1
-  switch_range_max_m: 0.35
+  switch_range_max_m: 0.50
   lateral_align_max_m: 0.08
   wall_normal_speed_max_mps: 0.15
   lateral_speed_max_mps: 0.20
@@ -60,8 +60,8 @@ reset:
   switch_wall_offset_m: 0.02
   switch_height_m: 1.0
   wall_half_extents_m: [0.05, 1.0, 1.0]
-  wall_normal_min_m: 0.20
-  wall_normal_max_m: 0.30
+  wall_normal_min_m: 0.40
+  wall_normal_max_m: 0.50
   lateral_error_min_m: -0.02
   lateral_error_max_m: 0.02
   vertical_error_min_m: -0.02

@@ -26,9 +26,12 @@ greps for.
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the
-canonical contact frame, commands a slow press, verifies pad contact plus
-pusher and button displacement, advances the production N-step latch, requires
-exactly one lamp transition, and then retreats within the stability envelope.
+canonical contact frame, and first verifies the pusher's fixed mount/boom,
+visible plunger, forward-facing collidable pad, fully deployed joint, enabled
+arm and swept-propeller colliders, and the static wall collider. It then
+commands a slow press, verifies pad contact plus pusher and button displacement,
+advances the production N-step latch, requires exactly one lamp transition, and
+retreats within the stability envelope.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
@@ -96,3 +99,11 @@ each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
 transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
 OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
 to completion.
+
+`make test-integration-press-routine` runs the artifact-dependent full press
+mission in `configs/policy_press_quad.yaml`: takeoff, navigate to the configured
+handoff point, execute the `press-v1` artifact through the generic `policy`
+step, return, land, and disarm. The strict post-routine hook requires stable
+first contact, exactly one off-to-on lamp event, and stable retreat. Run it only
+after `make eval-press` accepts `.build/training/press/latest`; it is excluded
+from `test-integration-all` for that reason.
