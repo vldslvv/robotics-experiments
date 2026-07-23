@@ -203,6 +203,7 @@ def test_wrapper_runs_three_stages_with_one_artifact_id_without_shutdown_by_defa
         "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
         and "scalar data loaded" in result.stdout
     )
+    assert "unbound variable" not in result.stderr
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

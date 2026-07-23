@@ -254,7 +254,7 @@ serve_tensorboard_when_ready() {
     local server_pid=""
     local scalar_tags=""
 
-    trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi' EXIT HUP INT TERM
+    trap 'if [ -n "${server_pid}" ]; then kill "${server_pid}" 2>/dev/null; fi; exit 0' HUP INT TERM
     until find "${tensorboard_logdir}" \
         -maxdepth 1 \
         -type f \
@@ -303,6 +303,8 @@ serve_tensorboard_when_ready() {
         "${tensorboard_url}" \
         "${console_log}" |
         tee -a "${console_log}" >&2
+    kill "${server_pid}" 2>/dev/null
+    wait "${server_pid}" 2>/dev/null
     return 1
 }
 
