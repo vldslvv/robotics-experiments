@@ -20,19 +20,16 @@ The harness changes three things at once:
 
 ---
 
-## Step 1 -- Hardware failure profile (the third `on_failure` profile)
+## Step 1 -- Qualify the shared landing recovery on hardware
 
-- Today the `make_env` seam injected into
-  the `robotics_experiments.runtime.FleetState` lifecycle has two failure reactions:
-  forgiving (live extension: log + idle the driver) and strict (integration
-  test: raise). Hardware adds a third: **abort** -- any driver `on_failure` (a
-  `FAIL`, a PX4 failsafe, a phase timeout) commands an immediate land/RTL
-  through the same GCS link instead of idling or raising.
-- Action: when the hardware shell is built, its `make_env` maps `on_failure` to
-  an abort action in the commanding layer (a `land` command send, reusing the
-  existing `{kind: land}` machinery), then idles the driver. No new orchestrator
-  code is needed now; this records the contract so the seam is not narrowed in
-  the meantime.
+- The shared driver now owns failure recovery for every shell. Any armed
+  routine `FAIL`, PX4 failsafe, or driver timeout enters `RECOVERING`, commands
+  Land at the current position, and falls back to PX4's configured offboard-loss
+  action if Land is rejected or unacknowledged. `on_failure` is notification-only
+  and cannot interrupt recovery.
+- Action: the future hardware shell reuses this state machine and reports the
+  preserved terminal `FAILED` result. It must not introduce a third side-effecting
+  `on_failure` profile or select RTL as contact-failure recovery.
 - Invariant: the RC kill switch and PX4's own failsafes stay above everything in
   this repo; the abort profile is the software layer's reaction, never the only
   line of defense.

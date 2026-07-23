@@ -26,11 +26,17 @@ from robotics_experiments.commanding._routine_model import (
 from robotics_experiments.commanding._routine_predicates import EnvelopeGates
 from robotics_experiments.commanding._routine_stepper import decide
 from robotics_experiments.commanding.commands import (
+    MAV_CMD_NAV_LAND,
     AttitudeRateSetpoint,
     PositionSetpoint,
     VelocitySetpoint,
+    land,
 )
-from robotics_experiments.commanding.observation import CommandAck, RoutineObservation
+from robotics_experiments.commanding.observation import (
+    MAV_RESULT_TEMPORARILY_REJECTED,
+    CommandAck,
+    RoutineObservation,
+)
 from robotics_experiments.commanding.port import (
     MavlinkCommandPort,
 )
@@ -43,9 +49,12 @@ from robotics_experiments.px4_bridge import (
 __all__ = [
     "DriverContext",
     "DriverEnvironment",
+    "DriverFailure",
     "DriverParams",
     "DriverPhase",
     "DriverTick",
+    "RecoveryOutcome",
+    "RecoveryStage",
     "RoutineDriverState",
     "create_routine_driver",
     "routine_driver_is_done",
@@ -63,7 +72,39 @@ class DriverPhase(Enum):
     FETCH_TARGET = auto()
     BUILD = auto()
     DRIVE = auto()
-    DONE = auto()
+    RECOVERING = auto()
+    SUCCEEDED = auto()
+    FAILED = auto()
+
+
+class RecoveryStage(Enum):
+    """Active stage of an armed vehicle's layered landing recovery."""
+
+    WAIT_LAND_ACK = auto()
+    WAIT_LAND_DISARM = auto()
+    WAIT_PX4_FAILSAFE = auto()
+    WAIT_PX4_FAILSAFE_DISARM = auto()
+    WAIT_PX4_FAILSAFE_NO_LINK = auto()
+
+
+class RecoveryOutcome(Enum):
+    """Terminal disposition of a failed driver's recovery attempt."""
+
+    PENDING = auto()
+    NOT_REQUIRED = auto()
+    LANDED = auto()
+    PX4_FAILSAFE_LANDED = auto()
+    DISARMED_AFTER_ESCALATION = auto()
+    EXHAUSTED = auto()
+
+
+@dataclass(frozen=True)
+class DriverFailure:
+    """Original driver failure plus its independent recovery disposition."""
+
+    kind: FailureKind
+    message: str
+    recovery_outcome: RecoveryOutcome
 
 
 @dataclass(frozen=True)
@@ -73,6 +114,7 @@ class DriverParams:
     steps: Sequence[Mapping[str, Any]]
     gates: EnvelopeGates
     command_ack_timeout_s: float
+    failure_recovery_timeout_s: float
     bridge_heartbeat_timeout_s: float
     handshake_timeout_s: float
     prearm_settle_s: float
@@ -105,7 +147,9 @@ class DriverEnvironment(Protocol):
 
     def log(self, message: str) -> None: ...
 
-    def on_failure(self, kind: FailureKind, message: str) -> None: ...
+    def on_failure(self, kind: FailureKind, message: str) -> None:
+        """Notify without raising; recovery must be allowed to finish."""
+        ...
 
     def on_step_advanced(self, step_label: str) -> None: ...
 
@@ -139,6 +183,9 @@ class RoutineDriverState:
     routine: Optional[VehicleRoutine]
     routine_state: RoutineState
     previous_cursor: int
+    failure: Optional[DriverFailure]
+    recovery_stage: Optional[RecoveryStage]
+    recovery_ack_deadline_s: float
 
 
 def _deadline_for_phase(
@@ -206,6 +253,9 @@ def create_routine_driver(
         routine=None,
         routine_state=RoutineState(),
         previous_cursor=0,
+        failure=None,
+        recovery_stage=None,
+        recovery_ack_deadline_s=0.0,
     )
     return _enter(
         context=context,
@@ -217,7 +267,7 @@ def create_routine_driver(
 
 def routine_driver_is_done(*, state: RoutineDriverState) -> bool:
     """Return whether the driver reached its terminal phase."""
-    return state.phase is DriverPhase.DONE
+    return state.phase in (DriverPhase.SUCCEEDED, DriverPhase.FAILED)
 
 
 def _pump_and_poll(*, context: DriverContext, tick: DriverTick) -> Optional[CommandAck]:
@@ -225,25 +275,97 @@ def _pump_and_poll(*, context: DriverContext, tick: DriverTick) -> Optional[Comm
     return context.port.poll_feedback()
 
 
-def _fail(
+def _terminal_failure(
+    *,
+    state: RoutineDriverState,
+    outcome: RecoveryOutcome,
+) -> RoutineDriverState:
+    assert state.failure is not None
+    return replace(
+        state,
+        phase=DriverPhase.FAILED,
+        deadline_s=0.0,
+        failure=replace(state.failure, recovery_outcome=outcome),
+        recovery_stage=None,
+        recovery_ack_deadline_s=0.0,
+    )
+
+
+def _start_failure(
     *,
     context: DriverContext,
     state: RoutineDriverState,
     tick: DriverTick,
     kind: FailureKind,
     message: str,
+    observation: Optional[RoutineObservation] = None,
 ) -> RoutineDriverState:
     context.env.on_failure(kind, message)
-    return _enter(context=context, state=state, phase=DriverPhase.DONE, tick=tick)
+    failed = replace(
+        state,
+        failure=DriverFailure(
+            kind=kind,
+            message=message,
+            recovery_outcome=RecoveryOutcome.PENDING,
+        ),
+    )
+    if observation is None or not observation.bridge_status.is_armed:
+        return _terminal_failure(state=failed, outcome=RecoveryOutcome.NOT_REQUIRED)
+
+    recovery_deadline_s = tick.monotonic_s + context.params.failure_recovery_timeout_s
+    if kind is FailureKind.FAILSAFE or context.port.read_status().failsafe:
+        context.env.log(
+            f"[{context.label}] failure recovery: PX4 failsafe is active; waiting for disarm"
+        )
+        return replace(
+            failed,
+            phase=DriverPhase.RECOVERING,
+            deadline_s=recovery_deadline_s,
+            recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE_DISARM,
+            recovery_ack_deadline_s=0.0,
+        )
+
+    context.env.log(f"[{context.label}] failure recovery: commanding Land at the current position")
+    try:
+        context.port.send(land())
+    except Exception as exc:  # noqa: BLE001 - external link failure must still reach fallback
+        context.env.log(
+            f"[{context.label}] failure recovery: Land send failed "
+            f"({type(exc).__name__}: {exc}); stopping OFFBOARD stream for PX4 fallback"
+        )
+        return replace(
+            failed,
+            phase=DriverPhase.RECOVERING,
+            deadline_s=recovery_deadline_s,
+            recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE,
+            recovery_ack_deadline_s=0.0,
+        )
+    return replace(
+        failed,
+        phase=DriverPhase.RECOVERING,
+        deadline_s=recovery_deadline_s,
+        recovery_stage=RecoveryStage.WAIT_LAND_ACK,
+        recovery_ack_deadline_s=tick.monotonic_s + context.params.command_ack_timeout_s,
+    )
 
 
 def _abort_on_failsafe(
-    *, context: DriverContext, state: RoutineDriverState, tick: DriverTick, phase_description: str
+    *,
+    context: DriverContext,
+    state: RoutineDriverState,
+    tick: DriverTick,
+    phase_description: str,
+    observation: Optional[RoutineObservation] = None,
 ) -> Optional[RoutineDriverState]:
     status = context.port.read_status()
     if not status.failsafe:
         return None
-    return _fail(
+    if observation is None:
+        observation = context.env.read_observation(
+            sim_time_us=tick.control_time_us,
+            last_ack=None,
+        )
+    return _start_failure(
         context=context,
         state=state,
         tick=tick,
@@ -252,6 +374,7 @@ def _abort_on_failsafe(
             f"[{context.label}] PX4 entered failsafe {phase_description}: "
             f"system_status={status.failsafe_system_status}"
         ),
+        observation=observation,
     )
 
 
@@ -275,41 +398,43 @@ def _tick_drive(
 ) -> RoutineDriverState:
     assert state.routine is not None
     last_ack = _pump_and_poll(context=context, tick=tick)
+    observation = context.env.read_observation(
+        sim_time_us=tick.control_time_us,
+        last_ack=last_ack,
+    )
     failed = _abort_on_failsafe(
         context=context,
         state=state,
         tick=tick,
         phase_description="during the routine",
+        observation=observation,
     )
     if failed is not None:
         return failed
-    observation = context.env.read_observation(
-        sim_time_us=tick.control_time_us,
-        last_ack=last_ack,
-    )
     routine_state, decision = decide(state.routine, state.routine_state, observation)
     _apply_decision(port=context.port, decision=decision)
     if decision.kind is DecisionKind.FAIL:
         assert decision.failure_kind is not None
-        context.env.on_failure(
-            decision.failure_kind,
-            f"[{context.label}] routine failed: {decision.reason}",
-        )
-        return replace(
-            state,
-            phase=DriverPhase.DONE,
-            deadline_s=0.0,
-            routine_state=routine_state,
+        return _start_failure(
+            context=context,
+            state=replace(
+                state,
+                routine_state=routine_state,
+            ),
+            tick=tick,
+            kind=decision.failure_kind,
+            message=f"[{context.label}] routine failed: {decision.reason}",
+            observation=observation,
         )
     previous_cursor = state.previous_cursor
     while previous_cursor < routine_state.cursor:
         context.env.on_step_advanced(state.routine.steps[previous_cursor].label)
         previous_cursor += 1
     if routine_state.cursor >= len(state.routine.steps):
-        context.env.log(f"[{context.label}] routine complete; holding, manual control available")
+        context.env.log(f"[{context.label}] routine complete")
         return replace(
             state,
-            phase=DriverPhase.DONE,
+            phase=DriverPhase.SUCCEEDED,
             deadline_s=0.0,
             routine_state=routine_state,
             previous_cursor=previous_cursor,
@@ -323,20 +448,142 @@ def _tick_drive(
     )
 
 
+def _tick_recovery(
+    *, context: DriverContext, state: RoutineDriverState, tick: DriverTick
+) -> RoutineDriverState:
+    """Advance explicit Land recovery, then PX4 offboard-loss fallback."""
+    assert state.recovery_stage is not None
+    stage = state.recovery_stage
+    last_ack = None
+    if stage is not RecoveryStage.WAIT_PX4_FAILSAFE_NO_LINK:
+        try:
+            last_ack = _pump_and_poll(context=context, tick=tick)
+        except Exception as exc:  # noqa: BLE001 - external link failure must still recover
+            context.env.log(
+                f"[{context.label}] failure recovery: GCS link unavailable "
+                f"({type(exc).__name__}: {exc}); waiting for PX4 fallback without control link"
+            )
+            state = replace(
+                state,
+                recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE_NO_LINK,
+                recovery_ack_deadline_s=0.0,
+            )
+            stage = RecoveryStage.WAIT_PX4_FAILSAFE_NO_LINK
+    observation = context.env.read_observation(
+        sim_time_us=tick.control_time_us,
+        last_ack=last_ack,
+    )
+
+    if not observation.bridge_status.is_armed:
+        if stage is RecoveryStage.WAIT_PX4_FAILSAFE_DISARM:
+            outcome = RecoveryOutcome.PX4_FAILSAFE_LANDED
+        elif stage in (
+            RecoveryStage.WAIT_PX4_FAILSAFE,
+            RecoveryStage.WAIT_PX4_FAILSAFE_NO_LINK,
+        ):
+            outcome = RecoveryOutcome.DISARMED_AFTER_ESCALATION
+        else:
+            outcome = RecoveryOutcome.LANDED
+        context.env.log(f"[{context.label}] failure recovery complete: vehicle disarmed")
+        return _terminal_failure(state=state, outcome=outcome)
+
+    if tick.monotonic_s > state.deadline_s:
+        context.env.log(
+            f"[{context.label}] failure recovery exhausted after "
+            f"{context.params.failure_recovery_timeout_s:.1f}s"
+        )
+        return _terminal_failure(state=state, outcome=RecoveryOutcome.EXHAUSTED)
+
+    if context.port.read_status().failsafe and stage is not RecoveryStage.WAIT_PX4_FAILSAFE_DISARM:
+        context.env.log(
+            f"[{context.label}] failure recovery: PX4 failsafe engaged; waiting for disarm"
+        )
+        return replace(
+            state,
+            recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE_DISARM,
+            recovery_ack_deadline_s=0.0,
+        )
+
+    if stage is RecoveryStage.WAIT_LAND_ACK:
+        if last_ack is not None and last_ack.command_id == MAV_CMD_NAV_LAND:
+            if last_ack.accepted:
+                context.env.log(
+                    f"[{context.label}] failure recovery: Land accepted; waiting for disarm"
+                )
+                return replace(
+                    state,
+                    recovery_stage=RecoveryStage.WAIT_LAND_DISARM,
+                    recovery_ack_deadline_s=0.0,
+                )
+            if last_ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
+                context.env.log(
+                    f"[{context.label}] failure recovery: Land temporarily rejected; retrying"
+                )
+                try:
+                    context.port.send(land())
+                except Exception as exc:  # noqa: BLE001 - retry failure must still reach fallback
+                    context.env.log(
+                        f"[{context.label}] failure recovery: Land retry failed "
+                        f"({type(exc).__name__}: {exc}); "
+                        "stopping OFFBOARD stream for PX4 fallback"
+                    )
+                    return replace(
+                        state,
+                        recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE,
+                        recovery_ack_deadline_s=0.0,
+                    )
+                return replace(
+                    state,
+                    recovery_ack_deadline_s=(
+                        tick.monotonic_s + context.params.command_ack_timeout_s
+                    ),
+                )
+            context.env.log(
+                f"[{context.label}] failure recovery: Land rejected "
+                f"(result={last_ack.result}); stopping OFFBOARD stream for PX4 fallback"
+            )
+            return replace(
+                state,
+                recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE,
+                recovery_ack_deadline_s=0.0,
+            )
+        if tick.monotonic_s > state.recovery_ack_deadline_s:
+            context.env.log(
+                f"[{context.label}] failure recovery: no Land acknowledgement; "
+                "stopping OFFBOARD stream for PX4 fallback"
+            )
+            return replace(
+                state,
+                recovery_stage=RecoveryStage.WAIT_PX4_FAILSAFE,
+                recovery_ack_deadline_s=0.0,
+            )
+    return state
+
+
 def tick_routine_driver(
     *, context: DriverContext, state: RoutineDriverState, tick: DriverTick
 ) -> RoutineDriverState:
     """Advance one control frame and return the successor driver state."""
-    if state.phase is DriverPhase.DONE:
+    if state.phase in (DriverPhase.SUCCEEDED, DriverPhase.FAILED):
         _pump_and_poll(context=context, tick=tick)
         return state
+    if state.phase is DriverPhase.RECOVERING:
+        return _tick_recovery(context=context, state=state, tick=tick)
     if state.deadline_s and tick.monotonic_s > state.deadline_s:
-        return _fail(
+        observation = None
+        if state.phase is DriverPhase.DRIVE:
+            last_ack = _pump_and_poll(context=context, tick=tick)
+            observation = context.env.read_observation(
+                sim_time_us=tick.control_time_us,
+                last_ack=last_ack,
+            )
+        return _start_failure(
             context=context,
             state=state,
             tick=tick,
             kind=FailureKind.TIMEOUT,
             message=f"phase {state.phase.name} timed out",
+            observation=observation,
         )
     if state.phase is DriverPhase.WAIT_BRIDGE:
         if context.env.is_bridge_connected():
@@ -428,7 +675,7 @@ def tick_routine_driver(
                 policy_fn_factory=context.params.policy_fn_factory,
             )
         except ValueError as exc:
-            return _fail(
+            return _start_failure(
                 context=context,
                 state=state,
                 tick=tick,

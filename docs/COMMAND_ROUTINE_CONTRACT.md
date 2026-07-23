@@ -146,11 +146,9 @@ the entire fleet cycle.
   bounds); `FailureKind.COMMAND` is a command rejection or step timeout. The pure
   stepper emits only those two; the driver adds `FailureKind.FAILSAFE` (a PX4
   failsafe system status on the GCS link) and `FailureKind.TIMEOUT` (a driver
-  phase exceeding its wall-clock backstop) for its own terminal conditions, so
-  `DriverEnvironment.on_failure(kind, message)` is fully typed. A driver
-  reacts in kind: the strict driver maps `ENVELOPE` to its instability error,
-  `FAILSAFE` to `Px4FailsafeDetected`, and the rest to a plain assertion; a
-  forgiving driver logs any of them and stops.
+  phase exceeding its wall-clock backstop) for its own terminal conditions.
+  `DriverEnvironment.on_failure(kind, message)` is a typed, non-throwing
+  notification: an armed failure must retain control long enough to recover.
 - **`port.py`** -- the PX4-specific `MavlinkCommandPort` (the side-effect seam:
   `connect`, `disconnect`, `pump_heartbeat`, `send`, `send_setpoint`,
   `send_velocity_setpoint`, `send_attitude_target`, `poll_feedback`), whose
@@ -178,7 +176,8 @@ the entire fleet cycle.
   and stateless `create_routine_driver` / `tick_routine_driver` transition
   functions: a phase
   machine (`WAIT_BRIDGE -> CONNECT -> HANDSHAKE -> PREARM_SETTLE -> FETCH_TARGET
-  -> BUILD -> DRIVE -> DONE`) that takes one drone's routine plus an
+  -> BUILD -> DRIVE -> SUCCEEDED`, or `RECOVERING -> FAILED`) that takes one
+  drone's routine plus an
   `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
   connectivity, sim time, observation assembly, `log`, `on_failure`,
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
@@ -190,8 +189,18 @@ the entire fleet cycle.
   constructed directly by the runtime from the per-drone subset of
   `RoutineConfig` it needs plus the global `driver`
   execution heuristics (the `goto` heading epsilon and the wall-clock backstop
-  floor/multipliers from the Hydra `driver` group). The strict-vs-forgiving
-  reaction lives entirely in the env's `on_failure` (raise vs log).
+  floor/multipliers from the Hydra `driver` group). `RoutineDriverState.failure`
+  preserves the original kind/message and recovery outcome.
+
+On an armed routine failure, the driver stops policy setpoints and enters
+`RECOVERING`. It sends `MAV_CMD_NAV_LAND`, retries temporary rejection, and
+waits for disarm after acceptance. A hard rejection or missing acknowledgement
+stops the OFFBOARD stream and waits for PX4's independently configured
+offboard-loss action; an already active PX4 failsafe is monitored without a
+competing command. Recovery ends in terminal `FAILED`, preserving the original
+failure even when landing succeeds. Unarmed failures need no recovery and become
+`FAILED` immediately. `routine.failure_recovery_timeout_s` bounds the entire
+attempt.
 
 ## Pure / impure split
 
@@ -242,16 +251,17 @@ then calls `tick_drivers` from one separate **PhysX-step** subscription. The
 fleet cadence emits at `driver.control_rate_hz` (50 Hz by default), synchronized
 across vehicles and independent of render/app-update frequency. Its `make_env`
 is **forgiving**: `on_failure` (a `FAIL`,
-a PX4 failsafe, or a phase timeout) logs a warning and the driver idles (it never
-raises into the sim); after `DONE` the driver keeps the GCS link warm so
-PX4-console control returns to the user. STOP/PAUSE and shutdown drop the tick and
+a PX4 failsafe, or a phase timeout) logs a warning while the driver performs
+landing recovery (it never raises into the sim); after terminal `SUCCEEDED` or
+`FAILED` the driver keeps the GCS link warm. STOP/PAUSE and shutdown drop the tick and
 tear down. Setup errors are caught at this lifecycle boundary, recorded in the
 public failure field, and cleaned before a later Play retry; a failed setup never
 installs the PhysX control subscription.
 
 The live shell also exposes an immutable status snapshot for dependent Kit
 plugins. It reports each vehicle label, simulated time, completed-step count,
-and bridge status, without exposing or mutating `DriverContext`,
+driver phase, failure/recovery outcome, and bridge status, without exposing or
+mutating `DriverContext`,
 `RoutineDriverState`, or `FleetState`; observation does not create a second
 executor path. The existing runtime failure field is the authoritative signal
 that a forgiving driver stopped early.
@@ -264,11 +274,12 @@ bridge first-heartbeat, the pre-arm start-tilt check), and ticks every flying
 drivers from the same PhysX subscription while its host loop calls
 `SimulationApp.update()`. Callback failures are captured and re-raised after
 the update returns so strict exceptions keep their types. It then runs the strict
-bridge-log scan. Its `make_env` is **strict** under `--strict` (the integration
-test): `on_failure` raises `ExpectedInstabilityDetected` for a
-`FailureKind.ENVELOPE` breach, `Px4FailsafeDetected` for a failsafe, and
-`AssertionError` otherwise; without `--strict` it logs and the driver idles, like
-the live path. The `post_takeoff_hook` (negative-test fault injection) is wired to
+bridge-log scan. Its `on_failure` notification never raises. Under `--strict`,
+after recovery reaches terminal `FAILED`, the shell raises
+`ExpectedInstabilityDetected` for a `FailureKind.ENVELOPE` breach,
+`Px4FailsafeDetected` for a failsafe, and `AssertionError` otherwise; without
+`--strict` it only reports the terminal failure. The `post_takeoff_hook`
+(negative-test fault injection) is wired to
 the first drone's `on_step_advanced` and fires when the takeoff step completes, so
 the hover step's envelope catches the resulting instability.
 
@@ -284,7 +295,7 @@ Every bridge-enabled drone gets one `DriverContext` and one
 `{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
 `{kind: land, timeout_s}`)
 drive the authored commands; empty steps traverse the same phase machine,
-complete without commands, and retain terminal GCS servicing for manual control.
+complete as `SUCCEEDED` without commands, and retain terminal GCS servicing.
 The pure `build_vehicle_routine(*, steps, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,

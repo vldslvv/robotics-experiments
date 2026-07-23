@@ -17,6 +17,15 @@ from robotics_experiments.config._schemas import _register_schemas
 
 __all__ = ["load_config"]
 
+_PX4_OFFBOARD_LOSS_ACTION_PARAMS = {
+    "position": 0,
+    "altitude": 1,
+    "stabilized": 2,
+    "return": 3,
+    "land": 4,
+    "hold": 5,
+}
+
 
 @functools.cache
 def _airframes_by_output_filename(airframe_config_dir: Path) -> dict[str, dict]:
@@ -79,6 +88,21 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
     ros_namespaces: set[str] = set()
     ros_frame_prefixes: set[str] = set()
     for label, v in vehicles.items():
+        if not math.isfinite(v.px4.failsafe.offboard_loss_timeout_s) or not (
+            0.0 <= v.px4.failsafe.offboard_loss_timeout_s <= 60.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} px4.failsafe.offboard_loss_timeout_s must be "
+                "finite and between 0 and 60 seconds, got "
+                f"{v.px4.failsafe.offboard_loss_timeout_s!r}"
+            )
+        if not math.isfinite(v.routine.failure_recovery_timeout_s) or (
+            v.routine.failure_recovery_timeout_s <= 0.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} routine.failure_recovery_timeout_s must be "
+                f"finite and positive, got {v.routine.failure_recovery_timeout_s!r}"
+            )
         if len(v.spawn.position_xy) != 2:
             raise ValueError(
                 f"vehicle {label!r} position_xy must have length 2, got {v.spawn.position_xy!r}"
@@ -200,7 +224,16 @@ def _ros_frame_prefix_from_namespace(namespace: str) -> str:
 
 def _enrich_fleet(cfg, airframe_config_dir: Path) -> None:
     """Fill the derived fields on each already structured vehicle."""
-    for entry in cfg.vehicles.values():
+    for label, entry in cfg.vehicles.items():
+        action = str(entry.px4.failsafe.offboard_loss_action)
+        try:
+            action_param = _PX4_OFFBOARD_LOSS_ACTION_PARAMS[action]
+        except KeyError as exc:
+            raise ValueError(
+                f"vehicle {label!r} px4.failsafe.offboard_loss_action must be one of "
+                f"{sorted(_PX4_OFFBOARD_LOSS_ACTION_PARAMS)}, got {action!r}"
+            ) from exc
+        entry.px4.failsafe.offboard_loss_action_param = action_param
         airframe = _airframe_for_drone_asset(str(entry.spawn.usd_path), airframe_config_dir)
         px4_airframe_defaults = (airframe or {}).get("px4", {}).get("bridge", {})
         entry.bridge = OmegaConf.merge(entry.bridge, px4_airframe_defaults)

@@ -3,7 +3,7 @@ from typing import Dict
 
 from robotics_experiments.config._commanding import DriverConfig, RoutineConfig
 from robotics_experiments.config._immutability import _FreezableConfig
-from robotics_experiments.config._px4 import Px4BridgeConfig
+from robotics_experiments.config._px4 import Px4BridgeConfig, _Px4RuntimeConfig
 from robotics_experiments.config._rl import RlConfig
 from robotics_experiments.config._scene import (
     DroneSpawnConfig,
@@ -30,6 +30,7 @@ class VehicleConfig(_FreezableConfig):
     ros: RosVehicleConfig
     spawn: DroneSpawnConfig
     bridge: Px4BridgeConfig
+    px4: _Px4RuntimeConfig
     routine: RoutineConfig
     mavlink_port: int = field(init=False, default=0)
     gcs_port: int = field(init=False, default=0)

@@ -101,7 +101,8 @@ the current contents and the intended home for that kind of code.
   config submodules.
 - `load_config(path)` is the cached, explicit, environment-independent config
   boundary. It returns an immutable `ExperimentConfig` whose ordered `vehicles`
-  mapping contains complete per-vehicle `spawn`, `bridge`, and `routine` configs.
+  mapping contains complete per-vehicle `spawn`, `bridge`, `px4`, and `routine`
+  configs.
   Runtime roots resolve `ROBOTICS_EXPERIMENT_CONFIG_PATH` themselves and pass the
   resolved config downward.
 - Keep public API minimal. Public exports are for production consumers outside
@@ -211,8 +212,10 @@ the current contents and the intended home for that kind of code.
   executor composition, one per bridge-enabled drone. The frozen context owns
   resources and immutable parameters; the frozen state owns progress only.
   Empty `routine.steps` follows the same driver lifecycle and completes without
-  commands. Live and standalone workflows stay thin shells that differ only in
-  tick source and failure reaction.
+  commands. Driver failures enter explicit landing recovery before terminal
+  `FAILED`; terminal success is distinct. `on_failure` is notification-only so
+  shells cannot interrupt recovery, and strict shells raise the preserved
+  failure only after recovery terminates.
 - In `runtime`, `commanding`, and `px4_bridge`, project-owned evolving state is
   represented by frozen dataclasses and replaced by stateless transition
   functions. Mutable classes are limited to external resource adapters (MAVLink,

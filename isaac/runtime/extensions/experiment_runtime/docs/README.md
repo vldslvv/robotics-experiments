@@ -20,9 +20,11 @@ its stateless lifecycle functions, explicitly rebinding every returned state.
 
 Dependent Kit plugins may call `get_instance().read_status()` for an immutable
 snapshot of scene readiness, the last driver/control failure, and each vehicle's
-label, simulated time, bridge status, and completed-step count. The snapshot is the observation boundary used by the
+label, simulated time, bridge status, completed-step count, driver phase, and
+failure/recovery outcome. The snapshot is the observation boundary used by the
 opt-in flight benchmark; it never exposes mutable `FleetState` resources.
 
-Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged and
-that drone idles (manual control remains). The strict counterpart is the
-standalone scenario runner under `--strict`.
+Always forgiving: a routine failure, PX4 failsafe, or phase timeout is logged
+while that drone performs layered landing recovery. The strict counterpart is
+the standalone scenario runner under `--strict`, which reports the preserved
+failure after recovery terminates.

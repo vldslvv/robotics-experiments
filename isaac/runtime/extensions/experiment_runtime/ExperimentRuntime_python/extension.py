@@ -19,9 +19,9 @@ extension):
 - ``STOP`` / ``PAUSE`` and ``on_shutdown`` drop the control tick and tear down.
 
 It is always *forgiving*: a routine ``FAIL``, a PX4 failsafe, or a phase timeout
-is logged via ``carb`` and that drone's driver idles (manual control remains); a
+is logged via ``carb`` while the driver performs layered landing recovery; a
 control bug is caught per driver so it never spams Kit or stalls the others. The
-strict, asserting counterpart is the standalone scenario's adapter.
+strict counterpart reports the preserved failure after recovery terminates.
 """
 
 from __future__ import annotations
@@ -78,6 +78,9 @@ class VehicleRuntimeSnapshot:
     sim_time_us: int
     bridge_status: BridgeStatus | None
     completed_steps: int
+    driver_phase: str
+    failure: str | None
+    recovery_outcome: str | None
 
 
 @dataclass(frozen=True)
@@ -160,12 +163,16 @@ class Extension(omni.ext.IExt):
                     f"{_LOG_PREFIX} flying vehicle {flying.spawned.label!r} has no bridge host"
                 )
             host_status = read_bridge_host_status(host=host)
+            failure = flying.driver.failure
             vehicles.append(
                 VehicleRuntimeSnapshot(
                     label=flying.spawned.label,
                     sim_time_us=host_status.sim_time_us,
                     bridge_status=host_status.bridge_status,
                     completed_steps=flying.driver.previous_cursor,
+                    driver_phase=flying.driver.phase.name,
+                    failure=None if failure is None else failure.message,
+                    recovery_outcome=(None if failure is None else failure.recovery_outcome.name),
                 )
             )
         return ExperimentRuntimeSnapshot(
@@ -253,10 +260,7 @@ class Extension(omni.ext.IExt):
 
     def _log_driver_failure(self, kind: FailureKind, message: str) -> None:
         self._failure = f"{message} ({kind.name})"
-        carb.log_warn(
-            f"{_LOG_PREFIX} {message} ({kind.name}); stopping routine "
-            "(manual control remains available)"
-        )
+        carb.log_warn(f"{_LOG_PREFIX} {message} ({kind.name}); starting landing recovery")
 
     def _make_env(self, spawned, port):
         """Build the forgiving :class:`DriverEnvironment` for one flying drone."""

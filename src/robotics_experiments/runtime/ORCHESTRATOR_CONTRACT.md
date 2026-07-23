@@ -90,8 +90,9 @@ a sim-time callable so they do not depend on resource properties.
 
 Invalid lifecycle order or configuration raises. Recoverable runtime bridge
 errors are logged by `BridgeHost` without taking down other vehicles. Driver
-failure reaction is injected through `FleetDriverEnv`: strict environments
-raise, while forgiving environments log and leave manual control available.
+failure notification is injected through `FleetDriverEnv` and never raises;
+strict shells report the preserved error after terminal recovery, while
+forgiving shells log recovery progress and keep the simulator running.
 If a bridge send or receive leg raises, `BridgeHost` abandons both its host-level
 poll marker and the frozen bridge state's pending tick before the next physics
 step.

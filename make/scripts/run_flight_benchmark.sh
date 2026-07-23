@@ -78,7 +78,13 @@ mapfile -t launch_specs < <(
 from robotics_experiments.config import load_config
 for vehicle in load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).vehicles.values():
     if vehicle.bridge.enabled:
-        print(vehicle.id, vehicle.px4_sim_model, vehicle.px4_sys_autostart)'
+        print(
+            vehicle.id,
+            vehicle.px4_sim_model,
+            vehicle.px4_sys_autostart,
+            vehicle.px4.failsafe.offboard_loss_action_param,
+            vehicle.px4.failsafe.offboard_loss_timeout_s,
+        )'
 )
 if [ "${#launch_specs[@]}" -eq 0 ]; then
     echo "Flight benchmark requires at least one PX4-enabled vehicle" >&2
@@ -137,10 +143,12 @@ run_repetition() {
     local i
     local sim_model
     local sys_autostart
+    local offboard_loss_action
+    local offboard_loss_timeout
 
     mkdir -p "${output_dir}/logs" "${output_dir}/px4/logs" "${output_dir}/px4/eeprom"
     for spec in "${launch_specs[@]}"; do
-        read -r i sim_model sys_autostart <<<"${spec}"
+        read -r i sim_model sys_autostart offboard_loss_action offboard_loss_timeout <<<"${spec}"
         local container="${container_prefix}-${label}-px4-${i}"
         local log_mount="${output_dir}/px4/logs/${i}"
         local eeprom_mount="${output_dir}/px4/eeprom/${i}"
@@ -151,6 +159,8 @@ run_repetition() {
             -e "PX4_INSTANCE=${i}" \
             -e "PX4_SIM_MODEL=${sim_model}" \
             -e "PX4_SYS_AUTOSTART=${sys_autostart}" \
+            -e "PX4_PARAM_COM_OBL_RC_ACT=${offboard_loss_action}" \
+            -e "PX4_PARAM_COM_OF_LOSS_T=${offboard_loss_timeout}" \
             -v "${log_mount}:${PX4_ROOTFS}/${i}/log" \
             -v "${eeprom_mount}:${PX4_ROOTFS}/${i}/eeprom" \
             "${PX4_IMAGE}" \

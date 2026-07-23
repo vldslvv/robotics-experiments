@@ -6,11 +6,13 @@ Isaac, or pymavlink, and exercise the failure reactions (envelope / command /
 failsafe / timeout) and the per-step advance callback.
 """
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
     MAV_CMD_DO_SET_MODE,
+    MAV_CMD_NAV_LAND,
+    MAV_RESULT_TEMPORARILY_REJECTED,
     CommandAck,
     DriverContext,
     DriverParams,
@@ -20,6 +22,8 @@ from robotics_experiments.commanding import (
     FailureKind,
     PolicyAdapter,
     PolicyStepResult,
+    RecoveryOutcome,
+    RecoveryStage,
     RoutineDriverState,
     VelocitySetpoint,
     create_routine_driver,
@@ -50,6 +54,7 @@ def _params(steps):
         steps=steps,
         gates=_GATES,
         command_ack_timeout_s=10.0,
+        failure_recovery_timeout_s=30.0,
         bridge_heartbeat_timeout_s=12.0,
         handshake_timeout_s=12.0,
         prearm_settle_s=0.0,
@@ -83,9 +88,9 @@ def _tick_driver(*, context, state, monotonic_s=0.0):
     )
 
 
-def _make_driver(*, raise_on_failure=False):
+def _make_driver():
     port = FakeCommandPort()
-    env = FakeDriverEnvironment(raise_on_failure=raise_on_failure)
+    env = FakeDriverEnvironment()
     clock = {"now": 0.0}  # frozen wall clock: phase deadlines never fire
     context = DriverContext(
         params=_params(_STEPS),
@@ -109,6 +114,9 @@ def test_routine_driver_state_contains_only_progress_fields():
         "routine",
         "routine_state",
         "previous_cursor",
+        "failure",
+        "recovery_stage",
+        "recovery_ack_deadline_s",
     ]
 
 
@@ -219,7 +227,7 @@ def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
         DriverPhase.FETCH_TARGET,
         DriverPhase.BUILD,
         DriverPhase.DRIVE,
-        DriverPhase.DONE,
+        DriverPhase.SUCCEEDED,
     ]
     assert port.sent == port.setpoints == port.velocity_setpoints == port.attitude_targets == []
     servicing = (port.heartbeats, port.feedback_polls)
@@ -245,13 +253,34 @@ def _drive_to_takeoff(context, driver, port, env):
     return driver
 
 
+def _finish_explicit_landing(context, driver, port, env):
+    assert driver.phase is DriverPhase.RECOVERING
+    assert driver.recovery_stage is RecoveryStage.WAIT_LAND_ACK
+    assert port.sent[-1].command_id == MAV_CMD_NAV_LAND
+    port.feedback = [CommandAck.from_result(MAV_CMD_NAV_LAND, 0)]
+    env.observation = make_routine_observation(is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.recovery_stage is RecoveryStage.WAIT_LAND_DISARM
+    env.observation = make_routine_observation(is_armed=False)
+    return _tick_driver(context=context, state=driver)
+
+
 def test_routine_driver_envelope_breach_fails():
     context, driver, port, env = _make_driver()[:4]
     driver = _drive_to_takeoff(context, driver, port, env)
     # A hard tilt during the takeoff step is an ENVELOPE breach.
-    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.5), tilt_deg=50.0)
+    env.observation = make_routine_observation(
+        position_enu=(0.0, 0.0, 0.5),
+        tilt_deg=50.0,
+        is_armed=True,
+    )
     driver = _tick_driver(context=context, state=driver)
+    assert not routine_driver_is_done(state=driver)
+    driver = _finish_explicit_landing(context, driver, port, env)
     assert routine_driver_is_done(state=driver)
+    assert driver.phase is DriverPhase.FAILED
+    assert driver.failure is not None
+    assert driver.failure.recovery_outcome is RecoveryOutcome.LANDED
     assert len(env.failures) == 1
     kind, _message = env.failures[0]
     assert kind is FailureKind.ENVELOPE
@@ -260,10 +289,18 @@ def test_routine_driver_envelope_breach_fails():
 def test_routine_driver_failsafe_fails_distinctly():
     context, driver, port, env = _make_driver()[:4]
     driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(is_armed=True)
     port.set_failsafe(active=True, system_status=6)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.phase is DriverPhase.RECOVERING
+    assert driver.recovery_stage is RecoveryStage.WAIT_PX4_FAILSAFE_DISARM
+    assert port.sent[-1].command_id != MAV_CMD_NAV_LAND
+    env.observation = make_routine_observation(is_armed=False)
     driver = _tick_driver(context=context, state=driver)
     assert routine_driver_is_done(state=driver)
     assert env.failures and env.failures[0][0] is FailureKind.FAILSAFE
+    assert driver.failure is not None
+    assert driver.failure.recovery_outcome is RecoveryOutcome.PX4_FAILSAFE_LANDED
 
 
 def test_routine_driver_phase_timeout_fails():
@@ -272,19 +309,117 @@ def test_routine_driver_phase_timeout_fails():
     clock["now"] = 10_000.0
     driver = _tick_driver(context=context, state=driver, monotonic_s=clock["now"])
     assert routine_driver_is_done(state=driver)
+    assert driver.phase is DriverPhase.FAILED
     assert env.failures and env.failures[0][0] is FailureKind.TIMEOUT
 
 
-def test_routine_driver_strict_env_raises_on_failure():
-    context, driver, port, env = _make_driver(raise_on_failure=True)[:4]
+def test_failure_notification_does_not_prevent_landing_recovery():
+    context, driver, port, env = _make_driver()[:4]
     driver = _drive_to_takeoff(context, driver, port, env)
-    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 0.5), tilt_deg=50.0)
-    try:
-        _tick_driver(context=context, state=driver)
-    except AssertionError as exc:
-        assert "ENVELOPE" in str(exc)
-    else:  # pragma: no cover - the strict env must raise
-        raise AssertionError("strict env did not raise on an envelope breach")
+    env.observation = make_routine_observation(
+        position_enu=(0.0, 0.0, 0.5),
+        tilt_deg=50.0,
+        is_armed=True,
+    )
+    driver = _tick_driver(context=context, state=driver)
+    assert env.failures[0][0] is FailureKind.ENVELOPE
+    assert driver.phase is DriverPhase.RECOVERING
+    assert port.sent[-1].command_id == MAV_CMD_NAV_LAND
+
+
+def test_recovery_retries_temporary_land_rejection():
+    context, driver, port, env = _make_driver()[:4]
+    driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(tilt_deg=50.0, is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+    land_count = sum(command.command_id == MAV_CMD_NAV_LAND for command in port.sent)
+    port.feedback = [CommandAck.from_result(MAV_CMD_NAV_LAND, MAV_RESULT_TEMPORARILY_REJECTED)]
+
+    driver = _tick_driver(context=context, state=driver)
+
+    assert driver.recovery_stage is RecoveryStage.WAIT_LAND_ACK
+    assert sum(command.command_id == MAV_CMD_NAV_LAND for command in port.sent) == land_count + 1
+
+
+def test_rejected_land_escalates_to_px4_failsafe_and_preserves_original_failure():
+    context, driver, port, env = _make_driver()[:4]
+    driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(tilt_deg=50.0, is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+    streamed_before_recovery = (
+        len(port.setpoints) + len(port.velocity_setpoints) + len(port.attitude_targets)
+    )
+    port.feedback = [CommandAck.from_result(MAV_CMD_NAV_LAND, 2)]
+
+    driver = _tick_driver(context=context, state=driver)
+
+    assert driver.recovery_stage is RecoveryStage.WAIT_PX4_FAILSAFE
+    assert (
+        len(port.setpoints) + len(port.velocity_setpoints) + len(port.attitude_targets)
+        == streamed_before_recovery
+    )
+    port.set_failsafe(active=True, system_status=5)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.recovery_stage is RecoveryStage.WAIT_PX4_FAILSAFE_DISARM
+    env.observation = make_routine_observation(is_armed=False)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.phase is DriverPhase.FAILED
+    assert driver.failure is not None
+    assert driver.failure.kind is FailureKind.ENVELOPE
+    assert driver.failure.recovery_outcome is RecoveryOutcome.PX4_FAILSAFE_LANDED
+
+
+def test_land_send_failure_escalates_without_losing_driver_state():
+    context, driver, port, env = _make_driver()[:4]
+    driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(tilt_deg=50.0, is_armed=True)
+
+    def fail_send(_command):
+        raise OSError("link closed")
+
+    port.send = fail_send
+    driver = _tick_driver(context=context, state=driver)
+
+    assert driver.phase is DriverPhase.RECOVERING
+    assert driver.recovery_stage is RecoveryStage.WAIT_PX4_FAILSAFE
+    assert driver.failure is not None
+    assert driver.failure.kind is FailureKind.ENVELOPE
+
+
+def test_control_link_loss_during_recovery_waits_for_px4_without_repeated_sends():
+    context, driver, port, env = _make_driver()[:4]
+    driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(tilt_deg=50.0, is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+
+    def fail_heartbeat(*, now_s, force=False):
+        del now_s, force
+        raise OSError("link closed")
+
+    port.pump_heartbeat = fail_heartbeat
+    env.observation = make_routine_observation(is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.recovery_stage is RecoveryStage.WAIT_PX4_FAILSAFE_NO_LINK
+
+    env.observation = make_routine_observation(is_armed=False)
+    driver = _tick_driver(context=context, state=driver)
+    assert driver.phase is DriverPhase.FAILED
+    assert driver.failure is not None
+    assert driver.failure.recovery_outcome is RecoveryOutcome.DISARMED_AFTER_ESCALATION
+
+
+def test_recovery_timeout_is_terminal_and_explicitly_exhausted():
+    context, driver, port, env = _make_driver()[:4]
+    driver = _drive_to_takeoff(context, driver, port, env)
+    env.observation = make_routine_observation(tilt_deg=50.0, is_armed=True)
+    driver = _tick_driver(context=context, state=driver)
+    env.observation = make_routine_observation(is_armed=True)
+
+    driver = _tick_driver(context=context, state=driver, monotonic_s=31.0)
+
+    assert driver.phase is DriverPhase.FAILED
+    assert driver.failure is not None
+    assert driver.failure.recovery_outcome is RecoveryOutcome.EXHAUSTED
 
 
 _GOTO_STEPS = [{"kind": "goto", "x": 3.0, "y": 0.0, "z": 2.0, "timeout_s": 20.0}]
@@ -350,6 +485,7 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         steps=_POLICY_STEPS,
         gates=_GATES,
         command_ack_timeout_s=10.0,
+        failure_recovery_timeout_s=30.0,
         bridge_heartbeat_timeout_s=12.0,
         handshake_timeout_s=12.0,
         prearm_settle_s=0.0,
@@ -412,6 +548,59 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
     assert env.failures == []
 
 
+def test_policy_timeout_stops_streaming_and_starts_landing_recovery():
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+
+    def never_complete(observation, target_enu, progress):
+        del observation, target_enu
+        return PolicyStepResult(
+            progress=progress + 1,
+            setpoint=VelocitySetpoint(
+                forward_mps=0.2,
+                right_mps=0.0,
+                down_mps=0.0,
+                yaw_rate_radps=0.0,
+            ),
+        )
+
+    params = replace(
+        _params(_POLICY_STEPS),
+        policy_fn_factory=lambda descriptor: PolicyAdapter(
+            rate_hz=20.0,
+            initial_progress=0,
+            step=never_complete,
+        ),
+    )
+    context = DriverContext(params=params, port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
+    )
+    env.connected = True
+    port.set_handshaked()
+    port.set_global_position((47.0, 8.0, 488.0))
+    env.observation = make_routine_observation(is_armed=True)
+    for _ in range(20):
+        driver = _tick_driver(context=context, state=driver)
+        if driver.phase is DriverPhase.DRIVE:
+            break
+    for _ in range(6):
+        driver = _tick_driver(context=context, state=driver)
+    port.feedback.append(CommandAck.from_result(MAV_CMD_DO_SET_MODE, 0))
+    driver = _tick_driver(context=context, state=driver)
+    streamed_before_timeout = len(port.velocity_setpoints)
+    env.sim_us = 11_000_000
+
+    driver = _tick_driver(context=context, state=driver)
+
+    assert driver.phase is DriverPhase.RECOVERING
+    assert len(port.velocity_setpoints) == streamed_before_timeout
+    assert port.sent[-1].command_id == MAV_CMD_NAV_LAND
+    assert driver.failure is not None
+    assert "policy did not complete" in driver.failure.message
+
+
 def test_routine_driver_policy_step_without_factory_fails_at_build():
     port = FakeCommandPort()
     env = FakeDriverEnvironment()
@@ -432,7 +621,7 @@ def test_routine_driver_policy_step_without_factory_fails_at_build():
     env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
     for _ in range(20):
         driver = _tick_driver(context=context, state=driver)
-        if driver.phase is DriverPhase.DONE:
+        if driver.phase is DriverPhase.FAILED:
             break
     assert env.failures
     kind, message = env.failures[0]

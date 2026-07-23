@@ -37,9 +37,10 @@ class RoutineConfig(_FreezableConfig):
 
     The *same* routine runs in the live extension (``make run-all``), a regular
     standalone run, and the strict standalone integration test; only the driver's
-    reaction to a flight-envelope breach differs (the strict integration test
-    raises, the forgiving live/regular run logs and stops). The verification is
-    the routine's own job: a takeoff step completes on a real climb and a hover
+    terminal reporting of a flight-envelope breach differs (the strict
+    integration test raises after landing recovery, while the forgiving
+    live/regular run logs it). The verification is the routine's own job: a
+    takeoff step completes on a real climb and a hover
     step on a sustained stable hover, and the ``max_*`` / ``hover_max_*`` gates
     below are wired by the command driver's private routine builder onto the
     flight steps as continuous invariants whose breach fails the routine.
@@ -59,6 +60,8 @@ class RoutineConfig(_FreezableConfig):
             flight commands. The resolved graph exposes read-only typed mappings.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.
+        failure_recovery_timeout_s: Wall-clock budget for explicit landing and
+            PX4 failsafe recovery after a routine failure.
         bridge_heartbeat_timeout_s: Wall-clock deadline to wait for every bridge
             to connect before the routine starts.
         handshake_timeout_s: Wall-clock deadline to learn the PX4 target system on
@@ -99,6 +102,7 @@ class RoutineConfig(_FreezableConfig):
     steps: List[RoutineStepConfig]
     gcs_heartbeat_period_s: float
     command_ack_timeout_s: float
+    failure_recovery_timeout_s: float
     bridge_heartbeat_timeout_s: float
     handshake_timeout_s: float
     prearm_settle_s: float

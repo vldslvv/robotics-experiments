@@ -15,3 +15,10 @@ spawn:
   stationary_ground_z: 0.0
   stationary_ground_clearance_m: 0.05
   stationary_spawn_z_fallback: 0.07
+px4:
+  failsafe:
+    # PX4 COM_OBL_RC_ACT / COM_OF_LOSS_T. Land at the current position after
+    # loss of the OFFBOARD stream instead of invoking the default RC-loss path,
+    # which can select RTL and climb before landing.
+    offboard_loss_action: land
+    offboard_loss_timeout_s: 1.0

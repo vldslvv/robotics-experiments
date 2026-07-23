@@ -12,8 +12,9 @@ lockstep bridge group -> build one per-drone
 :class:`~robotics_experiments.commanding.RoutineDriverState` per flying drone ->
 teardown); this runner only owns the SimApp host loop, the **integration-test-only
 checks** (bridge connectivity + first heartbeat, the pre-arm start-tilt check, and
-the bridge-log scan), and the failure reaction. In **strict** mode (the
-integration test, ``--strict``) a flight-envelope breach raises
+the bridge-log scan), and the terminal failure reaction. In **strict** mode (the
+integration test, ``--strict``) recovery is allowed to land first, then a
+flight-envelope breach raises
 ``ExpectedInstabilityDetected``, a PX4 failsafe raises ``Px4FailsafeDetected``,
 and any other routine failure raises ``AssertionError``; in **forgiving** mode a
 breach is logged and that drone's routine stops, like the live extension. The
@@ -239,17 +240,16 @@ def _assert_bridge_log_clean(path: Path | None, label: str) -> None:
 
 def _build_make_env(
     context: SceneTestContext,
-    strict: bool,
     post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None,
     first_label: str,
     /,
 ) -> Callable[[SpawnedDrone, MavlinkCommandPort], FleetDriverEnv]:
-    """Build the per-drone ``make_env`` closure with the strict/forgiving reaction.
+    """Build the per-drone ``make_env`` closure with non-throwing notifications.
 
-    ``on_failure`` raises the scenario's typed exceptions in strict mode (so the
-    integration test fails non-zero) and logs in forgiving mode (the driver then
-    idles). ``on_step_advanced`` fires the optional post-takeoff hook on the first
-    drone when its takeoff step completes (the negative test's fault injection).
+    The driver must retain control long enough to attempt landing, so strict-mode
+    exceptions are raised only after the driver reaches terminal ``FAILED``.
+    ``on_step_advanced`` fires the optional post-takeoff hook on the first drone
+    when its takeoff step completes (the negative test's fault injection).
     """
     # FleetDriverEnv lives in the Isaac-coupled runtime package; import it here so
     # module import stays free of the Kit app.
@@ -259,16 +259,7 @@ def _build_make_env(
         is_first = spawned.label == first_label
 
         def on_failure(kind: FailureKind, message: str) -> None:
-            if strict:
-                if kind is FailureKind.FAILSAFE:
-                    _raise_failsafe(message)
-                if kind is FailureKind.ENVELOPE:
-                    _raise_instability(message)
-                raise AssertionError(message)
-            context.report(
-                f"WARNING: {message} ({kind.name}); stopping routine "
-                "(manual control remains available)"
-            )
+            context.report(f"WARNING: {message} ({kind.name}); starting landing recovery")
 
         def on_step_advanced(step_label: str) -> None:
             if post_takeoff_hook is not None and is_first and step_label == "takeoff":
@@ -337,6 +328,18 @@ def _drive_to_done(
                 raise callback_error
     finally:
         del physics_subscription
+    if context.strict:
+        failure = next(
+            (flying.driver.failure for flying in fleet.flying if flying.driver.failure is not None),
+            None,
+        )
+        if failure is not None:
+            message = f"{failure.message}; recovery={failure.recovery_outcome.name}"
+            if failure.kind is FailureKind.FAILSAFE:
+                _raise_failsafe(message)
+            if failure.kind is FailureKind.ENVELOPE:
+                _raise_instability(message)
+            raise AssertionError(message)
     return fleet
 
 
@@ -441,7 +444,6 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
 
         make_env = _build_make_env(
             context,
-            strict,
             options.post_takeoff_hook,
             fleet.drones[0].label,
         )

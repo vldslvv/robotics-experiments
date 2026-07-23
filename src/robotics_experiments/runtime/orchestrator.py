@@ -600,6 +600,7 @@ def build_drivers(
                     hover_max_abs_horizontal_speed_m_s=(routine.hover_max_abs_horizontal_speed_m_s),
                 ),
                 command_ack_timeout_s=routine.command_ack_timeout_s,
+                failure_recovery_timeout_s=routine.failure_recovery_timeout_s,
                 bridge_heartbeat_timeout_s=routine.bridge_heartbeat_timeout_s,
                 handshake_timeout_s=routine.handshake_timeout_s,
                 prearm_settle_s=routine.prearm_settle_s,
