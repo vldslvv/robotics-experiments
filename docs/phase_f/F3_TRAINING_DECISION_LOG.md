@@ -1127,3 +1127,75 @@ episodes. Acceptance remains at least 80% confirmed-latch success, 85% stable
 first contact among contacted episodes, and 95% stable retreat among toggled
 episodes. The evaluator is still required because reward improvement and unit
 tests establish objective semantics, not statistical policy reliability.
+
+### 27. Remove passive hover credit and always publish the selected diagnostic
+
+#### Interpret the first 300-update checkpoint sweep
+
+Plain-language view: Run `20260723T165833Z.19` learned to hover near or touch
+the switch but did not learn a reliable press. Checkpoints 50 and 100 contacted
+the switch in all 300 evaluation episodes without toggling it. Checkpoint 150
+contacted in 275 of 300 episodes and toggled once. Checkpoints 200, 250, and
+299 regressed to no contact. This is a hover/contact local optimum followed by
+collapse, not evidence that more updates under the same objective will solve
+the task.
+
+Technical view: The schema-1 diagnostic report for
+`20260723T165833Z.19` records zero accepted checkpoints. Iteration 150 has the
+best normalized-gate maximin tuple because its confirmed-toggle rate is
+1/300 while every later checkpoint is zero on contact-conditioned progress.
+PPO return is not used to reinterpret that evidence. Under the revised
+selection contract, iteration 150 is the fallback winner.
+
+#### Penalize tilt instead of paying for survival and upright hover
+
+Plain-language view: The task no longer gives the drone points merely for
+remaining alive or upright. It now charges an increasingly strong penalty as
+the drone tilts, pays much more for approaching and moving the real pusher and
+button, and puts more value on completing an uninterrupted latch hold. The
+training failure angle now matches the 35-degree deployment gate that ended the
+manual run.
+
+Technical view: `alive_weight` changes from 0.025 to 0.0. Stability changes
+from positive upright credit to
+`-stability_weight * (1 - clamp(body_z_world_z, 0, 1))^2`, with
+`stability_weight` 5.0. Approach progress changes from 10.0 to 50.0, gentle
+first contact from 10.0 to 5.0, compression and button progress from 100.0 to
+200.0 each, and latch progress from 10.0 to 30.0. Premature release still
+cancels all accumulated latch-progress credit. `crash_tilt_cos` is 0.819152,
+the cosine of 35 degrees. The 2.0 m/s action authority, toggle, retreat,
+success, failure, timeout, action and retreat penalties, PPO settings,
+300-update run length, and 50-update checkpoint interval are unchanged.
+
+#### Publish the best evidence without weakening acceptance
+
+Plain-language view: Every completed selection now leaves a usable artifact for
+manual diagnosis. Passing candidates still win. If none pass, the same
+balanced gate ranking chooses the best fallback, publishes it, and clearly
+marks it rejected. Independent evaluation still fails the workflow, and only
+an independently accepted artifact proceeds to the full PX4 press routine.
+
+Technical view: Selection method `press-gated-maximin-v2` ranks accepted
+candidates first and otherwise ranks every evaluated candidate by the existing
+normalized-gate maximin tuple and tie-breakers. Schema-2
+`checkpoint_selection.json` adds `selected_accepted`. `policy_meta.json` keeps
+`selected_checkpoint_iteration` and `selection_method` and adds
+`checkpoint_evaluation`, containing the selected acceptance result, seeds,
+episodes per seed, thresholds, exact metrics, normalized margins, ranking
+values, and reward-term means. Metadata is strict JSON; these diagnostic fields
+do not alter the runtime policy contract. `latest` now means the newest
+selected artifact and may point to an explicitly rejected fallback.
+
+#### Next run and gate sequence
+
+Start from scratch after committing this objective change and confirming a
+clean revision; do not resume a checkpoint trained with the previous reward.
+Preserve the user-owned `TODO.txt` change rather than reverting or silently
+including it to obtain `source_dirty: false`. Run the hover/goto and real
+contact-chain gates, then use the standard wrapper with 49,152 environments,
+300 updates, and 50-update checkpoints. Selection evaluates every checkpoint
+over seeds 101, 202, and 303 with 100 episodes per seed. Independent acceptance
+still requires at least 80% toggles, 85% stable first contact, and 95%
+post-toggle retreat. Only a passing artifact proceeds to
+`test-integration-press-routine`; a fallback remains diagnostic evidence while
+the workflow remains failed.

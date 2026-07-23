@@ -17,9 +17,11 @@ Usage:
     [--shutdown]
 
 Run Make training, checkpoint-selection, and independent-evaluation targets in
-that order, preserving console and status logs. A failed stage skips every
-later stage. Power-off after success, failure, or a handled interrupt is
-disabled by default and must be requested with --shutdown.
+that order, preserving console and status logs. The wrapper also serves the
+training logs through TensorBoard for the lifetime of the workflow and prints
+its URL. A failed stage skips every later stage. Power-off after success,
+failure, or a handled interrupt is disabled by default and must be requested
+with --shutdown.
 
 Defaults:
   --train-target train-rl
@@ -146,7 +148,12 @@ train_status="not-run"
 select_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
+tensorboard_pid=""
 sudo_validated=false
+tensorboard_host="127.0.0.1"
+tensorboard_port="6006"
+tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
+tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
 shutdown_mode="disabled"
 if [ "${shutdown_requested}" = true ]; then
     shutdown_mode="enabled"
@@ -193,6 +200,11 @@ finish_run() {
 
     set +e
     trap - EXIT HUP INT TERM
+    if [ -n "${tensorboard_pid}" ]; then
+        kill "${tensorboard_pid}" 2>/dev/null
+        docker stop "${tensorboard_container_name}" >/dev/null 2>&1
+        wait "${tensorboard_pid}" 2>/dev/null
+    fi
     if [ -n "${sudo_keeper_pid}" ]; then
         kill "${sudo_keeper_pid}" 2>/dev/null
         wait "${sudo_keeper_pid}" 2>/dev/null
@@ -229,6 +241,34 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+start_tensorboard() {
+    make tensorboard-rl \
+        "RL_TENSORBOARD_CONTAINER_NAME=${tensorboard_container_name}" \
+        "RL_TENSORBOARD_HOST=${tensorboard_host}" \
+        "RL_TENSORBOARD_PORT=${tensorboard_port}" \
+        >>"${console_log}" 2>&1 &
+    tensorboard_pid=$!
+    for _ in {1..30}; do
+        if ! kill -0 "${tensorboard_pid}" 2>/dev/null; then
+            printf 'ERROR: TensorBoard exited before becoming ready; see %s\n' \
+                "${console_log}" >&2
+            return 1
+        fi
+        if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
+            printf '[%s] TensorBoard URL: %s\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                "${tensorboard_url}" |
+                tee -a "${console_log}"
+            return 0
+        fi
+        sleep 1
+    done
+    printf 'ERROR: TensorBoard did not become ready at %s; see %s\n' \
+        "${tensorboard_url}" \
+        "${console_log}" >&2
+    return 1
+}
+
 printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
@@ -239,6 +279,8 @@ printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_targe
     "${eval_target}" \
     "${shutdown_mode}" |
     tee -a "${console_log}"
+
+start_tensorboard
 
 if [ "${shutdown_requested}" = true ]; then
     sudo -v

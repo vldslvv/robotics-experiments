@@ -29,17 +29,18 @@ handoff:
   estimator_health_min: 0.80
 
 # Ground-truth F3 task. Penalty weights are positive and subtracted by the
-# transition; generic contact is never a substitute for a confirmed latch.
+# transition. Stability penalizes squared deviation from upright; generic
+# contact is never a substitute for a confirmed latch.
 reward:
-  alive_weight: 0.025
-  stability_weight: 0.025
-  approach_progress_weight: 10.0
-  gentle_contact_weight: 10.0
-  compression_progress_weight: 100.0
-  button_progress_weight: 100.0
+  alive_weight: 0.0
+  stability_weight: 5.0
+  approach_progress_weight: 50.0
+  gentle_contact_weight: 5.0
+  compression_progress_weight: 200.0
+  button_progress_weight: 200.0
   # Signed confirmation progress rewards an uninterrupted hold and cancels the
   # accumulated credit when the button is released before confirmation.
-  latch_progress_weight: 10.0
+  latch_progress_weight: 30.0
   toggle_weight: 30.0
   retreat_progress_weight: 200.0
   retreat_alignment_weight: 50.0
@@ -75,7 +76,7 @@ reset:
   initial_angular_velocity_max_radps: 0.0
 
 termination:
-  crash_tilt_cos: 0.5
+  crash_tilt_cos: 0.819152
   min_altitude_m: 0.25
   max_wall_normal_distance_m: 1.0
   max_lateral_error_m: 0.30

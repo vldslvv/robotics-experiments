@@ -148,4 +148,4 @@ def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, A
     example = torch.zeros(1, int(metadata["obs_dim"]), dtype=torch.float32)
     scripted = torch.jit.trace(actor, example)
     scripted.save(str(out_dir / POLICY_FILENAME))
-    (out_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2) + "\n")
+    (out_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")

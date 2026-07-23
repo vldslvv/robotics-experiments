@@ -68,7 +68,10 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   requires one lamp transition, stable first contact, and stable post-toggle
   retreat. Like the hover artifact gate, it is deliberately excluded from
   `test-integration-all` because it needs an accepted
-  `.build/training/press/latest` whose metadata declares `press-v1`.
+  independently accepted artifact whose metadata declares `press-v1`.
+  Selection may publish an explicitly rejected diagnostic fallback at
+  `.build/training/press/latest`; that fallback does not satisfy this gate's
+  workflow precondition.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

@@ -27,8 +27,8 @@ from robotics_experiments.rl.training.selection import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 1
-_PRESS_SELECTION_METHOD = "press-acceptance-maximin-v1"
+_REPORT_SCHEMA_VERSION = 2
+_PRESS_SELECTION_METHOD = "press-gated-maximin-v2"
 
 
 def _report(message: str) -> None:
@@ -166,6 +166,15 @@ def _selection_report(
         else None
     )
     evaluated = {evaluation.candidate.iteration: evaluation for evaluation in selection.candidates}
+    selected_evaluation = next(
+        (
+            evaluation
+            for evaluation in selection.candidates
+            if selection.selected is not None
+            and evaluation.candidate.iteration == selection.selected.iteration
+        ),
+        None,
+    )
     candidates = []
     for candidate in all_candidates:
         evaluation = evaluated.get(candidate.iteration)
@@ -178,7 +187,7 @@ def _selection_report(
             record |= {
                 "accepted": evaluation.accepted,
                 "metrics": {metric.name: metric.value for metric in evaluation.metrics},
-                "normalized_ranking_margins": list(evaluation.normalized_margins),
+                "normalized_margins": list(evaluation.normalized_margins),
                 "ranking_values": list(evaluation.ranking_values),
                 "reward_means": {reward.name: reward.mean for reward in evaluation.reward_means},
             }
@@ -196,13 +205,10 @@ def _selection_report(
         "selected_iteration": (
             selection.selected.iteration if selection.selected is not None else None
         ),
+        "selected_accepted": (
+            selected_evaluation.accepted if selected_evaluation is not None else None
+        ),
     }
-
-
-def _atomic_write_report(*, path: Path, report: dict[str, Any]) -> None:
-    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    temp.replace(path)
 
 
 def _select_candidates(
@@ -263,6 +269,27 @@ def _publish_selection(
         "selected_checkpoint_iteration": selection.selected.iteration,
         "selection_method": selection.selection_method,
     }
+    selected_evaluation = next(
+        (
+            evaluation
+            for evaluation in selection.candidates
+            if evaluation.candidate.iteration == selection.selected.iteration
+        ),
+        None,
+    )
+    if selected_evaluation is not None:
+        selected_metadata["checkpoint_evaluation"] = {
+            "accepted": selected_evaluation.accepted,
+            "seeds": report["seeds"],
+            "episodes_per_seed": report["episodes_per_seed"],
+            "thresholds": report["thresholds"],
+            "metrics": {metric.name: metric.value for metric in selected_evaluation.metrics},
+            "normalized_margins": list(selected_evaluation.normalized_margins),
+            "ranking_values": list(selected_evaluation.ranking_values),
+            "reward_means": {
+                reward.name: reward.mean for reward in selected_evaluation.reward_means
+            },
+        }
     training.load_checkpoint(
         runner=runner,
         checkpoint_path=selection.selected.path,
@@ -341,11 +368,6 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             evaluation_config=evaluation,
             all_candidates=candidates,
         )
-        if selection.selected is None:
-            _atomic_write_report(path=run_dir / _REPORT_FILENAME, report=report)
-            raise AssertionError(
-                f"no checkpoint in RL_RUN_ID={run_id} passed {selection.selection_method}"
-            )
         _publish_selection(
             selection=selection,
             report=report,
@@ -358,10 +380,27 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     finally:
         env.close()
 
+    if selection.selected is None:
+        raise AssertionError("checkpoint selector returned no winner")
+    selected_accepted = next(
+        (
+            evaluation.accepted
+            for evaluation in selection.candidates
+            if evaluation.candidate.iteration == selection.selected.iteration
+        ),
+        None,
+    )
+    outcome = (
+        "accepted"
+        if selected_accepted
+        else "fallback"
+        if selected_accepted is not None
+        else "selected"
+    )
     _report(
-        f"checkpoint selection PASSED run={run_id} "
-        f"iteration={selection.selected.iteration} method={selection.selection_method} "
-        f"latest={policy_root / 'latest'}"
+        f"checkpoint selection COMPLETE run={run_id} "
+        f"iteration={selection.selected.iteration} outcome={outcome} "
+        f"method={selection.selection_method} latest={policy_root / 'latest'}"
     )
     return selection
 
