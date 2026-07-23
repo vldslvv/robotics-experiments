@@ -162,28 +162,42 @@ def _run_seed(
 
 
 def _run(*, config: ExperimentConfig, artifact_dir: Path) -> None:
-    from robotics_experiments.rl.press import POLICY_FILENAME, load_vector_policy
+    from robotics_experiments.rl.press import (
+        POLICY_FILENAME,
+        load_policy_contract,
+        validate_policy_artifact,
+    )
     from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
+    contract = load_policy_contract(artifact_dir=artifact_dir)
+    validate_policy_artifact(
+        artifact_dir=artifact_dir,
+        obs_schema_version=contract.obs_schema_version,
+        obs_dim=contract.obs_dim,
+        policy_interface=contract.policy_interface,
+    )
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
         seed=seeds[0],
         num_envs=evaluation.episodes_per_seed,
+        policy_contract=contract,
     )
     episodes: list[_EpisodeMetrics] = []
     rewards: dict[str, tuple[float, int]] = {}
     try:
-        load_vector_policy(
-            artifact_dir=artifact_dir,
-            action_cfg=config.rl.action,
-            obs_schema_version=int(env_cfg.observation_schema_version),
-            obs_dim=int(env_cfg.observation_space),
-            policy_rate_hz=config.rl.policy_rate_hz,
-            policy_interface=str(env_cfg.policy_interface),
-        )
+        if (
+            int(env_cfg.observation_schema_version),
+            int(env_cfg.observation_space),
+            str(env_cfg.policy_interface),
+        ) != (
+            contract.obs_schema_version,
+            contract.obs_dim,
+            contract.policy_interface,
+        ):
+            raise ValueError("Isaac Lab evaluation environment changed the artifact contract")
         policy = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location=env.device)
         policy.eval()
         for seed in seeds:

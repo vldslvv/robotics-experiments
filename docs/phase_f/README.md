@@ -25,14 +25,15 @@ Status as of 2026-07-22:
   action, and training config live under `rl`; press-task config lives under
   `rl.press`, composed from `configs/experiment/rl/press/default.yaml`.
 - The default policy rate is 20 Hz. Isaac Lab schedules it from
-  `sim.physics_hz` with the shared exact-average cadence; deployment evaluates
-  the policy at `rl.policy_rate_hz`, transmits at
+  `sim.physics_hz` with the shared exact-average cadence while training.
+  Exported artifacts own evaluation and deployment cadence; deployment
+  transmits at
   `driver.offboard_setpoint_rate_hz`, and ticks drivers at
   `driver.control_rate_hz`. Do not collapse these into one fixed decimation or
   assume they are equal.
 - Policy metadata includes observation schema/dimension, action contract, and
-  `policy_rate_hz`. Changing any of them invalidates an artifact and requires
-  retraining.
+  `policy_rate_hz`. These values are artifact-owned after export; changing
+  training YAML does not reinterpret an existing artifact.
 - Project-owned evolving state in `runtime`, `commanding`, and `px4_bridge` is a
   frozen dataclass advanced by stateless transitions. The remaining Phase F
   pure state machines, curriculum state, estimator state, and retry progress

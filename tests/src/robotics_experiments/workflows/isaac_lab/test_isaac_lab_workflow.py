@@ -104,6 +104,44 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
     }
 
 
+def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeypatch):
+    registration = importlib.import_module("robotics_experiments.workflows.isaac_lab.registration")
+    contract = types.SimpleNamespace(policy_interface="press-v1")
+    calls = {}
+    env_cfg = types.SimpleNamespace(scene=types.SimpleNamespace(num_envs=1))
+    factory_module = types.SimpleNamespace(
+        make_switch_press_env_cfg=lambda **kwargs: calls.setdefault("factory", kwargs) and env_cfg
+    )
+    fake_gym = types.ModuleType("gymnasium")
+
+    def make(task_id, **kwargs):
+        calls["gym"] = (task_id, kwargs)
+        return types.SimpleNamespace(unwrapped="environment")
+
+    fake_gym.make = make
+    monkeypatch.setitem(sys.modules, "gymnasium", fake_gym)
+    monkeypatch.setattr(registration, "register_isaac_lab_tasks", lambda: True)
+    monkeypatch.setattr(
+        registration.importlib,
+        "import_module",
+        lambda _name: factory_module,
+    )
+
+    env, returned_cfg = registration.make_isaac_lab_env(
+        task_id=registration.SWITCH_PRESS_TASK_ID,
+        experiment_config="training-yaml",
+        seed=123,
+        num_envs=8,
+        policy_contract=contract,
+    )
+
+    assert env == "environment"
+    assert returned_cfg is env_cfg
+    assert calls["factory"]["policy_contract"] is contract
+    assert calls["gym"][1]["policy_contract"] is contract
+    assert env_cfg.scene.num_envs == 8
+
+
 def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     pytest.importorskip("isaaclab")
     pytest.importorskip("gymnasium")

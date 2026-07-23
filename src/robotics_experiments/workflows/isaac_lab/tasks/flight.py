@@ -222,10 +222,11 @@ def build_flight_actuation_params(
     min_rotor_velocity: ArrayLike,
     max_rotor_velocity: ArrayLike,
     action_cfg,
+    policy_contract=None,
     mass: float,
     device,
 ) -> _FlightActuationParams:
-    """Build the frozen batched actuation params from geometry + ``rl.action``.
+    """Build actuation params from YAML controllers plus optional artifact scales.
 
     Precomputes the device tensors, the allocation pseudoinverse, and the max
     total thrust once (mirroring ``robotics_experiments.rl.build_actuation_params``).
@@ -266,13 +267,29 @@ def build_flight_actuation_params(
         allocation_pinv=torch.linalg.pinv(allocation),  # (N, 4)
         max_total_thrust=float((constants * max_velocity.square()).sum().item()),
         kp_rate=_tensor(action_cfg.controller_kp_rate),
-        max_body_rate_radps=float(action_cfg.max_body_rate_radps),
-        hover_thrust_fraction=float(action_cfg.hover_thrust_fraction),
+        max_body_rate_radps=float(
+            action_cfg.max_body_rate_radps
+            if policy_contract is None
+            else policy_contract.max_body_rate_radps
+        ),
+        hover_thrust_fraction=float(
+            action_cfg.hover_thrust_fraction
+            if policy_contract is None
+            else policy_contract.hover_thrust_fraction
+        ),
         kp_vel=_tensor(action_cfg.controller_kp_vel),
         kd_vel=_tensor(action_cfg.controller_kd_vel),
         kp_att=_tensor(action_cfg.controller_kp_att),
-        max_body_velocity_mps=float(action_cfg.max_body_velocity_mps),
-        max_yaw_rate_radps=float(action_cfg.max_yaw_rate_radps),
+        max_body_velocity_mps=float(
+            action_cfg.max_body_velocity_mps
+            if policy_contract is None
+            else policy_contract.max_body_velocity_mps
+        ),
+        max_yaw_rate_radps=float(
+            action_cfg.max_yaw_rate_radps
+            if policy_contract is None
+            else policy_contract.max_yaw_rate_radps
+        ),
         max_tilt_rad=float(np.radians(action_cfg.max_tilt_cmd_deg)),
     )
 

@@ -71,12 +71,20 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = cast(Any, MISSING)
 
 
-def make_switch_press_env_cfg(*, experiment_config: ExperimentConfig) -> SwitchPressEnvCfg:
+def make_switch_press_env_cfg(
+    *,
+    experiment_config: ExperimentConfig,
+    policy_contract=None,
+) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
     vehicle = _training_vehicle(experiment_config)
     rl = experiment_config.rl
     reset = rl.press.reset
-    decimation = math.ceil(experiment_config.sim.physics_hz / rl.policy_rate_hz)
+    policy_rate_hz = (
+        rl.policy_rate_hz if policy_contract is None else policy_contract.policy_rate_hz
+    )
+    action_dim = rl.action.action_dim if policy_contract is None else policy_contract.action_dim
+    decimation = math.ceil(experiment_config.sim.physics_hz / policy_rate_hz)
     switch_position = (
         reset.switch_distance_from_env_origin_m,
         0.0,
@@ -89,9 +97,9 @@ def make_switch_press_env_cfg(*, experiment_config: ExperimentConfig) -> SwitchP
     )
     return SwitchPressEnvCfg(
         decimation=decimation,
-        policy_rate_hz=rl.policy_rate_hz,
+        policy_rate_hz=policy_rate_hz,
         episode_length_s=rl.episode_length_s,
-        action_space=rl.action.action_dim,
+        action_space=action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
         policy_interface="press-v1",
@@ -156,12 +164,14 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         *,
         cfg: SwitchPressEnvCfg,
         experiment_config: ExperimentConfig,
+        policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
     ):
         super().__init__(
             cfg=cfg,
             experiment_config=experiment_config,
+            policy_contract=policy_contract,
             render_mode=render_mode,
             **kwargs,
         )

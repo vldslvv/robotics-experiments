@@ -106,8 +106,8 @@ the entire fleet cycle.
   The **`policy` step** is the task-neutral policy plug-in over the same streaming
   lifecycle. Its `_StreamingSpec` carries an injected `PolicyAdapter` instead
   of a fixed geodetic target. It evaluates
-  when a new OFFBOARD stream starts and then only when the continuous
-  exact-average `rl.policy_rate_hz` cadence is due; its latest payload is held
+  when a new OFFBOARD stream starts and then only when its adapter's continuous
+  exact-average artifact-owned cadence is due; its latest payload is held
   without interpolation while the independent setpoint streamer runs. A
   compatible OFFBOARD-step boundary does not reset either cadence. The payload is a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
@@ -125,6 +125,9 @@ the entire fleet cycle.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
   `.build/training/hover/latest` followed by `.build/training/press/latest`.
+  `PolicyAdapter.rate_hz` carries each artifact's immutable cadence, so those
+  steps may run at different rates; neither `DriverParams` nor
+  `VehicleRoutine` repeats a routine-wide policy rate.
   `hover-v1` uses the authored target, or the entry position when target is
   omitted, and requires `hold_s`; its adapter completes after that duration.
   `press-v1` consumes the injected exact 34-value `PressObservation`, waits for
@@ -286,7 +289,7 @@ The pure `build_vehicle_routine(*, steps, target_latitude_deg,
 target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
-goto_offboard_prime_ticks, policy_rate_hz, offboard_setpoint_rate_hz,
+goto_offboard_prime_ticks, offboard_setpoint_rate_hz,
 goto_min_heading_dist_m, policy_fn_factory)` maps the
 descriptors plus a
 per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missing a required

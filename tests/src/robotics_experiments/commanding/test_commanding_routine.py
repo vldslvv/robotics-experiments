@@ -76,7 +76,6 @@ def _arm_takeoff_routine(*, min_climb_m=1.0):
     )
     return VehicleRoutine(
         steps=(arm_step, takeoff_step),
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
     )
 
@@ -198,7 +197,6 @@ def _build(steps, *, target_altitude_m=488.0, command_ack_timeout_s=10.0, policy
         goto_heading_tol_deg=25.0,
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
         policy_fn_factory=policy_fn_factory,
     )
@@ -798,7 +796,6 @@ def test_forward_invariant_allows_commanded_x_displacement():
     )
     forward_routine = VehicleRoutine(
         steps=(routine.steps[1],),
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
     )
     state = RoutineState()
@@ -847,7 +844,6 @@ def test_decide_invariant_breach_fails_with_envelope_kind():
     )
     routine = VehicleRoutine(
         steps=(takeoff_step,),
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
     )
     state = RoutineState()
@@ -877,7 +873,6 @@ def test_decide_hover_step_holds_before_advancing():
     )
     routine = VehicleRoutine(
         steps=(hover_step,),
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
     )
     state = RoutineState()
@@ -936,12 +931,16 @@ class _FakePolicyFn:
         )
 
 
-def _policy_routine(policy_fn, **overrides):
+def _policy_routine(policy_fn, *, rate_hz=20.0, **overrides):
     descriptor = {"kind": "policy", "artifact": "does/not/matter", "hold_s": 2.0, "timeout_s": 10.0}
     descriptor.update(overrides)
     return _build(
         [descriptor],
-        policy_fn_factory=lambda d: PolicyAdapter(initial_progress=None, step=policy_fn),
+        policy_fn_factory=lambda d: PolicyAdapter(
+            rate_hz=rate_hz,
+            initial_progress=None,
+            step=policy_fn,
+        ),
     )
 
 
@@ -958,6 +957,7 @@ def test_build_vehicle_routine_policy_requires_fields():
             _build(
                 [descriptor],
                 policy_fn_factory=lambda d: PolicyAdapter(
+                    rate_hz=20.0,
                     initial_progress=None,
                     step=_FakePolicyFn(),
                 ),
@@ -1025,6 +1025,21 @@ def test_policy_and_setpoint_cadences_are_independent_exact_averages():
     assert state.offboard.transmissions == 50
 
 
+def test_policy_adapter_owns_its_exact_average_cadence():
+    policy_fn = _FakePolicyFn()
+    routine = _policy_routine(policy_fn, rate_hz=10.0)
+    state = RoutineState()
+
+    for cycle in range(50):
+        state, _decision = decide(
+            routine,
+            state,
+            make_routine_observation(sim_time_us=cycle * 20_000),
+        )
+
+    assert len(policy_fn.goals) == 10
+
+
 def test_decide_policy_without_target_hovers_at_step_baseline():
     policy_fn = _FakePolicyFn()
     routine = _policy_routine(policy_fn)
@@ -1075,7 +1090,11 @@ def test_build_vehicle_routine_policy_supports_multiple_artifacts():
 
     def factory(descriptor):
         seen_artifacts.append(descriptor["artifact"])
-        return PolicyAdapter(initial_progress=None, step=policies[descriptor["name"]])
+        return PolicyAdapter(
+            rate_hz=10.0 if descriptor["name"] == "hover" else 25.0,
+            initial_progress=None,
+            step=policies[descriptor["name"]],
+        )
 
     routine = _build(descriptors, policy_fn_factory=factory)
 
@@ -1087,6 +1106,8 @@ def test_build_vehicle_routine_policy_supports_multiple_artifacts():
     second_stream = routine.steps[1].streaming
     assert first_stream is not None and first_stream.policy is not None
     assert second_stream is not None and second_stream.policy is not None
+    assert first_stream.policy.rate_hz == 10.0
+    assert second_stream.policy.rate_hz == 25.0
     first_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
     second_stream.policy.step(obs, np.zeros(3, dtype=np.float64), None)
 

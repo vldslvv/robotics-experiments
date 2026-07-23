@@ -60,7 +60,6 @@ def _params(steps):
         goto_heading_tol_deg=25.0,
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
     )
 
@@ -361,9 +360,9 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         goto_heading_tol_deg=25.0,
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
-        policy_rate_hz=20.0,
         offboard_setpoint_rate_hz=50.0,
         policy_fn_factory=lambda descriptor: PolicyAdapter(
+            rate_hz=20.0,
             initial_progress=0,
             step=_fake_policy_step,
         ),

@@ -5,24 +5,32 @@ correct sign flips (y / z / yaw) and thrust normalization -- the deploy-time
 analogue of the in-Lab actuation, tested without pymavlink or Isaac.
 """
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
-from robotics_experiments.rl.press import press_action_to_offboard
+from robotics_experiments.rl.press import PolicyContract, press_action_to_offboard
 
 
-def _velocity_cfg():
-    return SimpleNamespace(kind="velocity", max_body_velocity_mps=3.0, max_yaw_rate_radps=1.5)
-
-
-def _ctbr_cfg():
-    return SimpleNamespace(kind="ctbr", hover_thrust_fraction=0.4, max_body_rate_radps=6.0)
+def _contract(*, action_kind: str) -> PolicyContract:
+    return PolicyContract(
+        policy_interface="hover-v1",
+        obs_schema_version=1,
+        obs_dim=13,
+        policy_rate_hz=20.0,
+        action_kind=action_kind,
+        action_dim=4,
+        max_body_velocity_mps=3.0,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_fraction=0.4,
+    )
 
 
 def test_velocity_action_flips_flu_to_frd():
-    setpoint = press_action_to_offboard(np.array([1.0, 0.5, 0.25, 0.4]), _velocity_cfg())
+    setpoint = press_action_to_offboard(
+        np.array([1.0, 0.5, 0.25, 0.4]),
+        _contract(action_kind="velocity"),
+    )
 
     assert setpoint.forward_mps == pytest.approx(3.0)
     assert setpoint.right_mps == pytest.approx(-1.5)  # +left FLU -> -right FRD
@@ -31,7 +39,10 @@ def test_velocity_action_flips_flu_to_frd():
 
 
 def test_ctbr_action_maps_thrust_and_body_rates():
-    setpoint = press_action_to_offboard(np.array([0.2, 0.1, -0.1, 0.3]), _ctbr_cfg())
+    setpoint = press_action_to_offboard(
+        np.array([0.2, 0.1, -0.1, 0.3]),
+        _contract(action_kind="ctbr"),
+    )
 
     assert setpoint.thrust == pytest.approx(0.4 * 1.2)
     assert setpoint.roll_rate_radps == pytest.approx(0.6)  # +x FLU == +x FRD
@@ -40,8 +51,9 @@ def test_ctbr_action_maps_thrust_and_body_rates():
 
 
 def test_ctbr_thrust_is_clipped_to_unit_interval():
-    high = press_action_to_offboard(np.array([5.0, 0.0, 0.0, 0.0]), _ctbr_cfg())
-    low = press_action_to_offboard(np.array([-5.0, 0.0, 0.0, 0.0]), _ctbr_cfg())
+    contract = _contract(action_kind="ctbr")
+    high = press_action_to_offboard(np.array([5.0, 0.0, 0.0, 0.0]), contract)
+    low = press_action_to_offboard(np.array([-5.0, 0.0, 0.0, 0.0]), contract)
 
     assert high.thrust == pytest.approx(1.0)
     assert low.thrust == pytest.approx(0.0)
@@ -49,4 +61,4 @@ def test_ctbr_thrust_is_clipped_to_unit_interval():
 
 def test_deploy_rejects_unimplemented_kind():
     with pytest.raises(ValueError, match="attitude"):
-        press_action_to_offboard(np.zeros(4), SimpleNamespace(kind="attitude"))
+        press_action_to_offboard(np.zeros(4), _contract(action_kind="attitude"))

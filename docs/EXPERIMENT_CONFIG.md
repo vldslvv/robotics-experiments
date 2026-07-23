@@ -42,10 +42,12 @@ the same canonical configuration fingerprint as the flown routine.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
-`rl.policy_rate_hz` drives policy inference and Isaac Lab stepping. All rates
-must be finite and positive; policy and setpoint rates cannot exceed the driver
-rate, and the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50,
-and 20 Hz respectively.
+`rl.policy_rate_hz` authors training and supplies the switch-latch fallback
+when no press artifact is deployed. Exported artifacts own evaluation and
+deployment policy cadence. All rates must be finite and positive; authored or
+artifact policy cadence and setpoint rates cannot exceed the driver rate, and
+the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50, and 20 Hz
+respectively.
 
 ## Routine behavior
 
