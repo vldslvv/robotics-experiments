@@ -1360,3 +1360,50 @@ remain high, stop it and run one 100-iteration from-scratch comparison under
 the identical corrected objective. Selection may publish a better candidate,
 but the existing checkpoint-50 fallback is not overwritten merely because a
 comparison run completed.
+
+### 31. Actor-only fine-tuning learned retreat but not stable contact
+
+#### Complete the run without triggering either stop rule
+
+Plain-language view: The actor-only run preserved reliable pressing and began
+to learn retreat just before iteration 50, so it was allowed to finish. It did
+not spend ten consecutive post-25 iterations below 50% active toggles. The
+from-scratch contingency was therefore not triggered.
+
+Technical view: Run `20260723T231822Z.117549` trained 49,152 environments for
+150 iterations from source commit `f15597d`, with `source_dirty: false`.
+Initialization metadata identifies method `actor-only`, source run
+`20260723T215635Z.61663`, checkpoint iteration 50, and source commit
+`0f69dfc`. At training iteration 50, active toggles were 91.65% and cumulative
+retreat among toggled episodes was 0.026%, no longer exactly zero. The run
+saved periodic checkpoints 0, 25, 50, 75, 100, and 125 plus rsl_rl's final
+checkpoint 149. The run-scoped TensorBoard URL was
+`http://127.0.0.1:6006/`; its environment endpoint was independently verified
+to identify only this run's log directory. The wrapper stopped the server on
+exit.
+
+#### Select and independently reject the best fallback
+
+Plain-language view: Checkpoint 75 learned essentially perfect retreat but made
+unstable first contact. Later checkpoints traded retreat reliability for a
+small contact-stability improvement. None met all three gates, so the selector
+published the best balanced fallback rather than describing it as accepted.
+
+Technical view: Deterministic 300-episode results for iterations
+0/25/50/75/100/125/149 respectively were:
+
+- Confirmed toggles: 0.9967 / 0.9967 / 1.0 / 0.9967 / 1.0 / 1.0 / 0.9833.
+- Stable first contact among contacted episodes: 0.3700 / 0.1100 / 0.1667 /
+  0.1767 / 0.2033 / 0.3000 / 0.2367.
+- Retreat among toggled episodes: 0.0 / 0.0 / 0.0 / 1.0 / 0.4733 / 0.0 /
+  0.3356.
+
+The maximin selector chose iteration 149 because its weakest normalized
+acceptance margin, contact stability at 0.2784 of target, exceeded iteration
+75's 0.2078 and iteration 100's 0.2392. It published the artifact with
+`accepted: false` and advanced `latest`; the original checkpoint-50 run remains
+intact. Independent evaluation reproduced 0.9833 confirmed toggles, 0.2367
+stable first contact, 0.3356 retreat, 0.3300 full completion, a 0.700 s median
+toggle time, and 2.00 mm peak compression overshoot. It failed first-contact
+stability and retreat acceptance. Consequently
+`test-integration-press-routine` was not run.
