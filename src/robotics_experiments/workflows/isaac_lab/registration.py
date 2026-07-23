@@ -94,8 +94,9 @@ def make_isaac_lab_env(
     experiment_config,
     seed: int | None = None,
     num_envs: int | None = None,
+    policy_contract=None,
 ):
-    """Build any registered project task through its registry-owned cfg factory."""
+    """Build a task, optionally interpreting actions through an artifact contract."""
     import gymnasium as gym
 
     if not register_isaac_lab_tasks():
@@ -104,9 +105,21 @@ def make_isaac_lab_env(
         registration = _TASKS[task_id]
     except KeyError as exc:
         raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
+    expected_interface = {
+        DRONE_HOVER_TASK_ID: "hover-v1",
+        SWITCH_PRESS_TASK_ID: "press-v1",
+    }[task_id]
+    if policy_contract is not None and policy_contract.policy_interface != expected_interface:
+        raise ValueError(
+            f"task {task_id!r} requires policy_interface={expected_interface!r}, "
+            f"artifact provides {policy_contract.policy_interface!r}"
+        )
     module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)
     factory = getattr(importlib.import_module(module_name), factory_name)
-    env_cfg = factory(experiment_config=experiment_config)
+    env_cfg = factory(
+        experiment_config=experiment_config,
+        policy_contract=policy_contract,
+    )
     if seed is not None and hasattr(env_cfg, "seed"):
         env_cfg.seed = seed
     if num_envs is not None:
@@ -115,5 +128,6 @@ def make_isaac_lab_env(
         task_id,
         cfg=env_cfg,
         experiment_config=experiment_config,
+        policy_contract=policy_contract,
     ).unwrapped
     return env, env_cfg

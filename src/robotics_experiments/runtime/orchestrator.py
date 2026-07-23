@@ -115,6 +115,7 @@ class FleetState:
     driver_cadence: _CadenceState
     switches: Any
     switch_cadence: _CadenceState
+    switch_rate_hz: float
     switch_events: tuple[SwitchToggleEvent, ...]
 
 
@@ -197,6 +198,7 @@ def create_fleet(*, config: ExperimentConfig) -> FleetState:
         driver_cadence=_CadenceState(previous_time_ns=0),
         switches=create_switches_runtime(config=config.switches, stage=None),
         switch_cadence=_CadenceState(previous_time_ns=0),
+        switch_rate_hz=config.rl.policy_rate_hz,
         switch_events=(),
     )
 
@@ -246,12 +248,13 @@ def spawn_fleet(*, state: FleetState) -> FleetState:
 
     if state.stage is None:
         raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
+    switch_rate_hz = state.switch_rate_hz
     if any(
         descriptor.get("kind") == "policy"
         for vehicle in state.config.vehicles.values()
         for descriptor in vehicle.routine.steps
     ):
-        _preflight_policy_artifacts(config=state.config)
+        switch_rate_hz = _preflight_policy_artifacts(config=state.config)
     summary = ", ".join(
         f"{label}: id={vehicle.id} prim={vehicle.spawn.prim_name} "
         f"px4_enabled={vehicle.bridge.enabled} endpoint={vehicle.mavlink_port} "
@@ -305,6 +308,7 @@ def spawn_fleet(*, state: FleetState) -> FleetState:
             drones=prepared_drones,
             flying=(),
             switches=switches,
+            switch_rate_hz=switch_rate_hz,
             switch_events=(),
         )
     except Exception:
@@ -335,14 +339,17 @@ def _artifact_path(*, descriptor: Mapping[str, Any]) -> Path:
     return artifact if artifact.is_absolute() else _repo_root() / artifact
 
 
+def _policy_contract(*, descriptor: Mapping[str, Any]):
+    from robotics_experiments.rl.press import load_policy_contract
+
+    return load_policy_contract(artifact_dir=_artifact_path(descriptor=descriptor))
+
+
 def _policy_interface(*, descriptor: Mapping[str, Any]) -> str:
-    from robotics_experiments.rl.press import load_policy_metadata
-
-    metadata = load_policy_metadata(artifact_dir=_artifact_path(descriptor=descriptor))
-    return str(metadata["policy_interface"])
+    return _policy_contract(descriptor=descriptor).policy_interface
 
 
-def _preflight_policy_artifacts(*, config: ExperimentConfig) -> None:
+def _preflight_policy_artifacts(*, config: ExperimentConfig) -> float:
     from robotics_experiments.rl.press import (
         HOVER_OBSERVATION_DIM,
         HOVER_OBSERVATION_SCHEMA_VERSION,
@@ -353,11 +360,13 @@ def _preflight_policy_artifacts(*, config: ExperimentConfig) -> None:
         validate_policy_artifact,
     )
 
+    press_rates: set[float] = set()
     for vehicle in config.vehicles.values():
         for descriptor in vehicle.routine.steps:
             if descriptor.get("kind") != "policy":
                 continue
-            interface = _policy_interface(descriptor=descriptor)
+            contract = _policy_contract(descriptor=descriptor)
+            interface = contract.policy_interface
             if interface == HOVER_POLICY_INTERFACE:
                 obs_schema_version = HOVER_OBSERVATION_SCHEMA_VERSION
                 obs_dim = HOVER_OBSERVATION_DIM
@@ -366,26 +375,39 @@ def _preflight_policy_artifacts(*, config: ExperimentConfig) -> None:
                 obs_dim = PRESS_OBSERVATION_DIM
             else:
                 raise ValueError(f"unsupported policy_interface={interface!r}")
-            validate_policy_artifact(
+            contract = validate_policy_artifact(
                 artifact_dir=_artifact_path(descriptor=descriptor),
-                action_cfg=config.rl.action,
                 obs_schema_version=obs_schema_version,
                 obs_dim=obs_dim,
-                policy_rate_hz=config.rl.policy_rate_hz,
                 policy_interface=interface,
             )
+            if contract.policy_rate_hz > config.driver.control_rate_hz:
+                raise ValueError(
+                    f"policy artifact {_artifact_path(descriptor=descriptor)} cadence "
+                    f"{contract.policy_rate_hz} Hz exceeds driver.control_rate_hz="
+                    f"{config.driver.control_rate_hz}"
+                )
+            if interface == PRESS_POLICY_INTERFACE:
+                press_rates.add(contract.policy_rate_hz)
+    if len(press_rates) > 1:
+        raise ValueError(
+            "press-v1 policy artifacts in one fleet must share one policy_rate_hz; "
+            f"found {sorted(press_rates)}"
+        )
+    return next(iter(press_rates), config.rl.policy_rate_hz)
 
 
 def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any]) -> PolicyAdapter:
-    from robotics_experiments.commanding import VelocitySetpoint
     from robotics_experiments.rl.press import (
+        HOVER_OBSERVATION_DIM,
+        HOVER_OBSERVATION_SCHEMA_VERSION,
         HOVER_POLICY_INTERFACE,
         OBSERVATION_SCHEMA_VERSION,
         PRESS_OBSERVATION_DIM,
         PRESS_POLICY_INTERFACE,
         HandoffGate,
         PressDeploymentState,
-        build_policy_step_fn,
+        hover_observation_from_state,
         initial_press_deployment_state,
         load_vector_policy,
         press_action_to_offboard,
@@ -398,18 +420,20 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
         if "hold_s" not in descriptor:
             raise ValueError("hover-v1 policy step requires 'hold_s'")
         hold_s = float(descriptor["hold_s"])
-        policy_step = build_policy_step_fn(
+        loaded = load_vector_policy(
             artifact_dir=artifact,
-            action_cfg=config.rl.action,
-            policy_rate_hz=config.rl.policy_rate_hz,
+            obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
+            obs_dim=HOVER_OBSERVATION_DIM,
+            policy_interface=HOVER_POLICY_INTERFACE,
         )
+        contract = loaded.contract
 
         def _hover_step(observation, target_enu, progress):
             assert isinstance(progress, _HoverPolicyProgress)
             if target_enu is None:
                 return PolicyStepResult(
                     progress=progress,
-                    setpoint=VelocitySetpoint(0.0, 0.0, 0.0, 0.0),
+                    setpoint=press_action_to_offboard(np.zeros(contract.action_dim), contract),
                     failure_reason="hover-v1 policy has no target or entry baseline",
                 )
             started_us = (
@@ -418,21 +442,35 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
             successor = _HoverPolicyProgress(started_us=started_us)
             return PolicyStepResult(
                 progress=successor,
-                setpoint=policy_step(observation.vehicle_state, target_enu),
+                setpoint=press_action_to_offboard(
+                    np.clip(
+                        loaded.inference(
+                            hover_observation_from_state(
+                                observation.vehicle_state,
+                                target_enu,
+                            )
+                        ),
+                        -1.0,
+                        1.0,
+                    ),
+                    contract,
+                ),
                 complete=observation.sim_time_us - started_us >= hold_s * 1_000_000,
             )
 
-        return PolicyAdapter(initial_progress=_HoverPolicyProgress(), step=_hover_step)
+        return PolicyAdapter(
+            rate_hz=contract.policy_rate_hz,
+            initial_progress=_HoverPolicyProgress(),
+            step=_hover_step,
+        )
     if interface == PRESS_POLICY_INTERFACE:
-        action_cfg = config.rl.action
-        policy = load_vector_policy(
+        loaded = load_vector_policy(
             artifact_dir=artifact,
-            action_cfg=action_cfg,
             obs_schema_version=OBSERVATION_SCHEMA_VERSION,
             obs_dim=PRESS_OBSERVATION_DIM,
-            policy_rate_hz=config.rl.policy_rate_hz,
             policy_interface=PRESS_POLICY_INTERFACE,
         )
+        contract = loaded.contract
         termination = config.rl.press.termination
 
         def _press_step(observation, target_enu, progress):
@@ -442,7 +480,7 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
             if task_observation is None:
                 return PolicyStepResult(
                     progress=progress,
-                    setpoint=VelocitySetpoint(0.0, 0.0, 0.0, 0.0),
+                    setpoint=press_action_to_offboard(np.zeros(contract.action_dim), contract),
                     failure_reason="press-v1 policy has no runtime task observation",
                 )
             task_observation = replace(
@@ -453,8 +491,8 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
             decision = step_press_deployment(
                 state=progress,
                 observation=task_observation,
-                policy=policy,
-                action_dim=action_cfg.action_dim,
+                policy=loaded.inference,
+                action_dim=contract.action_dim,
                 handoff_gate=HandoffGate.from_config(config.rl.press.handoff),
                 first_contact_speed_max_mps=termination.first_contact_speed_max_mps,
                 first_contact_angular_speed_max_radps=(
@@ -466,13 +504,14 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
             )
             return PolicyStepResult(
                 progress=decision.state,
-                setpoint=press_action_to_offboard(decision.action, action_cfg),
+                setpoint=press_action_to_offboard(decision.action, contract),
                 complete=decision.complete,
                 failure_reason=decision.failure_reason,
             )
 
         return PolicyAdapter(
-            initial_progress=initial_press_deployment_state(action_dim=action_cfg.action_dim),
+            rate_hz=contract.policy_rate_hz,
+            initial_progress=initial_press_deployment_state(action_dim=contract.action_dim),
             step=_press_step,
         )
     raise ValueError(f"unsupported policy_interface={interface!r} in artifact {artifact}")
@@ -482,7 +521,7 @@ def _prepare_policy_observer(*, state: FleetState, spawned: SpawnedDrone) -> Spa
     from robotics_experiments.rl.press import PRESS_POLICY_INTERFACE
 
     press_descriptors = [
-        descriptor
+        (descriptor, _policy_contract(descriptor=descriptor))
         for descriptor in spawned.vehicle.routine.steps
         if descriptor.get("kind") == "policy"
         and _policy_interface(descriptor=descriptor) == PRESS_POLICY_INTERFACE
@@ -491,7 +530,9 @@ def _prepare_policy_observer(*, state: FleetState, spawned: SpawnedDrone) -> Spa
         return spawned
     from robotics_experiments.runtime._press_io import PressObservationIO
 
-    indices = {int(descriptor.get("switch_index", -1)) for descriptor in press_descriptors}
+    indices = {
+        int(descriptor.get("switch_index", -1)) for descriptor, _contract in press_descriptors
+    }
     if len(indices) != 1 or next(iter(indices)) < 0:
         raise ValueError("press-v1 policy steps require one shared non-negative switch_index")
     switch_index = next(iter(indices))
@@ -506,7 +547,7 @@ def _prepare_policy_observer(*, state: FleetState, spawned: SpawnedDrone) -> Spa
         stage=state.stage,
         articulation_path=spawned.articulation_path,
         switch_index=switch_index,
-        action_dim=state.config.rl.action.action_dim,
+        action_dim=press_descriptors[0][1].action_dim,
         contact_force_threshold_n=state.config.rl.press.contact_force_threshold_n,
         button_geometry_scale=reset.button_geometry_scale,
         button_stiffness_scale=reset.button_stiffness_scale,
@@ -567,7 +608,6 @@ def build_drivers(
                 goto_heading_tol_deg=routine.goto_heading_tol_deg,
                 goto_cross_track_m=routine.goto_cross_track_m,
                 goto_offboard_prime_ticks=routine.goto_offboard_prime_ticks,
-                policy_rate_hz=state.config.rl.policy_rate_hz,
                 offboard_setpoint_rate_hz=(state.config.driver.offboard_setpoint_rate_hz),
                 home_lat_deg=spawned.vehicle.bridge.home_lat_deg,
                 home_lon_deg=spawned.vehicle.bridge.home_lon_deg,
@@ -610,7 +650,7 @@ def tick_drivers(
     switch_cadence, switch_due = _advance_cadence(
         state=state.switch_cadence,
         time_ns=control_time_ns,
-        rate_hz=state.config.rl.policy_rate_hz,
+        rate_hz=state.switch_rate_hz,
     )
     switches = state.switches
     switch_events = state.switch_events

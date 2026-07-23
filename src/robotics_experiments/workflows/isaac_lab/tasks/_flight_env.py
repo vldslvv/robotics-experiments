@@ -43,10 +43,12 @@ class _FlightDirectRLEnv(DirectRLEnv):
         *,
         cfg,
         experiment_config: ExperimentConfig,
+        policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
     ):
         self._experiment_config = experiment_config
+        self._policy_contract = policy_contract
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
         self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
         self._policy_cadence = _CadenceState(previous_time_ns=0)
@@ -89,8 +91,11 @@ class _FlightDirectRLEnv(DirectRLEnv):
             bridge.linear_drag, dtype=torch.float32, device=self.device
         )
         action_cfg = self._experiment_config.rl.action
+        action_kind = (
+            action_cfg.kind if self._policy_contract is None else self._policy_contract.action_kind
+        )
         self.actuation_params = build_flight_actuation_params(
-            kind=action_cfg.kind,
+            kind=action_kind,
             positions_body=rotors.positions_body,
             rot_dir=rotors.rot_dir,
             rotor_constant=bridge.rotor_constant,
@@ -98,6 +103,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
             min_rotor_velocity=bridge.min_rotor_velocity,
             max_rotor_velocity=bridge.max_rotor_velocity,
             action_cfg=action_cfg,
+            policy_contract=self._policy_contract,
             mass=total_mass,
             device=self.device,
         )

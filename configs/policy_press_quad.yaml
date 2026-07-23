@@ -4,10 +4,8 @@ defaults:
   - override experiment/routine@vehicles.x500_01.routine: policy_press
   - _self_
 
-# Single-drone F3 deployment sanity flight in the real warehouse. This
-# diagnostic config faithfully matches the current legacy artifact. Future
-# artifacts trained with a different action scale must update this value in the
-# same change that promotes the artifact.
+# Single-drone F3 deployment sanity flight in the real warehouse. The selected
+# artifact owns its action transform and policy cadence.
 scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 switches:
@@ -17,10 +15,6 @@ switches:
   spawn_bounds:
     - min: [0.0, 17.99, 2.5]
       max: [0.0, 17.99, 2.5]
-
-rl:
-  action:
-    max_body_velocity_mps: 0.5
 
 vehicles:
   x500_01:

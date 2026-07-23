@@ -61,8 +61,12 @@ The NumPy reference builder copies the caller's mixer geometry and marks every
 geometry, gain, and derived-allocation array read-only, so its frozen parameter
 graph cannot be mutated through an external alias.
 
-Shared RL training scale and the RL action level live in the Hydra `rl` group
-with matching bare annotations in `src/robotics_experiments/config/_rl.py`.
+The action contract for a new training run lives in the Hydra `rl` group, with
+matching bare annotations in `src/robotics_experiments/config/_rl.py`.
+Hydra owns the action kind, dimensions, physical scales, and cadence until the
+run captures them in `policy_meta.json`; the exported artifact owns those
+values for evaluation and deployment. Controller gains, tilt limits, vehicle
+dynamics, and physical task settings remain YAML-owned.
 `rl.training.vehicle_id` selects the experiment vehicle whose spawn asset and
 airframe-enriched bridge dynamics configure the Lab task; selection fails when
 the task is constructed if that ID is absent. `bridge.enabled` is irrelevant
@@ -142,7 +146,10 @@ Pieces:
   and updates the named `.build/training/<policy-name>/latest` symlink;
   `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
   task config owns its observation schema version and dimension, so exported
-  metadata contains no task-ID conditional. rsl_rl comes from the
+  metadata contains no task-ID conditional. Before PPO begins, the run writes
+  the complete policy contract and Git provenance to its run directory.
+  Normal export rereads that stored metadata, rather than regenerating it from
+  the current config. rsl_rl comes from the
   pinned Lab image requirements; the host `training` extra (`rsl-rl-lib`)
   exists for tooling only.
   If training finishes but artifact export is interrupted, recover the
@@ -153,28 +160,31 @@ Pieces:
     TRAIN_ARGS='--num-envs 2 --export-checkpoint /isaac-sim/proj/.build/training/press/<run-id>/logs/model_<iteration>.pt'
   ```
 
-  Export recovery loads policy weights without optimizer state, writes the
+  Export recovery loads policy weights without optimizer state, reuses the
+  contract and provenance captured in that run before training, writes the
   artifact back into the checkpoint's existing run directory, and updates the
-  policy namespace's `latest` symlink. The checkpoint must be below that
-  namespace's `.build/training/<policy-name>/<run-id>/logs/` directory.
+  policy namespace's `latest` symlink. Recovery rejects a run missing its
+  stored metadata. The checkpoint must be below that namespace's
+  `.build/training/<policy-name>/<run-id>/logs/` directory.
 - **Artifact** = TorchScript `policy.pt` + `policy_meta.json`
   (`policy_interface`, obs schema version/dim, policy rate, action kind/dim,
   action scales, source Git commit, and dirty-worktree flag). The interface is
   the runtime adapter selector (`hover-v1` or `press-v1`), not a commanding
   routine kind. Train accepted policies from a clean revision;
   `source_dirty: true` is diagnostic provenance, not a claim that the commit
-  alone reproduces the artifact. `build_policy_step_fn` raises
-  `ValueError` on ANY metadata/config mismatch at load (a bare checkpoint is
-  not a valid artifact) and composes the generic `load_vector_policy(...)` + hover-observation
-  packing + `press_action_to_offboard` into the hover-specific callable.
-  `load_vector_policy(...)` is the schema-validated vector interface used by
-  the press adapter. `validate_policy_artifact(...)` performs the same contract
-  validation without importing Torch and backs the pre-launch Make preflight.
-  Exact schema-v1 hover artifacts made before `policy_interface` are recognized
-  as `hover-v1`. A legacy press artifact is recognized as `press-v1` only when
-  its complete tuple is schema 1, dimension 34, 20 Hz, four-value velocity
-  action, and complete action scales; this compatibility path warns, and new
-  exports must carry the field explicitly.
+  alone reproduces the artifact. The frozen `PolicyContract` is the typed
+  runtime authority for the interface, observation layout, cadence, action
+  shape, and physical action scales. `load_vector_policy(...)` validates that
+  the runtime supplies the artifact's supported observation contract and
+  returns a `LoadedVectorPolicy` carrying both the contract and inference
+  callable. It never compares against deployment `rl.action` or
+  `rl.policy_rate_hz`. `validate_policy_artifact(...)` performs the same
+  contract validation without importing Torch and backs the pre-launch Make
+  preflight. Malformed, missing, non-finite, structurally invalid, and
+  unsupported contracts fail before simulator startup. Exact schema-v1 hover
+  and press artifacts made before `policy_interface` are recognized only from
+  their complete contract fields; legacy press inference retains its exact
+  34-value, 20 Hz, four-value velocity tuple and warns.
 - **Gate**: `make test-integration-press-policy` flies
   `configs/policy_hover_quad.yaml` (routine `policy_hover`: arm ->
   takeoff -> policy hover hold -> land) strict over PX4 SITL on
@@ -198,9 +208,40 @@ make eval-press
 deterministic episodes for each of three non-training seeds. It reports reward
 term means, latch-confirmed press success, first-contact stability among
 contacted episodes, retreat among toggled episodes, median time-to-toggle, and
-peak compression overshoot. The command fails below the configured 80% press,
+peak compression overshoot. The Lab environment uses the artifact's action
+kind, dimension, physical scales, and cadence, while controller gains and
+physical task settings continue to come from the training YAML. The command
+fails below the configured 80% press,
 85% stable-contact, or 95% retreat thresholds. Artifacts remain ignored under
 `.build/training`; no policy binary is committed.
+
+For an unattended train-then-evaluate run that powers off after either success
+or failure, use the reusable wrapper:
+
+```console
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_quad.yaml \
+  --train-target train-rl \
+  --eval-target eval-press \
+  --train-args '--num-envs 49152 --max-iterations 300' \
+  --label press-overnight
+```
+
+The wrapper validates sudo access before starting, refreshes that authorization
+while the workload runs, skips evaluation when training fails, and requests
+power-off after a successful evaluation, a failed stage, or a handled
+interrupt. Its target names, Hydra config, stage arguments, label, and log
+directory are command-line options so the same script can run later RL
+workflows. The combined console log and final per-stage exit status default to
+`.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
+ordinary integration and policy artifacts remain in `.build/docker/integration`
+and `.build/training`.
+
+From another terminal, follow the newest wrapper log with:
+
+```console
+tail -F "$(ls -1t .build/overnight/*.console.log | head -n 1)"
+```
 
 ## Full press-policy mission gate
 
@@ -209,7 +250,12 @@ top-level Hydra format as `configs/takeoff_quad_quad.yaml`. It runs one X500 in
 the warehouse through arm -> takeoff -> hover -> goto handoff pose -> hover ->
 generic `policy` -> return goto -> land. The policy descriptor carries
 `artifact: .build/training/press/latest` and `switch_index: 0`; the artifact's
-`policy_interface: press-v1` selects the runtime adapter.
+`policy_interface: press-v1` selects the runtime adapter. The deployment config
+does not repeat action scales or policy cadence: OFFBOARD conversion, press
+observation action shape, adapter scheduling, and the production switch latch
+use artifact metadata. A fleet with press artifacts at conflicting cadences is
+rejected before spawn; when no press policy is present, the switch latch uses
+the configured training cadence.
 
 The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
 before physics starts, creates a pad `ContactSensor`, and reads canonical

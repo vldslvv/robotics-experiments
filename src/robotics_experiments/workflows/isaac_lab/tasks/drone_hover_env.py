@@ -3,7 +3,8 @@
 Maps a normalized RL action to per-rotor forces through the pluggable in-Lab
 actuation seam (the ``flight`` params + pure functions, the batched twin of
 the host-tested ``robotics_experiments.rl``), with no PX4 lockstep
-per env. The action level is ``rl.action.kind`` (``velocity`` / ``ctbr``).
+per env. Training takes the action level from ``rl.action.kind`` (``velocity`` /
+``ctbr``); artifact-backed evaluation supplies it through ``PolicyContract``.
 The env class is thin wiring: the frozen ``actuation_params`` plus the pure
 per-step math (``_hover_observation`` / ``_hover_reward`` /
 ``_hover_terminated``) do the work, so external composition (rollout/eval
@@ -112,15 +113,29 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     scene: InteractiveSceneCfg = cast(Any, MISSING)
 
 
-def make_drone_hover_env_cfg(*, experiment_config) -> DroneHoverEnvCfg:
+def make_drone_hover_env_cfg(
+    *,
+    experiment_config,
+    policy_contract=None,
+) -> DroneHoverEnvCfg:
     """Build the Isaac Lab task config from one resolved experiment."""
     vehicle = _training_vehicle(experiment_config)
-    decimation = math.ceil(experiment_config.sim.physics_hz / experiment_config.rl.policy_rate_hz)
+    policy_rate_hz = (
+        experiment_config.rl.policy_rate_hz
+        if policy_contract is None
+        else policy_contract.policy_rate_hz
+    )
+    action_dim = (
+        experiment_config.rl.action.action_dim
+        if policy_contract is None
+        else policy_contract.action_dim
+    )
+    decimation = math.ceil(experiment_config.sim.physics_hz / policy_rate_hz)
     return DroneHoverEnvCfg(
         decimation=decimation,
-        policy_rate_hz=experiment_config.rl.policy_rate_hz,
+        policy_rate_hz=policy_rate_hz,
         episode_length_s=experiment_config.rl.episode_length_s,
-        action_space=experiment_config.rl.action.action_dim,
+        action_space=action_dim,
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
         policy_interface="hover-v1",
@@ -162,12 +177,14 @@ class DroneHoverEnv(_FlightDirectRLEnv):
         *,
         cfg: DroneHoverEnvCfg,
         experiment_config: ExperimentConfig,
+        policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
     ):
         super().__init__(
             cfg=cfg,
             experiment_config=experiment_config,
+            policy_contract=policy_contract,
             render_mode=render_mode,
             **kwargs,
         )

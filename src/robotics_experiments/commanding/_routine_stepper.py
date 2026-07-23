@@ -72,7 +72,7 @@ def _advance_stream_cadences(
         policy_cadence, policy_due = _advance_cadence(
             state=policy_cadence,
             time_ns=now_ns,
-            rate_hz=routine.policy_rate_hz,
+            rate_hz=spec.policy.rate_hz,
         )
         if policy_due:
             result = spec.policy.step(

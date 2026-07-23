@@ -247,7 +247,11 @@ def _build_policy_step(
             del baseline
             return original_step(observation, target_enu, progress)
 
-        adapter = PolicyAdapter(initial_progress=adapter.initial_progress, step=_targeted_policy)
+        adapter = PolicyAdapter(
+            rate_hz=adapter.rate_hz,
+            initial_progress=adapter.initial_progress,
+            step=_targeted_policy,
+        )
 
     spec = _StreamingSpec(
         target_enu=(math.nan, math.nan, math.nan),
@@ -297,7 +301,6 @@ def build_vehicle_routine(
     goto_heading_tol_deg: float,
     goto_cross_track_m: float,
     goto_offboard_prime_ticks: int,
-    policy_rate_hz: float,
     offboard_setpoint_rate_hz: float,
     goto_min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M,
     policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None,
@@ -335,7 +338,7 @@ def build_vehicle_routine(
       cross-track-to-path gate plus tilt / vertical / angular gates apply.
     - ``policy`` (requires ``artifact``, ``hold_s`` and ``timeout_s``; optional
       ``target`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
-      produced by a trained policy at its configured cadence -- the injected
+      produced by a trained policy at its artifact-owned cadence -- the injected
       ``policy_fn_factory(descriptor)`` loads the artifact and returns the pure
       :data:`PolicyStepFn` (raising ``ValueError`` for a missing or mismatched
       artifact, so a bad config fails at build time). Reuses the ``goto``
@@ -428,6 +431,5 @@ def build_vehicle_routine(
             raise ValueError(f"routine step {index} has unknown kind {kind!r}")
     return VehicleRoutine(
         steps=tuple(built),
-        policy_rate_hz=policy_rate_hz,
         offboard_setpoint_rate_hz=offboard_setpoint_rate_hz,
     )

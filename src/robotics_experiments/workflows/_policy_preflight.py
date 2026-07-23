@@ -51,13 +51,26 @@ def _preflight_policy_artifacts(
             obs_schema_version, obs_dim = _interface_contract(interface=interface)
             metadata = validate_policy_artifact(
                 artifact_dir=artifact,
-                action_cfg=config.rl.action,
                 obs_schema_version=obs_schema_version,
                 obs_dim=obs_dim,
-                policy_rate_hz=config.rl.policy_rate_hz,
                 policy_interface=interface,
             )
-            validated.append((label, artifact, metadata))
+            if metadata.policy_rate_hz > config.driver.control_rate_hz:
+                raise ValueError(
+                    f"policy artifact {artifact} cadence {metadata.policy_rate_hz} Hz "
+                    f"exceeds driver.control_rate_hz={config.driver.control_rate_hz}"
+                )
+            validated.append((label, artifact, load_policy_metadata(artifact_dir=artifact)))
+    press_rates = {
+        float(metadata["policy_rate_hz"])
+        for _label, _artifact, metadata in validated
+        if metadata["policy_interface"] == PRESS_POLICY_INTERFACE
+    }
+    if len(press_rates) > 1:
+        raise ValueError(
+            "press-v1 policy artifacts in one fleet must share one policy_rate_hz; "
+            f"found {sorted(press_rates)}"
+        )
     return tuple(validated)
 
 

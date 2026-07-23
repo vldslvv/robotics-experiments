@@ -13,6 +13,23 @@ import pytest
 from tests.support.paths import REPO_ROOT
 
 
+def _contract():
+    from robotics_experiments.rl.press import PolicyContract
+
+    return PolicyContract(
+        policy_interface="press-v1",
+        obs_schema_version=1,
+        obs_dim=34,
+        policy_rate_hz=17.0,
+        action_kind="velocity",
+        action_dim=4,
+        max_body_velocity_mps=0.5,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_fraction=0.4,
+    )
+
+
 def _load_eval_press_module():
     pytest.importorskip("torch")
     script = REPO_ROOT / "isaac" / "runtime" / "standalone" / "eval_press.py"
@@ -126,7 +143,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
     policy = FakePolicy()
     factory_calls = []
     rollout_seeds = []
-    policy_loads = []
+    validations = []
 
     def fake_factory(**kwargs):
         factory_calls.append(kwargs)
@@ -145,14 +162,18 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         return [episode], {}
 
     monkeypatch.setattr(workflow, "make_isaac_lab_env", fake_factory)
-    monkeypatch.setattr(press, "load_vector_policy", lambda **kwargs: policy_loads.append(kwargs))
+    contract = _contract()
+    monkeypatch.setattr(press, "load_policy_contract", lambda **_kwargs: contract)
+    monkeypatch.setattr(
+        press,
+        "validate_policy_artifact",
+        lambda **kwargs: validations.append(kwargs),
+    )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
     monkeypatch.setattr(evaluator, "_run_seed", fake_run_seed)
     config = SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(task_id="press-task"),
-            action=object(),
-            policy_rate_hz=20.0,
             press=SimpleNamespace(
                 evaluation=SimpleNamespace(
                     seeds=(101, 202, 303),
@@ -169,8 +190,9 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
     assert len(factory_calls) == 1
     assert factory_calls[0]["seed"] == 101
+    assert factory_calls[0]["policy_contract"] is contract
     assert rollout_seeds == [(101, 1), (202, 1), (303, 1)]
-    assert len(policy_loads) == 1
+    assert len(validations) == 1
     assert policy.eval_count == 1
     assert env.close_count == 1
 
@@ -194,7 +216,9 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             ),
         ),
     )
-    monkeypatch.setattr(press, "load_vector_policy", lambda **_kwargs: None)
+    contract = _contract()
+    monkeypatch.setattr(press, "load_policy_contract", lambda **_kwargs: contract)
+    monkeypatch.setattr(press, "validate_policy_artifact", lambda **_kwargs: contract)
     monkeypatch.setattr(
         evaluator.torch.jit,
         "load",
@@ -208,8 +232,6 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     config = SimpleNamespace(
         rl=SimpleNamespace(
             training=SimpleNamespace(task_id="press-task"),
-            action=object(),
-            policy_rate_hz=20.0,
             press=SimpleNamespace(
                 evaluation=SimpleNamespace(
                     seeds=(101,),

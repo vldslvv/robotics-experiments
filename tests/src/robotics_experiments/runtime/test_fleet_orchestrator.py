@@ -361,6 +361,26 @@ def test_tick_drivers_passes_context_and_progress_state(monkeypatch):
     assert fleet.flying[0].context is flying.context
 
 
+def test_switch_latch_uses_artifact_selected_cadence(monkeypatch):
+    module, _rec = _import_orchestrator(monkeypatch)
+    env = _env()
+    fleet = replace(
+        module.create_fleet(config=env),
+        switch_rate_hz=10.0,
+    )
+    steps = []
+    environment = sys.modules["robotics_experiments.environment"]
+    environment.step_switches_runtime = (
+        lambda *, state, on_toggle=None: steps.append(state) or state
+    )
+
+    for _ in range(250):
+        fleet = module.tick_drivers(state=fleet, physics_dt_s=0.004, monotonic_s=7.0)
+
+    assert len(steps) == 10
+    assert env.rl.policy_rate_hz == 20.0
+
+
 def test_tick_drivers_isolates_errors_and_shares_one_fleet_tick(monkeypatch):
     module, _rec = _import_orchestrator(monkeypatch)
     env = _env(

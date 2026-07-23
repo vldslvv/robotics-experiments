@@ -83,7 +83,6 @@ class DriverParams:
     goto_heading_tol_deg: float
     goto_cross_track_m: float
     goto_offboard_prime_ticks: int
-    policy_rate_hz: float
     offboard_setpoint_rate_hz: float
     home_lat_deg: float = DEFAULT_HOME_LAT_DEG
     home_lon_deg: float = DEFAULT_HOME_LON_DEG
@@ -424,7 +423,6 @@ def tick_routine_driver(
                 goto_heading_tol_deg=context.params.goto_heading_tol_deg,
                 goto_cross_track_m=context.params.goto_cross_track_m,
                 goto_offboard_prime_ticks=context.params.goto_offboard_prime_ticks,
-                policy_rate_hz=context.params.policy_rate_hz,
                 offboard_setpoint_rate_hz=context.params.offboard_setpoint_rate_hz,
                 goto_min_heading_dist_m=context.params.goto_min_heading_dist_m,
                 policy_fn_factory=context.params.policy_fn_factory,

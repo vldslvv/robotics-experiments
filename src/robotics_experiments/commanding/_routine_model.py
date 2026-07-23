@@ -68,8 +68,9 @@ PolicyStepFn = Callable[
 
 @dataclass(frozen=True)
 class PolicyAdapter:
-    """Injected policy implementation and its immutable initial progress."""
+    """Injected policy implementation, cadence, and immutable initial progress."""
 
+    rate_hz: float
     initial_progress: Any
     step: PolicyStepFn
 
@@ -224,7 +225,6 @@ class VehicleRoutine:
     """An ordered, immutable plan of :class:`RoutineStep`s for one vehicle."""
 
     steps: tuple[RoutineStep, ...]
-    policy_rate_hz: float
     offboard_setpoint_rate_hz: float
 
 

@@ -15,6 +15,7 @@ Run inside the Isaac Lab container (make train-rl):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import re
@@ -124,6 +125,7 @@ def _build_env(
     seed: int,
     num_envs: int | None,
     experiment_config: ExperimentConfig,
+    policy_contract=None,
 ):
     from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
@@ -132,6 +134,7 @@ def _build_env(
         experiment_config=experiment_config,
         seed=seed,
         num_envs=num_envs,
+        policy_contract=policy_contract,
     )
 
 
@@ -148,6 +151,30 @@ def _artifact_metadata(
         policy_interface=str(env_cfg.policy_interface),
     )
     return metadata | source_metadata
+
+
+def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
+    from robotics_experiments.rl.press import METADATA_FILENAME
+
+    (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2) + "\n")
+
+
+def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
+    import robotics_experiments.rl.press as press
+
+    metadata_path = run_dir / press.METADATA_FILENAME
+    if not metadata_path.is_file():
+        raise ValueError(
+            f"checkpoint run {run_dir} is missing its stored {press.METADATA_FILENAME}; "
+            "the original training contract cannot be recovered"
+        )
+    contract = press.load_policy_contract(artifact_dir=run_dir)
+    metadata = json.loads(metadata_path.read_text())
+    if not isinstance(metadata.get("source_commit"), str) or not metadata["source_commit"]:
+        raise ValueError(f"checkpoint run {run_dir} metadata has no source_commit provenance")
+    if type(metadata.get("source_dirty")) is not bool:
+        raise ValueError(f"checkpoint run {run_dir} metadata has no source_dirty provenance")
+    return metadata, contract
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
@@ -179,13 +206,24 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             f"(policy={training_cfg.policy_name}, device={device}) -> {run_dir}"
         )
 
+    policy_contract = None
+    if checkpoint_path is not None:
+        _metadata, policy_contract = _stored_artifact_metadata(run_dir=run_dir)
     env, env_cfg = _build_env(
         task_id=training_cfg.task_id,
         seed=seed,
         num_envs=args.num_envs,
         experiment_config=config,
+        policy_contract=policy_contract,
     )
     try:
+        if checkpoint_path is None:
+            metadata = _artifact_metadata(
+                config=config,
+                env_cfg=env_cfg,
+                source_metadata=_git_source_metadata(repo_root=_repo_root()),
+            )
+            _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
             env,
             training_cfg,
@@ -200,11 +238,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
                 checkpoint_path=checkpoint_path,
                 device=device,
             )
-        metadata = _artifact_metadata(
-            config=config,
-            env_cfg=env_cfg,
-            source_metadata=_git_source_metadata(repo_root=_repo_root()),
-        )
+        metadata, _contract = _stored_artifact_metadata(run_dir=run_dir)
         training.export_policy(runner, run_dir, metadata=metadata)
     finally:
         env.close()

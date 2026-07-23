@@ -25,9 +25,9 @@ No deferred decisions (artifact metadata validation and hover-first sequencing
 were decided 2026-07-05).
 Post-F2b alignment: `rl.training.vehicle_id` now selects the fleet vehicle that
 supplies the Lab spawn asset and resolved bridge dynamics. Artifact metadata
-also records `rl.policy_rate_hz`; deployment refuses artifacts trained at a
-different rate. Policy evaluation, OFFBOARD transmission, and fleet driver
-ticks use independent exact-average cadences at `rl.policy_rate_hz`,
+also records `rl.policy_rate_hz`; that stored value owns evaluation and
+deployment cadence. Policy evaluation, OFFBOARD transmission, and fleet driver
+ticks use independent exact-average cadences at the artifact rate,
 `driver.offboard_setpoint_rate_hz`, and `driver.control_rate_hz` respectively.
 
 Why this exists: F3/F3b would otherwise be the first place the training adapter,
@@ -137,11 +137,12 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
   (implemented in `src/robotics_experiments/rl/press/policy.py`; imports
   torch only inside functions, like `MavlinkCommandPort` imports pymavlink
   inside methods). Provide
-  `build_policy_step_fn(*, artifact_dir, action_cfg, policy_rate_hz)` returning
+  `build_policy_step_fn(*, artifact_dir)` returning
   a `Callable[[VehicleState, np.ndarray], setpoint]`
-  that loads the artifact and raises `ValueError` on ANY metadata mismatch
-  against the active config (schema version, kind, dims, policy rate, scales) -- fail loudly
-  at load, never a shape error deep in the driver. It imports neither rsl_rl nor
+  that loads the artifact and raises `ValueError` on a malformed, unsupported,
+  or structurally incompatible contract -- fail loudly at load, never a shape
+  error deep in the driver. Physical action scales and cadence come from the
+  artifact, not deployment Hydra. It imports neither rsl_rl nor
   the training stack; the runtime depends only on this seam, never on the
   training library.
 - Test: `tests/src/robotics_experiments/rl/press/test_press_policy.py`: a tiny exported identity/linear
@@ -181,7 +182,7 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
   pack the Step-2 layout from `RoutineObservation.vehicle_state` (+ the step's
   target position) -> `policy(obs)` -> `robotics_experiments.rl.press.press_action_to_offboard`
   -> a `STREAM` decision carrying the setpoint payload. Policy inference runs
-  only when its exact-average `rl.policy_rate_hz` cadence is due; the latest
+  only when its exact-average artifact cadence is due; the latest
   payload is held and transmitted independently at
   `driver.offboard_setpoint_rate_hz`.
 - Action: extend the `STREAM` decision payload from `PositionSetpoint`-only to

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -128,6 +129,117 @@ def test_checkpoint_export_rejects_checkpoint_outside_policy_root(tmp_path: Path
             checkpoint_path=checkpoint,
             out_root=tmp_path / "training" / "press",
         )
+
+
+def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    metadata = {
+        "policy_interface": "press-v1",
+        "obs_schema_version": 1,
+        "obs_dim": 34,
+        "policy_rate_hz": 17.0,
+        "action_kind": "velocity",
+        "action_dim": 4,
+        "action_scales": {
+            "max_body_velocity_mps": 0.5,
+            "max_yaw_rate_radps": 1.5,
+            "max_body_rate_radps": 6.0,
+            "hover_thrust_fraction": 0.4,
+        },
+        "source_commit": "captured",
+        "source_dirty": False,
+    }
+    train_rl._write_artifact_metadata(  # noqa: SLF001
+        run_dir=tmp_path,
+        metadata=metadata,
+    )
+
+    stored, contract = train_rl._stored_artifact_metadata(run_dir=tmp_path)  # noqa: SLF001
+
+    assert stored == metadata
+    assert contract.policy_rate_hz == 17.0
+    assert contract.max_body_velocity_mps == 0.5
+
+
+def test_checkpoint_export_rejects_run_without_stored_contract(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+
+    with pytest.raises(ValueError, match="original training contract cannot be recovered"):
+        train_rl._stored_artifact_metadata(run_dir=tmp_path)  # noqa: SLF001
+
+
+def test_training_persists_contract_before_ppo_and_reuses_it_for_export(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    action = SimpleNamespace(
+        kind="velocity",
+        action_dim=4,
+        max_body_velocity_mps=0.75,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_fraction=0.4,
+    )
+    training_cfg = SimpleNamespace(
+        task_id="press-task",
+        policy_name="press",
+        seed=7,
+        max_iterations=2,
+    )
+    config = SimpleNamespace(
+        rl=SimpleNamespace(
+            action=action,
+            policy_rate_hz=17.0,
+            training=training_cfg,
+        )
+    )
+    env = SimpleNamespace(close=lambda: None)
+    env_cfg = SimpleNamespace(
+        observation_schema_version=1,
+        observation_space=34,
+        policy_interface="press-v1",
+    )
+    runner = object()
+    observed = {}
+
+    monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(train_rl, "_build_env", lambda **_kwargs: (env, env_cfg))
+    monkeypatch.setattr(
+        train_rl,
+        "_git_source_metadata",
+        lambda **_kwargs: {"source_commit": "captured", "source_dirty": False},
+    )
+    import robotics_experiments.rl.training.rsl_rl as training
+
+    def build_runner(*_args, log_dir, **_kwargs):
+        run_dir = Path(log_dir).parent
+        observed["before_ppo"] = json.loads((run_dir / "policy_meta.json").read_text())
+        return runner
+
+    monkeypatch.setattr(training, "build_runner", build_runner)
+    monkeypatch.setattr(
+        training,
+        "train",
+        lambda *_args: SimpleNamespace(iterations=2),
+    )
+    monkeypatch.setattr(
+        training,
+        "export_policy",
+        lambda _runner, _run_dir, *, metadata: observed.update(exported=metadata),
+    )
+    args = SimpleNamespace(
+        seed=None,
+        max_iterations=None,
+        num_envs=None,
+        export_checkpoint=None,
+    )
+
+    train_rl._run(args=args, config=config)  # noqa: SLF001
+
+    assert observed["before_ppo"]["policy_rate_hz"] == 17.0
+    assert observed["before_ppo"]["action_scales"]["max_body_velocity_mps"] == 0.75
+    assert observed["exported"] == observed["before_ppo"]
 
 
 def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
