@@ -157,8 +157,11 @@ class PressRewardConfig(_FreezableConfig):
     gentle_contact_weight: float
     compression_progress_weight: float
     button_progress_weight: float
+    latch_progress_weight: float
     toggle_weight: float
     retreat_progress_weight: float
+    retreat_alignment_weight: float
+    retreat_overspeed_weight: float
     success_weight: float
     action_energy_weight: float
     action_delta_weight: float
@@ -205,6 +208,8 @@ class PressTerminationConfig(_FreezableConfig):
     max_vertical_error_m: float
     retreat_distance_m: float
     retreat_speed_max_mps: float
+    retreat_alignment_tolerance_m: float
+    retreat_angular_speed_max_radps: float
     stable_retreat_steps: int
     first_contact_speed_max_mps: float
     first_contact_angular_speed_max_radps: float

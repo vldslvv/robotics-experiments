@@ -500,6 +500,8 @@ def _policy_fn_factory(*, config: ExperimentConfig, descriptor: Mapping[str, Any
                 ),
                 retreat_distance_m=termination.retreat_distance_m,
                 retreat_speed_max_mps=termination.retreat_speed_max_mps,
+                retreat_alignment_tolerance_m=(termination.retreat_alignment_tolerance_m),
+                retreat_angular_speed_max_radps=(termination.retreat_angular_speed_max_radps),
                 stable_retreat_steps=termination.stable_retreat_steps,
             )
             return PolicyStepResult(

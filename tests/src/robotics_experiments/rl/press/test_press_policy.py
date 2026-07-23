@@ -231,16 +231,25 @@ def _preflight_config(*, artifacts: list[Path], action_cfg=None, policy_rate_hz=
 
 
 def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Path) -> None:
-    artifact = tmp_path / "artifact"
-    artifact.mkdir()
+    policy_root = tmp_path / "training" / "press"
+    old_run = policy_root / "old-run"
+    old_run.mkdir(parents=True)
     _write_metadata_artifact(
-        artifact,
+        old_run,
+        _metadata(interface=PRESS_POLICY_INTERFACE),
+    )
+    latest_run = policy_root / "latest-run"
+    latest_run.mkdir()
+    _write_metadata_artifact(
+        latest_run,
         _metadata(
             interface=PRESS_POLICY_INTERFACE,
             action_cfg=_action_cfg(max_body_velocity_mps=0.5),
             rate_hz=17.0,
         ),
     )
+    artifact = policy_root / "latest"
+    artifact.symlink_to(latest_run.name)
 
     validated = _preflight_policy_artifacts(
         config=_preflight_config(artifacts=[artifact]),
@@ -249,6 +258,7 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
 
     assert validated[0][1] == artifact
     assert validated[0][2]["policy_rate_hz"] == 17.0
+    assert validated[0][2]["action_scales"]["max_body_velocity_mps"] == 0.5
 
 
 def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> None:
@@ -270,9 +280,18 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
 
 
 def test_press_deployment_config_has_no_action_scale_override() -> None:
+    from robotics_experiments.config import load_config
+
     config_text = (REPO_ROOT / "configs/policy_press_quad.yaml").read_text()
+    config = load_config(REPO_ROOT / "configs/policy_press_quad.yaml")
+    policy_steps = [
+        step for step in config.vehicles["x500_01"].routine.steps if step["kind"] == "policy"
+    ]
 
     assert "max_body_velocity_mps" not in config_text
+    assert "policy_rate_hz" not in config_text
+    assert len(policy_steps) == 1
+    assert policy_steps[0]["artifact"] == ".build/training/press/latest"
 
 
 def test_current_press_artifact_preflights_when_available() -> None:

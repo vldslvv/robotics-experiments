@@ -85,6 +85,8 @@ def step_press_deployment(
     first_contact_angular_speed_max_radps: float,
     retreat_distance_m: float,
     retreat_speed_max_mps: float,
+    retreat_alignment_tolerance_m: float,
+    retreat_angular_speed_max_radps: float,
     stable_retreat_steps: int,
 ) -> PressDeploymentDecision:
     """Advance handoff, policy action, lamp-toggle, and retreat completion once."""
@@ -164,10 +166,15 @@ def step_press_deployment(
             )
     peak_abs_action = max(state.peak_abs_action, float(np.max(np.abs(action))))
 
+    retreat_target_m = max(initial_switch_range_m, retreat_distance_m)
+    lateral_error_m = float(np.linalg.norm(observation.relative_switch_pos_m[1:3]))
     stable_retreat = (
         toggle_count == 1
-        and float(observation.relative_switch_pos_m[0]) >= retreat_distance_m
+        and not observation.contact_flag
+        and float(observation.relative_switch_pos_m[0]) >= retreat_target_m
         and linear_speed <= retreat_speed_max_mps
+        and lateral_error_m <= retreat_alignment_tolerance_m
+        and angular_speed <= retreat_angular_speed_max_radps
     )
     retreat_steps = state.stable_retreat_steps + 1 if stable_retreat else 0
     successor = PressDeploymentState(

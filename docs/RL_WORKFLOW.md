@@ -111,9 +111,14 @@ Press progression is the backend-neutral frozen `PressTaskState` advanced by
 `apply_button_sample` semantics. DirectRLEnv advances it once from `_get_dones`
 and caches the result for rewards and observations. Success is a confirmed
 toggle plus stable retreat; generic contact alone never earns toggle reward.
-Approach/retreat progress is signed, and crash/altitude/envelope termination
-has an explicit terminal failure cost, preventing timeout-hover and early-exit
-reward shortcuts.
+Confirmation progress is signed: every uninterrupted above-threshold sample
+earns part of the latch-progress reward, while releasing before confirmation
+removes the accumulated progress credit. Approach and retreat progress are also
+signed. Retreat returns toward at least the episode's initial wall-normal
+range, stops earning distance reward there, penalizes lateral/vertical drift
+and excess speed, and completes only while contact-free, aligned, and stable.
+Crash/altitude/envelope termination has an explicit terminal failure cost,
+preventing timeout-hover and early-exit reward shortcuts.
 
 ## Task->policy pipeline (F2b)
 
@@ -143,7 +148,9 @@ Pieces:
   `make train-rl` (thin target in `make/training.mk`, runs
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
   image) writes the artifact under `.build/training/<policy-name>/<run-id>/`
-  and updates the named `.build/training/<policy-name>/latest` symlink;
+  and atomically updates the named
+  `.build/training/<policy-name>/latest` symlink only after metadata and
+  TorchScript export complete;
   `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
   task config owns its observation schema version and dimension, so exported
   metadata contains no task-ID conditional. Before PPO begins, the run writes
@@ -215,8 +222,7 @@ fails below the configured 80% press,
 85% stable-contact, or 95% retreat thresholds. Artifacts remain ignored under
 `.build/training`; no policy binary is committed.
 
-For an unattended train-then-evaluate run that powers off after either success
-or failure, use the reusable wrapper:
+For a logged train-then-evaluate run, use the reusable wrapper:
 
 ```console
 make/scripts/run_training_evaluation_then_shutdown.sh \
@@ -227,15 +233,43 @@ make/scripts/run_training_evaluation_then_shutdown.sh \
   --label press-overnight
 ```
 
-The wrapper validates sudo access before starting, refreshes that authorization
-while the workload runs, skips evaluation when training fails, and requests
-power-off after a successful evaluation, a failed stage, or a handled
-interrupt. Its target names, Hydra config, stage arguments, label, and log
+Shutdown is disabled by default, so this form never invokes `sudo`, refreshes
+sudo authorization, calls `sync`, or requests power-off. Add the valueless
+`--shutdown` flag for an unattended run that powers off after a successful
+evaluation, a failed stage, or a handled interrupt. In that mode the wrapper
+validates sudo access before training and refreshes the authorization while the
+workload runs. In both modes it skips evaluation when training fails and
+preserves the workflow exit status unless the explicitly requested shutdown
+command fails. Its target names, Hydra config, stage arguments, label, and log
 directory are command-line options so the same script can run later RL
-workflows. The combined console log and final per-stage exit status default to
+workflows. The combined console log and final per-stage exit status, including
+the selected shutdown mode, default to
 `.build/overnight/<label>.<UTC-time>.<pid>.console.log` and `.status`. The
 ordinary integration and policy artifacts remain in `.build/docker/integration`
 and `.build/training`.
+
+For explicit unattended shutdown, add the flag:
+
+```console
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_quad.yaml \
+  --eval-target eval-press \
+  --train-args '--num-envs 49152 --max-iterations 300' \
+  --label press-overnight \
+  --shutdown
+```
+
+The zero-manual-update deployment sequence is:
+
+1. Run the wrapper with `--hydra-config configs/train_press_quad.yaml`, adding
+   `--shutdown` only when power-off is wanted.
+2. Successful training export advances `.build/training/press/latest`.
+3. Evaluation reads that same symlink. A rejected policy does not roll it back:
+   `latest` means the newest successfully exported policy, not the newest
+   accepted policy.
+4. Run `make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; the
+   composed `policy_press` routine reads the same symlink, while action kind,
+   dimensions, scales, and cadence come from `policy_meta.json`.
 
 From another terminal, follow the newest wrapper log with:
 

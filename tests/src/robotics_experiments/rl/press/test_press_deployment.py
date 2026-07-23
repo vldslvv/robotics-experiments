@@ -64,6 +64,8 @@ def _step(state, observation, policy=lambda vector: np.full(4, 0.5), /):
         first_contact_angular_speed_max_radps=0.5,
         retreat_distance_m=0.35,
         retreat_speed_max_mps=0.2,
+        retreat_alignment_tolerance_m=0.05,
+        retreat_angular_speed_max_radps=0.5,
         stable_retreat_steps=2,
     )
 
@@ -142,6 +144,51 @@ def test_deployment_progress_records_approach_and_peak_compression() -> None:
     assert decision.state.closest_switch_range_m == 0.08
     assert decision.state.peak_pusher_compression_m == 0.004
     assert decision.state.peak_abs_action == 0.75
+
+
+def test_retreat_returns_to_initial_range_aligned_and_stable() -> None:
+    initial = _observation(relative_switch_pos_m=np.array([0.5, 0.0, 0.0]))
+    decision = _step(initial_press_deployment_state(action_dim=4), initial)
+    decision = _step(
+        decision.state,
+        _observation(
+            lamp_state=1,
+            contact_flag=True,
+            relative_switch_pos_m=np.array([0.36, 0.0, 0.0]),
+        ),
+    )
+
+    decision = _step(
+        decision.state,
+        _observation(lamp_state=1, relative_switch_pos_m=np.array([0.4, 0.0, 0.0])),
+    )
+    assert not decision.complete
+    assert decision.state.stable_retreat_steps == 0
+
+    decision = _step(
+        decision.state,
+        _observation(lamp_state=1, relative_switch_pos_m=np.array([0.5, 0.06, 0.0])),
+    )
+    assert decision.state.stable_retreat_steps == 0
+
+    decision = _step(
+        decision.state,
+        _observation(
+            lamp_state=1,
+            relative_switch_pos_m=np.array([0.5, 0.0, 0.0]),
+            body_ang_vel_radps=np.array([0.0, 0.0, 0.6]),
+        ),
+    )
+    assert decision.state.stable_retreat_steps == 0
+
+    stable = _observation(
+        lamp_state=1,
+        relative_switch_pos_m=np.array([0.5, 0.0, 0.0]),
+    )
+    decision = _step(decision.state, stable)
+    assert not decision.complete
+    decision = _step(decision.state, stable)
+    assert decision.complete
 
 
 def test_second_lamp_transition_fails_instead_of_rewarding_toggle_gaming() -> None:

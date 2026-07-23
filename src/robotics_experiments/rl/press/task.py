@@ -32,6 +32,7 @@ class PressTaskState:
     toggle_latched: Any
     lamp_state: Any
     phase: Any
+    initial_range_m: Any
     previous_range_m: Any
     previous_button_position_m: Any
     previous_compression_m: Any
@@ -74,8 +75,11 @@ class PressRewardTerms:
     gentle_contact: Any
     compression_progress: Any
     button_progress: Any
+    latch_progress: Any
     toggle: Any
     retreat: Any
+    retreat_alignment: Any
+    retreat_overspeed: Any
     success: Any
     action_energy: Any
     action_delta: Any
@@ -167,6 +171,12 @@ def _mean_square(value: Any) -> Any:
     return np.square(value).mean(axis=-1)
 
 
+def _square(value: Any) -> Any:
+    if _is_torch(value):
+        return value.square()
+    return np.square(value)
+
+
 def _maximum(value: Any, minimum: float) -> Any:
     if _is_torch(value):
         return value.clamp_min(minimum)
@@ -179,6 +189,14 @@ def _minimum(value: Any, maximum: float) -> Any:
     return np.minimum(value, maximum)
 
 
+def _elementwise_minimum(*, left: Any, right: Any) -> Any:
+    if _is_torch(left):
+        import torch
+
+        return torch.minimum(left, right)
+    return np.minimum(left, right)
+
+
 def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> PressTaskState:
     """Create a zero-progress state matching a NumPy or torch batch."""
     zeros = _zeros_like(value=relative_switch_range_m)
@@ -189,6 +207,7 @@ def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> Pr
         toggle_latched=false,
         lamp_state=false,
         phase=integers,
+        initial_range_m=relative_switch_range_m,
         previous_range_m=relative_switch_range_m,
         previous_button_position_m=zeros,
         previous_compression_m=zeros,
@@ -309,11 +328,15 @@ def step_press_task(
         state.misalignment_steps + 1,
         _zeros_like(value=state.misalignment_steps),
     )
+    retreat_target = _maximum(state.initial_range_m, termination_cfg.retreat_distance_m)
     retreat_candidate = (
         (state.phase == _PHASE_TOGGLED)
         & lamp_state
-        & (current_range >= termination_cfg.retreat_distance_m)
+        & ~sample.contact_flag
+        & (current_range >= retreat_target)
         & (linear_speed <= termination_cfg.retreat_speed_max_mps)
+        & (lateral_error <= termination_cfg.retreat_alignment_tolerance_m)
+        & (angular_speed <= termination_cfg.retreat_angular_speed_max_radps)
     )
     retreat_stable_steps = _where(
         retreat_candidate,
@@ -334,7 +357,13 @@ def step_press_task(
     approach_progress = state.previous_range_m - current_range
     compression_progress = sample.pusher_compression_m - state.previous_compression_m
     button_progress = sample.button_position_m - state.previous_button_position_m
-    retreat_progress = current_range - state.previous_range_m
+    latch_progress = (press_steps - state.press_steps) / confirm_steps
+    capped_range = _elementwise_minimum(left=current_range, right=retreat_target)
+    previous_capped_range = _elementwise_minimum(
+        left=state.previous_range_m,
+        right=retreat_target,
+    )
+    retreat_progress = capped_range - previous_capped_range
     contact_changed = sample.contact_flag != state.previous_contact_flag
     scraping_speed = _norm(sample.body_linear_velocity_mps[..., 1:3])
 
@@ -355,9 +384,18 @@ def step_press_task(
     )
     compression_term = reward_cfg.compression_progress_weight * compression_progress * contact_phase
     button_term = reward_cfg.button_progress_weight * button_progress * contact_phase
+    latch_term = reward_cfg.latch_progress_weight * latch_progress * (state.toggle_time_s < 0.0)
     # Generic contact never earns this reward: only the N-step button latch can.
     toggle = reward_cfg.toggle_weight * first_toggle
     retreat = reward_cfg.retreat_progress_weight * retreat_progress * toggled_phase
+    retreat_alignment = (
+        -reward_cfg.retreat_alignment_weight * _square(lateral_error) * toggled_phase
+    )
+    retreat_overspeed = (
+        -reward_cfg.retreat_overspeed_weight
+        * _maximum(linear_speed - termination_cfg.retreat_speed_max_mps, 0.0) ** 2
+        * toggled_phase
+    )
     success_term = reward_cfg.success_weight * success
     action_energy = -reward_cfg.action_energy_weight * _mean_square(sample.action)
     action_delta = -reward_cfg.action_delta_weight * _mean_square(
@@ -383,8 +421,11 @@ def step_press_task(
         + gentle_contact
         + compression_term
         + button_term
+        + latch_term
         + toggle
         + retreat
+        + retreat_alignment
+        + retreat_overspeed
         + success_term
         + action_energy
         + action_delta
@@ -401,8 +442,11 @@ def step_press_task(
         gentle_contact=gentle_contact,
         compression_progress=compression_term,
         button_progress=button_term,
+        latch_progress=latch_term,
         toggle=toggle,
         retreat=retreat,
+        retreat_alignment=retreat_alignment,
+        retreat_overspeed=retreat_overspeed,
         success=success_term,
         action_energy=action_energy,
         action_delta=action_delta,
@@ -418,6 +462,7 @@ def step_press_task(
         toggle_latched=toggle_latched,
         lamp_state=lamp_state,
         phase=phase,
+        initial_range_m=state.initial_range_m,
         previous_range_m=current_range,
         previous_button_position_m=sample.button_position_m,
         previous_compression_m=sample.pusher_compression_m,
