@@ -333,7 +333,8 @@ training, waits for that run's non-empty event file, and then serves only
 TensorBoard process whose initially absent log root never activates any
 dashboard, while exact scoping keeps unrelated runs out of the UI. The wrapper
 prints the URL and `<policy-name>/<artifact-run-id>` label to the terminal and
-combined console log only after the scalar-tags endpoint reports loaded data.
+combined console log only after the environment endpoint identifies the exact
+run log directory and the scalar-tags endpoint reports loaded data.
 It stops the named TensorBoard container on every wrapper exit path. If the
 server exits or does not load scalar data, the error is logged and a
 successfully completed training stage does not proceed to selection.

@@ -26,6 +26,7 @@ def _run_wrapper(
     eval_exit: int = 0,
     shutdown: bool = False,
     shutdown_exit: int = 0,
+    stale_tensorboard: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -61,6 +62,19 @@ exit 0
         path=fake_bin / "curl",
         body="""#!/usr/bin/env bash
 printf 'curl\\n' >>"${WRAPPER_CALLS}"
+if [[ "$*" == *data/environment* ]]; then
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        printf '{"data_location": "/fake/.build/training/press/stale/logs"}\\n'
+    else
+        logdir="$(
+            sed -n 's/.*RL_TENSORBOARD_LOGDIR=\\([^ ]*\\).*/\\1/p' \
+                "${WRAPPER_CALLS}" |
+                tail -n 1
+        )"
+        printf '{"data_location": "/fake/%s"}\\n' "${logdir}"
+    fi
+    exit 0
+fi
 printf '{"Train/mean_reward": {}}\\n'
 exit 0
 """,
@@ -77,6 +91,10 @@ exit 0
         body="""#!/usr/bin/env bash
 printf 'make %s\\n' "$*" >>"${WRAPPER_CALLS}"
 if [ "$1" = "tensorboard-rl" ]; then
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        sleep 2
+        exit 1
+    fi
     trap 'exit 0' TERM INT
     while true; do
         sleep 1 &
@@ -100,6 +118,9 @@ if [ "$1" = "train-test" ]; then
         fi
         sleep 0.01
     done
+    if [ "${STALE_TENSORBOARD}" = true ]; then
+        sleep 3
+    fi
     exit "${TRAIN_EXIT}"
 fi
 if [ "$1" = "select-test" ]; then
@@ -116,6 +137,7 @@ exit "${EVAL_EXIT}"
             "EVAL_EXIT": str(eval_exit),
             "SELECT_EXIT": str(select_exit),
             "SHUTDOWN_EXIT": str(shutdown_exit),
+            "STALE_TENSORBOARD": str(stale_tensorboard).lower(),
             "TRAIN_EXIT": str(train_exit),
             "WRAPPER_CALLS": str(calls),
         }
@@ -219,6 +241,24 @@ def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:
     status = next((tmp_path / "logs").glob("*.status")).read_text(encoding="utf-8")
     assert "train_exit=0 select_exit=0 eval_exit=0 overall_exit=0" in status
     assert "shutdown=enabled shutdown_exit=0" in status
+
+
+def test_wrapper_rejects_scalar_data_from_another_tensorboard_run(
+    tmp_path: Path,
+) -> None:
+    result = _run_wrapper(
+        tmp_path=tmp_path,
+        train_exit=0,
+        stale_tensorboard=True,
+    )
+
+    assert result.returncode != 0
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
+    assert "make train-test " in calls
+    assert "make select-test " not in calls
+    assert "make eval-test " not in calls
+    assert "data_location" not in result.stdout
+    assert "TensorBoard URL:" not in result.stdout
 
 
 @pytest.mark.parametrize("shutdown", [False, True])

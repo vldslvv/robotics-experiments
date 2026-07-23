@@ -251,6 +251,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 serve_tensorboard_when_ready() {
+    local environment=""
     local server_pid=""
     local scalar_tags=""
 
@@ -281,12 +282,18 @@ serve_tensorboard_when_ready() {
             return 1
         fi
         if curl --fail --silent --output /dev/null "${tensorboard_url}"; then
+            environment="$(
+                curl --fail --silent \
+                    "${tensorboard_url}data/environment" ||
+                    true
+            )"
             scalar_tags="$(
                 curl --fail --silent \
                     "${tensorboard_url}data/plugin/scalars/tags" ||
                     true
             )"
-            if [[ "${scalar_tags}" == *\"* ]]; then
+            if [[ "${environment}" == *'"data_location":'*"${tensorboard_logdir}"'"'* ]] &&
+                [[ "${scalar_tags}" == *\"* ]]; then
                 printf '[%s] TensorBoard URL: %s (run: %s/%s; scalar data loaded)\n' \
                     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     "${tensorboard_url}" \
