@@ -4,8 +4,9 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path (the lazy
 ``robotics_experiments.rl`` package root defers it). The package-root contract --
 ``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
-``export_policy`` plus ``TrainingResult`` over a private runner Protocol -- is what a future
-``skrl.py`` / ``rl_games.py`` re-implements.
+``initialize_actor_from_checkpoint`` / ``export_policy`` plus ``TrainingResult``
+over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
+re-implements.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ __all__ = [
     "build_runner",
     "deterministic_actor",
     "export_policy",
+    "initialize_actor_from_checkpoint",
     "load_checkpoint",
     "train",
 ]
@@ -75,7 +77,7 @@ def _train_cfg(training_cfg: Any) -> dict[str, Any]:
         "algorithm": {
             "class_name": "PPO",
             "learning_rate": float(training_cfg.learning_rate),
-            "schedule": "adaptive",
+            "schedule": str(training_cfg.schedule),
             "gamma": float(training_cfg.gamma),
             "lam": float(training_cfg.lam),
             "entropy_coef": float(training_cfg.entropy_coef),
@@ -114,12 +116,53 @@ def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str
     )
 
 
-def _actor_module(runner: _PolicyRunner) -> Any:
+def _policy_module(runner: _PolicyRunner) -> Any:
     # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
     policy = getattr(runner.alg, "policy", None)
-    if policy is None:
-        policy = runner.alg.actor_critic
-    return policy.actor
+    return policy if policy is not None else runner.alg.actor_critic
+
+
+def initialize_actor_from_checkpoint(
+    *,
+    runner: _PolicyRunner,
+    checkpoint_path: Path,
+    device: str,
+) -> None:
+    """Load only compatible actor parameters into a freshly built runner.
+
+    The critic, action standard deviation, optimizer, and runner iteration are
+    deliberately left exactly as initialized by ``build_runner``.
+    """
+    import torch
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model_state = checkpoint.get("model_state_dict")
+    if not isinstance(model_state, dict):
+        raise ValueError(f"checkpoint {checkpoint_path} has no model_state_dict")
+    source_actor = {
+        name.removeprefix("actor."): value
+        for name, value in model_state.items()
+        if name.startswith("actor.")
+    }
+    target_actor = _policy_module(runner).actor
+    target_state = target_actor.state_dict()
+    if source_actor.keys() != target_state.keys():
+        raise ValueError("initialization checkpoint actor architecture is incompatible")
+    incompatible_shapes = {
+        name: (tuple(source_actor[name].shape), tuple(target.shape))
+        for name, target in target_state.items()
+        if source_actor[name].shape != target.shape
+    }
+    if incompatible_shapes:
+        raise ValueError(
+            "initialization checkpoint observation/action dimensions or actor "
+            f"architecture are incompatible: {incompatible_shapes}"
+        )
+    target_actor.load_state_dict(source_actor, strict=True)
+
+
+def _actor_module(runner: _PolicyRunner) -> Any:
+    return _policy_module(runner).actor
 
 
 def deterministic_actor(*, runner: _PolicyRunner) -> Any:

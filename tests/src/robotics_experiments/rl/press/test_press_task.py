@@ -21,15 +21,20 @@ def _reward_cfg():
         alive_weight=0.0,
         stability_weight=5.0,
         approach_progress_weight=50.0,
-        gentle_contact_weight=5.0,
+        near_contact_linear_overspeed_weight=20.0,
+        near_contact_angular_overspeed_weight=5.0,
+        gentle_contact_weight=20.0,
         compression_progress_weight=200.0,
         button_progress_weight=200.0,
         latch_progress_weight=30.0,
         toggle_weight=30.0,
-        retreat_progress_weight=200.0,
+        repeat_toggle_weight=100.0,
+        retreat_progress_weight=300.0,
         retreat_alignment_weight=50.0,
         retreat_overspeed_weight=50.0,
-        success_weight=100.0,
+        post_toggle_contact_weight=0.5,
+        post_toggle_delay_weight=0.05,
+        success_weight=150.0,
         action_energy_weight=0.001,
         action_delta_weight=0.004,
         contact_oscillation_weight=0.2,
@@ -37,6 +42,9 @@ def _reward_cfg():
         misalignment_weight=0.2,
         failure_weight=100.0,
         timeout_weight=25.0,
+        near_contact_range_m=0.42,
+        near_contact_linear_speed_max_mps=0.2,
+        near_contact_angular_speed_max_radps=0.5,
         gentle_contact_speed_max_mps=0.2,
         compression_target_m=0.01,
         compression_overshoot_tolerance_m=0.003,
@@ -181,7 +189,7 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
         sample=_sample(button=[0.0], relative=[[0.19, 0.0, 0.0]], contact=[True]),
     )
     assert generic_contact.rewards.toggle[0] == 0.0
-    assert generic_contact.rewards.gentle_contact[0] > 0.0
+    assert generic_contact.rewards.gentle_contact[0] == _reward_cfg().gentle_contact_weight
 
     unstable_contact = _step(
         state=approach.state,
@@ -192,7 +200,7 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
             linear_velocity=[[0.5, 0.0, 0.0]],
         ),
     )
-    assert unstable_contact.rewards.gentle_contact[0] < 0.0
+    assert unstable_contact.rewards.gentle_contact[0] == -_reward_cfg().gentle_contact_weight
 
     pressed = _step(
         state=generic_contact.state,
@@ -225,7 +233,56 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
     )
     assert not toggled_off.state.lamp_state[0]
     assert toggled_off.rewards.toggle[0] == 0.0
+    assert toggled_off.rewards.repeat_toggle[0] == -_reward_cfg().repeat_toggle_weight
     assert toggled_off.metrics.toggled[0]
+    assert toggled_off.metrics.repeat_toggled[0]
+    held_after_repeat = _step(
+        state=toggled_off.state,
+        sample=_sample(button=[0.02], relative=[[0.18, 0.0, 0.0]], contact=[True]),
+    )
+    assert held_after_repeat.rewards.repeat_toggle[0] == 0.0
+
+
+def test_near_contact_speed_penalties_are_thresholded_and_phase_gated() -> None:
+    near = _step(
+        state=_initial(switch_range_m=0.5),
+        sample=_sample(
+            button=[0.0],
+            relative=[[0.41, 0.0, 0.0]],
+            linear_velocity=[[0.3, 0.0, 0.0]],
+            angular_velocity=[[0.0, 0.0, 0.7]],
+        ),
+    )
+    assert near.rewards.near_contact_linear_overspeed[0] == pytest.approx(-0.2)
+    assert near.rewards.near_contact_angular_overspeed[0] == pytest.approx(-0.2)
+
+    outside = _step(
+        state=_initial(switch_range_m=0.5),
+        sample=_sample(
+            button=[0.0],
+            relative=[[0.43, 0.0, 0.0]],
+            linear_velocity=[[0.3, 0.0, 0.0]],
+            angular_velocity=[[0.0, 0.0, 0.7]],
+        ),
+    )
+    assert outside.rewards.near_contact_linear_overspeed[0] == 0.0
+    assert outside.rewards.near_contact_angular_overspeed[0] == 0.0
+
+    contacted = _step(
+        state=_initial(),
+        sample=_sample(button=[0.0], contact=[True]),
+    )
+    after_contact = _step(
+        state=contacted.state,
+        sample=_sample(
+            button=[0.0],
+            relative=[[0.3, 0.0, 0.0]],
+            linear_velocity=[[0.3, 0.0, 0.0]],
+            angular_velocity=[[0.0, 0.0, 0.7]],
+        ),
+    )
+    assert after_contact.rewards.near_contact_linear_overspeed[0] == 0.0
+    assert after_contact.rewards.near_contact_angular_overspeed[0] == 0.0
 
 
 def test_upright_has_no_passive_credit_and_tilt_is_penalized_until_failure() -> None:
@@ -327,7 +384,57 @@ def test_success_requires_latch_and_stable_retreat() -> None:
         confirm_steps=1,
     )
     assert retreat.termination.success[0]
-    assert retreat.rewards.success[0] > 0.0
+    assert retreat.rewards.success[0] == _reward_cfg().success_weight
+
+
+def test_success_reward_requires_a_stable_first_contact() -> None:
+    toggled = _step(
+        state=_initial(),
+        sample=_sample(
+            button=[0.02],
+            contact=[True],
+            linear_velocity=[[0.3, 0.0, 0.0]],
+        ),
+        confirm_steps=1,
+    )
+    retreat = _step(
+        state=toggled.state,
+        sample=_sample(button=[0.0], relative=[[0.4, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+
+    assert not toggled.metrics.first_contact_stable[0]
+    assert retreat.termination.success[0]
+    assert retreat.rewards.success[0] == 0.0
+
+
+def test_post_toggle_contact_and_delay_are_charged_until_stable_retreat() -> None:
+    toggled = _step(
+        state=_initial(),
+        sample=_sample(button=[0.02], contact=[True]),
+        confirm_steps=1,
+    )
+    held_contact = _step(
+        state=toggled.state,
+        sample=_sample(button=[0.02], relative=[[0.3, 0.0, 0.0]], contact=[True]),
+        confirm_steps=1,
+    )
+    released = _step(
+        state=held_contact.state,
+        sample=_sample(button=[0.0], relative=[[0.3, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    retreated = _step(
+        state=released.state,
+        sample=_sample(button=[0.0], relative=[[0.4, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+
+    assert held_contact.rewards.post_toggle_contact[0] == -0.5
+    assert held_contact.rewards.post_toggle_delay[0] == -0.05
+    assert released.rewards.post_toggle_contact[0] == 0.0
+    assert released.rewards.post_toggle_delay[0] == -0.05
+    assert retreated.rewards.post_toggle_delay[0] == 0.0
 
 
 def test_retreat_returns_to_initial_range_with_alignment_and_speed_control() -> None:
@@ -349,12 +456,26 @@ def test_retreat_returns_to_initial_range_with_alignment_and_speed_control() -> 
     assert partial_retreat.rewards.retreat[0] > 0.0
     assert not partial_retreat.termination.success[0]
 
-    misaligned = _step(
+    regressed = _step(
         state=partial_retreat.state,
+        sample=_sample(button=[0.0], relative=[[0.38, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert regressed.rewards.retreat[0] < 0.0
+
+    within_tolerance = _step(
+        state=regressed.state,
+        sample=_sample(button=[0.0], relative=[[0.45, 0.04, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert within_tolerance.rewards.retreat_alignment[0] == 0.0
+
+    misaligned = _step(
+        state=within_tolerance.state,
         sample=_sample(button=[0.0], relative=[[0.5, 0.06, 0.0]], contact=[False]),
         confirm_steps=1,
     )
-    assert misaligned.rewards.retreat_alignment[0] < 0.0
+    assert misaligned.rewards.retreat_alignment[0] == pytest.approx(-0.005)
     assert not misaligned.termination.success[0]
 
     too_fast = _step(

@@ -30,6 +30,7 @@ from robotics_experiments.config import ExperimentConfig, load_config
 
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_CHECKPOINT_NAME_PATTERN = re.compile(r"model_(\d+)\.pt")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 
@@ -179,6 +180,48 @@ def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
     return metadata, contract
 
 
+def _initialization_provenance(
+    *,
+    checkpoint_path: Path,
+    out_root: Path,
+    repo_root: Path,
+) -> tuple[dict[str, str | int], object]:
+    run_dir = _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
+    match = _CHECKPOINT_NAME_PATTERN.fullmatch(checkpoint_path.name)
+    if match is None:
+        raise ValueError("--initialize-checkpoint must name a numeric model_<iteration>.pt")
+    source_metadata, source_contract = _stored_artifact_metadata(run_dir=run_dir)
+    relative_checkpoint = checkpoint_path.resolve().relative_to(repo_root.resolve())
+    return (
+        {
+            "method": "actor-only",
+            "source_run": run_dir.name,
+            "checkpoint_iteration": int(match.group(1)),
+            "checkpoint_path": str(relative_checkpoint),
+            "source_commit": str(source_metadata["source_commit"]),
+        },
+        source_contract,
+    )
+
+
+def _validate_initialization_contract(
+    *,
+    source_contract,
+    env_cfg,
+    action_dim: int,
+) -> None:
+    if source_contract.obs_dim != int(env_cfg.observation_space):
+        raise ValueError(
+            "initialization checkpoint observation dimension is incompatible: "
+            f"{source_contract.obs_dim} != {int(env_cfg.observation_space)}"
+        )
+    if source_contract.action_dim != action_dim:
+        raise ValueError(
+            "initialization checkpoint action dimension is incompatible: "
+            f"{source_contract.action_dim} != {action_dim}"
+        )
+
+
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     import robotics_experiments.rl.training.rsl_rl as training
 
@@ -189,8 +232,18 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     )
     _seed_everything(seed)
 
-    out_root = _policy_out_root(_repo_root() / ".build" / "training", training_cfg.policy_name)
+    repo_root = _repo_root()
+    out_root = _policy_out_root(repo_root / ".build" / "training", training_cfg.policy_name)
     checkpoint_path = args.export_checkpoint
+    initialization_checkpoint = args.initialize_checkpoint
+    initialization = None
+    source_contract = None
+    if initialization_checkpoint is not None:
+        initialization, source_contract = _initialization_provenance(
+            checkpoint_path=initialization_checkpoint,
+            out_root=out_root,
+            repo_root=repo_root,
+        )
     run_dir = (
         _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
         if checkpoint_path is not None
@@ -198,9 +251,18 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     )
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     if checkpoint_path is None:
+        initialization_report = (
+            ""
+            if initialization is None
+            else (
+                f", actor_init={initialization['source_run']}/"
+                f"model_{initialization['checkpoint_iteration']}.pt"
+            )
+        )
         _report(
             f"training {training_cfg.task_id} for {iterations} iterations "
-            f"(policy={training_cfg.policy_name}, seed={seed}, device={device}) -> {run_dir}"
+            f"(policy={training_cfg.policy_name}, seed={seed}, device={device}"
+            f"{initialization_report}) -> {run_dir}"
         )
     else:
         _report(
@@ -219,13 +281,21 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         policy_contract=policy_contract,
     )
     try:
+        if source_contract is not None:
+            _validate_initialization_contract(
+                source_contract=source_contract,
+                env_cfg=env_cfg,
+                action_dim=int(config.rl.action.action_dim),
+            )
         if checkpoint_path is None:
             metadata = _artifact_metadata(
                 config=config,
                 env_cfg=env_cfg,
-                source_metadata=_git_source_metadata(repo_root=_repo_root()),
+                source_metadata=_git_source_metadata(repo_root=repo_root),
                 artifact_run_id=run_dir.name,
             )
+            if initialization is not None:
+                metadata["initialization"] = initialization
             _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
             env,
@@ -234,6 +304,12 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             device=device,
         )
         if checkpoint_path is None:
+            if initialization_checkpoint is not None:
+                training.initialize_actor_from_checkpoint(
+                    runner=runner,
+                    checkpoint_path=initialization_checkpoint,
+                    device=device,
+                )
             result = training.train(runner, iterations)
         else:
             training.load_checkpoint(
@@ -273,11 +349,18 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=None, help="override rl.training.seed")
     parser.add_argument("--num-envs", type=int, default=None, help="override rl.num_envs")
-    parser.add_argument(
+    checkpoint_group = parser.add_mutually_exclusive_group()
+    checkpoint_group.add_argument(
         "--export-checkpoint",
         type=Path,
         default=None,
         help="export an existing run checkpoint without additional training",
+    )
+    checkpoint_group.add_argument(
+        "--initialize-checkpoint",
+        type=Path,
+        default=None,
+        help="start a fresh run initialized from only an existing checkpoint's actor weights",
     )
     args, _unknown = parser.parse_known_args()
     if args.max_iterations is not None and args.max_iterations < 1:

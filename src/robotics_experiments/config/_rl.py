@@ -154,14 +154,19 @@ class PressRewardConfig(_FreezableConfig):
     alive_weight: float
     stability_weight: float
     approach_progress_weight: float
+    near_contact_linear_overspeed_weight: float
+    near_contact_angular_overspeed_weight: float
     gentle_contact_weight: float
     compression_progress_weight: float
     button_progress_weight: float
     latch_progress_weight: float
     toggle_weight: float
+    repeat_toggle_weight: float
     retreat_progress_weight: float
     retreat_alignment_weight: float
     retreat_overspeed_weight: float
+    post_toggle_contact_weight: float
+    post_toggle_delay_weight: float
     success_weight: float
     action_energy_weight: float
     action_delta_weight: float
@@ -170,6 +175,9 @@ class PressRewardConfig(_FreezableConfig):
     misalignment_weight: float
     failure_weight: float
     timeout_weight: float
+    near_contact_range_m: float
+    near_contact_linear_speed_max_mps: float
+    near_contact_angular_speed_max_radps: float
     gentle_contact_speed_max_mps: float
     compression_target_m: float
     compression_overshoot_tolerance_m: float
@@ -243,7 +251,8 @@ class RlTrainingConfig(_FreezableConfig):
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
         save_interval: Checkpoint save interval, iterations.
-        learning_rate: PPO learning rate (adaptive schedule).
+        learning_rate: PPO learning rate.
+        schedule: PPO learning-rate schedule (``adaptive`` or ``fixed``).
         gamma: Discount factor.
         lam: GAE lambda.
         entropy_coef: Entropy bonus coefficient.
@@ -267,6 +276,7 @@ class RlTrainingConfig(_FreezableConfig):
     num_steps_per_env: int
     save_interval: int
     learning_rate: float
+    schedule: str
     gamma: float
     lam: float
     entropy_coef: float

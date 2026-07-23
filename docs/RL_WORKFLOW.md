@@ -115,8 +115,14 @@ Confirmation progress is signed: every uninterrupted above-threshold sample
 earns part of the latch-progress reward, while releasing before confirmation
 removes the accumulated progress credit. Approach and retreat progress are also
 signed. Retreat returns toward at least the episode's initial wall-normal
-range, stops earning distance reward there, penalizes lateral/vertical drift
-and excess speed, and completes only while contact-free, aligned, and stable.
+range, stops earning distance reward there, penalizes alignment error beyond
+the acceptance tolerance and excess speed, and completes only while
+contact-free, aligned, and stable. Precontact motion within 0.42 m of the switch
+penalizes linear speed above 0.20 m/s and angular speed above 0.50 rad/s.
+After the first toggle, continued contact and every step before stable retreat
+carry small costs; another confirmed toggle carries a one-shot failure-scale
+penalty. The terminal success bonus is paid only when the first contact was
+stable.
 Crash/altitude/envelope termination has an explicit terminal failure cost,
 preventing timeout-hover and early-exit reward shortcuts. The configured
 terminal failure cost is larger than the timeout cost so an uncontrolled early
@@ -124,8 +130,11 @@ exit cannot outscore a controlled but unsuccessful full attempt.
 
 During training, the press environment publishes cumulative completed-episode
 contact, confirmed-toggle, full-success, and failure percentages under the
-`Press/` TensorBoard namespace. It also publishes the active-episode contact
-and toggle percentages and the principal signed reward terms under `Reward/`.
+`Press/` TensorBoard namespace. The same namespace reports stable first contact
+among contacted episodes, retreat among toggled episodes, and repeated toggles
+among toggled episodes. It also publishes the active-episode contact and toggle
+percentages and the principal signed reward terms, including every
+fine-tuning-specific term, under `Reward/`.
 These are diagnostic training signals; deterministic checkpoint evaluation
 remains the source of selection and acceptance metrics.
 
@@ -152,7 +161,8 @@ Pieces:
   `handoff_ready` gate (thresholds in `rl.press.handoff`). See ADR 0014.
 - **Training and selection** (`rl/training/`; `rsl_rl.py` is the only rsl_rl
   importer): import `build_runner`/`train`/`load_checkpoint`/
-  `deterministic_actor`/`export_policy`/`TrainingResult` from
+  `initialize_actor_from_checkpoint`/`deterministic_actor`/`export_policy`/
+  `TrainingResult` from
   `robotics_experiments.rl.training.rsl_rl`. The contract runs
   over `RlTrainingConfig` (the `rl.training` block, incl. explicit `task_id`
   and `policy_name`).
@@ -165,6 +175,14 @@ Pieces:
   task config owns its observation schema version and dimension, so stored
   metadata contains no task-ID conditional. Before PPO begins, the run writes
   the complete policy contract and Git provenance to its run directory.
+  `--initialize-checkpoint PATH` creates the same fresh run but loads only the
+  compatible `actor.*` tensors before PPO starts. The critic, optimizer,
+  exploration standard deviation, and iteration counter remain freshly
+  initialized. The source observation/action dimensions and exact actor tensor
+  layout must match. Stored strict-JSON provenance records `method:
+  actor-only`, source run, checkpoint iteration/path, and source commit.
+  `--initialize-checkpoint` and `--export-checkpoint` are mutually exclusive;
+  export-only loading retains its existing no-optimizer behavior.
   rsl_rl comes from the pinned Lab image requirements; the host `training`
   extra (`rsl-rl-lib`) exists for tooling only.
   `make select-rl-checkpoint RL_RUN_ID=<run-id>` resumes selection without
@@ -230,10 +248,15 @@ Pieces:
 ## Ground-truth press training and evaluation (F3)
 
 `configs/train_press_quad.yaml` selects `Isaac-Switch-Press-Direct-v0`, the
-`press` artifact namespace, ten-second episodes, and press PPO settings. Run:
+`press` artifact namespace, ten-second episodes, and the conservative
+fine-tuning PPO settings: fixed `1e-4` learning rate, 0.20 initial action noise,
+25-iteration checkpoints, and at most 150 iterations. The network, rollout,
+clipping, entropy, GAE, and batch settings remain the established press-task
+settings. Actor-only fine-tuning from the protected checkpoint-50 fallback is:
 
 ```console
-make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
+make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id> \
+  TRAIN_ARGS='--num-envs 49152 --initialize-checkpoint /isaac-sim/proj/.build/training/press/20260723T215635Z.61663/logs/model_50.pt'
 make select-rl-checkpoint HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id>
 make eval-press
 ```
@@ -279,8 +302,8 @@ make/scripts/run_training_evaluation_then_shutdown.sh \
   --train-target train-rl \
   --select-target select-rl-checkpoint \
   --eval-target eval-press \
-  --train-args '--num-envs 49152 --max-iterations 300' \
-  --label press-overnight
+  --train-args '--num-envs 49152 --initialize-checkpoint /isaac-sim/proj/.build/training/press/20260723T215635Z.61663/logs/model_50.pt' \
+  --label press-finetune
 ```
 
 Shutdown is disabled by default, so this form never invokes `sudo`, refreshes
@@ -321,8 +344,8 @@ For explicit unattended shutdown, add the flag:
 make/scripts/run_training_evaluation_then_shutdown.sh \
   --hydra-config configs/train_press_quad.yaml \
   --eval-target eval-press \
-  --train-args '--num-envs 49152 --max-iterations 300' \
-  --label press-overnight \
+  --train-args '--num-envs 49152 --initialize-checkpoint /isaac-sim/proj/.build/training/press/20260723T215635Z.61663/logs/model_50.pt' \
+  --label press-finetune \
   --shutdown
 ```
 

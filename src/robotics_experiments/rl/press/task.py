@@ -40,6 +40,7 @@ class PressTaskState:
     previous_action: Any
     first_contact_seen: Any
     first_contact_stable: Any
+    repeat_toggle_seen: Any
     toggle_time_s: Any
     peak_compression_m: Any
     retreat_stable_steps: Any
@@ -72,14 +73,19 @@ class PressRewardTerms:
     alive: Any
     stability: Any
     approach: Any
+    near_contact_linear_overspeed: Any
+    near_contact_angular_overspeed: Any
     gentle_contact: Any
     compression_progress: Any
     button_progress: Any
     latch_progress: Any
     toggle: Any
+    repeat_toggle: Any
     retreat: Any
     retreat_alignment: Any
     retreat_overspeed: Any
+    post_toggle_contact: Any
+    post_toggle_delay: Any
     success: Any
     action_energy: Any
     action_delta: Any
@@ -114,6 +120,7 @@ class PressStepMetrics:
     peak_compression_overshoot_m: Any
     contacted: Any
     toggled: Any
+    repeat_toggled: Any
     retreated: Any
 
 
@@ -215,6 +222,7 @@ def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> Pr
         previous_action=_zeros_like(value=action),
         first_contact_seen=false,
         first_contact_stable=false,
+        repeat_toggle_seen=false,
         toggle_time_s=_full_like(value=relative_switch_range_m, fill=-1.0),
         peak_compression_m=zeros,
         retreat_stable_steps=integers,
@@ -311,6 +319,8 @@ def step_press_task(
     first_contact_stable = state.first_contact_stable | (first_contact & first_contact_stable_now)
     phase = _where(first_contact_seen, _PHASE_CONTACT, _PHASE_PRECONTACT)
     first_toggle = toggled & (state.toggle_time_s < 0.0)
+    repeat_toggle = toggled & (state.toggle_time_s >= 0.0)
+    repeat_toggle_seen = state.repeat_toggle_seen | repeat_toggle
     toggle_time = _where(
         first_toggle,
         sample.elapsed_s,
@@ -371,6 +381,27 @@ def step_press_task(
     upright_alignment = _minimum(_maximum(sample.body_z_world_z, 0.0), 1.0)
     stability = -reward_cfg.stability_weight * _square(1.0 - upright_alignment)
     approach = reward_cfg.approach_progress_weight * approach_progress * precontact
+    near_contact = precontact & (current_range <= reward_cfg.near_contact_range_m)
+    near_contact_linear_overspeed = (
+        -reward_cfg.near_contact_linear_overspeed_weight
+        * _square(
+            _maximum(
+                linear_speed - reward_cfg.near_contact_linear_speed_max_mps,
+                0.0,
+            )
+        )
+        * near_contact
+    )
+    near_contact_angular_overspeed = (
+        -reward_cfg.near_contact_angular_overspeed_weight
+        * _square(
+            _maximum(
+                angular_speed - reward_cfg.near_contact_angular_speed_max_radps,
+                0.0,
+            )
+        )
+        * near_contact
+    )
     gentle_contact_stable = first_contact_stable_now & (
         linear_speed <= reward_cfg.gentle_contact_speed_max_mps
     )
@@ -388,16 +419,28 @@ def step_press_task(
     latch_term = reward_cfg.latch_progress_weight * latch_progress * (state.toggle_time_s < 0.0)
     # Generic contact never earns this reward: only the N-step button latch can.
     toggle = reward_cfg.toggle_weight * first_toggle
+    repeat_toggle_term = -reward_cfg.repeat_toggle_weight * repeat_toggle
     retreat = reward_cfg.retreat_progress_weight * retreat_progress * toggled_phase
     retreat_alignment = (
-        -reward_cfg.retreat_alignment_weight * _square(lateral_error) * toggled_phase
+        -reward_cfg.retreat_alignment_weight
+        * _square(
+            _maximum(
+                lateral_error - termination_cfg.retreat_alignment_tolerance_m,
+                0.0,
+            )
+        )
+        * toggled_phase
     )
     retreat_overspeed = (
         -reward_cfg.retreat_overspeed_weight
         * _maximum(linear_speed - termination_cfg.retreat_speed_max_mps, 0.0) ** 2
         * toggled_phase
     )
-    success_term = reward_cfg.success_weight * success
+    post_toggle_contact = (
+        -reward_cfg.post_toggle_contact_weight * sample.contact_flag * toggled_phase
+    )
+    post_toggle_delay = -reward_cfg.post_toggle_delay_weight * ~success * toggled_phase
+    success_term = reward_cfg.success_weight * success * first_contact_stable
     action_energy = -reward_cfg.action_energy_weight * _mean_square(sample.action)
     action_delta = -reward_cfg.action_delta_weight * _mean_square(
         sample.action - state.previous_action
@@ -419,14 +462,19 @@ def step_press_task(
         alive
         + stability
         + approach
+        + near_contact_linear_overspeed
+        + near_contact_angular_overspeed
         + gentle_contact
         + compression_term
         + button_term
         + latch_term
         + toggle
+        + repeat_toggle_term
         + retreat
         + retreat_alignment
         + retreat_overspeed
+        + post_toggle_contact
+        + post_toggle_delay
         + success_term
         + action_energy
         + action_delta
@@ -440,14 +488,19 @@ def step_press_task(
         alive=alive,
         stability=stability,
         approach=approach,
+        near_contact_linear_overspeed=near_contact_linear_overspeed,
+        near_contact_angular_overspeed=near_contact_angular_overspeed,
         gentle_contact=gentle_contact,
         compression_progress=compression_term,
         button_progress=button_term,
         latch_progress=latch_term,
         toggle=toggle,
+        repeat_toggle=repeat_toggle_term,
         retreat=retreat,
         retreat_alignment=retreat_alignment,
         retreat_overspeed=retreat_overspeed,
+        post_toggle_contact=post_toggle_contact,
+        post_toggle_delay=post_toggle_delay,
         success=success_term,
         action_energy=action_energy,
         action_delta=action_delta,
@@ -471,6 +524,7 @@ def step_press_task(
         previous_action=sample.action,
         first_contact_seen=first_contact_seen,
         first_contact_stable=first_contact_stable,
+        repeat_toggle_seen=repeat_toggle_seen,
         toggle_time_s=toggle_time,
         peak_compression_m=peak_compression,
         retreat_stable_steps=retreat_stable_steps,
@@ -489,6 +543,7 @@ def step_press_task(
         ),
         contacted=first_contact_seen,
         toggled=toggle_time >= 0.0,
+        repeat_toggled=repeat_toggle_seen,
         retreated=success,
     )
     return PressTaskResult(

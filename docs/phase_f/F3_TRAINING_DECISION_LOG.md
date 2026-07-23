@@ -1300,3 +1300,63 @@ post-toggle retreat. The next objective should preserve this confirmed-toggle
 baseline while improving approach/contact gentleness and teaching the
 post-toggle reverse trajectory; increasing the toggle target or learning rate
 is not the next constraint.
+
+### 30. Fine-tune stable contact and learned retreat from the press actor
+
+#### Preserve the learned press while resetting PPO state
+
+Plain-language view: The next run starts from checkpoint 50's deterministic
+press behavior but learns with a fresh critic, optimizer, action noise, and
+iteration count. It is a new run with explicit provenance, not a continuation
+of the old optimization trajectory. Checkpoint 50 remains the protected
+published fallback.
+
+Technical view: `train_rl.py --initialize-checkpoint PATH` accepts a numeric
+checkpoint below the selected policy namespace, verifies the stored
+observation and action dimensions, and copies only compatible `actor.*`
+parameters into a freshly built runner. The exact actor keys and tensor shapes
+must match. Strict-JSON metadata records the `actor-only` method, source run,
+checkpoint iteration/path, and source commit. Export-only checkpoint loading is
+unchanged.
+
+#### Correct the objective around contact and retreat
+
+Plain-language view: The actor is now strongly encouraged to slow down near the
+switch, make a stable first contact, release after the lamp turns on, and back
+away without lateral drift. Lingering in contact, waiting after the toggle, or
+toggling the lamp again is explicitly costly.
+
+Technical view: Gentle-contact weight is 20.0. While precontact and within
+0.42 m, squared linear overspeed above 0.20 m/s has weight 20.0 and squared
+angular overspeed above 0.50 rad/s has weight 5.0. Retreat progress weight is
+300.0. Retreat alignment is a squared hinge beyond the existing 0.05 m
+tolerance with weight 50.0. Post-toggle contact costs 0.5 per step and delay
+before stable retreat costs 0.05 per step. A later confirmed toggle costs
+100.0 once on its transition. Success pays 150.0 only after a stable first
+contact. Approach, compression, latch, toggle, failure, timeout, action
+authority, tilt gate, and signed progress cancellation remain unchanged.
+
+#### Conservative run and evidence plan
+
+Plain-language view: Fine-tuning uses small, fixed updates and frequent
+checkpoints so deterministic press behavior can be retained if later updates
+forget it. TensorBoard now directly exposes the three acceptance populations
+and repeated-toggle failures.
+
+Technical view: The press config uses a fixed `1e-4` learning rate, 0.20 fresh
+action noise, checkpoints every 25 iterations, and a 150-iteration maximum.
+Network architecture, 32-step rollout, clipping, entropy, GAE, and minibatch
+settings are unchanged. Cumulative telemetry reports stable first contact
+among contacted episodes, retreat and repeat toggles among toggled episodes,
+plus all new reward means. Run with 49,152 environments from
+`20260723T215635Z.61663/logs/model_50.pt`. Stop for catastrophic forgetting if
+active toggles remain below 50% for ten iterations after iteration 25, or as
+unproductive if retreat is still exactly zero at iteration 50. Evaluate every
+25-iteration checkpoint over seeds 101, 202, and 303. Only an independently
+accepted selection proceeds to `test-integration-press-routine`.
+
+If actor-only fine-tuning still has zero retreat at iteration 50 while toggles
+remain high, stop it and run one 100-iteration from-scratch comparison under
+the identical corrected objective. Selection may publish a better candidate,
+but the existing checkpoint-50 fallback is not overwritten merely because a
+comparison run completed.

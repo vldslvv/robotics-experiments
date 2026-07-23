@@ -30,6 +30,7 @@ training:
   num_steps_per_env: 24
   save_interval: 200
   learning_rate: 1.0e-3
+  schedule: adaptive
   gamma: 0.99
   lam: 0.95
   entropy_coef: 0.005

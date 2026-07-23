@@ -52,11 +52,20 @@ _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
     "stability",
     "approach",
+    "near_contact_linear_overspeed",
+    "near_contact_angular_overspeed",
     "gentle_contact",
     "compression_progress",
     "button_progress",
     "latch_progress",
     "toggle",
+    "repeat_toggle",
+    "retreat",
+    "retreat_alignment",
+    "retreat_overspeed",
+    "post_toggle_contact",
+    "post_toggle_delay",
+    "success",
     "failure",
     "timeout",
     "total",
@@ -206,7 +215,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._task_result: PressTaskResult | None = None
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._contacted_episode_count = torch.zeros((), device=self.device)
+        self._stable_first_contact_episode_count = torch.zeros((), device=self.device)
         self._toggled_episode_count = torch.zeros((), device=self.device)
+        self._repeat_toggle_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
         self._failed_episode_count = torch.zeros((), device=self.device)
 
@@ -340,16 +351,31 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         self._completed_episode_count += ended.count_nonzero()
         self._contacted_episode_count += (ended & result.metrics.contacted).count_nonzero()
+        self._stable_first_contact_episode_count += (
+            ended & result.metrics.contacted & result.metrics.first_contact_stable
+        ).count_nonzero()
         self._toggled_episode_count += (ended & result.metrics.toggled).count_nonzero()
+        self._repeat_toggle_episode_count += (ended & result.metrics.repeat_toggled).count_nonzero()
         self._successful_episode_count += (ended & result.termination.success).count_nonzero()
         self._failed_episode_count += (ended & failures).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
+        contact_denominator = self._contacted_episode_count.clamp_min(1.0)
+        toggle_denominator = self._toggled_episode_count.clamp_min(1.0)
         self.extras["log"] = {
             "Press/completed_episodes": self._completed_episode_count,
             "Press/contact_percent": 100.0 * self._contacted_episode_count / episode_denominator,
             "Press/toggle_percent": 100.0 * self._toggled_episode_count / episode_denominator,
             "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
             "Press/failure_percent": 100.0 * self._failed_episode_count / episode_denominator,
+            "Press/stable_first_contact_percent": 100.0
+            * self._stable_first_contact_episode_count
+            / contact_denominator,
+            "Press/post_toggle_retreat_percent": 100.0
+            * self._successful_episode_count
+            / toggle_denominator,
+            "Press/repeat_toggle_percent": 100.0
+            * self._repeat_toggle_episode_count
+            / toggle_denominator,
             "Press/active_contact_percent": 100.0
             * result.metrics.contacted.to(torch.float32).mean(),
             "Press/active_toggle_percent": 100.0 * result.metrics.toggled.to(torch.float32).mean(),

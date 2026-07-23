@@ -235,6 +235,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         max_iterations=None,
         num_envs=None,
         export_checkpoint=None,
+        initialize_checkpoint=None,
     )
 
     train_rl._run(args=args, config=config)  # noqa: SLF001
@@ -260,6 +261,189 @@ def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
     )
 
     assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
+
+
+def test_actor_only_initialization_preserves_fresh_training_state(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.rl.training import rsl_rl
+
+    actor = torch.nn.Sequential(
+        torch.nn.Linear(3, 4),
+        torch.nn.ELU(),
+        torch.nn.Linear(4, 2),
+    )
+    critic = torch.nn.Sequential(
+        torch.nn.Linear(3, 4),
+        torch.nn.ELU(),
+        torch.nn.Linear(4, 1),
+    )
+    std = torch.nn.Parameter(torch.full((2,), 0.2))
+    policy = SimpleNamespace(actor=actor, critic=critic, std=std)
+    optimizer = torch.optim.Adam([*actor.parameters(), *critic.parameters(), std])
+    runner = SimpleNamespace(
+        alg=SimpleNamespace(policy=policy, optimizer=optimizer),
+        current_learning_iteration=0,
+    )
+    critic_before = {
+        name: value.detach().clone() for name, value in policy.critic.state_dict().items()
+    }
+    std_before = policy.std.detach().clone()
+    optimizer_before = optimizer.state_dict()
+    actor_state = {
+        f"actor.{name}": torch.full_like(value, 0.75)
+        for name, value in policy.actor.state_dict().items()
+    }
+    checkpoint = tmp_path / "model_50.pt"
+    torch.save(
+        {
+            "model_state_dict": actor_state
+            | {
+                f"critic.{name}": torch.full_like(value, 9.0)
+                for name, value in policy.critic.state_dict().items()
+            }
+            | {"std": torch.full_like(policy.std, 9.0)},
+            "optimizer_state_dict": {"source": "must not load"},
+            "iter": 50,
+        },
+        checkpoint,
+    )
+
+    rsl_rl.initialize_actor_from_checkpoint(
+        runner=runner,
+        checkpoint_path=checkpoint,
+        device="cpu",
+    )
+
+    for value in policy.actor.state_dict().values():
+        assert torch.all(value == 0.75)
+    for name, value in policy.critic.state_dict().items():
+        assert torch.equal(value, critic_before[name])
+    assert torch.equal(policy.std, std_before)
+    assert optimizer.state_dict() == optimizer_before
+    assert runner.current_learning_iteration == 0
+
+
+def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.rl.training import rsl_rl
+
+    actor = torch.nn.Sequential(torch.nn.Linear(3, 2))
+    runner = SimpleNamespace(alg=SimpleNamespace(policy=SimpleNamespace(actor=actor)))
+    checkpoint = tmp_path / "model_50.pt"
+    torch.save(
+        {
+            "model_state_dict": {
+                "actor.0.weight": torch.zeros((2, 4)),
+                "actor.0.bias": torch.zeros(2),
+            }
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="dimensions or actor architecture"):
+        rsl_rl.initialize_actor_from_checkpoint(
+            runner=runner,
+            checkpoint_path=checkpoint,
+            device="cpu",
+        )
+
+
+def test_initialization_provenance_is_strict_json_and_uses_source_commit(
+    tmp_path: Path,
+) -> None:
+    train_rl = _load_train_rl_module()
+    out_root = tmp_path / ".build" / "training" / "press"
+    run_dir = out_root / "source-run"
+    checkpoint = run_dir / "logs" / "model_50.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.touch()
+    metadata = {
+        "policy_interface": "press-v1",
+        "obs_schema_version": 1,
+        "obs_dim": 34,
+        "policy_rate_hz": 20.0,
+        "action_kind": "velocity",
+        "action_dim": 4,
+        "action_scales": {
+            "max_body_velocity_mps": 2.0,
+            "max_yaw_rate_radps": 1.5,
+            "max_body_rate_radps": 6.0,
+            "hover_thrust_fraction": 0.4,
+        },
+        "source_commit": "source-commit",
+        "source_dirty": False,
+    }
+    train_rl._write_artifact_metadata(run_dir=run_dir, metadata=metadata)  # noqa: SLF001
+
+    provenance, contract = train_rl._initialization_provenance(  # noqa: SLF001
+        checkpoint_path=checkpoint,
+        out_root=out_root,
+        repo_root=tmp_path,
+    )
+
+    assert provenance == {
+        "method": "actor-only",
+        "source_run": "source-run",
+        "checkpoint_iteration": 50,
+        "checkpoint_path": ".build/training/press/source-run/logs/model_50.pt",
+        "source_commit": "source-commit",
+    }
+    assert contract.obs_dim == 34
+    json.dumps({"initialization": provenance}, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("source_obs_dim", "source_action_dim", "match"),
+    [
+        (13, 4, "observation dimension"),
+        (34, 3, "action dimension"),
+    ],
+)
+def test_actor_initialization_rejects_incompatible_contract_dimensions(
+    source_obs_dim: int,
+    source_action_dim: int,
+    match: str,
+) -> None:
+    train_rl = _load_train_rl_module()
+    source_contract = SimpleNamespace(obs_dim=source_obs_dim, action_dim=source_action_dim)
+
+    with pytest.raises(ValueError, match=match):
+        train_rl._validate_initialization_contract(  # noqa: SLF001
+            source_contract=source_contract,
+            env_cfg=SimpleNamespace(observation_space=34),
+            action_dim=4,
+        )
+
+
+def test_training_adapter_uses_yaml_owned_schedule() -> None:
+    from robotics_experiments.rl.training import rsl_rl
+
+    training_cfg = SimpleNamespace(
+        num_steps_per_env=32,
+        save_interval=25,
+        init_noise_std=0.2,
+        actor_hidden_dims=[256, 256, 128],
+        critic_hidden_dims=[256, 256, 128],
+        activation="elu",
+        learning_rate=1.0e-4,
+        schedule="fixed",
+        gamma=0.995,
+        lam=0.95,
+        entropy_coef=0.001,
+        clip_param=0.2,
+        value_loss_coef=1.0,
+        num_learning_epochs=5,
+        num_mini_batches=8,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+    )
+
+    runner_cfg = rsl_rl._train_cfg(training_cfg)  # noqa: SLF001 - adapter mapping contract.
+
+    assert runner_cfg["algorithm"]["learning_rate"] == 1.0e-4
+    assert runner_cfg["algorithm"]["schedule"] == "fixed"
+    assert runner_cfg["policy"]["init_noise_std"] == 0.2
+    assert runner_cfg["save_interval"] == 25
 
 
 def test_deterministic_actor_returns_actor_mean_in_evaluation_mode() -> None:

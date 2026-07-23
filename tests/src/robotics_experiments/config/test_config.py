@@ -123,6 +123,25 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
+def test_press_fine_tuning_config_preserves_contract_and_uses_conservative_schedule():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_quad.yaml")
+    training = config.rl.training
+    reward = config.rl.press.reward
+
+    assert config.rl.action.action_dim == 4
+    assert config.rl.action.max_body_velocity_mps == 2.0
+    assert training.max_iterations == 150
+    assert training.save_interval == 25
+    assert training.learning_rate == 1.0e-4
+    assert training.schedule == "fixed"
+    assert training.init_noise_std == 0.2
+    assert reward.gentle_contact_weight == 20.0
+    assert reward.retreat_progress_weight == 300.0
+    assert reward.success_weight == 150.0
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
