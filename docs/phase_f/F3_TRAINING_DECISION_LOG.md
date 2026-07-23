@@ -787,3 +787,267 @@ The timeout now prints the exact approach, action, compression, contact, toggle,
 and retreat progress needed to confirm or reject that expectation. Stop with
 `make stop-all` after capturing it. Do not resume the staged 2.0 m/s training
 cycle until this diagnostic record has been added here.
+
+### 23. Replace the floating contact puck before any further training
+
+#### Verify the observed missing-tool problem
+
+Plain-language view: The drone did have a small simulated contact piece, and the
+simulator extended it, but the observation that there was no visible pusher
+stick was correct. The model contained only a tiny round puck floating ahead of
+the frame. It had no bracket, boom, shaft, spring guide, or other visible
+connection to the drone.
+
+Technical view: The tracked X500 USDA contained only the moving rigid body
+`/pusher/pad` with a 30 mm diameter by 8 mm cylinder at body X=0.11 m and a
+15 mm prismatic joint. The cylinder retained OpenUSD's default Z axis while the
+joint translated on X, so switch contact occurred on the cylinder's curved edge
+instead of a flat forward face. Isaac Sim 5.1 evidence showed that the joint did
+extend and that this simplified collision shape could toggle the switch; the
+missing element was the intended mechanical geometry, not the PhysX joint.
+
+#### Author the complete tool while preserving the software contract
+
+Plain-language view: The drone now has a dark body bracket, an 80 mm carbon
+boom, a visible metal-colored sliding plunger, and an orange flat pad facing the
+switch. Existing code still looks for the same joint and contact-pad names, so
+the mechanical correction does not create a second policy interface.
+
+Technical view: The USD builder now authors fixed body geometry at
+`/body/pusher/mount` and `/body/pusher/fixed_boom`, moving plunger geometry at
+`/pusher/pad/plunger`, and the existing collidable sensor sink at
+`/pusher/pad/geom`. The pad and plunger explicitly use cylinder axis X.
+`/pusher_joint` remains a 15 mm X-axis spring-damper articulation and the
+contact-sensor path is unchanged. The placeholder hexacopter receives the same
+schema with an under-frame placement so its centerline front arm is not
+overlapped.
+
+#### Preserve mass and clearance rather than hiding a dynamics change
+
+Plain-language view: Adding visible parts should not quietly make the vehicle
+heavier. Weight that was previously bundled into generic frame numbers was
+moved into the explicit bracket and boom. The complete X500 remains about
+2.339 kg, and the pad stays safely below the propeller plane.
+
+Technical view: The X500 fixed body is now 2.3062 kg and the moving
+pad/plunger body is 0.033 kg, preserving the prior 2.3392 kg articulation mass.
+The 5 g bracket and 12 g boom are included in body mass, while 10 g of the old
+implicit pusher allowance was removed from the wiring residual. Static tests
+require the mount to overlap the center-plate front edge, the 80 mm boom to
+begin there, the plunger to remain captured at the full 15 mm extension, and at
+least 10 mm vertical clearance between the pad and propeller plane.
+
+#### Turn visible deployment into a prerequisite gate
+
+Plain-language view: Future tests cannot pass merely because an invisible
+collision shape happens to press the switch. The check now requires every
+visible tool component, verifies that the pad faces forward, and confirms the
+pusher starts fully extended before the drone approaches.
+
+Technical view: `make test-integration-press-contact-chain` inspects the real
+Isaac Sim 5.1 stage for a collidable mount and fixed boom, visible display
+colors on mount/boom/plunger/pad, X-axis plunger and pad geometry, the preserved
+pad collision API, and an initial pusher joint position equal to its upper
+limit. It then runs the unchanged real contact, production latch, lamp, and
+retreat assertions.
+
+#### Verification result and training consequence
+
+Plain-language view: The corrected tool started fully deployed, pressed the
+real switch, turned on exactly one lamp, and retreated stably. No policy was
+trained or evaluated. The old model learned with the floating puck, so its
+results cannot validate the corrected tool; the next meaningful policy must be
+trained from this geometry.
+
+Technical view: The Isaac Sim 5.1 gate passed in
+`.build/docker/integration/test-integration-press-contact-chain.20260723T035112Z.15799`.
+It measured 15.00 mm initial deployment, 12.39 mm peak pusher compression,
+10.61 mm button displacement, 10.471 N peak pad force, one off-to-on lamp
+transition, stable retreat, and 0.454 rad peak tilt. The existing artifact at
+`.build/training/press/20260722T150005Z.19` predates this contact geometry and
+is now explicitly non-parity diagnostic evidence. Keep training paused until
+the repository revision containing this geometry is the recorded clean source
+revision for a new run.
+
+### 24. Make the entire approach geometry collidable before retraining
+
+#### Verify the reported collision gap
+
+Plain-language view: The report was correct. The arm tubes had collision shapes
+in the generated drone, but both press execution paths explicitly turned those
+collisions off. The visible propellers had no collision shape at all. The Lab
+training task had a real wall collider, while the warehouse deployment path
+assumed the surrounding scene supplied a suitable wall and did not guarantee
+one behind the chosen switch.
+
+Technical view: `SwitchPressEnv._disable_boom_collisions()` and the live
+`PressObservationIO` adapter set `physics:collisionEnabled=false` on every arm
+boom. Propeller hubs and blades were cosmetic `UsdGeom` only. The Lab
+`RigidObjectCfg` wall already used `CollisionPropertiesCfg`, but no equivalent
+collision proxy was authored for `/Root/LightSwitch_<index>` during live policy
+setup. This meant training and deployment could permit physically impossible
+arm or rotor penetration, and their wall contracts differed.
+
+#### Enable arm, swept-rotor, and wall collision as one contract
+
+Plain-language view: The simulator now treats the drone's arms and the complete
+area swept by each spinning propeller as solid. The training wall is checked,
+and live warehouse policy execution creates an invisible solid wall immediately
+behind the selected switch. A policy must therefore approach with the pusher
+instead of passing the airframe or propellers through the surface.
+
+Technical view: Both boom-disabling paths were removed. The USD builder now
+authors one invisible cylinder collider at each
+`/body/arms/*/prop_collision`, using the configured propeller radius and
+thickness. The collider is a stationary sibling of the animated `/prop` marker;
+parenting it under `/prop` made cosmetic spin rebuild the PhysX shape and
+invalidate Isaac's tensor simulation view during the first manual run. Runtime
+setup fails closed if any arm boom is disabled or the arm-to-prop-collider
+count is not one-to-one. It also authors
+`/Root/LightSwitch_<index>/PressWallCollider/geom`, positioned along the source
+asset's local `+Y` behind its local `-Y` outward face. The proxy dimensions come
+from `rl.press.reset.wall_half_extents_m`; no new hardcoded wall geometry was
+introduced.
+
+#### Lengthen the tool and move mass to the correct rigid body
+
+Plain-language view: Once the propeller sweep is solid, the old short pusher
+cannot reach the wall first. The X500 boom is now 265 mm long, placing the
+compressed pad face about 7 mm ahead of the forward rotor envelope. The spring
+housing and guide bushing stay on the fixed drone body; only the 10 g pad and
+plunger move. This keeps hover behavior stable without pretending the hardware
+is lighter.
+
+Technical view: The forward rotor envelope is approximately 0.342 m from the
+body origin. The compressed pad face is at 0.349 m and the deployed face at
+0.364 m. The complete articulation mass is 2.3472 kg: 2.3372 kg fixed body plus
+0.0100 kg moving pad/plunger. An intermediate model incorrectly placed 0.033 kg
+of spring/bushing/plunger mass on the distant moving body; the hover gate then
+missed its 0.10 m limit (`last1.0s_max=0.130 m`). Moving the fixed mechanism
+mass back to the fixed boom restored the gate without changing total mass or
+controller gains.
+
+#### Move reset and handoff geometry outside the collision envelope
+
+Plain-language view: A training episode must not begin with a propeller or
+pusher already inside the wall. Starts are now 0.40-0.50 m from the switch, and
+the navigation-to-policy handoff accepts up to 0.50 m. The warehouse routine's
+handoff point is 0.40 m from its switch.
+
+Technical view: `rl.press.reset.wall_normal_min_m/max_m` changed from
+0.20-0.30 m to 0.40-0.50 m, `rl.press.handoff.switch_range_max_m` changed from
+0.35 m to 0.50 m, and the configured warehouse goto changed correspondingly.
+The hover/goto side-channel switch was also moved to 0.45 m so that this
+non-contact gate does not hit the 0.364 m deployed tool. While rerunning that
+gate, a stale source-asset orientation was exposed: its raw `-Y` normal now
+uses `Rz(-pi/2)`, matching the provider's canonical conversion.
+
+#### Verification result and training consequence
+
+Plain-language view: Collision hardening passed both deterministic checks. The
+drone hovers and navigates normally, then a separate scripted routine contacts
+the real switch with the pusher, toggles one lamp, and retreats without the arms
+or propellers crossing the wall. No training or policy evaluation was started.
+
+Technical view: Isaac Sim 5.1 hover/goto evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260723T041342Z.34723`:
+hover last-window error 0.084 m, goto last-window error 0.040 m, and
+ground-truth range 2.397 m to 0.458 m. Contact-chain evidence is under
+`.build/docker/integration/test-integration-press-contact-chain.20260723T041406Z.35316`:
+four arm colliders, four swept-propeller colliders, one wall collider, 14.04 mm
+peak pusher compression, 10.90 mm button travel, 11.962 N peak force, one lamp
+toggle, stable retreat, and 0.514 rad peak tilt.
+
+The previous artifacts were trained without this collision contract and are
+not parity-valid. Keep training paused. Before continuing, commit this state,
+confirm the exported metadata records that clean commit and
+`source_dirty: false`, rerun both deterministic gates, then start the staged
+training command already documented above. The separate acceptance evaluator
+is still required afterward because one scripted contact-chain success proves
+mechanical executability, not learned-policy reliability across the configured
+300 episodes and three non-training seeds.
+
+### 25. Keep physics collision outside the animated propeller marker
+
+#### Diagnose the first manual policy-run failure
+
+Plain-language view: The manual run did start, but it broke almost immediately
+inside the simulator. Each propeller's invisible safety disc had been attached
+to the visible propeller marker. The runtime rotates that marker every frame to
+make the propeller look as if it is spinning. Moving a collision shape in this
+way caused PhysX to replace the shape while the flight runtime was still using
+it. Once that physics connection was invalid, later drone and switch errors
+were consequences rather than independent failures.
+
+Technical view: The first causal warning in the Isaac Sim 5.1 log
+`/root/.nvidia-omniverse/logs/Kit/Isaac-Sim Full/5.1/kit_20260723_041940.log`
+occurred at `2026-07-23T04:20:30Z`:
+`prim '/Root/DroneSpawned/body/arms/arm_4/prop/collision' was deleted while
+being used by a shape in a tensor view class`. The following
+`physics.tensors simulationView was invalidated` message explains the repeated
+transform and switch-joint read failures. `IsaacArticulationIO` intentionally
+writes the `RotateZ` operation on each `/prop` marker for cosmetic rotor spin;
+therefore a collider below that marker violates the invariant that tensor-view
+physics shapes remain structurally stable during simulation.
+
+#### Author the swept-disc collider as a stationary sibling
+
+Plain-language view: The visible propeller can still spin, but its invisible
+safety disc now stays fixed relative to the drone arm. A circular swept area is
+rotationally symmetric, so visually rotating that collision disc never added
+physical accuracy. Keeping it stationary prevents the simulator from replacing
+the shape.
+
+Technical view: The USD builder now authors
+`/body/arms/arm_<index>/prop_collision` beside `/prop`, with the same configured
+pose, radius, and thickness. Only the hub and blades remain descendants of the
+animated marker. Runtime and deterministic geometry checks were updated to
+require exactly one `prop_collision` sibling per arm. Both tracked drone USDA
+files were regenerated from the existing YAML definitions; no binary asset was
+changed. A host-test fake was also completed with the two commanding setpoint
+types imported transitively by press deployment, eliminating an
+order-dependent test isolation failure exposed by the focused verification
+run.
+
+#### Add a regression that reproduces the invalidation sequence
+
+Plain-language view: The drone articulation test now does more than check that
+the drone can be read and pushed. It spins the visible rotors while physics is
+active, advances the simulator, and then reads and controls the drone again. A
+collider accidentally placed under the animated marker will make this test fail
+in the same way as the manual run.
+
+Technical view: `test-integration-drone-articulation` now calls
+`update_rotor_spin(...)` with live tensor views, advances Kit, reads the
+articulation again, and applies rotor forces. It passed in Isaac Sim 5.1 with
+artifacts at
+`.build/docker/integration/test-integration-drone-articulation.20260723T042751Z.46232`.
+The collision-hardened hover/goto gate passed at
+`.build/docker/integration/test-integration-press-hover-goto.20260723T042807Z.47008`
+with 0.084 m last-window hover error, 0.040 m last-window goto error, and a
+ready handoff at 0.458 m. The real contact-chain gate passed at
+`.build/docker/integration/test-integration-press-contact-chain.20260723T042833Z.47715`
+with four arm colliders, four stationary propeller colliders, one wall
+collider, 14.04 mm peak pusher compression, 10.90 mm button travel, one toggle,
+11.962 N peak force, and stable retreat.
+
+#### Training and continuation decision
+
+Plain-language view: Do not train yet. The simulator fault is fixed, but these
+checks demonstrate mechanics and runtime stability, not that the old learned
+policy can press the switch. The next step is to rerun the manual
+takeoff-to-policy-to-landing sanity routine and observe whether the existing
+policy attempts a plausible approach. Retraining remains paused until that
+diagnostic is reviewed.
+
+Technical view: No training or acceptance evaluation was started for this
+decision. The old artifact still lacks parity with the corrected pusher and
+collision geometry. Resume with
+`make run-all-autorun HYDRA_CONFIG=configs/policy_press_quad.yaml`; inspect the
+structured Isaac Sim 5.1 log and routine telemetry for approach, contact,
+toggle, retreat, and landing behavior. If its behavior is not useful, begin a
+new clean-revision training run using the staged commands in this document,
+then run the acceptance evaluator. The evaluator remains the statistical gate:
+it measures learned-policy reliability over the configured non-training seeds,
+whereas the deterministic contact-chain test only proves that one scripted
+physical press is possible.

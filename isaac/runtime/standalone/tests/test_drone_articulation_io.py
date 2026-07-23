@@ -312,16 +312,26 @@ def _run_test(context: SceneTestContext) -> None:
         context.report_vehicle_state(f"{TEST_NAME}: initial drone state", state)
         _assert_vehicle_state(state, sim_time_us=int(PHYSICS_DT_S * 1_000_000))
 
+        context.report(f"{TEST_NAME}: spinning visual rotors with tensor views active")
+        rotor_omega_rad_s = np.full(len(rotor_paths), 600.0, dtype=np.float64)
+        articulation_io.update_rotor_spin(rotor_omega_rad_s, PHYSICS_DT_S)
+        _advance(context, SETTLE_UPDATES)
+        state_after_spin = articulation_io.read_state(sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000))
+        _assert_vehicle_state(
+            state_after_spin,
+            sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000),
+        )
+
         forces_n = np.full(len(rotor_paths), 0.25, dtype=np.float64)
         context.report(f"{TEST_NAME}: applying per-rotor forces through Isaac")
         articulation_io.apply_forces(forces_n)
         _advance(context, SETTLE_UPDATES)
 
         state_after_force = articulation_io.read_state(
-            sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000)
+            sim_time_us=int(3 * PHYSICS_DT_S * 1_000_000)
         )
         context.report_vehicle_state(f"{TEST_NAME}: post-force drone state", state_after_force)
-        _assert_vehicle_state(state_after_force, sim_time_us=int(2 * PHYSICS_DT_S * 1_000_000))
+        _assert_vehicle_state(state_after_force, sim_time_us=int(3 * PHYSICS_DT_S * 1_000_000))
 
         if context.benchmark_output_dir is not None:
             context.report(f"{TEST_NAME}: running drone physics and articulation phases")

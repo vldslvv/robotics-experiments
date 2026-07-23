@@ -78,6 +78,7 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "omni.usd", omni_usd)
 
     fake_commanding = types.ModuleType("robotics_experiments.commanding")
+    fake_commanding.AttitudeRateSetpoint = object
     fake_commanding.CommandAck = object
     fake_commanding.DriverContext = SimpleNamespace
     fake_commanding.DriverEnvironment = object
@@ -90,6 +91,7 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.PolicyStepResult = object
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
+    fake_commanding.VelocitySetpoint = object
     creation_ticks = []
     fake_commanding.create_routine_driver = (
         lambda *, context, tick: creation_ticks.append((context, tick)) or _FakeDriver()

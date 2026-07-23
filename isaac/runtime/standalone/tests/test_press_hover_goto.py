@@ -19,6 +19,7 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import random
 import sys
@@ -52,9 +53,10 @@ _DEFAULT_SEED = 7
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
-# target along +X, outward plate normal facing the approaching drone, so the
-# settled drone sits inside the handoff gate's switch-range threshold.
-_SWITCH_BEYOND_GOTO_M = 0.25
+# target along +X, outward plate normal facing the approaching drone. This keeps
+# the fully deployed pusher clear during the non-contact goto while leaving the
+# settled drone inside the configured handoff range.
+_SWITCH_BEYOND_GOTO_M = 0.45
 _SWITCH_PRIM_PATH = "/World/PressValidationSwitch"
 _CONTACT_LAMP_PRIM_PATH = "/World/envs/env_0/Lamp"
 
@@ -316,6 +318,99 @@ def _collision_paths(stage, root_path: str) -> list[str]:
     ]
 
 
+def _collision_contract_summary(stage, drone_root_path: str, wall_root_path: str) -> str:
+    from pxr import UsdPhysics
+
+    drone_root = stage.GetPrimAtPath(drone_root_path)
+    drone_colliders = [
+        prim
+        for prim in stage.Traverse()
+        if prim.GetPath().HasPrefix(drone_root.GetPath()) and prim.HasAPI(UsdPhysics.CollisionAPI)
+    ]
+    arm_booms = [
+        prim
+        for prim in drone_colliders
+        if "/body/arms/" in str(prim.GetPath()) and prim.GetName() == "boom"
+    ]
+    propeller_discs = [prim for prim in drone_colliders if prim.GetName() == "prop_collision"]
+    if not arm_booms or len(propeller_discs) != len(arm_booms):
+        raise AssertionError(
+            "drone requires one arm and swept-propeller collision per rotor: "
+            f"arms={len(arm_booms)} props={len(propeller_discs)}"
+        )
+    disabled = [
+        str(prim.GetPath())
+        for prim in (*arm_booms, *propeller_discs)
+        if UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is False
+    ]
+    if disabled:
+        raise AssertionError(f"arm/propeller collision geometry is disabled: {disabled}")
+
+    wall_root = stage.GetPrimAtPath(wall_root_path)
+    wall_colliders = [
+        prim
+        for prim in stage.Traverse()
+        if prim.GetPath().HasPrefix(wall_root.GetPath())
+        and prim.HasAPI(UsdPhysics.CollisionAPI)
+        and UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is not False
+    ]
+    if not wall_colliders:
+        raise AssertionError("press task wall has no enabled collision geometry")
+    return (
+        f"arm_colliders={len(arm_booms)} "
+        f"propeller_colliders={len(propeller_discs)} "
+        f"wall_colliders={[str(prim.GetPath()) for prim in wall_colliders]}"
+    )
+
+
+def _pusher_tool_geometry_summary(stage, root_path: str) -> str:
+    from pxr import UsdGeom, UsdPhysics
+
+    paths = {
+        "mount": f"{root_path}/body/pusher/mount",
+        "boom": f"{root_path}/body/pusher/fixed_boom",
+        "plunger": f"{root_path}/pusher/pad/plunger",
+        "pad": f"{root_path}/pusher/pad/geom",
+    }
+    mount = stage.GetPrimAtPath(paths["mount"])
+    boom = UsdGeom.Cylinder(stage.GetPrimAtPath(paths["boom"]))
+    plunger = UsdGeom.Cylinder(stage.GetPrimAtPath(paths["plunger"]))
+    pad = UsdGeom.Cylinder(stage.GetPrimAtPath(paths["pad"]))
+    if not mount.IsValid() or not mount.HasAPI(UsdPhysics.CollisionAPI):
+        raise AssertionError("pusher mount is missing or non-collidable")
+    if not boom or not boom.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
+        raise AssertionError("fixed pusher boom is missing or non-collidable")
+    if not plunger or plunger.GetAxisAttr().Get() != "X":
+        raise AssertionError("pusher plunger is missing or not aligned with body +X")
+    if not pad or pad.GetAxisAttr().Get() != "X":
+        raise AssertionError("pusher pad is missing or not forward-facing along body +X")
+    if not pad.GetPrim().HasAPI(UsdPhysics.CollisionAPI):
+        raise AssertionError("forward-facing pusher pad has no collision geometry")
+    visible_gprims = (
+        UsdGeom.Cube(stage.GetPrimAtPath(f"{paths['mount']}/geom")),
+        boom,
+        plunger,
+        pad,
+    )
+    if any(not gprim or not gprim.GetDisplayColorAttr().Get() for gprim in visible_gprims):
+        raise AssertionError("pusher mount/boom/plunger/pad must all have visible display colors")
+
+    xform_cache = UsdGeom.XformCache()
+    boom_center = xform_cache.GetLocalToWorldTransform(boom.GetPrim()).ExtractTranslation()
+    plunger_center = xform_cache.GetLocalToWorldTransform(plunger.GetPrim()).ExtractTranslation()
+    pad_center = xform_cache.GetLocalToWorldTransform(pad.GetPrim()).ExtractTranslation()
+    if not boom_center[0] < plunger_center[0] < pad_center[0]:
+        raise AssertionError(
+            "pusher geometry is not ordered mount -> boom -> plunger -> pad along body +X"
+        )
+    return (
+        f"paths={paths} "
+        f"boom_center={tuple(round(float(value), 4) for value in boom_center)} "
+        f"plunger_center={tuple(round(float(value), 4) for value in plunger_center)} "
+        f"pad_center={tuple(round(float(value), 4) for value in pad_center)}"
+    )
+
+
 def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     from pxr import UsdLux
 
@@ -340,6 +435,13 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
         joint_id = int(switch_joint_ids[0])
         pusher_joint_ids, _ = env.drone.find_joints("pusher_joint")
         pusher_joint_id = int(pusher_joint_ids[0])
+        initial_pusher_position = float(env.drone.data.joint_pos[0, pusher_joint_id].item())
+        pusher_upper_limit = float(env.drone.data.joint_pos_limits[0, pusher_joint_id, 1].item())
+        if not np.isclose(initial_pusher_position, pusher_upper_limit, atol=1e-5):
+            raise AssertionError(
+                "pusher did not start fully deployed: "
+                f"position={initial_pusher_position:.6f} upper={pusher_upper_limit:.6f}"
+            )
         adapter = _SwitchJointAdapter(env.switch, joint_id)
         switch_state = (SwitchState("/World/envs/env_0/Switch", _CONTACT_LAMP_PRIM_PATH),)
         toggles: list[bool] = []
@@ -359,8 +461,19 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
             "contact geometry: "
             f"switch_bodies={env.switch.body_names} drone_bodies={env.drone.body_names} "
             f"switch_joint={env.switch.joint_names[joint_id]} "
-            f"switch_limits={env.switch.data.joint_pos_limits[0, joint_id].cpu().tolist()}"
+            f"switch_limits={env.switch.data.joint_pos_limits[0, joint_id].cpu().tolist()} "
+            f"pusher_deployed={initial_pusher_position:.5f} m"
         )
+        _report(
+            "pusher tool geometry: "
+            f"{_pusher_tool_geometry_summary(stage, '/World/envs/env_0/Drone')}"
+        )
+        collision_summary = _collision_contract_summary(
+            stage,
+            "/World/envs/env_0/Drone",
+            "/World/envs/env_0/Wall",
+        )
+        _report(f"collision contract: {collision_summary}")
         _report(f"drone collision prims={_collision_paths(stage, '/World/envs/env_0/Drone')}")
         for _step in range(steps):
             switch_offset = env.switch.data.root_pos_w - env.drone.data.root_pos_w
@@ -449,9 +562,9 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
 def _setup_press_side_channel(*, goto_target_env0: np.ndarray, switch_usd_path: str):
     """Place the F2 validation switch prim and return its ground-truth provider.
 
-    The prim's world pose is what the provider reads; its authored orientation
-    (pi about Z) makes the local +X outward plate normal face the approaching
-    drone, per the RL contact-frame convention.
+    The prim's world pose is what the provider reads. The source asset's local
+    -Y outward normal faces the approaching drone after a -pi/2 rotation about
+    Z; the provider then converts it to canonical local +X.
     """
     # Isaac-app imports (omni/pxr and the press Isaac leaf) stay deferred until
     # after AppLauncher, per the standalone import-ordering rule.
@@ -467,7 +580,10 @@ def _setup_press_side_channel(*, goto_target_env0: np.ndarray, switch_usd_path: 
     xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
         Gf.Vec3d(*(float(v) for v in goto_target_env0))
     )
-    xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(0.0, Gf.Vec3d(0.0, 0.0, 1.0)))
+    sqrt_half = math.sqrt(0.5)
+    xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(
+        Gf.Quatd(sqrt_half, Gf.Vec3d(0.0, 0.0, -sqrt_half))
+    )
     return GroundTruthPoseProvider(stage, _SWITCH_PRIM_PATH)
 
 
@@ -489,6 +605,10 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     lin_vel_w = env.drone.data.root_lin_vel_w[0].cpu().numpy().astype(np.float64)
     ang_vel_b = env.drone.data.root_ang_vel_b[0].cpu().numpy().astype(np.float64)
     sample = provider.sample(0.0)
+    _report(
+        "press pose sample: "
+        f"drone={position.tolist()} switch={sample.world_switch_pos_m.tolist()}"
+    )
     sq = sample.world_switch_quat_xyzw
     switch_quat_wxyz = np.array([sq[3], sq[0], sq[1], sq[2]], dtype=np.float64)
     rel_pos, rel_quat = world_switch_to_contact_frame(

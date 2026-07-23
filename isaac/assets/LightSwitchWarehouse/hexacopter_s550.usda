@@ -15,9 +15,9 @@ def Xform "hexacopter" (
         apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
     )
     {
-        point3f physics:centerOfMass = (0.0008099524, 2.869778e-18, 0.0010058231)
-        float3 physics:diagonalInertia = (0.01796482, 0.019376893, 0.03502181)
-        float physics:mass = 1.889
+        point3f physics:centerOfMass = (0.0055965823, 2.8073594e-18, 0.00046607974)
+        float3 physics:diagonalInertia = (0.01799156, 0.021838417, 0.037458092)
+        float physics:mass = 1.931
 
         def Xform "frame"
         {
@@ -129,6 +129,17 @@ def Xform "hexacopter" (
                         }
                     }
                 }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
             }
 
             def Xform "arm_2"
@@ -219,6 +230,17 @@ def Xform "hexacopter" (
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
+                }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
             }
 
@@ -311,6 +333,17 @@ def Xform "hexacopter" (
                         }
                     }
                 }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
             }
 
             def Xform "arm_4"
@@ -401,6 +434,17 @@ def Xform "hexacopter" (
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
+                }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
             }
 
@@ -493,6 +537,17 @@ def Xform "hexacopter" (
                         }
                     }
                 }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
             }
 
             def Xform "arm_6"
@@ -583,6 +638,17 @@ def Xform "hexacopter" (
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
+                }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.127
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.275, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
             }
         }
@@ -708,6 +774,39 @@ def Xform "hexacopter" (
                 }
             }
         }
+
+        def Xform "pusher"
+        {
+            def Xform "mount" (
+                apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
+            )
+            {
+                float physics:mass = 0.005
+                double3 xformOp:translate = (0.072, 0, -0.015)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def Cube "geom"
+                {
+                    color3f[] primvars:displayColor = [(0.18, 0.18, 0.2)]
+                    double size = 1
+                    float3 xformOp:scale = (0.02, 0.04, 0.02)
+                    uniform token[] xformOpOrder = ["xformOp:scale"]
+                }
+            }
+
+            def Cylinder "fixed_boom" (
+                apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
+            )
+            {
+                double height = 0.322
+                float physics:mass = 0.037
+                color3f[] primvars:displayColor = [(0.06, 0.06, 0.07)]
+                double radius = 0.003
+                float3 xformOp:rotateXYZ = (0, 90, 0)
+                double3 xformOp:translate = (0.241, 0, -0.025)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+            }
+        }
     }
 
     def Xform "pusher"
@@ -716,15 +815,27 @@ def Xform "hexacopter" (
             apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
         )
         {
-            float physics:mass = 0.04
-            double3 xformOp:translate = (0.13, 0, 0.01)
+            float physics:mass = 0.01
+            double3 xformOp:translate = (0.41, 0, -0.025)
             uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Cylinder "plunger"
+            {
+                uniform token axis = "X"
+                double height = 0.025
+                color3f[] primvars:displayColor = [(0.65, 0.68, 0.72)]
+                double radius = 0.002
+                double3 xformOp:translate = (-0.0165, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
 
             def Cylinder "geom" (
                 apiSchemas = ["PhysicsCollisionAPI"]
             )
             {
+                uniform token axis = "X"
                 double height = 0.008
+                color3f[] primvars:displayColor = [(1, 0.32, 0.04)]
                 double radius = 0.015
             }
         }
@@ -740,7 +851,7 @@ def Xform "hexacopter" (
         uniform token physics:axis = "X"
         rel physics:body0 = </hexacopter/body>
         rel physics:body1 = </hexacopter/pusher/pad>
-        point3f physics:localPos0 = (0.13, 0, 0.01)
+        point3f physics:localPos0 = (0.41, 0, -0.025)
         point3f physics:localPos1 = (0, 0, 0)
         quatf physics:localRot0 = (1, 0, 0, 0)
         quatf physics:localRot1 = (1, 0, 0, 0)

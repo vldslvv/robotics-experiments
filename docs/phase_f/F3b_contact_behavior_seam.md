@@ -39,13 +39,14 @@ not an attempt to invent a universal tensor format.
 
 The private Isaac Sim 5.1 runtime adapter owns live external handles. Before
 physics starts it applies the easy-task button geometry/stiffness and pusher
-limits, disables boom collision, and creates the pad contact sensor. At policy
-ticks it reads canonical switch pose, vehicle kinematics, pusher
-compression/rate, contact force/flag, and lamp state, then injects a frozen
-`PressObservation`. The pure `PressDeploymentState` transition owns handoff,
-previous action, first-contact evidence, lamp-transition count, and stable
-retreat. It fails closed on missing observation groups, an initially-on lamp,
-invalid policy output, or more than one lamp transition.
+limits, requires enabled arm and swept-propeller collision, authors an invisible
+static wall collider behind the selected warehouse switch, and creates the pad
+contact sensor. At policy ticks it reads canonical switch pose, vehicle
+kinematics, pusher compression/rate, contact force/flag, and lamp state, then
+injects a frozen `PressObservation`. The pure `PressDeploymentState` transition
+owns handoff, previous action, first-contact evidence, lamp-transition count,
+and stable retreat. It fails closed on missing observation groups, an
+initially-on lamp, invalid policy output, or more than one lamp transition.
 
 The switch/lamp lifecycle also moved into the shared frozen `FleetState`.
 `experiment_runtime` is the single owner; the light-switch extension is now a
@@ -72,17 +73,20 @@ The gate must be run only after `make eval-press` passes the F3 thresholds. The
 current `.build/training/press/latest` predates `policy_interface` and measures
 0% toggles, 100% stable first contact, and 0% retreat. Its exact legacy metadata
 tuple is accepted with a warning for diagnostic deployment at the recorded 0.5
-m/s scale, but it remains unaccepted. The staged second tuning cycle has not
-been started.
+m/s scale, but it was trained against the obsolete floating pad-only geometry
+and remains unaccepted. Do not use it to judge the corrected complete pusher
+tool. The staged second tuning cycle has not been started.
 
 ## Remaining Step 1 -- produce an accepted learned artifact
 
-Resume the exact staged F3 run documented in
+First rerun `make test-integration-press-contact-chain` and confirm the corrected
+mount/boom/plunger/pad geometry, full initial deployment, and arm/propeller/wall
+collision contract. Then resume the exact staged F3 run documented in
 `F3_TRAINING_DECISION_LOG.md`, evaluate all three non-training seeds, and stop
-unless all configured thresholds pass. If an intermediate checkpoint is
-better than the final checkpoint, export and evaluate it rather than rerunning
-PPO blindly. The exported metadata will include `policy_interface: press-v1`
-and Git provenance.
+unless all configured thresholds pass. If an intermediate checkpoint is better
+than the final checkpoint, export and evaluate it rather than rerunning PPO
+blindly. The exported metadata will include `policy_interface: press-v1` and
+Git provenance.
 
 Done when: press success is at least 80%, stable first contact at least 85%, and
 retreat among toggled episodes at least 95%.

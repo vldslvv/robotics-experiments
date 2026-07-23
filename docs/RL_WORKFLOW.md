@@ -92,7 +92,15 @@ Isaac Lab contact sensor, and reads pusher/button joints directly. Its easy-task
 geometry and initial pose ranges, contact threshold, reward, reset, termination,
 and evaluation values live under `rl.press`; Lab-only vehicle limits live under
 `rl.lab_vehicle`. Pusher stiffness and damping are inherited from the generated
-USD rather than duplicated in Lab config.
+USD rather than duplicated in Lab config. The generated pusher is a complete
+tool: a fixed bracket and 265 mm body-mounted boom, a visible moving plunger,
+and a flat forward-facing pad. The length keeps the compressed pad face ahead
+of the 13-inch forward rotor sweep. Arm capsules remain collidable and each
+propeller has an invisible swept-disc collider authored as a stationary sibling
+of its animated visual marker. The compliant body and sensor paths remain
+`/pusher_joint` and `/pusher/pad/geom`. Fixed/moving masses are explicit; the
+fixed body is 2.3372 kg and the 0.010 kg moving pad/plunger makes the complete
+X500 articulation 2.3472 kg.
 
 Press progression is the backend-neutral frozen `PressTaskState` advanced by
 `step_press_task(...)`. Its vector latch matches the production scalar
@@ -206,7 +214,13 @@ generic `policy` -> return goto -> land. The policy descriptor carries
 The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
 before physics starts, creates a pad `ContactSensor`, and reads canonical
 switch pose, vehicle state, pusher compression/rate, contact, and lamp state.
-It packs the exact 34-value `PressObservation`. The pure frozen deployment
+The non-policy contact-chain gate also requires the fixed mount/boom, visible
+plunger, a +X-facing collidable pad, full initial joint deployment, enabled arm
+and swept-propeller collision, wall collision, and rotor-sweep clearance before
+attempting a press. The Lab task owns a cloned static wall per environment; the
+live warehouse adapter adds an invisible collision proxy behind the selected
+switch so deployment cannot pass through decorative warehouse geometry. It
+packs the exact 34-value `PressObservation`. The pure frozen deployment
 transition waits for the handoff gate, supplies the preceding normalized action
 to the next observation, rejects an initially-on lamp or repeated lamp toggle,
 records first-contact stability plus diagnostic approach/compression/action
@@ -224,6 +238,9 @@ This artifact-dependent PX4/Isaac gate is intentionally outside
 `test-integration-all`. It requires exactly one off-to-on event, stable first
 contact, one toggle, stable retreat, return waypoint, landing, and disarm. The
 current legacy artifact can be run only as a diagnostic at its recorded 0.5 m/s
-action scale. Its measured 0% toggles and 0% retreat still block this gate; the
-next accepted export must carry `press-v1` explicitly. No new training was
-started while adding the deployment path.
+action scale. It was trained against the obsolete pad-only geometry, so it is
+not a parity-valid candidate after the complete pusher tool was introduced. Its
+measured 0% toggles and 0% retreat already blocked this gate; the next accepted
+export must be trained on the complete tool and carry `press-v1` explicitly. No
+new training was started while adding the deployment path or correcting the
+pusher geometry.

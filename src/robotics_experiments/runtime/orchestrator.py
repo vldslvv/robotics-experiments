@@ -510,6 +510,8 @@ def _prepare_policy_observer(*, state: FleetState, spawned: SpawnedDrone) -> Spa
         contact_force_threshold_n=state.config.rl.press.contact_force_threshold_n,
         button_geometry_scale=reset.button_geometry_scale,
         button_stiffness_scale=reset.button_stiffness_scale,
+        switch_wall_offset_m=reset.switch_wall_offset_m,
+        wall_half_extents_m=reset.wall_half_extents_m,
         pusher_effort_limit_n=lab_vehicle.pusher_effort_limit_n,
         pusher_velocity_limit_mps=lab_vehicle.pusher_velocity_limit_mps,
     )

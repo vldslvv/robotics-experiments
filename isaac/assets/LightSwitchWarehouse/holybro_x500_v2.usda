@@ -15,9 +15,9 @@ def Xform "holybro_x500_v2" (
         apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
     )
     {
-        point3f physics:centerOfMass = (-0.00084812107, 0, 0.0046209116)
-        float3 physics:diagonalInertia = (0.014118477, 0.015534429, 0.026955202)
-        float physics:mass = 2.2992
+        point3f physics:centerOfMass = (0.0030671316, 0, 0.004751155)
+        float3 physics:diagonalInertia = (0.014119186, 0.017583577, 0.029002503)
+        float physics:mass = 2.3372
 
         def Xform "frame"
         {
@@ -129,6 +129,17 @@ def Xform "holybro_x500_v2" (
                         }
                     }
                 }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.1651
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.25, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
             }
 
             def Xform "arm_2"
@@ -219,6 +230,17 @@ def Xform "holybro_x500_v2" (
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
+                }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.1651
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.25, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
             }
 
@@ -311,6 +333,17 @@ def Xform "holybro_x500_v2" (
                         }
                     }
                 }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.1651
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.25, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                }
             }
 
             def Xform "arm_4"
@@ -401,6 +434,17 @@ def Xform "holybro_x500_v2" (
                             uniform token[] xformOpOrder = ["xformOp:scale"]
                         }
                     }
+                }
+
+                def Cylinder "prop_collision" (
+                    apiSchemas = ["PhysicsCollisionAPI"]
+                )
+                {
+                    double height = 0.002
+                    double radius = 0.1651
+                    token visibility = "invisible"
+                    double3 xformOp:translate = (0.25, 0, 0.04)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
                 }
             }
         }
@@ -514,7 +558,7 @@ def Xform "holybro_x500_v2" (
                 apiSchemas = ["PhysicsMassAPI"]
             )
             {
-                float physics:mass = 0.327
+                float physics:mass = 0.317
                 double3 xformOp:translate = (0, 0, 0)
                 uniform token[] xformOpOrder = ["xformOp:translate"]
 
@@ -526,6 +570,39 @@ def Xform "holybro_x500_v2" (
                 }
             }
         }
+
+        def Xform "pusher"
+        {
+            def Xform "mount" (
+                apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
+            )
+            {
+                float physics:mass = 0.005
+                double3 xformOp:translate = (0.065, 0, 0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def Cube "geom"
+                {
+                    color3f[] primvars:displayColor = [(0.18, 0.18, 0.2)]
+                    double size = 1
+                    float3 xformOp:scale = (0.02, 0.04, 0.02)
+                    uniform token[] xformOpOrder = ["xformOp:scale"]
+                }
+            }
+
+            def Cylinder "fixed_boom" (
+                apiSchemas = ["PhysicsMassAPI", "PhysicsCollisionAPI"]
+            )
+            {
+                double height = 0.265
+                float physics:mass = 0.043
+                color3f[] primvars:displayColor = [(0.06, 0.06, 0.07)]
+                double radius = 0.003
+                float3 xformOp:rotateXYZ = (0, 90, 0)
+                double3 xformOp:translate = (0.2045, 0, 0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+            }
+        }
     }
 
     def Xform "pusher"
@@ -534,15 +611,27 @@ def Xform "holybro_x500_v2" (
             apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
         )
         {
-            float physics:mass = 0.04
-            double3 xformOp:translate = (0.11, 0, 0.01)
+            float physics:mass = 0.01
+            double3 xformOp:translate = (0.345, 0, 0.01)
             uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Cylinder "plunger"
+            {
+                uniform token axis = "X"
+                double height = 0.025
+                color3f[] primvars:displayColor = [(0.65, 0.68, 0.72)]
+                double radius = 0.002
+                double3 xformOp:translate = (-0.0165, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
 
             def Cylinder "geom" (
                 apiSchemas = ["PhysicsCollisionAPI"]
             )
             {
+                uniform token axis = "X"
                 double height = 0.008
+                color3f[] primvars:displayColor = [(1, 0.32, 0.04)]
                 double radius = 0.015
             }
         }
@@ -558,7 +647,7 @@ def Xform "holybro_x500_v2" (
         uniform token physics:axis = "X"
         rel physics:body0 = </holybro_x500_v2/body>
         rel physics:body1 = </holybro_x500_v2/pusher/pad>
-        point3f physics:localPos0 = (0.11, 0, 0.01)
+        point3f physics:localPos0 = (0.345, 0, 0.01)
         point3f physics:localPos1 = (0, 0, 0)
         quatf physics:localRot0 = (1, 0, 0, 0)
         quatf physics:localRot1 = (1, 0, 0, 0)

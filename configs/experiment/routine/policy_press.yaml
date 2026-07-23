@@ -12,7 +12,7 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.74
+    y: 17.59
     z: 2.5
     position_tol_m: 0.08
     timeout_s: 30.0

@@ -41,6 +41,8 @@ class PressObservationIO:
         contact_force_threshold_n: float,
         button_geometry_scale: float,
         button_stiffness_scale: float,
+        switch_wall_offset_m: float,
+        wall_half_extents_m: tuple[float, float, float],
         pusher_effort_limit_n: float,
         pusher_velocity_limit_mps: float,
     ) -> None:
@@ -58,6 +60,12 @@ class PressObservationIO:
         self._configure_switch(
             geometry_scale=float(button_geometry_scale),
             stiffness_scale=float(button_stiffness_scale),
+            wall_offset_m=float(switch_wall_offset_m),
+            wall_half_extents_m=(
+                float(wall_half_extents_m[0]),
+                float(wall_half_extents_m[1]),
+                float(wall_half_extents_m[2]),
+            ),
         )
         self._configure_drone(
             effort_limit_n=float(pusher_effort_limit_n),
@@ -71,7 +79,14 @@ class PressObservationIO:
             radius=-1.0,
         )
 
-    def _configure_switch(self, *, geometry_scale: float, stiffness_scale: float) -> None:
+    def _configure_switch(
+        self,
+        *,
+        geometry_scale: float,
+        stiffness_scale: float,
+        wall_offset_m: float,
+        wall_half_extents_m: tuple[float, float, float],
+    ) -> None:
         root = self._stage.GetPrimAtPath(self._switch_path)
         if not root.IsValid():
             raise ValueError(f"switch prim not found at {self._switch_path!r}")
@@ -115,6 +130,21 @@ class PressObservationIO:
             raise RuntimeError("switch button drive has no authored stiffness")
         drive.GetStiffnessAttr().Set(float(stiffness) * stiffness_scale)
 
+        # The source switch's local -Y is the outward normal, so its wall lies
+        # behind it along local +Y. Author a collision-only proxy as a child of
+        # the switch root; switch teardown then removes the proxy atomically.
+        normal_half, lateral_half, vertical_half = wall_half_extents_m
+        wall_path = f"{self._switch_path}/PressWallCollider"
+        wall = UsdGeom.Xform.Define(self._stage, wall_path)
+        UsdGeom.XformCommonAPI(wall).SetTranslate(Gf.Vec3d(0.0, wall_offset_m + normal_half, 0.0))
+        wall_geom = UsdGeom.Cube.Define(self._stage, f"{wall_path}/geom")
+        wall_geom.CreateSizeAttr(1.0)
+        wall_geom.AddScaleOp().Set(
+            Gf.Vec3f(2.0 * lateral_half, 2.0 * normal_half, 2.0 * vertical_half)
+        )
+        UsdPhysics.CollisionAPI.Apply(wall_geom.GetPrim())
+        wall_geom.MakeInvisible()
+
     def _configure_drone(self, *, effort_limit_n: float, velocity_limit_mps: float) -> None:
         root = self._stage.GetPrimAtPath(self._drone_path)
         if not root.IsValid():
@@ -128,8 +158,25 @@ class PressObservationIO:
         ]
         if not booms:
             raise RuntimeError("press-policy drone has no boom collision prims")
-        for boom in booms:
-            UsdPhysics.CollisionAPI(boom).GetCollisionEnabledAttr().Set(False)
+        disabled_booms = [
+            str(boom.GetPath())
+            for boom in booms
+            if UsdPhysics.CollisionAPI(boom).GetCollisionEnabledAttr().Get() is False
+        ]
+        if disabled_booms:
+            raise RuntimeError(f"press-policy drone has disabled boom collisions: {disabled_booms}")
+        prop_collisions = [
+            prim
+            for prim in self._stage.Traverse()
+            if prim.GetPath().HasPrefix(root.GetPath())
+            and prim.GetName() == "prop_collision"
+            and prim.HasAPI(UsdPhysics.CollisionAPI)
+        ]
+        if len(prop_collisions) != len(booms):
+            raise RuntimeError(
+                "press-policy drone requires one propeller collision disc per arm; "
+                f"found {len(prop_collisions)} discs and {len(booms)} arms"
+            )
 
         joint = self._stage.GetPrimAtPath(f"{self._drone_path}/pusher_joint")
         if not joint.IsValid():

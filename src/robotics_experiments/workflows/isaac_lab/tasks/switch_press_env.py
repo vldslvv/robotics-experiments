@@ -190,7 +190,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
 
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)
-        self._disable_boom_collisions()
         self.switch = Articulation(self.cfg.switch_cfg)
         self._scale_switch_button()
         self.wall = RigidObject(self.cfg.wall_cfg)
@@ -203,24 +202,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self.scene.clone_environments(copy_from_source=False)
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=["/World/ground"])
-
-    def _disable_boom_collisions(self) -> None:
-        """Keep the pusher pad as the forward contact sink for this task."""
-        from pxr import UsdPhysics
-
-        stage = sim_utils.get_current_stage()
-        drone_root = stage.GetPrimAtPath("/World/envs/env_0/Drone")
-        booms = [
-            prim
-            for prim in stage.Traverse()
-            if prim.GetPath().HasPrefix(drone_root.GetPath())
-            and prim.GetName() == "boom"
-            and prim.HasAPI(UsdPhysics.CollisionAPI)
-        ]
-        if not booms:
-            raise RuntimeError("press-task drone has no boom collision prims")
-        for boom in booms:
-            UsdPhysics.CollisionAPI(boom).GetCollisionEnabledAttr().Set(False)
 
     def _scale_switch_button(self) -> None:
         """Enlarge the pressable target without enlarging the boom-blocking plate."""

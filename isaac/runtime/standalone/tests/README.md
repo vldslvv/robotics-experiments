@@ -26,9 +26,12 @@ greps for.
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the
-canonical contact frame, commands a slow press, verifies pad contact plus
-pusher and button displacement, advances the production N-step latch, requires
-exactly one lamp transition, and then retreats within the stability envelope.
+canonical contact frame, and first verifies the pusher's fixed mount/boom,
+visible plunger, forward-facing collidable pad, fully deployed joint, enabled
+arm and swept-propeller colliders, and the static wall collider. It then
+commands a slow press, verifies pad contact plus pusher and button displacement,
+advances the production N-step latch, requires exactly one lamp transition, and
+retreats within the stability envelope.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
