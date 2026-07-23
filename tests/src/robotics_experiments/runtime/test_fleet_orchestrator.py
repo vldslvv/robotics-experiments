@@ -184,6 +184,7 @@ def _vehicle(vid, prim, xy, *, enabled, steps=()):
             hover_max_abs_vertical_speed_m_s=0.35,
             hover_max_abs_horizontal_speed_m_s=0.3,
             command_ack_timeout_s=10.0,
+            failure_recovery_timeout_s=30.0,
             bridge_heartbeat_timeout_s=30.0,
             handshake_timeout_s=30.0,
             prearm_settle_s=1.0,

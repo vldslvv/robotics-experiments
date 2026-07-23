@@ -40,8 +40,9 @@ the scripts at import time before the app boots.
 The fleet runner uses the same frozen `FleetState` lifecycle as the live
 extension and advances its driver from a PhysX-step subscription. Driver
 creation and each due fleet cycle use one shared explicit sim/wall-clock tick.
-Callback
-failures are retained and re-raised immediately after `SimulationApp.update()`
-so strict integration errors propagate. Rebind every lifecycle, bridge, and driver transition result. Helpers
+Unexpected callback exceptions are retained and re-raised immediately after
+`SimulationApp.update()`. Expected driver failures remain in immutable state
+until landing recovery terminates; strict mode then raises the original typed
+failure. Rebind every lifecycle, bridge, and driver transition result. Helpers
 that report simulated elapsed time receive a sim-time callable; they must not
 depend on mutable resource properties.

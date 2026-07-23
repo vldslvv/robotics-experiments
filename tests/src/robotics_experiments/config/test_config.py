@@ -112,6 +112,10 @@ def test_default_experiment_has_only_global_root_config():
     assert vehicle.spawn.position_xy == (0.0, 0.0)
     assert vehicle.spawn.usd_path.endswith("/holybro_x500_v2.usda")
     assert vehicle.bridge.rotor_constant
+    assert vehicle.px4.failsafe.offboard_loss_action == "land"
+    assert vehicle.px4.failsafe.offboard_loss_action_param == 4
+    assert vehicle.px4.failsafe.offboard_loss_timeout_s == 1.0
+    assert vehicle.routine.failure_recovery_timeout_s == 30.0
     assert [step["kind"] for step in vehicle.routine.steps] == ["arm", "takeoff", "hover"]
     assert config.rl.training.vehicle_id == 0
     assert config.rl.policy_rate_hz == 20.0
@@ -178,6 +182,38 @@ def test_switch_semantic_validation(tmp_path, overrides, match):
 
     with pytest.raises(ValueError, match=match):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("vehicle_override", "match"),
+    [
+        (
+            {"px4": {"failsafe": {"offboard_loss_action": "climb"}}},
+            "offboard_loss_action must be one of",
+        ),
+        (
+            {"px4": {"failsafe": {"offboard_loss_timeout_s": 61.0}}},
+            "offboard_loss_timeout_s must be",
+        ),
+        (
+            {"routine": {"failure_recovery_timeout_s": 0.0}},
+            "failure_recovery_timeout_s must be",
+        ),
+    ],
+)
+def test_per_vehicle_failsafe_and_recovery_validation(tmp_path, vehicle_override, match):
+    from robotics_experiments.config import load_config
+
+    vehicles = {
+        "x500": _vehicle(
+            0,
+            "/x500",
+            0.0,
+            **vehicle_override,
+        )
+    }
+    with pytest.raises(ValueError, match=match):
+        load_config(_write_experiment(tmp_path, "invalid_recovery", vehicles))
 
 
 def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():

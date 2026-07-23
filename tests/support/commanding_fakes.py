@@ -139,18 +139,16 @@ class FakeDriverEnvironment:
     The test sets :attr:`connected`, :attr:`sim_us`, and :attr:`observation`
     (the kinematic snapshot the driver reads each tick); ``read_observation``
     re-stamps it with the current sim time and the drained ack. Failures and
-    completed-step labels are captured; ``raise_on_failure`` makes ``on_failure``
-    raise (the strict reaction) so a test can assert the breach propagates.
+    completed-step labels and non-throwing failure notifications are captured.
     """
 
-    def __init__(self, *, raise_on_failure=False):
+    def __init__(self):
         self.connected = False
         self.sim_us = 0
         self.observation = make_routine_observation()
         self.logs = []
         self.failures = []
         self.advanced_steps = []
-        self.raise_on_failure = raise_on_failure
 
     def is_bridge_connected(self) -> bool:
         return self.connected
@@ -168,8 +166,6 @@ class FakeDriverEnvironment:
 
     def on_failure(self, kind, message: str) -> None:
         self.failures.append((kind, message))
-        if self.raise_on_failure:
-            raise AssertionError(f"{kind}: {message}")
 
     def on_step_advanced(self, step_label: str) -> None:
         self.advanced_steps.append(step_label)

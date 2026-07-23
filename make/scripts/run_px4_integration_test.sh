@@ -114,23 +114,34 @@ check_px4_airframe_manifest_current "${PX4_IMAGE}"
 # -i / port offset = vehicle id, plus the per-asset PX4 airframe) rather than a
 # blind 0..count loop, so non-contiguous ids keep their derived ports and each
 # container launches the airframe matching its drone asset. Each line is
-# "<instance> <sim_model> <sys_autostart>"; split into parallel arrays.
+# "<instance> <sim_model> <sys_autostart> <offboard-loss-action>
+# <offboard-loss-timeout>"; split into parallel arrays.
 mapfile -t PX4_LAUNCH_SPECS < <(
     uv run python -c \
         'import os
 from robotics_experiments.config import load_config
 for vehicle in load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).vehicles.values():
     if vehicle.bridge.enabled:
-        print(vehicle.id, vehicle.px4_sim_model, vehicle.px4_sys_autostart)'
+        print(
+            vehicle.id,
+            vehicle.px4_sim_model,
+            vehicle.px4_sys_autostart,
+            vehicle.px4.failsafe.offboard_loss_action_param,
+            vehicle.px4.failsafe.offboard_loss_timeout_s,
+        )'
 )
 PX4_INSTANCE_INDICES=()
 PX4_SIM_MODELS=()
 PX4_SYS_AUTOSTARTS=()
+PX4_OFFBOARD_LOSS_ACTIONS=()
+PX4_OFFBOARD_LOSS_TIMEOUTS=()
 for spec in "${PX4_LAUNCH_SPECS[@]}"; do
-    read -r idx sim_model sys_autostart <<<"${spec}"
+    read -r idx sim_model sys_autostart offboard_loss_action offboard_loss_timeout <<<"${spec}"
     PX4_INSTANCE_INDICES+=("${idx}")
     PX4_SIM_MODELS+=("${sim_model}")
     PX4_SYS_AUTOSTARTS+=("${sys_autostart}")
+    PX4_OFFBOARD_LOSS_ACTIONS+=("${offboard_loss_action}")
+    PX4_OFFBOARD_LOSS_TIMEOUTS+=("${offboard_loss_timeout}")
 done
 PX4_TOTAL_INSTANCES="${#PX4_INSTANCE_INDICES[@]}"
 if [ "${PX4_TOTAL_INSTANCES}" -lt 1 ]; then
@@ -298,6 +309,8 @@ for spec_idx in "${!PX4_INSTANCE_INDICES[@]}"; do
     i="${PX4_INSTANCE_INDICES[${spec_idx}]}"
     sim_model="${PX4_SIM_MODELS[${spec_idx}]}"
     sys_autostart="${PX4_SYS_AUTOSTARTS[${spec_idx}]}"
+    offboard_loss_action="${PX4_OFFBOARD_LOSS_ACTIONS[${spec_idx}]}"
+    offboard_loss_timeout="${PX4_OFFBOARD_LOSS_TIMEOUTS[${spec_idx}]}"
     container="$(px4_container_name "${i}")"
     docker rm -f "${container}" >/dev/null 2>&1 || true
 
@@ -324,6 +337,8 @@ for spec_idx in "${!PX4_INSTANCE_INDICES[@]}"; do
         -e "PX4_INSTANCE=${i}" \
         -e "PX4_SIM_MODEL=${sim_model}" \
         -e "PX4_SYS_AUTOSTART=${sys_autostart}" \
+        -e "PX4_PARAM_COM_OBL_RC_ACT=${offboard_loss_action}" \
+        -e "PX4_PARAM_COM_OF_LOSS_T=${offboard_loss_timeout}" \
         -v "${log_mount}:${rootfs_log}" \
         -v "${eeprom_mount}:${rootfs_eeprom}" \
         "${PX4_IMAGE}" \

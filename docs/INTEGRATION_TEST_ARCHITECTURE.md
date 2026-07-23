@@ -184,7 +184,10 @@ config, and delegates the Isaac-side test body to
 `make/scripts/run_isaac_test_in_container.sh` inside the Isaac container. It
 iterates the enabled vehicles from `load_config(path)` and uses each
 `vehicle.id` as the instance index rather than a blind `0..count` loop, so
-non-contiguous ids keep their derived ports. The first instance in that list owns
+non-contiguous ids keep their derived ports. The same resolved launch tuple
+threads each vehicle's PX4 simulator model/autostart plus
+`px4.failsafe.offboard_loss_action` and timeout into the container as pinned PX4
+startup parameters. The first instance in that list owns
 the network namespace. Each additional instance `i` joins that namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so
 `run_px4_sitl_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP
@@ -211,3 +214,10 @@ prebuilt binary run with `-i ${PX4_INSTANCE}` and an interactive `pxh>` console
 (no `-d`), from its own per-instance rootfs subdir, with no `instance == 0`
 special case in the launch, reset, or mount logic. Keep the launch interactive
 (`-d` omitted) so every per-vehicle terminal accepts commands.
+
+Strict routine failures do not abort the callback immediately. The shared driver
+first attempts `MAV_CMD_NAV_LAND`, escalates a rejected or unacknowledged command
+by stopping OFFBOARD streaming so PX4's configured offboard-loss action can run,
+and monitors until disarm or recovery timeout. The standalone strict shell then
+raises the preserved original failure, so the integration result remains
+failure-typed without preventing landing.

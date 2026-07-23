@@ -8,9 +8,10 @@ An empty mapping is a valid empty fleet.
 
 Hydra composes one explicitly named model profile per vehicle. The
 `holybro_x500_v2` and `hexacopter_s550` profiles each own their USD asset path
-and inherit shared spawn, bridge, and manual routine settings from an incomplete
-internal base. The experiment overrides identity, pose, prim, or routine at that
-same node. There is no implicit default vehicle model.
+and inherit shared spawn, bridge, PX4 failsafe, and manual routine settings from
+an incomplete internal base. The experiment overrides identity, pose, prim,
+failsafe behavior, or routine at that same node. There is no implicit default
+vehicle model.
 
 ```yaml
 defaults:
@@ -37,6 +38,8 @@ The loader enriches each `VehicleConfig` once:
 - `rotor_constant` is computed from cited thrust and maximum rotor velocity;
 - MAVLink port, GCS port, bridge log path, PX4 simulator model, and PX4 autostart
   id are derived from the vehicle identity, spawn asset, and nested configs.
+- the semantic `px4.failsafe.offboard_loss_action` is validated and resolved to
+  the pinned PX4 `COM_OBL_RC_ACT` value used by launchers.
 
 Repo-generated PX4 model airframes use PX4's reserved custom model range
 `22000-22999`. The current bindings are `none_x500_v2`/`22000` and
@@ -70,4 +73,4 @@ Driver build, teardown, and restart reset that cadence.
 One `BridgeHostGroup` runs every send leg before every poll leg. Each PX4 instance
 therefore remains isolated while lockstep latency tracks the slowest instance,
 not the sum of all instances. Host-side PX4 launch uses the same ordered vehicle
-mapping and airframe-derived SITL model.
+mapping, airframe-derived SITL model, and per-vehicle offboard-loss settings.

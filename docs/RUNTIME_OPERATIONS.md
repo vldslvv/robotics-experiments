@@ -120,6 +120,11 @@ runtime config composition, for example:
 make run-all HYDRA_CONFIG=configs/takeoff_quad_quad.yaml
 ```
 
+Each enabled vehicle's `px4.failsafe` values are passed to PX4 as startup
+parameters (`COM_OBL_RC_ACT` and `COM_OF_LOSS_T`). The default action is Land, so
+loss of an OFFBOARD policy stream does not enter RTL and climb first. Persistent
+PX4 containers are recreated when either effective value changes.
+
 ## Flight log analysis and PX4 bridge debugging
 
 - `flight_analysis/README.md` is the single source for the repeatable flight-log

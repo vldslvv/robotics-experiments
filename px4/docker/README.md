@@ -15,7 +15,11 @@ every per-vehicle terminal), from its own per-instance rootfs subdir
 per-vehicle pair resolved by `config.load_config(path)` onto each enabled
 `VehicleConfig` (`none_x500_v2`/`22000` for the X500 V2
 quad asset, `none_hexa_x`/`22001` for the Hex X asset) and thread it into each
-container. These repo-managed `none_*` airframes are generated from
+container. The same resolved launch path passes
+`PX4_PARAM_COM_OBL_RC_ACT` / `PX4_PARAM_COM_OF_LOSS_T` from the vehicle's
+`px4.failsafe` config, allowing PX4's native rcS environment override handling
+to apply the per-vehicle offboard-loss action and delay. These repo-managed
+`none_*` airframes are generated from
 `configs/airframes` and baked into the PX4 image by the Dockerfile's px4 stage
 before `make px4_sitl_default`; the same YAML therefore drives USD geometry,
 bridge rotor arrays, and PX4 control allocation. Like every non-gz/sih/jmavsim

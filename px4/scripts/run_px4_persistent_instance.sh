@@ -16,6 +16,8 @@ for name in \
     PX4_IMAGE \
     PX4_INSTANCE \
     PX4_LOGS \
+    PX4_PARAM_COM_OBL_RC_ACT \
+    PX4_PARAM_COM_OF_LOSS_T \
     PX4_ROOTFS \
     PX4_SIM_MODEL \
     PX4_SYS_AUTOSTART \
@@ -81,6 +83,10 @@ if docker ps -a --format '{{.Names}}' | grep -qx "${container}"; then
         recreate_reason="PX4_SIM_MODEL changed"
     elif [ "$(container_env_value PX4_SYS_AUTOSTART)" != "${PX4_SYS_AUTOSTART}" ]; then
         recreate_reason="PX4_SYS_AUTOSTART changed"
+    elif [ "$(container_env_value PX4_PARAM_COM_OBL_RC_ACT)" != "${PX4_PARAM_COM_OBL_RC_ACT}" ]; then
+        recreate_reason="PX4_PARAM_COM_OBL_RC_ACT changed"
+    elif [ "$(container_env_value PX4_PARAM_COM_OF_LOSS_T)" != "${PX4_PARAM_COM_OF_LOSS_T}" ]; then
+        recreate_reason="PX4_PARAM_COM_OF_LOSS_T changed"
     elif [ "$(container_env_value PX4_ROOTFS)" != "${PX4_ROOTFS}" ]; then
         recreate_reason="PX4_ROOTFS changed"
     elif ! container_has_mount "${log_mount}" "${rootfs_log}"; then
@@ -117,6 +123,8 @@ exec docker run -it \
     -e "PX4_TOTAL_INSTANCES=${PX4_TOTAL_INSTANCES}" \
     -e "PX4_SIM_MODEL=${PX4_SIM_MODEL}" \
     -e "PX4_SYS_AUTOSTART=${PX4_SYS_AUTOSTART}" \
+    -e "PX4_PARAM_COM_OBL_RC_ACT=${PX4_PARAM_COM_OBL_RC_ACT}" \
+    -e "PX4_PARAM_COM_OF_LOSS_T=${PX4_PARAM_COM_OF_LOSS_T}" \
     -e "PX4_ROOTFS=${PX4_ROOTFS}" \
     -v "${log_mount}:${rootfs_log}" \
     -v "${eeprom_mount}:${rootfs_eeprom}" \

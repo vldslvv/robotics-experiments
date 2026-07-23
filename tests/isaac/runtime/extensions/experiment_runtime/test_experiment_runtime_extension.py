@@ -165,7 +165,10 @@ def _install_fake_modules(monkeypatch, usd_context, timeline, app):
     fake_config.load_config = lambda path: SimpleNamespace()
 
     fake_commanding = types.ModuleType("robotics_experiments.commanding")
-    fake_commanding.DriverPhase = IntEnum("DriverPhase", {"DRIVE": 1, "DONE": 2})
+    fake_commanding.DriverPhase = IntEnum(
+        "DriverPhase",
+        {"DRIVE": 1, "RECOVERING": 2, "SUCCEEDED": 3, "FAILED": 4},
+    )
     fake_commanding.FailureKind = IntEnum("FailureKind", {"COMMAND": 1})
 
     fake_bridge = types.ModuleType("robotics_experiments.px4_bridge")
@@ -311,6 +314,7 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
             driver=SimpleNamespace(
                 phase=sys.modules["robotics_experiments.commanding"].DriverPhase.DRIVE,
                 previous_cursor=2,
+                failure=None,
             ),
         )
     ]
@@ -326,6 +330,9 @@ def test_public_runtime_snapshot_is_immutable_and_read_only(monkeypatch):
             sim_time_us=1_250_000,
             bridge_status=bridge_status,
             completed_steps=2,
+            driver_phase="DRIVE",
+            failure=None,
+            recovery_outcome=None,
         ),
     )
     assert status.switch_events == ()

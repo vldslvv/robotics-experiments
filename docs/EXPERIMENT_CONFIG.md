@@ -14,7 +14,8 @@ The root contains only execution-wide configuration:
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
 `configs/base.yaml` composes the global groups only. Vehicle-specific `spawn`,
-`bridge`, and `routine` groups are composed beneath each `vehicles.<label>` node.
+`bridge`, `px4`, and `routine` configuration is composed beneath each
+`vehicles.<label>` node.
 See `docs/FLEET_CONFIG.md` for the authoring pattern.
 
 Experiments are selected with `HYDRA_CONFIG`, for example:
@@ -57,8 +58,17 @@ lifecycle, sends no commands, and completes. Routine descriptors use the typed
 `RoutineStepConfig` mapping and are validated by the routine builder.
 
 Strict integration runs execute the same routines as live runs; only failure
-reaction differs. Fleet-wide waits derive from the active per-vehicle routines,
-so there is no root routine.
+reporting differs. `routine.failure_recovery_timeout_s` bounds layered landing
+recovery after an armed failure. Fleet-wide waits derive from the active
+per-vehicle routines, so there is no root routine.
+
+`vehicles.<label>.px4.failsafe` owns PX4 process behavior independently of the
+Isaac `bridge` group. `offboard_loss_action` accepts PX4's non-destructive flight
+actions (`position`, `altitude`, `stabilized`, `return`, `land`, or `hold`) and
+`offboard_loss_timeout_s` must be between 0 and 60 seconds. The shared vehicle
+default is `land` after 1 second. PX4 has no native `disabled` value for
+`COM_OBL_RC_ACT`; use an explicit supported action instead of pretending the
+failsafe is disabled.
 
 ## RL vehicle selection
 

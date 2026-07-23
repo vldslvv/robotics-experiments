@@ -10,6 +10,22 @@ __all__ = [
 
 
 @dataclass
+class _Px4FailsafeConfig(_FreezableConfig):
+    """Per-vehicle PX4 offboard-loss behavior applied at SITL startup."""
+
+    offboard_loss_action: str
+    offboard_loss_timeout_s: float
+    offboard_loss_action_param: int = field(init=False, default=0)
+
+
+@dataclass
+class _Px4RuntimeConfig(_FreezableConfig):
+    """PX4 process configuration separate from the Isaac bridge."""
+
+    failsafe: _Px4FailsafeConfig
+
+
+@dataclass
 class LockstepConfig(_FreezableConfig):
     """Tunables for the PX4 lockstep exchange (the ``px4.lockstep`` group).
 

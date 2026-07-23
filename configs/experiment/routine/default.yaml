@@ -14,6 +14,9 @@ steps: []
 # Control-link and command-flow tunables (used only when steps is non-empty).
 gcs_heartbeat_period_s: 0.5
 command_ack_timeout_s: 10.0
+# Wall-clock bound for the driver's explicit Land attempt and the independent
+# PX4 offboard-loss fallback after any armed routine failure.
+failure_recovery_timeout_s: 30.0
 bridge_heartbeat_timeout_s: 12.0
 handshake_timeout_s: 12.0
 prearm_settle_s: 10.0

@@ -1,10 +1,11 @@
-"""Static checks that the host-side PX4 launch wiring threads the airframe.
+"""Static checks that host-side PX4 launch wiring threads resolved process config.
 
 The per-vehicle PX4 SITL airframe (``PX4_SIM_MODEL`` / ``PX4_SYS_AUTOSTART``,
 resolved onto each enabled ``VehicleConfig`` by ``config.load_config``) must
 reach every PX4 container. These assert the persistent and integration launch
 scripts propagate both env vars rather than relying on the old hard-coded
-stale persistent container env, which silently flew hexacopters as quads.
+stale persistent container env, which silently flew hexacopters as quads. The
+same path must apply the per-vehicle offboard-loss parameters.
 """
 
 from tests.support.paths import REPO_ROOT
@@ -25,6 +26,9 @@ def test_persistent_launch_derives_and_propagates_airframe():
     # Threads both airframe env vars into the per-instance launch.
     assert "PX4_SIM_MODEL=" in containers
     assert "PX4_SYS_AUTOSTART=" in containers
+    assert "vehicle.px4.failsafe.offboard_loss_action_param" in containers
+    assert "PX4_PARAM_COM_OBL_RC_ACT=" in containers
+    assert "PX4_PARAM_COM_OF_LOSS_T=" in containers
     # Validates the PX4 image was rebuilt after airframe geometry/config changes.
     assert "px4_airframe_manifest_check.sh" in containers
     assert "check_px4_airframe_manifest_current" in containers
@@ -37,16 +41,22 @@ def test_persistent_launch_derives_and_propagates_airframe():
     instance = _read("px4/scripts/run_px4_persistent_instance.sh")
     assert '-e "PX4_SIM_MODEL=${PX4_SIM_MODEL}"' in instance
     assert '-e "PX4_SYS_AUTOSTART=${PX4_SYS_AUTOSTART}"' in instance
+    assert '-e "PX4_PARAM_COM_OBL_RC_ACT=${PX4_PARAM_COM_OBL_RC_ACT}"' in instance
+    assert '-e "PX4_PARAM_COM_OF_LOSS_T=${PX4_PARAM_COM_OF_LOSS_T}"' in instance
     assert '-e "PX4_TOTAL_INSTANCES=${PX4_TOTAL_INSTANCES}"' in instance
     assert "docker image inspect" in instance
     assert "container_env_value PX4_SIM_MODEL" in instance
     assert "container_env_value PX4_SYS_AUTOSTART" in instance
+    assert "container_env_value PX4_PARAM_COM_OBL_RC_ACT" in instance
+    assert "container_env_value PX4_PARAM_COM_OF_LOSS_T" in instance
     assert "docker rm -f" in instance
 
     make_target = _read("make/containers.mk")
     assert "PX4_IMAGE='$(PX4_IMAGE)'" in make_target
     assert "PX4_SIM_MODEL='$(PX4_SIM_MODEL)'" in make_target
     assert "PX4_SYS_AUTOSTART='$(PX4_SYS_AUTOSTART)'" in make_target
+    assert "PX4_PARAM_COM_OBL_RC_ACT='$(PX4_PARAM_COM_OBL_RC_ACT)'" in make_target
+    assert "PX4_PARAM_COM_OF_LOSS_T='$(PX4_PARAM_COM_OF_LOSS_T)'" in make_target
 
 
 def test_integration_launch_derives_and_propagates_airframe():
@@ -55,6 +65,8 @@ def test_integration_launch_derives_and_propagates_airframe():
     assert "vehicle.px4_sim_model" in integration
     assert '-e "PX4_SIM_MODEL=${sim_model}"' in integration
     assert '-e "PX4_SYS_AUTOSTART=${sys_autostart}"' in integration
+    assert '-e "PX4_PARAM_COM_OBL_RC_ACT=${offboard_loss_action}"' in integration
+    assert '-e "PX4_PARAM_COM_OF_LOSS_T=${offboard_loss_timeout}"' in integration
     assert "px4_airframe_manifest_check.sh" in integration
     assert "check_px4_airframe_manifest_current" in integration
     assert "generate_px4_airframes.py" not in integration
