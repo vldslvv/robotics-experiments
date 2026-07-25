@@ -3,6 +3,8 @@
 ########################################
 
 BENCHMARK_ROOT ?= $(CURDIR)/.build/benchmarks
+COMMANDING_BENCHMARK_BASELINE = $(CURDIR)/benchmarks/commanding/baseline.json
+COMMANDING_BENCHMARK = make/scripts/commanding_benchmark.py
 ISAAC_CORE_BENCHMARK_BASELINE = $(CURDIR)/benchmarks/isaac_core/baseline.json
 ISAAC_CORE_BENCHMARK_REPORT = make/scripts/isaac_core_benchmark_report.py
 ISAAC_CORE_BENCHMARK_RUNNER = make/scripts/run_isaac_core_benchmark.sh
@@ -11,6 +13,22 @@ FLIGHT_BENCHMARK_RUNNER = make/scripts/run_flight_benchmark.sh
 FLIGHT_BENCHMARK_COMPARE_ROOT ?= $(abspath $(CURDIR)/../.build/benchmarks)
 FLIGHT_BENCHMARK_BUILD_FRESH ?= 0
 FLIGHT_BENCHMARK_MEASUREMENT_LEVEL ?= full
+
+.PHONY: benchmark-commanding
+benchmark-commanding:
+	@PYTHONPATH='$(CURDIR)/src' uv run python '$(COMMANDING_BENCHMARK)' run \
+	    --output-root '$(BENCHMARK_ROOT)' \
+	    --baseline '$(COMMANDING_BENCHMARK_BASELINE)'
+
+.PHONY: benchmark-commanding-accept
+benchmark-commanding-accept:
+	@test -n '$(RESULT)' || { \
+	    echo 'Usage: make benchmark-commanding-accept RESULT=.build/benchmarks/commanding.<run-id>/report.json' >&2; \
+	    exit 2; \
+	}
+	@PYTHONPATH='$(CURDIR)/src' uv run python '$(COMMANDING_BENCHMARK)' accept \
+	    --result '$(RESULT)' \
+	    --baseline '$(COMMANDING_BENCHMARK_BASELINE)'
 
 .PHONY: benchmark-isaac-core
 benchmark-isaac-core:

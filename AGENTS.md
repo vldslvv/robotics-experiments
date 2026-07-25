@@ -31,6 +31,9 @@ Read area docs on demand when a task touches that area:
 - Command/routine: `docs/COMMAND_ROUTINE_CONTRACT.md` for
   `src/robotics_experiments/commanding/`, routine config, GCS MAVLink commands,
   `{kind: goto}` / `{kind: policy}`, and driver orchestration.
+- Commanding benchmark: `docs/COMMANDING_BENCHMARK.md` for the isolated host
+  routine-stepper/driver performance gate, statistical comparison, artifacts,
+  and baseline acceptance.
 - RL workflow: `docs/RL_WORKFLOW.md` for `src/robotics_experiments/rl/`,
   `src/robotics_experiments/workflows/isaac_lab/`, Isaac Lab images, training,
   policy artifacts, and RL integration gates.

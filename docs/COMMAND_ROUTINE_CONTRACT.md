@@ -226,6 +226,13 @@ so it does not break the purity split. Step timeouts are measured in **sim time*
 (`observation.sim_time_us`) so the stepper stays pure; the driver pairs that with
 its own wall-clock backstop for a fully stalled sim.
 
+`make benchmark-commanding` is the isolated driver performance gate. It measures
+fixed pure-stepper and inert-adapter `tick_routine_driver` snapshots through this
+public package-root contract on the host. It does not replace the full flight
+benchmark, which remains authoritative for system-level Isaac/PX4 behavior and
+timing. The workload, statistical, and acceptance contracts are documented in
+`docs/COMMANDING_BENCHMARK.md`.
+
 ## `gcs_port` is control, not bridge
 
 The command port talks the per-drone GCS MAVLink link

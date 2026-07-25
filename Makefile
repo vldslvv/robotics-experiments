@@ -56,6 +56,8 @@ help:
 		'' \
 		'Benchmark targets:' \
 		'' \
+		'  make benchmark-commanding    Run the isolated host commanding performance gate' \
+		'  make benchmark-commanding-accept RESULT=... Accept a commanding baseline' \
 		'  make benchmark-isaac-core  Run and gate the Isaac core performance benchmark' \
 		'  make benchmark-isaac-core-accept RESULT=... Accept an Isaac core baseline' \
 		'  make benchmark-flight      Run the diagnostic full-GUI two-drone benchmark' \

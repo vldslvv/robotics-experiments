@@ -163,6 +163,7 @@ tensorboard_port="6006"
 tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
 tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
+tensorboard_ready_file="${log_dir}/${run_id}.tensorboard-ready"
 shutdown_mode="disabled"
 if [ "${shutdown_requested}" = true ]; then
     shutdown_mode="enabled"
@@ -214,6 +215,7 @@ finish_run() {
         docker stop "${tensorboard_container_name}" >/dev/null 2>&1
         wait "${tensorboard_monitor_pid}" 2>/dev/null
     fi
+    rm -f "${tensorboard_ready_file}"
     if [ -n "${sudo_keeper_pid}" ]; then
         kill "${sudo_keeper_pid}" 2>/dev/null
         wait "${sudo_keeper_pid}" 2>/dev/null
@@ -300,6 +302,7 @@ serve_tensorboard_when_ready() {
                     "${policy_name}" \
                     "${artifact_run_id}" |
                     tee -a "${console_log}"
+                : >"${tensorboard_ready_file}"
                 wait "${server_pid}"
                 return $?
             fi
@@ -362,16 +365,20 @@ train_status="${stage_status}"
 if [ "${train_status}" -ne 0 ]; then
     exit "${train_status}"
 fi
-if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
-    set +e
-    wait "${tensorboard_monitor_pid}"
-    tensorboard_status=$?
-    set -e
-    tensorboard_monitor_pid=""
-    if [ "${tensorboard_status}" -ne 0 ]; then
-        exit "${tensorboard_status}"
+while [ ! -f "${tensorboard_ready_file}" ]; do
+    if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
+        set +e
+        wait "${tensorboard_monitor_pid}"
+        tensorboard_status=$?
+        set -e
+        tensorboard_monitor_pid=""
+        if [ "${tensorboard_status}" -ne 0 ]; then
+            exit "${tensorboard_status}"
+        fi
+        break
     fi
-fi
+    sleep 0.1
+done
 
 run_stage "${select_target}" "SELECT_ARGS" "${select_args}"
 select_status="${stage_status}"
