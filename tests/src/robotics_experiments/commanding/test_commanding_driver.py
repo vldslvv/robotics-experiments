@@ -21,7 +21,7 @@ from robotics_experiments.commanding import (
     EnvelopeGates,
     FailureKind,
     PolicyAdapter,
-    PolicyStepResult,
+    PolicyResult,
     RecoveryOutcome,
     RecoveryStage,
     RoutineDriverState,
@@ -464,17 +464,16 @@ _POLICY_STEPS = [
 ]
 
 
-def _fake_policy_step(observation, target_enu, progress):
-    del target_enu
-    return PolicyStepResult(
-        progress=progress + 1,
+def _fake_policy_advance(*, policy_input, state):
+    return PolicyResult(
+        state=state + 1,
         setpoint=VelocitySetpoint(
             forward_mps=0.2,
             right_mps=0.0,
             down_mps=0.0,
             yaw_rate_radps=0.0,
         ),
-        complete=observation.sim_time_us >= 3_000_000,
+        complete=policy_input.sim_time_us >= 3_000_000,
     )
 
 
@@ -497,10 +496,10 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
         goto_cross_track_m=2.0,
         goto_offboard_prime_ticks=3,
         offboard_setpoint_rate_hz=50.0,
-        policy_fn_factory=lambda descriptor: PolicyAdapter(
-            rate_hz=20.0,
-            initial_progress=0,
-            step=_fake_policy_step,
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=0,
+            advance=_fake_policy_advance,
         ),
     )
     context = DriverContext(params=params, port=port, env=env, label="d0")
@@ -552,10 +551,9 @@ def test_policy_timeout_stops_streaming_and_starts_landing_recovery():
     port = FakeCommandPort()
     env = FakeDriverEnvironment()
 
-    def never_complete(observation, target_enu, progress):
-        del observation, target_enu
-        return PolicyStepResult(
-            progress=progress + 1,
+    def never_complete(*, policy_input, state):
+        return PolicyResult(
+            state=state + 1,
             setpoint=VelocitySetpoint(
                 forward_mps=0.2,
                 right_mps=0.0,
@@ -566,10 +564,10 @@ def test_policy_timeout_stops_streaming_and_starts_landing_recovery():
 
     params = replace(
         _params(_POLICY_STEPS),
-        policy_fn_factory=lambda descriptor: PolicyAdapter(
-            rate_hz=20.0,
-            initial_progress=0,
-            step=never_complete,
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=0,
+            advance=never_complete,
         ),
     )
     context = DriverContext(params=params, port=port, env=env, label="d0")
@@ -625,4 +623,4 @@ def test_routine_driver_policy_step_without_factory_fails_at_build():
             break
     assert env.failures
     kind, message = env.failures[0]
-    assert "policy_fn_factory" in message
+    assert "policy_factory" in message

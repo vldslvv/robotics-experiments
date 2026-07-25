@@ -243,6 +243,19 @@ def test_vehicle_mapping_is_typed_and_routine_steps_are_not_any():
     assert "RoutineStepConfig" in str(get_type_hints(routine_type)["steps"])
 
 
+def test_policy_routine_uses_label_and_target_enu_contract():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "policy_hover_quad.yaml")
+    policy_step = next(
+        step for step in config.vehicles["x500_01"].routine.steps if step["kind"] == "policy"
+    )
+
+    assert policy_step["label"] == "hover"
+    assert "name" not in policy_step
+    assert "target" not in policy_step
+
+
 def test_empty_fleet_is_valid(tmp_path):
     from robotics_experiments.config import load_config
 

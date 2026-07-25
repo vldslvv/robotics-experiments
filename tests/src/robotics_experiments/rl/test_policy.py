@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -24,7 +25,9 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
+from robotics_experiments.runtime._policy import _hover_adapter, _press_adapter
 from robotics_experiments.workflows._policy_preflight import _preflight_policy_artifacts
+from tests.support.commanding_fakes import make_routine_observation
 from tests.support.paths import REPO_ROOT
 
 
@@ -296,6 +299,76 @@ def test_press_deployment_config_has_no_action_scale_override() -> None:
     assert "policy_rate_hz" not in config_text
     assert len(policy_steps) == 1
     assert policy_steps[0]["artifact"] == ".build/training/press/latest"
+
+
+def test_hover_adapter_requires_hold_duration() -> None:
+    loaded = LoadedPolicy(
+        metadata=PolicyMetadata(
+            contract=PolicyContract(
+                policy_interface=PolicyInterface.HOVER_V1,
+                obs_schema_version=1,
+                obs_dim=HOVER_OBSERVATION_DIM,
+                policy_rate_hz=20.0,
+                action_kind="velocity",
+                action_dim=4,
+                max_body_velocity_mps=3.0,
+                max_yaw_rate_radps=1.5,
+                max_body_rate_radps=6.0,
+                hover_thrust_fraction=0.4,
+            ),
+            values={},
+        ),
+        inference=lambda observation: np.zeros(4),
+    )
+
+    with pytest.raises(ValueError, match="requires 'hold_s'"):
+        _hover_adapter(hold_s=None, loaded=loaded)
+
+
+@pytest.mark.parametrize("task_observation", [None, (), "wrong"])
+def test_press_adapter_fails_closed_on_incompatible_task_observation(
+    task_observation,
+) -> None:
+    from robotics_experiments.config import load_config
+
+    inference_calls: list[np.ndarray] = []
+    loaded = LoadedPolicy(
+        metadata=PolicyMetadata(
+            contract=PolicyContract(
+                policy_interface=PolicyInterface.PRESS_V1,
+                obs_schema_version=1,
+                obs_dim=34,
+                policy_rate_hz=20.0,
+                action_kind="velocity",
+                action_dim=4,
+                max_body_velocity_mps=0.5,
+                max_yaw_rate_radps=1.5,
+                max_body_rate_radps=6.0,
+                hover_thrust_fraction=0.4,
+            ),
+            values={},
+        ),
+        inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
+    )
+    adapter = _press_adapter(
+        config=load_config(REPO_ROOT / "configs/policy_press_quad.yaml"),
+        loaded=loaded,
+    )
+    observation = make_routine_observation(sim_time_us=10)
+
+    result = adapter.advance(
+        policy_input=PolicyInput(
+            vehicle_state=observation.vehicle_state,
+            sim_time_us=observation.sim_time_us,
+            task_observation=task_observation,
+            reference_position_enu=(0.0, 0.0, 0.0),
+        ),
+        state=adapter.initial_state,
+    )
+
+    assert "requires a PressObservation" in str(result.failure_reason)
+    assert result.state is adapter.initial_state
+    assert inference_calls == []
 
 
 def test_current_press_artifact_preflights_when_available() -> None:

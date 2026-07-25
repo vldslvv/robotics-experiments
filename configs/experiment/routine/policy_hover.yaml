@@ -17,7 +17,7 @@ steps:
     climb_m: 2.5
     min_climb_m: 1.5
   - kind: policy
-    name: hover
+    label: hover
     artifact: .build/training/hover/latest
     hold_s: 5.0
     timeout_s: 20.0

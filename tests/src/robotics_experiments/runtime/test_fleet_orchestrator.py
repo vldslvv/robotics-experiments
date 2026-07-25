@@ -88,7 +88,8 @@ def _import_orchestrator(monkeypatch):
     fake_commanding.FailureKind = SimpleNamespace()
     fake_commanding.MavlinkCommandPort = _FakePort
     fake_commanding.PolicyAdapter = object
-    fake_commanding.PolicyStepResult = object
+    fake_commanding.PolicyInput = object
+    fake_commanding.PolicyResult = object
     fake_commanding.RoutineDriverState = _FakeDriver
     fake_commanding.RoutineObservation = object
     fake_commanding.VelocitySetpoint = object

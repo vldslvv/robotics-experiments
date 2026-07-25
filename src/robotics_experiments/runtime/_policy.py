@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 
-from robotics_experiments.commanding import PolicyAdapter, PolicyStepResult
+from robotics_experiments.commanding import PolicyAdapter, PolicyInput, PolicyResult
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.rl import (
     LoadedPolicy,
@@ -27,7 +26,7 @@ __all__: list[str] = []
 @dataclass(frozen=True)
 class _ConfiguredPolicy:
     vehicle_label: str
-    descriptor: Mapping[str, Any]
+    switch_index: int
     artifact: Path
     metadata: PolicyMetadata
 
@@ -39,13 +38,13 @@ class _PolicyPreflight:
 
 
 @dataclass(frozen=True)
-class _HoverPolicyProgress:
-    started_us: Optional[int] = None
+class _HoverPolicyExecutionState:
+    started_us: int = -1
 
 
-def _artifact_path(*, descriptor: Mapping[str, Any], repo_root: Path) -> Path:
-    artifact = Path(str(descriptor["artifact"]))
-    return artifact if artifact.is_absolute() else repo_root / artifact
+def _artifact_path(*, artifact: str, repo_root: Path) -> Path:
+    path = Path(artifact)
+    return path if path.is_absolute() else repo_root / path
 
 
 def _preflight_policy_artifacts(
@@ -60,7 +59,10 @@ def _preflight_policy_artifacts(
         for descriptor in vehicle.routine.steps:
             if descriptor.get("kind") != "policy":
                 continue
-            artifact = _artifact_path(descriptor=descriptor, repo_root=repo_root)
+            artifact = _artifact_path(
+                artifact=str(descriptor["artifact"]),
+                repo_root=repo_root,
+            )
             metadata = validate_policy_artifact(artifact_dir=artifact)
             contract = metadata.contract
             if contract.policy_rate_hz > config.driver.control_rate_hz:
@@ -73,7 +75,7 @@ def _preflight_policy_artifacts(
             policies.append(
                 _ConfiguredPolicy(
                     vehicle_label=label,
-                    descriptor=descriptor,
+                    switch_index=int(descriptor.get("switch_index", -1)),
                     artifact=artifact,
                     metadata=metadata,
                 )
@@ -91,62 +93,53 @@ def _preflight_policy_artifacts(
 
 def _hover_adapter(
     *,
-    descriptor: Mapping[str, Any],
+    hold_s: Optional[float],
     loaded: LoadedPolicy,
 ) -> PolicyAdapter:
-    if "hold_s" not in descriptor:
+    if hold_s is None:
         raise ValueError("hover-v1 policy step requires 'hold_s'")
-    hold_s = float(descriptor["hold_s"])
     contract = loaded.contract
 
-    def step(observation, target_enu, progress):
-        assert isinstance(progress, _HoverPolicyProgress)
-        if target_enu is None:
-            return PolicyStepResult(
-                progress=progress,
-                setpoint=policy_action_to_offboard(
-                    np.zeros(contract.action_dim),
-                    contract,
-                ),
-                failure_reason="hover-v1 policy has no target or entry baseline",
-            )
-        started_us = observation.sim_time_us if progress.started_us is None else progress.started_us
-        successor = _HoverPolicyProgress(started_us=started_us)
+    def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
+        assert isinstance(state, _HoverPolicyExecutionState)
+        started_us = policy_input.sim_time_us if state.started_us < 0 else state.started_us
+        successor = _HoverPolicyExecutionState(started_us=started_us)
         action = loaded.inference(
             hover_observation_from_state(
-                observation.vehicle_state,
-                target_enu,
+                policy_input.vehicle_state,
+                np.asarray(policy_input.reference_position_enu, dtype=np.float64),
             )
         )
-        return PolicyStepResult(
-            progress=successor,
+        return PolicyResult(
+            state=successor,
             setpoint=policy_action_to_offboard(
                 np.clip(action, -1.0, 1.0),
                 contract,
             ),
-            complete=observation.sim_time_us - started_us >= hold_s * 1_000_000,
+            complete=policy_input.sim_time_us - started_us >= hold_s * 1_000_000,
         )
 
     return PolicyAdapter(
-        rate_hz=contract.policy_rate_hz,
-        initial_progress=_HoverPolicyProgress(),
-        step=step,
+        policy_rate_hz=contract.policy_rate_hz,
+        initial_state=_HoverPolicyExecutionState(),
+        advance=advance,
     )
 
 
 def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyAdapter:
     from robotics_experiments.rl.press import (
         HandoffGate,
-        PressPolicyParams,
-        PressPolicyProgress,
-        initial_press_policy_progress,
-        step_press_policy,
+        PressObservation,
+        PressPolicyExecutionParams,
+        PressPolicyExecutionState,
+        advance_press_policy_execution,
+        initial_press_policy_execution_state,
     )
 
     contract = loaded.contract
     termination = config.rl.press.termination
-    params = PressPolicyParams(
-        policy=loaded.inference,
+    params = PressPolicyExecutionParams(
+        inference=loaded.inference,
         action_dim=contract.action_dim,
         handoff_gate=HandoffGate.from_config(config.rl.press.handoff),
         first_contact_speed_max_mps=termination.first_contact_speed_max_mps,
@@ -158,50 +151,55 @@ def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyA
         stable_retreat_steps=termination.stable_retreat_steps,
     )
 
-    def step(observation, target_enu, progress):
-        del target_enu
-        assert isinstance(progress, PressPolicyProgress)
-        task_observation = observation.policy_observation
-        if task_observation is None:
-            return PolicyStepResult(
-                progress=progress,
+    def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
+        assert isinstance(state, PressPolicyExecutionState)
+        task_observation = policy_input.task_observation
+        if not isinstance(task_observation, PressObservation):
+            return PolicyResult(
+                state=state,
                 setpoint=policy_action_to_offboard(
                     np.zeros(contract.action_dim),
                     contract,
                 ),
-                failure_reason="press-v1 policy has no runtime task observation",
+                failure_reason=(
+                    "press-v1 policy requires a PressObservation task observation, "
+                    f"got {type(task_observation).__name__}"
+                ),
             )
-        decision = step_press_policy(
+        result = advance_press_policy_execution(
             params=params,
-            progress=progress,
+            state=state,
             observation=task_observation,
         )
-        return PolicyStepResult(
-            progress=decision.progress,
-            setpoint=policy_action_to_offboard(decision.action, contract),
-            complete=decision.complete,
-            failure_reason=decision.failure_reason,
+        return PolicyResult(
+            state=result.state,
+            setpoint=policy_action_to_offboard(result.action, contract),
+            complete=result.complete,
+            failure_reason=result.failure_reason,
         )
 
     return PolicyAdapter(
-        rate_hz=contract.policy_rate_hz,
-        initial_progress=initial_press_policy_progress(action_dim=contract.action_dim),
-        step=step,
+        policy_rate_hz=contract.policy_rate_hz,
+        initial_state=initial_press_policy_execution_state(action_dim=contract.action_dim),
+        advance=advance,
     )
 
 
 def _make_policy_adapter(
     *,
     config: ExperimentConfig,
-    descriptor: Mapping[str, Any],
+    artifact: str,
+    hold_s: Optional[float],
     repo_root: Path,
 ) -> PolicyAdapter:
     """Load one artifact and compose its interface-selected routine adapter."""
-    artifact = _artifact_path(descriptor=descriptor, repo_root=repo_root)
-    loaded = load_policy(artifact_dir=artifact)
+    artifact_path = _artifact_path(artifact=artifact, repo_root=repo_root)
+    loaded = load_policy(artifact_dir=artifact_path)
     interface = loaded.contract.policy_interface
     if interface is PolicyInterface.HOVER_V1:
-        return _hover_adapter(descriptor=descriptor, loaded=loaded)
+        return _hover_adapter(hold_s=hold_s, loaded=loaded)
     if interface is PolicyInterface.PRESS_V1:
         return _press_adapter(config=config, loaded=loaded)
-    raise ValueError(f"unsupported policy_interface={interface.value!r} in artifact {artifact}")
+    raise ValueError(
+        f"unsupported policy_interface={interface.value!r} in artifact {artifact_path}"
+    )

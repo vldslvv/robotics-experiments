@@ -112,7 +112,7 @@ if [ "$1" = "train-test" ]; then
     mkdir -p ".build/training/press/${artifact_id}/logs"
     printf 'event-data\\n' \
         >".build/training/press/${artifact_id}/logs/events.out.tfevents.test"
-    for _ in {1..100}; do
+    for _ in {1..300}; do
         if grep -q '^curl$' "${WRAPPER_CALLS}"; then
             break
         fi

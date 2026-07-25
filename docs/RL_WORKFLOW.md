@@ -398,7 +398,11 @@ The runtime has two policy paths behind one private adapter factory:
 `hover-v1` packs `VehicleState` directly, while `press-v1` consumes the
 task-owned live observation. The fleet orchestrator performs the shared
 preflight, prepares resources required by the selected interfaces, and injects
-the factory; it does not dispatch interfaces or manipulate task observations.
+the narrowed `(*, artifact, hold_s) -> PolicyAdapter` factory; it does not
+dispatch interfaces or manipulate task observations. `hover-v1` requires
+`hold_s` and completes after that policy-owned duration. `press-v1` does not
+require `hold_s`; it owns completion through lamp-toggle and stable-retreat
+evidence.
 
 The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
 before physics starts, creates a pad `ContactSensor`, and reads canonical

@@ -19,7 +19,7 @@ steps:
   - kind: hover
     hold_s: 1.0
   - kind: policy
-    name: press
+    label: press
     artifact: .build/training/press/latest
     switch_index: 0
     timeout_s: 20.0

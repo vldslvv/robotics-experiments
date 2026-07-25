@@ -6,7 +6,7 @@ ARTIFACT; SCRIPTED BASELINE REMAINS PLANNED.
 Goal served: commanding must not know whether a policy hovers, presses a switch,
 or performs another learned task. Every policy uses `{kind: policy}` and emits
 the configured OFFBOARD setpoint type. Task-specific observation assembly,
-progress, completion, and failure belong to a runtime adapter selected by the
+state, completion, and failure belong to a runtime adapter selected by the
 artifact contract. There is intentionally no `{kind: press}`.
 
 ## Implemented boundary
@@ -14,18 +14,18 @@ artifact contract. There is intentionally no `{kind: press}`.
 The generic commanding contract is now:
 
 ```text
-RoutineObservation + opaque frozen progress
-                    |
-                    v
-              PolicyAdapter.step
-                    |
-                    v
-PolicyStepResult(progress, setpoint, complete, failure_reason)
+PolicyInput + opaque frozen state
+             |
+             v
+      PolicyAdapter.advance
+             |
+             v
+PolicyResult(state, setpoint, complete, failure_reason)
 ```
 
 Commanding owns OFFBOARD priming, inference cadence, zero-order hold,
 transmission cadence, mode acknowledgement, timeout, and flight-envelope
-checks. It stores opaque adapter progress but never imports a press type or
+checks. It stores opaque adapter state but never imports a press type or
 branches on a task name. The runtime reads `policy_interface` from
 `policy_meta.json` and currently composes either `hover-v1` or `press-v1`.
 That dispatch and both adapter compositions live in the private runtime policy
@@ -47,8 +47,9 @@ limits, requires enabled arm and swept-propeller collision, authors an invisible
 static wall collider behind the selected warehouse switch, and creates the pad
 contact sensor. At policy ticks it reads canonical switch pose, vehicle
 kinematics, pusher compression/rate, contact force/flag, and lamp state, then
-injects a frozen `PressObservation`. The pure `PressPolicyProgress` /
-`step_press_policy` transition owns handoff, previous-action injection, handoff
+injects a frozen `PressObservation`. The pure `PressPolicyExecutionState` /
+`advance_press_policy_execution` transition owns handoff, previous-action
+injection, handoff
 mode, inference validation/clipping, first-contact evidence,
 lamp-transition count, and stable retreat. It fails closed on missing observation groups, an
 initially-on lamp, invalid policy output, or more than one lamp transition.

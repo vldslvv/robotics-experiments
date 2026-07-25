@@ -21,8 +21,8 @@ class RoutineStepConfig(TypedDict, total=False):
     position_tol_m: NotRequired[float]
     heading_tol_deg: NotRequired[float]
     artifact: NotRequired[str]
-    name: NotRequired[str]
-    target: NotRequired[List[float]]
+    label: NotRequired[str]
+    target_enu: NotRequired[List[float]]
     switch_index: NotRequired[int]
 
 
@@ -56,7 +56,9 @@ class RoutineConfig(_FreezableConfig):
             ``hover`` carrying ``hold_s``; ``forward`` carrying ``distance_m`` +
             ``timeout_s``; ``goto`` carrying absolute world-ENU ``x`` + ``y`` +
             ``z`` + ``timeout_s`` and optional ``position_tol_m`` /
-            ``heading_tol_deg``; ``land`` carrying ``timeout_s``). Empty sends no
+            ``heading_tol_deg``; ``policy`` carrying ``artifact`` + ``timeout_s``
+            and optional ``hold_s`` / ``label`` / world-ENU ``target_enu`` /
+            ``switch_index``; ``land`` carrying ``timeout_s``). Empty sends no
             flight commands. The resolved graph exposes read-only typed mappings.
         gcs_heartbeat_period_s: Minimum wall-clock spacing between GCS heartbeats.
         command_ack_timeout_s: Sim-time budget for each command step's COMMAND_ACK.

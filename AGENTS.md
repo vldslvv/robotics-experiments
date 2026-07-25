@@ -303,7 +303,11 @@ the current contents and the intended home for that kind of code.
   would otherwise fail silently, continue with an incorrect result without
   notice, or when a genuinely distinct state must be represented. Do not wrap a
   value in `Optional`/`None`, add routine `is not None` checks, or carry a
-  `<= 0 disables` special case when a plain concrete default works.
+  `<= 0 disables` special case when a plain concrete default works. Prefer a
+  domain-appropriate concrete sentinel such as `NaN` for floating-point values
+  (and the equivalent concrete sentinel for other applicable types) over
+  `None`; use `None` only when absence is genuinely necessary and no concrete
+  value represents the state correctly.
 - Every behavior change must be reflected in `AGENTS.md` or the relevant
   referenced doc when it changes project conventions, error handling policy,
   runtime assumptions, public behavior, or developer workflow expectations.
@@ -318,6 +322,11 @@ the current contents and the intended home for that kind of code.
 - Do NOT add new lint/type ignores to `pyproject.toml` to get past quality
   gates. If a suppression is genuinely necessary, use the narrowest inline
   ignore at the offending line with a brief reason.
+- Do not make clear, correct code more indirect or verbose solely to appease a
+  static type checker. When an elegant expression is valid at runtime but the
+  checker cannot represent its behavior accurately, keep the expression and
+  use the narrowest per-case inline suppression with a brief reason. Do not
+  broaden this into a global ignore unless explicitly requested.
 - For intentionally aligned Python data tables, use Ruff/Black formatter pragmas
   (`# fmt: off` / `# fmt: on`) around the smallest useful block so pre-commit
   does not collapse manual column spacing.

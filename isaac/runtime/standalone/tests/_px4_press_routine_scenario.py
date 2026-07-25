@@ -9,7 +9,7 @@ __all__ = ["run_px4_press_routine_scenario"]
 
 
 def _validate_result(context: SceneTestContext, fleet) -> None:
-    from robotics_experiments.rl.press import PressPolicyProgress
+    from robotics_experiments.rl.press import PressPolicyExecutionState
 
     if len(fleet.flying) != 1:
         raise AssertionError(f"press routine requires one flying drone, got {len(fleet.flying)}")
@@ -18,16 +18,18 @@ def _validate_result(context: SceneTestContext, fleet) -> None:
         raise AssertionError(
             f"press routine requires exactly one off-to-on lamp toggle: {events!r}"
         )
-    progress = fleet.flying[0].driver.routine_state.last_policy_progress
-    if not isinstance(progress, PressPolicyProgress):
-        raise AssertionError(f"press routine did not retain press policy progress: {progress!r}")
-    if not progress.first_contact_seen or not progress.first_contact_stable:
-        raise AssertionError(f"press routine first contact was absent or unstable: {progress!r}")
-    if progress.toggle_count != 1:
-        raise AssertionError(f"press routine toggle count is not one: {progress!r}")
+    policy_state = fleet.flying[0].driver.routine_state.last_policy_state
+    if not isinstance(policy_state, PressPolicyExecutionState):
+        raise AssertionError(f"press routine did not retain press policy state: {policy_state!r}")
+    if not policy_state.first_contact_seen or not policy_state.first_contact_stable:
+        raise AssertionError(
+            f"press routine first contact was absent or unstable: {policy_state!r}"
+        )
+    if policy_state.toggle_count != 1:
+        raise AssertionError(f"press routine toggle count is not one: {policy_state!r}")
     required = context.config.rl.press.termination.stable_retreat_steps
-    if progress.stable_retreat_steps < required:
-        raise AssertionError(f"press routine did not complete stable retreat: {progress!r}")
+    if policy_state.stable_retreat_steps < required:
+        raise AssertionError(f"press routine did not complete stable retreat: {policy_state!r}")
     context.report(
         "press routine verified handoff, stable first contact, one latch, stable retreat, "
         "return waypoint, landing, and disarm"

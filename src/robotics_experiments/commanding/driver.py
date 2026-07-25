@@ -8,7 +8,7 @@ the imperative boundary.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from typing import Any, Optional, Protocol
@@ -18,10 +18,10 @@ from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     DecisionKind,
     FailureKind,
-    PolicyAdapter,
     RoutineDecision,
     RoutineState,
     VehicleRoutine,
+    _PolicyFactory,
 )
 from robotics_experiments.commanding._routine_predicates import EnvelopeGates
 from robotics_experiments.commanding._routine_stepper import decide
@@ -133,7 +133,7 @@ class DriverParams:
     prearm_backstop_floor_s: float = 20.0
     prearm_backstop_multiplier: float = 5.0
     drive_budget_multiplier: float = 4.0
-    policy_fn_factory: Optional[Callable[[Mapping[str, Any]], PolicyAdapter]] = None
+    policy_factory: Optional[_PolicyFactory] = None
 
 
 class DriverEnvironment(Protocol):
@@ -672,7 +672,7 @@ def tick_routine_driver(
                 goto_offboard_prime_ticks=context.params.goto_offboard_prime_ticks,
                 offboard_setpoint_rate_hz=context.params.offboard_setpoint_rate_hz,
                 goto_min_heading_dist_m=context.params.goto_min_heading_dist_m,
-                policy_fn_factory=context.params.policy_fn_factory,
+                policy_factory=context.params.policy_factory,
             )
         except ValueError as exc:
             return _start_failure(

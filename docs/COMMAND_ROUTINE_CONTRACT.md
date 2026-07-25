@@ -41,7 +41,7 @@ the entire fleet cycle.
 - **`observation.py`** -- `RoutineObservation` (frozen): the bridge's pure
   `VehicleState` and `BridgeStatus` plus the command-feedback fields (`last_ack:
   CommandAck | None`, `failsafe: bool`, `sim_time_us`) and an opaque
-  `policy_observation`. The runtime may inject a task-owned frozen observation
+  `task_observation`. The runtime may inject a task-owned frozen observation
   there; commanding passes it to the selected adapter without importing or
   interpreting its type. `MAV_RESULT_*` are named int constants;
   `CommandAck.from_result` derives `accepted`.
@@ -111,13 +111,18 @@ the entire fleet cycle.
   without interpolation while the independent setpoint streamer runs. A
   compatible OFFBOARD-step boundary does not reset either cadence. The payload is a
   `VelocitySetpoint` or `AttitudeRateSetpoint` per the `rl.action.kind`.
-  Each adapter owns opaque frozen progress and returns a `PolicyStepResult`
-  containing the successor progress, setpoint, completion flag, and optional
-  failure reason. Commanding stores those values but never interprets the
+  Commanding constructs one frozen `PolicyInput(vehicle_state, sim_time_us,
+  task_observation, reference_position_enu)` per evaluation. The reference is
+  the authored `target_enu`, or the immutable step-entry position when omitted.
+  Each adapter owns opaque frozen, non-`None` state and returns a
+  `PolicyResult(state, setpoint, complete, failure_reason)`. Stateless adapters
+  use `()`. Commanding stores the successor state but never interprets the
   policy's task, observation schema, contact phase, or network architecture.
   Adapters are composed at the runtime layer and injected as
-  `DriverParams.policy_fn_factory`; `build_vehicle_routine` calls the factory
-  per `{kind: policy, artifact, timeout_s[, name, target, switch_index]}` descriptor
+  `DriverParams.policy_factory`; `build_vehicle_routine` calls the narrowed
+  `policy_factory(*, artifact, hold_s)` per
+  `{kind: policy, artifact, timeout_s[, hold_s, label, target_enu, switch_index]}`
+  descriptor
   and raises `ValueError` without it (or on a missing/mismatched artifact), which
   the driver's BUILD phase routes through `on_failure` as `FailureKind.COMMAND`.
   Artifact metadata contains the typed `PolicyInterface`, which selects
@@ -128,15 +133,16 @@ the entire fleet cycle.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
   `.build/training/hover/latest` followed by `.build/training/press/latest`.
-  `PolicyAdapter.rate_hz` carries each artifact's immutable cadence, so those
+  `PolicyAdapter.policy_rate_hz` carries each artifact's immutable cadence, so those
   steps may run at different rates; neither `DriverParams` nor
   `VehicleRoutine` repeats a routine-wide policy rate.
-  `hover-v1` uses the authored target, or the entry position when target is
+  `hover-v1` uses the authored `target_enu`, or the entry position when it is
   omitted, and requires `hold_s`; its adapter completes after that duration.
   `press-v1` consumes the injected exact 34-value `PressObservation`, waits for
   the configured handoff gate, and completes only after one lamp transition and
-  stable retreat. Policy completion never advances before PX4 accepts OFFBOARD.
-  A policy timeout reports the adapter's final opaque progress rather than the
+  stable retreat; it does not require `hold_s`. A missing or incompatible task
+  observation fails closed. Policy completion never advances before PX4 accepts
+  OFFBOARD. A policy timeout reports the adapter's final opaque state rather than the
   goto-specific "did not reach the waypoint" text. For `press-v1` this exposes
   handoff, approach, contact, compression, toggle, and retreat evidence while
   commanding remains unaware of those fields.
@@ -295,7 +301,7 @@ Every bridge-enabled drone gets one `DriverContext` and one
 (`{kind: arm}` / `{kind: takeoff, climb_m, min_climb_m}` /
 `{kind: hover, hold_s}` / `{kind: forward, distance_m, timeout_s}` /
 `{kind: goto, x, y, z, timeout_s[, position_tol_m, heading_tol_deg]}` /
-`{kind: policy, artifact, hold_s, timeout_s[, name, target]}` /
+`{kind: policy, artifact, timeout_s[, hold_s, label, target_enu]}` /
 `{kind: land, timeout_s}`)
 drive the authored commands; empty steps traverse the same phase machine,
 complete as `SUCCEEDED` without commands, and retain terminal GCS servicing.
@@ -304,7 +310,7 @@ target_longitude_deg, target_altitude_m, command_ack_timeout_s, gates,
 takeoff_timeout_s, hover_settle_s, home_lat_deg, home_lon_deg, home_alt_m,
 goto_position_tol_m, goto_heading_tol_deg, goto_cross_track_m,
 goto_offboard_prime_ticks, offboard_setpoint_rate_hz,
-goto_min_heading_dist_m, policy_fn_factory)` maps the
+goto_min_heading_dist_m, policy_factory)` maps the
 descriptors plus a
 per-drone takeoff target into a `VehicleRoutine` (unknown `kind`, any step missing a required
 field, or a `policy` step without an injected factory, raises `ValueError`); it
@@ -313,8 +319,8 @@ seam both drivers use. The takeoff step completes on a real climb
 (`climbed_at_least(min_climb_m)`), the hover step on `hovering_stable(...)` held
 for `hold_s`, the forward step on observed world +X/east displacement, the `goto`
 step on `reached_world_position(...)` (absolute world ENU) plus heading
-alignment, the `policy` step after accepted OFFBOARD entry plus `hold_s` of
-continuous in-envelope flight, and the land step once PX4 disarms. Flight gates are continuous
+alignment, the `policy` step when its adapter reports completion after accepted
+OFFBOARD entry, and the land step once PX4 disarms. Flight gates are continuous
 invariants on takeoff, hover, forward, and goto. Each step captures its own
 baseline when it begins: takeoff measures climb from takeoff start; hover,
 forward, and every goto leg measure gates from their own step start. Takeoff and

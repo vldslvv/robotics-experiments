@@ -558,9 +558,11 @@ connector explains how this particular tool is wired.
 Technical view: `policy_meta.json` now includes `policy_interface` in addition
 to observation schema/version, action contract, policy rate, action scales,
 `source_commit`, and `source_dirty`. The commanding layer receives a
-`PolicyAdapter` and stores opaque frozen progress. Each inference returns a
-`PolicyStepResult(progress, setpoint, complete, failure_reason)`, so commanding
-owns cadence and OFFBOARD transport without importing `PressObservation` or
+`PolicyAdapter` and stores opaque frozen state. Each transition receives a
+`PolicyInput(vehicle_state, sim_time_us, task_observation,
+reference_position_enu)` and returns a
+`PolicyResult(state, setpoint, complete, failure_reason)`, so commanding owns
+cadence and OFFBOARD transport without importing `PressObservation` or
 branching on task IDs. The runtime selects `hover-v1` or `press-v1` from
 metadata. Exact 13-value hover schema-v1 artifacts without the new field retain
 a narrow legacy inference; a 34-value press artifact without it fails closed
@@ -591,10 +593,10 @@ and pusher settings before standalone physics starts, reads the real stage and
 articulations, converts the source asset's local `-Y` outward normal to
 canonical `+X` with `Rz(-pi/2)`, and packs the schema-v1 34-value
 `PressObservation`. The previous normalized action is injected from frozen
-runtime progress rather than guessed from the physical state.
+runtime state rather than guessed from the physical state.
 
-`PressDeploymentState` records handoff, first-contact evidence, previous lamp
-state, transition count, and consecutive stable-retreat samples. The transition
+`PressPolicyExecutionState` records handoff, first-contact evidence, previous
+lamp state, transition count, and consecutive stable-retreat samples. The transition
 holds a zero action until the existing handoff gate passes; rejects missing or
 non-finite observation groups, an initially-on lamp, malformed policy output,
 and a second lamp transition; and completes only after one transition plus the
@@ -702,11 +704,11 @@ far enough. The runtime now keeps a small scorecard of the attempt: whether the
 handoff happened, how close the drone came, its largest action and pusher
 compression, first-contact quality, lamp changes, and retreat samples.
 
-Technical view: The frozen `PressDeploymentState` adds initial and minimum
+Technical view: The frozen `PressPolicyExecutionState` adds initial and minimum
 wall-normal range, peak pusher compression, and peak absolute normalized action.
 These are deployment diagnostics only and do not alter the 34-value observation,
 policy weights, rewards, or action mapping. Generic commanding still treats
-progress as opaque, but includes its final representation in a policy timeout
+state as opaque, but includes its final representation in a policy timeout
 instead of the incorrect goto-specific "did not reach the waypoint" message.
 
 #### Fail before launching containers and clean partial simulator state

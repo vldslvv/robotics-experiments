@@ -159,7 +159,7 @@ class FleetDriverEnv:
         if host_status is None:
             raise RuntimeError(f"{_LOG_PREFIX} observation read before bridge startup")
         vehicle_state = self._observer.read_state(sim_time_us=sim_time_us)
-        policy_observation = (
+        task_observation = (
             None
             if self._policy_observer is None
             else self._policy_observer.read(
@@ -173,7 +173,7 @@ class FleetDriverEnv:
             last_ack=last_ack,
             failsafe=self._port.read_status().failsafe,
             sim_time_us=sim_time_us,
-            policy_observation=policy_observation,
+            task_observation=task_observation,
         )
 
     def log(self, message: str) -> None:
@@ -349,7 +349,7 @@ def _prepare_policy_observer(
     from robotics_experiments.rl import PolicyInterface
 
     press_descriptors = [
-        (policy.descriptor, policy.metadata.contract)
+        (policy.switch_index, policy.metadata.contract)
         for policy in preflight.policies
         if policy.vehicle_label == spawned.label
         and policy.metadata.contract.policy_interface is PolicyInterface.PRESS_V1
@@ -358,9 +358,7 @@ def _prepare_policy_observer(
         return spawned
     from robotics_experiments.runtime._press_io import PressObservationIO
 
-    indices = {
-        int(descriptor.get("switch_index", -1)) for descriptor, _contract in press_descriptors
-    }
+    indices = {switch_index for switch_index, _contract in press_descriptors}
     if len(indices) != 1 or next(iter(indices)) < 0:
         raise ValueError("press-v1 policy steps require one shared non-negative switch_index")
     switch_index = next(iter(indices))
@@ -445,9 +443,10 @@ def build_drivers(
                 prearm_backstop_floor_s=state.config.driver.prearm_backstop_floor_s,
                 prearm_backstop_multiplier=state.config.driver.prearm_backstop_multiplier,
                 drive_budget_multiplier=state.config.driver.drive_budget_multiplier,
-                policy_fn_factory=lambda descriptor: _make_policy_adapter(
+                policy_factory=lambda *, artifact, hold_s: _make_policy_adapter(
                     config=state.config,
-                    descriptor=descriptor,
+                    artifact=artifact,
+                    hold_s=hold_s,
                     repo_root=_repo_root(),
                 ),
             ),
