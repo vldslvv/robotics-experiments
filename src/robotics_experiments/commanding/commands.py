@@ -204,7 +204,7 @@ class VelocitySetpoint:
     ``SET_POSITION_TARGET_LOCAL_NED`` in ``MAV_FRAME_BODY_NED`` with the velocity
     fields enabled and position/acceleration ignored. Components are in the PX4
     body-FRD convention (forward / right / down), so the pure action->setpoint
-    mapper (``robotics_experiments.rl.press.press_action_to_offboard``) converts the body-FLU RL
+    mapper (``robotics_experiments.rl.policy_action_to_offboard``) converts the body-FLU RL
     action into these.
 
     Attributes:

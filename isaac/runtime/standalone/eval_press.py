@@ -24,9 +24,8 @@ def _repo_root() -> Path:
 
 
 def _run(*, config: ExperimentConfig, artifact_dir: Path):
-    from robotics_experiments.rl.press import (
+    from robotics_experiments.rl import (
         POLICY_FILENAME,
-        load_policy_contract,
         validate_policy_artifact,
     )
     from robotics_experiments.workflows.isaac_lab import (
@@ -36,13 +35,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path):
 
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
-    contract = load_policy_contract(artifact_dir=artifact_dir)
-    validate_policy_artifact(
-        artifact_dir=artifact_dir,
-        obs_schema_version=contract.obs_schema_version,
-        obs_dim=contract.obs_dim,
-        policy_interface=contract.policy_interface,
-    )
+    contract = validate_policy_artifact(artifact_dir=artifact_dir).contract
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
@@ -58,7 +51,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path):
         ) != (
             contract.obs_schema_version,
             contract.obs_dim,
-            contract.policy_interface,
+            contract.policy_interface.value,
         ):
             raise ValueError("Isaac Lab evaluation environment changed the artifact contract")
         policy = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location=env.device)

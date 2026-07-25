@@ -42,7 +42,7 @@ action:
 
 The fix is config-only. No integral term, explicit yaw hold, or controller
 structure change was needed, so the numpy reference in
-`rl/press/actuation.py` and the torch implementation in
+`rl/actuation.py` and the torch implementation in
 `workflows/isaac_lab/tasks/flight.py` remain structurally unchanged.
 
 ## Measured Results
@@ -83,7 +83,7 @@ Host-side:
 
 ```bash
 uv run pytest \
-  tests/src/robotics_experiments/rl/press/test_press_actuation.py \
+  tests/src/robotics_experiments/rl/test_actuation.py \
   tests/src/robotics_experiments/config/test_config.py \
   tests/src/robotics_experiments/test_core_imports.py
 ```

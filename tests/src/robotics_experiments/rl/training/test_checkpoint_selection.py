@@ -17,9 +17,7 @@ from robotics_experiments.rl.training.selection import (
     CheckpointSelection,
     MetricValue,
     RewardMean,
-    SelectedCheckpoint,
     enumerate_checkpoints,
-    register_checkpoint_scorer,
     select_checkpoint,
 )
 from tests.support.paths import REPO_ROOT
@@ -179,15 +177,11 @@ def test_accepted_candidate_always_outranks_rejected_candidate() -> None:
             reward_means=(),
         ),
     )
-    register_checkpoint_scorer(
-        policy_interface="test-eligible-v1",
-        selection_method="test",
-        scorer=lambda _candidates: evaluations,
-    )
-
     selection = select_checkpoint(
         policy_interface="test-eligible-v1",
         candidates=candidates,
+        selection_method="test",
+        scorer=lambda _candidates: evaluations,
     )
 
     assert selection.selected is not None
@@ -211,15 +205,11 @@ def test_scorer_selects_highest_ranked_fallback_when_none_are_accepted() -> None
         )
         for candidate, ranking in zip(candidates, (0.1, 0.3, 0.0), strict=True)
     )
-    register_checkpoint_scorer(
-        policy_interface="test-fallback-v1",
-        selection_method="test-maximin-v2",
-        scorer=lambda _candidates: evaluations,
-    )
-
     selection = select_checkpoint(
         policy_interface="test-fallback-v1",
         candidates=candidates,
+        selection_method="test-maximin-v2",
+        scorer=lambda _candidates: evaluations,
     )
 
     assert selection.selected is not None
@@ -328,8 +318,8 @@ def test_publish_records_exact_evaluation_and_advances_relative_latest(
     )
     selection = CheckpointSelection(
         selection_method="press-gated-maximin-v2",
-        candidates=(evaluation,),
-        selected=SelectedCheckpoint(iteration=50, path=checkpoint),
+        evaluations=(evaluation,),
+        selected=evaluation.candidate,
     )
     thresholds = {
         "confirmed_toggle_rate_min": 0.8,
@@ -393,8 +383,8 @@ def test_schema_two_report_marks_selected_fallback() -> None:
     )
     selection = CheckpointSelection(
         selection_method="press-gated-maximin-v2",
-        candidates=(evaluation,),
-        selected=SelectedCheckpoint(iteration=150, path=candidate.path),
+        evaluations=(evaluation,),
+        selected=candidate,
     )
 
     report = selector._selection_report(  # noqa: SLF001
@@ -439,8 +429,8 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
     )
     selection = CheckpointSelection(
         selection_method="press-gated-maximin-v2",
-        candidates=(),
-        selected=SelectedCheckpoint(iteration=50, path=checkpoint),
+        evaluations=(),
+        selected=CheckpointCandidate(iteration=50, path=checkpoint),
     )
 
     with pytest.raises(RuntimeError, match="export failed"):

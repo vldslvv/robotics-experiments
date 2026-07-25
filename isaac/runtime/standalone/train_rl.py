@@ -144,9 +144,9 @@ def _artifact_metadata(
     source_metadata: dict[str, str | bool],
     artifact_run_id: str,
 ):
-    import robotics_experiments.rl.press as press
+    import robotics_experiments.rl as rl
 
-    metadata = press.policy_metadata(
+    metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
@@ -157,22 +157,23 @@ def _artifact_metadata(
 
 
 def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
-    from robotics_experiments.rl.press import METADATA_FILENAME
+    from robotics_experiments.rl import METADATA_FILENAME
 
     (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
 
 
 def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
-    import robotics_experiments.rl.press as press
+    import robotics_experiments.rl as rl
 
-    metadata_path = run_dir / press.METADATA_FILENAME
+    metadata_path = run_dir / rl.METADATA_FILENAME
     if not metadata_path.is_file():
         raise ValueError(
-            f"checkpoint run {run_dir} is missing its stored {press.METADATA_FILENAME}; "
+            f"checkpoint run {run_dir} is missing its stored {rl.METADATA_FILENAME}; "
             "the original training contract cannot be recovered"
         )
-    contract = press.load_policy_contract(artifact_dir=run_dir)
-    metadata = json.loads(metadata_path.read_text())
+    loaded = rl.load_policy_metadata(artifact_dir=run_dir)
+    contract = loaded.contract
+    metadata = dict(loaded.values)
     if not isinstance(metadata.get("source_commit"), str) or not metadata["source_commit"]:
         raise ValueError(f"checkpoint run {run_dir} metadata has no source_commit provenance")
     if type(metadata.get("source_dirty")) is not bool:
@@ -222,19 +223,19 @@ def _validate_initialization_contract(
         )
 
 
-def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+def _run_new_training(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    seed: int,
+    iterations: int,
+    out_root: Path,
+    repo_root: Path,
+    device: str,
+) -> None:
     import robotics_experiments.rl.training.rsl_rl as training
 
     training_cfg = config.rl.training
-    seed = args.seed if args.seed is not None else int(training_cfg.seed)
-    iterations = (
-        args.max_iterations if args.max_iterations is not None else int(training_cfg.max_iterations)
-    )
-    _seed_everything(seed)
-
-    repo_root = _repo_root()
-    out_root = _policy_out_root(repo_root / ".build" / "training", training_cfg.policy_name)
-    checkpoint_path = args.export_checkpoint
     initialization_checkpoint = args.initialize_checkpoint
     initialization = None
     source_contract = None
@@ -244,41 +245,25 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             out_root=out_root,
             repo_root=repo_root,
         )
-    run_dir = (
-        _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
-        if checkpoint_path is not None
-        else _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
+    run_dir = _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
+    initialization_report = (
+        ""
+        if initialization is None
+        else (
+            f", actor_init={initialization['source_run']}/"
+            f"model_{initialization['checkpoint_iteration']}.pt"
+        )
     )
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    if checkpoint_path is None:
-        initialization_report = (
-            ""
-            if initialization is None
-            else (
-                f", actor_init={initialization['source_run']}/"
-                f"model_{initialization['checkpoint_iteration']}.pt"
-            )
-        )
-        _report(
-            f"training {training_cfg.task_id} for {iterations} iterations "
-            f"(policy={training_cfg.policy_name}, seed={seed}, device={device}"
-            f"{initialization_report}) -> {run_dir}"
-        )
-    else:
-        _report(
-            f"exporting {training_cfg.task_id} checkpoint {checkpoint_path} "
-            f"(policy={training_cfg.policy_name}, device={device}) -> {run_dir}"
-        )
-
-    policy_contract = None
-    if checkpoint_path is not None:
-        _metadata, policy_contract = _stored_artifact_metadata(run_dir=run_dir)
+    _report(
+        f"training {training_cfg.task_id} for {iterations} iterations "
+        f"(policy={training_cfg.policy_name}, seed={seed}, device={device}"
+        f"{initialization_report}) -> {run_dir}"
+    )
     env, env_cfg = _build_env(
         task_id=training_cfg.task_id,
         seed=seed,
         num_envs=args.num_envs,
         experiment_config=config,
-        policy_contract=policy_contract,
     )
     try:
         if source_contract is not None:
@@ -287,52 +272,112 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
                 env_cfg=env_cfg,
                 action_dim=int(config.rl.action.action_dim),
             )
-        if checkpoint_path is None:
-            metadata = _artifact_metadata(
-                config=config,
-                env_cfg=env_cfg,
-                source_metadata=_git_source_metadata(repo_root=repo_root),
-                artifact_run_id=run_dir.name,
-            )
-            if initialization is not None:
-                metadata["initialization"] = initialization
-            _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
+        metadata = _artifact_metadata(
+            config=config,
+            env_cfg=env_cfg,
+            source_metadata=_git_source_metadata(repo_root=repo_root),
+            artifact_run_id=run_dir.name,
+        )
+        if initialization is not None:
+            metadata["initialization"] = initialization
+        _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
             env,
             training_cfg,
             log_dir=str(run_dir / "logs"),
             device=device,
         )
-        if checkpoint_path is None:
-            if initialization_checkpoint is not None:
-                training.initialize_actor_from_checkpoint(
-                    runner=runner,
-                    checkpoint_path=initialization_checkpoint,
-                    device=device,
-                )
-            result = training.train(runner, iterations)
-        else:
-            training.load_checkpoint(
+        if initialization_checkpoint is not None:
+            training.initialize_actor_from_checkpoint(
                 runner=runner,
-                checkpoint_path=checkpoint_path,
+                checkpoint_path=initialization_checkpoint,
                 device=device,
             )
-        if checkpoint_path is not None:
-            metadata, _contract = _stored_artifact_metadata(run_dir=run_dir)
-            training.export_policy(runner, run_dir, metadata=metadata)
+        result = training.train(runner, iterations)
     finally:
         env.close()
 
-    if checkpoint_path is None:
-        _report(
-            f"train-rl COMPLETE iterations={result.iterations} "
-            f"run={run_dir} publication=pending-selection"
+    _report(
+        f"train-rl COMPLETE iterations={result.iterations} "
+        f"run={run_dir} publication=pending-selection"
+    )
+
+
+def _run_manual_export(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    seed: int,
+    out_root: Path,
+    device: str,
+) -> None:
+    import robotics_experiments.rl.training.rsl_rl as training
+
+    training_cfg = config.rl.training
+    checkpoint_path = args.export_checkpoint
+    assert checkpoint_path is not None
+    run_dir = _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
+    metadata, policy_contract = _stored_artifact_metadata(run_dir=run_dir)
+    _report(
+        f"exporting {training_cfg.task_id} checkpoint {checkpoint_path} "
+        f"(policy={training_cfg.policy_name}, device={device}) -> {run_dir}"
+    )
+    env, _env_cfg = _build_env(
+        task_id=training_cfg.task_id,
+        seed=seed,
+        num_envs=args.num_envs,
+        experiment_config=config,
+        policy_contract=policy_contract,
+    )
+    try:
+        runner = training.build_runner(
+            env,
+            training_cfg,
+            log_dir=str(run_dir / "logs"),
+            device=device,
         )
-    else:
-        _report(
-            f"train-rl EXPORT COMPLETE checkpoint={checkpoint_path} "
-            f"artifact={run_dir} publication=manual-only"
+        training.load_checkpoint(
+            runner=runner,
+            checkpoint_path=checkpoint_path,
+            device=device,
         )
+        training.export_policy(runner, run_dir, metadata=metadata)
+    finally:
+        env.close()
+    _report(
+        f"train-rl EXPORT COMPLETE checkpoint={checkpoint_path} "
+        f"artifact={run_dir} publication=manual-only"
+    )
+
+
+def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+    training_cfg = config.rl.training
+    seed = args.seed if args.seed is not None else int(training_cfg.seed)
+    iterations = (
+        args.max_iterations if args.max_iterations is not None else int(training_cfg.max_iterations)
+    )
+    _seed_everything(seed)
+    repo_root = _repo_root()
+    out_root = _policy_out_root(repo_root / ".build" / "training", training_cfg.policy_name)
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if args.export_checkpoint is not None:
+        _run_manual_export(
+            args=args,
+            config=config,
+            seed=seed,
+            out_root=out_root,
+            device=device,
+        )
+        return
+    _run_new_training(
+        args=args,
+        config=config,
+        seed=seed,
+        iterations=iterations,
+        out_root=out_root,
+        repo_root=repo_root,
+        device=device,
+    )
 
 
 def main() -> None:

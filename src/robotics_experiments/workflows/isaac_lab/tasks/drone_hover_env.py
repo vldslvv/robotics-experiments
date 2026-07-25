@@ -29,7 +29,7 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
 from robotics_experiments.config import ExperimentConfig
-from robotics_experiments.rl.press import (
+from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
 )
@@ -52,7 +52,7 @@ def _hover_observation(
 ) -> torch.Tensor:
     """Pack the 13-dim hover observation ``[pos_err, quat, lin_vel_w, ang_vel_b]``.
 
-    The batched twin of the pure ``rl.press.pack_hover_observation``
+    The batched twin of the pure ``rl.pack_hover_observation``
     layout (`HOVER_OBSERVATION_SCHEMA_VERSION`): the angular velocity is
     body-frame, matching ``VehicleState.angular_velocity_flu`` so the same
     vector is assemblable at deploy time.

@@ -14,10 +14,10 @@ from tests.support.paths import REPO_ROOT
 
 
 def _contract():
-    from robotics_experiments.rl.press import PolicyContract
+    from robotics_experiments.rl import PolicyContract, PolicyInterface
 
     return PolicyContract(
-        policy_interface="press-v1",
+        policy_interface=PolicyInterface.PRESS_V1,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=17.0,
@@ -124,7 +124,7 @@ def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denomina
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-    import robotics_experiments.rl.press as press
+    import robotics_experiments.rl as rl
     import robotics_experiments.workflows.isaac_lab as workflow
     from robotics_experiments.rl.training.selection import RewardMean
 
@@ -177,8 +177,11 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
     monkeypatch.setattr(workflow, "make_isaac_lab_env", fake_factory)
     monkeypatch.setattr(workflow, "evaluate_press_policy", fake_evaluate)
     contract = _contract()
-    monkeypatch.setattr(press, "load_policy_contract", lambda **_kwargs: contract)
-    monkeypatch.setattr(press, "validate_policy_artifact", lambda **_kwargs: contract)
+    monkeypatch.setattr(
+        rl,
+        "validate_policy_artifact",
+        lambda **_kwargs: SimpleNamespace(contract=contract),
+    )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
     config = SimpleNamespace(
         rl=SimpleNamespace(
@@ -207,7 +210,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-    import robotics_experiments.rl.press as press
+    import robotics_experiments.rl as rl
     import robotics_experiments.workflows.isaac_lab as workflow
 
     close_calls: list[bool] = []
@@ -225,8 +228,11 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         ),
     )
     contract = _contract()
-    monkeypatch.setattr(press, "load_policy_contract", lambda **_kwargs: contract)
-    monkeypatch.setattr(press, "validate_policy_artifact", lambda **_kwargs: contract)
+    monkeypatch.setattr(
+        rl,
+        "validate_policy_artifact",
+        lambda **_kwargs: SimpleNamespace(contract=contract),
+    )
     monkeypatch.setattr(
         evaluator.torch.jit,
         "load",

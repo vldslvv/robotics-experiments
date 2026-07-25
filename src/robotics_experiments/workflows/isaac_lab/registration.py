@@ -99,6 +99,8 @@ def make_isaac_lab_env(
     """Build a task, optionally interpreting actions through an artifact contract."""
     import gymnasium as gym
 
+    from robotics_experiments.rl import PolicyInterface
+
     if not register_isaac_lab_tasks():
         raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
     try:
@@ -106,12 +108,12 @@ def make_isaac_lab_env(
     except KeyError as exc:
         raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
     expected_interface = {
-        DRONE_HOVER_TASK_ID: "hover-v1",
-        SWITCH_PRESS_TASK_ID: "press-v1",
+        DRONE_HOVER_TASK_ID: PolicyInterface.HOVER_V1,
+        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS_V1,
     }[task_id]
     if policy_contract is not None and policy_contract.policy_interface != expected_interface:
         raise ValueError(
-            f"task {task_id!r} requires policy_interface={expected_interface!r}, "
+            f"task {task_id!r} requires policy_interface={expected_interface.value!r}, "
             f"artifact provides {policy_contract.policy_interface!r}"
         )
     module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)

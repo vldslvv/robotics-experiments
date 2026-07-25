@@ -20,7 +20,6 @@ from robotics_experiments.rl.training.selection import (
     MetricValue,
     enumerate_checkpoints,
     publish_latest,
-    register_checkpoint_scorer,
     select_checkpoint,
 )
 
@@ -37,18 +36,6 @@ def _report(message: str) -> None:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
-
-
-def _stored_metadata(*, run_dir: Path) -> dict[str, Any]:
-    from robotics_experiments.rl.press import METADATA_FILENAME
-
-    path = run_dir / METADATA_FILENAME
-    if not path.is_file():
-        raise ValueError(f"checkpoint run {run_dir} is missing {METADATA_FILENAME}")
-    metadata = json.loads(path.read_text())
-    if not isinstance(metadata, dict):
-        raise ValueError(f"checkpoint run {run_dir} metadata must be a JSON object")
-    return metadata
 
 
 def _press_evaluation(
@@ -165,13 +152,12 @@ def _selection_report(
         if policy_interface == "press-v1"
         else None
     )
-    evaluated = {evaluation.candidate.iteration: evaluation for evaluation in selection.candidates}
+    evaluated = {evaluation.candidate.iteration: evaluation for evaluation in selection.evaluations}
     selected_evaluation = next(
         (
             evaluation
-            for evaluation in selection.candidates
-            if selection.selected is not None
-            and evaluation.candidate.iteration == selection.selected.iteration
+            for evaluation in selection.evaluations
+            if evaluation.candidate.iteration == selection.selected.iteration
         ),
         None,
     )
@@ -202,9 +188,7 @@ def _selection_report(
         "episodes_per_seed": episodes_per_seed,
         "thresholds": thresholds,
         "candidates": candidates,
-        "selected_iteration": (
-            selection.selected.iteration if selection.selected is not None else None
-        ),
+        "selected_iteration": selection.selected.iteration,
         "selected_accepted": (
             selected_evaluation.accepted if selected_evaluation is not None else None
         ),
@@ -221,6 +205,8 @@ def _select_candidates(
     evaluation_config: Any,
     device: str,
 ) -> CheckpointSelection:
+    scorer = None
+    selection_method = "final-no-scorer"
     if policy_interface == "press-v1":
 
         def score_press(
@@ -239,14 +225,13 @@ def _select_candidates(
                 for candidate in scorer_candidates
             )
 
-        register_checkpoint_scorer(
-            policy_interface=policy_interface,
-            selection_method=_PRESS_SELECTION_METHOD,
-            scorer=score_press,
-        )
+        scorer = score_press
+        selection_method = _PRESS_SELECTION_METHOD
     return select_checkpoint(
         policy_interface=policy_interface,
         candidates=candidates,
+        selection_method=selection_method,
+        scorer=scorer,
     )
 
 
@@ -261,10 +246,8 @@ def _publish_selection(
     device: str,
 ) -> None:
     import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl.press import METADATA_FILENAME, POLICY_FILENAME
+    from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 
-    if selection.selected is None:
-        raise ValueError("cannot publish a checkpoint selection with no winner")
     selected_metadata = metadata | {
         "selected_checkpoint_iteration": selection.selected.iteration,
         "selection_method": selection.selection_method,
@@ -272,7 +255,7 @@ def _publish_selection(
     selected_evaluation = next(
         (
             evaluation
-            for evaluation in selection.candidates
+            for evaluation in selection.evaluations
             if evaluation.candidate.iteration == selection.selected.iteration
         ),
         None,
@@ -308,7 +291,7 @@ def _publish_selection(
 
 def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl.press import load_policy_contract
+    from robotics_experiments.rl import PolicyInterface, load_policy_metadata
     from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
     training_config = config.rl.training
@@ -316,11 +299,12 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     run_dir = policy_root / run_id
     if not run_dir.is_dir() or run_dir.parent != policy_root:
         raise ValueError(f"RL_RUN_ID does not identify a checkpoint run: {run_id!r}")
-    metadata = _stored_metadata(run_dir=run_dir)
-    contract = load_policy_contract(artifact_dir=run_dir)
+    policy_metadata = load_policy_metadata(artifact_dir=run_dir)
+    metadata = dict(policy_metadata.values)
+    contract = policy_metadata.contract
     candidates = enumerate_checkpoints(logs_dir=run_dir / "logs")
     evaluation = config.rl.press.evaluation
-    is_press = contract.policy_interface == "press-v1"
+    is_press = contract.policy_interface is PolicyInterface.PRESS_V1
     seeds = tuple(int(seed) for seed in evaluation.seeds) if is_press else ()
     env_seed = seeds[0] if seeds else int(training_config.seed)
     num_envs = evaluation.episodes_per_seed if is_press else 1
@@ -340,7 +324,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         ) != (
             contract.obs_schema_version,
             contract.obs_dim,
-            contract.policy_interface,
+            contract.policy_interface.value,
         ):
             raise ValueError("Isaac Lab selection environment changed the stored contract")
         runner = training.build_runner(
@@ -350,7 +334,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             device=device,
         )
         selection = _select_candidates(
-            policy_interface=contract.policy_interface,
+            policy_interface=contract.policy_interface.value,
             candidates=candidates,
             runner=runner,
             env=env,
@@ -362,7 +346,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             selection=selection,
             run_dir=run_dir,
             policy_name=training_config.policy_name,
-            policy_interface=contract.policy_interface,
+            policy_interface=contract.policy_interface.value,
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed if is_press else 0,
             evaluation_config=evaluation,
@@ -380,12 +364,10 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     finally:
         env.close()
 
-    if selection.selected is None:
-        raise AssertionError("checkpoint selector returned no winner")
     selected_accepted = next(
         (
             evaluation.accepted
-            for evaluation in selection.candidates
+            for evaluation in selection.evaluations
             if evaluation.candidate.iteration == selection.selected.iteration
         ),
         None,

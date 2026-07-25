@@ -11,8 +11,8 @@ Action-level decision: resolved in ADR 0013. `rl.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
 frozen params dataclasses + pure functions (`build_actuation_params` /
-`action_to_rotor_omega` exported by `robotics_experiments.rl.press` and implemented in
-`rl/press/actuation.py`, mirrored in `flight.py`); same
+`action_to_rotor_omega` exported by `robotics_experiments.rl` and implemented in
+`rl/actuation.py`, mirrored in `flight.py`); same
 math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
 constants move into config (`rl.press.hover_task`, task-as-config) and the
@@ -33,16 +33,16 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ---
 
-## Step 1 -- Create the pure `press` package skeleton
+## Step 1 -- Create the pure RL package skeleton
 
-- Action: create `src/robotics_experiments/rl/press/__init__.py` (re-export only) and
-  `src/robotics_experiments/rl/press/actuation.py`.
-- `rl/press/__init__.py`: `__all__` empty for now; add exports as later steps land.
+- Action: create `src/robotics_experiments/rl/__init__.py` and
+  `src/robotics_experiments/rl/actuation.py`.
+- `rl/__init__.py`: export the task-neutral actuation contract.
   Import nothing from torch/isaaclab/carb/pxr at module scope.
 - Rule: this package is on the core import path. It must import only stdlib +
   numpy. The torch/isaaclab env code lives in `workflows/isaac_lab/tasks/`, not
   here.
-- Done when: `python -c "import robotics_experiments.rl.press"` works in a plain
+- Done when: `python -c "import robotics_experiments.rl"` works in a plain
   `.venv` (no Isaac/torch).
 
 ## Step 2 -- Add the `press` Hydra config group (scaffold only)
@@ -102,7 +102,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 4 -- Implement the pluggable actuation seam
 
-- Action: in `rl/press/actuation.py` (pure), define the seam that maps a
+- Action: in `rl/actuation.py` (pure), define the seam that maps a
   normalized action to per-rotor angular-velocity references, independent of
   torch. The landed contract is frozen `ActuationParams` / `ActuationState`
   plus `build_actuation_params(...)` / `action_to_rotor_omega(...)`, with pure
@@ -114,7 +114,7 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 - Action: in `flight.py` (torch leaf), add a vectorized implementation of the
   selected `kind` that matches the pure reference (batched over envs). The torch
   version is the one the env runs; the numpy version is the test oracle.
-- Test: `tests/src/robotics_experiments/rl/press/test_press_actuation.py`
+- Test: `tests/src/robotics_experiments/rl/test_actuation.py`
   (pure): for a hover action the model
   returns rotor omegas whose `commands_to_dynamics` net force approximately cancels
   weight; for a +x velocity command the resulting body wrench tilts toward +x. Assert
@@ -205,7 +205,7 @@ transfer/contact-authority experiments. Switching between the two is a one-line
 
 ## Files touched by F1
 
-- add `src/robotics_experiments/rl/press/__init__.py`, `.../rl/press/actuation.py`
+- add `src/robotics_experiments/rl/__init__.py`, `.../rl/actuation.py`
 - add `src/robotics_experiments/workflows/isaac_lab/tasks/flight.py`
 - edit `src/robotics_experiments/workflows/isaac_lab/tasks/drone_hover_env.py`
 - edit the private RL config/schema modules

@@ -28,6 +28,10 @@ transmission cadence, mode acknowledgement, timeout, and flight-envelope
 checks. It stores opaque adapter progress but never imports a press type or
 branches on a task name. The runtime reads `policy_interface` from
 `policy_meta.json` and currently composes either `hover-v1` or `press-v1`.
+That dispatch and both adapter compositions live in the private runtime policy
+module. The fleet orchestrator shares preflight with the host CLI, prepares the
+live resources required by the selected interfaces, and injects the resulting
+factory.
 Exact legacy hover schema-v1 metadata is recognized; a press artifact without
 an interface must be re-exported so it cannot be guessed from an ambiguous
 shape.
@@ -43,9 +47,10 @@ limits, requires enabled arm and swept-propeller collision, authors an invisible
 static wall collider behind the selected warehouse switch, and creates the pad
 contact sensor. At policy ticks it reads canonical switch pose, vehicle
 kinematics, pusher compression/rate, contact force/flag, and lamp state, then
-injects a frozen `PressObservation`. The pure `PressDeploymentState` transition
-owns handoff, previous action, first-contact evidence, lamp-transition count,
-and stable retreat. It fails closed on missing observation groups, an
+injects a frozen `PressObservation`. The pure `PressPolicyProgress` /
+`step_press_policy` transition owns handoff, previous-action injection, handoff
+mode, inference validation/clipping, first-contact evidence,
+lamp-transition count, and stable retreat. It fails closed on missing observation groups, an
 initially-on lamp, invalid policy output, or more than one lamp transition.
 
 The switch/lamp lifecycle also moved into the shared frozen `FleetState`.

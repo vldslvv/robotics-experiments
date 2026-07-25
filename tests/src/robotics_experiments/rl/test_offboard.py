@@ -8,12 +8,16 @@ analogue of the in-Lab actuation, tested without pymavlink or Isaac.
 import numpy as np
 import pytest
 
-from robotics_experiments.rl.press import PolicyContract, press_action_to_offboard
+from robotics_experiments.rl import (
+    PolicyContract,
+    PolicyInterface,
+    policy_action_to_offboard,
+)
 
 
 def _contract(*, action_kind: str) -> PolicyContract:
     return PolicyContract(
-        policy_interface="hover-v1",
+        policy_interface=PolicyInterface.HOVER_V1,
         obs_schema_version=1,
         obs_dim=13,
         policy_rate_hz=20.0,
@@ -27,7 +31,7 @@ def _contract(*, action_kind: str) -> PolicyContract:
 
 
 def test_velocity_action_flips_flu_to_frd():
-    setpoint = press_action_to_offboard(
+    setpoint = policy_action_to_offboard(
         np.array([1.0, 0.5, 0.25, 0.4]),
         _contract(action_kind="velocity"),
     )
@@ -39,7 +43,7 @@ def test_velocity_action_flips_flu_to_frd():
 
 
 def test_ctbr_action_maps_thrust_and_body_rates():
-    setpoint = press_action_to_offboard(
+    setpoint = policy_action_to_offboard(
         np.array([0.2, 0.1, -0.1, 0.3]),
         _contract(action_kind="ctbr"),
     )
@@ -52,8 +56,8 @@ def test_ctbr_action_maps_thrust_and_body_rates():
 
 def test_ctbr_thrust_is_clipped_to_unit_interval():
     contract = _contract(action_kind="ctbr")
-    high = press_action_to_offboard(np.array([5.0, 0.0, 0.0, 0.0]), contract)
-    low = press_action_to_offboard(np.array([-5.0, 0.0, 0.0, 0.0]), contract)
+    high = policy_action_to_offboard(np.array([5.0, 0.0, 0.0, 0.0]), contract)
+    low = policy_action_to_offboard(np.array([-5.0, 0.0, 0.0, 0.0]), contract)
 
     assert high.thrust == pytest.approx(1.0)
     assert low.thrust == pytest.approx(0.0)
@@ -61,4 +65,4 @@ def test_ctbr_thrust_is_clipped_to_unit_interval():
 
 def test_deploy_rejects_unimplemented_kind():
     with pytest.raises(ValueError, match="attitude"):
-        press_action_to_offboard(np.zeros(4), _contract(action_kind="attitude"))
+        policy_action_to_offboard(np.zeros(4), _contract(action_kind="attitude"))

@@ -93,9 +93,9 @@ make eval-press
 
 Each task config owns `observation_schema_version`, `observation_space`, and
 `policy_interface`; artifact metadata is exported from those fields alongside
-the source commit and dirty-worktree flag. `load_vector_policy(...)` is the
-generic validated observation-vector loader; `build_policy_step_fn(...)`
-remains the hover-specific `VehicleState` to OFFBOARD composer.
+the source commit and dirty-worktree flag. The task-neutral
+`robotics_experiments.rl.load_policy(...)` validates and loads either interface;
+the private runtime adapter owns hover `VehicleState` composition.
 
 The evaluator loads `.build/training/press/latest` and runs 100 deterministic
 episodes for each of three configured non-training seeds. It reports reward

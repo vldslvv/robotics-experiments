@@ -1,4 +1,4 @@
-"""Pure deploy-time state transition for a trained press policy."""
+"""Pure deploy-time transition for a trained press policy."""
 
 from __future__ import annotations
 
@@ -16,15 +16,32 @@ from robotics_experiments.rl.press.observation import (
 )
 
 __all__ = [
-    "PressDeploymentDecision",
-    "PressDeploymentState",
-    "initial_press_deployment_state",
-    "step_press_deployment",
+    "PressPolicyDecision",
+    "PressPolicyParams",
+    "PressPolicyProgress",
+    "initial_press_policy_progress",
+    "step_press_policy",
 ]
 
 
 @dataclass(frozen=True)
-class PressDeploymentState:
+class PressPolicyParams:
+    """Immutable inference, handoff, and completion parameters."""
+
+    policy: Callable[[np.ndarray], np.ndarray]
+    action_dim: int
+    handoff_gate: HandoffGate
+    first_contact_speed_max_mps: float
+    first_contact_angular_speed_max_radps: float
+    retreat_distance_m: float
+    retreat_speed_max_mps: float
+    retreat_alignment_tolerance_m: float
+    retreat_angular_speed_max_radps: float
+    stable_retreat_steps: int
+
+
+@dataclass(frozen=True)
+class PressPolicyProgress:
     """Opaque immutable progress stored by the generic policy routine step."""
 
     previous_action: tuple[float, ...]
@@ -42,18 +59,18 @@ class PressDeploymentState:
 
 
 @dataclass(frozen=True)
-class PressDeploymentDecision:
+class PressPolicyDecision:
     """Successor progress, normalized action, and generic routine outcome."""
 
-    state: PressDeploymentState
+    progress: PressPolicyProgress
     action: np.ndarray
     complete: bool
     failure_reason: Optional[str]
 
 
-def initial_press_deployment_state(*, action_dim: int) -> PressDeploymentState:
+def initial_press_policy_progress(*, action_dim: int) -> PressPolicyProgress:
     """Create zero-action progress for one policy invocation."""
-    return PressDeploymentState(previous_action=(0.0,) * int(action_dim))
+    return PressPolicyProgress(previous_action=(0.0,) * int(action_dim))
 
 
 def _invalid_reason(*, observation: PressObservation, action_dim: int) -> Optional[str]:
@@ -74,67 +91,65 @@ def _invalid_reason(*, observation: PressObservation, action_dim: int) -> Option
     return None
 
 
-def step_press_deployment(
+def step_press_policy(
     *,
-    state: PressDeploymentState,
+    params: PressPolicyParams,
+    progress: PressPolicyProgress,
     observation: PressObservation,
-    policy: Callable[[np.ndarray], np.ndarray],
-    action_dim: int,
-    handoff_gate: HandoffGate,
-    first_contact_speed_max_mps: float,
-    first_contact_angular_speed_max_radps: float,
-    retreat_distance_m: float,
-    retreat_speed_max_mps: float,
-    retreat_alignment_tolerance_m: float,
-    retreat_angular_speed_max_radps: float,
-    stable_retreat_steps: int,
-) -> PressDeploymentDecision:
+) -> PressPolicyDecision:
     """Advance handoff, policy action, lamp-toggle, and retreat completion once."""
-    zero = np.zeros(action_dim, dtype=np.float64)
-    invalid = _invalid_reason(observation=observation, action_dim=action_dim)
+    observation = replace(
+        observation,
+        previous_action=np.asarray(progress.previous_action, dtype=np.float64),
+        handoff_mode=2 if progress.first_contact_seen else 1,
+    )
+    zero = np.zeros(params.action_dim, dtype=np.float64)
+    invalid = _invalid_reason(observation=observation, action_dim=params.action_dim)
     if invalid is not None:
-        return PressDeploymentDecision(state, zero, False, invalid)
+        return PressPolicyDecision(progress, zero, False, invalid)
 
     switch_range_m = float(observation.relative_switch_pos_m[0])
     initial_switch_range_m = (
-        switch_range_m if state.initial_switch_range_m is None else state.initial_switch_range_m
+        switch_range_m
+        if progress.initial_switch_range_m is None
+        else progress.initial_switch_range_m
     )
     closest_switch_range_m = (
         switch_range_m
-        if state.closest_switch_range_m is None
-        else min(state.closest_switch_range_m, switch_range_m)
+        if progress.closest_switch_range_m is None
+        else min(progress.closest_switch_range_m, switch_range_m)
     )
-    state = replace(
-        state,
+    progress = replace(
+        progress,
         initial_switch_range_m=initial_switch_range_m,
         closest_switch_range_m=closest_switch_range_m,
         peak_pusher_compression_m=max(
-            state.peak_pusher_compression_m,
+            progress.peak_pusher_compression_m,
             float(observation.pusher_compression_m),
         ),
     )
 
-    if not state.initialized:
+    if not progress.initialized:
         if observation.lamp_state != 0:
-            return PressDeploymentDecision(
-                state,
+            return PressPolicyDecision(
+                progress,
                 zero,
                 False,
                 "press policy requires the paired lamp to start off",
             )
-        state = replace(
-            state,
+        progress = replace(
+            progress,
             initialized=True,
             previous_lamp_state=observation.lamp_state,
         )
 
-    toggle_count = state.toggle_count
-    if observation.lamp_state != state.previous_lamp_state:
+    toggle_count = progress.toggle_count
+    if observation.lamp_state != progress.previous_lamp_state:
         toggle_count += 1
     if toggle_count > 1:
-        return PressDeploymentDecision(
+        return PressPolicyDecision(
             replace(
-                state,
+                progress,
                 previous_lamp_state=observation.lamp_state,
                 toggle_count=toggle_count,
             ),
@@ -145,39 +160,42 @@ def step_press_deployment(
 
     linear_speed = float(np.linalg.norm(observation.body_lin_vel_mps))
     angular_speed = float(np.linalg.norm(observation.body_ang_vel_radps))
-    first_contact = bool(observation.contact_flag) and not state.first_contact_seen
-    first_contact_seen = state.first_contact_seen or bool(observation.contact_flag)
-    first_contact_stable = state.first_contact_stable or (
+    first_contact = bool(observation.contact_flag) and not progress.first_contact_seen
+    first_contact_seen = progress.first_contact_seen or bool(observation.contact_flag)
+    first_contact_stable = progress.first_contact_stable or (
         first_contact
-        and linear_speed <= first_contact_speed_max_mps
-        and angular_speed <= first_contact_angular_speed_max_radps
+        and linear_speed <= params.first_contact_speed_max_mps
+        and angular_speed <= params.first_contact_angular_speed_max_radps
     )
 
-    handoff_complete = state.handoff_complete or handoff_ready(observation, handoff_gate).ready
+    handoff_complete = (
+        progress.handoff_complete or handoff_ready(observation, params.handoff_gate).ready
+    )
     action = zero
     if handoff_complete:
-        action = np.clip(np.asarray(policy(to_vector(observation)), dtype=np.float64), -1.0, 1.0)
-        if action.shape != (action_dim,) or not np.all(np.isfinite(action)):
-            return PressDeploymentDecision(
-                state,
+        action = np.asarray(params.policy(to_vector(observation)), dtype=np.float64)
+        if action.shape != (params.action_dim,) or not np.all(np.isfinite(action)):
+            return PressPolicyDecision(
+                progress,
                 zero,
                 False,
                 f"press policy returned invalid action shape {action.shape}",
             )
-    peak_abs_action = max(state.peak_abs_action, float(np.max(np.abs(action))))
+        action = np.clip(action, -1.0, 1.0)
+    peak_abs_action = max(progress.peak_abs_action, float(np.max(np.abs(action))))
 
-    retreat_target_m = max(initial_switch_range_m, retreat_distance_m)
+    retreat_target_m = max(initial_switch_range_m, params.retreat_distance_m)
     lateral_error_m = float(np.linalg.norm(observation.relative_switch_pos_m[1:3]))
     stable_retreat = (
         toggle_count == 1
         and not observation.contact_flag
         and float(observation.relative_switch_pos_m[0]) >= retreat_target_m
-        and linear_speed <= retreat_speed_max_mps
-        and lateral_error_m <= retreat_alignment_tolerance_m
-        and angular_speed <= retreat_angular_speed_max_radps
+        and linear_speed <= params.retreat_speed_max_mps
+        and lateral_error_m <= params.retreat_alignment_tolerance_m
+        and angular_speed <= params.retreat_angular_speed_max_radps
     )
-    retreat_steps = state.stable_retreat_steps + 1 if stable_retreat else 0
-    successor = PressDeploymentState(
+    retreat_steps = progress.stable_retreat_steps + 1 if stable_retreat else 0
+    successor = PressPolicyProgress(
         previous_action=tuple(float(value) for value in action),
         initialized=True,
         handoff_complete=handoff_complete,
@@ -188,8 +206,8 @@ def step_press_deployment(
         stable_retreat_steps=retreat_steps,
         initial_switch_range_m=initial_switch_range_m,
         closest_switch_range_m=closest_switch_range_m,
-        peak_pusher_compression_m=state.peak_pusher_compression_m,
+        peak_pusher_compression_m=progress.peak_pusher_compression_m,
         peak_abs_action=peak_abs_action,
     )
-    complete = retreat_steps >= stable_retreat_steps
-    return PressDeploymentDecision(successor, zero if complete else action, complete, None)
+    complete = retreat_steps >= params.stable_retreat_steps
+    return PressPolicyDecision(successor, zero if complete else action, complete, None)

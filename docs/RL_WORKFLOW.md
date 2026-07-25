@@ -41,7 +41,7 @@ Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
 for direct-workflow environments. The registered tasks are
 `Isaac-Drone-Hover-Direct-v0` and `Isaac-Switch-Press-Direct-v0`; registration
 is independently idempotent for each. Both fly N parallel drones through the
-pluggable in-Lab actuation seam (`robotics_experiments.rl.press`), which maps a
+pluggable in-Lab actuation seam (`robotics_experiments.rl`), which maps a
 normalized RL action to per-rotor angular-velocity references (and thence to
 forces) without a PX4 lockstep per env. The action level is a config switch
 (`rl.action.kind`): `velocity` (default; cascaded PD tracking body-frame
@@ -52,7 +52,7 @@ precomputing the allocation pseudoinverse), behavior in pure functions
 (`action_to_rotor_omega`, `hover_action`, `rotor_omega_to_body_wrench`) -- so
 a future pipeline composes it as plain functions with the RL policy as one
 stage. The public single-env reference contract is exported only from
-`robotics_experiments.rl.press` (implemented in `rl/press/actuation.py`; numpy, the
+`robotics_experiments.rl` (implemented in `rl/actuation.py`; numpy, the
 test oracle) and the Lab package exposes the env diagnostic entry point as
 `robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega`; both mirror
 the PX4 bridge's `PegasusQuadraticThrustModel` allocation so an action
@@ -85,7 +85,7 @@ decimation. The hover task's
 reward/termination/reset values are the `rl.press.hover_task` block (task
 definition = one YAML block; no task-tuning literal in the env module). The RL
 action also maps to a PX4 OFFBOARD setpoint at deploy time
-(`press_action_to_offboard` + the commanding-layer velocity / attitude-rate
+(`policy_action_to_offboard` + the commanding-layer velocity / attitude-rate
 setpoint seams).
 
 The private flight base owns cadence, action buffering, rotor force application,
@@ -147,11 +147,12 @@ artifact-selected adapter and, when its interface requires one, the task-owned
 observation assembled from live resources. Commanding remains task-neutral.
 Pieces:
 
-- **Observation layouts** (exported from `robotics_experiments.rl.press`, pure,
-  versioned): the
-  13-dim hover layout (`HOVER_OBSERVATION_SCHEMA_VERSION`,
+- **Observation layouts** (pure, versioned): the task-neutral 13-dim hover
+  layout is exported from `robotics_experiments.rl`
+  (`HOVER_OBSERVATION_SCHEMA_VERSION`,
   `pack_hover_observation` / `hover_observation_from_state`; body-FLU angular
-  velocity) and the press-task `PressObservation`/`to_vector`
+  velocity), while `robotics_experiments.rl.press` exports the press-task
+  `PressObservation`/`to_vector`
   (`OBSERVATION_SCHEMA_VERSION`) with the contact frame
   (`world_switch_to_contact_frame`; canonical switch `+X` = outward plate
   normal). PARITY INVARIANT: the same packing feeds Lab tensors in training
@@ -168,7 +169,8 @@ Pieces:
   and `policy_name`).
   `make train-rl` (thin target in `make/rl.mk`, runs
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
-  image) writes the stored policy contract, Git provenance, and all checkpoints
+  image) dispatches to separate new-run and manual-export paths. A new run
+  writes the stored policy contract, Git provenance, and all checkpoints
   under `.build/training/<policy-name>/<run-id>/`; it does not export
   `policy.pt` or advance `latest`.
   `TRAIN_ARGS='--max-iterations 5 --num-envs 2'` is a small smoke run. Each
@@ -187,8 +189,10 @@ Pieces:
   extra (`rsl-rl-lib`) exists for tooling only.
   `make select-rl-checkpoint RL_RUN_ID=<run-id>` resumes selection without
   retraining. The task-neutral selector enumerates every numeric checkpoint,
-  builds one compatible environment and runner, and dispatches by stored
-  `policy_interface`. `press-v1` evaluates every checkpoint with the full
+  builds one compatible environment and runner, and passes an explicit scorer
+  chosen from the stored `policy_interface` into the task-neutral selector.
+  There is no process-global scorer registry. `press-v1` evaluates every
+  checkpoint with the full
   workload shared with `eval-press`; an interface without a scorer warns and
   selects its final checkpoint with `selection_method: final-no-scorer`.
   Selection reloads the winner without optimizer state, stages the TorchScript
@@ -196,7 +200,9 @@ Pieces:
   advances the relative `.build/training/<policy-name>/latest` symlink.
   A scorer always selects a checkpoint: it prefers acceptance-passing
   candidates and otherwise publishes the highest-ranked candidate as an
-  explicitly rejected fallback. The independent evaluator remains the
+  explicitly rejected fallback. `CheckpointSelection.selected` is always the
+  chosen `CheckpointCandidate`; scored results are held separately in
+  `evaluations`. The independent evaluator remains the
   acceptance gate.
   Explicit export remains available for manual checkpoint diagnostics:
 
@@ -216,19 +222,21 @@ Pieces:
   the runtime adapter selector (`hover-v1` or `press-v1`), not a commanding
   routine kind. Train accepted policies from a clean revision;
   `source_dirty: true` is diagnostic provenance, not a claim that the commit
-  alone reproduces the artifact. The frozen `PolicyContract` is the typed
-  runtime authority for the interface, observation layout, cadence, action
-  shape, and physical action scales. `load_vector_policy(...)` validates that
-  the runtime supplies the artifact's supported observation contract and
-  returns a `LoadedVectorPolicy` carrying both the contract and inference
-  callable. It never compares against deployment `rl.action` or
-  `rl.policy_rate_hz`. `validate_policy_artifact(...)` performs the same
-  contract validation without importing Torch and backs the pre-launch Make
-  preflight. Malformed, missing, non-finite, structurally invalid, and
-  unsupported contracts fail before simulator startup. Exact schema-v1 hover
-  and press artifacts made before `policy_interface` are recognized only from
-  their complete contract fields; legacy press inference retains its exact
-  34-value, 20 Hz, four-value velocity tuple and warns.
+  alone reproduces the artifact. `robotics_experiments.rl` owns the typed
+  `PolicyInterface` (`hover-v1` / `press-v1`), frozen `PolicyContract`,
+  `PolicyMetadata`, and `LoadedPolicy`. `load_policy_metadata(...)`,
+  `validate_policy_artifact(...)`, and `load_policy(...)` each read and validate
+  the artifact contract once; observation compatibility is derived from
+  `PolicyInterface`, never supplied as a caller-owned schema tuple.
+  `load_policy(...)` returns the already validated metadata/contract with its
+  inference callable. Artifacts are never reinterpreted through deployment
+  `rl.action` or `rl.policy_rate_hz`. The Torch-free validator backs the one
+  configured-artifact preflight shared by the host CLI and runtime. Malformed,
+  missing, non-finite, structurally invalid, and unsupported contracts fail
+  before simulator startup. Exact schema-v1 hover and press artifacts made
+  before `policy_interface` are recognized only from their complete contract
+  fields; legacy press inference retains its exact 34-value, 20 Hz, four-value
+  velocity tuple and warns.
   A scored selected artifact also records `selected_checkpoint_iteration`,
   `selection_method`, and `checkpoint_evaluation`. The last field copies the
   selected checkpoint's acceptance result, evaluation seeds and episode count,
@@ -386,6 +394,12 @@ use artifact metadata. A fleet with press artifacts at conflicting cadences is
 rejected before spawn; when no press policy is present, the switch latch uses
 the configured training cadence.
 
+The runtime has two policy paths behind one private adapter factory:
+`hover-v1` packs `VehicleState` directly, while `press-v1` consumes the
+task-owned live observation. The fleet orchestrator performs the shared
+preflight, prepares resources required by the selected interfaces, and injects
+the factory; it does not dispatch interfaces or manipulate task observations.
+
 The private Isaac Sim 5.1 adapter authors the easy-task switch/pusher settings
 before physics starts, creates a pad `ContactSensor`, and reads canonical
 switch pose, vehicle state, pusher compression/rate, contact, and lamp state.
@@ -400,8 +414,8 @@ transition waits for the handoff gate, supplies the preceding normalized action
 to the next observation, rejects an initially-on lamp or repeated lamp toggle,
 records first-contact stability plus diagnostic approach/compression/action
 peaks, and completes only after one toggle plus the configured stable retreat.
-Its normalized output is mapped through the same
-`press_action_to_offboard` seam as training.
+Its normalized output is mapped through the same task-neutral
+`policy_action_to_offboard` seam as training.
 
 After an artifact passes `make eval-press`, run:
 

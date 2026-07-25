@@ -276,7 +276,8 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
 def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
 
-    def fail_preflight(*, config):
+    def fail_preflight(*, config, repo_root):
+        del config, repo_root
         raise ValueError("incompatible policy metadata")
 
     orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
@@ -312,7 +313,7 @@ def test_spawn_fleet_rolls_back_drones_after_observer_failure(monkeypatch):
     monkeypatch.setattr(
         orchestrator,
         "_prepare_policy_observer",
-        lambda *, state, spawned: (_ for _ in ()).throw(RuntimeError("observer failed")),
+        lambda *, state, spawned, preflight: (_ for _ in ()).throw(RuntimeError("observer failed")),
     )
 
     with pytest.raises(RuntimeError, match="observer failed"):

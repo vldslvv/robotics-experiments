@@ -1,11 +1,11 @@
-"""Policy artifact contracts, validation, loading, and hover composition.
+"""Policy artifact contracts, validation, and loading.
 
 A policy artifact owns the contract used to interpret its normalized output
 after export. Hydra authors that contract for a new training run, but
 evaluation and deployment parse the stored metadata instead of comparing it
 with the active RL training config.
 
-Torch is imported only by :func:`load_vector_policy`, keeping metadata
+Torch is imported only by :func:`load_policy`, keeping metadata
 preflight on the lightweight core import path.
 """
 
@@ -17,42 +17,36 @@ import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from types import MappingProxyType
+from typing import Any, Union
 
 import numpy as np
 
-from robotics_experiments.rl.press.deploy import press_action_to_offboard
-from robotics_experiments.rl.press.observation import (
+from robotics_experiments.rl._interfaces import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
-    OBSERVATION_SCHEMA_VERSION,
+    INTERFACE_OBSERVATIONS,
     PRESS_OBSERVATION_DIM,
-    hover_observation_from_state,
+    PRESS_OBSERVATION_SCHEMA_VERSION,
+    PolicyInterface,
 )
 
-if TYPE_CHECKING:
-    from robotics_experiments.commanding import AttitudeRateSetpoint, VelocitySetpoint
-    from robotics_experiments.px4_bridge import VehicleState
-
 __all__ = [
-    "HOVER_POLICY_INTERFACE",
-    "LoadedVectorPolicy",
+    "LoadedPolicy",
     "METADATA_FILENAME",
     "POLICY_FILENAME",
-    "PRESS_POLICY_INTERFACE",
     "PolicyContract",
-    "build_policy_step_fn",
-    "load_policy_contract",
+    "PolicyInterface",
+    "PolicyMetadata",
+    "load_policy",
     "load_policy_metadata",
-    "load_vector_policy",
     "policy_metadata",
     "validate_policy_artifact",
 ]
 
 POLICY_FILENAME = "policy.pt"
 METADATA_FILENAME = "policy_meta.json"
-HOVER_POLICY_INTERFACE = "hover-v1"
-PRESS_POLICY_INTERFACE = "press-v1"
+
 
 _SCALE_FIELDS = (
     "max_body_velocity_mps",
@@ -60,16 +54,6 @@ _SCALE_FIELDS = (
     "max_body_rate_radps",
     "hover_thrust_fraction",
 )
-_INTERFACE_OBSERVATIONS = {
-    HOVER_POLICY_INTERFACE: (
-        HOVER_OBSERVATION_SCHEMA_VERSION,
-        HOVER_OBSERVATION_DIM,
-    ),
-    PRESS_POLICY_INTERFACE: (
-        OBSERVATION_SCHEMA_VERSION,
-        PRESS_OBSERVATION_DIM,
-    ),
-}
 _ACTION_DIMENSIONS = {"velocity": 4, "ctbr": 4}
 
 
@@ -77,7 +61,7 @@ _ACTION_DIMENSIONS = {"velocity": 4, "ctbr": 4}
 class PolicyContract:
     """Artifact-owned interpretation of observations and normalized actions."""
 
-    policy_interface: str
+    policy_interface: PolicyInterface
     obs_schema_version: int
     obs_dim: int
     policy_rate_hz: float
@@ -90,11 +74,24 @@ class PolicyContract:
 
 
 @dataclass(frozen=True)
-class LoadedVectorPolicy:
-    """Validated artifact contract paired with its CPU inference callable."""
+class PolicyMetadata:
+    """Validated runtime contract paired with the complete stored JSON record."""
 
     contract: PolicyContract
+    values: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class LoadedPolicy:
+    """Validated artifact contract paired with its CPU inference callable."""
+
+    metadata: PolicyMetadata
     inference: Callable[[np.ndarray], np.ndarray]
+
+    @property
+    def contract(self) -> PolicyContract:
+        """Return the already-validated artifact contract."""
+        return self.metadata.contract
 
 
 def _metadata_value(
@@ -155,17 +152,17 @@ def _infer_legacy_interface(
         and metadata.get("obs_schema_version") == HOVER_OBSERVATION_SCHEMA_VERSION
         and metadata.get("obs_dim") == HOVER_OBSERVATION_DIM
     ):
-        metadata["policy_interface"] = HOVER_POLICY_INTERFACE
+        metadata["policy_interface"] = PolicyInterface.HOVER_V1.value
         return
     if (
         complete
-        and metadata.get("obs_schema_version") == OBSERVATION_SCHEMA_VERSION
+        and metadata.get("obs_schema_version") == PRESS_OBSERVATION_SCHEMA_VERSION
         and metadata.get("obs_dim") == PRESS_OBSERVATION_DIM
         and metadata.get("policy_rate_hz") == 20.0
         and metadata.get("action_kind") == "velocity"
         and metadata.get("action_dim") == 4
     ):
-        metadata["policy_interface"] = PRESS_POLICY_INTERFACE
+        metadata["policy_interface"] = PolicyInterface.PRESS_V1.value
         warnings.warn(
             f"policy artifact {artifact_dir} uses legacy press metadata without "
             "policy_interface; inferred press-v1 from its complete schema tuple. "
@@ -186,11 +183,12 @@ def policy_metadata(
     obs_schema_version: int,
     obs_dim: int,
     policy_rate_hz: float,
-    policy_interface: str,
+    policy_interface: Union[str, PolicyInterface],
 ) -> dict[str, Any]:
     """Compose metadata for a contract authored by a training config."""
+    interface = PolicyInterface(policy_interface)
     return {
-        "policy_interface": str(policy_interface),
+        "policy_interface": interface.value,
         "obs_schema_version": int(obs_schema_version),
         "obs_dim": int(obs_dim),
         "policy_rate_hz": float(policy_rate_hz),
@@ -200,8 +198,7 @@ def policy_metadata(
     }
 
 
-def load_policy_metadata(*, artifact_dir: Union[str, Path]) -> dict[str, Any]:
-    """Read policy metadata and apply the narrow schema-v1 legacy inference."""
+def _read_metadata(*, artifact_dir: Path) -> dict[str, Any]:
     artifact_dir = Path(artifact_dir)
     metadata_path = artifact_dir / METADATA_FILENAME
     if not metadata_path.is_file():
@@ -222,29 +219,29 @@ def load_policy_metadata(*, artifact_dir: Union[str, Path]) -> dict[str, Any]:
     return metadata
 
 
-def load_policy_contract(*, artifact_dir: Union[str, Path]) -> PolicyContract:
-    """Parse and validate the artifact-owned policy contract."""
-    artifact_dir = Path(artifact_dir)
-    metadata = load_policy_metadata(artifact_dir=artifact_dir)
-    interface = _metadata_value(
+def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMetadata:
+    interface_value = _metadata_value(
         metadata=metadata,
         name="policy_interface",
         artifact_dir=artifact_dir,
     )
-    if not isinstance(interface, str) or interface not in _INTERFACE_OBSERVATIONS:
+    try:
+        interface = PolicyInterface(interface_value)
+    except (TypeError, ValueError) as exc:
         raise ValueError(
-            f"policy artifact {artifact_dir} has unsupported policy_interface={interface!r}"
-        )
+            f"policy artifact {artifact_dir} has unsupported "
+            f"policy_interface={interface_value!r}"
+        ) from exc
     obs_schema_version = _integer(
         metadata=metadata,
         name="obs_schema_version",
         artifact_dir=artifact_dir,
     )
     obs_dim = _integer(metadata=metadata, name="obs_dim", artifact_dir=artifact_dir)
-    expected_observation = _INTERFACE_OBSERVATIONS[interface]
+    expected_observation = INTERFACE_OBSERVATIONS[interface]
     if (obs_schema_version, obs_dim) != expected_observation:
         raise ValueError(
-            f"policy artifact {artifact_dir} has unsupported {interface} observation "
+            f"policy artifact {artifact_dir} has unsupported {interface.value} observation "
             f"contract {(obs_schema_version, obs_dim)!r}; expected {expected_observation!r}"
         )
     policy_rate_hz = _finite_positive(
@@ -295,8 +292,8 @@ def load_policy_contract(*, artifact_dir: Union[str, Path]) -> PolicyContract:
             f"policy artifact {artifact_dir} metadata "
             "action_scales.hover_thrust_fraction must not exceed 1"
         )
-    return PolicyContract(
-        policy_interface=str(interface),
+    contract = PolicyContract(
+        policy_interface=interface,
         obs_schema_version=obs_schema_version,
         obs_dim=obs_dim,
         policy_rate_hz=policy_rate_hz,
@@ -304,37 +301,29 @@ def load_policy_contract(*, artifact_dir: Union[str, Path]) -> PolicyContract:
         action_dim=action_dim,
         **parsed_scales,
     )
-
-
-def _validate_runtime_observation(
-    *,
-    contract: PolicyContract,
-    artifact_dir: Path,
-    obs_schema_version: int,
-    obs_dim: int,
-    policy_interface: str,
-) -> None:
-    runtime = (policy_interface, obs_schema_version, obs_dim)
-    artifact = (
-        contract.policy_interface,
-        contract.obs_schema_version,
-        contract.obs_dim,
+    return PolicyMetadata(
+        contract=contract,
+        values=MappingProxyType(metadata),
     )
-    if runtime != artifact:
-        raise ValueError(
-            f"policy artifact {artifact_dir} contract {artifact!r} is incompatible "
-            f"with runtime observation {runtime!r}"
-        )
+
+
+def _load_metadata(*, artifact_dir: Path) -> PolicyMetadata:
+    return _parse_metadata(
+        artifact_dir=artifact_dir,
+        metadata=_read_metadata(artifact_dir=artifact_dir),
+    )
+
+
+def load_policy_metadata(*, artifact_dir: Union[str, Path]) -> PolicyMetadata:
+    """Read and validate an artifact's complete metadata record once."""
+    return _load_metadata(artifact_dir=Path(artifact_dir))
 
 
 def validate_policy_artifact(
     *,
     artifact_dir: Union[str, Path],
-    obs_schema_version: int,
-    obs_dim: int,
-    policy_interface: str,
-) -> PolicyContract:
-    """Validate an artifact and the runtime observation contract without Torch."""
+) -> PolicyMetadata:
+    """Validate a complete artifact without importing Torch."""
     artifact_dir = Path(artifact_dir)
     module_path = artifact_dir / POLICY_FILENAME
     metadata_path = artifact_dir / METADATA_FILENAME
@@ -344,33 +333,24 @@ def validate_policy_artifact(
             f"{METADATA_FILENAME}; train and select one first "
             "(make train-rl, then make select-rl-checkpoint)"
         )
-    contract = load_policy_contract(artifact_dir=artifact_dir)
-    _validate_runtime_observation(
-        contract=contract,
-        artifact_dir=artifact_dir,
-        obs_schema_version=obs_schema_version,
-        obs_dim=obs_dim,
-        policy_interface=policy_interface,
-    )
-    return contract
+    return _load_metadata(artifact_dir=artifact_dir)
 
 
-def load_vector_policy(
+def load_policy(
     *,
     artifact_dir: Union[str, Path],
-    obs_schema_version: int,
-    obs_dim: int,
-    policy_interface: str,
-) -> LoadedVectorPolicy:
-    """Load a vector policy after validating artifact/runtime compatibility."""
+) -> LoadedPolicy:
+    """Load a vector policy after reading and validating its artifact once."""
     artifact_dir = Path(artifact_dir)
     module_path = artifact_dir / POLICY_FILENAME
-    contract = validate_policy_artifact(
-        artifact_dir=artifact_dir,
-        obs_schema_version=obs_schema_version,
-        obs_dim=obs_dim,
-        policy_interface=policy_interface,
-    )
+    if not module_path.is_file():
+        raise ValueError(
+            f"policy artifact {artifact_dir} is missing {POLICY_FILENAME} or "
+            f"{METADATA_FILENAME}; train and select one first "
+            "(make train-rl, then make select-rl-checkpoint)"
+        )
+    metadata = _load_metadata(artifact_dir=artifact_dir)
+    contract = metadata.contract
 
     import torch
 
@@ -399,24 +379,4 @@ def load_vector_policy(
             )
         return action_np[0] if single else action_np
 
-    return LoadedVectorPolicy(contract=contract, inference=run)
-
-
-def build_policy_step_fn(
-    *,
-    artifact_dir: Union[str, Path],
-) -> Callable[["VehicleState", np.ndarray], "Union[VelocitySetpoint, AttitudeRateSetpoint]"]:
-    """Compose the hover policy's state-to-OFFBOARD callable."""
-    loaded = load_vector_policy(
-        artifact_dir=artifact_dir,
-        obs_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
-        obs_dim=HOVER_OBSERVATION_DIM,
-        policy_interface=HOVER_POLICY_INTERFACE,
-    )
-
-    def step(state: "VehicleState", target_enu: np.ndarray):
-        observation = hover_observation_from_state(state, target_enu)
-        action = np.clip(loaded.inference(observation), -1.0, 1.0)
-        return press_action_to_offboard(action, loaded.contract)
-
-    return step
+    return LoadedPolicy(metadata=metadata, inference=run)

@@ -13,12 +13,11 @@ __all__ = [
     "CandidateEvaluation",
     "CheckpointCandidate",
     "CheckpointSelection",
+    "CheckpointScorer",
     "MetricValue",
     "RewardMean",
-    "SelectedCheckpoint",
     "enumerate_checkpoints",
     "publish_latest",
-    "register_checkpoint_scorer",
     "select_checkpoint",
 ]
 
@@ -62,28 +61,18 @@ class CandidateEvaluation:
 
 
 @dataclass(frozen=True)
-class SelectedCheckpoint:
-    """The checkpoint chosen for artifact export."""
-
-    iteration: int
-    path: Path
-
-
-@dataclass(frozen=True)
 class CheckpointSelection:
     """All scorer results and the selected checkpoint."""
 
     selection_method: str
-    candidates: tuple[CandidateEvaluation, ...]
-    selected: SelectedCheckpoint | None
+    evaluations: tuple[CandidateEvaluation, ...]
+    selected: CheckpointCandidate
 
 
 CheckpointScorer = Callable[
     [tuple[CheckpointCandidate, ...]],
     tuple[CandidateEvaluation, ...],
 ]
-
-_SCORERS: dict[str, tuple[str, CheckpointScorer]] = {}
 
 
 def enumerate_checkpoints(*, logs_dir: Path) -> tuple[CheckpointCandidate, ...]:
@@ -99,40 +88,30 @@ def enumerate_checkpoints(*, logs_dir: Path) -> tuple[CheckpointCandidate, ...]:
     return tuple(candidates)
 
 
-def register_checkpoint_scorer(
-    *,
-    policy_interface: str,
-    selection_method: str,
-    scorer: CheckpointScorer,
-) -> None:
-    """Register the checkpoint scorer for one artifact policy interface."""
-    _SCORERS[policy_interface] = (selection_method, scorer)
-
-
 def select_checkpoint(
     *,
     policy_interface: str,
     candidates: tuple[CheckpointCandidate, ...],
+    selection_method: str = "final-no-scorer",
+    scorer: CheckpointScorer | None = None,
 ) -> CheckpointSelection:
-    """Score candidates or select the final checkpoint when no scorer exists."""
+    """Select from explicit scorer results, or use the final checkpoint."""
     if not candidates:
         raise ValueError("checkpoint selection requires at least one candidate")
-    registration = _SCORERS.get(policy_interface)
-    if registration is None:
+    if scorer is None:
         final = candidates[-1]
         warnings.warn(
-            f"no checkpoint scorer registered for policy_interface={policy_interface!r}; "
+            f"no checkpoint scorer provided for policy_interface={policy_interface!r}; "
             f"selecting final checkpoint iteration {final.iteration}",
             RuntimeWarning,
             stacklevel=2,
         )
         return CheckpointSelection(
             selection_method="final-no-scorer",
-            candidates=(),
-            selected=SelectedCheckpoint(iteration=final.iteration, path=final.path),
+            evaluations=(),
+            selected=final,
         )
 
-    selection_method, scorer = registration
     evaluations = scorer(candidates)
     if tuple(evaluation.candidate for evaluation in evaluations) != candidates:
         raise ValueError("checkpoint scorer did not evaluate every candidate in order")
@@ -141,11 +120,8 @@ def select_checkpoint(
     selected = max(ranked, key=lambda evaluation: evaluation.ranking_values)
     return CheckpointSelection(
         selection_method=selection_method,
-        candidates=evaluations,
-        selected=SelectedCheckpoint(
-            iteration=selected.candidate.iteration,
-            path=selected.candidate.path,
-        ),
+        evaluations=evaluations,
+        selected=selected.candidate,
     )
 
 

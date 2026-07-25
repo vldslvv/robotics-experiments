@@ -9,18 +9,18 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from robotics_experiments.rl.press import (
+from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
-    HOVER_POLICY_INTERFACE,
     METADATA_FILENAME,
     POLICY_FILENAME,
-    PRESS_POLICY_INTERFACE,
-    LoadedVectorPolicy,
+    LoadedPolicy,
     PolicyContract,
-    build_policy_step_fn,
-    load_policy_contract,
+    PolicyInterface,
+    PolicyMetadata,
+    hover_observation_from_state,
+    load_policy,
     load_policy_metadata,
-    load_vector_policy,
+    policy_action_to_offboard,
     policy_metadata,
     validate_policy_artifact,
 )
@@ -44,12 +44,12 @@ def _action_cfg(**overrides):
 
 def _metadata(
     *,
-    interface: str = HOVER_POLICY_INTERFACE,
+    interface: PolicyInterface = PolicyInterface.HOVER_V1,
     action_cfg=None,
     rate_hz: float = 20.0,
 ) -> dict:
     action_cfg = _action_cfg() if action_cfg is None else action_cfg
-    obs_dim = HOVER_OBSERVATION_DIM if interface == HOVER_POLICY_INTERFACE else 34
+    obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER_V1 else 34
     return policy_metadata(
         action_cfg=action_cfg,
         obs_schema_version=1,
@@ -80,7 +80,7 @@ def _write_torch_artifact(path: Path, metadata: dict) -> Path:
 
 def test_missing_artifact_raises_with_hint(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="train and select one first"):
-        build_policy_step_fn(artifact_dir=tmp_path)
+        validate_policy_artifact(artifact_dir=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -112,25 +112,20 @@ def test_contract_rejects_malformed_or_unsupported_metadata_before_torch(
     _write_metadata_artifact(tmp_path, {**_metadata(), **mutation})
 
     with pytest.raises(ValueError, match=message):
-        validate_policy_artifact(
-            artifact_dir=tmp_path,
-            obs_schema_version=1,
-            obs_dim=HOVER_OBSERVATION_DIM,
-            policy_interface=HOVER_POLICY_INTERFACE,
-        )
+        validate_policy_artifact(artifact_dir=tmp_path)
 
 
 def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None:
     (tmp_path / POLICY_FILENAME).write_bytes(b"not torch")
     (tmp_path / METADATA_FILENAME).write_text("{")
     with pytest.raises(ValueError, match="malformed"):
-        load_policy_contract(artifact_dir=tmp_path)
+        load_policy_metadata(artifact_dir=tmp_path)
 
     metadata = _metadata()
     del metadata["action_scales"]["max_yaw_rate_radps"]
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="max_yaw_rate_radps"):
-        load_policy_contract(artifact_dir=tmp_path)
+        load_policy_metadata(artifact_dir=tmp_path)
 
 
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
@@ -146,8 +141,15 @@ def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
         _metadata(action_cfg=trained_action),
     )
 
-    step = build_policy_step_fn(artifact_dir=artifact)
-    setpoint = step(VehicleState.hover_at(), np.array([0.0, 0.0, 1.0]))
+    loaded = load_policy(artifact_dir=artifact)
+    observation = hover_observation_from_state(
+        VehicleState.hover_at(),
+        np.array([0.0, 0.0, 1.0]),
+    )
+    setpoint = policy_action_to_offboard(
+        np.clip(loaded.inference(observation), -1.0, 1.0),
+        loaded.contract,
+    )
 
     assert isinstance(setpoint, VelocitySetpoint)
     assert setpoint.forward_mps == pytest.approx(0.5)
@@ -156,20 +158,16 @@ def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
     assert setpoint.yaw_rate_radps == pytest.approx(-0.1)
 
 
-def test_load_vector_policy_carries_contract_and_accepts_batches(tmp_path: Path) -> None:
+def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Path) -> None:
     artifact = _write_torch_artifact(
         tmp_path,
-        _metadata(interface=PRESS_POLICY_INTERFACE),
+        _metadata(interface=PolicyInterface.PRESS_V1),
     )
 
-    loaded = load_vector_policy(
-        artifact_dir=artifact,
-        obs_schema_version=1,
-        obs_dim=34,
-        policy_interface=PRESS_POLICY_INTERFACE,
-    )
+    loaded = load_policy(artifact_dir=artifact)
 
-    assert isinstance(loaded, LoadedVectorPolicy)
+    assert isinstance(loaded, LoadedPolicy)
+    assert isinstance(loaded.metadata, PolicyMetadata)
     assert isinstance(loaded.contract, PolicyContract)
     assert loaded.contract.policy_rate_hz == 20.0
     assert loaded.inference(np.zeros(34)).shape == (4,)
@@ -181,23 +179,29 @@ def test_load_vector_policy_carries_contract_and_accepts_batches(tmp_path: Path)
 def test_metadata_interface_selects_exact_legacy_contracts(tmp_path: Path) -> None:
     hover = _metadata()
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(hover))
-    assert load_policy_contract(artifact_dir=tmp_path).policy_interface == HOVER_POLICY_INTERFACE
+    assert (
+        load_policy_metadata(artifact_dir=tmp_path).contract.policy_interface
+        is PolicyInterface.HOVER_V1
+    )
 
     legacy_hover = {key: value for key, value in hover.items() if key != "policy_interface"}
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
-    assert load_policy_contract(artifact_dir=tmp_path).policy_interface == HOVER_POLICY_INTERFACE
+    assert (
+        load_policy_metadata(artifact_dir=tmp_path).contract.policy_interface
+        is PolicyInterface.HOVER_V1
+    )
 
-    legacy_press = _metadata(interface=PRESS_POLICY_INTERFACE)
+    legacy_press = _metadata(interface=PolicyInterface.PRESS_V1)
     legacy_press.pop("policy_interface")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
     with pytest.warns(RuntimeWarning, match="inferred press-v1"):
-        contract = load_policy_contract(artifact_dir=tmp_path)
-    assert contract.policy_interface == PRESS_POLICY_INTERFACE
+        metadata = load_policy_metadata(artifact_dir=tmp_path)
+    assert metadata.contract.policy_interface is PolicyInterface.PRESS_V1
 
     legacy_press["policy_rate_hz"] = 19.0
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
     with pytest.raises(ValueError, match="re-export"):
-        load_policy_contract(artifact_dir=tmp_path)
+        load_policy_metadata(artifact_dir=tmp_path)
 
     legacy_hover.pop("action_scales")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
@@ -236,14 +240,14 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
     old_run.mkdir(parents=True)
     _write_metadata_artifact(
         old_run,
-        _metadata(interface=PRESS_POLICY_INTERFACE),
+        _metadata(interface=PolicyInterface.PRESS_V1),
     )
     latest_run = policy_root / "latest-run"
     latest_run.mkdir()
     _write_metadata_artifact(
         latest_run,
         _metadata(
-            interface=PRESS_POLICY_INTERFACE,
+            interface=PolicyInterface.PRESS_V1,
             action_cfg=_action_cfg(max_body_velocity_mps=0.5),
             rate_hz=17.0,
         ),
@@ -256,9 +260,9 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
         repo_root=tmp_path,
     )
 
-    assert validated[0][1] == artifact
-    assert validated[0][2]["policy_rate_hz"] == 17.0
-    assert validated[0][2]["action_scales"]["max_body_velocity_mps"] == 0.5
+    assert validated.policies[0].artifact == artifact
+    assert validated.policies[0].metadata.contract.policy_rate_hz == 17.0
+    assert validated.policies[0].metadata.contract.max_body_velocity_mps == 0.5
 
 
 def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> None:
@@ -268,7 +272,7 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
         artifact.mkdir()
         _write_metadata_artifact(
             artifact,
-            _metadata(interface=PRESS_POLICY_INTERFACE, rate_hz=rate_hz),
+            _metadata(interface=PolicyInterface.PRESS_V1, rate_hz=rate_hz),
         )
         artifacts.append(artifact)
 
@@ -305,4 +309,4 @@ def test_current_press_artifact_preflights_when_available() -> None:
         repo_root=REPO_ROOT,
     )
 
-    assert validated[0][1].resolve() == artifact.resolve()
+    assert validated.policies[0].artifact.resolve() == artifact.resolve()

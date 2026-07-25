@@ -26,9 +26,9 @@ import numpy as np
 from robotics_experiments.commanding import AttitudeRateSetpoint, VelocitySetpoint
 
 if TYPE_CHECKING:
-    from robotics_experiments.rl.press.policy import PolicyContract
+    from robotics_experiments.rl.policy import PolicyContract
 
-__all__ = ["press_action_to_offboard"]
+__all__ = ["policy_action_to_offboard"]
 
 
 def _velocity_setpoint(action: np.ndarray, contract: "PolicyContract") -> VelocitySetpoint:
@@ -54,7 +54,7 @@ def _attitude_target(action: np.ndarray, contract: "PolicyContract") -> Attitude
     )
 
 
-def press_action_to_offboard(action: np.ndarray, contract: "PolicyContract"):
+def policy_action_to_offboard(action: np.ndarray, contract: "PolicyContract"):
     """Map a normalized RL action to a PX4 OFFBOARD setpoint wire payload.
 
     Args:

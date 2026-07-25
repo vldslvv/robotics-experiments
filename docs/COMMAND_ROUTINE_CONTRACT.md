@@ -120,8 +120,11 @@ the entire fleet cycle.
   per `{kind: policy, artifact, timeout_s[, name, target, switch_index]}` descriptor
   and raises `ValueError` without it (or on a missing/mismatched artifact), which
   the driver's BUILD phase routes through `on_failure` as `FailureKind.COMMAND`.
-  Artifact metadata contains `policy_interface`, which currently selects
-  `hover-v1` or `press-v1` in runtime without adding a task-specific routine kind.
+  Artifact metadata contains the typed `PolicyInterface`, which selects
+  `hover-v1` or `press-v1` in the private runtime policy module without adding
+  a task-specific routine kind. The fleet orchestrator only preflights
+  configured artifacts, prepares interface-required resources, and injects the
+  module's adapter factory.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
   `.build/training/hover/latest` followed by `.build/training/press/latest`.
@@ -168,7 +171,7 @@ the entire fleet cycle.
   `velocity` action, and `send_attitude_target` serializes an
   `AttitudeRateSetpoint` to `SET_ATTITUDE_TARGET` (collective thrust + body rates)
   for `ctbr`. The pure body-FLU action -> body-FRD payload mapping lives in
-  `robotics_experiments.rl.press.press_action_to_offboard`; every learned task,
+  `robotics_experiments.rl.policy_action_to_offboard`; every learned task,
   including handoff-gated switch pressing, remains a `{kind: policy}` routine
   step. There is intentionally no `{kind: press}` branch in commanding.
 - **`driver.py`** -- the frozen, per-drone `DriverContext` (parameters, port,

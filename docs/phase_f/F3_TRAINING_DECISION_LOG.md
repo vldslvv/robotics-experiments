@@ -1407,3 +1407,117 @@ stable first contact, 0.3356 retreat, 0.3300 full completion, a 0.700 s median
 toggle time, and 2.00 mm peak compression overshoot. It failed first-contact
 stability and retreat acceptance. Consequently
 `test-integration-press-routine` was not run.
+
+### 32. Improve joint safe completion before changing actor capacity
+
+#### Interpret the current completion metric correctly
+
+Plain-language view: The current network has already demonstrated that it can
+press and retreat, but it has not learned to combine a gentle first contact
+with a reliable retreat. More hidden layers are therefore not the next
+experiment. The immediate problem is objective alignment and optimization
+stability across the precontact and post-toggle phases.
+
+Technical view: `full_completion_rate` currently counts episodes that reached
+stable retreat, regardless of whether first contact was stable. Checkpoint 75
+therefore achieved 0.9967 raw full completion while achieving only 0.1767
+stable first contact. Iterations 75/100/125/149 then achieved retreat rates of
+1.0/0.4733/0.0/0.3356 while contact stability moved to
+0.1767/0.2033/0.3000/0.2367. This rapid, partly opposing movement with the
+unchanged `[256, 256, 128]` actor is evidence of phase interference and
+destructive PPO updates, not an established representation-capacity limit.
+
+Add a diagnostic `safe_full_completion_rate` that requires stable first
+contact, confirmed toggle, and stable retreat in the same episode. Preserve
+the three existing acceptance gates because their separate denominators explain
+which phase failed. Do not publish checkpoint 75 merely for its raw completion:
+it remains unsafe and rejected.
+
+#### Diagnose the failing predicate before retuning
+
+Extend deterministic evaluation diagnostics before the next training run.
+Record wall-normal, lateral, total linear, and angular velocity at first
+contact; approach speed by range; the delay from toggle to contact release and
+first retreat command; and the final failed retreat predicate (contact release,
+distance, alignment, linear speed, angular speed, crash, or timeout). Report
+per-seed distributions and margins to the configured thresholds, not only
+means or booleans. Re-evaluate existing checkpoints 0, 50, 75, 100, 125, and
+149 with these diagnostics.
+
+Also inspect PPO KL, clip fraction, action standard deviation, value loss, and
+explained variance when available. A KL or clip-fraction spike indicates
+oversized actor updates. Persistently poor value estimates, especially early in
+actor-only fine-tuning with a fresh critic, indicate a critic warm-up or
+separate actor/critic learning-rate experiment rather than a larger actor.
+
+#### Align downstream credit with stable first contact
+
+Plain-language view: An unstable hit can currently remain profitable because it
+may still collect latch, toggle, retreat-progress, and physical retreat success
+credit. Gating only the terminal bonus does not make gentle contact a
+prerequisite for the learned task.
+
+Technical view: In the next objective experiment, make stable first contact a
+prerequisite for downstream task credit. Prefer terminating an unstable
+first-contact episode with an explicit failure-scale cost because it produces a
+clear advantage signal. If preserving post-contact diagnostic experience is
+more important, continue the physical episode but gate latch, toggle, retreat,
+and terminal-success reward on stable first contact. Continue to report the
+physical toggle and retreat events independently.
+
+Replace the short near-contact total-speed penalty with dense braking guidance
+over the complete 0.40-0.50 m reset envelope. Use wall-normal closing velocity,
+with a distance-dependent target that approaches the configured contact-speed
+limit near the switch. Keep separate lateral and angular control terms. Do not
+begin by increasing the one-shot gentle-contact weight again: the policy needs
+a useful slowing gradient before contact, not only a larger reward after the
+outcome is already determined.
+
+#### Run a conservative checkpoint-75 experiment
+
+Warm-start from run `20260723T231822Z.117549`, checkpoint 75, because that actor
+already owns reliable post-toggle retreat. Keep the observation, action
+authority, and `[256, 256, 128]` MLP unchanged for the first comparison. Use a
+smaller actor update, initially comparing a fixed `5e-5` learning rate and 0.10
+initial action noise, save every 5-10 iterations, and evaluate a 50-75
+iteration run. If KL or clip fraction remains high, compare `2e-5`, fewer PPO
+epochs, or a smaller clip range. Change one material variable per comparison
+and rank deterministic checkpoints by the existing acceptance gates plus the
+new joint diagnostic.
+
+If retreat is still forgotten while contact improves, preserve checkpoint 75's
+post-toggle behavior explicitly with an anchor/distillation loss on
+post-toggle observations or balanced precontact/post-toggle reset sampling.
+This is a more direct response to catastrophic forgetting than increasing
+generic network depth.
+
+#### Escalate architecture only with phase-interference evidence
+
+Do not add hidden layers or recurrence initially. The existing observation
+already supplies pose, velocity, angular velocity, contact, compression and
+compression rate, lamp state, and previous action. There is no current evidence
+that missing history requires an LSTM.
+
+If corrected rewards, smaller updates, and retreat anchoring repeatedly show
+that contact improvement destroys retreat, test a shared trunk with separate
+pre-toggle and post-toggle actor heads selected by lamp state. This
+phase-specific architecture directly isolates the behaviors that are
+interfering. Test generic actor capacity only if training and deterministic
+evaluation both plateau under an aligned objective while KL, clipping, and
+critic learning remain stable. If value learning alone is inadequate, change
+critic capacity before actor capacity.
+
+Use these decision signals:
+
+- High wall-normal impact speed: improve dense braking and stable-contact
+  prerequisite.
+- Near-threshold contact misses: adjust shaping margin and reduce update noise.
+- Alignment-dominated retreat failures: retune retreat alignment behavior.
+- Large checkpoint-to-checkpoint phase swings: reduce update size, checkpoint
+  more frequently, and anchor the learned phase.
+- High training performance but low deterministic evaluation: inspect
+  exploration dependence and train/evaluation mismatch.
+- Passing Lab evaluation but failing the live routine: inspect observation,
+  controller, and simulator-to-deployment parity instead of model capacity.
+- Stable optimization and a repeatable capacity plateau: only then compare a
+  larger actor under identical seeds, objective, and sample budget.

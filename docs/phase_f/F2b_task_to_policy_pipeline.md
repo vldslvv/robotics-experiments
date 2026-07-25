@@ -133,20 +133,20 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
   scale values (`max_body_velocity_mps` / `max_yaw_rate_radps` /
   `max_body_rate_radps` / `hover_thrust_fraction` as applicable to the kind).
   The artifact = module + metadata; a bare checkpoint is not a valid artifact.
-- Action: create the press policy-artifact loader at `robotics_experiments.rl.press`
-  (implemented in `src/robotics_experiments/rl/press/policy.py`; imports
+- Action: create the task-neutral policy-artifact loader at
+  `robotics_experiments.rl` (implemented in
+  `src/robotics_experiments/rl/policy.py`; imports
   torch only inside functions, like `MavlinkCommandPort` imports pymavlink
-  inside methods). Provide
-  `build_policy_step_fn(*, artifact_dir)` returning
-  a `Callable[[VehicleState, np.ndarray], setpoint]`
+  inside methods). Provide `load_policy(*, artifact_dir)` returning a
+  `LoadedPolicy`
   that loads the artifact and raises `ValueError` on a malformed, unsupported,
   or structurally incompatible contract -- fail loudly at load, never a shape
   error deep in the driver. Physical action scales and cadence come from the
   artifact, not deployment Hydra. It imports neither rsl_rl nor
   the training stack; the runtime depends only on this seam, never on the
   training library.
-- Test: `tests/src/robotics_experiments/rl/press/test_press_policy.py`: a tiny exported identity/linear
-  TorchScript module + metadata round-trips through `build_policy_step_fn`
+- Test: `tests/src/robotics_experiments/rl/test_policy.py`: a tiny exported identity/linear
+  TorchScript module + metadata round-trips through `load_policy`
   (guarded on torch availability); each metadata field mismatch (version, kind,
   dims, a scale) rejects with `ValueError`.
 - Done when: an exported artifact loads and infers with the training stack
@@ -180,7 +180,7 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
   (`Callable[[np.ndarray], np.ndarray]`, deterministic, no I/O) carried by the
   step, so the per-tick chain inside `decide` is pure end-to-end:
   pack the Step-2 layout from `RoutineObservation.vehicle_state` (+ the step's
-  target position) -> `policy(obs)` -> `robotics_experiments.rl.press.press_action_to_offboard`
+  target position) -> `policy(obs)` -> `robotics_experiments.rl.policy_action_to_offboard`
   -> a `STREAM` decision carrying the setpoint payload. Policy inference runs
   only when its exact-average artifact cadence is due; the latest
   payload is held and transmitted independently at
@@ -233,8 +233,8 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
 
 - edit `workflows/isaac_lab/tasks/drone_hover_env.py` (task-as-config, body
   ang vel observation)
-- add the pure hover-observation layout module under `press/`;
-  add `rl/press/policy.py`, `rl/training/__init__.py`,
+- add the pure hover-observation layout as `rl/observation.py`;
+  add `rl/policy.py`, `rl/training/__init__.py`,
   `rl/training/rsl_rl.py`; edit `rl/__init__.py` (re-exports)
 - edit the owning private RL config module (`PressHoverTaskConfig`,
   `RlTrainingConfig`), `configs/experiment/rl/default.yaml`, and

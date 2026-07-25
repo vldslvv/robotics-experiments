@@ -31,16 +31,20 @@ Status as of 2026-07-22:
   `driver.offboard_setpoint_rate_hz`, and ticks drivers at
   `driver.control_rate_hz`. Do not collapse these into one fixed decimation or
   assume they are equal.
-- Policy metadata includes observation schema/dimension, action contract, and
-  `policy_rate_hz`. These values are artifact-owned after export; changing
-  training YAML does not reinterpret an existing artifact.
+- `robotics_experiments.rl` owns task-neutral actuation, hover layout, artifact
+  metadata/loading, and normalized-action-to-OFFBOARD conversion.
+  `robotics_experiments.rl.press` owns only the press observation, handoff,
+  task/provider, and immutable deployment progress. Policy metadata includes
+  observation schema/dimension, action contract, and `policy_rate_hz`; these
+  values are artifact-owned after export.
 - Project-owned evolving state in `runtime`, `commanding`, and `px4_bridge` is a
   frozen dataclass advanced by stateless transitions. The remaining Phase F
   pure state machines, curriculum state, estimator state, and retry progress
   must follow the same model; mutable classes are reserved for external
   Isaac/PX4/torch adapters.
-- Consumers import config values from `robotics_experiments.config`, press APIs
-  from `robotics_experiments.rl.press`, and Isaac Lab workflow APIs from
+- Consumers import config values from `robotics_experiments.config`,
+  task-neutral RL APIs from `robotics_experiments.rl`, press-only APIs from
+  `robotics_experiments.rl.press`, and Isaac Lab workflow APIs from
   `robotics_experiments.workflows.isaac_lab`. New public exports are added only
   for production consumers.
 - Host tests mirror source paths under `tests/src/robotics_experiments/`; Isaac

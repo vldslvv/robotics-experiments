@@ -1,4 +1,4 @@
-"""Versioned, pure observation layouts for the press RL tasks.
+"""Versioned, pure observation layout for the press RL task.
 
 Each layout is a documented, versioned field order packed by a pure function
 (numpy + stdlib only; on the core import path). The schema version is recorded
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntFlag
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -26,72 +25,20 @@ from robotics_experiments.px4_bridge import (
     quat_wxyz_to_xyzw,
     rotate_vector_wxyz,
 )
-
-if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge import VehicleState
+from robotics_experiments.rl._interfaces import (
+    PRESS_OBSERVATION_DIM,
+    PRESS_OBSERVATION_SCHEMA_VERSION,
+)
 
 __all__ = [
-    "HOVER_OBSERVATION_DIM",
-    "HOVER_OBSERVATION_SCHEMA_VERSION",
     "OBSERVATION_SCHEMA_VERSION",
     "PRESS_OBSERVATION_DIM",
     "PressObservation",
     "PressObservationMask",
-    "hover_observation_from_state",
-    "pack_hover_observation",
     "pack_press_observation",
     "to_vector",
     "world_switch_to_contact_frame",
 ]
-
-# Bump whenever the hover layout below changes shape, order, units, or frame.
-HOVER_OBSERVATION_SCHEMA_VERSION = 1
-
-# Hover layout v1: [pos_err_enu(3), quat_flu_enu_wxyz(4), lin_vel_enu(3),
-# ang_vel_body_flu(3)] -- 13 floats. The angular velocity is body-FLU (matching
-# VehicleState.angular_velocity_flu and the actuation controller input); the
-# position error and linear velocity are world-ENU.
-HOVER_OBSERVATION_DIM = 13
-
-
-def pack_hover_observation(
-    position_err_enu: np.ndarray,
-    quat_flu_enu_wxyz: np.ndarray,
-    linear_velocity_enu: np.ndarray,
-    angular_velocity_body_flu: np.ndarray,
-) -> np.ndarray:
-    """Pack the hover layout (schema v1) into a float64 vector of length 13.
-
-    Args:
-        position_err_enu: World-ENU position minus the hover target, meters (3,).
-        quat_flu_enu_wxyz: Body-FLU -> world-ENU attitude quaternion, wxyz (4,).
-        linear_velocity_enu: World-ENU linear velocity, m/s (3,).
-        angular_velocity_body_flu: Body-FLU angular velocity, rad/s (3,).
-    """
-    vector = np.concatenate(
-        (
-            np.asarray(position_err_enu, dtype=np.float64).reshape(3),
-            np.asarray(quat_flu_enu_wxyz, dtype=np.float64).reshape(4),
-            np.asarray(linear_velocity_enu, dtype=np.float64).reshape(3),
-            np.asarray(angular_velocity_body_flu, dtype=np.float64).reshape(3),
-        )
-    )
-    return vector
-
-
-def hover_observation_from_state(state: VehicleState, target_enu: np.ndarray) -> np.ndarray:
-    """Assemble the hover layout from a live ``VehicleState`` (deploy side).
-
-    The deploy-time counterpart of the env's batched observation: identical
-    field order and frames, so a Lab-trained policy consumes it unchanged.
-    """
-    return pack_hover_observation(
-        state.position_enu - np.asarray(target_enu, dtype=np.float64).reshape(3),
-        state.orientation_flu_enu_wxyz,
-        state.linear_velocity_enu,
-        state.angular_velocity_flu,
-    )
-
 
 # ---- Contact frame -----------------------------------------------------------
 #
@@ -143,9 +90,9 @@ def world_switch_to_contact_frame(
 
 # ---- Press observation (the policy input for the press task family) ----------
 
-# Bump whenever the press layout (field set, order, units, or frames) changes.
-OBSERVATION_SCHEMA_VERSION = 1
-PRESS_OBSERVATION_DIM = 34
+# Bump the private interface contract whenever this field set, order, units, or
+# frames change.
+OBSERVATION_SCHEMA_VERSION = PRESS_OBSERVATION_SCHEMA_VERSION
 
 
 class PressObservationMask(IntFlag):

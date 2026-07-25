@@ -17,7 +17,7 @@ from robotics_experiments.px4_bridge import (
     PegasusQuadraticThrustModel,
     create_pegasus_thrust_model,
 )
-from robotics_experiments.rl.press import (
+from robotics_experiments.rl import (
     ActuationState,
     MixerGeometry,
     action_to_rotor_omega,

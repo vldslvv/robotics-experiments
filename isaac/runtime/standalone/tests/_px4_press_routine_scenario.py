@@ -9,7 +9,7 @@ __all__ = ["run_px4_press_routine_scenario"]
 
 
 def _validate_result(context: SceneTestContext, fleet) -> None:
-    from robotics_experiments.rl.press import PressDeploymentState
+    from robotics_experiments.rl.press import PressPolicyProgress
 
     if len(fleet.flying) != 1:
         raise AssertionError(f"press routine requires one flying drone, got {len(fleet.flying)}")
@@ -19,7 +19,7 @@ def _validate_result(context: SceneTestContext, fleet) -> None:
             f"press routine requires exactly one off-to-on lamp toggle: {events!r}"
         )
     progress = fleet.flying[0].driver.routine_state.last_policy_progress
-    if not isinstance(progress, PressDeploymentState):
+    if not isinstance(progress, PressPolicyProgress):
         raise AssertionError(f"press routine did not retain press policy progress: {progress!r}")
     if not progress.first_contact_seen or not progress.first_contact_stable:
         raise AssertionError(f"press routine first contact was absent or unstable: {progress!r}")

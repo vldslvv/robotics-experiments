@@ -184,7 +184,12 @@ the current contents and the intended home for that kind of code.
   Lab task/env package imports lazy; keep the in-Lab actuation seam pure and
   aligned with its numpy reference and torch twin; keep RL tunables in the Hydra
   `rl` group; keep task IDs, policy artifacts, and RL gates aligned with that
-  doc and the command/routine contract.
+  doc and the command/routine contract. `robotics_experiments.rl` is the public
+  boundary for task-neutral actuation, hover observation, artifact, and
+  normalized-action-to-OFFBOARD concepts; `robotics_experiments.rl.press`
+  exports only press observation, handoff, task, provider, and policy-progress
+  concepts. Runtime policy interface dispatch and adapter composition belong in
+  the private `runtime/_policy.py`, not the fleet orchestrator or commanding.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor

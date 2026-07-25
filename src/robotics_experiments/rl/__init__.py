@@ -1,8 +1,55 @@
-"""Reinforcement-learning packages.
+"""Public task-neutral reinforcement-learning contract."""
 
-Use ``robotics_experiments.rl.press`` for the press-flight contract and
-``robotics_experiments.rl.training.rsl_rl`` for the training adapter. This
-initializer intentionally provides no forwarding facade.
-"""
+from robotics_experiments.rl.actuation import (
+    ActuationParams,
+    ActuationState,
+    MixerGeometry,
+    action_to_rotor_omega,
+    build_actuation_params,
+    hover_action,
+    rotor_forces_to_body_wrench,
+)
+from robotics_experiments.rl.observation import (
+    HOVER_OBSERVATION_DIM,
+    HOVER_OBSERVATION_SCHEMA_VERSION,
+    hover_observation_from_state,
+    pack_hover_observation,
+)
+from robotics_experiments.rl.offboard import policy_action_to_offboard
+from robotics_experiments.rl.policy import (
+    METADATA_FILENAME,
+    POLICY_FILENAME,
+    LoadedPolicy,
+    PolicyContract,
+    PolicyInterface,
+    PolicyMetadata,
+    load_policy,
+    load_policy_metadata,
+    policy_metadata,
+    validate_policy_artifact,
+)
 
-__all__: list[str] = []
+__all__ = [
+    "ActuationParams",
+    "ActuationState",
+    "HOVER_OBSERVATION_DIM",
+    "HOVER_OBSERVATION_SCHEMA_VERSION",
+    "LoadedPolicy",
+    "METADATA_FILENAME",
+    "MixerGeometry",
+    "POLICY_FILENAME",
+    "PolicyContract",
+    "PolicyInterface",
+    "PolicyMetadata",
+    "action_to_rotor_omega",
+    "build_actuation_params",
+    "hover_action",
+    "hover_observation_from_state",
+    "load_policy",
+    "load_policy_metadata",
+    "pack_hover_observation",
+    "policy_action_to_offboard",
+    "policy_metadata",
+    "rotor_forces_to_body_wrench",
+    "validate_policy_artifact",
+]

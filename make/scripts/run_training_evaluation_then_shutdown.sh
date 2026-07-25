@@ -315,6 +315,26 @@ serve_tensorboard_when_ready() {
     return 1
 }
 
+run_stage() {
+    local target="$1"
+    local argument_name="$2"
+    local argument_value="$3"
+    local -a pipeline_status
+
+    set +e
+    make "${target}" \
+        "HYDRA_CONFIG=${hydra_config}" \
+        "RL_RUN_ID=${artifact_run_id}" \
+        "${argument_name}=${argument_value}" \
+        2>&1 | tee -a "${console_log}"
+    pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    stage_status="${pipeline_status[0]}"
+    if [ "${stage_status}" -eq 0 ] && [ "${pipeline_status[1]}" -ne 0 ]; then
+        stage_status="${pipeline_status[1]}"
+    fi
+}
+
 printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
@@ -336,18 +356,8 @@ if [ "${shutdown_requested}" = true ]; then
     sudo_keeper_pid=$!
 fi
 
-set +e
-make "${train_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "TRAIN_ARGS=${train_args}" \
-    2>&1 | tee -a "${console_log}"
-train_pipeline=("${PIPESTATUS[@]}")
-set -e
-train_status="${train_pipeline[0]}"
-if [ "${train_status}" -eq 0 ] && [ "${train_pipeline[1]}" -ne 0 ]; then
-    train_status="${train_pipeline[1]}"
-fi
+run_stage "${train_target}" "TRAIN_ARGS" "${train_args}"
+train_status="${stage_status}"
 
 if [ "${train_status}" -ne 0 ]; then
     exit "${train_status}"
@@ -363,34 +373,14 @@ if ! kill -0 "${tensorboard_monitor_pid}" 2>/dev/null; then
     fi
 fi
 
-set +e
-make "${select_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "SELECT_ARGS=${select_args}" \
-    2>&1 | tee -a "${console_log}"
-select_pipeline=("${PIPESTATUS[@]}")
-set -e
-select_status="${select_pipeline[0]}"
-if [ "${select_status}" -eq 0 ] && [ "${select_pipeline[1]}" -ne 0 ]; then
-    select_status="${select_pipeline[1]}"
-fi
+run_stage "${select_target}" "SELECT_ARGS" "${select_args}"
+select_status="${stage_status}"
 
 if [ "${select_status}" -ne 0 ]; then
     exit "${select_status}"
 fi
 
-set +e
-make "${eval_target}" \
-    "HYDRA_CONFIG=${hydra_config}" \
-    "RL_RUN_ID=${artifact_run_id}" \
-    "EVAL_ARGS=${eval_args}" \
-    2>&1 | tee -a "${console_log}"
-eval_pipeline=("${PIPESTATUS[@]}")
-set -e
-eval_status="${eval_pipeline[0]}"
-if [ "${eval_status}" -eq 0 ] && [ "${eval_pipeline[1]}" -ne 0 ]; then
-    eval_status="${eval_pipeline[1]}"
-fi
+run_stage "${eval_target}" "EVAL_ARGS" "${eval_args}"
+eval_status="${stage_status}"
 
 exit "${eval_status}"
