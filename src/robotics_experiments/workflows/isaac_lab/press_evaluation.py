@@ -98,7 +98,7 @@ def _evaluate_seed(
     episode_count: int,
     report: Callable[[str], None],
 ) -> tuple[tuple[PressEpisodeMetrics, ...], dict[str, tuple[float, int]]]:
-    reward_names = tuple(field.name for field in fields(PressRewardTerms))
+    reward_names = tuple(field.name for field in fields(PressRewardTerms)) + ("total",)
     reward_sums = torch.zeros(len(reward_names), dtype=torch.float32, device=env.device)
     reward_sample_count = torch.zeros((), dtype=torch.long, device=env.device)
     active = torch.ones(episode_count, dtype=torch.bool, device=env.device)

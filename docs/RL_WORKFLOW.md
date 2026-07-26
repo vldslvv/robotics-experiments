@@ -81,9 +81,9 @@ redundant physics-rate field in the Lab config. `max_episode_length` is fixed to
 `ceil(episode_length_s * policy_rate_hz)`, so the alternating decimation cannot
 shorten an episode (20 steps per simulated second and exactly 100 steps for the
 default five-second episode). The fixed render interval uses the ceiling
-decimation. The hover task's
-reward/termination/reset values are the `rl.press.hover_task` block (task
-definition = one YAML block; no task-tuning literal in the env module). The RL
+decimation. The hover task's reward/termination/reset values and network
+topology are the `rl.hover` block (task definition = one YAML block; no
+task-tuning literal in the env module). The RL
 action also maps to a PX4 OFFBOARD setpoint at deploy time
 (`policy_action_to_offboard` + the commanding-layer velocity / attitude-rate
 setpoint seams).
@@ -111,6 +111,27 @@ Press progression is the backend-neutral frozen `PressTaskState` advanced by
 `apply_button_sample` semantics. DirectRLEnv advances it once from `_get_dones`
 and caches the result for rewards and observations. Success is a confirmed
 toggle plus stable retreat; generic contact alone never earns toggle reward.
+
+The batched integer `phase` array stores the public `PressTaskPhase` values:
+
+| Phase | Entry | Active behavior |
+|---|---|---|
+| `APPROACH` | Episode reset | Signed range progress and near-contact speed shaping |
+| `CONTACT` | First measured pad contact | Compression, button, latch, toggle, and contact-quality shaping |
+| `RETREAT` | First confirmed toggle | Signed retreat, alignment, speed, contact, and delay shaping |
+
+Phase transitions are successor-state updates. The first-contact tick retains
+the established approach and contact gates, and the first-toggle tick
+transitions to `RETREAT` while retreat shaping and stable-retreat counting
+remain gated by the prior phase. This preserves their established one-tick
+timing.
+
+`rl.press.reward` mirrors the transition with `common`, `approach`, `contact`,
+`retreat`, `control`, and `terminal` groups. Shared success thresholds stay in
+`rl.press.termination`; compression target and overshoot tolerance are
+evaluation metrics under `rl.press.evaluation`. `PressRewardTerms.total` is the
+computed sum of every named component, and reporting code adds that property
+explicitly after enumerating the stored components.
 Confirmation progress is signed: every uninterrupted above-threshold sample
 earns part of the latch-progress reward, while releasing before confirmation
 removes the accumulated progress credit. Approach and retreat progress are also
@@ -166,7 +187,17 @@ Pieces:
   `TrainingResult` from
   `robotics_experiments.rl.training.rsl_rl`. The contract runs
   over `RlTrainingConfig` (the `rl.training` block, incl. explicit `task_id`
-  and `policy_name`).
+  and `policy_name`) plus the selected task config's `policy` block.
+  `build_runner(*, env, training_config, policy_config, log_dir, device)` is the
+  construction boundary; each Isaac Lab task config carries its own policy
+  configuration, so the generic trainer contains no task-ID topology branch.
+  Both tasks use rsl_rl's standard `ActorCritic` with a shared configured
+  activation, separate actor and critic weights, and independent hidden
+  dimensions. For press schema v1, the actor maps the same 34-value observation
+  used in training and deployment to a four-value normalized action mean; the
+  critic maps that observation to one scalar value estimate. They train jointly
+  under PPO, but checkpoint initialization and TorchScript export copy only the
+  actor.
   `make train-rl` (thin target in `make/rl.mk`, runs
   `isaac/runtime/standalone/train_rl.py` on `ISAAC_LAB_IMAGE`, never the base
   image) dispatches to separate new-run and manual-export paths. A new run
@@ -257,10 +288,11 @@ Pieces:
 
 `configs/train_press_quad.yaml` selects `Isaac-Switch-Press-Direct-v0`, the
 `press` artifact namespace, ten-second episodes, and the conservative
-fine-tuning PPO settings: fixed `1e-4` learning rate, 0.20 initial action noise,
-25-iteration checkpoints, and at most 150 iterations. The network, rollout,
-clipping, entropy, GAE, and batch settings remain the established press-task
-settings. Actor-only fine-tuning from the protected checkpoint-50 fallback is:
+fine-tuning PPO settings: fixed `1e-4` learning rate, 25-iteration checkpoints,
+and at most 150 iterations. `rl.press.policy` retains the 0.20 initial action
+noise and `[256, 256, 128]` actor and critic hidden dimensions. Rollout,
+clipping, entropy, GAE, and batch settings remain under `rl.training`.
+Actor-only fine-tuning from the protected checkpoint-50 fallback is:
 
 ```console
 make train-rl HYDRA_CONFIG=configs/train_press_quad.yaml RL_RUN_ID=<run-id> \

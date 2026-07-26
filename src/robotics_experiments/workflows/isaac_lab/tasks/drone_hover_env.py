@@ -107,6 +107,7 @@ class DroneHoverEnvCfg(DirectRLEnvCfg):
     observation_schema_version: int = cast(Any, MISSING)
     observation_space: int = cast(Any, MISSING)
     policy_interface: str = cast(Any, MISSING)
+    policy_config: Any = cast(Any, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(Any, MISSING)
     drone_cfg: ArticulationCfg = cast(Any, MISSING)
@@ -139,6 +140,7 @@ def make_drone_hover_env_cfg(
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
         policy_interface="hover-v1",
+        policy_config=experiment_config.rl.hover.policy,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -189,7 +191,7 @@ class DroneHoverEnv(_FlightDirectRLEnv):
             **kwargs,
         )
         self._hover_target_w = torch.zeros((self.num_envs, 3), device=self.device)
-        self._task = self._experiment_config.rl.press.hover_task
+        self._task = self._experiment_config.rl.hover
 
     def _setup_scene(self) -> None:
         self.drone = Articulation(self.cfg.drone_cfg)

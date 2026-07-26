@@ -282,8 +282,9 @@ def _run_new_training(
             metadata["initialization"] = initialization
         _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
-            env,
-            training_cfg,
+            env=env,
+            training_config=training_cfg,
+            policy_config=env_cfg.policy_config,
             log_dir=str(run_dir / "logs"),
             device=device,
         )
@@ -331,8 +332,9 @@ def _run_manual_export(
     )
     try:
         runner = training.build_runner(
-            env,
-            training_cfg,
+            env=env,
+            training_config=training_cfg,
+            policy_config=_env_cfg.policy_config,
             log_dir=str(run_dir / "logs"),
             device=device,
         )

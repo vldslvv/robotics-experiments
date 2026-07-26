@@ -15,7 +15,7 @@ frozen params dataclasses + pure functions (`build_actuation_params` /
 `rl/actuation.py`, mirrored in `flight.py`); same
 math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
-constants move into config (`rl.press.hover_task`, task-as-config) and the
+constants move into config (`rl.hover`, task-as-config) and the
 observation's angular velocity switches to body frame in F2b Steps 1-2, so the
 hover task becomes the first YAML-defined task of the task->policy pipeline.
 Post-F1 cadence/config alignment: shared Lab scale, action, training, and

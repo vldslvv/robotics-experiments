@@ -69,7 +69,7 @@ def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denomina
     from robotics_experiments.rl.press import PressRewardTerms
     from robotics_experiments.workflows.isaac_lab import evaluate_press_policy
 
-    reward_names = tuple(field.name for field in fields(PressRewardTerms))
+    reward_names = tuple(field.name for field in fields(PressRewardTerms)) + ("total",)
 
     class FakePolicy:
         def __call__(self, observation):

@@ -328,8 +328,9 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         ):
             raise ValueError("Isaac Lab selection environment changed the stored contract")
         runner = training.build_runner(
-            env,
-            training_config,
+            env=env,
+            training_config=training_config,
+            policy_config=env_cfg.policy_config,
             log_dir=str(run_dir / "selection"),
             device=device,
         )

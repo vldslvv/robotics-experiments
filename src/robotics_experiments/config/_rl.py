@@ -4,16 +4,25 @@ from typing import List, Tuple
 from robotics_experiments.config._immutability import _FreezableConfig
 
 __all__ = [
+    "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "PressActionConfig",
+    "PressApproachRewardConfig",
+    "PressCommonRewardConfig",
+    "PressContactRewardConfig",
+    "PressControlRewardConfig",
     "PressEvaluationConfig",
     "PressHandoffConfig",
-    "PressHoverTaskConfig",
     "PressResetConfig",
+    "PressRetreatRewardConfig",
     "PressRewardConfig",
     "PressTaskConfig",
+    "PressTerminalRewardConfig",
     "PressTerminationConfig",
     "RlConfig",
+    "RlPolicyActorConfig",
+    "RlPolicyConfig",
+    "RlPolicyCriticConfig",
     "RlTrainingConfig",
 ]
 
@@ -85,7 +94,31 @@ class PressActionConfig(_FreezableConfig):
 
 
 @dataclass
-class PressHoverTaskConfig(_FreezableConfig):
+class RlPolicyActorConfig(_FreezableConfig):
+    """Actor topology and exploration initialization."""
+
+    hidden_dims: List[int]
+    initial_noise_std: float
+
+
+@dataclass
+class RlPolicyCriticConfig(_FreezableConfig):
+    """Critic topology."""
+
+    hidden_dims: List[int]
+
+
+@dataclass
+class RlPolicyConfig(_FreezableConfig):
+    """Task-owned rsl_rl ``ActorCritic`` topology."""
+
+    activation: str
+    actor: RlPolicyActorConfig
+    critic: RlPolicyCriticConfig
+
+
+@dataclass
+class HoverTaskConfig(_FreezableConfig):
     """The hover task definition: reward weights, termination, and reset ranges.
 
     The task half of the ``task definition -> policy`` contract for the hover
@@ -108,6 +141,7 @@ class PressHoverTaskConfig(_FreezableConfig):
             around the hover target, meters.
     """
 
+    policy: RlPolicyConfig
     reward_pos_weight: float
     reward_linvel_weight: float
     reward_angvel_weight: float
@@ -148,40 +182,80 @@ class PressHandoffConfig(_FreezableConfig):
 
 
 @dataclass
-class PressRewardConfig(_FreezableConfig):
-    """Weights and gates for the ground-truth switch-press reward."""
+class PressCommonRewardConfig(_FreezableConfig):
+    """Reward terms active in every press-task phase."""
 
     alive_weight: float
     stability_weight: float
+
+
+@dataclass
+class PressApproachRewardConfig(_FreezableConfig):
+    """Approach progress and near-contact speed shaping."""
+
     approach_progress_weight: float
     near_contact_linear_overspeed_weight: float
     near_contact_angular_overspeed_weight: float
+    near_contact_range_m: float
+    near_contact_linear_speed_max_mps: float
+    near_contact_angular_speed_max_radps: float
+
+
+@dataclass
+class PressContactRewardConfig(_FreezableConfig):
+    """Contact, latch, and confirmed-toggle shaping."""
+
     gentle_contact_weight: float
     compression_progress_weight: float
     button_progress_weight: float
     latch_progress_weight: float
     toggle_weight: float
     repeat_toggle_weight: float
+    contact_oscillation_weight: float
+    scraping_weight: float
+    misalignment_weight: float
+    gentle_contact_speed_max_mps: float
+    misalignment_tolerance_m: float
+
+
+@dataclass
+class PressRetreatRewardConfig(_FreezableConfig):
+    """Post-toggle retreat shaping."""
+
     retreat_progress_weight: float
     retreat_alignment_weight: float
     retreat_overspeed_weight: float
     post_toggle_contact_weight: float
     post_toggle_delay_weight: float
-    success_weight: float
+
+
+@dataclass
+class PressControlRewardConfig(_FreezableConfig):
+    """Normalized-action regularization."""
+
     action_energy_weight: float
     action_delta_weight: float
-    contact_oscillation_weight: float
-    scraping_weight: float
-    misalignment_weight: float
+
+
+@dataclass
+class PressTerminalRewardConfig(_FreezableConfig):
+    """Successful and unsuccessful terminal shaping."""
+
+    success_weight: float
     failure_weight: float
     timeout_weight: float
-    near_contact_range_m: float
-    near_contact_linear_speed_max_mps: float
-    near_contact_angular_speed_max_radps: float
-    gentle_contact_speed_max_mps: float
-    compression_target_m: float
-    compression_overshoot_tolerance_m: float
-    misalignment_tolerance_m: float
+
+
+@dataclass
+class PressRewardConfig(_FreezableConfig):
+    """Press reward groups matching the backend-neutral task transition."""
+
+    common: PressCommonRewardConfig
+    approach: PressApproachRewardConfig
+    contact: PressContactRewardConfig
+    retreat: PressRetreatRewardConfig
+    control: PressControlRewardConfig
+    terminal: PressTerminalRewardConfig
 
 
 @dataclass
@@ -232,6 +306,8 @@ class PressEvaluationConfig(_FreezableConfig):
     success_rate_min: float
     first_contact_stability_min: float
     retreat_rate_min: float
+    compression_target_m: float
+    compression_overshoot_tolerance_m: float
 
 
 @dataclass
@@ -262,10 +338,6 @@ class RlTrainingConfig(_FreezableConfig):
         num_mini_batches: Minibatches per epoch.
         desired_kl: Adaptive-schedule KL target.
         max_grad_norm: Gradient clipping norm.
-        init_noise_std: Initial action noise std (normalized action units).
-        actor_hidden_dims: Actor MLP hidden layer sizes.
-        critic_hidden_dims: Critic MLP hidden layer sizes.
-        activation: MLP activation name (e.g. ``elu``).
         seed: Training seed (env reset + torch).
     """
 
@@ -286,10 +358,6 @@ class RlTrainingConfig(_FreezableConfig):
     num_mini_batches: int
     desired_kl: float
     max_grad_norm: float
-    init_noise_std: float
-    actor_hidden_dims: List[int]
-    critic_hidden_dims: List[int]
-    activation: str
     seed: int
 
 
@@ -298,7 +366,7 @@ class PressTaskConfig(_FreezableConfig):
     """Press-task-specific RL config.
 
     Attributes:
-        hover_task: The hover task definition (reward/termination/reset).
+        policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> contact handoff gate.
         reward: Ground-truth press reward weights and gates.
         reset: Easy-task geometry and initial-state ranges.
@@ -307,7 +375,7 @@ class PressTaskConfig(_FreezableConfig):
         contact_force_threshold_n: Pad force norm that marks real contact.
     """
 
-    hover_task: PressHoverTaskConfig
+    policy: RlPolicyConfig
     handoff: PressHandoffConfig
     reward: PressRewardConfig
     reset: PressResetConfig
@@ -328,7 +396,8 @@ class RlConfig(_FreezableConfig):
     Attributes:
         action: The RL action-level selection and controller tunables.
         training: PPO hyperparameters + task selection for training runs.
-        press: Press-task-specific config.
+        hover: Hover-task-specific config and policy topology.
+        press: Press-task-specific config and policy topology.
         num_envs: Number of parallel cloned envs.
         env_spacing: Distance between cloned env origins, meters.
         episode_length_s: Episode timeout, seconds.
@@ -338,6 +407,7 @@ class RlConfig(_FreezableConfig):
     action: PressActionConfig
     lab_vehicle: IsaacLabVehicleConfig
     training: RlTrainingConfig
+    hover: HoverTaskConfig
     press: PressTaskConfig
     num_envs: int
     env_spacing: float

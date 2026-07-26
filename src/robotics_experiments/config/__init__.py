@@ -15,6 +15,9 @@ from robotics_experiments.config._rl import (
     PressResetConfig,
     PressRewardConfig,
     PressTerminationConfig,
+    RlPolicyActorConfig,
+    RlPolicyConfig,
+    RlPolicyCriticConfig,
 )
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
@@ -31,6 +34,9 @@ __all__ = [
     "PressRewardConfig",
     "PressTerminationConfig",
     "Px4BridgeConfig",
+    "RlPolicyActorConfig",
+    "RlPolicyConfig",
+    "RlPolicyCriticConfig",
     "SimSettings",
     "VehicleConfig",
     "load_config",

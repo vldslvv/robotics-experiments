@@ -455,7 +455,7 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
         max_tilt = 0.0
         steps = round(config.rl.episode_length_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
-        approach_speed = config.rl.press.reward.gentle_contact_speed_max_mps
+        approach_speed = config.rl.press.reward.contact.gentle_contact_speed_max_mps
         retreat_speed = config.rl.press.termination.retreat_speed_max_mps * 0.75
         _report(
             "contact geometry: "

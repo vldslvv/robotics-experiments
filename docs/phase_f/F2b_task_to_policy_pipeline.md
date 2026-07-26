@@ -56,17 +56,17 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
   `_REWARD_POS_WEIGHT` / `_REWARD_LINVEL_WEIGHT` / `_REWARD_ANGVEL_WEIGHT` /
   `_REWARD_ALIVE`, `_CRASH_TILT_COS` / `_MIN_ALTITUDE_M` /
   `_MAX_POSITION_ERROR_M`, `_RESET_XY_HALF_M` / `_RESET_Z_HALF_M`.
-- Action: add `@dataclass class PressHoverTaskConfig` (bare annotations, per the
+- Action: add `@dataclass class HoverTaskConfig` (bare annotations, per the
   configs rule) to the owning private RL config module; add
-  `hover_task: PressHoverTaskConfig` to `PressTaskConfig`; author a
-  `hover_task:` block in `configs/experiment/rl/press/default.yaml` with the
+  `hover: HoverTaskConfig` to `RlConfig`; author a
+  `hover:` block in `configs/experiment/rl/default.yaml` with the
   current values.
-- The env reads `cfg.rl.press.hover_task`; no reward/termination/reset literal
+- The env reads `cfg.rl.hover`; no reward/termination/reset literal
   remains in the env module. This is the "task definition = one YAML block"
   half of the contract, established before the press task repeats the pattern
   (F3's `PressRewardConfig` etc. follow it).
 - Test: extend the config resolution test to assert
-  `load_config(path).rl.press.hover_task` resolves with the expected fields.
+  `load_config(path).rl.hover` resolves with the expected fields.
 - Done when: the F1 hover+goto gate still passes with the constants sourced
   from YAML and the env module contains no task-tuning literals.
 
@@ -101,7 +101,7 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
 - Action: create `src/robotics_experiments/rl/training/__init__.py` and
   `src/robotics_experiments/rl/training/rsl_rl.py` -- the ONLY module
   importing `rsl_rl`. Expose the functional contract:
-  - `build_runner(env, runner_cfg) -> Runner`
+  - `build_runner(*, env, training_config, policy_config, log_dir, device) -> Runner`
   - `train(runner, iterations) -> training result`
   - `export_policy(runner, out_dir) -> None` (Step-4 artifact format)
   - a private runner `Protocol` typing the surface so `_skrl.py` /
@@ -236,7 +236,7 @@ OFFBOARD streaming, envelope invariants, timeouts, and `on_failure` machinery.
 - add the pure hover-observation layout as `rl/observation.py`;
   add `rl/policy.py`, `rl/training/__init__.py`,
   `rl/training/rsl_rl.py`; edit `rl/__init__.py` (re-exports)
-- edit the owning private RL config module (`PressHoverTaskConfig`,
+- edit the owning private RL config module (`HoverTaskConfig`,
   `RlTrainingConfig`), `configs/experiment/rl/default.yaml`, and
   `configs/experiment/rl/press/default.yaml`
 - add `isaac/runtime/standalone/train_rl.py`; add the `train-rl` make

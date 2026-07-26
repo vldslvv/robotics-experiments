@@ -33,10 +33,6 @@ rl:
     num_mini_batches: 8
     desired_kl: 0.01
     max_grad_norm: 1.0
-    init_noise_std: 0.2
-    actor_hidden_dims: [256, 256, 128]
-    critic_hidden_dims: [256, 256, 128]
-    activation: elu
     seed: 42
 
 vehicles:

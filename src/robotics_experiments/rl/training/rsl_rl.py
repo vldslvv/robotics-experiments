@@ -55,50 +55,65 @@ class TrainingResult:
     log_dir: str
 
 
-def _train_cfg(training_cfg: Any) -> dict[str, Any]:
-    """Map ``RlTrainingConfig`` onto the rsl_rl OnPolicyRunner cfg dict."""
+def _train_cfg(*, training_config: Any, policy_config: Any) -> dict[str, Any]:
+    """Map PPO and task-owned policy config onto the rsl_rl runner dict."""
     return {
         # Single observation group: the env emits {"policy": tensor} and the
         # critic shares it (no privileged observations yet).
         "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
-        "num_steps_per_env": int(training_cfg.num_steps_per_env),
-        "save_interval": int(training_cfg.save_interval),
+        "num_steps_per_env": int(training_config.num_steps_per_env),
+        "save_interval": int(training_config.save_interval),
         "empirical_normalization": False,
         "policy": {
             "class_name": "ActorCritic",
-            "init_noise_std": float(training_cfg.init_noise_std),
+            "init_noise_std": float(policy_config.actor.initial_noise_std),
             "noise_std_type": "scalar",
             "actor_obs_normalization": False,
             "critic_obs_normalization": False,
-            "actor_hidden_dims": [int(d) for d in training_cfg.actor_hidden_dims],
-            "critic_hidden_dims": [int(d) for d in training_cfg.critic_hidden_dims],
-            "activation": str(training_cfg.activation),
+            "actor_hidden_dims": [int(d) for d in policy_config.actor.hidden_dims],
+            "critic_hidden_dims": [int(d) for d in policy_config.critic.hidden_dims],
+            "activation": str(policy_config.activation),
         },
         "algorithm": {
             "class_name": "PPO",
-            "learning_rate": float(training_cfg.learning_rate),
-            "schedule": str(training_cfg.schedule),
-            "gamma": float(training_cfg.gamma),
-            "lam": float(training_cfg.lam),
-            "entropy_coef": float(training_cfg.entropy_coef),
-            "clip_param": float(training_cfg.clip_param),
-            "value_loss_coef": float(training_cfg.value_loss_coef),
+            "learning_rate": float(training_config.learning_rate),
+            "schedule": str(training_config.schedule),
+            "gamma": float(training_config.gamma),
+            "lam": float(training_config.lam),
+            "entropy_coef": float(training_config.entropy_coef),
+            "clip_param": float(training_config.clip_param),
+            "value_loss_coef": float(training_config.value_loss_coef),
             "use_clipped_value_loss": True,
-            "num_learning_epochs": int(training_cfg.num_learning_epochs),
-            "num_mini_batches": int(training_cfg.num_mini_batches),
-            "desired_kl": float(training_cfg.desired_kl),
-            "max_grad_norm": float(training_cfg.max_grad_norm),
+            "num_learning_epochs": int(training_config.num_learning_epochs),
+            "num_mini_batches": int(training_config.num_mini_batches),
+            "desired_kl": float(training_config.desired_kl),
+            "max_grad_norm": float(training_config.max_grad_norm),
         },
     }
 
 
-def build_runner(env: Any, training_cfg: Any, *, log_dir: str, device: str) -> _PolicyRunner:
+def build_runner(
+    *,
+    env: Any,
+    training_config: Any,
+    policy_config: Any,
+    log_dir: str,
+    device: str,
+) -> _PolicyRunner:
     """Wrap a DirectRLEnv for rsl_rl and build the OnPolicyRunner."""
     from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
     from rsl_rl.runners import OnPolicyRunner
 
     wrapped = RslRlVecEnvWrapper(env, clip_actions=1.0)
-    return OnPolicyRunner(wrapped, _train_cfg(training_cfg), log_dir=log_dir, device=device)
+    return OnPolicyRunner(
+        wrapped,
+        _train_cfg(
+            training_config=training_config,
+            policy_config=policy_config,
+        ),
+        log_dir=log_dir,
+        device=device,
+    )
 
 
 def train(runner: _PolicyRunner, iterations: int) -> TrainingResult:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
 from types import SimpleNamespace
 
 import numpy as np
@@ -11,44 +11,60 @@ import pytest
 from robotics_experiments.environment import SwitchState, apply_button_sample
 from robotics_experiments.rl.press import (
     PressTaskInput,
+    PressTaskPhase,
     initial_press_task_state,
+    reset_press_task_state,
     step_press_task,
 )
 
 
 def _reward_cfg():
     return SimpleNamespace(
-        alive_weight=0.0,
-        stability_weight=5.0,
-        approach_progress_weight=50.0,
-        near_contact_linear_overspeed_weight=20.0,
-        near_contact_angular_overspeed_weight=5.0,
-        gentle_contact_weight=20.0,
-        compression_progress_weight=200.0,
-        button_progress_weight=200.0,
-        latch_progress_weight=30.0,
-        toggle_weight=30.0,
-        repeat_toggle_weight=100.0,
-        retreat_progress_weight=300.0,
-        retreat_alignment_weight=50.0,
-        retreat_overspeed_weight=50.0,
-        post_toggle_contact_weight=0.5,
-        post_toggle_delay_weight=0.05,
-        success_weight=150.0,
-        action_energy_weight=0.001,
-        action_delta_weight=0.004,
-        contact_oscillation_weight=0.2,
-        scraping_weight=0.1,
-        misalignment_weight=0.2,
-        failure_weight=100.0,
-        timeout_weight=25.0,
-        near_contact_range_m=0.42,
-        near_contact_linear_speed_max_mps=0.2,
-        near_contact_angular_speed_max_radps=0.5,
-        gentle_contact_speed_max_mps=0.2,
+        common=SimpleNamespace(alive_weight=0.0, stability_weight=5.0),
+        approach=SimpleNamespace(
+            approach_progress_weight=50.0,
+            near_contact_linear_overspeed_weight=20.0,
+            near_contact_angular_overspeed_weight=5.0,
+            near_contact_range_m=0.42,
+            near_contact_linear_speed_max_mps=0.2,
+            near_contact_angular_speed_max_radps=0.5,
+        ),
+        contact=SimpleNamespace(
+            gentle_contact_weight=20.0,
+            compression_progress_weight=200.0,
+            button_progress_weight=200.0,
+            latch_progress_weight=30.0,
+            toggle_weight=30.0,
+            repeat_toggle_weight=100.0,
+            contact_oscillation_weight=0.2,
+            scraping_weight=0.1,
+            misalignment_weight=0.2,
+            gentle_contact_speed_max_mps=0.2,
+            misalignment_tolerance_m=0.035,
+        ),
+        retreat=SimpleNamespace(
+            retreat_progress_weight=300.0,
+            retreat_alignment_weight=50.0,
+            retreat_overspeed_weight=50.0,
+            post_toggle_contact_weight=0.5,
+            post_toggle_delay_weight=0.05,
+        ),
+        control=SimpleNamespace(
+            action_energy_weight=0.001,
+            action_delta_weight=0.004,
+        ),
+        terminal=SimpleNamespace(
+            success_weight=150.0,
+            failure_weight=100.0,
+            timeout_weight=25.0,
+        ),
+    )
+
+
+def _evaluation_cfg():
+    return SimpleNamespace(
         compression_target_m=0.01,
         compression_overshoot_tolerance_m=0.003,
-        misalignment_tolerance_m=0.035,
     )
 
 
@@ -106,9 +122,7 @@ def _sample(
         body_z_world_z=scalar(body_z, 1.0),
         altitude_m=scalar(altitude, 1.0),
         pusher_compression_m=np.maximum(button, 0.0),
-        pusher_compression_rate_mps=np.zeros(batch),
         button_position_m=button,
-        button_rate_mps=np.zeros(batch),
         contact_flag=scalar(contact, False, bool),
         action=vector(action, 4),
         elapsed_s=np.arange(batch, dtype=np.float64) + 1.0,
@@ -129,6 +143,7 @@ def _step(*, state, sample, confirm_steps=2, termination_cfg=None):
         sample=sample,
         reward_cfg=_reward_cfg(),
         termination_cfg=termination_cfg or _termination_cfg(),
+        evaluation_cfg=_evaluation_cfg(),
         press_threshold_m=0.01,
         confirm_steps=confirm_steps,
     )
@@ -189,7 +204,7 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
         sample=_sample(button=[0.0], relative=[[0.19, 0.0, 0.0]], contact=[True]),
     )
     assert generic_contact.rewards.toggle[0] == 0.0
-    assert generic_contact.rewards.gentle_contact[0] == _reward_cfg().gentle_contact_weight
+    assert generic_contact.rewards.gentle_contact[0] == _reward_cfg().contact.gentle_contact_weight
 
     unstable_contact = _step(
         state=approach.state,
@@ -200,7 +215,9 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
             linear_velocity=[[0.5, 0.0, 0.0]],
         ),
     )
-    assert unstable_contact.rewards.gentle_contact[0] == -_reward_cfg().gentle_contact_weight
+    assert (
+        unstable_contact.rewards.gentle_contact[0] == -_reward_cfg().contact.gentle_contact_weight
+    )
 
     pressed = _step(
         state=generic_contact.state,
@@ -215,7 +232,7 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
         sample=_sample(button=[0.02], relative=[[0.18, 0.0, 0.0]], contact=[True]),
     )
     assert pressed.rewards.toggle[0] == 0.0
-    assert toggled.rewards.toggle[0] == _reward_cfg().toggle_weight
+    assert toggled.rewards.toggle[0] == _reward_cfg().contact.toggle_weight
     assert held.rewards.toggle[0] == 0.0
     assert held.rewards.approach[0] == 0.0
 
@@ -233,7 +250,7 @@ def test_reward_is_phase_gated_and_toggle_is_one_shot() -> None:
     )
     assert not toggled_off.state.lamp_state[0]
     assert toggled_off.rewards.toggle[0] == 0.0
-    assert toggled_off.rewards.repeat_toggle[0] == -_reward_cfg().repeat_toggle_weight
+    assert toggled_off.rewards.repeat_toggle[0] == -_reward_cfg().contact.repeat_toggle_weight
     assert toggled_off.metrics.toggled[0]
     assert toggled_off.metrics.repeat_toggled[0]
     held_after_repeat = _step(
@@ -299,7 +316,7 @@ def test_upright_has_no_passive_credit_and_tilt_is_penalized_until_failure() -> 
     assert result.rewards.stability[1] < result.rewards.stability[0]
     assert result.rewards.stability[2] < result.rewards.stability[1]
     np.testing.assert_array_equal(result.termination.crash, [False, False, False, True])
-    assert result.rewards.failure[3] == -_reward_cfg().failure_weight
+    assert result.rewards.failure[3] == -_reward_cfg().terminal.failure_weight
 
 
 def test_terminal_failure_cost_is_worse_than_unsuccessful_timeout() -> None:
@@ -384,7 +401,7 @@ def test_success_requires_latch_and_stable_retreat() -> None:
         confirm_steps=1,
     )
     assert retreat.termination.success[0]
-    assert retreat.rewards.success[0] == _reward_cfg().success_weight
+    assert retreat.rewards.success[0] == _reward_cfg().terminal.success_weight
 
 
 def test_success_reward_requires_a_stable_first_contact() -> None:
@@ -527,6 +544,170 @@ def test_failure_cannot_also_be_success() -> None:
     assert crashed_retreat.termination.crash[0]
     assert not crashed_retreat.termination.success[0]
     assert crashed_retreat.rewards.success[0] == 0.0
+
+
+def test_explicit_phase_flow_reaches_stable_retreat_success() -> None:
+    state = _initial(switch_range_m=0.5)
+    assert state.phase[0] == PressTaskPhase.APPROACH
+
+    approached = _step(
+        state=state,
+        sample=_sample(button=[0.0], relative=[[0.3, 0.0, 0.0]]),
+        confirm_steps=1,
+    )
+    assert approached.state.phase[0] == PressTaskPhase.APPROACH
+
+    contacted = _step(
+        state=approached.state,
+        sample=_sample(button=[0.0], relative=[[0.25, 0.0, 0.0]], contact=[True]),
+        confirm_steps=1,
+    )
+    assert contacted.state.phase[0] == PressTaskPhase.CONTACT
+
+    toggled = _step(
+        state=contacted.state,
+        sample=_sample(button=[0.02], relative=[[0.24, 0.0, 0.0]], contact=[True]),
+        confirm_steps=1,
+    )
+    assert toggled.state.phase[0] == PressTaskPhase.RETREAT
+    assert not toggled.termination.success[0]
+
+    retreated = _step(
+        state=toggled.state,
+        sample=_sample(button=[0.0], relative=[[0.5, 0.0, 0.0]], contact=[False]),
+        confirm_steps=1,
+    )
+    assert retreated.termination.success[0]
+    assert retreated.metrics.retreated[0]
+
+
+def test_first_contact_and_first_toggle_same_tick_keep_existing_reward_gates() -> None:
+    result = _step(
+        state=_initial(switch_range_m=0.5),
+        sample=_sample(
+            button=[0.02],
+            relative=[[0.3, 0.0, 0.0]],
+            contact=[True],
+        ),
+        confirm_steps=1,
+    )
+
+    assert result.state.phase[0] == PressTaskPhase.RETREAT
+    assert result.rewards.approach[0] > 0.0
+    assert result.rewards.gentle_contact[0] > 0.0
+    assert result.rewards.compression_progress[0] == 0.0
+    assert result.rewards.button_progress[0] == 0.0
+    assert result.rewards.latch_progress[0] > 0.0
+    assert result.rewards.toggle[0] > 0.0
+    assert result.rewards.retreat[0] == 0.0
+    assert result.state.retreat_stable_steps[0] == 0
+
+
+def test_reward_total_equals_every_component() -> None:
+    result = _step(
+        state=_initial(),
+        sample=_sample(
+            button=[0.0],
+            relative=[[0.2, 0.04, 0.0]],
+            linear_velocity=[[0.3, 0.1, 0.0]],
+            angular_velocity=[[0.0, 0.0, 0.7]],
+            action=[[0.5, -0.25, 0.1, -0.2]],
+            time_out=[True],
+        ),
+    )
+    component_total = sum(
+        getattr(result.rewards, field.name) for field in fields(type(result.rewards))
+    )
+
+    np.testing.assert_allclose(result.rewards.total, component_total)
+
+
+def test_reset_replaces_only_selected_environment_state() -> None:
+    advanced = _step(
+        state=_initial(batch=2),
+        sample=_sample(button=[0.02, 0.02], contact=[True, True]),
+        confirm_steps=1,
+    ).state
+
+    reset = reset_press_task_state(
+        state=advanced,
+        env_ids=np.asarray([1]),
+        relative_switch_range_m=np.asarray([0.7]),
+        action=np.asarray([[0.1, 0.2, 0.3, 0.4]]),
+    )
+
+    for field in fields(type(advanced)):
+        np.testing.assert_array_equal(
+            getattr(reset, field.name)[0],
+            getattr(advanced, field.name)[0],
+        )
+    assert reset.phase[1] == PressTaskPhase.APPROACH
+    assert reset.initial_range_m[1] == 0.7
+    assert not reset.first_contact_seen[1]
+    np.testing.assert_array_equal(reset.previous_action[1], [0.0, 0.0, 0.0, 0.0])
+
+
+def test_numpy_and_torch_match_over_identical_multi_step_trajectory() -> None:
+    torch = pytest.importorskip("torch")
+    numpy_state = _initial(batch=2, switch_range_m=0.5)
+    torch_state = initial_press_task_state(
+        relative_switch_range_m=torch.full((2,), 0.5, dtype=torch.float64),
+        action=torch.zeros((2, 4), dtype=torch.float64),
+    )
+    samples = (
+        _sample(
+            button=[0.0, 0.02],
+            relative=[[0.4, 0.0, 0.0], [0.3, 0.01, 0.0]],
+            contact=[False, True],
+        ),
+        _sample(
+            button=[0.02, 0.02],
+            relative=[[0.3, 0.0, 0.0], [0.28, 0.01, 0.0]],
+            contact=[True, True],
+        ),
+        _sample(
+            button=[0.02, 0.0],
+            relative=[[0.28, 0.0, 0.0], [0.5, 0.0, 0.0]],
+            contact=[True, False],
+        ),
+        _sample(
+            button=[0.0, 0.0],
+            relative=[[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]],
+            contact=[False, False],
+        ),
+    )
+
+    for numpy_sample in samples:
+        torch_sample = PressTaskInput(
+            **{
+                field.name: torch.as_tensor(getattr(numpy_sample, field.name))
+                for field in fields(PressTaskInput)
+            }
+        )
+        numpy_result = _step(
+            state=numpy_state,
+            sample=numpy_sample,
+            confirm_steps=2,
+        )
+        torch_result = _step(
+            state=torch_state,
+            sample=torch_sample,
+            confirm_steps=2,
+        )
+        for record_name in ("state", "rewards", "termination", "metrics"):
+            numpy_record = getattr(numpy_result, record_name)
+            torch_record = getattr(torch_result, record_name)
+            for field in fields(type(numpy_record)):
+                np.testing.assert_allclose(
+                    getattr(torch_record, field.name).cpu().numpy(),
+                    getattr(numpy_record, field.name),
+                )
+        np.testing.assert_allclose(
+            torch_result.rewards.total.cpu().numpy(),
+            numpy_result.rewards.total,
+        )
+        numpy_state = numpy_result.state
+        torch_state = torch_result.state
 
 
 def test_press_state_is_frozen() -> None:

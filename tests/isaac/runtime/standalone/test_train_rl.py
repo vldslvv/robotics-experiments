@@ -200,6 +200,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         observation_schema_version=1,
         observation_space=34,
         policy_interface="press-v1",
+        policy_config=SimpleNamespace(),
     )
     runner = object()
     before_ppo = {}
@@ -421,10 +422,6 @@ def test_training_adapter_uses_yaml_owned_schedule() -> None:
     training_cfg = SimpleNamespace(
         num_steps_per_env=32,
         save_interval=25,
-        init_noise_std=0.2,
-        actor_hidden_dims=[256, 256, 128],
-        critic_hidden_dims=[256, 256, 128],
-        activation="elu",
         learning_rate=1.0e-4,
         schedule="fixed",
         gamma=0.995,
@@ -437,13 +434,57 @@ def test_training_adapter_uses_yaml_owned_schedule() -> None:
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+    policy_cfg = SimpleNamespace(
+        activation="elu",
+        actor=SimpleNamespace(
+            hidden_dims=[256, 256, 128],
+            initial_noise_std=0.2,
+        ),
+        critic=SimpleNamespace(hidden_dims=[256, 256, 128]),
+    )
 
-    runner_cfg = rsl_rl._train_cfg(training_cfg)  # noqa: SLF001 - adapter mapping contract.
+    runner_cfg = rsl_rl._train_cfg(  # noqa: SLF001 - adapter mapping contract.
+        training_config=training_cfg,
+        policy_config=policy_cfg,
+    )
 
     assert runner_cfg["algorithm"]["learning_rate"] == 1.0e-4
     assert runner_cfg["algorithm"]["schedule"] == "fixed"
     assert runner_cfg["policy"]["init_noise_std"] == 0.2
+    assert runner_cfg["policy"]["actor_hidden_dims"] == [256, 256, 128]
+    assert runner_cfg["policy"]["critic_hidden_dims"] == [256, 256, 128]
+    assert runner_cfg["policy"]["activation"] == "elu"
+    assert runner_cfg["policy"]["class_name"] == "ActorCritic"
+    assert runner_cfg["obs_groups"] == {
+        "policy": ["policy"],
+        "critic": ["policy"],
+    }
     assert runner_cfg["save_interval"] == 25
+
+
+def test_export_contains_only_the_34_to_4_actor(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.rl.training import rsl_rl
+
+    actor = torch.nn.Sequential(
+        torch.nn.Linear(34, 256),
+        torch.nn.ELU(),
+        torch.nn.Linear(256, 4),
+    )
+    critic = torch.nn.Sequential(
+        torch.nn.Linear(34, 128),
+        torch.nn.ELU(),
+        torch.nn.Linear(128, 1),
+    )
+    runner = SimpleNamespace(
+        alg=SimpleNamespace(policy=SimpleNamespace(actor=actor, critic=critic))
+    )
+
+    rsl_rl.export_policy(runner, tmp_path, metadata={"obs_dim": 34})
+    exported = torch.jit.load(str(tmp_path / "policy.pt"))
+
+    assert exported(torch.zeros((2, 34))).shape == (2, 4)
+    assert critic(torch.zeros((2, 34))).shape == (2, 1)
 
 
 def test_deterministic_actor_returns_actor_mean_in_evaluation_mode() -> None:

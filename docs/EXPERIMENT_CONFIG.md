@@ -78,7 +78,25 @@ is constructed. PX4 `bridge.enabled` does not affect Lab because Lab bypasses PX
 
 `rl.lab_vehicle` owns Lab-only spawn height, rigid-body velocity caps, and
 pusher effort/velocity limits. Pusher stiffness and damping are inherited from
-the generated vehicle USD. `rl.press` owns the press reward, reset geometry,
-contact threshold, termination envelopes, deterministic evaluation seeds/count,
-and acceptance targets. `configs/train_press_quad.yaml` selects the press task,
-the `press` artifact namespace, ten-second episodes, and its PPO settings.
+the generated vehicle USD. `rl.hover` owns the hover task definition and its
+`policy`; `rl.press` owns the press task definition and its separate `policy`.
+Each policy contains a shared activation, actor hidden dimensions and initial
+noise, and critic hidden dimensions. Hidden dimensions must be positive, the
+activation must be non-empty, and initial noise must be finite and
+non-negative.
+
+Press reward fields are grouped under `rl.press.reward.common`, `.approach`,
+`.contact`, `.retreat`, `.control`, and `.terminal`, matching the
+backend-neutral task transition. Shared success thresholds, including retreat
+speed and alignment, remain under `rl.press.termination`. Evaluation-only
+compression target and overshoot tolerance live under `rl.press.evaluation`
+with the deterministic seeds/count and acceptance targets. Old flat reward
+fields, `rl.press.hover_task`, and model fields under `rl.training` are invalid
+strict Hydra paths.
+
+`rl.training` owns PPO optimization, rollout, checkpoint cadence, task
+selection, artifact namespace, and seed settings. New runs capture the task
+contract before PPO, checkpoint selection publishes the chosen actor artifact,
+manual export reloads an existing run contract without optimizer state, and
+only the actor is exported. `configs/train_press_quad.yaml` selects the press
+task, the `press` artifact namespace, ten-second episodes, and its PPO settings.

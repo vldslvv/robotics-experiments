@@ -129,6 +129,7 @@ def test_press_fine_tuning_config_preserves_contract_and_uses_conservative_sched
     config = load_config(_ROOT / "train_press_quad.yaml")
     training = config.rl.training
     reward = config.rl.press.reward
+    policy = config.rl.press.policy
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
@@ -136,10 +137,73 @@ def test_press_fine_tuning_config_preserves_contract_and_uses_conservative_sched
     assert training.save_interval == 25
     assert training.learning_rate == 1.0e-4
     assert training.schedule == "fixed"
-    assert training.init_noise_std == 0.2
-    assert reward.gentle_contact_weight == 20.0
-    assert reward.retreat_progress_weight == 300.0
-    assert reward.success_weight == 150.0
+    assert policy.actor.initial_noise_std == 0.2
+    assert policy.actor.hidden_dims == (256, 256, 128)
+    assert policy.critic.hidden_dims == (256, 256, 128)
+    assert policy.activation == "elu"
+    assert reward.contact.gentle_contact_weight == 20.0
+    assert reward.retreat.retreat_progress_weight == 300.0
+    assert reward.terminal.success_weight == 150.0
+    assert config.rl.press.evaluation.compression_target_m == 0.01
+    assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"rl": {"training": {"actor_hidden_dims": [64, 64]}}},
+        {"rl": {"press": {"reward": {"alive_weight": 1.0}}}},
+        {"rl": {"press": {"hover_task": {"reward_alive": 1.0}}}},
+    ],
+)
+def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
+    from hydra.errors import ConfigCompositionException
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "old_rl_path", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
+
+    with pytest.raises(ConfigCompositionException):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [
+        (
+            {"rl": {"press": {"policy": {"actor": {"hidden_dims": [256, 0]}}}}},
+            "actor.hidden_dims values must be positive",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"critic": {"hidden_dims": [-1]}}}}},
+            "critic.hidden_dims values must be positive",
+        ),
+        (
+            {"rl": {"press": {"policy": {"activation": "  "}}}},
+            "activation must be non-empty",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"actor": {"initial_noise_std": -0.1}}}}},
+            "initial_noise_std must be finite and non-negative",
+        ),
+        (
+            {"rl": {"hover": {"policy": {"actor": {"initial_noise_std": float("inf")}}}}},
+            "initial_noise_std must be finite and non-negative",
+        ),
+    ],
+)
+def test_task_policy_validation(tmp_path, override, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_policy", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
+
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
 
 
 @pytest.mark.parametrize(

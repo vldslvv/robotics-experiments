@@ -1,19 +1,16 @@
 defaults:
   - base_press_task
 
-# The hover task definition (Isaac-Drone-Hover-Direct-v0): reward weights,
-# termination envelope, and reset randomization. Authoring this block IS the
-# task definition; the env module carries no task-tuning literals.
-hover_task:
-  reward_pos_weight: 1.0
-  reward_linvel_weight: 0.1
-  reward_angvel_weight: 0.05
-  reward_alive: 0.5
-  crash_tilt_cos: 0.0
-  min_altitude_m: 0.15
-  max_position_error_m: 5.0
-  reset_xy_half_m: 0.5
-  reset_z_half_m: 0.3
+# Press task-owned ActorCritic topology. The actor maps the 34-value
+# schema-v1 observation to a four-value normalized action mean; the critic maps
+# the same observation to one value estimate.
+policy:
+  activation: elu
+  actor:
+    hidden_dims: [256, 256, 128]
+    initial_noise_std: 0.2
+  critic:
+    hidden_dims: [256, 256, 128]
 
 # Nav -> contact handoff gate thresholds (rl.press.handoff_ready).
 # Initial-column values from the ROADMAP1 handoff table; the mature column
@@ -32,41 +29,45 @@ handoff:
 # transition. Stability penalizes squared deviation from upright; generic
 # contact is never a substitute for a confirmed latch.
 reward:
-  alive_weight: 0.0
-  stability_weight: 5.0
-  approach_progress_weight: 50.0
-  near_contact_linear_overspeed_weight: 20.0
-  near_contact_angular_overspeed_weight: 5.0
-  gentle_contact_weight: 20.0
-  compression_progress_weight: 200.0
-  button_progress_weight: 200.0
-  # Signed confirmation progress rewards an uninterrupted hold and cancels the
-  # accumulated credit when the button is released before confirmation.
-  latch_progress_weight: 30.0
-  toggle_weight: 30.0
-  repeat_toggle_weight: 100.0
-  retreat_progress_weight: 300.0
-  retreat_alignment_weight: 50.0
-  retreat_overspeed_weight: 50.0
-  post_toggle_contact_weight: 0.5
-  post_toggle_delay_weight: 0.05
-  success_weight: 150.0
-  action_energy_weight: 0.001
-  action_delta_weight: 0.004
-  contact_oscillation_weight: 0.2
-  scraping_weight: 0.1
-  misalignment_weight: 0.2
-  # A terminal failure must be worse than timing out after a controlled
-  # unsuccessful attempt; otherwise PPO can improve return by crashing early.
-  failure_weight: 100.0
-  timeout_weight: 25.0
-  near_contact_range_m: 0.42
-  near_contact_linear_speed_max_mps: 0.20
-  near_contact_angular_speed_max_radps: 0.50
-  gentle_contact_speed_max_mps: 0.20
-  compression_target_m: 0.010
-  compression_overshoot_tolerance_m: 0.003
-  misalignment_tolerance_m: 0.035
+  common:
+    alive_weight: 0.0
+    stability_weight: 5.0
+  approach:
+    approach_progress_weight: 50.0
+    near_contact_linear_overspeed_weight: 20.0
+    near_contact_angular_overspeed_weight: 5.0
+    near_contact_range_m: 0.42
+    near_contact_linear_speed_max_mps: 0.20
+    near_contact_angular_speed_max_radps: 0.50
+  contact:
+    gentle_contact_weight: 20.0
+    compression_progress_weight: 200.0
+    button_progress_weight: 200.0
+    # Signed confirmation progress rewards an uninterrupted hold and cancels
+    # the accumulated credit when released before confirmation.
+    latch_progress_weight: 30.0
+    toggle_weight: 30.0
+    repeat_toggle_weight: 100.0
+    contact_oscillation_weight: 0.2
+    scraping_weight: 0.1
+    misalignment_weight: 0.2
+    gentle_contact_speed_max_mps: 0.20
+    misalignment_tolerance_m: 0.035
+  retreat:
+    retreat_progress_weight: 300.0
+    retreat_alignment_weight: 50.0
+    retreat_overspeed_weight: 50.0
+    post_toggle_contact_weight: 0.5
+    post_toggle_delay_weight: 0.05
+  control:
+    action_energy_weight: 0.001
+    action_delta_weight: 0.004
+  terminal:
+    success_weight: 150.0
+    # A terminal failure must be worse than timing out after a controlled
+    # unsuccessful attempt; otherwise PPO can improve return by crashing early.
+    failure_weight: 100.0
+    timeout_weight: 25.0
 
 reset:
   button_geometry_scale: 1.5
@@ -107,5 +108,7 @@ evaluation:
   success_rate_min: 0.80
   first_contact_stability_min: 0.85
   retreat_rate_min: 0.95
+  compression_target_m: 0.010
+  compression_overshoot_tolerance_m: 0.003
 
 contact_force_threshold_n: 0.25

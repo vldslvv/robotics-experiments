@@ -40,11 +40,26 @@ training:
   num_mini_batches: 4
   desired_kl: 0.01
   max_grad_norm: 1.0
-  init_noise_std: 1.0
-  actor_hidden_dims: [128, 128]
-  critic_hidden_dims: [128, 128]
-  activation: elu
   seed: 42
+
+# Hover task definition and task-owned ActorCritic topology.
+hover:
+  policy:
+    activation: elu
+    actor:
+      hidden_dims: [128, 128]
+      initial_noise_std: 1.0
+    critic:
+      hidden_dims: [128, 128]
+  reward_pos_weight: 1.0
+  reward_linvel_weight: 0.1
+  reward_angvel_weight: 0.05
+  reward_alive: 0.5
+  crash_tilt_cos: 0.0
+  min_altitude_m: 0.15
+  max_position_error_m: 5.0
+  reset_xy_half_m: 0.5
+  reset_z_half_m: 0.3
 
 # Pluggable RL action level. `kind` selects the in-Lab actuation model
 # (velocity | ctbr); switching is a one-line edit. Gains are a superset covering

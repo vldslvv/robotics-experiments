@@ -168,6 +168,31 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
 
 
+def _validate_rl_policies(experiment: ExperimentConfig) -> None:
+    policies = {
+        "rl.hover.policy": experiment.rl.hover.policy,
+        "rl.press.policy": experiment.rl.press.policy,
+    }
+    for path, policy in policies.items():
+        if not policy.activation.strip():
+            raise ValueError(f"{path}.activation must be non-empty")
+        dimensions = {
+            f"{path}.actor.hidden_dims": policy.actor.hidden_dims,
+            f"{path}.critic.hidden_dims": policy.critic.hidden_dims,
+        }
+        for dimensions_path, hidden_dims in dimensions.items():
+            bad_dimension = next((dimension for dimension in hidden_dims if dimension <= 0), None)
+            if bad_dimension is not None:
+                raise ValueError(
+                    f"{dimensions_path} values must be positive, got {bad_dimension!r}"
+                )
+        noise = policy.actor.initial_noise_std
+        if not math.isfinite(noise) or noise < 0.0:
+            raise ValueError(
+                f"{path}.actor.initial_noise_std must be finite and non-negative, got {noise!r}"
+            )
+
+
 def _validate_switches(experiment: ExperimentConfig) -> None:
     switches = experiment.switches
     positive_integers = {
@@ -306,5 +331,6 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
+    _validate_rl_policies(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

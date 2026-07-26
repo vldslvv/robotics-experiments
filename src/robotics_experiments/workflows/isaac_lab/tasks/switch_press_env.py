@@ -83,6 +83,7 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     observation_schema_version: int = cast(Any, MISSING)
     observation_space: int = cast(Any, MISSING)
     policy_interface: str = cast(Any, MISSING)
+    policy_config: Any = cast(Any, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(Any, MISSING)
     drone_cfg: ArticulationCfg = cast(Any, MISSING)
@@ -124,6 +125,7 @@ def make_switch_press_env_cfg(
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
         policy_interface="press-v1",
+        policy_config=rl.press.policy,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -312,9 +314,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 self._pusher_extension_target[:, 0]
                 - self.drone.data.joint_pos[:, self._pusher_joint_id]
             ),
-            pusher_compression_rate_mps=-self.drone.data.joint_vel[:, self._pusher_joint_id],
             button_position_m=self.switch.data.joint_pos[:, self._switch_joint_id],
-            button_rate_mps=self.switch.data.joint_vel[:, self._switch_joint_id],
             contact_flag=self._contact_flag(),
             action=self.actions,
             elapsed_s=self.episode_length_buf.to(torch.float32) * self.step_dt,
@@ -329,6 +329,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             sample=self._sample(time_out=time_out),
             reward_cfg=press.reward,
             termination_cfg=press.termination,
+            evaluation_cfg=press.evaluation,
             press_threshold_m=(
                 self._experiment_config.switches.press_threshold
                 * press.reset.button_threshold_scale

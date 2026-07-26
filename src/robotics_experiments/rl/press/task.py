@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from enum import IntEnum
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,7 @@ __all__ = [
     "PressRewardTerms",
     "PressStepMetrics",
     "PressTaskInput",
+    "PressTaskPhase",
     "PressTaskResult",
     "PressTaskState",
     "PressTerminationFlags",
@@ -19,14 +21,25 @@ __all__ = [
     "step_press_task",
 ]
 
-_PHASE_PRECONTACT = 0
-_PHASE_CONTACT = 1
-_PHASE_TOGGLED = 2
+
+class PressTaskPhase(IntEnum):
+    """Press-task progression values stored in batched integer arrays."""
+
+    APPROACH = 0
+    CONTACT = 1
+    RETREAT = 2
 
 
 @dataclass(frozen=True)
 class PressTaskState:
-    """Per-environment latch, phase, history, and evaluation progress."""
+    """Batched task memory.
+
+    Scalar fields have shape ``[N]`` and ``previous_action`` has shape
+    ``[N, action_dim]``. Ranges, positions, and compression are meters; time is
+    seconds. Contact/toggle fields and peak compression are cumulative within
+    an episode, while ``previous_*`` fields retain the immediately preceding
+    policy step.
+    """
 
     press_steps: Any
     toggle_latched: Any
@@ -49,7 +62,14 @@ class PressTaskState:
 
 @dataclass(frozen=True)
 class PressTaskInput:
-    """One batched sample consumed by :func:`step_press_task`."""
+    """One batched physical sample consumed by :func:`step_press_task`.
+
+    Scalar fields have shape ``[N]``; position and velocity vectors have shape
+    ``[N, 3]``; normalized actions have shape ``[N, action_dim]``. Position,
+    altitude, button travel, and compression are meters; velocities are m/s or
+    rad/s; elapsed time is seconds. Every field describes the current policy
+    step, not cumulative episode state.
+    """
 
     relative_switch_pos_m: Any
     body_linear_velocity_mps: Any
@@ -57,9 +77,7 @@ class PressTaskInput:
     body_z_world_z: Any
     altitude_m: Any
     pusher_compression_m: Any
-    pusher_compression_rate_mps: Any
     button_position_m: Any
-    button_rate_mps: Any
     contact_flag: Any
     action: Any
     elapsed_s: Any
@@ -68,7 +86,7 @@ class PressTaskInput:
 
 @dataclass(frozen=True)
 class PressRewardTerms:
-    """Named signed reward contributions and their total."""
+    """Batched signed per-step reward contributions, each with shape ``[N]``."""
 
     alive: Any
     stability: Any
@@ -94,12 +112,20 @@ class PressRewardTerms:
     misalignment: Any
     failure: Any
     timeout: Any
-    total: Any
+
+    @property
+    def total(self) -> Any:
+        """Sum every named reward component."""
+        return sum(getattr(self, field.name) for field in fields(self))
 
 
 @dataclass(frozen=True)
 class PressTerminationFlags:
-    """Distinct successful, failure, and timeout outcomes."""
+    """Batched per-step outcome flags, each with shape ``[N]``.
+
+    ``terminated`` contains success and non-timeout failures. ``time_out`` is
+    kept distinct for the environment's truncation path.
+    """
 
     success: Any
     crash: Any
@@ -111,10 +137,14 @@ class PressTerminationFlags:
 
 @dataclass(frozen=True)
 class PressStepMetrics:
-    """Per-step facts accumulated by the rollout evaluator."""
+    """Batched evaluator facts.
+
+    ``toggled_this_step`` is a per-step event. The remaining boolean values are
+    cumulative episode facts. Toggle time is seconds and peak compression
+    overshoot is meters.
+    """
 
     toggled_this_step: Any
-    first_contact_this_step: Any
     first_contact_stable: Any
     toggle_time_s: Any
     peak_compression_overshoot_m: Any
@@ -126,7 +156,7 @@ class PressStepMetrics:
 
 @dataclass(frozen=True)
 class PressTaskResult:
-    """Successor state plus reward, termination, and metric outputs."""
+    """Successor state plus batched reward, termination, and metric records."""
 
     state: PressTaskState
     rewards: PressRewardTerms
@@ -156,12 +186,12 @@ def _zeros_like(*, value: Any, boolean: bool = False, integer: bool = False) -> 
     return np.zeros_like(value, dtype=dtype)
 
 
-def _full_like(*, value: Any, fill: float, integer: bool = False) -> Any:
+def _full_like(*, value: Any, fill: float) -> Any:
     if _is_torch(value):
         import torch
 
-        return torch.full_like(value, fill, dtype=torch.long if integer else value.dtype)
-    return np.full_like(value, fill, dtype=np.int64 if integer else None)
+        return torch.full_like(value, fill, dtype=value.dtype)
+    return np.full_like(value, fill)
 
 
 def _norm(value: Any) -> Any:
@@ -205,7 +235,7 @@ def _elementwise_minimum(*, left: Any, right: Any) -> Any:
 
 
 def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> PressTaskState:
-    """Create a zero-progress state matching a NumPy or torch batch."""
+    """Create zero progress matching a NumPy or torch batch."""
     zeros = _zeros_like(value=relative_switch_range_m)
     false = _zeros_like(value=relative_switch_range_m, boolean=True)
     integers = _zeros_like(value=relative_switch_range_m, integer=True)
@@ -291,79 +321,39 @@ def _termination(
     )
 
 
-def step_press_task(
+def _compute_reward_terms(
     *,
     state: PressTaskState,
     sample: PressTaskInput,
     reward_cfg: Any,
     termination_cfg: Any,
-    press_threshold_m: float,
+    press_steps: Any,
+    phase: Any,
+    first_contact: Any,
+    first_contact_stable_now: Any,
+    first_toggle: Any,
+    repeat_toggle: Any,
+    retreat_target: Any,
+    misalignment_steps: Any,
+    success: Any,
+    termination: PressTerminationFlags,
     confirm_steps: int,
-) -> PressTaskResult:
-    """Advance the latch, phase, reward, termination, and metrics exactly once."""
-    press_steps, toggle_latched, lamp_state, toggled = _advance_latch(
-        state=state,
-        button_position_m=sample.button_position_m,
-        press_threshold_m=press_threshold_m,
-        confirm_steps=confirm_steps,
-    )
+) -> PressRewardTerms:
+    """Calculate every named reward term without advancing task state."""
+    common = reward_cfg.common
+    approach_cfg = reward_cfg.approach
+    contact_cfg = reward_cfg.contact
+    retreat_cfg = reward_cfg.retreat
+    control_cfg = reward_cfg.control
+    terminal_cfg = reward_cfg.terminal
+
     current_range = sample.relative_switch_pos_m[..., 0]
     lateral_error = _norm(sample.relative_switch_pos_m[..., 1:3])
     linear_speed = _norm(sample.body_linear_velocity_mps)
     angular_speed = _norm(sample.body_angular_velocity_radps)
-    first_contact = sample.contact_flag & ~state.first_contact_seen
-    first_contact_stable_now = (linear_speed <= termination_cfg.first_contact_speed_max_mps) & (
-        angular_speed <= termination_cfg.first_contact_angular_speed_max_radps
-    )
-    first_contact_seen = state.first_contact_seen | sample.contact_flag
-    first_contact_stable = state.first_contact_stable | (first_contact & first_contact_stable_now)
-    phase = _where(first_contact_seen, _PHASE_CONTACT, _PHASE_PRECONTACT)
-    first_toggle = toggled & (state.toggle_time_s < 0.0)
-    repeat_toggle = toggled & (state.toggle_time_s >= 0.0)
-    repeat_toggle_seen = state.repeat_toggle_seen | repeat_toggle
-    toggle_time = _where(
-        first_toggle,
-        sample.elapsed_s,
-        state.toggle_time_s,
-    )
-    phase = _where(toggle_time >= 0.0, _PHASE_TOGGLED, phase)
-    peak_compression = _where(
-        sample.pusher_compression_m > state.peak_compression_m,
-        sample.pusher_compression_m,
-        state.peak_compression_m,
-    )
-    misaligned = sample.contact_flag & (lateral_error > reward_cfg.misalignment_tolerance_m)
-    misalignment_steps = _where(
-        misaligned,
-        state.misalignment_steps + 1,
-        _zeros_like(value=state.misalignment_steps),
-    )
-    retreat_target = _maximum(state.initial_range_m, termination_cfg.retreat_distance_m)
-    retreat_candidate = (
-        (state.phase == _PHASE_TOGGLED)
-        & lamp_state
-        & ~sample.contact_flag
-        & (current_range >= retreat_target)
-        & (linear_speed <= termination_cfg.retreat_speed_max_mps)
-        & (lateral_error <= termination_cfg.retreat_alignment_tolerance_m)
-        & (angular_speed <= termination_cfg.retreat_angular_speed_max_radps)
-    )
-    retreat_stable_steps = _where(
-        retreat_candidate,
-        state.retreat_stable_steps + 1,
-        _zeros_like(value=state.retreat_stable_steps),
-    )
-    success = retreat_stable_steps >= termination_cfg.stable_retreat_steps
-    termination = _termination(
-        sample=sample,
-        success=success,
-        termination_cfg=termination_cfg,
-    )
-    success = termination.success
-
-    precontact = state.phase == _PHASE_PRECONTACT
-    contact_phase = (phase == _PHASE_CONTACT) & ~first_toggle
-    toggled_phase = state.phase == _PHASE_TOGGLED
+    precontact = state.phase == PressTaskPhase.APPROACH
+    contact_phase = (phase == PressTaskPhase.CONTACT) & ~first_toggle
+    retreat_phase = state.phase == PressTaskPhase.RETREAT
     approach_progress = state.previous_range_m - current_range
     compression_progress = sample.pusher_compression_m - state.previous_compression_m
     button_progress = sample.button_position_m - state.previous_button_position_m
@@ -377,114 +367,84 @@ def step_press_task(
     contact_changed = sample.contact_flag != state.previous_contact_flag
     scraping_speed = _norm(sample.body_linear_velocity_mps[..., 1:3])
 
-    alive = _full_like(value=current_range, fill=reward_cfg.alive_weight)
+    alive = _full_like(value=current_range, fill=common.alive_weight)
     upright_alignment = _minimum(_maximum(sample.body_z_world_z, 0.0), 1.0)
-    stability = -reward_cfg.stability_weight * _square(1.0 - upright_alignment)
-    approach = reward_cfg.approach_progress_weight * approach_progress * precontact
-    near_contact = precontact & (current_range <= reward_cfg.near_contact_range_m)
+    stability = -common.stability_weight * _square(1.0 - upright_alignment)
+    approach = approach_cfg.approach_progress_weight * approach_progress * precontact
+    near_contact = precontact & (current_range <= approach_cfg.near_contact_range_m)
     near_contact_linear_overspeed = (
-        -reward_cfg.near_contact_linear_overspeed_weight
+        -approach_cfg.near_contact_linear_overspeed_weight
         * _square(
             _maximum(
-                linear_speed - reward_cfg.near_contact_linear_speed_max_mps,
+                linear_speed - approach_cfg.near_contact_linear_speed_max_mps,
                 0.0,
             )
         )
         * near_contact
     )
     near_contact_angular_overspeed = (
-        -reward_cfg.near_contact_angular_overspeed_weight
+        -approach_cfg.near_contact_angular_overspeed_weight
         * _square(
             _maximum(
-                angular_speed - reward_cfg.near_contact_angular_speed_max_radps,
+                angular_speed - approach_cfg.near_contact_angular_speed_max_radps,
                 0.0,
             )
         )
         * near_contact
     )
     gentle_contact_stable = first_contact_stable_now & (
-        linear_speed <= reward_cfg.gentle_contact_speed_max_mps
+        linear_speed <= contact_cfg.gentle_contact_speed_max_mps
     )
     gentle_contact = (
-        reward_cfg.gentle_contact_weight
-        * first_contact
-        * _where(
-            gentle_contact_stable,
-            1.0,
-            -1.0,
-        )
+        contact_cfg.gentle_contact_weight * first_contact * _where(gentle_contact_stable, 1.0, -1.0)
     )
-    compression_term = reward_cfg.compression_progress_weight * compression_progress * contact_phase
-    button_term = reward_cfg.button_progress_weight * button_progress * contact_phase
-    latch_term = reward_cfg.latch_progress_weight * latch_progress * (state.toggle_time_s < 0.0)
+    compression_term = (
+        contact_cfg.compression_progress_weight * compression_progress * contact_phase
+    )
+    button_term = contact_cfg.button_progress_weight * button_progress * contact_phase
+    latch_term = contact_cfg.latch_progress_weight * latch_progress * (state.toggle_time_s < 0.0)
     # Generic contact never earns this reward: only the N-step button latch can.
-    toggle = reward_cfg.toggle_weight * first_toggle
-    repeat_toggle_term = -reward_cfg.repeat_toggle_weight * repeat_toggle
-    retreat = reward_cfg.retreat_progress_weight * retreat_progress * toggled_phase
+    toggle = contact_cfg.toggle_weight * first_toggle
+    repeat_toggle_term = -contact_cfg.repeat_toggle_weight * repeat_toggle
+    retreat = retreat_cfg.retreat_progress_weight * retreat_progress * retreat_phase
     retreat_alignment = (
-        -reward_cfg.retreat_alignment_weight
+        -retreat_cfg.retreat_alignment_weight
         * _square(
             _maximum(
                 lateral_error - termination_cfg.retreat_alignment_tolerance_m,
                 0.0,
             )
         )
-        * toggled_phase
+        * retreat_phase
     )
     retreat_overspeed = (
-        -reward_cfg.retreat_overspeed_weight
+        -retreat_cfg.retreat_overspeed_weight
         * _maximum(linear_speed - termination_cfg.retreat_speed_max_mps, 0.0) ** 2
-        * toggled_phase
+        * retreat_phase
     )
     post_toggle_contact = (
-        -reward_cfg.post_toggle_contact_weight * sample.contact_flag * toggled_phase
+        -retreat_cfg.post_toggle_contact_weight * sample.contact_flag * retreat_phase
     )
-    post_toggle_delay = -reward_cfg.post_toggle_delay_weight * ~success * toggled_phase
-    success_term = reward_cfg.success_weight * success * first_contact_stable
-    action_energy = -reward_cfg.action_energy_weight * _mean_square(sample.action)
-    action_delta = -reward_cfg.action_delta_weight * _mean_square(
+    post_toggle_delay = -retreat_cfg.post_toggle_delay_weight * ~success * retreat_phase
+    success_term = terminal_cfg.success_weight * success * state.first_contact_stable
+    action_energy = -control_cfg.action_energy_weight * _mean_square(sample.action)
+    action_delta = -control_cfg.action_delta_weight * _mean_square(
         sample.action - state.previous_action
     )
     contact_oscillation = (
-        -reward_cfg.contact_oscillation_weight * contact_changed * state.first_contact_seen
+        -contact_cfg.contact_oscillation_weight * contact_changed * state.first_contact_seen
     )
-    scraping = -reward_cfg.scraping_weight * scraping_speed * sample.contact_flag
+    scraping = -contact_cfg.scraping_weight * scraping_speed * sample.contact_flag
     misalignment = (
-        -reward_cfg.misalignment_weight
-        * _maximum(lateral_error - reward_cfg.misalignment_tolerance_m, 0.0)
+        -contact_cfg.misalignment_weight
+        * _maximum(lateral_error - contact_cfg.misalignment_tolerance_m, 0.0)
         * (misalignment_steps >= confirm_steps)
     )
-    failure = -reward_cfg.failure_weight * (
+    failure = -terminal_cfg.failure_weight * (
         termination.crash | termination.altitude | termination.relative_envelope
     )
-    timeout = -reward_cfg.timeout_weight * sample.time_out
-    total = (
-        alive
-        + stability
-        + approach
-        + near_contact_linear_overspeed
-        + near_contact_angular_overspeed
-        + gentle_contact
-        + compression_term
-        + button_term
-        + latch_term
-        + toggle
-        + repeat_toggle_term
-        + retreat
-        + retreat_alignment
-        + retreat_overspeed
-        + post_toggle_contact
-        + post_toggle_delay
-        + success_term
-        + action_energy
-        + action_delta
-        + contact_oscillation
-        + scraping
-        + misalignment
-        + failure
-        + timeout
-    )
-    rewards = PressRewardTerms(
+    timeout = -terminal_cfg.timeout_weight * sample.time_out
+    return PressRewardTerms(
         alive=alive,
         stability=stability,
         approach=approach,
@@ -509,8 +469,105 @@ def step_press_task(
         misalignment=misalignment,
         failure=failure,
         timeout=timeout,
-        total=total,
     )
+
+
+def step_press_task(
+    *,
+    state: PressTaskState,
+    sample: PressTaskInput,
+    reward_cfg: Any,
+    termination_cfg: Any,
+    evaluation_cfg: Any,
+    press_threshold_m: float,
+    confirm_steps: int,
+) -> PressTaskResult:
+    """Advance the latch, phase, reward, termination, and metrics exactly once."""
+    # 1. Derive current physical measurements and events.
+    current_range = sample.relative_switch_pos_m[..., 0]
+    lateral_error = _norm(sample.relative_switch_pos_m[..., 1:3])
+    linear_speed = _norm(sample.body_linear_velocity_mps)
+    angular_speed = _norm(sample.body_angular_velocity_radps)
+    first_contact = sample.contact_flag & ~state.first_contact_seen
+    first_contact_stable_now = (linear_speed <= termination_cfg.first_contact_speed_max_mps) & (
+        angular_speed <= termination_cfg.first_contact_angular_speed_max_radps
+    )
+
+    # 2. Advance the latch and explicit task phase.
+    press_steps, toggle_latched, lamp_state, toggled = _advance_latch(
+        state=state,
+        button_position_m=sample.button_position_m,
+        press_threshold_m=press_threshold_m,
+        confirm_steps=confirm_steps,
+    )
+    first_contact_seen = state.first_contact_seen | sample.contact_flag
+    first_contact_stable = state.first_contact_stable | (first_contact & first_contact_stable_now)
+    phase = _where(
+        first_contact_seen,
+        PressTaskPhase.CONTACT,
+        PressTaskPhase.APPROACH,
+    )
+    first_toggle = toggled & (state.toggle_time_s < 0.0)
+    repeat_toggle = toggled & (state.toggle_time_s >= 0.0)
+    repeat_toggle_seen = state.repeat_toggle_seen | repeat_toggle
+    toggle_time = _where(first_toggle, sample.elapsed_s, state.toggle_time_s)
+    phase = _where(toggle_time >= 0.0, PressTaskPhase.RETREAT, phase)
+    peak_compression = _where(
+        sample.pusher_compression_m > state.peak_compression_m,
+        sample.pusher_compression_m,
+        state.peak_compression_m,
+    )
+    misaligned = sample.contact_flag & (lateral_error > reward_cfg.contact.misalignment_tolerance_m)
+    misalignment_steps = _where(
+        misaligned,
+        state.misalignment_steps + 1,
+        _zeros_like(value=state.misalignment_steps),
+    )
+
+    # 3. Evaluate stable retreat and terminal outcomes. Deliberately gate on
+    # the prior phase so retreat stability starts one tick after first toggle.
+    retreat_target = _maximum(state.initial_range_m, termination_cfg.retreat_distance_m)
+    retreat_candidate = (
+        (state.phase == PressTaskPhase.RETREAT)
+        & lamp_state
+        & ~sample.contact_flag
+        & (current_range >= retreat_target)
+        & (linear_speed <= termination_cfg.retreat_speed_max_mps)
+        & (lateral_error <= termination_cfg.retreat_alignment_tolerance_m)
+        & (angular_speed <= termination_cfg.retreat_angular_speed_max_radps)
+    )
+    retreat_stable_steps = _where(
+        retreat_candidate,
+        state.retreat_stable_steps + 1,
+        _zeros_like(value=state.retreat_stable_steps),
+    )
+    stable_retreat_success = retreat_stable_steps >= termination_cfg.stable_retreat_steps
+    termination = _termination(
+        sample=sample,
+        success=stable_retreat_success,
+        termination_cfg=termination_cfg,
+    )
+
+    # 4. Calculate named reward terms with the same prior/successor phase gates.
+    rewards = _compute_reward_terms(
+        state=state,
+        sample=sample,
+        reward_cfg=reward_cfg,
+        termination_cfg=termination_cfg,
+        press_steps=press_steps,
+        phase=phase,
+        first_contact=first_contact,
+        first_contact_stable_now=first_contact_stable_now,
+        first_toggle=first_toggle,
+        repeat_toggle=repeat_toggle,
+        retreat_target=retreat_target,
+        misalignment_steps=misalignment_steps,
+        success=termination.success,
+        termination=termination,
+        confirm_steps=confirm_steps,
+    )
+
+    # 5. Assemble successor state and cumulative episode metrics.
     successor = PressTaskState(
         press_steps=press_steps,
         toggle_latched=toggle_latched,
@@ -532,19 +589,18 @@ def step_press_task(
     )
     metrics = PressStepMetrics(
         toggled_this_step=first_toggle,
-        first_contact_this_step=first_contact,
         first_contact_stable=first_contact_stable,
         toggle_time_s=toggle_time,
         peak_compression_overshoot_m=_maximum(
             peak_compression
-            - reward_cfg.compression_target_m
-            - reward_cfg.compression_overshoot_tolerance_m,
+            - evaluation_cfg.compression_target_m
+            - evaluation_cfg.compression_overshoot_tolerance_m,
             0.0,
         ),
         contacted=first_contact_seen,
         toggled=toggle_time >= 0.0,
         repeat_toggled=repeat_toggle_seen,
-        retreated=success,
+        retreated=termination.success,
     )
     return PressTaskResult(
         state=successor,
