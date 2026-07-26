@@ -21,12 +21,12 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
   `/home/vv/.local` or `/home/vv/.pyenv`. `.uv-python/` is local machine state
   and must not be committed.
 - Initialize or repair the core development environment with
-  `uv sync --extra dev`. The default dependency set contains only reusable-core
-  runtime dependencies. The `dev` extra adds pytest and quality tools; the
-  `simulation` extra adds Isaac Sim and USD for host-side asset/simulator work;
-  and the `training` extra adds `rsl-rl-lib` (and torch) for host-side training
-  tooling only. Actual training runs in the Isaac Lab image, which already
-  ships rsl_rl. Flight-analysis tools deliberately use the documented
+  `uv sync --extra dev`. The default dependency set contains the ordinary
+  dependencies reached by public package roots, including torch, pymavlink,
+  Gymnasium, and rsl_rl. The `dev` extra adds pytest and quality tools, while
+  the `simulation` extra adds Isaac Sim and USD for host-side asset/simulator
+  work. Actual training runs in the Isaac Lab image, which also ships rsl_rl.
+  Flight-analysis tools deliberately use the documented
   throwaway `uv --no-project --with pyulog --with numpy` environment instead of
   a project extra.
 - If `.venv` is missing, points outside the repository, or cannot be read from
@@ -83,8 +83,9 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 ## Quality gates
 
 - `make check` is the canonical non-mutating host gate. It validates `uv.lock`,
-  checks lint and formatting, runs mypy and vulture, and executes the complete
-  host pytest suite. The CPU-only pull-request workflow runs this same target.
+  checks lint and formatting, runs mypy over every project-owned Python file
+  except vendored Pegasus, runs vulture, and executes the complete host pytest
+  suite. The CPU-only pull-request workflow runs this same target.
 - Pre-commit remains the formatting and commit-time convenience layer. Install
   it once with `uv run pre-commit install` and run a whole-repository sweep with
   `uv run pre-commit run --all-files`. Mirror hooks may modify staged Python

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from pymavlink import mavutil
 
 import robotics_experiments.px4_bridge.frames as frames
 from robotics_experiments.px4_bridge._pegasus_sensors import (
@@ -720,8 +721,6 @@ class Px4MavlinkPort:
             ``True`` if an actuator message was processed, or no blocking wait
             was needed before the first actuator; ``False`` on timeout.
         """
-        from pymavlink import mavutil
-
         backend = self._backend
         if backend._connection is None:
             self._mark_disconnected("actuator polling skipped: connection is closed")
@@ -789,8 +788,6 @@ class Px4MavlinkPort:
         so a backlog never makes the bridge fly on stale motor commands. Returns
         ``False`` (after a disconnect) on a recv failure, otherwise ``True``.
         """
-        from pymavlink import mavutil
-
         backend = self._backend
         while True:
             try:

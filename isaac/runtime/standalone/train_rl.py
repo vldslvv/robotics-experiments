@@ -26,7 +26,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import robotics_experiments.rl as rl
+import robotics_experiments.rl.training.rsl_rl as training
 from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.rl import METADATA_FILENAME
+from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -126,8 +130,6 @@ def _build_env(
     experiment_config: ExperimentConfig,
     policy_contract=None,
 ):
-    from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
-
     return make_isaac_lab_env(
         task_id=task_id,
         experiment_config=experiment_config,
@@ -144,8 +146,6 @@ def _artifact_metadata(
     source_metadata: dict[str, str | bool],
     artifact_run_id: str,
 ):
-    import robotics_experiments.rl as rl
-
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
         obs_schema_version=int(env_cfg.observation_schema_version),
@@ -157,14 +157,10 @@ def _artifact_metadata(
 
 
 def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
-    from robotics_experiments.rl import METADATA_FILENAME
-
     (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
 
 
 def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
-    import robotics_experiments.rl as rl
-
     metadata_path = run_dir / rl.METADATA_FILENAME
     if not metadata_path.is_file():
         raise ValueError(
@@ -233,8 +229,6 @@ def _run_new_training(
     repo_root: Path,
     device: str,
 ) -> None:
-    import robotics_experiments.rl.training.rsl_rl as training
-
     training_cfg = config.rl.training
     initialization_checkpoint = args.initialize_checkpoint
     initialization = None
@@ -312,8 +306,6 @@ def _run_manual_export(
     out_root: Path,
     device: str,
 ) -> None:
-    import robotics_experiments.rl.training.rsl_rl as training
-
     training_cfg = config.rl.training
     checkpoint_path = args.export_checkpoint
     assert checkpoint_path is not None

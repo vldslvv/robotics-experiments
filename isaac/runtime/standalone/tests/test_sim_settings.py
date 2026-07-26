@@ -14,14 +14,14 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from _runtime import SceneTestContext, run_scene_test
 
 from robotics_experiments.simulation import apply_settings
 
 if TYPE_CHECKING:
-    from pxr import Usd, UsdPhysics
+    from pxr import Gf, Usd, UsdPhysics
 
 DEFAULT_SCENE = "@isaac/assets/TestScenes/MinimalIntegration.usda"
 TEST_NAME = "sim_settings"
@@ -38,7 +38,7 @@ def _assert_close(actual: float, expected: float, label: str) -> None:
         raise AssertionError(f"{label}: expected {expected}, got {actual}")
 
 
-def _assert_vec3_close(actual: Any, expected: tuple[float, float, float], label: str) -> None:
+def _assert_vec3_close(actual: Gf.Vec3d, expected: tuple[float, float, float], label: str) -> None:
     actual_tuple = tuple(float(value) for value in actual)
     for axis, (actual_value, expected_value) in enumerate(zip(actual_tuple, expected, strict=True)):
         _assert_close(actual_value, expected_value, f"{label}[{axis}]")

@@ -5,12 +5,12 @@ from __future__ import annotations
 from _px4_takeoff_scenario import Px4TakeoffScenarioOptions, run_px4_takeoff_scenario
 from _runtime import SceneTestContext
 
+from robotics_experiments.rl.press import PressPolicyExecutionState
+
 __all__ = ["run_px4_press_routine_scenario"]
 
 
 def _validate_result(context: SceneTestContext, fleet) -> None:
-    from robotics_experiments.rl.press import PressPolicyExecutionState
-
     if len(fleet.flying) != 1:
         raise AssertionError(f"press routine requires one flying drone, got {len(fleet.flying)}")
     events = fleet.switch_events

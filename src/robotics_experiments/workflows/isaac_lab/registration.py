@@ -6,6 +6,11 @@ import importlib
 from dataclasses import dataclass
 from importlib.util import find_spec
 
+import gymnasium as gym
+
+from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.rl import PolicyContract, PolicyInterface
+
 __all__ = [
     "DRONE_HOVER_TASK_ID",
     "SWITCH_PRESS_TASK_ID",
@@ -59,7 +64,7 @@ def _dependency_available(module_name: str) -> bool:
         return False
 
 
-def _gym_has_task(gym, task_id: str) -> bool:
+def _gym_has_task(task_id: str) -> bool:
     return task_id in gym.registry
 
 
@@ -71,13 +76,11 @@ def register_isaac_lab_tasks() -> bool:
         False when called in a host environment without those dependencies.
     """
 
-    if not _dependency_available("gymnasium") or not _dependency_available("isaaclab"):
+    if not _dependency_available("isaaclab"):
         return False
 
-    import gymnasium as gym
-
     for task_id, task in _TASKS.items():
-        if _gym_has_task(gym, task_id):
+        if _gym_has_task(task_id):
             continue
         gym.register(
             id=task_id,
@@ -91,16 +94,12 @@ def register_isaac_lab_tasks() -> bool:
 def make_isaac_lab_env(
     *,
     task_id: str,
-    experiment_config,
+    experiment_config: ExperimentConfig,
     seed: int | None = None,
     num_envs: int | None = None,
-    policy_contract=None,
-):
+    policy_contract: PolicyContract | None = None,
+) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
-    import gymnasium as gym
-
-    from robotics_experiments.rl import PolicyInterface
-
     if not register_isaac_lab_tasks():
         raise RuntimeError("Isaac Lab task registration failed (gymnasium/isaaclab missing)")
     try:

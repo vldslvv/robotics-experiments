@@ -787,7 +787,6 @@ def _worker(args: argparse.Namespace, /) -> int:
         "isaacsim",
         "omni",
         "pxr",
-        "pymavlink",
     )
     imported = sorted(
         name

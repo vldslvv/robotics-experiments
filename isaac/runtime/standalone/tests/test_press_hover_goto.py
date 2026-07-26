@@ -29,10 +29,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.config import ExperimentConfig, PressActionConfig, load_config
 
 if TYPE_CHECKING:
-    from robotics_experiments.config import PressActionConfig
     from robotics_experiments.workflows.isaac_lab import (
         DroneHoverEnv,
         DroneHoverEnvCfg,

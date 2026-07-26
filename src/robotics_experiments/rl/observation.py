@@ -7,17 +7,13 @@ assemble is forbidden in the layout.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 
+from robotics_experiments.px4_bridge import VehicleState
 from robotics_experiments.rl._interfaces import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
 )
-
-if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge import VehicleState
 
 __all__ = [
     "HOVER_OBSERVATION_DIM",

@@ -10,6 +10,12 @@ from pathlib import Path
 import torch
 
 from robotics_experiments.config import ExperimentConfig, load_config
+from robotics_experiments.rl import POLICY_FILENAME, validate_policy_artifact
+from robotics_experiments.workflows.isaac_lab import (
+    PressEvaluationResult,
+    evaluate_press_policy,
+    make_isaac_lab_env,
+)
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
@@ -23,16 +29,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _run(*, config: ExperimentConfig, artifact_dir: Path):
-    from robotics_experiments.rl import (
-        POLICY_FILENAME,
-        validate_policy_artifact,
-    )
-    from robotics_experiments.workflows.isaac_lab import (
-        evaluate_press_policy,
-        make_isaac_lab_env,
-    )
-
+def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressEvaluationResult:
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
     contract = validate_policy_artifact(artifact_dir=artifact_dir).contract

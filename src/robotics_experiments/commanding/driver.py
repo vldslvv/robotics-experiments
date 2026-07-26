@@ -8,10 +8,10 @@ the imperative boundary.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import Enum, auto
-from typing import Any, Optional, Protocol
+from typing import Optional, Protocol
 
 from robotics_experiments.commanding._routine_builder import build_vehicle_routine
 from robotics_experiments.commanding._routine_model import (
@@ -40,6 +40,7 @@ from robotics_experiments.commanding.observation import (
 from robotics_experiments.commanding.port import (
     MavlinkCommandPort,
 )
+from robotics_experiments.config import RoutineStepConfig
 from robotics_experiments.px4_bridge import (
     DEFAULT_HOME_ALT_M,
     DEFAULT_HOME_LAT_DEG,
@@ -111,7 +112,7 @@ class DriverFailure:
 class DriverParams:
     """The per-drone routine knobs required by the command driver."""
 
-    steps: Sequence[Mapping[str, Any]]
+    steps: Sequence[RoutineStepConfig]
     gates: EnvelopeGates
     command_ack_timeout_s: float
     failure_recovery_timeout_s: float

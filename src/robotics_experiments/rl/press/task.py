@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any
+from typing import Generic, TypeAlias, TypeVar
 
 import numpy as np
+import torch
+
+from robotics_experiments.config import (
+    PressEvaluationConfig,
+    PressRewardConfig,
+    PressTerminationConfig,
+)
 
 __all__ = [
     "PressRewardTerms",
@@ -21,6 +29,10 @@ __all__ = [
     "step_press_task",
 ]
 
+ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
+Scalar: TypeAlias = bool | int | float
+EnvironmentIndices: TypeAlias = Sequence[int] | np.ndarray | torch.Tensor
+
 
 class PressTaskPhase(IntEnum):
     """Press-task progression values stored in batched integer arrays."""
@@ -31,7 +43,7 @@ class PressTaskPhase(IntEnum):
 
 
 @dataclass(frozen=True)
-class PressTaskState:
+class PressTaskState(Generic[ArrayT]):
     """Batched task memory.
 
     Scalar fields have shape ``[N]`` and ``previous_action`` has shape
@@ -41,27 +53,27 @@ class PressTaskState:
     policy step.
     """
 
-    press_steps: Any
-    toggle_latched: Any
-    lamp_state: Any
-    phase: Any
-    initial_range_m: Any
-    previous_range_m: Any
-    previous_button_position_m: Any
-    previous_compression_m: Any
-    previous_contact_flag: Any
-    previous_action: Any
-    first_contact_seen: Any
-    first_contact_stable: Any
-    repeat_toggle_seen: Any
-    toggle_time_s: Any
-    peak_compression_m: Any
-    retreat_stable_steps: Any
-    misalignment_steps: Any
+    press_steps: ArrayT
+    toggle_latched: ArrayT
+    lamp_state: ArrayT
+    phase: ArrayT
+    initial_range_m: ArrayT
+    previous_range_m: ArrayT
+    previous_button_position_m: ArrayT
+    previous_compression_m: ArrayT
+    previous_contact_flag: ArrayT
+    previous_action: ArrayT
+    first_contact_seen: ArrayT
+    first_contact_stable: ArrayT
+    repeat_toggle_seen: ArrayT
+    toggle_time_s: ArrayT
+    peak_compression_m: ArrayT
+    retreat_stable_steps: ArrayT
+    misalignment_steps: ArrayT
 
 
 @dataclass(frozen=True)
-class PressTaskInput:
+class PressTaskInput(Generic[ArrayT]):
     """One batched physical sample consumed by :func:`step_press_task`.
 
     Scalar fields have shape ``[N]``; position and velocity vectors have shape
@@ -71,72 +83,97 @@ class PressTaskInput:
     step, not cumulative episode state.
     """
 
-    relative_switch_pos_m: Any
-    body_linear_velocity_mps: Any
-    body_angular_velocity_radps: Any
-    body_z_world_z: Any
-    altitude_m: Any
-    pusher_compression_m: Any
-    button_position_m: Any
-    contact_flag: Any
-    action: Any
-    elapsed_s: Any
-    time_out: Any
+    relative_switch_pos_m: ArrayT
+    body_linear_velocity_mps: ArrayT
+    body_angular_velocity_radps: ArrayT
+    body_z_world_z: ArrayT
+    altitude_m: ArrayT
+    pusher_compression_m: ArrayT
+    button_position_m: ArrayT
+    contact_flag: ArrayT
+    action: ArrayT
+    elapsed_s: ArrayT
+    time_out: ArrayT
 
 
 @dataclass(frozen=True)
-class PressRewardTerms:
+class PressRewardTerms(Generic[ArrayT]):
     """Batched signed per-step reward contributions, each with shape ``[N]``."""
 
-    alive: Any
-    stability: Any
-    approach: Any
-    near_contact_linear_overspeed: Any
-    near_contact_angular_overspeed: Any
-    gentle_contact: Any
-    compression_progress: Any
-    button_progress: Any
-    latch_progress: Any
-    toggle: Any
-    repeat_toggle: Any
-    retreat: Any
-    retreat_alignment: Any
-    retreat_overspeed: Any
-    post_toggle_contact: Any
-    post_toggle_delay: Any
-    success: Any
-    action_energy: Any
-    action_delta: Any
-    contact_oscillation: Any
-    scraping: Any
-    misalignment: Any
-    failure: Any
-    timeout: Any
+    alive: ArrayT
+    stability: ArrayT
+    approach: ArrayT
+    near_contact_linear_overspeed: ArrayT
+    near_contact_angular_overspeed: ArrayT
+    gentle_contact: ArrayT
+    compression_progress: ArrayT
+    button_progress: ArrayT
+    latch_progress: ArrayT
+    toggle: ArrayT
+    repeat_toggle: ArrayT
+    retreat: ArrayT
+    retreat_alignment: ArrayT
+    retreat_overspeed: ArrayT
+    post_toggle_contact: ArrayT
+    post_toggle_delay: ArrayT
+    success: ArrayT
+    action_energy: ArrayT
+    action_delta: ArrayT
+    contact_oscillation: ArrayT
+    scraping: ArrayT
+    misalignment: ArrayT
+    failure: ArrayT
+    timeout: ArrayT
 
     @property
-    def total(self) -> Any:
+    def total(self) -> ArrayT:
         """Sum every named reward component."""
-        return sum(getattr(self, field.name) for field in fields(self))
+        return (
+            self.alive
+            + self.stability
+            + self.approach
+            + self.near_contact_linear_overspeed
+            + self.near_contact_angular_overspeed
+            + self.gentle_contact
+            + self.compression_progress
+            + self.button_progress
+            + self.latch_progress
+            + self.toggle
+            + self.repeat_toggle
+            + self.retreat
+            + self.retreat_alignment
+            + self.retreat_overspeed
+            + self.post_toggle_contact
+            + self.post_toggle_delay
+            + self.success
+            + self.action_energy
+            + self.action_delta
+            + self.contact_oscillation
+            + self.scraping
+            + self.misalignment
+            + self.failure
+            + self.timeout
+        )
 
 
 @dataclass(frozen=True)
-class PressTerminationFlags:
+class PressTerminationFlags(Generic[ArrayT]):
     """Batched per-step outcome flags, each with shape ``[N]``.
 
     ``terminated`` contains success and non-timeout failures. ``time_out`` is
     kept distinct for the environment's truncation path.
     """
 
-    success: Any
-    crash: Any
-    altitude: Any
-    relative_envelope: Any
-    time_out: Any
-    terminated: Any
+    success: ArrayT
+    crash: ArrayT
+    altitude: ArrayT
+    relative_envelope: ArrayT
+    time_out: ArrayT
+    terminated: ArrayT
 
 
 @dataclass(frozen=True)
-class PressStepMetrics:
+class PressStepMetrics(Generic[ArrayT]):
     """Batched evaluator facts.
 
     ``toggled_this_step`` is a per-step event. The remaining boolean values are
@@ -144,97 +181,85 @@ class PressStepMetrics:
     overshoot is meters.
     """
 
-    toggled_this_step: Any
-    first_contact_stable: Any
-    toggle_time_s: Any
-    peak_compression_overshoot_m: Any
-    contacted: Any
-    toggled: Any
-    repeat_toggled: Any
-    retreated: Any
+    toggled_this_step: ArrayT
+    first_contact_stable: ArrayT
+    toggle_time_s: ArrayT
+    peak_compression_overshoot_m: ArrayT
+    contacted: ArrayT
+    toggled: ArrayT
+    repeat_toggled: ArrayT
+    retreated: ArrayT
 
 
 @dataclass(frozen=True)
-class PressTaskResult:
+class PressTaskResult(Generic[ArrayT]):
     """Successor state plus batched reward, termination, and metric records."""
 
-    state: PressTaskState
-    rewards: PressRewardTerms
-    termination: PressTerminationFlags
-    metrics: PressStepMetrics
+    state: PressTaskState[ArrayT]
+    rewards: PressRewardTerms[ArrayT]
+    termination: PressTerminationFlags[ArrayT]
+    metrics: PressStepMetrics[ArrayT]
 
 
-def _is_torch(value: Any) -> bool:
-    return type(value).__module__.startswith("torch")
-
-
-def _where(condition: Any, yes: Any, no: Any) -> Any:
-    if _is_torch(condition):
-        import torch
-
+def _where(condition: ArrayT, yes: ArrayT | Scalar, no: ArrayT | Scalar) -> ArrayT:
+    if isinstance(condition, torch.Tensor):
         return torch.where(condition, yes, no)
     return np.where(condition, yes, no)
 
 
-def _zeros_like(*, value: Any, boolean: bool = False, integer: bool = False) -> Any:
-    if _is_torch(value):
-        import torch
-
+def _zeros_like(*, value: ArrayT, boolean: bool = False, integer: bool = False) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         dtype = torch.bool if boolean else torch.long if integer else value.dtype
         return torch.zeros_like(value, dtype=dtype)
     dtype = bool if boolean else np.int64 if integer else None
     return np.zeros_like(value, dtype=dtype)
 
 
-def _full_like(*, value: Any, fill: float) -> Any:
-    if _is_torch(value):
-        import torch
-
+def _full_like(*, value: ArrayT, fill: float) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return torch.full_like(value, fill, dtype=value.dtype)
     return np.full_like(value, fill)
 
 
-def _norm(value: Any) -> Any:
-    if _is_torch(value):
-        import torch
-
+def _norm(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return torch.linalg.norm(value, dim=-1)
     return np.linalg.norm(value, axis=-1)
 
 
-def _mean_square(value: Any) -> Any:
-    if _is_torch(value):
+def _mean_square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.square().mean(dim=-1)
     return np.square(value).mean(axis=-1)
 
 
-def _square(value: Any) -> Any:
-    if _is_torch(value):
+def _square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.square()
     return np.square(value)
 
 
-def _maximum(value: Any, minimum: float) -> Any:
-    if _is_torch(value):
+def _maximum(value: ArrayT, minimum: float) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.clamp_min(minimum)
     return np.maximum(value, minimum)
 
 
-def _minimum(value: Any, maximum: float) -> Any:
-    if _is_torch(value):
+def _minimum(value: ArrayT, maximum: float) -> ArrayT:
+    if isinstance(value, torch.Tensor):
         return value.clamp_max(maximum)
     return np.minimum(value, maximum)
 
 
-def _elementwise_minimum(*, left: Any, right: Any) -> Any:
-    if _is_torch(left):
-        import torch
-
+def _elementwise_minimum(*, left: ArrayT, right: ArrayT) -> ArrayT:
+    if isinstance(left, torch.Tensor):
         return torch.minimum(left, right)
     return np.minimum(left, right)
 
 
-def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> PressTaskState:
+def initial_press_task_state(
+    *, relative_switch_range_m: ArrayT, action: ArrayT
+) -> PressTaskState[ArrayT]:
     """Create zero progress matching a NumPy or torch batch."""
     zeros = _zeros_like(value=relative_switch_range_m)
     false = _zeros_like(value=relative_switch_range_m, boolean=True)
@@ -261,16 +286,23 @@ def initial_press_task_state(*, relative_switch_range_m: Any, action: Any) -> Pr
 
 
 def reset_press_task_state(
-    *, state: PressTaskState, env_ids: Any, relative_switch_range_m: Any, action: Any
-) -> PressTaskState:
+    *,
+    state: PressTaskState[ArrayT],
+    env_ids: EnvironmentIndices,
+    relative_switch_range_m: ArrayT,
+    action: ArrayT,
+) -> PressTaskState[ArrayT]:
     """Return ``state`` with only the selected environments reset."""
     fresh = initial_press_task_state(
         relative_switch_range_m=relative_switch_range_m,
         action=action,
     )
 
-    def replaced(current: Any, replacement: Any) -> Any:
-        successor = current.clone() if _is_torch(current) else current.copy()
+    def replaced(current: ArrayT, replacement: ArrayT) -> ArrayT:
+        if isinstance(current, torch.Tensor):
+            successor = current.clone()
+        else:
+            successor = current.copy()
         successor[env_ids] = replacement
         return successor
 
@@ -283,8 +315,12 @@ def reset_press_task_state(
 
 
 def _advance_latch(
-    *, state: PressTaskState, button_position_m: Any, press_threshold_m: float, confirm_steps: int
-) -> tuple[Any, Any, Any, Any]:
+    *,
+    state: PressTaskState[ArrayT],
+    button_position_m: ArrayT,
+    press_threshold_m: float,
+    confirm_steps: int,
+) -> tuple[ArrayT, ArrayT, ArrayT, ArrayT]:
     """Vectorized twin of ``environment.apply_button_sample``."""
     pressed = button_position_m >= press_threshold_m
     press_steps = _where(
@@ -299,8 +335,11 @@ def _advance_latch(
 
 
 def _termination(
-    *, sample: PressTaskInput, success: Any, termination_cfg: Any
-) -> PressTerminationFlags:
+    *,
+    sample: PressTaskInput[ArrayT],
+    success: ArrayT,
+    termination_cfg: PressTerminationConfig,
+) -> PressTerminationFlags[ArrayT]:
     relative = sample.relative_switch_pos_m
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
@@ -323,22 +362,22 @@ def _termination(
 
 def _compute_reward_terms(
     *,
-    state: PressTaskState,
-    sample: PressTaskInput,
-    reward_cfg: Any,
-    termination_cfg: Any,
-    press_steps: Any,
-    phase: Any,
-    first_contact: Any,
-    first_contact_stable_now: Any,
-    first_toggle: Any,
-    repeat_toggle: Any,
-    retreat_target: Any,
-    misalignment_steps: Any,
-    success: Any,
-    termination: PressTerminationFlags,
+    state: PressTaskState[ArrayT],
+    sample: PressTaskInput[ArrayT],
+    reward_cfg: PressRewardConfig,
+    termination_cfg: PressTerminationConfig,
+    press_steps: ArrayT,
+    phase: ArrayT,
+    first_contact: ArrayT,
+    first_contact_stable_now: ArrayT,
+    first_toggle: ArrayT,
+    repeat_toggle: ArrayT,
+    retreat_target: ArrayT,
+    misalignment_steps: ArrayT,
+    success: ArrayT,
+    termination: PressTerminationFlags[ArrayT],
     confirm_steps: int,
-) -> PressRewardTerms:
+) -> PressRewardTerms[ArrayT]:
     """Calculate every named reward term without advancing task state."""
     common = reward_cfg.common
     approach_cfg = reward_cfg.approach
@@ -474,14 +513,14 @@ def _compute_reward_terms(
 
 def step_press_task(
     *,
-    state: PressTaskState,
-    sample: PressTaskInput,
-    reward_cfg: Any,
-    termination_cfg: Any,
-    evaluation_cfg: Any,
+    state: PressTaskState[ArrayT],
+    sample: PressTaskInput[ArrayT],
+    reward_cfg: PressRewardConfig,
+    termination_cfg: PressTerminationConfig,
+    evaluation_cfg: PressEvaluationConfig,
     press_threshold_m: float,
     confirm_steps: int,
-) -> PressTaskResult:
+) -> PressTaskResult[ArrayT]:
     """Advance the latch, phase, reward, termination, and metrics exactly once."""
     # 1. Derive current physical measurements and events.
     current_range = sample.relative_switch_pos_m[..., 0]

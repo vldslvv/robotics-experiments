@@ -105,7 +105,7 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "robotics_experiments.commanding", fake_commanding)
 
     fake_environment = types.ModuleType("robotics_experiments.environment")
-    fake_environment.PressObservationIO = object
+    fake_environment.SwitchesRuntimeState = object
     fake_environment.create_switches_runtime = lambda *, config, stage: SimpleNamespace(
         config=config,
         stage=stage,
@@ -134,6 +134,9 @@ def _import_orchestrator(monkeypatch):
             "robotics_experiments.runtime."
         ):
             sys.modules.pop(name, None)
+    fake_press_io = types.ModuleType("robotics_experiments.runtime._press_io")
+    fake_press_io.PressObservationIO = object
+    monkeypatch.setitem(sys.modules, "robotics_experiments.runtime._press_io", fake_press_io)
     module = importlib.import_module("robotics_experiments.runtime")
 
     spawned: list = []
@@ -372,9 +375,11 @@ def test_switch_latch_uses_artifact_selected_cadence(monkeypatch):
         switch_rate_hz=10.0,
     )
     steps = []
-    environment = sys.modules["robotics_experiments.environment"]
-    environment.step_switches_runtime = (
-        lambda *, state, on_toggle=None: steps.append(state) or state
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "step_switches_runtime",
+        lambda *, state, on_toggle=None: steps.append(state) or state,
     )
 
     for _ in range(250):

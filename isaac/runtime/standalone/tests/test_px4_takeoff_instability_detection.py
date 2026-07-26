@@ -13,7 +13,7 @@ Isaac:
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from _px4_takeoff_scenario import (
@@ -23,7 +23,11 @@ from _px4_takeoff_scenario import (
 )
 from _runtime import SceneTestContext, run_scene_test
 
-from robotics_experiments.px4_bridge import ActuatorCommands, RotorThrustModel
+from robotics_experiments.px4_bridge import (
+    ActuatorCommands,
+    RotorDynamics,
+    RotorThrustModel,
+)
 
 if TYPE_CHECKING:
     from robotics_experiments.runtime import BridgeHost
@@ -40,7 +44,7 @@ FAULT_BODY_TORQUE_BIAS_N_M = np.array([4.0, 0.0, 0.0], dtype=np.float64)
 class _RotorFailureFault(RotorThrustModel):
     def __init__(
         self,
-        base_model: Any,
+        base_model: RotorThrustModel,
         rotor_index: int,
         command_scale: float,
         body_torque_bias_n_m: np.ndarray,
@@ -62,12 +66,12 @@ class _RotorFailureFault(RotorThrustModel):
         faulted[self._rotor_index] *= self._command_scale
         return ActuatorCommands(faulted)
 
-    def commands_to_forces(self, commands: ActuatorCommands) -> Any:
+    def commands_to_forces(self, commands: ActuatorCommands) -> np.ndarray:
         return self._base_model.commands_to_forces(self._faulted_commands(commands))
 
     def commands_to_dynamics(
         self, commands: ActuatorCommands, linear_body_velocity_flu: np.ndarray | None = None
-    ) -> Any:
+    ) -> RotorDynamics:
         dynamics = self._base_model.commands_to_dynamics(
             self._faulted_commands(commands),
             linear_body_velocity_flu=linear_body_velocity_flu,

@@ -12,8 +12,7 @@ repos:
   # ruff/mypy run as mirror hooks: fast, self-bootstrapping, per-changed-file,
   # and ruff auto-fixes in place on commit. Versions are kept in sync with the
   # `dev` extra in pyproject.toml. Because they only see staged files, they are
-  # not a whole-repo gate -- run `uv run ruff check` / `uv run mypy src tests`
-  # for a full sweep.
+  # not a whole-repo gate -- run `make check` for a full sweep.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
@@ -25,13 +24,14 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        # Scoped to the typed source/test tree, matching the
-        # `uv run mypy src tests` full sweep. The isaac/runtime and vendored
-        # pegasus trees can't resolve isaacsim/pxr/carb in the mirror's
-        # isolated env, so checking them only yields false positives.
-        files: ^(src|tests)/
+        # Cover every project-owned Python file. Missing container-only
+        # Isaac/Kit imports are tolerated by the shared mypy configuration;
+        # vendored Pegasus is excluded there.
+        files: ^(src|tests|isaac/runtime|make/scripts|flight_analysis|px4/scripts|ros/scripts)/
+        exclude: ^isaac/runtime/extensions/px4_sitl_brigde/pegasus/
         additional_dependencies:
           - types-requests
+          - types-PyYAML
         args: ["--ignore-missing-imports"]
 
   # pytest has no per-file notion, so it runs locally through the project venv

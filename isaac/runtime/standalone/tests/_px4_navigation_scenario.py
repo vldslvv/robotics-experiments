@@ -13,30 +13,30 @@ so the navigation entrypoint stays thin (one config, one scene) over it.
 
 from __future__ import annotations
 
-from typing import Any
-
 from _px4_takeoff_scenario import (
     Px4TakeoffScenarioOptions,
     run_px4_takeoff_scenario,
 )
 from _runtime import SceneTestContext
 
+from robotics_experiments.config import RoutineStepConfig
+
 __all__ = ["run_px4_navigation_scenario"]
 
 
-def _step_kind(step: Any) -> str:
+def _step_kind(step: RoutineStepConfig) -> str:
     return str(step["kind"])
 
 
-def _step_waypoint(step: Any) -> tuple[float, float, float]:
+def _step_waypoint(step: RoutineStepConfig) -> tuple[float, float, float]:
     return (float(step["x"]), float(step["y"]), float(step["z"]))
 
 
-def _goto_waypoints(steps: list[Any]) -> tuple[tuple[float, float, float], ...]:
+def _goto_waypoints(steps: list[RoutineStepConfig]) -> tuple[tuple[float, float, float], ...]:
     return tuple(_step_waypoint(step) for step in steps if _step_kind(step) == "goto")
 
 
-def _has_goto_hover_transition(steps: list[Any]) -> bool:
+def _has_goto_hover_transition(steps: list[RoutineStepConfig]) -> bool:
     kinds = [_step_kind(step) for step in steps]
     return any(
         current == "goto" and following == "hover"

@@ -8,11 +8,19 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 
-from robotics_experiments.config import ExperimentConfig, load_config
+import robotics_experiments.rl.training.rsl_rl as training
+from robotics_experiments.config import ExperimentConfig, PressEvaluationConfig, load_config
+from robotics_experiments.rl import (
+    METADATA_FILENAME,
+    POLICY_FILENAME,
+    PolicyInterface,
+    load_policy_metadata,
+)
+from robotics_experiments.rl.press import PressTaskResult
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -22,12 +30,72 @@ from robotics_experiments.rl.training.selection import (
     publish_latest,
     select_checkpoint,
 )
+from robotics_experiments.workflows.isaac_lab import (
+    PressEvaluationResult,
+    evaluate_press_policy,
+    make_isaac_lab_env,
+)
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
 _REPORT_SCHEMA_VERSION = 2
 _PRESS_SELECTION_METHOD = "press-gated-maximin-v2"
+
+
+class _ActorCritic(Protocol):
+    actor: torch.nn.Module
+
+
+class _Algorithm(Protocol):
+    policy: _ActorCritic
+    actor_critic: _ActorCritic
+
+
+class _Runner(Protocol):
+    alg: _Algorithm
+    log_dir: str
+
+    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
+        """Run the training loop."""
+        ...
+
+    def load(
+        self,
+        path: str,
+        load_optimizer: bool = True,
+        map_location: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore a runner checkpoint."""
+        ...
+
+
+class _SelectionEnvironment(Protocol):
+    device: str | torch.device
+    max_episode_length: int
+    press_task_result: PressTaskResult[torch.Tensor] | None
+
+    def reset(
+        self, *, seed: int
+    ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], dict[str, Any]]:
+        """Reset the vector environment."""
+        ...
+
+    def step(
+        self, action: torch.Tensor
+    ) -> tuple[
+        dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Advance the vector environment."""
+        ...
+
+    def close(self) -> None:
+        """Release environment resources."""
+        ...
 
 
 def _report(message: str) -> None:
@@ -41,16 +109,13 @@ def _repo_root() -> Path:
 def _press_evaluation(
     *,
     candidate: CheckpointCandidate,
-    runner: Any,
-    env: Any,
+    runner: _Runner,
+    env: _SelectionEnvironment,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
-    evaluation_config: Any,
+    evaluation_config: PressEvaluationConfig,
     device: str,
 ) -> CandidateEvaluation:
-    import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_policy
-
     _report(f"checkpoint selection iteration={candidate.iteration} START")
     training.load_checkpoint(
         runner=runner,
@@ -84,8 +149,8 @@ def _press_evaluation(
 def _score_press_result(
     *,
     candidate: CheckpointCandidate,
-    result: Any,
-    evaluation_config: Any,
+    result: PressEvaluationResult,
+    evaluation_config: PressEvaluationConfig,
 ) -> CandidateEvaluation:
     summary = result.summary
     thresholds = (
@@ -140,7 +205,7 @@ def _selection_report(
     policy_interface: str,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
-    evaluation_config: Any,
+    evaluation_config: PressEvaluationConfig,
     all_candidates: tuple[CheckpointCandidate, ...],
 ) -> dict[str, Any]:
     thresholds = (
@@ -199,10 +264,10 @@ def _select_candidates(
     *,
     policy_interface: str,
     candidates: tuple[CheckpointCandidate, ...],
-    runner: Any,
-    env: Any,
+    runner: _Runner,
+    env: _SelectionEnvironment,
     seeds: tuple[int, ...],
-    evaluation_config: Any,
+    evaluation_config: PressEvaluationConfig,
     device: str,
 ) -> CheckpointSelection:
     scorer = None
@@ -240,14 +305,11 @@ def _publish_selection(
     selection: CheckpointSelection,
     report: dict[str, Any],
     metadata: dict[str, Any],
-    runner: Any,
+    runner: _Runner,
     run_dir: Path,
     policy_root: Path,
     device: str,
 ) -> None:
-    import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
-
     selected_metadata = metadata | {
         "selected_checkpoint_iteration": selection.selected.iteration,
         "selection_method": selection.selection_method,
@@ -290,10 +352,6 @@ def _publish_selection(
 
 
 def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
-    import robotics_experiments.rl.training.rsl_rl as training
-    from robotics_experiments.rl import PolicyInterface, load_policy_metadata
-    from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
-
     training_config = config.rl.training
     policy_root = _repo_root() / ".build" / "training" / training_config.policy_name
     run_dir = policy_root / run_id

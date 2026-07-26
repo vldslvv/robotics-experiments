@@ -1,6 +1,6 @@
 import math
-from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from collections.abc import Sequence
+from typing import Optional
 
 import numpy as np
 
@@ -37,6 +37,7 @@ from robotics_experiments.commanding.commands import (
     takeoff,
 )
 from robotics_experiments.commanding.observation import RoutineObservation
+from robotics_experiments.config import RoutineStepConfig
 from robotics_experiments.px4_bridge import synth_gps_from_enu
 
 __all__ = ["build_vehicle_routine"]
@@ -65,7 +66,7 @@ def _build_arm_step(*, command_ack_timeout_s: float) -> RoutineStep:
 
 def _build_takeoff_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     target_latitude_deg: float,
     target_longitude_deg: float,
@@ -91,7 +92,7 @@ def _build_takeoff_step(
 
 def _build_hover_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     gates: EnvelopeGates,
     hover_settle_s: float,
@@ -115,7 +116,7 @@ def _build_hover_step(
 
 def _build_forward_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     target_latitude_deg: float,
     target_longitude_deg: float,
@@ -146,7 +147,7 @@ def _build_forward_step(
 
 def _build_goto_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     gates: EnvelopeGates,
     home_lat_deg: float,
@@ -204,7 +205,7 @@ def _build_goto_step(
 
 def _build_policy_step(
     *,
-    descriptor: Mapping[str, Any],
+    descriptor: RoutineStepConfig,
     index: int,
     flight_invariants: tuple[_Invariant, ...],
     goto_offboard_prime_ticks: int,
@@ -268,7 +269,7 @@ def _build_policy_step(
     )
 
 
-def _build_land_step(*, descriptor: Mapping[str, Any], index: int) -> RoutineStep:
+def _build_land_step(*, descriptor: RoutineStepConfig, index: int) -> RoutineStep:
     if "timeout_s" not in descriptor:
         raise ValueError(f"routine step {index} (land) is missing required 'timeout_s'")
     return RoutineStep(
@@ -282,7 +283,7 @@ def _build_land_step(*, descriptor: Mapping[str, Any], index: int) -> RoutineSte
 
 def build_vehicle_routine(
     *,
-    steps: Sequence[Mapping[str, Any]],
+    steps: Sequence[RoutineStepConfig],
     target_latitude_deg: float,
     target_longitude_deg: float,
     target_altitude_m: float,

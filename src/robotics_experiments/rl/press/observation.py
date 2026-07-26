@@ -1,7 +1,7 @@
 """Versioned, pure observation layout for the press RL task.
 
 Each layout is a documented, versioned field order packed by a pure function
-(numpy + stdlib only; on the core import path). The schema version is recorded
+(NumPy/torch + stdlib only; on the core import path). The schema version is recorded
 in the exported policy artifact's metadata and validated at load time, so a
 policy can never silently run against a layout it was not trained on.
 
@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntFlag
+from typing import TypeVar
 
 import numpy as np
+import torch
 
 from robotics_experiments.px4_bridge import (
     normalize_quat_wxyz,
@@ -93,6 +95,7 @@ def world_switch_to_contact_frame(
 # Bump the private interface contract whenever this field set, order, units, or
 # frames change.
 OBSERVATION_SCHEMA_VERSION = PRESS_OBSERVATION_SCHEMA_VERSION
+ArrayT = TypeVar("ArrayT", np.ndarray, torch.Tensor)
 
 
 class PressObservationMask(IntFlag):
@@ -189,33 +192,31 @@ def to_vector(obs: PressObservation) -> np.ndarray:
 
 def pack_press_observation(
     *,
-    relative_switch_pos_m,
-    relative_switch_quat_xyzw,
-    pose_confidence,
-    pose_age_s,
-    detection_valid,
-    body_lin_vel_mps,
-    body_ang_vel_radps,
-    attitude_quat_xyzw,
-    pusher_compression_m,
-    pusher_compression_rate_mps,
-    contact_valid,
-    contact_flag,
-    lamp_state,
-    lamp_confidence,
-    lamp_age_s,
-    previous_action,
-    handoff_mode,
-    estimator_health,
-    obs_mask,
-):
+    relative_switch_pos_m: ArrayT,
+    relative_switch_quat_xyzw: ArrayT,
+    pose_confidence: ArrayT | float,
+    pose_age_s: ArrayT | float,
+    detection_valid: ArrayT | bool,
+    body_lin_vel_mps: ArrayT,
+    body_ang_vel_radps: ArrayT,
+    attitude_quat_xyzw: ArrayT,
+    pusher_compression_m: ArrayT | float,
+    pusher_compression_rate_mps: ArrayT | float,
+    contact_valid: ArrayT | bool,
+    contact_flag: ArrayT | bool,
+    lamp_state: ArrayT | int,
+    lamp_confidence: ArrayT | float,
+    lamp_age_s: ArrayT | float,
+    previous_action: ArrayT,
+    handoff_mode: ArrayT | int,
+    estimator_health: ArrayT | float,
+    obs_mask: ArrayT | int,
+) -> ArrayT:
     """Pack the press schema for either NumPy values or batched torch tensors."""
-    if type(relative_switch_pos_m).__module__.startswith("torch"):
-        import torch
-
+    if isinstance(relative_switch_pos_m, torch.Tensor):
         reference = relative_switch_pos_m
 
-        def column(value):
+        def column(value: torch.Tensor | bool | int | float) -> torch.Tensor:
             return torch.as_tensor(value, dtype=reference.dtype, device=reference.device).reshape(
                 -1, 1
             )

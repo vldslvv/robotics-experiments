@@ -12,16 +12,20 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import carb
 import omni.physx
 
 from robotics_experiments.config import Px4BridgeConfig
 from robotics_experiments.px4_bridge import (
+    BridgeStatus,
+    DiscoveredRotorMapping,
     LockstepSettings,
     PegasusQuadraticThrustModel,
+    Px4BridgeState,
     Px4MavlinkPort,
+    SimClockState,
     advance_sim_clock,
     bridge_time_us,
     create_pegasus_thrust_model,
@@ -35,14 +39,6 @@ from robotics_experiments.px4_bridge import (
     stop_px4_bridge,
     vehicle_log_context,
 )
-
-if TYPE_CHECKING:
-    from robotics_experiments.px4_bridge import (
-        BridgeStatus,
-        DiscoveredRotorMapping,
-        Px4BridgeState,
-        SimClockState,
-    )
 
 __all__ = [
     "BridgeHost",

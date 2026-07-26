@@ -35,7 +35,9 @@ imports only from `robotics_experiments.workflows.isaac_lab`; its lazy package
 root is the public contract and exposes guarded task registration, both task
 IDs/env/config factories, the generic `make_isaac_lab_env(...)`, and the named
 batched rotor-omega diagnostic seam without eager-importing Isaac Lab task
-modules during host-side package imports.
+modules during host-side package imports. Ordinary dependencies such as torch,
+Gymnasium, and rsl_rl are imported eagerly by their owning modules; only
+Isaac Lab / Kit modules stay behind this container-only boundary.
 
 Isaac Lab task IDs use the Gymnasium `Isaac-...-Direct-v0` naming convention
 for direct-workflow environments. The registered tasks are
@@ -216,8 +218,9 @@ Pieces:
   actor-only`, source run, checkpoint iteration/path, and source commit.
   `--initialize-checkpoint` and `--export-checkpoint` are mutually exclusive;
   export-only loading retains its existing no-optimizer behavior.
-  rsl_rl comes from the pinned Lab image requirements; the host `training`
-  extra (`rsl-rl-lib`) exists for tooling only.
+  rsl_rl comes from both the pinned Lab image requirements and the project's
+  default host dependency set so the owning training module can import it
+  eagerly.
   `make select-rl-checkpoint RL_RUN_ID=<run-id>` resumes selection without
   retraining. The task-neutral selector enumerates every numeric checkpoint,
   builds one compatible environment and runner, and passes an explicit scorer

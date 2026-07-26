@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import carb
 
@@ -30,11 +30,23 @@ from robotics_experiments.commanding import (
     tick_routine_driver,
 )
 from robotics_experiments.config import ExperimentConfig, VehicleConfig
+from robotics_experiments.drone import despawn_drone, spawn_drone
+from robotics_experiments.environment import (
+    SwitchesRuntimeState,
+    adopt_switches_stage,
+    create_switches_runtime,
+    play_switches_runtime,
+    step_switches_runtime,
+    teardown_switches_runtime,
+)
+from robotics_experiments.px4_bridge import IsaacArticulationIO
+from robotics_experiments.rl import PolicyInterface
 from robotics_experiments.runtime._policy import (
     _make_policy_adapter,
     _PolicyPreflight,
     _preflight_policy_artifacts,
 )
+from robotics_experiments.runtime._press_io import PressObservationIO
 from robotics_experiments.runtime._scene import resolve_scene_path
 from robotics_experiments.runtime.bridge_host import (
     BridgeHost,
@@ -42,12 +54,10 @@ from robotics_experiments.runtime.bridge_host import (
     BridgeHostParams,
     read_bridge_host_status,
 )
+from robotics_experiments.simulation import apply_settings as apply_simulation_settings
 
 if TYPE_CHECKING:
     from pxr import Usd
-
-    from robotics_experiments.px4_bridge import IsaacArticulationIO
-    from robotics_experiments.runtime._press_io import PressObservationIO
 
 __all__ = [
     "FleetDriverEnv",
@@ -114,7 +124,7 @@ class FleetState:
     drones: tuple[SpawnedDrone, ...]
     flying: tuple[FlyingDrone, ...]
     driver_cadence: _CadenceState
-    switches: Any
+    switches: SwitchesRuntimeState
     switch_cadence: _CadenceState
     switch_rate_hz: float
     switch_events: tuple[SwitchToggleEvent, ...]
@@ -188,8 +198,6 @@ class FleetDriverEnv:
 
 def create_fleet(*, config: ExperimentConfig) -> FleetState:
     """Create an empty runtime state for a resolved experiment config."""
-    from robotics_experiments.environment import create_switches_runtime
-
     return FleetState(
         config=config,
         stage=None,
@@ -225,8 +233,6 @@ def adopt_current_stage(*, state: FleetState) -> FleetState:
     stage = omni.usd.get_context().get_stage()
     if stage is None:
         raise RuntimeError(f"{_LOG_PREFIX} stage adopted before it finished opening")
-    from robotics_experiments.environment import adopt_switches_stage
-
     return replace(
         state,
         stage=stage,
@@ -236,17 +242,12 @@ def adopt_current_stage(*, state: FleetState) -> FleetState:
 
 def apply_settings(*, state: FleetState) -> FleetState:
     """Apply configured simulation settings to the adopted stage."""
-    from robotics_experiments.simulation import apply_settings as apply_simulation_settings
-
     apply_simulation_settings(stage=state.stage, settings=state.config.sim)
     return state
 
 
 def spawn_fleet(*, state: FleetState) -> FleetState:
     """Spawn the ordered vehicle mapping and compose bridge resources."""
-    from robotics_experiments.drone import spawn_drone
-    from robotics_experiments.environment import play_switches_runtime
-
     if state.stage is None:
         raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
     switch_rate_hz = state.switch_rate_hz
@@ -279,8 +280,6 @@ def spawn_fleet(*, state: FleetState) -> FleetState:
             observer: Optional[IsaacArticulationIO] = None
             articulation_path = vehicle.bridge.articulation_path or path
             if vehicle.bridge.enabled:
-                from robotics_experiments.px4_bridge import IsaacArticulationIO
-
                 host = BridgeHost(
                     BridgeHostParams(
                         bridge=vehicle.bridge,
@@ -346,8 +345,6 @@ def _prepare_policy_observer(
     spawned: SpawnedDrone,
     preflight: _PolicyPreflight,
 ) -> SpawnedDrone:
-    from robotics_experiments.rl import PolicyInterface
-
     press_descriptors = [
         (policy.switch_index, policy.metadata.contract)
         for policy in preflight.policies
@@ -356,8 +353,6 @@ def _prepare_policy_observer(
     ]
     if not press_descriptors:
         return spawned
-    from robotics_experiments.runtime._press_io import PressObservationIO
-
     indices = {switch_index for switch_index, _contract in press_descriptors}
     if len(indices) != 1 or next(iter(indices)) < 0:
         raise ValueError("press-v1 policy steps require one shared non-negative switch_index")
@@ -471,8 +466,6 @@ def tick_drivers(
     on_error: Optional[Callable[[FlyingDrone, Exception], None]] = None,
 ) -> FleetState:
     """Advance the physics-derived fleet cadence and tick every driver when due."""
-    from robotics_experiments.environment import step_switches_runtime
-
     previous_time_ns = state.driver_cadence.previous_time_ns
     assert previous_time_ns is not None
     control_time_ns = previous_time_ns + int(round(physics_dt_s * 1_000_000_000))
@@ -547,9 +540,6 @@ def fleet_is_done(*, state: FleetState) -> bool:
 
 def teardown(*, state: FleetState) -> FleetState:
     """Stop resources before despawning vehicles, preserving lifecycle order."""
-    from robotics_experiments.drone import despawn_drone
-    from robotics_experiments.environment import teardown_switches_runtime
-
     state.group.stop()
     for flying in state.flying:
         flying.context.port.disconnect()

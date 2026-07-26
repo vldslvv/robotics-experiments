@@ -6,15 +6,14 @@ runtime leaf stays off the host import path until a press artifact is selected.
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils.types import ArticulationAction
 from isaacsim.sensors.physics import ContactSensor
-from pxr import Gf, PhysxSchema, UsdGeom, UsdLux, UsdPhysics
+from pxr import Gf, PhysxSchema, Usd, UsdGeom, UsdLux, UsdPhysics
 
 from robotics_experiments.px4_bridge import (
+    VehicleState,
     body_velocity_flu_from_state,
     quat_wxyz_to_xyzw,
 )
@@ -34,7 +33,7 @@ class PressObservationIO:
     def __init__(
         self,
         *,
-        stage: Any,
+        stage: Usd.Stage,
         articulation_path: str,
         switch_index: int,
         action_dim: int,
@@ -207,7 +206,7 @@ class PressObservationIO:
     def read(
         self,
         *,
-        vehicle_state: Any,
+        vehicle_state: VehicleState,
         sim_time_s: float,
     ) -> PressObservation:
         """Assemble the exact 34-value policy input from live resources."""

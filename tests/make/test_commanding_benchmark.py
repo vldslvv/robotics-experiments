@@ -117,13 +117,13 @@ def test_workload_fixtures_validate_public_behavior() -> None:
         fixture.validate(fixture.operation())
 
 
-def test_workload_fixtures_do_not_import_isaac_or_pymavlink() -> None:
+def test_workload_fixtures_do_not_import_isaac() -> None:
     code = """
 import sys
 from make.scripts.commanding_benchmark import build_workload_fixtures
 for fixture in build_workload_fixtures():
     fixture.validate(fixture.operation())
-forbidden = ("carb", "isaacsim", "omni", "pxr", "pymavlink")
+forbidden = ("carb", "isaacsim", "omni", "pxr")
 loaded = [name for name in sys.modules if name.split(".", 1)[0] in forbidden]
 raise SystemExit(1 if loaded else 0)
 """

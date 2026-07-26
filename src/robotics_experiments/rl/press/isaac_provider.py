@@ -25,7 +25,7 @@ class GroundTruthPoseProvider:
     canonical policy-frame local ``+X`` convention.
     """
 
-    def __init__(self, stage, switch_prim_path: str) -> None:
+    def __init__(self, stage: Usd.Stage, switch_prim_path: str) -> None:
         prim = stage.GetPrimAtPath(switch_prim_path)
         if not prim or not prim.IsValid():
             raise ValueError(f"switch prim not found at {switch_prim_path!r}")

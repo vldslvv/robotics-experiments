@@ -5,8 +5,7 @@ after export. Hydra authors that contract for a new training run, but
 evaluation and deployment parse the stored metadata instead of comparing it
 with the active RL training config.
 
-Torch is imported only by :func:`load_policy`, keeping metadata
-preflight on the lightweight core import path.
+Torch is an ordinary runtime dependency and is imported eagerly.
 """
 
 from __future__ import annotations
@@ -18,10 +17,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
+import torch
 
+from robotics_experiments.config import PressActionConfig
 from robotics_experiments.rl._interfaces import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
@@ -179,11 +180,11 @@ def _infer_legacy_interface(
 
 def policy_metadata(
     *,
-    action_cfg: Any,
+    action_cfg: PressActionConfig,
     obs_schema_version: int,
     obs_dim: int,
     policy_rate_hz: float,
-    policy_interface: Union[str, PolicyInterface],
+    policy_interface: str | PolicyInterface,
 ) -> dict[str, Any]:
     """Compose metadata for a contract authored by a training config."""
     interface = PolicyInterface(policy_interface)
@@ -314,14 +315,14 @@ def _load_metadata(*, artifact_dir: Path) -> PolicyMetadata:
     )
 
 
-def load_policy_metadata(*, artifact_dir: Union[str, Path]) -> PolicyMetadata:
+def load_policy_metadata(*, artifact_dir: str | Path) -> PolicyMetadata:
     """Read and validate an artifact's complete metadata record once."""
     return _load_metadata(artifact_dir=Path(artifact_dir))
 
 
 def validate_policy_artifact(
     *,
-    artifact_dir: Union[str, Path],
+    artifact_dir: str | Path,
 ) -> PolicyMetadata:
     """Validate a complete artifact without importing Torch."""
     artifact_dir = Path(artifact_dir)
@@ -338,7 +339,7 @@ def validate_policy_artifact(
 
 def load_policy(
     *,
-    artifact_dir: Union[str, Path],
+    artifact_dir: str | Path,
 ) -> LoadedPolicy:
     """Load a vector policy after reading and validating its artifact once."""
     artifact_dir = Path(artifact_dir)
@@ -351,8 +352,6 @@ def load_policy(
         )
     metadata = _load_metadata(artifact_dir=artifact_dir)
     contract = metadata.contract
-
-    import torch
 
     module = torch.jit.load(str(module_path), map_location="cpu")
     module.eval()

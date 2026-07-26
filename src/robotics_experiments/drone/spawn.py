@@ -13,6 +13,7 @@ import math
 from typing import Optional
 
 import carb
+import numpy as np
 from isaacsim.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
@@ -113,7 +114,6 @@ def _clear_rigid_body_velocities(stage: Usd.Stage, prim_path: str) -> None:
         return
 
     try:
-        import numpy as np
         from isaacsim.core.prims import RigidPrim
 
         body = RigidPrim(prim_paths_expr=body_path)

@@ -3,9 +3,7 @@
 :class:`MavlinkCommandPort` is the PX4-specific boundary the orchestrators talk
 across: the private commander sends MAVLink commands and OFFBOARD setpoints, and
 the driver pumps GCS heartbeats and drains feedback. It uses the resolved
-``vehicle.gcs_port``; its ``pymavlink`` import is function-scoped so importing
-``commanding`` never pulls in the MAVLink runtime, exactly as the standalone
-scenario did inline.
+``vehicle.gcs_port`` and imports its ordinary ``pymavlink`` dependency eagerly.
 
 The command port is a separate *control* layer by design: it talks the GCS link,
 never the bridge's simulator MAVLink port. The bridge contract forbids the
@@ -18,7 +16,9 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, replace
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
+
+from pymavlink import mavutil
 
 from robotics_experiments.commanding.commands import (
     MAV_CMD_COMPONENT_ARM_DISARM,
@@ -32,6 +32,33 @@ from robotics_experiments.commanding.observation import MAV_RESULT_ACCEPTED, Com
 __all__ = ["CommandPortStatus", "MavlinkCommandPort"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _MavlinkMessage(Protocol):
+    command: int
+    result: int
+
+    def get_type(self) -> str: ...
+
+    def get_srcSystem(self) -> int: ...
+
+    def get_srcComponent(self) -> int: ...
+
+
+class _MavlinkConnection(Protocol):
+    """Dynamic pymavlink connection surface used by the command adapter."""
+
+    mav: Any
+    target_system: int
+    target_component: int
+
+    def close(self) -> None: ...
+
+    def recv_match(
+        self,
+        *,
+        blocking: bool,  # noqa: F841 - Protocol preserves pymavlink's keyword name.
+    ) -> Optional[_MavlinkMessage]: ...
 
 
 @dataclass(frozen=True)
@@ -78,7 +105,7 @@ _ARM_ACCEPTED_STATUSTEXT = "Armed by external command"
 _FAILSAFE_SYSTEM_STATUS = frozenset({5, 6, 8})
 
 
-def _global_position(msg: Any) -> Optional[tuple[float, float, float]]:
+def _global_position(msg: _MavlinkMessage) -> Optional[tuple[float, float, float]]:
     lat_e7 = getattr(msg, "lat", None)
     lon_e7 = getattr(msg, "lon", None)
     alt_mm = getattr(msg, "alt", None)
@@ -97,7 +124,7 @@ def _global_position(msg: Any) -> Optional[tuple[float, float, float]]:
 
 
 def _fold_feedback(
-    state: CommandPortStatus, msg: Any
+    state: CommandPortStatus, msg: _MavlinkMessage
 ) -> tuple[CommandPortStatus, Optional[CommandAck]]:
     """Purely fold one MAVLink feedback message into an immutable snapshot."""
     msg_type = msg.get_type()
@@ -142,7 +169,7 @@ class MavlinkCommandPort:
         gcs_endpoint: str,
         heartbeat_period_s: float,
         label: str = "",
-        connection: Any = None,
+        connection: Optional[_MavlinkConnection] = None,
     ) -> None:
         """Build the port. No socket is opened until :meth:`connect`.
 
@@ -158,10 +185,7 @@ class MavlinkCommandPort:
         self._gcs_endpoint = gcs_endpoint
         self._heartbeat_period_s = float(heartbeat_period_s)
         self._label = label
-        # Typed Any (not Optional): None before connect(), a live mavutil
-        # connection after; keeping it Any avoids Optional-member churn on every
-        # access of the function-scoped pymavlink object.
-        self._mav: Any = connection
+        self._mav = connection
         self._last_heartbeat_sent_s = 0.0
         self._feedback = CommandPortStatus(
             is_handshaked=False,
@@ -172,8 +196,6 @@ class MavlinkCommandPort:
 
     def connect(self) -> None:
         if self._mav is None:
-            from pymavlink import mavutil
-
             _LOGGER.info("[%s] opening GCS MAVLink endpoint %s", self._label, self._gcs_endpoint)
             self._mav = mavutil.mavlink_connection(self._gcs_endpoint, source_system=255)
         self._last_heartbeat_sent_s = 0.0
@@ -190,12 +212,15 @@ class MavlinkCommandPort:
         """Return an immutable snapshot of the current control-link state."""
         return self._feedback
 
-    def pump_heartbeat(self, *, now_s: float, force: bool = False) -> None:
-        from pymavlink import mavutil
+    def _connection(self) -> _MavlinkConnection:
+        if self._mav is None:
+            raise RuntimeError(f"[{self._label}] GCS link is not connected")
+        return self._mav
 
+    def pump_heartbeat(self, *, now_s: float, force: bool = False) -> None:
         if not force and now_s - self._last_heartbeat_sent_s < self._heartbeat_period_s:
             return
-        self._mav.mav.heartbeat_send(
+        self._connection().mav.heartbeat_send(
             mavutil.mavlink.MAV_TYPE_GCS,
             mavutil.mavlink.MAV_AUTOPILOT_INVALID,
             0,
@@ -215,9 +240,10 @@ class MavlinkCommandPort:
     def send(self, command: MavlinkCommand) -> None:
         self._require_target(f"send {command.label!r}")
         _LOGGER.info("[%s] sending MAVLink command %s", self._label, command.label)
-        self._mav.mav.command_long_send(
-            self._mav.target_system,
-            self._mav.target_component,
+        connection = self._connection()
+        connection.mav.command_long_send(
+            connection.target_system,
+            connection.target_component,
             command.command_id,
             0,
             *command.params,
@@ -230,10 +256,11 @@ class MavlinkCommandPort:
         if not math.isfinite(yaw):
             type_mask |= _POSITION_TARGET_TYPEMASK_YAW_IGNORE
             yaw = 0.0
-        self._mav.mav.set_position_target_global_int_send(
+        connection = self._connection()
+        connection.mav.set_position_target_global_int_send(
             0,  # time_boot_ms (unused by PX4)
-            self._mav.target_system,
-            self._mav.target_component,
+            connection.target_system,
+            connection.target_component,
             _MAV_FRAME_GLOBAL_INT,
             type_mask,
             int(round(setpoint.latitude_deg * 1e7)),
@@ -251,10 +278,11 @@ class MavlinkCommandPort:
 
     def send_velocity_setpoint(self, setpoint: VelocitySetpoint) -> None:
         self._require_target("stream a velocity setpoint")
-        self._mav.mav.set_position_target_local_ned_send(
+        connection = self._connection()
+        connection.mav.set_position_target_local_ned_send(
             0,  # time_boot_ms (unused by PX4)
-            self._mav.target_system,
-            self._mav.target_component,
+            connection.target_system,
+            connection.target_component,
             _MAV_FRAME_BODY_NED,
             _VELOCITY_TARGET_TYPEMASK,
             0.0,
@@ -272,10 +300,11 @@ class MavlinkCommandPort:
 
     def send_attitude_target(self, setpoint: AttitudeRateSetpoint) -> None:
         self._require_target("stream an attitude setpoint")
-        self._mav.mav.set_attitude_target_send(
+        connection = self._connection()
+        connection.mav.set_attitude_target_send(
             0,  # time_boot_ms (unused by PX4)
-            self._mav.target_system,
-            self._mav.target_component,
+            connection.target_system,
+            connection.target_component,
             _ATTITUDE_TARGET_TYPEMASK_RATES,
             [1.0, 0.0, 0.0, 0.0],  # attitude quaternion (ignored)
             float(setpoint.roll_rate_radps),
@@ -286,15 +315,16 @@ class MavlinkCommandPort:
 
     def poll_feedback(self) -> Optional[CommandAck]:
         latest_ack: Optional[CommandAck] = None
+        connection = self._connection()
         while True:
-            msg = self._mav.recv_match(blocking=False)
+            msg = connection.recv_match(blocking=False)
             if msg is None:
                 return latest_ack
             previous = self._feedback
             self._feedback, ack = _fold_feedback(self._feedback, msg)
             if not previous.is_handshaked and self._feedback.is_handshaked:
-                self._mav.target_system = msg.get_srcSystem()
-                self._mav.target_component = msg.get_srcComponent()
+                connection.target_system = msg.get_srcSystem()
+                connection.target_component = msg.get_srcComponent()
                 _LOGGER.info(
                     "[%s] GCS learned target system=%s component=%s",
                     self._label,

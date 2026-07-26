@@ -1,8 +1,9 @@
 """rsl_rl training adapter: the ONLY module importing ``rsl_rl``.
 
 Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
-``isaaclab.sh --install``); it is never imported on the core path (the lazy
-``robotics_experiments.rl`` package root defers it). The package-root contract --
+``isaaclab.sh --install``); it is never imported on the core path. The ordinary
+``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
+deferred until the application is running. The package-root contract --
 ``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
 ``initialize_actor_from_checkpoint`` / ``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
@@ -11,10 +12,20 @@ re-implements.
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+import torch
+from rsl_rl.runners import OnPolicyRunner
+
+from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig
+from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
+
+if TYPE_CHECKING:
+    from isaaclab.envs import DirectRLEnv
 
 __all__ = [
     "TrainingResult",
@@ -27,10 +38,20 @@ __all__ = [
 ]
 
 
+class _ActorCritic(Protocol):
+    actor: torch.nn.Module
+
+
+class _Algorithm(Protocol):
+    policy: _ActorCritic
+    actor_critic: _ActorCritic
+
+
 class _PolicyRunner(Protocol):
     """The runner surface the adapter contract relies on."""
 
-    alg: Any
+    alg: _Algorithm
+    log_dir: str
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -41,7 +62,7 @@ class _PolicyRunner(Protocol):
         path: str,
         load_optimizer: bool = True,
         map_location: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Restore a runner checkpoint."""
         del path, load_optimizer, map_location
         return {}
@@ -55,7 +76,9 @@ class TrainingResult:
     log_dir: str
 
 
-def _train_cfg(*, training_config: Any, policy_config: Any) -> dict[str, Any]:
+def _train_cfg(
+    *, training_config: RlTrainingConfig, policy_config: RlPolicyConfig
+) -> dict[str, Any]:
     """Map PPO and task-owned policy config onto the rsl_rl runner dict."""
     return {
         # Single observation group: the env emits {"policy": tensor} and the
@@ -94,15 +117,15 @@ def _train_cfg(*, training_config: Any, policy_config: Any) -> dict[str, Any]:
 
 def build_runner(
     *,
-    env: Any,
-    training_config: Any,
-    policy_config: Any,
+    env: DirectRLEnv,
+    training_config: RlTrainingConfig,
+    policy_config: RlPolicyConfig,
     log_dir: str,
     device: str,
 ) -> _PolicyRunner:
     """Wrap a DirectRLEnv for rsl_rl and build the OnPolicyRunner."""
+    # Isaac Lab must be imported only after AppLauncher starts.
     from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
-    from rsl_rl.runners import OnPolicyRunner
 
     wrapped = RslRlVecEnvWrapper(env, clip_actions=1.0)
     return OnPolicyRunner(
@@ -131,7 +154,7 @@ def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str
     )
 
 
-def _policy_module(runner: _PolicyRunner) -> Any:
+def _policy_module(runner: _PolicyRunner) -> _ActorCritic:
     # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
     policy = getattr(runner.alg, "policy", None)
     return policy if policy is not None else runner.alg.actor_critic
@@ -148,8 +171,6 @@ def initialize_actor_from_checkpoint(
     The critic, action standard deviation, optimizer, and runner iteration are
     deliberately left exactly as initialized by ``build_runner``.
     """
-    import torch
-
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model_state = checkpoint.get("model_state_dict")
     if not isinstance(model_state, dict):
@@ -176,11 +197,11 @@ def initialize_actor_from_checkpoint(
     target_actor.load_state_dict(source_actor, strict=True)
 
 
-def _actor_module(runner: _PolicyRunner) -> Any:
+def _actor_module(runner: _PolicyRunner) -> torch.nn.Module:
     return _policy_module(runner).actor
 
 
-def deterministic_actor(*, runner: _PolicyRunner) -> Any:
+def deterministic_actor(*, runner: _PolicyRunner) -> torch.nn.Module:
     """Return the checkpoint-loaded actor mean in evaluation mode."""
     actor = _actor_module(runner)
     actor.eval()
@@ -194,12 +215,6 @@ def export_policy(runner: _PolicyRunner, out_dir: Path, *, metadata: dict[str, A
     ``[N, action_dim]`` action mean (deterministic inference); the metadata is
     the runtime policy-step loader validates at load time.
     """
-    import copy
-
-    import torch
-
-    from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
-
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     actor = copy.deepcopy(_actor_module(runner)).to("cpu").eval()

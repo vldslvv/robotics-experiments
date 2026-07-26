@@ -1,8 +1,8 @@
 """Deterministic press-policy rollout and aggregation shared by selection and gates.
 
-This Isaac-Lab workflow leaf imports Torch at module scope. It stays behind the
-lazy :mod:`robotics_experiments.workflows.isaac_lab` package boundary so core
-imports remain usable without the training dependency.
+This host-safe workflow module imports its ordinary NumPy and Torch
+dependencies eagerly. Isaac Lab itself is represented by a narrow environment
+protocol and remains outside this module.
 """
 
 from __future__ import annotations
@@ -10,12 +10,12 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import torch
 
-from robotics_experiments.rl.press import PressRewardTerms
+from robotics_experiments.rl.press import PressRewardTerms, PressTaskResult
 from robotics_experiments.rl.training.selection import RewardMean
 
 __all__ = [
@@ -60,6 +60,36 @@ class PressEvaluationResult:
     reward_means: tuple[RewardMean, ...]
 
 
+class _PressPolicy(Protocol):
+    def __call__(self, observation: torch.Tensor) -> torch.Tensor:
+        """Return one normalized action batch."""
+        ...
+
+
+class _PressEvaluationEnvironment(Protocol):
+    device: str | torch.device
+    max_episode_length: int
+    press_task_result: PressTaskResult[torch.Tensor] | None
+
+    def reset(
+        self, *, seed: int
+    ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], dict[str, Any]]:
+        """Reset the existing vector environment with a deterministic seed."""
+        ...
+
+    def step(
+        self, action: torch.Tensor
+    ) -> tuple[
+        dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Advance the vector environment by one policy step."""
+        ...
+
+
 def summarize_press_episodes(
     *, episodes: tuple[PressEpisodeMetrics, ...]
 ) -> PressEvaluationSummary:
@@ -92,8 +122,8 @@ def summarize_press_episodes(
 
 def _evaluate_seed(
     *,
-    env: Any,
-    policy: Any,
+    env: _PressEvaluationEnvironment,
+    policy: _PressPolicy,
     seed: int,
     episode_count: int,
     report: Callable[[str], None],
@@ -182,8 +212,8 @@ def _evaluate_seed(
 
 def evaluate_press_policy(
     *,
-    env: Any,
-    policy: Any,
+    env: _PressEvaluationEnvironment,
+    policy: _PressPolicy,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
     report: Callable[[str], None],

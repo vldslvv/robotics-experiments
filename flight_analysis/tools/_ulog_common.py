@@ -39,4 +39,4 @@ def euler_deg(q: list[float]) -> tuple[float, float, float]:
     roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
     pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
     yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-    return tuple(math.degrees(value) for value in (roll, pitch, yaw))
+    return math.degrees(roll), math.degrees(pitch), math.degrees(yaw)

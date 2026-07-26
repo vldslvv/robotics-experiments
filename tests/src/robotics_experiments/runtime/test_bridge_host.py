@@ -174,8 +174,12 @@ def _install_fake_px4_bridge(monkeypatch, calls):
             self.__dict__.update(kwargs)
 
     fake_px4_bridge.LockstepSettings = LockstepSettings
+    fake_px4_bridge.BridgeStatus = object
+    fake_px4_bridge.DiscoveredRotorMapping = object
     fake_px4_bridge.PegasusQuadraticThrustModel = PegasusQuadraticThrustModel
+    fake_px4_bridge.Px4BridgeState = Px4BridgeState
     fake_px4_bridge.Px4MavlinkPort = Px4MavlinkPort
+    fake_px4_bridge.SimClockState = object
     fake_px4_bridge.advance_sim_clock = advance_sim_clock
     fake_px4_bridge.bridge_time_us = bridge_time_us
     fake_px4_bridge.create_px4_bridge = create_px4_bridge

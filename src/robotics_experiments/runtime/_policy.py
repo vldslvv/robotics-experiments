@@ -19,6 +19,14 @@ from robotics_experiments.rl import (
     policy_action_to_offboard,
     validate_policy_artifact,
 )
+from robotics_experiments.rl.press import (
+    HandoffGate,
+    PressObservation,
+    PressPolicyExecutionParams,
+    PressPolicyExecutionState,
+    advance_press_policy_execution,
+    initial_press_policy_execution_state,
+)
 
 __all__: list[str] = []
 
@@ -127,15 +135,6 @@ def _hover_adapter(
 
 
 def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyAdapter:
-    from robotics_experiments.rl.press import (
-        HandoffGate,
-        PressObservation,
-        PressPolicyExecutionParams,
-        PressPolicyExecutionState,
-        advance_press_policy_execution,
-        initial_press_policy_execution_state,
-    )
-
     contract = loaded.contract
     termination = config.rl.press.termination
     params = PressPolicyExecutionParams(

@@ -24,8 +24,8 @@ def _drop_modules(*prefixes: str) -> None:
 
 
 def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
-    _drop_modules("gymnasium", "isaaclab", "robotics_experiments.workflows.isaac_lab")
-    blocker = _BlockedDependencyFinder({"gymnasium", "isaaclab"})
+    _drop_modules("isaaclab", "robotics_experiments.workflows.isaac_lab")
+    blocker = _BlockedDependencyFinder({"isaaclab"})
     monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
 
     module = importlib.import_module("robotics_experiments.workflows.isaac_lab")
@@ -54,11 +54,9 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
 
 
 def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
-    from robotics_experiments.workflows.isaac_lab import (
-        DRONE_HOVER_TASK_ID,
-        SWITCH_PRESS_TASK_ID,
-        register_isaac_lab_tasks,
-    )
+    registration = importlib.import_module("robotics_experiments.workflows.isaac_lab.registration")
+    DRONE_HOVER_TASK_ID = registration.DRONE_HOVER_TASK_ID
+    SWITCH_PRESS_TASK_ID = registration.SWITCH_PRESS_TASK_ID
 
     fake_gym = types.ModuleType("gymnasium")
     fake_gym.__spec__ = importlib.machinery.ModuleSpec("gymnasium", loader=None)
@@ -74,11 +72,11 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
         }
 
     fake_gym.register = register
-    monkeypatch.setitem(sys.modules, "gymnasium", fake_gym)
+    monkeypatch.setattr(registration, "gym", fake_gym)
     monkeypatch.setitem(sys.modules, "isaaclab", fake_isaaclab)
 
-    assert register_isaac_lab_tasks() is True
-    assert register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
 
     spec = fake_gym.registry[DRONE_HOVER_TASK_ID]
     assert spec == {
@@ -93,7 +91,7 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
         },
     }
     fake_gym.registry.pop(SWITCH_PRESS_TASK_ID)
-    assert register_isaac_lab_tasks() is True
+    assert registration.register_isaac_lab_tasks() is True
     assert fake_gym.registry[DRONE_HOVER_TASK_ID] is spec
     assert fake_gym.registry[SWITCH_PRESS_TASK_ID] == {
         "entry_point": (
@@ -124,7 +122,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
         return types.SimpleNamespace(unwrapped="environment")
 
     fake_gym.make = make
-    monkeypatch.setitem(sys.modules, "gymnasium", fake_gym)
+    monkeypatch.setattr(registration, "gym", fake_gym)
     monkeypatch.setattr(registration, "register_isaac_lab_tasks", lambda: True)
     monkeypatch.setattr(
         registration.importlib,

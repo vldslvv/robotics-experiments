@@ -2,14 +2,23 @@
 
 This package root is the only supported import surface for code outside
 ``robotics_experiments.workflows.isaac_lab``. It stays lightweight at import
-time: Isaac Lab task modules and torch helpers are loaded only when their
-exported symbols are requested.
+time: ordinary torch-backed helpers are imported eagerly, while Isaac Lab task
+modules are loaded only when their exported symbols are requested.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import torch
+
+from robotics_experiments.workflows.isaac_lab.press_evaluation import (
+    PressEpisodeMetrics,
+    PressEvaluationResult,
+    PressEvaluationSummary,
+    evaluate_press_policy,
+    summarize_press_episodes,
+)
 from robotics_experiments.workflows.isaac_lab.registration import (
     DRONE_HOVER_TASK_ID,
     SWITCH_PRESS_TASK_ID,
@@ -18,13 +27,6 @@ from robotics_experiments.workflows.isaac_lab.registration import (
 )
 
 if TYPE_CHECKING:
-    import torch
-
-    from robotics_experiments.workflows.isaac_lab.press_evaluation import (
-        PressEpisodeMetrics,
-        PressEvaluationResult,
-        PressEvaluationSummary,
-    )
     from robotics_experiments.workflows.isaac_lab.tasks.drone_hover_env import (
         DroneHoverEnv,
         DroneHoverEnvCfg,
@@ -86,28 +88,6 @@ def __getattr__(name: str):
         from robotics_experiments.workflows.isaac_lab.tasks.flight import action_to_rotor_omega
 
         return action_to_rotor_omega
-    if name in {
-        "PressEpisodeMetrics",
-        "PressEvaluationResult",
-        "PressEvaluationSummary",
-        "evaluate_press_policy",
-        "summarize_press_episodes",
-    }:
-        from robotics_experiments.workflows.isaac_lab.press_evaluation import (
-            PressEpisodeMetrics,
-            PressEvaluationResult,
-            PressEvaluationSummary,
-            evaluate_press_policy,
-            summarize_press_episodes,
-        )
-
-        return {
-            "PressEpisodeMetrics": PressEpisodeMetrics,
-            "PressEvaluationResult": PressEvaluationResult,
-            "PressEvaluationSummary": PressEvaluationSummary,
-            "evaluate_press_policy": evaluate_press_policy,
-            "summarize_press_episodes": summarize_press_episodes,
-        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -29,13 +29,13 @@ airframe dataclasses, Hydra parsing, and mass-property calculations live in
 `robotics_experiments.drone._airframe`, which can be tested on the host without
 OpenUSD bindings.
 
-These files carry `from __future__ import annotations`, and ruff lints them but
-mypy does not (its scope is `src tests`), so annotate parameters/returns
-precisely using `TYPE_CHECKING` imports for Kit-app-only types. Never add a
-runtime import only for a hint.
+These files carry `from __future__ import annotations`, and both Ruff and mypy
+check them. Annotate parameters and returns precisely. `TYPE_CHECKING` imports
+are reserved for Kit-app-only types whose runtime import would violate startup
+ordering; ordinary dependencies and pure project types remain eager.
 
-Do not convert deferred imports to module top to remove redundancy; that breaks
-the scripts at import time before the app boots.
+Do not hoist the documented Kit-dependent imports; that breaks the scripts at
+import time before the app boots.
 
 The fleet runner uses the same frozen `FleetState` lifecycle as the live
 extension and advances its driver from a PhysX-step subscription. Driver

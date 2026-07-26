@@ -123,8 +123,13 @@ the current contents and the intended home for that kind of code.
   Construct the dataclass directly at the call site; reserve a builder function
   for construction that carries real logic (nontrivial derivation, validation,
   or branching).
-- Preserve lazy imports where they prevent simulator, ROS, PX4, or Pegasus
-  dependencies from loading during lightweight package imports.
+- Import standard-library modules, project modules, and ordinary installable
+  dependencies eagerly. Lazy imports and `TYPE_CHECKING` dependency imports are
+  permitted only for container-only Isaac Sim / Kit / Isaac Lab modules or
+  where `SimulationApp` / `AppLauncher` must start before Kit-dependent imports.
+  Resolve circular dependencies structurally instead of hiding them behind
+  function-scoped or type-only imports. The vendored Pegasus tree and its
+  consuming import behavior are outside this policy.
 - Use absolute imports for project modules (`from robotics_experiments...`)
   instead of relative imports. The only exception is a narrowly scoped workaround
   for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
@@ -212,7 +217,8 @@ the current contents and the intended home for that kind of code.
 - `commanding` mirrors the PX4 bridge as a pure contract
   (`RoutineObservation` -> `decide(...)` -> `RoutineDecision` over
   the PX4-specific `MavlinkCommandPort`) and must stay import-clean with
-  Isaac/pymavlink absent.
+  Isaac absent. Its concrete port eagerly owns the ordinary `pymavlink`
+  dependency.
 - `decide` and completion/invariant predicates are pure. The port is the only
   MAVLink side-effect seam, and `gcs_port` is control-only: it must not touch the
   bridge simulator port.

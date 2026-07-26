@@ -17,6 +17,7 @@ import omni.ext
 import omni.kit.app
 import omni.timeline
 import omni.usd
+import torch
 from ExperimentRuntime_python import get_instance
 
 from FlightBenchmark_python._capture import (
@@ -63,8 +64,6 @@ def _isaac_version() -> str:
 
 
 def _gpu_models() -> list[str]:
-    import torch
-
     models = [torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())]
     if not models:
         raise RuntimeError("flight benchmark could not determine a CUDA GPU")

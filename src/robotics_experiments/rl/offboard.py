@@ -19,19 +19,15 @@ via ``MAV_FRAME_BODY_NED``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from robotics_experiments.commanding import AttitudeRateSetpoint, VelocitySetpoint
-
-if TYPE_CHECKING:
-    from robotics_experiments.rl.policy import PolicyContract
+from robotics_experiments.rl.policy import PolicyContract
 
 __all__ = ["policy_action_to_offboard"]
 
 
-def _velocity_setpoint(action: np.ndarray, contract: "PolicyContract") -> VelocitySetpoint:
+def _velocity_setpoint(action: np.ndarray, contract: PolicyContract) -> VelocitySetpoint:
     max_velocity = contract.max_body_velocity_mps
     max_yaw_rate = contract.max_yaw_rate_radps
     return VelocitySetpoint(
@@ -42,7 +38,7 @@ def _velocity_setpoint(action: np.ndarray, contract: "PolicyContract") -> Veloci
     )
 
 
-def _attitude_target(action: np.ndarray, contract: "PolicyContract") -> AttitudeRateSetpoint:
+def _attitude_target(action: np.ndarray, contract: PolicyContract) -> AttitudeRateSetpoint:
     hover_fraction = contract.hover_thrust_fraction
     max_body_rate = contract.max_body_rate_radps
     thrust = float(np.clip(hover_fraction * (1.0 + float(action[0])), 0.0, 1.0))
@@ -54,7 +50,9 @@ def _attitude_target(action: np.ndarray, contract: "PolicyContract") -> Attitude
     )
 
 
-def policy_action_to_offboard(action: np.ndarray, contract: "PolicyContract"):
+def policy_action_to_offboard(
+    action: np.ndarray, contract: PolicyContract
+) -> VelocitySetpoint | AttitudeRateSetpoint:
     """Map a normalized RL action to a PX4 OFFBOARD setpoint wire payload.
 
     Args:

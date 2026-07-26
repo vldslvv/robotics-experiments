@@ -124,7 +124,6 @@ def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denomina
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-    import robotics_experiments.rl as rl
     import robotics_experiments.workflows.isaac_lab as workflow
     from robotics_experiments.rl.training.selection import RewardMean
 
@@ -174,11 +173,11 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         evaluation_calls.append(kwargs)
         return result
 
-    monkeypatch.setattr(workflow, "make_isaac_lab_env", fake_factory)
-    monkeypatch.setattr(workflow, "evaluate_press_policy", fake_evaluate)
+    monkeypatch.setattr(evaluator, "make_isaac_lab_env", fake_factory)
+    monkeypatch.setattr(evaluator, "evaluate_press_policy", fake_evaluate)
     contract = _contract()
     monkeypatch.setattr(
-        rl,
+        evaluator,
         "validate_policy_artifact",
         lambda **_kwargs: SimpleNamespace(contract=contract),
     )
@@ -210,13 +209,11 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-    import robotics_experiments.rl as rl
-    import robotics_experiments.workflows.isaac_lab as workflow
 
     close_calls: list[bool] = []
     env = SimpleNamespace(device="cpu", close=lambda: close_calls.append(True))
     monkeypatch.setattr(
-        workflow,
+        evaluator,
         "make_isaac_lab_env",
         lambda **_kwargs: (
             env,
@@ -229,7 +226,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     )
     contract = _contract()
     monkeypatch.setattr(
-        rl,
+        evaluator,
         "validate_policy_artifact",
         lambda **_kwargs: SimpleNamespace(contract=contract),
     )
@@ -239,7 +236,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda *_args, **_kwargs: SimpleNamespace(eval=lambda: None),
     )
     monkeypatch.setattr(
-        workflow,
+        evaluator,
         "evaluate_press_policy",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("rollout failed")),
     )

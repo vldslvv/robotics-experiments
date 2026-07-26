@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import MISSING
-from typing import Any, cast
+from typing import cast
 
 import isaaclab.sim as sim_utils
 import torch
@@ -19,7 +19,8 @@ from isaaclab.sim.spawners.from_files import GroundPlaneCfg, UsdFileCfg, spawn_g
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
 
-from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.config import ExperimentConfig, RlPolicyConfig
+from robotics_experiments.rl import PolicyContract
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PRESS_OBSERVATION_DIM,
@@ -76,27 +77,27 @@ _TRAINING_REWARD_TERMS = (
 class SwitchPressEnvCfg(DirectRLEnvCfg):
     """Configuration for the ground-truth switch-press DirectRLEnv."""
 
-    decimation: int = cast(Any, MISSING)
-    policy_rate_hz: float = cast(Any, MISSING)
-    episode_length_s: float = cast(Any, MISSING)
-    action_space: int = cast(Any, MISSING)
-    observation_schema_version: int = cast(Any, MISSING)
-    observation_space: int = cast(Any, MISSING)
-    policy_interface: str = cast(Any, MISSING)
-    policy_config: Any = cast(Any, MISSING)
+    decimation: int = cast(int, MISSING)
+    policy_rate_hz: float = cast(float, MISSING)
+    episode_length_s: float = cast(float, MISSING)
+    action_space: int = cast(int, MISSING)
+    observation_schema_version: int = cast(int, MISSING)
+    observation_space: int = cast(int, MISSING)
+    policy_interface: str = cast(str, MISSING)
+    policy_config: RlPolicyConfig = cast(RlPolicyConfig, MISSING)
     state_space = 0
-    sim: SimulationCfg = cast(Any, MISSING)
-    drone_cfg: ArticulationCfg = cast(Any, MISSING)
-    switch_cfg: ArticulationCfg = cast(Any, MISSING)
-    wall_cfg: RigidObjectCfg = cast(Any, MISSING)
-    contact_sensor_cfg: ContactSensorCfg = cast(Any, MISSING)
-    scene: InteractiveSceneCfg = cast(Any, MISSING)
+    sim: SimulationCfg = cast(SimulationCfg, MISSING)
+    drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
+    switch_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
+    wall_cfg: RigidObjectCfg = cast(RigidObjectCfg, MISSING)
+    contact_sensor_cfg: ContactSensorCfg = cast(ContactSensorCfg, MISSING)
+    scene: InteractiveSceneCfg = cast(InteractiveSceneCfg, MISSING)
 
 
 def make_switch_press_env_cfg(
     *,
     experiment_config: ExperimentConfig,
-    policy_contract=None,
+    policy_contract: PolicyContract | None = None,
 ) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
     vehicle = _training_vehicle(experiment_config)
@@ -214,7 +215,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             relative_switch_range_m=relative_position[:, 0],
             action=self.actions,
         )
-        self._task_result: PressTaskResult | None = None
+        self._task_result: PressTaskResult[torch.Tensor] | None = None
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._contacted_episode_count = torch.zeros((), device=self.device)
         self._stable_first_contact_episode_count = torch.zeros((), device=self.device)
@@ -300,7 +301,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         force_norm = torch.linalg.norm(self.contact_sensor.data.net_forces_w, dim=-1)
         return force_norm.amax(dim=-1) >= self._experiment_config.rl.press.contact_force_threshold_n
 
-    def _sample(self, *, time_out: torch.Tensor) -> PressTaskInput:
+    def _sample(self, *, time_out: torch.Tensor) -> PressTaskInput[torch.Tensor]:
         relative_position, _ = self._relative_switch_pose()
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())

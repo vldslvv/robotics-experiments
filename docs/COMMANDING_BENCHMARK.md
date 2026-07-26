@@ -2,7 +2,8 @@
 
 `make benchmark-commanding` is the explicit host-only performance gate for the
 pure routine stepper and routine driver. It requires the normal host Python
-environment only: it does not launch Docker, Isaac Sim, PX4, or pymavlink. It is
+environment only: it does not launch Docker, Isaac Sim, or PX4. Pymavlink is an
+eager ordinary dependency, although the inert benchmark does not open a link. It is
 separate from `make check` so normal correctness gates remain stable and fast.
 
 The accepted baseline is `benchmarks/commanding/baseline.json`. Transient runs
@@ -24,7 +25,7 @@ The benchmark measures four fixed snapshots through the public
 
 Fixtures validate state, decisions, cadence, and effects before measurement and
 after every timed batch. A fresh worker also refuses to run if fixture creation
-imports Isaac or pymavlink.
+imports Isaac.
 
 The parent launches nine fresh workers sequentially and pins each to one
 available logical CPU. Workload order rotates between workers. For every worker

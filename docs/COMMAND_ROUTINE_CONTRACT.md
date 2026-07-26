@@ -4,8 +4,8 @@ The commanding layer is the high-level control counterpart to the PX4 bridge
 contract. Where the bridge turns `VehicleState -> ActuatorCommands ->
 RotorDynamics` across a swappable sink, the command layer turns a pure plan plus
 an observation into a decision across a swappable MAVLink port. It is a domain
-leaf on the core import path: every module imports neither Isaac nor pymavlink at
-module scope, so `import robotics_experiments` succeeds with both absent.
+leaf on the core import path and remains free of Isaac/Kit dependencies. Its
+concrete port eagerly imports the ordinary `pymavlink` dependency.
 
 `robotics_experiments.commanding` is the only public import surface for the
 package. Code outside `src/robotics_experiments/commanding` imports the command
@@ -160,8 +160,8 @@ the entire fleet cycle.
   notification: an armed failure must retain control long enough to recover.
 - **`port.py`** -- the PX4-specific `MavlinkCommandPort` (the side-effect seam:
   `connect`, `disconnect`, `pump_heartbeat`, `send`, `send_setpoint`,
-  `send_velocity_setpoint`, `send_attitude_target`, `poll_feedback`), whose
-  `pymavlink` import is function-scoped. The port
+  `send_velocity_setpoint`, `send_attitude_target`, `poll_feedback`), which
+  imports its ordinary `pymavlink` dependency eagerly. The port
   absorbs the GCS-link concerns (connect, throttled heartbeat, `command_long`
   send, `SET_POSITION_TARGET_GLOBAL_INT` setpoint stream, draining `COMMAND_ACK` /
   `HEARTBEAT` / `STATUSTEXT` / position telemetry). Feedback interpretation is
@@ -190,7 +190,7 @@ the entire fleet cycle.
   `MavlinkCommandPort` and a `DriverEnvironment` (the injected seam: bridge
   connectivity, sim time, observation assembly, `log`, `on_failure`,
   `on_step_advanced`) and drives it from a fresh GCS link to a completed (or
-  stopped) routine. It imports no Isaac/pymavlink. Creation requires
+  stopped) routine. It imports no Isaac modules. Creation requires
   `create_routine_driver(context=..., tick=...)`, and ticking requires the same
   explicit `DriverTick` contract, so the runtime can share one sim/wall-clock
   snapshot across the whole fleet and tests can supply deterministic time.
