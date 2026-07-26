@@ -1,10 +1,10 @@
-"""Host tests for shared deterministic press-evaluation aggregation."""
+"""Host tests for deterministic approach evaluation and publication."""
 
 from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,13 +20,14 @@ def _contract():
         policy_interface=PolicyInterface.PRESS_V1,
         obs_schema_version=1,
         obs_dim=34,
-        policy_rate_hz=17.0,
+        policy_rate_hz=20.0,
         action_kind="velocity",
         action_dim=4,
         max_body_velocity_mps=0.5,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
         hover_thrust_fraction=0.4,
+        curriculum_stage="approach",
     )
 
 
@@ -41,35 +42,35 @@ def _load_eval_press_module():
     return module
 
 
-def test_evaluation_aggregation_uses_metric_denominators() -> None:
+def test_approach_evaluation_aggregation() -> None:
     from robotics_experiments.workflows.isaac_lab import (
-        PressEpisodeMetrics,
-        summarize_press_episodes,
+        PressApproachEpisodeMetrics,
+        summarize_press_approach_episodes,
     )
 
-    summary = summarize_press_episodes(
+    summary = summarize_press_approach_episodes(
         episodes=(
-            PressEpisodeMetrics(True, True, True, True, 1.0, 0.001),
-            PressEpisodeMetrics(True, False, True, False, 2.0, 0.004),
-            PressEpisodeMetrics(False, False, False, False, float("nan"), 0.0),
+            PressApproachEpisodeMetrics(True, False, False, False, 0.405, 1.0),
+            PressApproachEpisodeMetrics(False, True, False, False, 0.39, None),
+            PressApproachEpisodeMetrics(False, False, True, False, 0.44, None),
+            PressApproachEpisodeMetrics(False, False, False, True, 0.43, None),
         )
     )
+    assert summary.episodes == 4
+    assert summary.approach_success_rate == 0.25
+    assert summary.contact_failure_rate == 0.25
+    assert summary.other_flight_failure_rate == 0.25
+    assert summary.timeout_rate == 0.25
+    assert summary.mean_closest_range_m == pytest.approx(0.41625)
+    assert summary.median_completion_time_s == 1.0
 
-    assert summary.episodes == 3
-    assert summary.confirmed_toggle_rate == pytest.approx(2.0 / 3.0)
-    assert summary.stable_first_contact_rate == pytest.approx(0.5)
-    assert summary.post_toggle_retreat_rate == pytest.approx(0.5)
-    assert summary.full_completion_rate == pytest.approx(1.0 / 3.0)
-    assert summary.median_toggle_time_s == pytest.approx(1.5)
-    assert summary.peak_compression_overshoot_m == pytest.approx(0.004)
 
-
-def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denominator() -> None:
+def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     torch = pytest.importorskip("torch")
-    from robotics_experiments.rl.press import PressRewardTerms
-    from robotics_experiments.workflows.isaac_lab import evaluate_press_policy
+    from robotics_experiments.rl.press import PressApproachRewardTerms
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_approach_policy
 
-    reward_names = tuple(field.name for field in fields(PressRewardTerms)) + ("total",)
+    reward_names = tuple(field.name for field in fields(PressApproachRewardTerms)) + ("total",)
 
     class FakePolicy:
         def __call__(self, observation):
@@ -78,11 +79,12 @@ def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denomina
     class FakeEnv:
         device = "cpu"
         max_episode_length = 2
+        step_dt = 0.05
 
         def __init__(self):
             self.seeds = []
             self.step_count = 0
-            self.press_task_result = None
+            self.press_approach_result = None
 
         def reset(self, *, seed):
             self.seeds.append(seed)
@@ -91,35 +93,62 @@ def test_seed_rollout_reseeds_existing_environment_and_preserves_reward_denomina
 
         def step(self, _action):
             self.step_count += 1
-            first_step = self.step_count == 1
-            self.press_task_result = SimpleNamespace(
-                metrics=SimpleNamespace(
-                    contacted=torch.tensor([True, False]),
-                    first_contact_stable=torch.tensor([True, False]),
-                    toggled_this_step=torch.tensor([first_step, False]),
-                    toggled=torch.tensor([True, False]),
-                    retreated=torch.tensor([not first_step, False]),
-                    toggle_time_s=torch.tensor([0.5, float("nan")]),
-                    peak_compression_overshoot_m=torch.tensor([0.002, 0.0]),
+            first = self.step_count == 1
+            success = torch.tensor([first, False])
+            timeout = torch.tensor([False, not first])
+            self.press_approach_result = SimpleNamespace(
+                state=SimpleNamespace(
+                    closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43])
+                ),
+                termination=SimpleNamespace(
+                    success=success,
+                    contact=torch.zeros(2, dtype=torch.bool),
+                    flight_failure=torch.zeros(2, dtype=torch.bool),
+                    time_out=timeout,
                 ),
                 rewards=SimpleNamespace(**{name: torch.ones(2) for name in reward_names}),
             )
-            done = torch.full((2,), not first_step)
-            return {"policy": torch.zeros((2, 34))}, torch.zeros(2), done, done, {}
+            terminated = success
+            truncated = timeout
+            return (
+                {"policy": torch.zeros((2, 34))},
+                torch.zeros(2),
+                terminated,
+                truncated,
+                {},
+            )
 
     env = FakeEnv()
-    result = evaluate_press_policy(
+    result = evaluate_press_approach_policy(
         env=env,
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
         report=lambda _message: None,
     )
-
     assert env.seeds == [202]
-    assert result.summary.confirmed_toggle_rate == 0.5
-    assert result.summary.post_toggle_retreat_rate == 1.0
+    assert result.summary.approach_success_rate == 0.5
+    assert result.summary.timeout_rate == 0.5
+    assert result.summary.median_completion_time_s == pytest.approx(0.05)
+    assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
+
+
+def _config():
+    return SimpleNamespace(
+        rl=SimpleNamespace(
+            training=SimpleNamespace(task_id="press-task"),
+            press=SimpleNamespace(
+                curriculum_stage="approach",
+                evaluation=SimpleNamespace(
+                    seeds=(101, 202, 303),
+                    episodes_per_seed=1,
+                    success_rate_min=0.8,
+                    contact_failure_rate_max=0.05,
+                ),
+            ),
+        )
+    )
 
 
 def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
@@ -156,49 +185,40 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
             policy_interface="press-v1",
         )
 
-    result = workflow.PressEvaluationResult(
-        summary=workflow.PressEvaluationSummary(
+    monkeypatch.setattr(
+        evaluator,
+        "make_isaac_lab_env",
+        fake_factory,
+    )
+    result = workflow.PressApproachEvaluationResult(
+        summary=workflow.PressApproachEvaluationSummary(
             episodes=3,
-            confirmed_toggle_rate=1.0,
-            stable_first_contact_rate=1.0,
-            post_toggle_retreat_rate=1.0,
-            full_completion_rate=1.0,
-            peak_compression_overshoot_m=0.0,
-            median_toggle_time_s=1.0,
+            approach_success_rate=1.0,
+            contact_failure_rate=0.0,
+            other_flight_failure_rate=0.0,
+            timeout_rate=0.0,
+            mean_closest_range_m=0.41,
+            median_completion_time_s=1.0,
         ),
-        reward_means=(RewardMean(name="toggle", mean=1.0),),
+        reward_means=(RewardMean(name="success", mean=1.0),),
     )
 
     def fake_evaluate(**kwargs):
         evaluation_calls.append(kwargs)
         return result
 
-    monkeypatch.setattr(evaluator, "make_isaac_lab_env", fake_factory)
-    monkeypatch.setattr(evaluator, "evaluate_press_policy", fake_evaluate)
-    contract = _contract()
+    monkeypatch.setattr(evaluator, "evaluate_press_approach_policy", fake_evaluate)
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
-        lambda **_kwargs: SimpleNamespace(contract=contract),
+        lambda **_kwargs: SimpleNamespace(contract=_contract()),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
-    config = SimpleNamespace(
-        rl=SimpleNamespace(
-            training=SimpleNamespace(task_id="press-task"),
-            press=SimpleNamespace(
-                evaluation=SimpleNamespace(
-                    seeds=(101, 202, 303),
-                    episodes_per_seed=1,
-                    success_rate_min=0.8,
-                    first_contact_stability_min=0.85,
-                    retreat_rate_min=0.95,
-                )
-            ),
-        )
+
+    observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+        config=_config(),
+        artifact_dir=Path("artifact"),
     )
-
-    observed = evaluator._run(config=config, artifact_dir=Path("artifact"))  # noqa: SLF001
-
     assert observed == result
     assert len(factory_calls) == 1
     assert evaluation_calls[0]["seeds"] == (101, 202, 303)
@@ -209,7 +229,6 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
-
     close_calls: list[bool] = []
     env = SimpleNamespace(device="cpu", close=lambda: close_calls.append(True))
     monkeypatch.setattr(
@@ -224,11 +243,10 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             ),
         ),
     )
-    contract = _contract()
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
-        lambda **_kwargs: SimpleNamespace(contract=contract),
+        lambda **_kwargs: SimpleNamespace(contract=_contract()),
     )
     monkeypatch.setattr(
         evaluator.torch.jit,
@@ -237,25 +255,27 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         evaluator,
-        "evaluate_press_policy",
+        "evaluate_press_approach_policy",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("rollout failed")),
     )
-    config = SimpleNamespace(
-        rl=SimpleNamespace(
-            training=SimpleNamespace(task_id="press-task"),
-            press=SimpleNamespace(
-                evaluation=SimpleNamespace(
-                    seeds=(101,),
-                    episodes_per_seed=1,
-                    success_rate_min=0.8,
-                    first_contact_stability_min=0.85,
-                    retreat_rate_min=0.95,
-                )
-            ),
-        )
-    )
-
     with pytest.raises(RuntimeError, match="rollout failed"):
-        evaluator._run(config=config, artifact_dir=Path("artifact"))  # noqa: SLF001
-
+        evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+            config=_config(),
+            artifact_dir=Path("artifact"),
+        )
     assert close_calls == [True]
+
+
+def test_evaluation_rejects_stage_mismatch(monkeypatch) -> None:
+    evaluator = _load_eval_press_module()
+    contract = replace(_contract(), curriculum_stage="future")
+    monkeypatch.setattr(
+        evaluator,
+        "validate_policy_artifact",
+        lambda **_kwargs: SimpleNamespace(contract=contract),
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
+            config=_config(),
+            artifact_dir=Path("artifact"),
+        )

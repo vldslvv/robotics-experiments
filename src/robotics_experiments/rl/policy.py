@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import math
-import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,8 +26,6 @@ from robotics_experiments.rl._interfaces import (
     HOVER_OBSERVATION_DIM,
     HOVER_OBSERVATION_SCHEMA_VERSION,
     INTERFACE_OBSERVATIONS,
-    PRESS_OBSERVATION_DIM,
-    PRESS_OBSERVATION_SCHEMA_VERSION,
     PolicyInterface,
 )
 
@@ -72,6 +69,7 @@ class PolicyContract:
     max_yaw_rate_radps: float
     max_body_rate_radps: float
     hover_thrust_fraction: float
+    curriculum_stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -155,23 +153,6 @@ def _infer_legacy_interface(
     ):
         metadata["policy_interface"] = PolicyInterface.HOVER_V1.value
         return
-    if (
-        complete
-        and metadata.get("obs_schema_version") == PRESS_OBSERVATION_SCHEMA_VERSION
-        and metadata.get("obs_dim") == PRESS_OBSERVATION_DIM
-        and metadata.get("policy_rate_hz") == 20.0
-        and metadata.get("action_kind") == "velocity"
-        and metadata.get("action_dim") == 4
-    ):
-        metadata["policy_interface"] = PolicyInterface.PRESS_V1.value
-        warnings.warn(
-            f"policy artifact {artifact_dir} uses legacy press metadata without "
-            "policy_interface; inferred press-v1 from its complete schema tuple. "
-            "Re-export future artifacts with an explicit policy_interface.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return
     raise ValueError(
         f"policy artifact {artifact_dir} metadata has no policy_interface; "
         "re-export it from its checkpoint"
@@ -185,10 +166,11 @@ def policy_metadata(
     obs_dim: int,
     policy_rate_hz: float,
     policy_interface: str | PolicyInterface,
+    curriculum_stage: str | None = None,
 ) -> dict[str, Any]:
     """Compose metadata for a contract authored by a training config."""
     interface = PolicyInterface(policy_interface)
-    return {
+    metadata = {
         "policy_interface": interface.value,
         "obs_schema_version": int(obs_schema_version),
         "obs_dim": int(obs_dim),
@@ -197,6 +179,18 @@ def policy_metadata(
         "action_dim": int(action_cfg.action_dim),
         "action_scales": {name: float(getattr(action_cfg, name)) for name in _SCALE_FIELDS},
     }
+    if interface is PolicyInterface.PRESS_V1:
+        if curriculum_stage != "approach":
+            raise ValueError(
+                "press-v1 metadata requires curriculum_stage='approach', "
+                f"got {curriculum_stage!r}"
+            )
+        metadata["curriculum_stage"] = curriculum_stage
+    elif curriculum_stage is not None:
+        raise ValueError(
+            f"{interface.value} metadata must not declare " f"curriculum_stage={curriculum_stage!r}"
+        )
+    return metadata
 
 
 def _read_metadata(*, artifact_dir: Path) -> dict[str, Any]:
@@ -244,6 +238,23 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         raise ValueError(
             f"policy artifact {artifact_dir} has unsupported {interface.value} observation "
             f"contract {(obs_schema_version, obs_dim)!r}; expected {expected_observation!r}"
+        )
+    curriculum_stage = metadata.get("curriculum_stage")
+    if interface is PolicyInterface.PRESS_V1:
+        if curriculum_stage is None:
+            raise ValueError(
+                f"policy artifact {artifact_dir} press-v1 metadata is missing "
+                "curriculum_stage; historical stage-less press artifacts are unsupported"
+            )
+        if curriculum_stage != "approach":
+            raise ValueError(
+                f"policy artifact {artifact_dir} has unsupported "
+                f"curriculum_stage={curriculum_stage!r}"
+            )
+    elif curriculum_stage is not None:
+        raise ValueError(
+            f"policy artifact {artifact_dir} {interface.value} metadata must not "
+            f"declare curriculum_stage={curriculum_stage!r}"
         )
     policy_rate_hz = _finite_positive(
         value=_metadata_value(
@@ -300,6 +311,7 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         policy_rate_hz=policy_rate_hz,
         action_kind=str(action_kind),
         action_dim=action_dim,
+        curriculum_stage=curriculum_stage,
         **parsed_scales,
     )
     return PolicyMetadata(

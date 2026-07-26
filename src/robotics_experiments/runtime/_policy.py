@@ -21,11 +21,11 @@ from robotics_experiments.rl import (
 )
 from robotics_experiments.rl.press import (
     HandoffGate,
+    PressApproachExecutionParams,
+    PressApproachExecutionState,
     PressObservation,
-    PressPolicyExecutionParams,
-    PressPolicyExecutionState,
-    advance_press_policy_execution,
-    initial_press_policy_execution_state,
+    advance_press_approach_execution,
+    initial_press_approach_execution_state,
 )
 
 __all__: list[str] = []
@@ -79,6 +79,12 @@ def _preflight_policy_artifacts(
                     f"exceeds driver.control_rate_hz={config.driver.control_rate_hz}"
                 )
             if contract.policy_interface is PolicyInterface.PRESS_V1:
+                if contract.curriculum_stage != config.rl.press.curriculum_stage:
+                    raise ValueError(
+                        f"press artifact {artifact} stage "
+                        f"{contract.curriculum_stage!r} does not match configured "
+                        f"stage {config.rl.press.curriculum_stage!r}"
+                    )
                 press_rates.add(contract.policy_rate_hz)
             policies.append(
                 _ConfiguredPolicy(
@@ -134,24 +140,23 @@ def _hover_adapter(
     )
 
 
-def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyAdapter:
+def _press_approach_adapter(
+    *,
+    config: ExperimentConfig,
+    loaded: LoadedPolicy,
+) -> PolicyAdapter:
     contract = loaded.contract
-    termination = config.rl.press.termination
-    params = PressPolicyExecutionParams(
+    if contract.curriculum_stage != "approach":
+        raise ValueError(f"unsupported press-v1 curriculum_stage={contract.curriculum_stage!r}")
+    params = PressApproachExecutionParams(
         inference=loaded.inference,
         action_dim=contract.action_dim,
         handoff_gate=HandoffGate.from_config(config.rl.press.handoff),
-        first_contact_speed_max_mps=termination.first_contact_speed_max_mps,
-        first_contact_angular_speed_max_radps=(termination.first_contact_angular_speed_max_radps),
-        retreat_distance_m=termination.retreat_distance_m,
-        retreat_speed_max_mps=termination.retreat_speed_max_mps,
-        retreat_alignment_tolerance_m=termination.retreat_alignment_tolerance_m,
-        retreat_angular_speed_max_radps=termination.retreat_angular_speed_max_radps,
-        stable_retreat_steps=termination.stable_retreat_steps,
+        goal=config.rl.press.goal,
     )
 
     def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
-        assert isinstance(state, PressPolicyExecutionState)
+        assert isinstance(state, PressApproachExecutionState)
         task_observation = policy_input.task_observation
         if not isinstance(task_observation, PressObservation):
             return PolicyResult(
@@ -165,7 +170,7 @@ def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyA
                     f"got {type(task_observation).__name__}"
                 ),
             )
-        result = advance_press_policy_execution(
+        result = advance_press_approach_execution(
             params=params,
             state=state,
             observation=task_observation,
@@ -179,7 +184,7 @@ def _press_adapter(*, config: ExperimentConfig, loaded: LoadedPolicy) -> PolicyA
 
     return PolicyAdapter(
         policy_rate_hz=contract.policy_rate_hz,
-        initial_state=initial_press_policy_execution_state(action_dim=contract.action_dim),
+        initial_state=initial_press_approach_execution_state(action_dim=contract.action_dim),
         advance=advance,
     )
 
@@ -198,7 +203,7 @@ def _make_policy_adapter(
     if interface is PolicyInterface.HOVER_V1:
         return _hover_adapter(hold_s=hold_s, loaded=loaded)
     if interface is PolicyInterface.PRESS_V1:
-        return _press_adapter(config=config, loaded=loaded)
+        return _press_approach_adapter(config=config, loaded=loaded)
     raise ValueError(
         f"unsupported policy_interface={interface.value!r} in artifact {artifact_path}"
     )

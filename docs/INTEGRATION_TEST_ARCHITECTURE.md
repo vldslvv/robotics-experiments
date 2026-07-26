@@ -52,8 +52,9 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   full initial pusher deployment. It then drives a slow press, requires real
   forward-pad contact and pusher/button displacement, advances the production
   N-step latch, verifies exactly one lamp transition, and retreats within the
-  stability envelope. It is part of `test-integration-all` and requires no PX4
-  container or trained policy.
+  stability envelope. A test-local no-dones environment keeps these physical
+  measurements independent of Stage 1's contact-failure termination. It is
+  part of `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
   Isaac Lab image. It needs a published artifact from `make train-rl` followed
   by `make select-rl-checkpoint`, so it is deliberately not part of
@@ -61,17 +62,17 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   contract and routine config. Policy metadata includes the active policy
   rate, so artifacts trained before that field was introduced must be
   retrained.
-- `make test-integration-press-routine` runs the complete F3 deployment sanity
-  flight from `configs/policy_press_quad.yaml`: takeoff, goto the press handoff
-  pose, execute the artifact-selected generic policy against the real spawned
-  switch/lamp and pusher, return to the landing point, land, and disarm. It
-  requires one lamp transition, stable first contact, and stable post-toggle
-  retreat. Like the hover artifact gate, it is deliberately excluded from
-  `test-integration-all` because it needs an accepted
-  independently accepted artifact whose metadata declares `press-v1`.
+- `make test-integration-press-approach-routine` runs the Stage 1 deployment
+  flight from `configs/policy_press_approach_quad.yaml`: takeoff, goto about
+  0.48 m from the switch, execute the artifact-selected approach policy, return
+  to the landing point, land, and disarm. It requires stable contact-free
+  approach completion and no lamp transition. Like the hover artifact gate, it
+  is excluded from `test-integration-all` because it needs an independently
+  accepted artifact declaring `policy_interface: press-v1` and
+  `curriculum_stage: approach`.
   Selection may publish an explicitly rejected diagnostic fallback at
-  `.build/training/press/latest`; that fallback does not satisfy this gate's
-  workflow precondition.
+  `.build/training/press-approach/latest`; that fallback does not satisfy this
+  gate's workflow precondition.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

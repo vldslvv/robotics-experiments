@@ -52,7 +52,7 @@ help:
 		'  make test-integration-press-hover-goto Run the in-Lab hover/goto gate' \
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \
 		'  make test-integration-press-policy Run the trained hover-policy PX4 gate' \
-		'  make test-integration-press-routine Run the selected press full-mission gate' \
+		'  make test-integration-press-approach-routine Run the selected approach mission gate' \
 		'' \
 		'Benchmark targets:' \
 		'' \

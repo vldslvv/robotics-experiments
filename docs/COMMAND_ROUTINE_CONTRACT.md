@@ -132,20 +132,24 @@ the entire fleet cycle.
   module's adapter factory.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
-  `.build/training/hover/latest` followed by `.build/training/press/latest`.
+  `.build/training/hover/latest` followed by
+  `.build/training/press-approach/latest`.
   `PolicyAdapter.policy_rate_hz` carries each artifact's immutable cadence, so those
   steps may run at different rates; neither `DriverParams` nor
   `VehicleRoutine` repeats a routine-wide policy rate.
   `hover-v1` uses the authored `target_enu`, or the entry position when it is
   omitted, and requires `hold_s`; its adapter completes after that duration.
-  `press-v1` consumes the injected exact 34-value `PressObservation`, waits for
-  the configured handoff gate, and completes only after one lamp transition and
-  stable retreat; it does not require `hold_s`. A missing or incompatible task
-  observation fails closed. Policy completion never advances before PX4 accepts
-  OFFBOARD. A policy timeout reports the adapter's final opaque state rather than the
-  goto-specific "did not reach the waypoint" text. For `press-v1` this exposes
-  handoff, approach, contact, compression, toggle, and retreat evidence while
-  commanding remains unaware of those fields.
+  `press-v1` consumes the injected exact 34-value `PressObservation`;
+  `curriculum_stage` selects the stage-specific adapter. The implemented
+  `approach` adapter waits for the configured handoff gate, fails on contact or
+  invalid observation, and completes after five stable contact-free approach
+  samples with a zero terminal setpoint. It does not require `hold_s`.
+  Stage-less and unknown-stage press artifacts fail preflight. Policy
+  completion never advances before PX4 accepts OFFBOARD. A policy timeout
+  reports the adapter's final opaque state rather than goto-specific text. The
+  retained approach state exposes handoff, stable-goal count, initial/closest
+  range, completion, and contact failure while commanding remains unaware of
+  those fields.
   An adapter failure becomes `FailureKind.COMMAND`; a bad flight still fails as
   `FailureKind.ENVELOPE` through the unchanged flight gates. Follow a policy
   step with an explicit-command step (e.g. `land`), not a command-less verifier:

@@ -1,4 +1,4 @@
-"""Ground-truth Isaac Lab DirectRLEnv for switch approach, press, and retreat."""
+"""Ground-truth Isaac Lab DirectRLEnv for the press approach curriculum stage."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ from robotics_experiments.rl import PolicyContract
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PRESS_OBSERVATION_DIM,
+    PressApproachInput,
+    PressApproachResult,
     PressObservationMask,
-    PressTaskInput,
-    PressTaskResult,
-    initial_press_task_state,
+    initial_press_approach_state,
     pack_press_observation,
-    reset_press_task_state,
-    step_press_task,
+    reset_press_approach_state,
+    step_press_approach,
 )
 from robotics_experiments.rl.press._switch_asset import ASSET_TO_CANONICAL_WXYZ, SQRT_HALF
 from robotics_experiments.workflows.isaac_lab.tasks._drone_cfg import _make_drone_articulation_cfg
@@ -51,21 +51,11 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # correction to its root pose yields the canonical pi-about-Z provider pose.
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
-    "stability",
-    "approach",
-    "near_contact_linear_overspeed",
-    "near_contact_angular_overspeed",
-    "gentle_contact",
-    "compression_progress",
-    "button_progress",
-    "latch_progress",
-    "toggle",
-    "repeat_toggle",
-    "retreat",
-    "retreat_alignment",
-    "retreat_overspeed",
-    "post_toggle_contact",
-    "post_toggle_delay",
+    "range_progress",
+    "alignment_error",
+    "closing_speed_error",
+    "upright_error",
+    "action_delta",
     "success",
     "failure",
     "timeout",
@@ -103,6 +93,14 @@ def make_switch_press_env_cfg(
     vehicle = _training_vehicle(experiment_config)
     rl = experiment_config.rl
     reset = rl.press.reset
+    if (
+        policy_contract is not None
+        and policy_contract.curriculum_stage != rl.press.curriculum_stage
+    ):
+        raise ValueError(
+            f"press artifact stage {policy_contract.curriculum_stage!r} does not match "
+            f"configured stage {rl.press.curriculum_stage!r}"
+        )
     policy_rate_hz = (
         rl.policy_rate_hz if policy_contract is None else policy_contract.policy_rate_hz
     )
@@ -211,21 +209,19 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         )
         self.switch.write_joint_stiffness_to_sim(stiffness, joint_ids=switch_joint_ids)
         relative_position, _ = self._relative_switch_pose()
-        self._task_state = initial_press_task_state(
+        self._task_state = initial_press_approach_state(
             relative_switch_range_m=relative_position[:, 0],
             action=self.actions,
         )
-        self._task_result: PressTaskResult[torch.Tensor] | None = None
+        self._task_result: PressApproachResult[torch.Tensor] | None = None
         self._completed_episode_count = torch.zeros((), device=self.device)
-        self._contacted_episode_count = torch.zeros((), device=self.device)
-        self._stable_first_contact_episode_count = torch.zeros((), device=self.device)
-        self._toggled_episode_count = torch.zeros((), device=self.device)
-        self._repeat_toggle_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
-        self._failed_episode_count = torch.zeros((), device=self.device)
+        self._contact_failure_episode_count = torch.zeros((), device=self.device)
+        self._flight_failure_episode_count = torch.zeros((), device=self.device)
+        self._timeout_episode_count = torch.zeros((), device=self.device)
 
     @property
-    def press_task_result(self):
+    def press_approach_result(self):
         """Most recent transition result for rollout evaluation."""
         return self._task_result
 
@@ -299,88 +295,65 @@ class SwitchPressEnv(_FlightDirectRLEnv):
 
     def _contact_flag(self) -> torch.Tensor:
         force_norm = torch.linalg.norm(self.contact_sensor.data.net_forces_w, dim=-1)
-        return force_norm.amax(dim=-1) >= self._experiment_config.rl.press.contact_force_threshold_n
+        threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
+        return force_norm.amax(dim=-1) >= threshold
 
-    def _sample(self, *, time_out: torch.Tensor) -> PressTaskInput[torch.Tensor]:
-        relative_position, _ = self._relative_switch_pose()
+    def _sample(self, *, time_out: torch.Tensor) -> PressApproachInput[torch.Tensor]:
+        relative_position, relative_quat_xyzw = self._relative_switch_pose()
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
-        return PressTaskInput(
+        relative_quat_wxyz = relative_quat_xyzw[:, [3, 0, 1, 2]]
+        return PressApproachInput(
             relative_switch_pos_m=relative_position,
-            body_linear_velocity_mps=self.drone.data.root_lin_vel_b,
-            body_angular_velocity_radps=self.drone.data.root_ang_vel_b,
+            linear_velocity_mps=math_utils.quat_apply(
+                relative_quat_wxyz,
+                self.drone.data.root_lin_vel_b,
+            ),
+            angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],
-            pusher_compression_m=(
-                self._pusher_extension_target[:, 0]
-                - self.drone.data.joint_pos[:, self._pusher_joint_id]
-            ),
-            button_position_m=self.switch.data.joint_pos[:, self._switch_joint_id],
             contact_flag=self._contact_flag(),
             action=self.actions,
-            elapsed_s=self.episode_length_buf.to(torch.float32) * self.step_dt,
             time_out=time_out,
         )
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         press = self._experiment_config.rl.press
-        self._task_result = step_press_task(
+        self._task_result = step_press_approach(
             state=self._task_state,
             sample=self._sample(time_out=time_out),
+            goal_cfg=press.goal,
             reward_cfg=press.reward,
             termination_cfg=press.termination,
-            evaluation_cfg=press.evaluation,
-            press_threshold_m=(
-                self._experiment_config.switches.press_threshold
-                * press.reset.button_threshold_scale
-            ),
-            confirm_steps=self._experiment_config.switches.press_confirm_steps,
         )
         result = self._task_result
         self._task_state = result.state
-        return result.termination.terminated, time_out
+        return result.termination.terminated, result.termination.time_out
 
     def _get_rewards(self) -> torch.Tensor:
         if self._task_result is None:
             raise RuntimeError("press transition must advance in _get_dones before rewards")
         result = self._task_result
         ended = self.reset_buf
-        failures = (
-            result.termination.crash
-            | result.termination.altitude
-            | result.termination.relative_envelope
-        )
         self._completed_episode_count += ended.count_nonzero()
-        self._contacted_episode_count += (ended & result.metrics.contacted).count_nonzero()
-        self._stable_first_contact_episode_count += (
-            ended & result.metrics.contacted & result.metrics.first_contact_stable
-        ).count_nonzero()
-        self._toggled_episode_count += (ended & result.metrics.toggled).count_nonzero()
-        self._repeat_toggle_episode_count += (ended & result.metrics.repeat_toggled).count_nonzero()
         self._successful_episode_count += (ended & result.termination.success).count_nonzero()
-        self._failed_episode_count += (ended & failures).count_nonzero()
+        self._contact_failure_episode_count += (ended & result.termination.contact).count_nonzero()
+        self._flight_failure_episode_count += (
+            ended & result.termination.flight_failure
+        ).count_nonzero()
+        self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
-        contact_denominator = self._contacted_episode_count.clamp_min(1.0)
-        toggle_denominator = self._toggled_episode_count.clamp_min(1.0)
         self.extras["log"] = {
             "Press/completed_episodes": self._completed_episode_count,
-            "Press/contact_percent": 100.0 * self._contacted_episode_count / episode_denominator,
-            "Press/toggle_percent": 100.0 * self._toggled_episode_count / episode_denominator,
             "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
-            "Press/failure_percent": 100.0 * self._failed_episode_count / episode_denominator,
-            "Press/stable_first_contact_percent": 100.0
-            * self._stable_first_contact_episode_count
-            / contact_denominator,
-            "Press/post_toggle_retreat_percent": 100.0
-            * self._successful_episode_count
-            / toggle_denominator,
-            "Press/repeat_toggle_percent": 100.0
-            * self._repeat_toggle_episode_count
-            / toggle_denominator,
-            "Press/active_contact_percent": 100.0
-            * result.metrics.contacted.to(torch.float32).mean(),
-            "Press/active_toggle_percent": 100.0 * result.metrics.toggled.to(torch.float32).mean(),
+            "Press/contact_failure_percent": 100.0
+            * self._contact_failure_episode_count
+            / episode_denominator,
+            "Press/flight_failure_percent": 100.0
+            * self._flight_failure_episode_count
+            / episode_denominator,
+            "Press/timeout_percent": 100.0 * self._timeout_episode_count / episode_denominator,
         }
         self.extras["log"].update(
             {
@@ -399,7 +372,6 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         mask = float(
             PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
         )
-        handoff_mode = torch.where(self._task_state.first_contact_seen, 2.0, 1.0)
         observations = pack_press_observation(
             relative_switch_pos_m=relative_position,
             relative_switch_quat_xyzw=relative_quat_xyzw,
@@ -416,11 +388,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             pusher_compression_rate_mps=-self.drone.data.joint_vel[:, self._pusher_joint_id],
             contact_valid=ones,
             contact_flag=self._contact_flag(),
-            lamp_state=self._task_state.lamp_state,
+            lamp_state=zeros,
             lamp_confidence=ones,
             lamp_age_s=zeros,
             previous_action=self._task_state.previous_action,
-            handoff_mode=handoff_mode,
+            handoff_mode=ones,
             estimator_health=ones,
             obs_mask=torch.full_like(ones, mask),
         )
@@ -465,7 +437,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             env_ids=env_ids,
         )
         if hasattr(self, "_task_state"):
-            self._task_state = reset_press_task_state(
+            self._task_state = reset_press_approach_state(
                 state=self._task_state,
                 env_ids=env_ids,
                 relative_switch_range_m=wall_normal,

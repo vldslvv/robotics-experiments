@@ -152,6 +152,11 @@ def _artifact_metadata(
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rl.policy_rate_hz,
         policy_interface=str(env_cfg.policy_interface),
+        curriculum_stage=(
+            config.rl.press.curriculum_stage
+            if str(env_cfg.policy_interface) == rl.PolicyInterface.PRESS_V1.value
+            else None
+        ),
     )
     return metadata | source_metadata | {"artifact_run_id": artifact_run_id}
 
@@ -180,10 +185,28 @@ def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
 def _initialization_provenance(
     *,
     checkpoint_path: Path,
-    out_root: Path,
+    training_root: Path,
     repo_root: Path,
-) -> tuple[dict[str, str | int], object]:
-    run_dir = _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
+) -> tuple[dict[str, str | int | None], object]:
+    checkpoint_path = checkpoint_path.resolve()
+    if not checkpoint_path.is_file() or checkpoint_path.parent.name != "logs":
+        raise ValueError(
+            "--initialize-checkpoint must name an existing "
+            ".build/training/<source-policy>/<run>/logs checkpoint"
+        )
+    run_dir = checkpoint_path.parent.parent
+    try:
+        relative_run = run_dir.relative_to(training_root.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"initialization checkpoint {checkpoint_path} is outside {training_root}"
+        ) from exc
+    if len(relative_run.parts) != 2:
+        raise ValueError(
+            f"initialization checkpoint {checkpoint_path} is not inside one policy run"
+        )
+    source_policy, source_run = relative_run.parts
+    _validate_policy_name(source_policy)
     match = _CHECKPOINT_NAME_PATTERN.fullmatch(checkpoint_path.name)
     if match is None:
         raise ValueError("--initialize-checkpoint must name a numeric model_<iteration>.pt")
@@ -192,7 +215,9 @@ def _initialization_provenance(
     return (
         {
             "method": "actor-only",
-            "source_run": run_dir.name,
+            "source_policy": source_policy,
+            "source_stage": source_metadata.get("curriculum_stage"),
+            "source_run": source_run,
             "checkpoint_iteration": int(match.group(1)),
             "checkpoint_path": str(relative_checkpoint),
             "source_commit": str(source_metadata["source_commit"]),
@@ -226,6 +251,7 @@ def _run_new_training(
     seed: int,
     iterations: int,
     out_root: Path,
+    training_root: Path,
     repo_root: Path,
     device: str,
 ) -> None:
@@ -236,7 +262,7 @@ def _run_new_training(
     if initialization_checkpoint is not None:
         initialization, source_contract = _initialization_provenance(
             checkpoint_path=initialization_checkpoint,
-            out_root=out_root,
+            training_root=training_root,
             repo_root=repo_root,
         )
     run_dir = _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
@@ -352,7 +378,8 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     )
     _seed_everything(seed)
     repo_root = _repo_root()
-    out_root = _policy_out_root(repo_root / ".build" / "training", training_cfg.policy_name)
+    training_root = repo_root / ".build" / "training"
+    out_root = _policy_out_root(training_root, training_cfg.policy_name)
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     if args.export_checkpoint is not None:
         _run_manual_export(
@@ -369,6 +396,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         seed=seed,
         iterations=iterations,
         out_root=out_root,
+        training_root=training_root,
         repo_root=repo_root,
         device=device,
     )

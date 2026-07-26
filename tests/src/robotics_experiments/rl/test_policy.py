@@ -25,7 +25,10 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
-from robotics_experiments.runtime._policy import _hover_adapter, _press_adapter
+from robotics_experiments.runtime._policy import (
+    _hover_adapter,
+    _press_approach_adapter,
+)
 from robotics_experiments.workflows._policy_preflight import _preflight_policy_artifacts
 from tests.support.commanding_fakes import make_routine_observation
 from tests.support.paths import REPO_ROOT
@@ -59,6 +62,7 @@ def _metadata(
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
         policy_interface=interface,
+        curriculum_stage=("approach" if interface is PolicyInterface.PRESS_V1 else None),
     )
 
 
@@ -173,13 +177,14 @@ def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Pat
     assert isinstance(loaded.metadata, PolicyMetadata)
     assert isinstance(loaded.contract, PolicyContract)
     assert loaded.contract.policy_rate_hz == 20.0
+    assert loaded.contract.curriculum_stage == "approach"
     assert loaded.inference(np.zeros(34)).shape == (4,)
     assert loaded.inference(np.zeros((3, 34))).shape == (3, 4)
     with pytest.raises(ValueError, match="observation shape"):
         loaded.inference(np.zeros((2, 17)))
 
 
-def test_metadata_interface_selects_exact_legacy_contracts(tmp_path: Path) -> None:
+def test_metadata_interface_selects_hover_legacy_only(tmp_path: Path) -> None:
     hover = _metadata()
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(hover))
     assert (
@@ -197,18 +202,31 @@ def test_metadata_interface_selects_exact_legacy_contracts(tmp_path: Path) -> No
     legacy_press = _metadata(interface=PolicyInterface.PRESS_V1)
     legacy_press.pop("policy_interface")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
-    with pytest.warns(RuntimeWarning, match="inferred press-v1"):
-        metadata = load_policy_metadata(artifact_dir=tmp_path)
-    assert metadata.contract.policy_interface is PolicyInterface.PRESS_V1
-
-    legacy_press["policy_rate_hz"] = 19.0
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
     with pytest.raises(ValueError, match="re-export"):
         load_policy_metadata(artifact_dir=tmp_path)
 
     legacy_hover.pop("action_scales")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
     with pytest.raises(ValueError, match="re-export"):
+        load_policy_metadata(artifact_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [(None, "stage-less"), ("future", "unsupported curriculum_stage")],
+)
+def test_press_metadata_requires_known_curriculum_stage(
+    tmp_path: Path,
+    stage: str | None,
+    message: str,
+) -> None:
+    metadata = _metadata(interface=PolicyInterface.PRESS_V1)
+    if stage is None:
+        metadata.pop("curriculum_stage")
+    else:
+        metadata["curriculum_stage"] = stage
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match=message):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -232,13 +250,14 @@ def _preflight_config(*, artifacts: list[Path], action_cfg=None, policy_rate_hz=
         rl=SimpleNamespace(
             action=_action_cfg(max_body_velocity_mps=99.0) if action_cfg is None else action_cfg,
             policy_rate_hz=policy_rate_hz,
+            press=SimpleNamespace(curriculum_stage="approach"),
         ),
         driver=SimpleNamespace(control_rate_hz=50.0),
     )
 
 
 def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Path) -> None:
-    policy_root = tmp_path / "training" / "press"
+    policy_root = tmp_path / "training" / "press-approach"
     old_run = policy_root / "old-run"
     old_run.mkdir(parents=True)
     _write_metadata_artifact(
@@ -289,8 +308,9 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
 def test_press_deployment_config_has_no_action_scale_override() -> None:
     from robotics_experiments.config import load_config
 
-    config_text = (REPO_ROOT / "configs/policy_press_quad.yaml").read_text()
-    config = load_config(REPO_ROOT / "configs/policy_press_quad.yaml")
+    config_path = REPO_ROOT / "configs/policy_press_approach_quad.yaml"
+    config_text = config_path.read_text()
+    config = load_config(config_path)
     policy_steps = [
         step for step in config.vehicles["x500_01"].routine.steps if step["kind"] == "policy"
     ]
@@ -298,7 +318,7 @@ def test_press_deployment_config_has_no_action_scale_override() -> None:
     assert "max_body_velocity_mps" not in config_text
     assert "policy_rate_hz" not in config_text
     assert len(policy_steps) == 1
-    assert policy_steps[0]["artifact"] == ".build/training/press/latest"
+    assert policy_steps[0]["artifact"] == ".build/training/press-approach/latest"
 
 
 def test_hover_adapter_requires_hold_duration() -> None:
@@ -345,13 +365,14 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
                 max_yaw_rate_radps=1.5,
                 max_body_rate_radps=6.0,
                 hover_thrust_fraction=0.4,
+                curriculum_stage="approach",
             ),
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
     )
-    adapter = _press_adapter(
-        config=load_config(REPO_ROOT / "configs/policy_press_quad.yaml"),
+    adapter = _press_approach_adapter(
+        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
         loaded=loaded,
     )
     observation = make_routine_observation(sim_time_us=10)
@@ -374,11 +395,11 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
 def test_current_press_artifact_preflights_when_available() -> None:
     from robotics_experiments.config import load_config
 
-    artifact = REPO_ROOT / ".build/training/press/latest"
+    artifact = REPO_ROOT / ".build/training/press-approach/latest"
     if not artifact.exists():
         pytest.skip("current local press artifact is not available")
     validated = _preflight_policy_artifacts(
-        config=load_config(REPO_ROOT / "configs/policy_press_quad.yaml"),
+        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
         repo_root=REPO_ROOT,
     )
 

@@ -369,7 +369,7 @@ def _prepare_policy_observer(
         articulation_path=spawned.articulation_path,
         switch_index=switch_index,
         action_dim=press_descriptors[0][1].action_dim,
-        contact_force_threshold_n=state.config.rl.press.contact_force_threshold_n,
+        contact_force_threshold_n=(state.config.rl.press.termination.contact_force_threshold_n),
         button_geometry_scale=reset.button_geometry_scale,
         button_stiffness_scale=reset.button_stiffness_scale,
         switch_wall_offset_m=reset.switch_wall_offset_m,

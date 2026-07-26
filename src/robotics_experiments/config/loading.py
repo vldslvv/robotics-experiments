@@ -1,6 +1,7 @@
 import functools
 import math
 from collections.abc import Iterable
+from dataclasses import fields
 from os import PathLike
 from pathlib import Path
 from typing import cast
@@ -193,6 +194,64 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
             )
 
 
+def _validate_press_approach(experiment: ExperimentConfig) -> None:
+    press = experiment.rl.press
+    if press.curriculum_stage != "approach":
+        raise ValueError(
+            f"unknown rl.press.curriculum_stage={press.curriculum_stage!r}; " "expected 'approach'"
+        )
+    goal = press.goal
+    if not 0.0 < goal.range_min_m <= goal.range_max_m:
+        raise ValueError("rl.press.goal range bounds must be positive and ordered")
+    if not goal.closing_speed_zero_range_m < goal.closing_speed_far_range_m:
+        raise ValueError(
+            "rl.press.goal closing_speed_zero_range_m must be less than "
+            "closing_speed_far_range_m"
+        )
+    if not 0.0 <= goal.body_z_alignment_min <= 1.0:
+        raise ValueError("rl.press.goal.body_z_alignment_min must be between 0 and 1")
+    positive_goal_values = {
+        "alignment_error_max_m": goal.alignment_error_max_m,
+        "linear_speed_max_mps": goal.linear_speed_max_mps,
+        "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "closing_speed_far_mps": goal.closing_speed_far_mps,
+    }
+    for name, value in positive_goal_values.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"rl.press.goal.{name} must be finite and positive")
+    if goal.stable_steps <= 0:
+        raise ValueError("rl.press.goal.stable_steps must be positive")
+
+    reset = press.reset
+    ordered_reset_bounds = {
+        "wall_normal": (reset.wall_normal_min_m, reset.wall_normal_max_m),
+        "lateral_error": (reset.lateral_error_min_m, reset.lateral_error_max_m),
+        "vertical_error": (reset.vertical_error_min_m, reset.vertical_error_max_m),
+    }
+    for name, (minimum, maximum) in ordered_reset_bounds.items():
+        if not math.isfinite(minimum) or not math.isfinite(maximum) or minimum > maximum:
+            raise ValueError(f"rl.press.reset.{name} bounds must be finite and ordered")
+    if reset.wall_normal_min_m <= goal.range_max_m:
+        raise ValueError("rl.press.reset.wall_normal_min_m must exceed rl.press.goal.range_max_m")
+
+    for field in fields(press.reward):
+        name = field.name
+        value = getattr(press.reward, name)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(
+                f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
+            )
+    evaluation = press.evaluation
+    if evaluation.episodes_per_seed <= 0 or not evaluation.seeds:
+        raise ValueError("rl.press.evaluation requires seeds and positive episodes_per_seed")
+    for name, value in {
+        "success_rate_min": evaluation.success_rate_min,
+        "contact_failure_rate_max": evaluation.contact_failure_rate_max,
+    }.items():
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
+
+
 def _validate_switches(experiment: ExperimentConfig) -> None:
     switches = experiment.switches
     positive_integers = {
@@ -332,5 +391,6 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
     _validate_rl_policies(experiment)
+    _validate_press_approach(experiment)
     _validate_switches(experiment)
     return _freeze_config_graph(experiment)

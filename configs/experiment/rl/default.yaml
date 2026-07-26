@@ -1,6 +1,6 @@
 defaults:
   - base_rl
-  - press: default
+  - press: approach
 
 # Shared Isaac Lab RL scale. The physics decimation is derived in the env as
 # scheduled exactly from sim.physics_hz (250 / 20 alternates 13 and 12 physics

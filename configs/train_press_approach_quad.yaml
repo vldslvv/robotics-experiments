@@ -3,30 +3,26 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# F3 ground-truth switch-press training selection. The shared training target is
-# unchanged; this experiment selects the press task and artifact namespace.
+# Stage 1 contact-free approach training selection.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
   num_envs: 256
   episode_length_s: 10.0
   action:
-    # The 0.40-0.50 m collision-safe start range does not need the shared 3 m/s
-    # navigation scale. The policy can command a gentle first contact while
-    # retaining enough post-contact authority to cross the real latch threshold.
     max_body_velocity_mps: 2.0
   training:
     task_id: Isaac-Switch-Press-Direct-v0
     vehicle_id: 0
-    policy_name: press
-    max_iterations: 150
+    policy_name: press-approach
+    max_iterations: 25
     num_steps_per_env: 32
-    save_interval: 25
-    learning_rate: 1.0e-4
+    save_interval: 5
+    learning_rate: 1.0e-6
     schedule: fixed
     gamma: 0.995
     lam: 0.95
-    entropy_coef: 0.001
+    entropy_coef: 0.0
     clip_param: 0.2
     value_loss_coef: 1.0
     num_learning_epochs: 5

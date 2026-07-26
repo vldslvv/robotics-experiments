@@ -1,8 +1,8 @@
 defaults:
   - default
 
-# Full deployment sanity flight: navigate to a stable handoff pose, let the
-# artifact-selected generic policy complete its task, return, and land.
+# Navigate to 0.48 m, let the actor complete the final contact-free approach,
+# return, and land.
 steps:
   - kind: arm
   - kind: takeoff
@@ -12,15 +12,15 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
-    y: 17.59
+    y: 17.51
     z: 2.5
-    position_tol_m: 0.08
+    position_tol_m: 0.03
     timeout_s: 30.0
   - kind: hover
     hold_s: 1.0
   - kind: policy
-    label: press
-    artifact: .build/training/press/latest
+    label: press-approach
+    artifact: .build/training/press-approach/latest
     switch_index: 0
     timeout_s: 20.0
   - kind: goto

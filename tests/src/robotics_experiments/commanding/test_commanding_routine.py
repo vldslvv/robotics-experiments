@@ -1155,7 +1155,7 @@ def test_build_vehicle_routine_policy_factory_receives_only_artifact_and_hold():
     press_policy = _FakePolicyAdvance()
     policies = {
         ".build/training/hover/latest": hover_policy,
-        ".build/training/press/latest": press_policy,
+        ".build/training/press-approach/latest": press_policy,
     }
     descriptors = [
         {
@@ -1169,7 +1169,7 @@ def test_build_vehicle_routine_policy_factory_receives_only_artifact_and_hold():
         {
             "kind": "policy",
             "label": "press",
-            "artifact": ".build/training/press/latest",
+            "artifact": ".build/training/press-approach/latest",
             "timeout_s": 5.0,
             "target_enu": [4.0, 5.0, 6.0],
         },
@@ -1189,7 +1189,7 @@ def test_build_vehicle_routine_policy_factory_receives_only_artifact_and_hold():
     assert [step.label for step in routine.steps] == ["policy[hover]", "policy[press]"]
     assert calls == [
         (".build/training/hover/latest", 1.0),
-        (".build/training/press/latest", None),
+        (".build/training/press-approach/latest", None),
     ]
     first_stream = routine.steps[0].streaming
     second_stream = routine.steps[1].streaming

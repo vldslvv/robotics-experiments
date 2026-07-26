@@ -32,7 +32,7 @@ modules remain internal outside the package.
 Shared RL tunables (Lab-scale + the RL action level) live in the Hydra `rl`
 group (`configs/experiment/rl/default.yaml`), including Lab-only vehicle limits
 under `rl.lab_vehicle`, with press task tunables under the `rl.press` config
-group (`configs/experiment/rl/press/default.yaml`). The env spawns from an
+group (`configs/experiment/rl/press/approach.yaml`). The env spawns from an
 internal config-driven `ArticulationCfg` builder that reads `drone.usd_path`,
 not a hardcoded asset path.
 

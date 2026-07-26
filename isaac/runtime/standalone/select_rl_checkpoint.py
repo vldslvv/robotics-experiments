@@ -13,14 +13,18 @@ from typing import Any, Protocol
 import torch
 
 import robotics_experiments.rl.training.rsl_rl as training
-from robotics_experiments.config import ExperimentConfig, PressEvaluationConfig, load_config
+from robotics_experiments.config import (
+    ExperimentConfig,
+    PressApproachEvaluationConfig,
+    load_config,
+)
 from robotics_experiments.rl import (
     METADATA_FILENAME,
     POLICY_FILENAME,
     PolicyInterface,
     load_policy_metadata,
 )
-from robotics_experiments.rl.press import PressTaskResult
+from robotics_experiments.rl.press import PressApproachResult
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -31,16 +35,16 @@ from robotics_experiments.rl.training.selection import (
     select_checkpoint,
 )
 from robotics_experiments.workflows.isaac_lab import (
-    PressEvaluationResult,
-    evaluate_press_policy,
+    PressApproachEvaluationResult,
+    evaluate_press_approach_policy,
     make_isaac_lab_env,
 )
 
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 2
-_PRESS_SELECTION_METHOD = "press-gated-maximin-v2"
+_REPORT_SCHEMA_VERSION = 3
+_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v1"
 
 
 class _ActorCritic(Protocol):
@@ -73,7 +77,7 @@ class _Runner(Protocol):
 class _SelectionEnvironment(Protocol):
     device: str | torch.device
     max_episode_length: int
-    press_task_result: PressTaskResult[torch.Tensor] | None
+    press_approach_result: PressApproachResult[torch.Tensor] | None
 
     def reset(
         self, *, seed: int
@@ -113,7 +117,7 @@ def _press_evaluation(
     env: _SelectionEnvironment,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
-    evaluation_config: PressEvaluationConfig,
+    evaluation_config: PressApproachEvaluationConfig,
     device: str,
 ) -> CandidateEvaluation:
     _report(f"checkpoint selection iteration={candidate.iteration} START")
@@ -123,7 +127,7 @@ def _press_evaluation(
         device=device,
     )
     actor = training.deterministic_actor(runner=runner)
-    result = evaluate_press_policy(
+    result = evaluate_press_approach_policy(
         env=env,
         policy=actor,
         seeds=seeds,
@@ -139,9 +143,10 @@ def _press_evaluation(
     _report(
         f"checkpoint selection iteration={candidate.iteration} COMPLETE "
         f"accepted={str(evaluation.accepted).lower()} "
-        f"success={summary.confirmed_toggle_rate:.3f} "
-        f"first_contact_stability={summary.stable_first_contact_rate:.3f} "
-        f"retreat={summary.post_toggle_retreat_rate:.3f}"
+        f"success={summary.approach_success_rate:.3f} "
+        f"contact_failure={summary.contact_failure_rate:.3f} "
+        f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
+        f"timeout={summary.timeout_rate:.3f}"
     )
     return evaluation
 
@@ -149,47 +154,41 @@ def _press_evaluation(
 def _score_press_result(
     *,
     candidate: CheckpointCandidate,
-    result: PressEvaluationResult,
-    evaluation_config: PressEvaluationConfig,
+    result: PressApproachEvaluationResult,
+    evaluation_config: PressApproachEvaluationConfig,
 ) -> CandidateEvaluation:
     summary = result.summary
-    thresholds = (
-        float(evaluation_config.success_rate_min),
-        float(evaluation_config.first_contact_stability_min),
-        float(evaluation_config.retreat_rate_min),
+    success_threshold = float(evaluation_config.success_rate_min)
+    contact_threshold = float(evaluation_config.contact_failure_rate_max)
+    success_margin = summary.approach_success_rate / success_threshold
+    contact_margin = (
+        1.0 + (contact_threshold - summary.contact_failure_rate) / contact_threshold
+        if contact_threshold > 0.0
+        else (1.0 if summary.contact_failure_rate == 0.0 else -summary.contact_failure_rate)
     )
-    acceptance_rates = (
-        summary.confirmed_toggle_rate,
-        summary.stable_first_contact_rate,
-        summary.post_toggle_retreat_rate,
+    normalized_margins = (success_margin, contact_margin)
+    accepted = (
+        summary.approach_success_rate >= success_threshold
+        and summary.contact_failure_rate <= contact_threshold
     )
-    normalized_margins = tuple(
-        rate / threshold for rate, threshold in zip(acceptance_rates, thresholds, strict=True)
-    )
-    accepted = all(
-        rate >= threshold for rate, threshold in zip(acceptance_rates, thresholds, strict=True)
-    )
-    median_toggle_time_s = summary.median_toggle_time_s
+    median_completion_time_s = summary.median_completion_time_s
     ranking_values = (
         *sorted(normalized_margins),
-        summary.full_completion_rate,
-        -summary.peak_compression_overshoot_m,
-        -(median_toggle_time_s if median_toggle_time_s is not None else sys.float_info.max),
+        -summary.other_flight_failure_rate,
+        -summary.timeout_rate,
+        -(median_completion_time_s if median_completion_time_s is not None else sys.float_info.max),
         -candidate.iteration,
     )
     return CandidateEvaluation(
         candidate=candidate,
         accepted=accepted,
         metrics=(
-            MetricValue("confirmed_toggle_rate", summary.confirmed_toggle_rate),
-            MetricValue("stable_first_contact_rate", summary.stable_first_contact_rate),
-            MetricValue("post_toggle_retreat_rate", summary.post_toggle_retreat_rate),
-            MetricValue("full_completion_rate", summary.full_completion_rate),
-            MetricValue(
-                "peak_compression_overshoot_m",
-                summary.peak_compression_overshoot_m,
-            ),
-            MetricValue("median_toggle_time_s", summary.median_toggle_time_s),
+            MetricValue("approach_success_rate", summary.approach_success_rate),
+            MetricValue("contact_failure_rate", summary.contact_failure_rate),
+            MetricValue("other_flight_failure_rate", summary.other_flight_failure_rate),
+            MetricValue("timeout_rate", summary.timeout_rate),
+            MetricValue("mean_closest_range_m", summary.mean_closest_range_m),
+            MetricValue("median_completion_time_s", summary.median_completion_time_s),
         ),
         normalized_margins=normalized_margins,
         ranking_values=ranking_values,
@@ -203,16 +202,16 @@ def _selection_report(
     run_dir: Path,
     policy_name: str,
     policy_interface: str,
+    curriculum_stage: str | None,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
-    evaluation_config: PressEvaluationConfig,
+    evaluation_config: PressApproachEvaluationConfig,
     all_candidates: tuple[CheckpointCandidate, ...],
 ) -> dict[str, Any]:
     thresholds = (
         {
-            "confirmed_toggle_rate_min": float(evaluation_config.success_rate_min),
-            "stable_first_contact_rate_min": float(evaluation_config.first_contact_stability_min),
-            "post_toggle_retreat_rate_min": float(evaluation_config.retreat_rate_min),
+            "approach_success_rate_min": float(evaluation_config.success_rate_min),
+            "contact_failure_rate_max": float(evaluation_config.contact_failure_rate_max),
         }
         if policy_interface == "press-v1"
         else None
@@ -248,6 +247,7 @@ def _selection_report(
         "artifact_run_id": run_dir.name,
         "policy_name": policy_name,
         "policy_interface": policy_interface,
+        "curriculum_stage": curriculum_stage,
         "selection_method": selection.selection_method,
         "seeds": list(seeds),
         "episodes_per_seed": episodes_per_seed,
@@ -267,7 +267,7 @@ def _select_candidates(
     runner: _Runner,
     env: _SelectionEnvironment,
     seeds: tuple[int, ...],
-    evaluation_config: PressEvaluationConfig,
+    evaluation_config: PressApproachEvaluationConfig,
     device: str,
 ) -> CheckpointSelection:
     scorer = None
@@ -351,6 +351,17 @@ def _publish_selection(
     publish_latest(policy_root=policy_root, run_dir=run_dir)
 
 
+def _selected_evaluation(selection: CheckpointSelection) -> CandidateEvaluation | None:
+    return next(
+        (
+            evaluation
+            for evaluation in selection.evaluations
+            if evaluation.candidate.iteration == selection.selected.iteration
+        ),
+        None,
+    )
+
+
 def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     training_config = config.rl.training
     policy_root = _repo_root() / ".build" / "training" / training_config.policy_name
@@ -360,6 +371,14 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     policy_metadata = load_policy_metadata(artifact_dir=run_dir)
     metadata = dict(policy_metadata.values)
     contract = policy_metadata.contract
+    if (
+        contract.policy_interface is PolicyInterface.PRESS_V1
+        and contract.curriculum_stage != config.rl.press.curriculum_stage
+    ):
+        raise ValueError(
+            f"press checkpoint run stage {contract.curriculum_stage!r} does not match "
+            f"configured stage {config.rl.press.curriculum_stage!r}"
+        )
     candidates = enumerate_checkpoints(logs_dir=run_dir / "logs")
     evaluation = config.rl.press.evaluation
     is_press = contract.policy_interface is PolicyInterface.PRESS_V1
@@ -406,11 +425,21 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             run_dir=run_dir,
             policy_name=training_config.policy_name,
             policy_interface=contract.policy_interface.value,
+            curriculum_stage=contract.curriculum_stage,
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed if is_press else 0,
             evaluation_config=evaluation,
             all_candidates=candidates,
         )
+        selected_evaluation = _selected_evaluation(selection)
+        if selected_evaluation is not None and not selected_evaluation.accepted:
+            (run_dir / _REPORT_FILENAME).write_text(
+                json.dumps(report, indent=2, allow_nan=False) + "\n"
+            )
+            raise AssertionError(
+                "no checkpoint passed the press-approach publication gates; "
+                f"best rejected iteration={selection.selected.iteration}"
+            )
         _publish_selection(
             selection=selection,
             report=report,
@@ -423,21 +452,8 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     finally:
         env.close()
 
-    selected_accepted = next(
-        (
-            evaluation.accepted
-            for evaluation in selection.evaluations
-            if evaluation.candidate.iteration == selection.selected.iteration
-        ),
-        None,
-    )
-    outcome = (
-        "accepted"
-        if selected_accepted
-        else "fallback"
-        if selected_accepted is not None
-        else "selected"
-    )
+    selected_evaluation = _selected_evaluation(selection)
+    outcome = "accepted" if selected_evaluation is not None else "selected"
     _report(
         f"checkpoint selection COMPLETE run={run_id} "
         f"iteration={selection.selected.iteration} outcome={outcome} "

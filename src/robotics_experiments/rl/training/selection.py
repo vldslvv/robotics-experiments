@@ -55,7 +55,7 @@ class CandidateEvaluation:
     candidate: CheckpointCandidate
     accepted: bool
     metrics: tuple[MetricValue, ...]
-    normalized_margins: tuple[float, float, float]
+    normalized_margins: tuple[float, ...]
     ranking_values: tuple[float, ...]
     reward_means: tuple[RewardMean, ...]
 

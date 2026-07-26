@@ -14,7 +14,7 @@ _MOVED_TARGETS = (
     "test-integration-press-hover-goto",
     "test-integration-press-contact-chain",
     "test-integration-press-policy",
-    "test-integration-press-routine",
+    "test-integration-press-approach-routine",
 )
 
 

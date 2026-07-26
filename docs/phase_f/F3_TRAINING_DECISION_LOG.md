@@ -1523,3 +1523,159 @@ Use these decision signals:
   controller, and simulator-to-deployment parity instead of model capacity.
 - Stable optimization and a repeatable capacity plateau: only then compare a
   larger actor under identical seeds, objective, and sample budget.
+
+### 33. Replace the joint objective with an explicit approach curriculum stage
+
+Date: 2026-07-26.
+
+Decision: Retire the approach/contact/toggle/retreat transition and train one
+small, named `approach` stage first. Keep the 34-value observation, four-value
+action, pusher/switch assets, and `[256, 256, 128]` actor so a later stage can
+initialize from the Stage 1 actor. Curriculum progression is manual through
+separate Hydra options and policy namespaces; no automatic promotion or fixed
+stage enum is introduced.
+
+Reason: The earlier joint objective showed strong phase interference:
+checkpoints alternated between contact quality and retreat reliability without
+meeting the joint gates. Stage 1 isolates the prerequisite flight behavior:
+reach 0.40-0.42 m, align, brake, and hold stably without touching the switch.
+Its reward contains only range progress, alignment, braking, upright, action
+delta, and terminal outcome terms. Contact is a failure, which removes
+post-contact credit ambiguity.
+
+Implementation contract:
+
+- Hydra option:
+  `configs/experiment/rl/press/approach.yaml`.
+- Training config and namespace:
+  `configs/train_press_approach_quad.yaml` and `press-approach`.
+- Deployment config:
+  `configs/policy_press_approach_quad.yaml`.
+- Acceptance: at least 80% approach success and at most 5% contact failure on
+  100 episodes for each seed 101, 202, and 303.
+- Ranking: worst normalized gate margin, then fewer other flight failures,
+  fewer timeouts, faster successful completion, and earlier iteration.
+- Metadata: `policy_interface: press-v1` plus required
+  `curriculum_stage: approach`; historical stage-less press artifacts are
+  rejected.
+- Physical contact validation remains in
+  `test-integration-press-contact-chain`, using a test-local no-dones
+  environment so approach termination cannot reset the physical scenario.
+
+Initial training decision: preserve the existing PPO topology, conservative
+fixed `1e-4` schedule, and 2.0 m/s action authority for the first Stage 1 run.
+An attempted reduction to 0.5 m/s was rejected before training because the
+physical contact-chain gate then produced only 2.31 mm of button travel against
+the 5 mm latch threshold. Precision remains the dense braking objective's job;
+the shared physical/action contract retains enough authority for later stages.
+Do not initialize from the old joint press actor for the first run: its learned
+contact/retreat behavior is not a clean approach baseline, while the new task
+is small enough to train directly.
+
+### 34. Reduce exploration scale after the first approach run
+
+Date: 2026-07-26.
+
+Decision: Reject run `approach-20260726a` and repeat Stage 1 from scratch with
+0.05 initial action noise, a fixed `5e-5` learning rate, `0.0001` entropy
+coefficient, and 300 iterations. Keep the 2.0 m/s action authority, reward,
+reset distribution, network topology, rollout length, and acceptance gates
+unchanged.
+
+Evidence: The 150-iteration baseline completed in 545 seconds. Selection over
+300 deterministic episodes per checkpoint found iteration 50 best, but it
+achieved only 0.2033 approach success with zero contacts and 0.7967 timeouts.
+Iteration 75 achieved 0.1933 success, iteration 100 achieved 0.1833, iteration
+125 failed the flight envelope in every episode, and iteration 149 timed out
+in every episode. The iteration-50 mean closest range was 0.40714 m, showing
+that wall-normal braking was learned while lateral/vertical correction was
+not. Its mean alignment contribution was -0.16143 per active step.
+
+Diagnosis: A generated frame-aware proportional actor passed the unchanged
+evaluator at 1.000 success, zero contacts, zero other flight failures, and zero
+timeouts across all 300 episodes, with a 1.225 s median completion time. The
+task geometry, contact frame, action mapping, goal predicate, and evaluator are
+therefore capable of passing. At the configured 2.0 m/s action scale, the old
+0.20 standard deviation injected roughly 0.40 m/s per-axis exploratory
+commands around a goal requiring at most 0.10 m/s total speed and offsets no
+larger than 0.08 m. Reduce fresh exploration to approximately the terminal
+speed scale, halve the update size, and double the checkpoint horizon to avoid
+the observed post-50 collapse while preserving the shared action contract.
+
+Publication rule correction: The rejected selector result exposed that a
+fallback checkpoint was still exported and advanced as `latest`. Selection may
+rank rejected checkpoints for diagnostics, but it must now write the report,
+fail the make gate, and leave publication unchanged unless the selected
+checkpoint passes both acceptance thresholds.
+
+### 35. Warm-start the approach actor with the task's affine flight prior
+
+Date: 2026-07-26.
+
+Decision: Reject run `approach-20260726b` and actor-only initialize the next
+run from an architecture-compatible affine approach prior. Fine-tune for 25
+iterations with `1e-6` fixed learning rate, 0.01 fresh action noise, zero
+entropy bonus, and checkpoints every five iterations. Keep the final task,
+reward, reset distribution, 2.0 m/s action authority, and actor/critic topology
+unchanged.
+
+Evidence: Run b completed 300 iterations in 1,128 seconds, but its strict
+selector failed as intended. Iteration 125 ranked best at 0.1967 success, zero
+contacts, zero other flight failures, and 0.8033 timeouts. Direct actor probes
+showed that its lateral and vertical outputs changed by only about 0.01 across
+the complete 0.16 m reset width, while retaining a much larger constant action
+bias. More iterations and smaller random exploration therefore reproduced the
+same local optimum instead of learning feedback.
+
+Prior: Use the unchanged `[256, 256, 128]` ELU actor as a sparse affine
+controller. Positive hidden biases keep three pass-through units in ELU's
+linear region. The output commands a 0.42 m wall-normal equilibrium with
+normalized gain 0.625 per meter and commands lateral/vertical normalized
+velocities equal to their signed switch-relative offsets; yaw is zero. This is
+an initialization, not a runtime fallback or an added reward term. The prior
+passed the exact 300-episode evaluator at 1.000 success with zero contact,
+flight failure, or timeout and 1.900 s median completion. The final artifact
+must still come from PPO checkpoint selection and independently pass all
+publication and deployment gates. Initialization provenance records policy,
+stage, run, iteration, and checkpoint path through the standard actor-only
+contract.
+
+The first 1.25-gain fine-tune, run `approach-20260726c`, passed Lab selection
+and independent evaluation at 1.000 success and zero failures. The live PX4
+routine nevertheless contacted the switch at 0.3828 m while still moving
+0.1122 m/s. Halving the prior's wall-normal gain limits its commanded speed to
+0.10 m/s at 0.50 m and addresses the measured velocity-loop overshoot without
+changing the configured 0.20 m/s reward target or any acceptance threshold.
+
+### 36. Publish the slower Stage 1 actor after every gate passes
+
+Date: 2026-07-26.
+
+Decision: Publish run `approach-20260726d`, checkpoint 24, as the accepted
+`press-approach` Stage 1 artifact. Its actor-only provenance is source policy
+`press-approach`, stage `approach`, run `approach-affine-prior-slow`, checkpoint
+0. One identical training attempt crashed during Isaac/Kit startup before
+creating a run; the immediate retry completed all 25 PPO iterations in 77
+seconds.
+
+Selection evidence: Every saved checkpoint passed 300 deterministic episodes.
+Iteration 24 ranked first with 1.000 approach success, zero contact failures,
+zero other flight failures, zero timeouts, 0.41244 m mean closest range, and
+1.500 s median completion. Its reward means were 0.103331 range progress,
+-0.070378 alignment error, -0.088123 closing-speed error, effectively zero
+upright/action-delta error, 4.980631 success, zero failure/timeout, and 4.925460
+total.
+
+Independent and deployment evidence: `make eval-press
+RL_RUN_ID=approach-20260726d` reproduced 1.000 success, zero
+contact/fault/timeout, 0.41244 m mean closest range, and 1.500 s median
+completion. `make test-integration-press-approach-routine` then completed the
+handoff, five-sample stable approach, contact-free terminal zero setpoint,
+return waypoint, landing, and disarm without a lamp transition. The physical
+contact-chain gate also remained independent and passed with 14.02 mm maximum
+pusher travel, 10.90 mm button travel, one toggle, 11.821 N maximum contact
+force, and stable retreat.
+
+Final repository validation: the full host suite passed with 578 tests and one
+skip; all pre-commit hooks passed; the aggregate container suite passed 8/8
+targets; and the independent `test-integration-press-policy` gate passed.

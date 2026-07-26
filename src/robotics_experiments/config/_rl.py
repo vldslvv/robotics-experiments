@@ -7,18 +7,13 @@ __all__ = [
     "HoverTaskConfig",
     "IsaacLabVehicleConfig",
     "PressActionConfig",
+    "PressApproachEvaluationConfig",
+    "PressApproachGoalConfig",
     "PressApproachRewardConfig",
-    "PressCommonRewardConfig",
-    "PressContactRewardConfig",
-    "PressControlRewardConfig",
-    "PressEvaluationConfig",
+    "PressApproachTerminationConfig",
     "PressHandoffConfig",
     "PressResetConfig",
-    "PressRetreatRewardConfig",
-    "PressRewardConfig",
     "PressTaskConfig",
-    "PressTerminalRewardConfig",
-    "PressTerminationConfig",
     "RlConfig",
     "RlPolicyActorConfig",
     "RlPolicyConfig",
@@ -182,80 +177,33 @@ class PressHandoffConfig(_FreezableConfig):
 
 
 @dataclass
-class PressCommonRewardConfig(_FreezableConfig):
-    """Reward terms active in every press-task phase."""
-
-    alive_weight: float
-    stability_weight: float
-
-
-@dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Approach progress and near-contact speed shaping."""
+    """Weights for the eight signed approach-stage reward contributions."""
 
-    approach_progress_weight: float
-    near_contact_linear_overspeed_weight: float
-    near_contact_angular_overspeed_weight: float
-    near_contact_range_m: float
-    near_contact_linear_speed_max_mps: float
-    near_contact_angular_speed_max_radps: float
-
-
-@dataclass
-class PressContactRewardConfig(_FreezableConfig):
-    """Contact, latch, and confirmed-toggle shaping."""
-
-    gentle_contact_weight: float
-    compression_progress_weight: float
-    button_progress_weight: float
-    latch_progress_weight: float
-    toggle_weight: float
-    repeat_toggle_weight: float
-    contact_oscillation_weight: float
-    scraping_weight: float
-    misalignment_weight: float
-    gentle_contact_speed_max_mps: float
-    misalignment_tolerance_m: float
-
-
-@dataclass
-class PressRetreatRewardConfig(_FreezableConfig):
-    """Post-toggle retreat shaping."""
-
-    retreat_progress_weight: float
-    retreat_alignment_weight: float
-    retreat_overspeed_weight: float
-    post_toggle_contact_weight: float
-    post_toggle_delay_weight: float
-
-
-@dataclass
-class PressControlRewardConfig(_FreezableConfig):
-    """Normalized-action regularization."""
-
-    action_energy_weight: float
+    range_progress_weight: float
+    alignment_error_weight: float
+    closing_speed_error_weight: float
+    upright_error_weight: float
     action_delta_weight: float
-
-
-@dataclass
-class PressTerminalRewardConfig(_FreezableConfig):
-    """Successful and unsuccessful terminal shaping."""
-
     success_weight: float
     failure_weight: float
     timeout_weight: float
 
 
 @dataclass
-class PressRewardConfig(_FreezableConfig):
-    """Press reward groups matching the backend-neutral task transition."""
+class PressApproachGoalConfig(_FreezableConfig):
+    """Stable approach target and wall-normal braking schedule."""
 
-    common: PressCommonRewardConfig
-    approach: PressApproachRewardConfig
-    contact: PressContactRewardConfig
-    retreat: PressRetreatRewardConfig
-    control: PressControlRewardConfig
-    terminal: PressTerminalRewardConfig
+    range_min_m: float
+    range_max_m: float
+    alignment_error_max_m: float
+    linear_speed_max_mps: float
+    angular_speed_max_radps: float
+    body_z_alignment_min: float
+    stable_steps: int
+    closing_speed_far_mps: float
+    closing_speed_far_range_m: float
+    closing_speed_zero_range_m: float
 
 
 @dataclass
@@ -280,34 +228,25 @@ class PressResetConfig(_FreezableConfig):
 
 
 @dataclass
-class PressTerminationConfig(_FreezableConfig):
-    """Success and failure envelopes for the switch-press task."""
+class PressApproachTerminationConfig(_FreezableConfig):
+    """Contact and flight-envelope failure conditions for approach."""
 
     crash_tilt_cos: float
     min_altitude_m: float
     max_wall_normal_distance_m: float
     max_lateral_error_m: float
     max_vertical_error_m: float
-    retreat_distance_m: float
-    retreat_speed_max_mps: float
-    retreat_alignment_tolerance_m: float
-    retreat_angular_speed_max_radps: float
-    stable_retreat_steps: int
-    first_contact_speed_max_mps: float
-    first_contact_angular_speed_max_radps: float
+    contact_force_threshold_n: float
 
 
 @dataclass
-class PressEvaluationConfig(_FreezableConfig):
-    """Deterministic press-policy evaluation workload and acceptance targets."""
+class PressApproachEvaluationConfig(_FreezableConfig):
+    """Deterministic approach-policy workload and publication gates."""
 
     seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
-    first_contact_stability_min: float
-    retreat_rate_min: float
-    compression_target_m: float
-    compression_overshoot_tolerance_m: float
+    contact_failure_rate_max: float
 
 
 @dataclass
@@ -363,25 +302,27 @@ class RlTrainingConfig(_FreezableConfig):
 
 @dataclass
 class PressTaskConfig(_FreezableConfig):
-    """Press-task-specific RL config.
+    """Named press curriculum-stage config.
 
     Attributes:
+        curriculum_stage: Required stage name written to artifacts.
         policy: Task-owned actor/critic topology.
-        handoff: Thresholds for the nav -> contact handoff gate.
-        reward: Ground-truth press reward weights and gates.
-        reset: Easy-task geometry and initial-state ranges.
-        termination: Press success/failure envelopes.
-        evaluation: Deterministic evaluation workload and acceptance targets.
-        contact_force_threshold_n: Pad force norm that marks real contact.
+        handoff: Thresholds for the nav -> policy handoff gate.
+        goal: Stable approach target and braking schedule.
+        reward: Approach-stage reward weights.
+        reset: Physical scene and initial-state ranges.
+        termination: Contact and flight-envelope failure conditions.
+        evaluation: Deterministic approach workload and acceptance targets.
     """
 
+    curriculum_stage: str
     policy: RlPolicyConfig
     handoff: PressHandoffConfig
-    reward: PressRewardConfig
+    goal: PressApproachGoalConfig
+    reward: PressApproachRewardConfig
     reset: PressResetConfig
-    termination: PressTerminationConfig
-    evaluation: PressEvaluationConfig
-    contact_force_threshold_n: float
+    termination: PressApproachTerminationConfig
+    evaluation: PressApproachEvaluationConfig
 
 
 @dataclass

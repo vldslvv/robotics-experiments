@@ -416,6 +416,16 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
     from robotics_experiments.environment import SwitchState, step_switches
     from robotics_experiments.workflows.isaac_lab import SwitchPressEnv, make_switch_press_env_cfg
 
+    class _ContactChainEnv(SwitchPressEnv):
+        """Test-local physical path that cannot terminate on Stage 1 contact."""
+
+        def _get_dones(self):
+            no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            return no_done, no_done
+
+        def _get_rewards(self):
+            return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
     if config.rl.action.kind != "velocity":
         raise AssertionError("contact-chain gate requires rl.action.kind=velocity")
     if args.num_envs not in (None, 1):
@@ -426,7 +436,7 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
     cfg.episode_length_s = config.rl.episode_length_s + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
         cfg.seed = args.seed
-    env = SwitchPressEnv(cfg=cfg, experiment_config=config)
+    env = _ContactChainEnv(cfg=cfg, experiment_config=config)
     try:
         _reset_env(env, args.seed)
         stage = _spawn_contact_chain_lamp(lamp_usd_path=config.switches.lamp_usd_path)
@@ -451,11 +461,13 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
         max_contact_force = 0.0
         retreat_started = False
         stable_retreat = False
+        stable_retreat_steps = 0
         max_tilt = 0.0
         steps = round(config.rl.episode_length_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
-        approach_speed = config.rl.press.reward.contact.gentle_contact_speed_max_mps
-        retreat_speed = config.rl.press.termination.retreat_speed_max_mps * 0.75
+        approach_speed = config.rl.press.goal.closing_speed_far_mps
+        retreat_speed = approach_speed * 0.75
+        initial_range = float((env.switch.data.root_pos_w - env.drone.data.root_pos_w)[0, 0].item())
         _report(
             "contact geometry: "
             f"switch_bodies={env.switch.body_names} drone_bodies={env.drone.body_names} "
@@ -490,10 +502,7 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
             action[:, 0] = speed / max_velocity
             action[:, 1] = torch.clamp(2.0 * switch_offset[:, 1] / max_velocity, -0.2, 0.2)
             action[:, 2] = torch.clamp(2.0 * switch_offset[:, 2] / max_velocity, -0.2, 0.2)
-            _observation, _reward, terminated, truncated, _info = env.step(action)
-            result = env.press_task_result
-            if result is None:
-                raise AssertionError("press task did not advance")
+            _observation, _reward, _terminated, _truncated, _info = env.step(action)
             pusher = float(
                 env.drone.data.joint_pos_limits[0, pusher_joint_id, 1].item()
                 - env.drone.data.joint_pos[0, pusher_joint_id].item()
@@ -501,11 +510,12 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
             button = float(env.switch.data.joint_pos[0, joint_id].item())
             max_pusher = max(max_pusher, pusher)
             max_button = max(max_button, button)
-            contact_seen = contact_seen or bool(result.metrics.contacted[0].item())
-            max_contact_force = max(
-                max_contact_force,
-                float(torch.linalg.norm(env.contact_sensor.data.net_forces_w, dim=-1).max().item()),
+            contact_force = float(
+                torch.linalg.norm(env.contact_sensor.data.net_forces_w, dim=-1).max().item()
             )
+            max_contact_force = max(max_contact_force, contact_force)
+            contact_now = contact_force >= config.rl.press.termination.contact_force_threshold_n
+            contact_seen = contact_seen or contact_now
             switch_state = step_switches(
                 stage=stage,
                 switch_state=switch_state,
@@ -517,13 +527,24 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
                 retreat_started = True
             _yaw, tilt = _yaw_tilt_from_quat(env.drone.data.root_quat_w)
             max_tilt = max(max_tilt, float(tilt[0].item()))
-            if retreat_started and bool(result.metrics.retreated[0].item()):
+            relative = env.switch.data.root_pos_w - env.drone.data.root_pos_w
+            linear_speed = float(torch.linalg.norm(env.drone.data.root_lin_vel_b[0]).item())
+            angular_speed = float(torch.linalg.norm(env.drone.data.root_ang_vel_b[0]).item())
+            retreat_stable_now = (
+                retreat_started
+                and not contact_now
+                and float(relative[0, 0].item()) >= initial_range
+                and float(torch.linalg.norm(relative[0, 1:3]).item())
+                <= config.rl.press.goal.alignment_error_max_m
+                and linear_speed <= config.rl.press.goal.closing_speed_far_mps
+                and angular_speed <= config.rl.press.goal.angular_speed_max_radps
+            )
+            stable_retreat_steps = stable_retreat_steps + 1 if retreat_stable_now else 0
+            if stable_retreat_steps >= config.rl.press.goal.stable_steps:
                 stable_retreat = True
                 break
-            if bool(truncated[0].item()):
-                break
-            if bool(terminated[0].item()) and not bool(result.termination.success[0].item()):
-                raise AssertionError("contact-chain drone breached its stability envelope")
+            if float(tilt[0].item()) > math.acos(config.rl.press.termination.crash_tilt_cos):
+                raise AssertionError("contact-chain drone breached its tilt envelope")
 
         light_prim = stage.GetPrimAtPath(f"{_CONTACT_LAMP_PRIM_PATH}/Lamp/SphereLight")
         intensity = float(UsdLux.SphereLight(light_prim).GetIntensityAttr().Get())

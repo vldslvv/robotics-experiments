@@ -106,7 +106,7 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
 
 def test_checkpoint_export_resolves_existing_policy_run(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
-    out_root = tmp_path / "training" / "press"
+    out_root = tmp_path / "training" / "press-approach"
     checkpoint = out_root / "run-1" / "logs" / "model_299.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.touch()
@@ -128,7 +128,7 @@ def test_checkpoint_export_rejects_checkpoint_outside_policy_root(tmp_path: Path
     with pytest.raises(ValueError, match="outside policy artifact root"):
         train_rl._checkpoint_run_dir(  # noqa: SLF001 - helper contract.
             checkpoint_path=checkpoint,
-            out_root=tmp_path / "training" / "press",
+            out_root=tmp_path / "training" / "press-approach",
         )
 
 
@@ -136,6 +136,7 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
     train_rl = _load_train_rl_module()
     metadata = {
         "policy_interface": "press-v1",
+        "curriculum_stage": "approach",
         "obs_schema_version": 1,
         "obs_dim": 34,
         "policy_rate_hz": 17.0,
@@ -184,7 +185,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     )
     training_cfg = SimpleNamespace(
         task_id="press-task",
-        policy_name="press",
+        policy_name="press-approach",
         seed=7,
         max_iterations=2,
     )
@@ -193,6 +194,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
             action=action,
             policy_rate_hz=17.0,
             training=training_cfg,
+            press=SimpleNamespace(curriculum_stage="approach"),
         )
     )
     env = SimpleNamespace(close=lambda: None)
@@ -245,7 +247,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
     assert export_calls == []
-    assert not (tmp_path / ".build" / "training" / "press" / "latest").exists()
+    assert not (tmp_path / ".build" / "training" / "press-approach" / "latest").exists()
 
 
 def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
@@ -349,17 +351,18 @@ def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: P
         )
 
 
-def test_initialization_provenance_is_strict_json_and_uses_source_commit(
+def test_cross_namespace_initialization_records_complete_source_provenance(
     tmp_path: Path,
 ) -> None:
     train_rl = _load_train_rl_module()
-    out_root = tmp_path / ".build" / "training" / "press"
-    run_dir = out_root / "source-run"
+    training_root = tmp_path / ".build" / "training"
+    run_dir = training_root / "press-source" / "source-run"
     checkpoint = run_dir / "logs" / "model_50.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.touch()
     metadata = {
         "policy_interface": "press-v1",
+        "curriculum_stage": "approach",
         "obs_schema_version": 1,
         "obs_dim": 34,
         "policy_rate_hz": 20.0,
@@ -378,15 +381,17 @@ def test_initialization_provenance_is_strict_json_and_uses_source_commit(
 
     provenance, contract = train_rl._initialization_provenance(  # noqa: SLF001
         checkpoint_path=checkpoint,
-        out_root=out_root,
+        training_root=training_root,
         repo_root=tmp_path,
     )
 
     assert provenance == {
         "method": "actor-only",
+        "source_policy": "press-source",
+        "source_stage": "approach",
         "source_run": "source-run",
         "checkpoint_iteration": 50,
-        "checkpoint_path": ".build/training/press/source-run/logs/model_50.pt",
+        "checkpoint_path": (".build/training/press-source/source-run/logs/model_50.pt"),
         "source_commit": "source-commit",
     }
     assert contract.obs_dim == 34

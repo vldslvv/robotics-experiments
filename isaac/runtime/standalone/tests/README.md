@@ -31,7 +31,9 @@ visible plunger, forward-facing collidable pad, fully deployed joint, enabled
 arm and swept-propeller colliders, and the static wall collider. It then
 commands a slow press, verifies pad contact plus pusher and button displacement,
 advances the production N-step latch, requires exactly one lamp transition, and
-retreats within the stability envelope.
+retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
+returns no dones and no approach reward, so Stage 1's contact-failure
+termination cannot reset this physical measurement path.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current
@@ -100,11 +102,10 @@ transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
 OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
 to completion.
 
-`make test-integration-press-routine` runs the artifact-dependent full press
-mission in `configs/policy_press_quad.yaml`: takeoff, navigate to the configured
-handoff point, execute the `press-v1` artifact through the generic `policy`
-step, return, land, and disarm. The strict post-routine hook requires stable
-first contact, exactly one off-to-on lamp event, and stable retreat. Run it only
-after `make select-rl-checkpoint` publishes `.build/training/press/latest` and
-`make eval-press` independently verifies it; it is excluded from
-`test-integration-all` for that reason.
+`make test-integration-press-approach-routine` runs the artifact-dependent
+Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
+to about 0.48 m, execute the `press-v1` / `approach` artifact through the
+generic `policy` step, return, land, and disarm. The strict hook requires stable
+contact-free completion and no lamp transition. Run it only after selection
+publishes `.build/training/press-approach/latest` and `make eval-press`
+independently accepts it; it is excluded from `test-integration-all`.

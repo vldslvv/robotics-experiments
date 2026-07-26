@@ -123,28 +123,34 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
-def test_press_fine_tuning_config_preserves_contract_and_uses_conservative_schedule():
+def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "train_press_quad.yaml")
+    config = load_config(_ROOT / "train_press_approach_quad.yaml")
     training = config.rl.training
     reward = config.rl.press.reward
     policy = config.rl.press.policy
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert training.max_iterations == 150
-    assert training.save_interval == 25
-    assert training.learning_rate == 1.0e-4
+    assert training.policy_name == "press-approach"
+    assert config.rl.press.curriculum_stage == "approach"
+    assert training.max_iterations == 25
+    assert training.learning_rate == 1.0e-6
+    assert training.entropy_coef == 0.0
+    assert training.save_interval == 5
     assert training.schedule == "fixed"
-    assert policy.actor.initial_noise_std == 0.2
+    assert policy.actor.initial_noise_std == 0.01
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
-    assert reward.contact.gentle_contact_weight == 20.0
-    assert reward.retreat.retreat_progress_weight == 300.0
-    assert reward.terminal.success_weight == 150.0
-    assert config.rl.press.evaluation.compression_target_m == 0.01
+    assert reward.range_progress_weight == 50.0
+    assert reward.closing_speed_error_weight == 20.0
+    assert reward.success_weight == 150.0
+    assert config.rl.press.goal.stable_steps == 5
+    assert config.rl.press.reset.wall_normal_min_m == 0.45
+    assert config.rl.press.reset.lateral_error_min_m == -0.08
+    assert config.rl.press.evaluation.contact_failure_rate_max == 0.05
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
 
 
@@ -202,6 +208,59 @@ def test_task_policy_validation(tmp_path, override, match):
     path = _write_experiment(tmp_path, "invalid_policy", {})
     OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
 
+    with pytest.raises(ValueError, match=match):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [
+        ({"rl": {"press": {"curriculum_stage": "future"}}}, "unknown"),
+        (
+            {"rl": {"press": {"goal": {"range_min_m": 0.43}}}},
+            "range bounds",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "goal": {
+                            "closing_speed_zero_range_m": 0.51,
+                        }
+                    }
+                }
+            },
+            "closing_speed_zero_range_m",
+        ),
+        (
+            {"rl": {"press": {"reset": {"wall_normal_min_m": 0.40}}}},
+            "wall_normal_min_m",
+        ),
+        (
+            {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},
+            "finite and non-negative",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "evaluation": {
+                            "contact_failure_rate_max": 1.1,
+                        }
+                    }
+                }
+            },
+            "between 0 and 1",
+        ),
+    ],
+)
+def test_press_approach_validation(tmp_path, override, match):
+    from omegaconf import OmegaConf
+
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_press_approach", {})
+    OmegaConf.save(OmegaConf.merge(OmegaConf.load(path), override), path)
     with pytest.raises(ValueError, match=match):
         load_config(path)
 

@@ -12,8 +12,8 @@ import torch
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import POLICY_FILENAME, validate_policy_artifact
 from robotics_experiments.workflows.isaac_lab import (
-    PressEvaluationResult,
-    evaluate_press_policy,
+    PressApproachEvaluationResult,
+    evaluate_press_approach_policy,
     make_isaac_lab_env,
 )
 
@@ -29,10 +29,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressEvaluationResult:
+def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
     contract = validate_policy_artifact(artifact_dir=artifact_dir).contract
+    if contract.curriculum_stage != config.rl.press.curriculum_stage:
+        raise ValueError(
+            f"press artifact stage {contract.curriculum_stage!r} does not match "
+            f"configured stage {config.rl.press.curriculum_stage!r}"
+        )
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
@@ -53,7 +58,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressEvaluationResu
             raise ValueError("Isaac Lab evaluation environment changed the artifact contract")
         policy = torch.jit.load(str(artifact_dir / POLICY_FILENAME), map_location=env.device)
         policy.eval()
-        result = evaluate_press_policy(
+        result = evaluate_press_approach_policy(
             env=env,
             policy=policy,
             seeds=seeds,
@@ -65,28 +70,26 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressEvaluationResu
 
     summary = result.summary
     _report(
-        "press evaluation: "
+        "press approach evaluation: "
         f"episodes={summary.episodes} "
-        f"success={summary.confirmed_toggle_rate:.3f} "
-        f"first_contact_stability={summary.stable_first_contact_rate:.3f} "
-        f"retreat={summary.post_toggle_retreat_rate:.3f} "
-        f"full_completion={summary.full_completion_rate:.3f} "
-        f"median_toggle_s={summary.median_toggle_time_s!s} "
-        f"peak_compression_overshoot_m={summary.peak_compression_overshoot_m:.5f}"
+        f"success={summary.approach_success_rate:.3f} "
+        f"contact_failure={summary.contact_failure_rate:.3f} "
+        f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
+        f"timeout={summary.timeout_rate:.3f} "
+        f"mean_closest_range_m={summary.mean_closest_range_m:.5f} "
+        f"median_completion_s={summary.median_completion_time_s!s}"
     )
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
 
     failures = []
-    if summary.confirmed_toggle_rate < evaluation.success_rate_min:
-        failures.append("press success")
-    if summary.stable_first_contact_rate < evaluation.first_contact_stability_min:
-        failures.append("first-contact stability")
-    if summary.post_toggle_retreat_rate < evaluation.retreat_rate_min:
-        failures.append("post-toggle retreat")
+    if summary.approach_success_rate < evaluation.success_rate_min:
+        failures.append("approach success")
+    if summary.contact_failure_rate > evaluation.contact_failure_rate_max:
+        failures.append("contact failures")
     if failures:
         raise AssertionError("press acceptance failed: " + ", ".join(failures))
-    _report("press evaluation PASSED")
+    _report("press approach evaluation PASSED")
     return result
 
 

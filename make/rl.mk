@@ -44,7 +44,7 @@ select-rl-checkpoint: generate-drone-usd
 # supplied it evaluates that exact published run instead of resolving latest.
 .PHONY: eval-press
 eval-press: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-eval-press: HYDRA_CONFIG = configs/train_press_quad.yaml
+eval-press: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
 eval-press: ISAAC_TEST_EXTRA_ARGS = $(EVAL_ARGS)
 eval-press: generate-drone-usd
 	@TEST_TARGET='eval-press' \
@@ -79,7 +79,7 @@ test-integration-press-hover-goto: generate-drone-usd
 
 .PHONY: test-integration-press-contact-chain
 test-integration-press-contact-chain: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_quad.yaml
+test-integration-press-contact-chain: HYDRA_CONFIG = configs/train_press_approach_quad.yaml
 test-integration-press-contact-chain: ISAAC_TEST_EXTRA_ARGS = --contact-chain --num-envs 1
 test-integration-press-contact-chain: generate-drone-usd
 	@TEST_TARGET='test-integration-press-contact-chain' \
@@ -102,17 +102,17 @@ test-integration-press-policy: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
-.PHONY: test-integration-press-routine
-test-integration-press-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-press-routine: HYDRA_CONFIG = configs/policy_press_quad.yaml
-test-integration-press-routine: SCENE = @config
-test-integration-press-routine: generate-drone-usd
-	@TEST_TARGET='test-integration-press-routine' \
-	    HOST_ISAAC_LOG_BASENAME='test_px4_press_policy_routine.log' \
-	    HOST_PX4_LOG_BASENAME='test_px4_press_policy_routine_px4.log' \
-	    ISAAC_TEST_LOG='$(ISAAC_PRESS_ROUTINE_TEST_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_ROUTINE_TEST)' \
-	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-routine' \
+.PHONY: test-integration-press-approach-routine
+test-integration-press-approach-routine: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-approach-routine: HYDRA_CONFIG = configs/policy_press_approach_quad.yaml
+test-integration-press-approach-routine: SCENE = @config
+test-integration-press-approach-routine: generate-drone-usd
+	@TEST_TARGET='test-integration-press-approach-routine' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_approach_routine.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_approach_routine_px4.log' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-approach-routine' \
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
