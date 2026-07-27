@@ -8,6 +8,8 @@ from typing import Any
 
 import torch
 from isaaclab.envs import DirectRLEnv
+from isaaclab_contrib.actuators import Thruster, ThrusterCfg
+from isaaclab_contrib.utils.types import MultiRotorActions
 
 from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import ExperimentConfig
@@ -15,7 +17,7 @@ from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
-    rotor_omega_to_body_wrench,
+    rotor_thrust_to_body_wrench,
 )
 
 __all__: list[str] = []
@@ -54,6 +56,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self._policy_cadence = _CadenceState(previous_time_ns=0)
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
+        self._applied_actions = self.actions.clone()
         self._setup_actuation()
 
     @property
@@ -107,6 +110,47 @@ class _FlightDirectRLEnv(DirectRLEnv):
             mass=total_mass,
             device=self.device,
         )
+        rotor_count = len(rotors.rot_dir)
+        thrust_max = max(
+            float(constant) * float(max_omega) ** 2
+            for constant, max_omega in zip(
+                bridge.rotor_constant,
+                bridge.max_rotor_velocity,
+                strict=True,
+            )
+        )
+        thrust_constant_min = min(float(value) for value in bridge.rotor_constant)
+        thrust_constant_max = max(float(value) for value in bridge.rotor_constant)
+        initial_omega = torch.zeros(
+            (self.num_envs, rotor_count),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._thruster = Thruster(
+            cfg=ThrusterCfg(
+                dt=1.0 / self._experiment_config.sim.physics_hz,
+                thrust_range=(0.0, thrust_max),
+                max_thrust_rate=action_cfg.actuator_max_thrust_rate_nps,
+                thrust_const_range=(thrust_constant_min, thrust_constant_max),
+                tau_inc_range=(
+                    action_cfg.actuator_tau_inc_s,
+                    action_cfg.actuator_tau_inc_s,
+                ),
+                tau_dec_range=(
+                    action_cfg.actuator_tau_dec_s,
+                    action_cfg.actuator_tau_dec_s,
+                ),
+                torque_to_thrust_ratio=0.0,
+                use_discrete_approximation=True,
+                integration_scheme="euler",
+                thruster_names_expr=[f"rotor_{index}" for index in range(rotor_count)],
+            ),
+            thruster_names=[f"rotor_{index}" for index in range(rotor_count)],
+            thruster_ids=slice(None),
+            num_envs=self.num_envs,
+            device=str(self.device),
+            init_thruster_rps=initial_omega,
+        )
         pusher_joint_ids, _ = self.drone.find_joints("pusher_joint")
         if len(pusher_joint_ids) != 1:
             raise RuntimeError(
@@ -120,6 +164,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
+        self._applied_actions = self.actions
 
     def _apply_action(self) -> None:
         self.drone.set_joint_position_target(
@@ -128,14 +173,23 @@ class _FlightDirectRLEnv(DirectRLEnv):
         )
         omega = action_to_rotor_omega(
             self.actuation_params,
-            self.actions,
+            self._applied_actions,
             self.drone.data.root_quat_w,
             self.drone.data.root_lin_vel_w,
             self.drone.data.root_ang_vel_b,
         )
-        force_body, torque_body = rotor_omega_to_body_wrench(
+        desired_thrust = self.actuation_params.rotor_constant * omega.square()
+        realized = self._thruster.compute(
+            MultiRotorActions(
+                thrusts=desired_thrust,
+                thruster_indices=slice(None),
+            )
+        ).thrusts
+        if realized is None:
+            raise RuntimeError("Isaac Lab Thruster returned no realized thrust")
+        force_body, torque_body = rotor_thrust_to_body_wrench(
             self.actuation_params,
-            omega,
+            realized,
             self.drone.data.root_lin_vel_b,
             self._linear_drag,
         )
@@ -153,3 +207,5 @@ class _FlightDirectRLEnv(DirectRLEnv):
         joint_velocity = self.drone.data.default_joint_vel[env_ids].clone()
         self.drone.write_joint_state_to_sim(joint_position, joint_velocity, env_ids=env_ids)
         self.actions[env_ids] = 0.0
+        self._applied_actions[env_ids] = 0.0
+        self._thruster.reset_idx(env_ids)

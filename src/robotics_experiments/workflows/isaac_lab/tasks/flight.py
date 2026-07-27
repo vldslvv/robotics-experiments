@@ -40,6 +40,7 @@ __all__ = [
     "apply_body_wrench",
     "build_flight_actuation_params",
     "rotor_omega_to_body_wrench",
+    "rotor_thrust_to_body_wrench",
 ]
 
 _GRAVITY_M_S2 = 9.81
@@ -323,6 +324,22 @@ def rotor_omega_to_body_wrench(
     """
     omega_squared = omega.square()
     forces = params.rotor_constant * omega_squared
+    return rotor_thrust_to_body_wrench(
+        params,
+        forces,
+        body_velocity_flu,
+        linear_drag,
+    )
+
+
+def rotor_thrust_to_body_wrench(
+    params: _FlightActuationParams,
+    forces: torch.Tensor,
+    body_velocity_flu: torch.Tensor,
+    linear_drag: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Realize official-actuator per-rotor thrust as one body-frame wrench."""
+    omega_squared = forces / params.rotor_constant
     yaw_reaction = (params.rolling_moment_coefficient * omega_squared * params.rot_dir).sum(dim=-1)
     zeros = torch.zeros_like(yaw_reaction)
     body_torque = torch.stack([zeros, zeros, yaw_reaction], dim=-1)

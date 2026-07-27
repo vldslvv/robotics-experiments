@@ -14,17 +14,17 @@ policy:
   critic:
     hidden_dims: [256, 256, 128]
 
-# Nav -> contact handoff gate thresholds (rl.press.handoff_ready).
-# Initial-column values from the ROADMAP1 handoff table; the mature column
-# tightens them once the perception stack stabilizes.
+# Shared actor-entry envelope for Lab reset and live policy handoff.
 handoff:
   pose_confidence_min: 0.85
   pose_age_max_s: 0.1
+  switch_range_min_m: 0.45
   switch_range_max_m: 0.50
   lateral_align_max_m: 0.08
-  wall_normal_speed_max_mps: 0.15
-  lateral_speed_max_mps: 0.20
-  angular_speed_max_radps: 0.40
+  wall_normal_speed_max_mps: 0.02
+  lateral_speed_max_mps: 0.02
+  angular_speed_max_radps: 0.05
+  body_z_alignment_min: 0.965926
   estimator_health_min: 0.80
 
 # Stage 1 stable, contact-free approach goal and safe closing-speed schedule.
@@ -61,14 +61,6 @@ reset:
   switch_wall_offset_m: 0.02
   switch_height_m: 1.0
   wall_half_extents_m: [0.05, 1.0, 1.0]
-  wall_normal_min_m: 0.45
-  wall_normal_max_m: 0.50
-  lateral_error_min_m: -0.08
-  lateral_error_max_m: 0.08
-  vertical_error_min_m: -0.08
-  vertical_error_max_m: 0.08
-  initial_linear_velocity_max_mps: 0.0
-  initial_angular_velocity_max_radps: 0.0
 
 termination:
   crash_tilt_cos: 0.819152

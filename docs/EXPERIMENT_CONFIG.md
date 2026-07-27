@@ -87,13 +87,16 @@ activation must be non-empty, and initial noise must be finite and
 non-negative.
 
 `rl.press.curriculum_stage` is required and currently accepts only `approach`.
-`goal` owns the stable range/alignment/speed/upright predicate and braking
-schedule; `reward` owns the eight non-negative reward magnitudes; `reset` owns
-the physical scene and initial ranges; `termination` owns contact sensing and
+`handoff` owns the single actor-entry envelope used by both Lab reset and live
+deployment; `goal` owns the stable range/alignment/speed/upright predicate and
+braking schedule; `reward` owns the nine non-negative reward magnitudes;
+`reset` owns only the physical scene; `termination` owns contact sensing and
 flight envelopes; and `evaluation` owns deterministic seeds/count plus the 80%
-success and 5% maximum-contact gates. Invalid goal/braking/reset bounds,
-negative or non-finite reward weights, invalid rates, and unknown stages fail
-during `load_config`.
+success and 5% maximum-contact gates. Independent reset velocity/range
+tunables are intentionally absent so training and deployment cannot resolve
+different entry bounds. Invalid handoff/goal/braking bounds, negative or
+non-finite reward weights, invalid rates, and unknown stages fail during
+`load_config`.
 
 `rl.training` owns PPO optimization, rollout, checkpoint cadence, task
 selection, artifact namespace, and seed settings. New runs capture the task

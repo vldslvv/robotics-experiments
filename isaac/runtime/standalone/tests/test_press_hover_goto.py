@@ -44,7 +44,7 @@ _POSITION_KP = 1.0
 _HOVER_SETTLE_S = 4.0
 _HOVER_TOLERANCE_M = 0.1
 _GOTO_DISTANCE_M = 2.0
-_GOTO_SETTLE_S = 6.0
+_GOTO_SETTLE_S = 8.0
 _GOTO_TOLERANCE_M = 0.2
 _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
@@ -55,7 +55,7 @@ _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 # target along +X, outward plate normal facing the approaching drone. This keeps
 # the fully deployed pusher clear during the non-contact goto while leaving the
 # settled drone inside the configured handoff range.
-_SWITCH_BEYOND_GOTO_M = 0.45
+_SWITCH_BEYOND_GOTO_M = 0.48
 _SWITCH_PRIM_PATH = "/World/PressValidationSwitch"
 _CONTACT_LAMP_PRIM_PATH = "/World/envs/env_0/Lamp"
 
@@ -417,7 +417,11 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
     from robotics_experiments.workflows.isaac_lab import SwitchPressEnv, make_switch_press_env_cfg
 
     class _ContactChainEnv(SwitchPressEnv):
-        """Test-local physical path that cannot terminate on Stage 1 contact."""
+        """Test-local physical path independent of Stage 1 policy behavior."""
+
+        def _pre_physics_step(self, actions, /):
+            super()._pre_physics_step(actions)
+            self._applied_actions = self.actions
 
         def _get_dones(self):
             no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -618,6 +622,7 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
     from robotics_experiments.px4_bridge import quat_wxyz_to_xyzw, world_enu_to_body_flu
     from robotics_experiments.rl.press import (
         PressObservation,
+        PressObservationMask,
         to_vector,
         world_switch_to_contact_frame,
     )
@@ -647,15 +652,17 @@ def _press_observation_sample(env: DroneHoverEnv, provider, action_dim: int):
         attitude_quat_xyzw=quat_wxyz_to_xyzw(quat_wxyz),
         pusher_compression_m=0.0,
         pusher_compression_rate_mps=0.0,
-        contact_valid=False,
+        contact_valid=True,
         contact_flag=False,
-        lamp_state=-1,
-        lamp_confidence=0.0,
+        lamp_state=0,
+        lamp_confidence=1.0,
         lamp_age_s=0.0,
         previous_action=np.zeros(action_dim),
-        handoff_mode=0,
+        handoff_mode=1,
         estimator_health=1.0,
-        obs_mask=0,
+        obs_mask=int(
+            PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP
+        ),
     )
     assert to_vector(observation).shape == (30 + action_dim,)
     return observation

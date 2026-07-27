@@ -43,6 +43,7 @@ def _result(
     other_failure: float = 0.05,
     timeout: float = 0.10,
     closest: float = 0.41,
+    min_closest: float = 0.405,
     completion_time: float | None = 2.0,
 ):
     from robotics_experiments.workflows.isaac_lab import (
@@ -60,6 +61,7 @@ def _result(
             other_flight_failure_rate=other_failure,
             timeout_rate=timeout,
             mean_closest_range_m=closest,
+            min_closest_range_m=min_closest,
             median_completion_time_s=completion_time,
         ),
         reward_means=(RewardMean(name="success", mean=success),),
@@ -74,6 +76,7 @@ def _evaluation(*, selector, iteration: int, result=None) -> CandidateEvaluation
             success_rate_min=0.8,
             collision_rate_max=0.05,
         ),
+        goal_range_min_m=0.40,
     )
 
 
@@ -99,6 +102,11 @@ def test_approach_acceptance_uses_success_and_collision_gates() -> None:
         selector=selector,
         iteration=2,
         result=_result(collision=0.051),
+    ).accepted
+    assert not _evaluation(
+        selector=selector,
+        iteration=3,
+        result=_result(min_closest=0.399),
     ).accepted
 
 
@@ -247,6 +255,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
             success_rate_min=0.8,
             collision_rate_max=0.05,
         ),
+        goal_range_min_m=0.40,
         device="cuda:0",
     )
     assert [call["candidate"] for call in calls] == list(candidates)
@@ -277,7 +286,7 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="press-approach-gated-maximin-v2",
+        selection_method="press-approach-gated-maximin-v3",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -293,14 +302,16 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
             success_rate_min=0.8,
             collision_rate_max=0.05,
         ),
+        goal_range_min_m=0.40,
         all_candidates=(candidate,),
     )
-    assert report["schema_version"] == 4
+    assert report["schema_version"] == 5
     assert report["curriculum_stage"] == "approach"
     assert report["selected_accepted"] is False
     assert report["thresholds"] == {
         "approach_success_rate_min": 0.8,
         "collision_rate_max": 0.05,
+        "min_closest_range_m": 0.40,
     }
     json.dumps(report, allow_nan=False)
 
@@ -343,7 +354,7 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v2",
+        "press-approach-gated-maximin-v3",
         (evaluation,),
         evaluation.candidate,
     )
@@ -395,7 +406,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v2",
+        "press-approach-gated-maximin-v3",
         (),
         CheckpointCandidate(50, checkpoint),
     )

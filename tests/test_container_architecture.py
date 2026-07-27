@@ -128,4 +128,7 @@ def test_isaac_lab_uses_pinned_minimal_dependencies() -> None:
     assert requirements
     assert all("==" in requirement for requirement in requirements)
     assert "TERM=xterm ./isaaclab.sh --install" not in dockerfile
-    assert "--no-build-isolation -e source/isaaclab -e source/isaaclab_rl" in dockerfile
+    assert "-e source/isaaclab_contrib" in dockerfile
+    assert (
+        "import flatdict, gymnasium, isaaclab, isaaclab_contrib, isaaclab_rl, rsl_rl" in dockerfile
+    )

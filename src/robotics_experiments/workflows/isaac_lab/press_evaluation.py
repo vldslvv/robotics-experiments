@@ -48,6 +48,7 @@ class PressApproachEvaluationSummary:
     other_flight_failure_rate: float
     timeout_rate: float
     mean_closest_range_m: float
+    min_closest_range_m: float
     median_completion_time_s: float | None
 
 
@@ -115,6 +116,7 @@ def summarize_press_approach_episodes(
         ),
         timeout_rate=sum(episode.timeout for episode in episodes) / total,
         mean_closest_range_m=float(np.mean([episode.closest_range_m for episode in episodes])),
+        min_closest_range_m=min(episode.closest_range_m for episode in episodes),
         median_completion_time_s=(float(np.median(completion_times)) if completion_times else None),
     )
 

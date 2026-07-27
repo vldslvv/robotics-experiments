@@ -24,6 +24,7 @@ from robotics_experiments.rl import PolicyContract
 from robotics_experiments.rl.press import (
     OBSERVATION_SCHEMA_VERSION,
     PRESS_OBSERVATION_DIM,
+    HandoffGate,
     PressApproachInput,
     PressApproachResult,
     PressObservationMask,
@@ -38,6 +39,9 @@ from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
     _DRONE_PRIM_PATH,
     _FlightDirectRLEnv,
     _training_vehicle,
+)
+from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
+    _press_entry_state_from_unit_samples,
 )
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
@@ -284,7 +288,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         else:
             raise RuntimeError(f"unsupported ButtonMesh type {button.GetTypeName()!r}")
 
-    def _relative_switch_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def _contact_frame_quat(self) -> torch.Tensor:
         switch_quat = self.switch.data.root_quat_w
         asset_to_canonical = torch.zeros_like(switch_quat)
         asset_to_canonical[:, :] = torch.as_tensor(
@@ -295,7 +299,10 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         canonical_switch_quat = math_utils.quat_mul(switch_quat, asset_to_canonical)
         half_turn_z = torch.zeros_like(switch_quat)
         half_turn_z[:, 3] = 1.0
-        contact_quat = math_utils.quat_mul(canonical_switch_quat, half_turn_z)
+        return math_utils.quat_mul(canonical_switch_quat, half_turn_z)
+
+    def _relative_switch_pose(self) -> tuple[torch.Tensor, torch.Tensor]:
+        contact_quat = self._contact_frame_quat()
         offset_world = self.switch.data.root_pos_w - self.drone.data.root_pos_w
         relative_position = math_utils.quat_apply_inverse(contact_quat, offset_world)
         relative_quat_wxyz = math_utils.quat_mul(
@@ -455,32 +462,26 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
         super()._reset_idx(env_ids)
-        reset = self._experiment_config.rl.press.reset
+        handoff_gate = HandoffGate.from_config(self._experiment_config.rl.press.handoff)
         switch_position = self.switch.data.default_root_state[env_ids, :3]
         switch_position = switch_position + self.scene.env_origins[env_ids]
         count = len(env_ids)
-        wall_normal = torch.empty(count, device=self.device).uniform_(
-            reset.wall_normal_min_m,
-            reset.wall_normal_max_m,
-        )
-        lateral = torch.empty(count, device=self.device).uniform_(
-            reset.lateral_error_min_m,
-            reset.lateral_error_max_m,
-        )
-        vertical = torch.empty(count, device=self.device).uniform_(
-            reset.vertical_error_min_m,
-            reset.vertical_error_max_m,
+        wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
+            _press_entry_state_from_unit_samples(
+                unit_samples=torch.rand((count, 9), device=self.device),
+                gate=handoff_gate,
+            )
         )
         root_state = self.drone.data.default_root_state[env_ids].clone()
-        root_state[:, :3] = switch_position - torch.stack((wall_normal, lateral, vertical), dim=-1)
-        root_state[:, 7:10].uniform_(
-            -reset.initial_linear_velocity_max_mps,
-            reset.initial_linear_velocity_max_mps,
+        root_state[:, :3] = switch_position - torch.cat(
+            (wall_normal[:, None], lateral_vertical),
+            dim=-1,
         )
-        root_state[:, 10:13].uniform_(
-            -reset.initial_angular_velocity_max_radps,
-            reset.initial_angular_velocity_max_radps,
+        root_state[:, 7:10] = math_utils.quat_apply(
+            self._contact_frame_quat()[env_ids],
+            linear_velocity_contact,
         )
+        root_state[:, 10:13] = angular_velocity
         self._reset_drone(env_ids=env_ids, root_state=root_state)
         switch_joint_position = self.switch.data.default_joint_pos[env_ids].clone()
         switch_joint_velocity = self.switch.data.default_joint_vel[env_ids].clone()

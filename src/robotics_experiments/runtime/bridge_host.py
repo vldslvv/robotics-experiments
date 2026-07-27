@@ -167,8 +167,9 @@ class BridgeHost:
 def read_bridge_host_status(*, host: BridgeHost) -> BridgeHostStatus:
     """Read one immutable host status without exposing transition state."""
     state = host._state  # noqa: SLF001 - module status boundary
+    sim_time_us = max(0, bridge_time_us(state=state.clock)) if state.clock is not None else 0
     return BridgeHostStatus(
-        sim_time_us=state.clock.total_us if state.clock is not None else 0,
+        sim_time_us=sim_time_us,
         bridge_status=state.bridge.port.read_status() if state.bridge is not None else None,
         start_attempted=state.start_attempted,
         debug_log_path=(state.bridge.port.debug_log_path if state.bridge is not None else None),

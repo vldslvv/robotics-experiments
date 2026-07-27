@@ -277,6 +277,34 @@ def test_spawn_fleet_requires_an_adopted_stage(monkeypatch):
         module.spawn_fleet(state=fleet)
 
 
+def test_fleet_driver_log_is_mirrored_to_vehicle_bridge_log(monkeypatch, caplog):
+    module, _rec = _import_orchestrator(monkeypatch)
+    messages = []
+    spawned = module.SpawnedDrone(
+        vehicle=SimpleNamespace(id=7),
+        label="drone7",
+        articulation_path="/World/Drone7",
+        host=object(),
+        observer=object(),
+    )
+    env = module.FleetDriverEnv(
+        spawned,
+        _FakePort(gcs_endpoint="", heartbeat_period_s=1.0, label="drone7"),
+        log=messages.append,
+        on_failure=lambda _kind, _message: None,
+        on_step_advanced=lambda _label: None,
+    )
+
+    with caplog.at_level(
+        "INFO",
+        logger="robotics_experiments.px4_bridge.routine",
+    ):
+        env.log('[drone7] ROUTINE_STAGE {"event":"start","sim_time_us":123000}')
+
+    assert messages == ['[drone7] ROUTINE_STAGE {"event":"start","sim_time_us":123000}']
+    assert caplog.messages[-1] == messages[-1]
+
+
 def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
 

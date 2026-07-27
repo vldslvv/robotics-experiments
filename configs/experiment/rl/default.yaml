@@ -77,3 +77,9 @@ action:
   controller_kd_vel: [1.2, 1.2, 1.5]
   controller_kp_att: [6.0, 6.0, 2.0]
   controller_kp_rate: [1.2, 1.2, 0.4]
+  # The pinned Isaac Lab contrib Thruster owns motor realization. Zero time
+  # constants preserve the instantaneous Pegasus motor model until a paired
+  # hardware/PX4 trace supplies measured rise/fall values.
+  actuator_tau_inc_s: 0.0
+  actuator_tau_dec_s: 0.0
+  actuator_max_thrust_rate_nps: 100000.0

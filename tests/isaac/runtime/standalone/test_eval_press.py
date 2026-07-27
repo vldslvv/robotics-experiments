@@ -65,6 +65,7 @@ def test_approach_evaluation_aggregation() -> None:
     assert summary.other_flight_failure_rate == 0.2
     assert summary.timeout_rate == 0.2
     assert summary.mean_closest_range_m == pytest.approx(0.413)
+    assert summary.min_closest_range_m == pytest.approx(0.39)
     assert summary.median_completion_time_s == 1.0
 
 
@@ -145,6 +146,7 @@ def _config():
             training=SimpleNamespace(task_id="press-task"),
             press=SimpleNamespace(
                 curriculum_stage="approach",
+                goal=SimpleNamespace(range_min_m=0.40),
                 evaluation=SimpleNamespace(
                     seeds=(101, 202, 303),
                     episodes_per_seed=1,
@@ -205,6 +207,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
             other_flight_failure_rate=0.0,
             timeout_rate=0.0,
             mean_closest_range_m=0.41,
+            min_closest_range_m=0.405,
             median_completion_time_s=1.0,
         ),
         reward_means=(RewardMean(name="success", mean=1.0),),

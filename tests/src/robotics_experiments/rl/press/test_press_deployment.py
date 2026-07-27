@@ -33,11 +33,13 @@ _GOAL = PressApproachGoalConfig(
 _GATE = HandoffGate(
     pose_confidence_min=0.85,
     pose_age_max_s=0.1,
+    switch_range_min_m=0.45,
     switch_range_max_m=0.50,
     lateral_align_max_m=0.08,
-    wall_normal_speed_max_mps=0.15,
-    lateral_speed_max_mps=0.20,
-    angular_speed_max_radps=0.40,
+    wall_normal_speed_max_mps=0.02,
+    lateral_speed_max_mps=0.02,
+    angular_speed_max_radps=0.05,
+    body_z_alignment_min=0.965926,
     estimator_health_min=0.80,
 )
 
@@ -95,12 +97,20 @@ def _advance(*, state=None, observation=None, params=None):
 
 
 def test_public_records_are_approach_specific() -> None:
-    assert fields(PressApproachExecutionParams)[0].name == "inference"
+    assert [field.name for field in fields(PressApproachExecutionParams)] == [
+        "inference",
+        "action_dim",
+        "handoff_gate",
+        "goal",
+    ]
     assert [field.name for field in fields(PressApproachExecutionResult)] == [
         "state",
         "action",
         "complete",
         "failure_reason",
+        "handoff_reason",
+        "actor_observation",
+        "raw_action",
     ]
     assert [field.name for field in fields(PressApproachExecutionState)] == [
         "previous_action",
@@ -114,9 +124,18 @@ def test_public_records_are_approach_specific() -> None:
 
 
 def test_holds_zero_until_handoff_gate_passes() -> None:
-    result = _advance(observation=_observation(range_m=0.51))
+    result = _advance(observation=_observation(range_m=0.48, linear_velocity=(0.10, 0.0, 0.0)))
     np.testing.assert_array_equal(result.action, np.zeros(4))
     assert not result.state.handoff_latched
+    assert result.handoff_reason == "wall_normal_speed"
+
+
+def test_minimum_range_must_pass_before_actor_or_goal_progress() -> None:
+    result = _advance(observation=_observation(range_m=0.44))
+    np.testing.assert_array_equal(result.action, np.zeros(4))
+    assert not result.state.handoff_latched
+    assert result.state.stable_goal_steps == 0
+    assert result.handoff_reason == "too_close"
 
 
 def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
@@ -135,6 +154,10 @@ def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
     assert result.state.handoff_latched
     assert result.state.initial_switch_range_m == 0.48
     assert result.state.closest_switch_range_m == 0.48
+    assert len(result.actor_observation) == 34
+    assert result.actor_observation[27:31] == (0.0, 0.0, 0.0, 0.0)
+    assert result.actor_observation[31] == 1.0
+    assert result.raw_action == (0.2, -0.1, 0.0, 0.0)
 
     closer = _advance(
         state=result.state,
@@ -145,7 +168,10 @@ def test_runs_inference_after_handoff_and_tracks_ranges() -> None:
 
 
 def test_five_stable_steps_complete_with_zero_terminal_action() -> None:
-    state = initial_press_approach_execution_state(action_dim=4)
+    state = replace(
+        initial_press_approach_execution_state(action_dim=4),
+        handoff_latched=True,
+    )
     for expected in range(1, 6):
         result = _advance(
             state=state,

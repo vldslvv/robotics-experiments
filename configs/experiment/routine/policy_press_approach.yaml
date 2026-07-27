@@ -14,7 +14,7 @@ steps:
     x: 0.0
     y: 17.51
     z: 2.5
-    position_tol_m: 0.03
+    position_tol_m: 0.02
     timeout_s: 30.0
   - kind: hover
     hold_s: 1.0

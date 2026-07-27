@@ -6,6 +6,7 @@ Isaac, or pymavlink, and exercise the failure reactions (envelope / command /
 failsafe / timeout) and the per-step advance callback.
 """
 
+import json
 from dataclasses import fields, replace
 
 from robotics_experiments.commanding import (
@@ -201,6 +202,21 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
     assert env.advanced_steps == ["arm", "takeoff", "hover"]
     assert routine_driver_is_done(state=driver)
     assert env.failures == []
+    stage_events = [
+        json.loads(message.split("ROUTINE_STAGE ", maxsplit=1)[1])
+        for message in env.logs
+        if "ROUTINE_STAGE " in message
+    ]
+    assert [(event["kind"], event["event"]) for event in stage_events] == [
+        ("arm", "start"),
+        ("arm", "complete"),
+        ("takeoff", "start"),
+        ("takeoff", "complete"),
+        ("hover", "start"),
+        ("hover", "complete"),
+    ]
+    assert [event["index"] for event in stage_events] == [0, 0, 1, 1, 2, 2]
+    assert all(isinstance(event["sim_time_us"], int) for event in stage_events)
 
 
 def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
@@ -474,6 +490,7 @@ def _fake_policy_advance(*, policy_input, state):
             yaw_rate_radps=0.0,
         ),
         complete=policy_input.sim_time_us >= 3_000_000,
+        diagnostics=('PRESS_POLICY {"event":"test_actor_evaluation"}',),
     )
 
 
@@ -527,6 +544,21 @@ def test_routine_driver_policy_streams_velocity_setpoints_and_holds_to_done():
     assert [c.label for c in port.sent] == ["set_offboard_mode"]
     command_index = next(i for i, effect in enumerate(port.effects) if effect[0] == "command")
     assert port.effects[command_index - 1][0] == "setpoint"
+    assert any("test_actor_evaluation" in message for message in env.logs)
+    transmitted = [
+        json.loads(message.split("POLICY_SETPOINT ", maxsplit=1)[1])
+        for message in env.logs
+        if "POLICY_SETPOINT " in message
+    ]
+    assert transmitted
+    assert transmitted[0]["event"] == "setpoint_transmitted"
+    assert transmitted[0]["setpoint"] == {
+        "down_mps": 0.0,
+        "forward_mps": 0.2,
+        "kind": "VelocitySetpoint",
+        "right_mps": 0.0,
+        "yaw_rate_radps": 0.0,
+    }
 
     # It does not complete before PX4 accepts OFFBOARD, even when the adapter
     # would otherwise be allowed to complete.

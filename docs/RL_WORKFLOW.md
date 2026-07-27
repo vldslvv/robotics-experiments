@@ -26,7 +26,12 @@ Both tasks use the task-neutral actuation seam from
 body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
 control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
-PX4 is bypassed in Lab.
+PX4 is bypassed in Lab, but the pinned Isaac Lab
+`isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
+references. Its rise/fall constants and thrust-rate limit are Hydra tunables.
+The project still owns allocation, per-rotor yaw reaction, drag, and the sole
+body-wrench sink because the pusher-equipped articulation is not a pure
+multirotor asset.
 
 The shared exact-average cadence derives policy stepping from `sim.physics_hz`
 and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler
@@ -47,7 +52,11 @@ not represent contact by the frame, arms, propellers, or wall.
 The pose-provider seam is `AbstractPoseProvider` / `PoseSample`.
 `GroundTruthPoseProvider` is the lazy Isaac-only implementation.
 `handoff_ready` is the pure navigation-to-policy gate configured by
-`rl.press.handoff`.
+`rl.press.handoff`. That config is the shared actor-entry contract for Lab
+resets and deployment: 0.45-0.50 m wall-normal range, at most 0.08 m combined
+lateral/vertical error, at most 0.02 m/s wall-normal and lateral speed, at most
+0.05 rad/s angular speed, upright attitude, valid pose/contact samples, no
+contact, zero previous action, pre-contact mode, and a healthy estimator.
 
 The only implemented curriculum stage is the named `approach` stage. There is
 no automatic promotion and no fixed multi-stage enum. Future stages add their
@@ -83,7 +92,11 @@ Body collision, pusher collision, crash, altitude, or relative-envelope failure
 terminates the episode.
 Timeout is a truncation and is mutually exclusive with terminal success or
 failure. Reset samples range from 0.45 through 0.50 m and samples lateral and
-vertical offsets independently from -0.08 through 0.08 m.
+vertical offsets uniformly inside the shared 0.08 m radial bound. Initial
+linear velocity is sampled in the contact frame inside the shared wall-normal
+and lateral speed limits, initial angular velocity is sampled inside the shared
+0.05 rad/s ball, attitude is upright, previous action is zero, and mode is
+pre-contact. Reset owns no independent entry-velocity tunables.
 
 `PressApproachRewardTerms` has exactly nine signed contributions:
 
@@ -106,6 +119,12 @@ for diagnostics. `Reward/` TensorBoard scalars enumerate every contribution
 plus `total`. `Press/` reports completed episodes, success, combined collision,
 body-collision, pusher-collision, other-flight-failure, and timeout
 percentages.
+
+The actor action drives training physics directly. No deterministic
+near-wall governor changes the forward command in training or deployment.
+Collision reward and termination must therefore produce the learned braking
+behavior; a flat zero-collision run from the initial checkpoint is not evidence
+of learning unless the unguided actor already satisfies the independent gates.
 
 The physical switch, wall, pusher, arm, and propeller-collision assets remain
 present. Pusher stiffness and damping remain authored in the generated USD.
@@ -194,19 +213,21 @@ final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
 - Other-flight-failure rate.
 - Timeout rate.
 - Mean closest range.
+- Minimum closest range.
 - Median successful completion time.
 - Every reward-term mean.
 
-Publication requires approach success of at least 80% and simulated collisions
-of at most 5%. If no checkpoint passes, selection writes the diagnostic report,
-fails, and does not export or advance `latest`. Ranking compares the worst
+Publication requires approach success of at least 80%, simulated collisions
+of at most 5%, and no episode closer than the 0.40 m goal lower bound. If no
+checkpoint passes, selection writes the diagnostic report, fails, and does not
+export or advance `latest`. Ranking compares the worst
 normalized acceptance margin first, then the other acceptance margin, fewer
 other flight failures, fewer timeouts, faster successful completion, and
-earlier iteration. If no candidate passes, the same ranking publishes the best
-explicitly rejected fallback. PPO return is never a selection input.
+earlier iteration. A rejected fallback is retained only in the report. PPO
+return is never a selection input.
 
-Schema-4 `checkpoint_selection.json` uses
-`selection_method: press-approach-gated-maximin-v2` and records policy/stage
+Schema-5 `checkpoint_selection.json` uses
+`selection_method: press-approach-gated-maximin-v3` and records policy/stage
 identity, seeds, thresholds, every candidate, normalized margins, ranking
 values, reward means, selected iteration, and `selected_accepted`. Selection
 atomically advances `.build/training/press-approach/latest`.
@@ -241,12 +262,23 @@ goto -> land. The policy descriptor reads
 `.build/training/press-approach/latest` and selects switch index zero.
 
 The runtime preflights metadata before simulator mutation. The `approach`
-adapter holds zero action until `handoff_ready` passes, then runs inference.
-It supplies the preceding action to the next observation, tracks initial and
-closest range, and uses the same stable-goal predicate as training. Completion
-returns a zero terminal setpoint. Contact or an invalid observation returns a
-policy failure. The generic routine driver remains task-neutral and retains
-the opaque final policy state.
+adapter enters the policy stage with a zero velocity command and continues
+streaming zero until the complete shared `handoff_ready` gate passes. It then
+applies inference output directly, supplies the preceding action to the next
+observation, tracks initial and closest range, and uses the same stable-goal
+predicate as training. Completion cannot accrue before handoff and returns a
+zero terminal setpoint. Contact or an invalid observation returns a policy
+failure. The generic routine driver remains task-neutral and retains the
+opaque final policy state. The preceding 0.48 m `goto` uses a 0.02 m completion
+tolerance so its settled position remains inside the entry range.
+
+Deployment logs machine-readable `PRESS_POLICY` JSON at every policy
+evaluation, including the first-handoff marker, exact 34-value observation,
+raw and clipped normalized actions, derived setpoint, stable-goal count,
+contact state, and completion/failure value. `POLICY_SETPOINT` records every
+setpoint successfully handed to the MAVLink port, while `ROUTINE_STAGE` records
+the policy-stage start and terminal boundary. All timestamps use the same
+post-startup-settle simulation clock sent to PX4 HIL.
 
 Deployment continues to use deployable providers for pusher compression and
 contact plus lamp state. No any-body collision detector or new real-drone

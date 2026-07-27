@@ -200,6 +200,33 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError(
             f"unknown rl.press.curriculum_stage={press.curriculum_stage!r}; " "expected 'approach'"
         )
+    handoff = press.handoff
+    if not (
+        math.isfinite(handoff.switch_range_min_m)
+        and math.isfinite(handoff.switch_range_max_m)
+        and 0.0 < handoff.switch_range_min_m <= handoff.switch_range_max_m
+    ):
+        raise ValueError("rl.press.handoff switch range bounds must be positive and ordered")
+    positive_handoff_values = {
+        "lateral_align_max_m": handoff.lateral_align_max_m,
+        "wall_normal_speed_max_mps": handoff.wall_normal_speed_max_mps,
+        "lateral_speed_max_mps": handoff.lateral_speed_max_mps,
+        "angular_speed_max_radps": handoff.angular_speed_max_radps,
+    }
+    for name, value in positive_handoff_values.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"rl.press.handoff.{name} must be finite and positive")
+    if not math.isfinite(handoff.pose_age_max_s) or handoff.pose_age_max_s < 0.0:
+        raise ValueError("rl.press.handoff.pose_age_max_s must be finite and non-negative")
+    bounded_handoff_values = {
+        "pose_confidence_min": handoff.pose_confidence_min,
+        "body_z_alignment_min": handoff.body_z_alignment_min,
+        "estimator_health_min": handoff.estimator_health_min,
+    }
+    for name, value in bounded_handoff_values.items():
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
+
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
@@ -222,17 +249,10 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     if goal.stable_steps <= 0:
         raise ValueError("rl.press.goal.stable_steps must be positive")
 
-    reset = press.reset
-    ordered_reset_bounds = {
-        "wall_normal": (reset.wall_normal_min_m, reset.wall_normal_max_m),
-        "lateral_error": (reset.lateral_error_min_m, reset.lateral_error_max_m),
-        "vertical_error": (reset.vertical_error_min_m, reset.vertical_error_max_m),
-    }
-    for name, (minimum, maximum) in ordered_reset_bounds.items():
-        if not math.isfinite(minimum) or not math.isfinite(maximum) or minimum > maximum:
-            raise ValueError(f"rl.press.reset.{name} bounds must be finite and ordered")
-    if reset.wall_normal_min_m <= goal.range_max_m:
-        raise ValueError("rl.press.reset.wall_normal_min_m must exceed rl.press.goal.range_max_m")
+    if handoff.switch_range_min_m <= goal.range_max_m:
+        raise ValueError(
+            "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
+        )
 
     for field in fields(press.reward):
         name = field.name

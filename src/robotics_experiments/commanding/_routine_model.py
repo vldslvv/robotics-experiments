@@ -84,6 +84,7 @@ class PolicyResult:
     setpoint: StreamSetpoint
     complete: bool = False
     failure_reason: Optional[str] = None
+    diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_immutable_policy_state(state=self.state, source="policy successor state")
@@ -153,6 +154,7 @@ class RoutineDecision:
     setpoint: Optional[StreamSetpoint] = None
     reason: Optional[str] = None
     failure_kind: Optional[FailureKind] = None
+    diagnostics: tuple[str, ...] = ()
 
     @classmethod
     def continue_(
@@ -160,8 +162,14 @@ class RoutineDecision:
         *,
         command: Optional[MavlinkCommand] = None,
         setpoint: Optional[StreamSetpoint] = None,
+        diagnostics: tuple[str, ...] = (),
     ) -> "RoutineDecision":
-        return cls(DecisionKind.CONTINUE, command=command, setpoint=setpoint)
+        return cls(
+            DecisionKind.CONTINUE,
+            command=command,
+            setpoint=setpoint,
+            diagnostics=diagnostics,
+        )
 
     @classmethod
     def advance(cls) -> "RoutineDecision":

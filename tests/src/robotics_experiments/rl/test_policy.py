@@ -25,6 +25,7 @@ from robotics_experiments.rl import (
     policy_metadata,
     validate_policy_artifact,
 )
+from robotics_experiments.rl.press import PressObservation, PressObservationMask
 from robotics_experiments.runtime._policy import (
     _hover_adapter,
     _press_approach_adapter,
@@ -390,6 +391,90 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
     assert "requires a PressObservation" in str(result.failure_reason)
     assert result.state is adapter.initial_state
     assert inference_calls == []
+    assert (
+        json.loads(result.diagnostics[0].split("PRESS_POLICY ", maxsplit=1)[1])["event"]
+        == "failure"
+    )
+
+
+def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
+    from robotics_experiments.config import load_config
+
+    loaded = LoadedPolicy(
+        metadata=PolicyMetadata(
+            contract=PolicyContract(
+                policy_interface=PolicyInterface.PRESS_V1,
+                obs_schema_version=1,
+                obs_dim=34,
+                policy_rate_hz=20.0,
+                action_kind="velocity",
+                action_dim=4,
+                max_body_velocity_mps=0.5,
+                max_yaw_rate_radps=1.5,
+                max_body_rate_radps=6.0,
+                hover_thrust_fraction=0.4,
+                curriculum_stage="approach",
+            ),
+            values={},
+        ),
+        inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
+    )
+    adapter = _press_approach_adapter(
+        config=load_config(REPO_ROOT / "configs/policy_press_approach_quad.yaml"),
+        loaded=loaded,
+    )
+    routine_observation = make_routine_observation(sim_time_us=123_000)
+    mask = int(PressObservationMask.POSE | PressObservationMask.CONTACT | PressObservationMask.LAMP)
+    press_observation = PressObservation(
+        relative_switch_pos_m=np.array([0.48, 0.0, 0.0]),
+        relative_switch_quat_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        pose_confidence=1.0,
+        pose_age_s=0.0,
+        detection_valid=True,
+        body_lin_vel_mps=np.zeros(3),
+        body_ang_vel_radps=np.zeros(3),
+        attitude_quat_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
+        pusher_compression_m=0.0,
+        pusher_compression_rate_mps=0.0,
+        contact_valid=True,
+        contact_flag=False,
+        lamp_state=0,
+        lamp_confidence=1.0,
+        lamp_age_s=0.0,
+        previous_action=np.full(4, 99.0),
+        handoff_mode=0,
+        estimator_health=1.0,
+        obs_mask=mask,
+    )
+
+    result = adapter.advance(
+        policy_input=PolicyInput(
+            vehicle_state=routine_observation.vehicle_state,
+            sim_time_us=routine_observation.sim_time_us,
+            task_observation=press_observation,
+            reference_position_enu=(0.0, 0.0, 0.0),
+        ),
+        state=adapter.initial_state,
+    )
+
+    diagnostic = json.loads(result.diagnostics[0].split("PRESS_POLICY ", maxsplit=1)[1])
+    assert diagnostic["event"] == "actor_evaluation"
+    assert diagnostic["actor_entry"] is True
+    assert len(diagnostic["observation"]) == 34
+    assert diagnostic["observation"][27:31] == [0.0, 0.0, 0.0, 0.0]
+    assert diagnostic["observation"][31] == 1.0
+    assert diagnostic["raw_normalized_action"] == [1.2, -0.5, 0.25, -0.1]
+    assert diagnostic["normalized_action"] == [1.0, -0.5, 0.25, -0.1]
+    assert diagnostic["setpoint"] == {
+        "down_mps": -0.125,
+        "forward_mps": 0.5,
+        "kind": "VelocitySetpoint",
+        "right_mps": 0.25,
+        "yaw_rate_radps": 0.15000000000000002,
+    }
+    assert diagnostic["stable_goal_count"] == 0
+    assert diagnostic["contact"] is False
+    assert diagnostic["complete"] is False
 
 
 def test_current_press_artifact_preflights_when_available() -> None:

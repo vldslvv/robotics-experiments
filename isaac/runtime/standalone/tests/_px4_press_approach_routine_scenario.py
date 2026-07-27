@@ -30,7 +30,9 @@ def _validate_result(context: SceneTestContext, fleet) -> None:
         raise AssertionError(f"approach routine closest range missed the goal: {policy_state!r}")
     context.report(
         "approach routine verified handoff, stable contact-free completion, "
-        "no lamp transition, return waypoint, landing, and disarm"
+        "no lamp transition, return waypoint, landing, and disarm; "
+        f"action={policy_state.previous_action} "
+        f"closest_range_m={policy_state.closest_switch_range_m:.4f}"
     )
 
 

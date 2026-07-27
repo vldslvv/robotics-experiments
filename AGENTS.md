@@ -190,9 +190,12 @@ the current contents and the intended home for that kind of code.
   small local `config.py` adapter when they need feature-specific config access.
 - RL invariants: read `docs/RL_WORKFLOW.md` before touching RL code; keep Isaac
   Lab task/env package imports lazy; keep the in-Lab actuation seam pure and
-  aligned with its numpy reference and torch twin; keep RL tunables in the Hydra
-  `rl` group; keep task IDs, policy artifacts, and RL gates aligned with that
-  doc and the command/routine contract. `robotics_experiments.rl` is the public
+  aligned with its numpy reference and torch twin; use the pinned
+  `isaaclab_contrib.actuators.Thruster` for in-Lab motor rise/fall and slew
+  dynamics while the project retains the pusher-equipped articulation, rotor
+  allocation, yaw reaction, drag, and wrench sink; keep RL tunables in the
+  Hydra `rl` group; keep task IDs, policy artifacts, and RL gates aligned with
+  that doc and the command/routine contract. `robotics_experiments.rl` is the public
   boundary for task-neutral actuation, hover observation, artifact, and
   normalized-action-to-OFFBOARD concepts; `robotics_experiments.rl.press`
   exports only press observation, handoff, task, provider, and policy-progress

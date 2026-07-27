@@ -1772,3 +1772,255 @@ press-policy gate passed. The first aggregate integration attempt passed seven
 of eight targets; multi-drone navigation hit a one-off x500 actuator-poll
 timeout after the hexacopter completed. The navigation target then passed in
 isolation, and a complete serial aggregate rerun passed all eight targets.
+
+### 38. Trial the official Isaac Lab thruster and a shared governor
+
+Date: 2026-07-27.
+
+Decision: Restore `approach-20260726d` as the deployment baseline. Use the
+official `isaaclab_contrib.actuators.Thruster` from the already pinned Isaac Lab
+v2.3.2 commit for batched motor realization, without replacing the
+pusher-equipped articulation with `Multirotor`. Keep Pegasus and the live PX4
+SITL path as the deployment oracle. Do not adopt `rlPx4Controller`: it is a
+CPU/Eigen controller with hard-coded gains, incomplete yaw-rate behavior, and
+no indexed reset contract, so maintaining it would not remove the project-owned
+PX4-parity work.
+
+Dynamics diagnosis: Paired bridge/ULog evidence from the failed live run showed
+healthy 4 ms actuator lag but a braking mismatch. At 0.4459 m the configured
+safe target was approximately 0.008 m/s, the actor still requested 0.084 m/s,
+and PX4 measured 0.103 m/s. At 0.4032 m the actor requested 0.031 m/s while PX4
+still measured 0.104 m/s. The vehicle reached 0.3712 m. This is controller
+response mismatch, not missed privileged collision state.
+
+Implementation: Convert controller rotor-speed references to desired per-rotor
+thrust, pass them through the official actuator, then reconstruct the existing
+per-rotor yaw reaction, drag, and body wrench. Rise/fall time constants and the
+thrust-rate limit live in Hydra. They initially preserve the instantaneous
+Pegasus motor response with zero time constants until a deterministic paired
+trace supplies measured values.
+
+Safety decision: Apply one deterministic near-wall governor in both Lab and
+deployment. It follows the reward's safe closing-speed schedule, subtracts
+measured overspeed with configured braking gain, and caps reverse speed. Physics
+and PX4 receive the governed action. The actor observation, stored previous
+action, and action-delta reward retain the raw actor action, preserving
+`press-v1`, schema 1, dimension 34, and the existing reward contract. No body
+collision signal or new real sensor is introduced.
+
+Verification and publication decision: Re-run actor-only training from
+`approach-20260726d/logs/model_24.pt` for 50 iterations at fixed `1e-6`, 0.01
+noise, zero entropy, and five-iteration checkpoints. Serve only that run through
+TensorBoard. Selection, independent evaluation, host/pre-commit/integration
+gates, and three consecutive contact-free live approach routines are required
+before publication. If Lab passes but a live run contacts the wall, stop and
+record the remaining dynamics mismatch.
+
+### 39. Pause retraining and isolate controller conformance
+
+Date: 2026-07-27.
+
+Training result: Run `20260727T195222Z.162535` completed all 50 requested
+iterations, but it did not demonstrate learned collision avoidance. Combined,
+body, and pusher collision rates were zero from the first iteration through the
+last. Selection evaluated iterations 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, and
+49 over 300 episodes each; all reported 1.000 success and zero collision,
+failure, and timeout rates. Iteration 0 won
+`press-approach-gated-maximin-v3`, with 0.417999 m mean closest range,
+0.417608 m minimum closest range, and 4.050 s median completion. Independent
+evaluation reproduced those results. Selecting the warm-start checkpoint and a
+flat zero-collision curve means this run provides no evidence that PPO learned
+to reconcile the Lab/PX4 approach behavior. Keep training paused.
+
+Monitoring result: The run was exposed through a run-scoped TensorBoard on port
+6007. Its event file did not contain governor-intervention scalars, so actor
+intent could not be separated from the applied command after the run.
+
+Live result: The first governed PX4 routine did not report approach contact, but
+the later `land` step timed out after 30 simulated seconds and recovery disarmed
+the vehicle. Do not use that end-to-end failure to tune approach-controller
+gains; the mission contains unrelated navigation, landing, and lifecycle
+behavior.
+
+Isolation decision: Reconcile equivalent layers before another reward run.
+Static rotor realization compares identical rotor commands through the
+quadratic thrust/body-wrench path and the pinned Isaac Lab `Thruster`.
+Controller conformance compares identical estimator state and velocity intent
+at the physical rotor-speed/body-wrench boundary. Closed-loop conformance then
+compares deterministic forward/stop/reverse velocity traces without a wall,
+policy, reward, or mission landing step. Training may resume only after the
+instantaneous and temporal comparisons have reviewed tolerances.
+
+Initial controller replay: `flight_analysis/tools/controller_conformance.py`
+replayed the governed live ULog window 28.3-30.7 s through the numpy twin of the
+Isaac Lab controller. Across 24 matched samples, PX4 versus Isaac rotor-speed
+RMSE was 3.212 rad/s, or 0.00612 of the configured 1100 rad/s full scale; maximum
+absolute rotor error was 6.911 rad/s. Mean collective thrust was 23.012 N for
+PX4 and 23.045 N for Isaac, with 0.0494 N collective RMSE. Body-torque RMSE was
+0.0319, 0.0737, and 0.00088 N m. This provisional result says the instantaneous
+controller/allocation boundary is already close. The remaining investigation
+therefore targets cadence, delay, braking distance, overshoot, and settling in
+the closed loop rather than blind gain retuning.
+
+### 40. Remove the governor and require learned collision avoidance
+
+Date: 2026-07-27.
+
+Latest live evidence: The full autorun completed approach, return, landing, and
+disarm. Its applied PX4 forward setpoint peaked at 0.0778 m/s, reversed at
+0.4458 m range, and took approximately 0.8 s and 0.030 m to stop. It reached
+0.4158 m without a logged pusher contact. In the earlier failed run, the actor
+requested up to 0.1414 m/s and did not reverse until 0.3713 m; the vehicle had
+already entered the collision region. The successful autorun therefore
+demonstrates that the governor prevented the bump, not that PPO learned safer
+braking.
+
+Controller evidence: Replaying the latest approach window through the Isaac
+controller produced 3.353 rad/s rotor-speed RMSE (0.00639 of full scale),
+0.0209 N collective-thrust RMSE, and body-torque RMSE of 0.0281, 0.0792, and
+0.00119 N m. The bridge remained healthy at 4 ms actuator lag. Instantaneous
+controller and allocation math are already close; the remaining mismatch is
+temporal closed-loop response.
+
+Decision: Remove the governor from both training and deployment. The actor
+action again drives physics and PX4 directly, and `previous_action` remains the
+actual preceding command. Keep privileged body/pusher collision reward and
+termination unchanged. A new actor-only run must show collision rate falling
+through training and pass checkpoint selection plus independent evaluation
+without a safety layer. Defer new safety and closed-loop conformance harnesses
+until the raw policy has proved correct behavior.
+
+### 41. Actor-only retraining still does not expose the live collision
+
+Date: 2026-07-27.
+
+Run `20260727T204645Z.223589` removed the governor from both training and
+deployment and actor-only initialized from
+`approach-20260726d/logs/model_24.pt`. The requested 50 iterations completed
+with the fixed `1e-6` learning rate, 0.01 noise, zero entropy, and checkpoints
+every five iterations. A run-scoped TensorBoard was available at port 6006
+throughout training.
+
+Result: Training collision, body-collision, and pusher-collision percentages
+remained zero. All eleven checkpoints produced 1.000 success and zero
+collisions across 300 selection episodes. Selection chose iteration 45 because
+it completed faster than the earlier checkpoints. Independent evaluation
+reproduced 1.000 success, zero failures, 0.408605 m mean closest range,
+0.403935 m minimum closest range, and 1.300 s median completion.
+
+Interpretation: Removing the safety layer was necessary, but it did not make
+the Lab environment reproduce the PX4 failure. The unguided warm-start actor
+already succeeds without contact in Lab, so PPO never receives the privileged
+collision penalty and no falling collision curve can appear. Across
+checkpoints, median completion improved from 1.500 s to 1.300 s while minimum
+closest range moved from 0.411114 m to 0.403935 m. The selected actor is faster
+and uses more of the range margin, which is not evidence of safer live braking.
+Do not claim learned collision reconciliation from this run. Leave the raw
+artifact available for the requested manual routine, and use that result before
+changing training dynamics or selection policy.
+
+### 42. Stage-filtered live comparison confirms a settling mismatch
+
+Date: 2026-07-27.
+
+Scope correction: Compare only the configured `policy[press-approach]` routine
+step. The preceding arm, takeoff, hover, and waypoint steps establish the live
+handoff state and are not learned-policy behavior; the return and landing steps
+are also excluded. In the existing run, the PX4 trajectory-setpoint transition
+from position to velocity identifies the policy interval at raw simulated time
+28.120-46.720 s, or ULog-relative time 27.940-46.540 s.
+
+Live result: The policy step began at 0.500645 m wall-normal switch range and
+lasted 18.600 s. It first entered the 0.40-0.42 m goal band after 1.280 s at
+0.416357 m, but speed was 0.107596 m/s, just above the 0.10 m/s stable-goal
+limit. The applied forward setpoint did not reverse until 1.600 s, when the
+ground-truth range was already approximately 0.380 m; the body was still
+closing at 0.0400 m/s. Closest range was 0.380348 m at 1.680 s, and sampled
+ground truth remained below 0.40 m for 16.8 s before the vehicle backed out and
+completed at 0.402134 m. No pusher-contact failure was reported; this does not
+exclude a body, arm, propeller, or wall collision.
+
+Lab comparison: The independently evaluated selected checkpoint completes in a
+1.300 s median with 0.408605 m mean closest range and 0.403935 m minimum closest
+range. The live vehicle therefore reaches the goal band at approximately the Lab
+completion time, but does not settle there and overshoots the Lab minimum by
+23.6 mm. This is a policy-stage behavior mismatch, not an artifact of including
+takeoff or waypoint travel in the comparison.
+
+Controller comparison: Replaying the full policy-only ULog window through the
+Isaac controller produced 3.225 rad/s rotor-speed RMSE, 0.00614 normalized
+rotor-speed RMSE, 8.523 rad/s maximum rotor error, 0.0238 N collective-thrust
+RMSE, and body-torque RMSE of 0.0241, 0.0765, and 0.00145 N m. Instantaneous
+allocation remains close. Investigate the closed-loop transient, plant setup,
+cadence, and handoff-state distribution before changing the reward or training
+again.
+
+Logging decision: Every routine step now emits structured `ROUTINE_STAGE`
+records with start/complete/failed event, configured kind, label, index, and
+exact simulation time. The fleet runtime mirrors them into the per-vehicle
+bridge log so future analysis can select the policy interval directly rather
+than infer it from setpoint type.
+
+### 43. Matched policy entry isolates the remaining plant response
+
+Date: 2026-07-27.
+
+Entry reconciliation: Training resets and deployment now share one
+`rl.press.handoff` actor-entry contract: 0.45-0.50 m wall-normal range, at most
+0.08 m radial lateral/vertical error, at most 0.02 m/s wall-normal and lateral
+speed, at most 0.05 rad/s angular speed, upright attitude, valid pose and
+estimator state, no contact, zero previous action, and pre-contact mode. The
+policy routine retains its 0.48 m waypoint, tightened to 0.02 m settling
+tolerance, but transmits zero velocity until this complete gate passes.
+
+Matched Lab result: The existing iteration-45 actor from run
+`20260727T204645Z.223589` was independently evaluated over 300 episodes using
+the reconciled reset envelope. It achieved 1.000 success, zero body or pusher
+collisions, zero other flight failures and timeouts, 0.40864 m mean closest
+range, 0.40726 m minimum closest range, and 1.300 s median completion. The
+evidence is under
+`.build/docker/integration/eval-press.20260727T220447Z.283068`. This passes the
+80% success, 5% collision, and 0.40 m minimum-range acceptance thresholds.
+
+Matched PX4 entry: The corrected manual routine entered the policy at HIL time
+50.084 s with the following exact 34-value observation:
+
+```text
+[0.48916839599609224, -0.007876251824200153, 0.020658969879150394,
+ 0.0007149667336627738, -0.0009180963702619456, -0.0034416273301046685,
+ 0.9999934005396961, 1.0, 0.0, 1.0, -0.006910835427534126,
+ 0.005143429205436118, -0.001968258445456121, -0.003251545146200264,
+ -0.006700190542363499, 1.736254838224173e-05, 0.0011547500034794211,
+ -0.00014363434456754476, 0.7046685218811035, 0.7095357179641724,
+ 2.6640482246875763e-05, 0.0034139060880988836, 1.0, 0.0, 0.0, 1.0,
+ 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 7.0]
+```
+
+The raw normalized action was
+`[0.0627968311, -0.0075850487, 0.0221121311, -0.0005383986]`, and the
+transmitted velocity setpoint was 0.125594 m/s forward, 0.015170 m/s right,
+-0.044224 m/s down, and 0.000808 rad/s yaw rate. The gate admitted the actor
+with only 0.00691 m/s initial wall-normal speed. The policy accumulated four
+stable samples at 0.415001, 0.411734, 0.407021, and 0.404009 m, but retained
+0.08286-0.07400 m/s closing speed through those samples. It first commanded
+reverse at 1.76 s, when range was already 0.387520 m and closing speed was
+0.052732 m/s. Pusher contact followed at 1.86 s and 0.3834 m, so the policy
+stage failed without completing five stable samples. The evidence is under
+`.build/docker/integration/test-integration-press-approach-routine.20260727T220835Z.286190`.
+
+Isolated replay: Reconstructing the captured contact-relative entry in Lab and
+running the actor closed-loop completed in 1.45 s without collision, with a
+0.409990 m closest range. Replaying the captured PX4 normalized-action sequence
+through the same Lab plant also completed without collision in 1.40 s, with a
+0.406557 m closest range. Lab policy intervals alternate 52/48 ms at 250 Hz;
+the 50 Hz routine driver quantizes the same 20 Hz policy to alternating 60/40
+ms intervals. Both average exactly 50 ms, while the materially different
+closing-speed and braking traces remain.
+
+Decision: Entry-state mismatch is reconciled, but it was not the complete
+cause. Lab succeeds from the matched entry while PX4 overshoots, so do not
+resume PPO and do not run another manual approach yet. The identical-action
+replay and the already-close instantaneous controller/allocation comparison
+localize the remaining work to temporal closed-loop plant response, including
+velocity tracking, braking distance, and settling. Reconcile that response
+before another wall run.

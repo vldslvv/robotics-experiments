@@ -928,6 +928,7 @@ def test_policy_transition_values_have_explicit_fields():
         "setpoint",
         "complete",
         "failure_reason",
+        "diagnostics",
     ]
 
 
@@ -1114,6 +1115,35 @@ def test_policy_adapter_owns_its_exact_average_cadence():
         )
 
     assert len(policy_advance.inputs) == 10
+
+
+def test_policy_entry_replaces_retained_goto_payload_immediately():
+    goto = _goto_routine()
+    goto_state = RoutineState()
+    for t in range(5):
+        goto_state, _decision = decide(goto, goto_state, _far(t))
+    retained_position_setpoint = goto_state.offboard.cached_setpoint
+
+    policy_advance = _FakePolicyAdvance()
+    policy = _policy_routine(policy_advance)
+    policy_entry_state = replace(
+        goto_state,
+        cursor=0,
+        sent=False,
+        baseline_position_enu=None,
+        step_started_us=None,
+        hold_since_us=None,
+    )
+    successor, decision = decide(
+        policy,
+        policy_entry_state,
+        make_routine_observation(sim_time_us=100_000),
+    )
+
+    assert len(policy_advance.inputs) == 1
+    assert isinstance(decision.setpoint, VelocitySetpoint)
+    assert decision.setpoint is not retained_position_setpoint
+    assert successor.offboard.cached_setpoint is decision.setpoint
 
 
 def test_decide_policy_input_is_narrow_and_uses_step_baseline_reference():

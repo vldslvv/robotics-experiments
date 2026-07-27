@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,10 @@ class _PolicyPreflight:
 @dataclass(frozen=True)
 class _HoverPolicyExecutionState:
     started_us: int = -1
+
+
+def _structured_policy_diagnostic(*, payload: dict[str, object]) -> str:
+    return f"PRESS_POLICY {json.dumps(payload, separators=(',', ':'), sort_keys=True)}"
 
 
 def _artifact_path(*, artifact: str, repo_root: Path) -> Path:
@@ -159,15 +164,25 @@ def _press_approach_adapter(
         assert isinstance(state, PressApproachExecutionState)
         task_observation = policy_input.task_observation
         if not isinstance(task_observation, PressObservation):
+            failure_reason = (
+                "press-v1 policy requires a PressObservation task observation, "
+                f"got {type(task_observation).__name__}"
+            )
             return PolicyResult(
                 state=state,
                 setpoint=policy_action_to_offboard(
                     np.zeros(contract.action_dim),
                     contract,
                 ),
-                failure_reason=(
-                    "press-v1 policy requires a PressObservation task observation, "
-                    f"got {type(task_observation).__name__}"
+                failure_reason=failure_reason,
+                diagnostics=(
+                    _structured_policy_diagnostic(
+                        payload={
+                            "event": "failure",
+                            "failure": failure_reason,
+                            "sim_time_us": policy_input.sim_time_us,
+                        }
+                    ),
                 ),
             )
         result = advance_press_approach_execution(
@@ -175,11 +190,31 @@ def _press_approach_adapter(
             state=state,
             observation=task_observation,
         )
+        setpoint = policy_action_to_offboard(result.action, contract)
+        payload: dict[str, object] = {
+            "actor_entry": (not state.handoff_latched and result.state.handoff_latched),
+            "complete": result.complete,
+            "contact": task_observation.contact_flag,
+            "event": ("actor_evaluation" if result.actor_observation else "handoff_wait"),
+            "failure": result.failure_reason,
+            "handoff_reason": result.handoff_reason,
+            "normalized_action": [float(value) for value in result.action],
+            "setpoint": {
+                "kind": type(setpoint).__name__,
+                **asdict(setpoint),
+            },
+            "sim_time_us": policy_input.sim_time_us,
+            "stable_goal_count": result.state.stable_goal_steps,
+        }
+        if result.actor_observation:
+            payload["observation"] = list(result.actor_observation)
+            payload["raw_normalized_action"] = list(result.raw_action)
         return PolicyResult(
             state=result.state,
-            setpoint=policy_action_to_offboard(result.action, contract),
+            setpoint=setpoint,
             complete=result.complete,
             failure_reason=result.failure_reason,
+            diagnostics=(_structured_policy_diagnostic(payload=payload),),
         )
 
     return PolicyAdapter(

@@ -73,6 +73,11 @@ class PressActionConfig(_FreezableConfig):
             body-rate setpoint (``velocity`` cascade), length 3.
         controller_kp_rate: Per-axis P gain mapping body-rate error to desired
             body torque (both models), length 3.
+        actuator_tau_inc_s: Official Isaac Lab thruster rise time constant,
+            seconds.
+        actuator_tau_dec_s: Official Isaac Lab thruster fall time constant,
+            seconds.
+        actuator_max_thrust_rate_nps: Per-rotor thrust slew-rate limit, N/s.
     """
 
     kind: str
@@ -86,6 +91,9 @@ class PressActionConfig(_FreezableConfig):
     controller_kd_vel: List[float]
     controller_kp_att: List[float]
     controller_kp_rate: List[float]
+    actuator_tau_inc_s: float
+    actuator_tau_dec_s: float
+    actuator_max_thrust_rate_nps: float
 
 
 @dataclass
@@ -158,21 +166,25 @@ class PressHandoffConfig(_FreezableConfig):
     Attributes:
         pose_confidence_min: Minimum pose confidence, [0, 1].
         pose_age_max_s: Maximum pose-estimate age, seconds.
+        switch_range_min_m: Minimum wall-normal range to the switch, meters.
         switch_range_max_m: Maximum wall-normal range to the switch, meters.
         lateral_align_max_m: Maximum lateral (in-plate) alignment error, meters.
         wall_normal_speed_max_mps: Maximum speed along the press axis, m/s.
         lateral_speed_max_mps: Maximum in-plate speed, m/s.
         angular_speed_max_radps: Maximum body angular speed, rad/s.
+        body_z_alignment_min: Minimum body-Z/world-Z alignment cosine.
         estimator_health_min: Minimum aggregate estimator health, [0, 1].
     """
 
     pose_confidence_min: float
     pose_age_max_s: float
+    switch_range_min_m: float
     switch_range_max_m: float
     lateral_align_max_m: float
     wall_normal_speed_max_mps: float
     lateral_speed_max_mps: float
     angular_speed_max_radps: float
+    body_z_alignment_min: float
     estimator_health_min: float
 
 
@@ -209,7 +221,7 @@ class PressApproachGoalConfig(_FreezableConfig):
 
 @dataclass
 class PressResetConfig(_FreezableConfig):
-    """Easy-task geometry and initial-state ranges for switch pressing."""
+    """Easy-task physical-scene parameters for switch pressing."""
 
     button_geometry_scale: float
     button_stiffness_scale: float
@@ -218,14 +230,6 @@ class PressResetConfig(_FreezableConfig):
     switch_wall_offset_m: float
     switch_height_m: float
     wall_half_extents_m: Tuple[float, float, float]
-    wall_normal_min_m: float
-    wall_normal_max_m: float
-    lateral_error_min_m: float
-    lateral_error_max_m: float
-    vertical_error_min_m: float
-    vertical_error_max_m: float
-    initial_linear_velocity_max_mps: float
-    initial_angular_velocity_max_radps: float
 
 
 @dataclass

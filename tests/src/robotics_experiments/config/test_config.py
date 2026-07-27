@@ -150,10 +150,29 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reward.collision_weight == 300.0
     assert reward.flight_failure_weight == 100.0
     assert config.rl.press.goal.stable_steps == 5
-    assert config.rl.press.reset.wall_normal_min_m == 0.45
-    assert config.rl.press.reset.lateral_error_min_m == -0.08
+    assert config.rl.press.handoff.switch_range_min_m == 0.45
+    assert config.rl.press.handoff.switch_range_max_m == 0.50
+    assert config.rl.press.handoff.lateral_align_max_m == 0.08
+    assert config.rl.press.handoff.wall_normal_speed_max_mps == 0.02
+    assert config.rl.press.handoff.lateral_speed_max_mps == 0.02
+    assert config.rl.press.handoff.angular_speed_max_radps == 0.05
+    assert config.rl.press.handoff.body_z_alignment_min == 0.965926
+    assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
+    assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
     assert config.rl.press.evaluation.collision_rate_max == 0.05
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+def test_training_and_manual_press_configs_share_one_actor_entry_contract():
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl.press import HandoffGate
+
+    training = load_config(_ROOT / "train_press_approach_quad.yaml")
+    deployment = load_config(_ROOT / "policy_press_approach_quad.yaml")
+
+    assert HandoffGate.from_config(training.rl.press.handoff) == HandoffGate.from_config(
+        deployment.rl.press.handoff
+    )
 
 
 @pytest.mark.parametrize(
@@ -162,6 +181,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         {"rl": {"training": {"actor_hidden_dims": [64, 64]}}},
         {"rl": {"press": {"reward": {"alive_weight": 1.0}}}},
         {"rl": {"press": {"hover_task": {"reward_alive": 1.0}}}},
+        {"rl": {"press": {"reset": {"initial_linear_velocity_max_mps": 0.0}}}},
     ],
 )
 def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
@@ -235,8 +255,8 @@ def test_task_policy_validation(tmp_path, override, match):
             "closing_speed_zero_range_m",
         ),
         (
-            {"rl": {"press": {"reset": {"wall_normal_min_m": 0.40}}}},
-            "wall_normal_min_m",
+            {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},
+            "switch_range_min_m",
         ),
         (
             {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},

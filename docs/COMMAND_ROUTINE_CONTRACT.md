@@ -286,6 +286,22 @@ mutating `DriverContext`,
 executor path. The existing runtime failure field is the authoritative signal
 that a forgiving driver stopped early.
 
+Every routine step emits machine-readable `ROUTINE_STAGE` JSON records for its
+`start` and `complete` boundaries (or `failed` instead of `complete`), carrying
+the configured `kind`, built label, zero-based index, and exact
+`sim_time_us`. The fleet environment sends the same record to the normal shell
+log and the vehicle-filtered bridge log. Flight analysis must select a policy
+interval from these boundaries rather than treating takeoff, waypoint travel,
+or return/landing as learned-policy behavior.
+
+An adapter may also return immutable diagnostic strings in `PolicyResult`.
+The pure stepper carries them to `RoutineDecision`, and the imperative driver
+logs them only after applying that cycle's wire effects. Press deployment uses
+this path for `PRESS_POLICY` actor-evaluation records. The driver separately
+emits `POLICY_SETPOINT` JSON after each policy setpoint is successfully handed
+to the concrete MAVLink port, so actor cadence and actual transmission cadence
+remain distinguishable.
+
 **Standalone scenario**
 (`isaac/runtime/standalone/tests/_px4_takeoff_scenario.py`):
 a blocking runner that drives the same lifecycle functions, adds the

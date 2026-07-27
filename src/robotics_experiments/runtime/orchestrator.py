@@ -6,6 +6,7 @@ standalone runner explicitly rebind it at their imperative boundaries.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -39,7 +40,7 @@ from robotics_experiments.environment import (
     step_switches_runtime,
     teardown_switches_runtime,
 )
-from robotics_experiments.px4_bridge import IsaacArticulationIO
+from robotics_experiments.px4_bridge import IsaacArticulationIO, vehicle_log_context
 from robotics_experiments.rl import PolicyInterface
 from robotics_experiments.runtime._policy import (
     _make_policy_adapter,
@@ -78,6 +79,7 @@ __all__ = [
 ]
 
 _LOG_PREFIX = "[FleetRuntime]"
+_ROUTINE_LOGGER = logging.getLogger("robotics_experiments.px4_bridge.routine")
 
 
 def _repo_root() -> Path:
@@ -151,6 +153,7 @@ class FleetDriverEnv:
         self._observer = spawned.observer
         self._policy_observer = spawned.policy_observer
         self._port = port
+        self._vehicle_id = spawned.vehicle.id
         self._log_fn = log
         self._on_failure_fn = on_failure
         self._on_step_advanced_fn = on_step_advanced
@@ -188,6 +191,8 @@ class FleetDriverEnv:
 
     def log(self, message: str) -> None:
         self._log_fn(message)
+        with vehicle_log_context(self._vehicle_id):
+            _ROUTINE_LOGGER.info(message)
 
     def on_failure(self, kind: FailureKind, message: str) -> None:
         self._on_failure_fn(kind, message)

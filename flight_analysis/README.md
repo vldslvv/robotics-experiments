@@ -28,6 +28,28 @@ for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
 yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real
 gap once real flights exist, and to track sim-vs-sim drift in the meantime.
 
+`controller_conformance.py` isolates the deploy/train controller boundary. It
+replays PX4 ULog estimator state and velocity setpoints through the numpy
+reference for Isaac Lab's velocity cascade, converts PX4 motor controls through
+the configured Pegasus scaling, and compares per-rotor angular velocity,
+collective thrust, and body torque at the same timestamps. This is a diagnostic
+calibration step, not a publication gate: establish reviewed tolerances from an
+isolated command trace before using its result to unblock training.
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
+  flight_analysis/tools/controller_conformance.py <flight.ulg> \
+  --config configs/policy_press_approach_quad.yaml \
+  --window 28.3,30.7 --json /tmp/controller-conformance.json
+```
+
+Use a window containing finite OFFBOARD velocity setpoints. The comparison
+boundary is deliberately below the policy and above the plant: identical state
+and velocity intent enter both controllers, and physical rotor speed/body wrench
+leave both. Isaac Lab's `Thruster` is a lower actuator-realization layer; with
+the configured zero time constants its output must match the requested
+per-rotor thrust independently of this controller comparison.
+
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
   flight_analysis/tools/compare_logs.py <log_a.ulg> <log_b.ulg> \
@@ -219,3 +241,21 @@ When a future flight is unstable, first decide which side commanded the bad
 motion. If the ULog actuator topics and bridge `commands` agree, inspect PX4
 setpoints and sensor frames. If they disagree, inspect bridge actuator freshness,
 rotor ordering, and thrust application.
+
+## Routine-stage filtering
+
+Live and standalone routines write structured `ROUTINE_STAGE` JSON records to
+both the runtime output and the per-vehicle bridge log. Each record contains
+`event`, `index`, `kind`, `label`, and the exact `sim_time_us`. Select the
+interval from the `start` record through the matching `complete` or `failed`
+record before comparing a learned policy with Isaac Lab. In particular, a
+`kind: policy` comparison excludes takeoff, the preceding `goto`/`hover`, and
+the return/landing steps:
+
+```text
+rg 'ROUTINE_STAGE.*"kind":"policy"' px4/logs/<date>/<time>_v0_bridge.log
+```
+
+ULog message timestamps use the same simulated PX4 boot-time clock. Tools whose
+windows are relative to `ULog.start_timestamp` convert a stage boundary with
+`(sim_time_us - ULog.start_timestamp) / 1e6`.

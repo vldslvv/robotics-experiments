@@ -59,6 +59,9 @@ class PressApproachExecutionResult:
     action: np.ndarray
     complete: bool
     failure_reason: Optional[str]
+    handoff_reason: Optional[str] = None
+    actor_observation: tuple[float, ...] = ()
+    raw_action: tuple[float, ...] = ()
 
 
 def initial_press_approach_execution_state(
@@ -126,26 +129,28 @@ def advance_press_approach_execution(
     closest_switch_range_m = (
         switch_range_m if first_sample else min(state.closest_switch_range_m, switch_range_m)
     )
-    handoff_latched = (
-        state.handoff_latched
-        or handoff_ready(
-            observation,
-            params.handoff_gate,
-        ).ready
-    )
+    handoff = handoff_ready(observation, params.handoff_gate)
+    handoff_latched = state.handoff_latched or handoff.ready
     action = zero
+    actor_observation: tuple[float, ...] = ()
+    raw_action: tuple[float, ...] = ()
     if handoff_latched:
-        action = np.asarray(params.inference(to_vector(observation)), dtype=np.float64)
+        observation_vector = to_vector(observation)
+        actor_observation = tuple(float(value) for value in observation_vector)
+        action = np.asarray(params.inference(observation_vector), dtype=np.float64)
+        raw_action = tuple(float(value) for value in action.reshape(-1))
         if action.shape != (params.action_dim,) or not np.all(np.isfinite(action)):
             return PressApproachExecutionResult(
                 state,
                 zero,
                 False,
                 f"press approach policy returned invalid action shape {action.shape}",
+                actor_observation=actor_observation,
+                raw_action=raw_action,
             )
         action = np.clip(action, -1.0, 1.0)
 
-    stable_goal = bool(
+    stable_goal = handoff_latched and bool(
         press_approach_goal_satisfied(
             relative_switch_pos_m=np.asarray(observation.relative_switch_pos_m)[None, :],
             linear_velocity_mps=rotate_vector_wxyz(
@@ -174,4 +179,7 @@ def advance_press_approach_execution(
         zero if complete else action,
         complete,
         None,
+        handoff_reason=None if handoff_latched else handoff.reason.value,
+        actor_observation=actor_observation,
+        raw_action=raw_action,
     )

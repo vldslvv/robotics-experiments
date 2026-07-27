@@ -43,8 +43,8 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 4
-_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v2"
+_REPORT_SCHEMA_VERSION = 5
+_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v3"
 
 
 class _ActorCritic(Protocol):
@@ -118,6 +118,7 @@ def _press_evaluation(
     seeds: tuple[int, ...],
     episodes_per_seed: int,
     evaluation_config: PressApproachEvaluationConfig,
+    goal_range_min_m: float,
     device: str,
 ) -> CandidateEvaluation:
     _report(f"checkpoint selection iteration={candidate.iteration} START")
@@ -138,6 +139,7 @@ def _press_evaluation(
         candidate=candidate,
         result=result,
         evaluation_config=evaluation_config,
+        goal_range_min_m=goal_range_min_m,
     )
     summary = result.summary
     _report(
@@ -158,6 +160,7 @@ def _score_press_result(
     candidate: CheckpointCandidate,
     result: PressApproachEvaluationResult,
     evaluation_config: PressApproachEvaluationConfig,
+    goal_range_min_m: float,
 ) -> CandidateEvaluation:
     summary = result.summary
     success_threshold = float(evaluation_config.success_rate_min)
@@ -172,6 +175,7 @@ def _score_press_result(
     accepted = (
         summary.approach_success_rate >= success_threshold
         and summary.collision_rate <= collision_threshold
+        and summary.min_closest_range_m >= goal_range_min_m
     )
     median_completion_time_s = summary.median_completion_time_s
     ranking_values = (
@@ -192,6 +196,7 @@ def _score_press_result(
             MetricValue("other_flight_failure_rate", summary.other_flight_failure_rate),
             MetricValue("timeout_rate", summary.timeout_rate),
             MetricValue("mean_closest_range_m", summary.mean_closest_range_m),
+            MetricValue("min_closest_range_m", summary.min_closest_range_m),
             MetricValue("median_completion_time_s", summary.median_completion_time_s),
         ),
         normalized_margins=normalized_margins,
@@ -210,12 +215,14 @@ def _selection_report(
     seeds: tuple[int, ...],
     episodes_per_seed: int,
     evaluation_config: PressApproachEvaluationConfig,
+    goal_range_min_m: float,
     all_candidates: tuple[CheckpointCandidate, ...],
 ) -> dict[str, Any]:
     thresholds = (
         {
             "approach_success_rate_min": float(evaluation_config.success_rate_min),
             "collision_rate_max": float(evaluation_config.collision_rate_max),
+            "min_closest_range_m": goal_range_min_m,
         }
         if policy_interface == "press-v1"
         else None
@@ -272,6 +279,7 @@ def _select_candidates(
     env: _SelectionEnvironment,
     seeds: tuple[int, ...],
     evaluation_config: PressApproachEvaluationConfig,
+    goal_range_min_m: float,
     device: str,
 ) -> CheckpointSelection:
     scorer = None
@@ -289,6 +297,7 @@ def _select_candidates(
                     seeds=seeds,
                     episodes_per_seed=evaluation_config.episodes_per_seed,
                     evaluation_config=evaluation_config,
+                    goal_range_min_m=goal_range_min_m,
                     device=device,
                 )
                 for candidate in scorer_candidates
@@ -422,6 +431,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             env=env,
             seeds=seeds,
             evaluation_config=evaluation,
+            goal_range_min_m=config.rl.press.goal.range_min_m,
             device=device,
         )
         report = _selection_report(
@@ -433,6 +443,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed if is_press else 0,
             evaluation_config=evaluation,
+            goal_range_min_m=config.rl.press.goal.range_min_m,
             all_candidates=candidates,
         )
         selected_evaluation = _selected_evaluation(selection)
