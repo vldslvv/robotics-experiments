@@ -73,7 +73,9 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         "press approach evaluation: "
         f"episodes={summary.episodes} "
         f"success={summary.approach_success_rate:.3f} "
-        f"contact_failure={summary.contact_failure_rate:.3f} "
+        f"collision={summary.collision_rate:.3f} "
+        f"body_collision={summary.body_collision_rate:.3f} "
+        f"pusher_collision={summary.pusher_collision_rate:.3f} "
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f} "
         f"mean_closest_range_m={summary.mean_closest_range_m:.5f} "
@@ -85,8 +87,8 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     failures = []
     if summary.approach_success_rate < evaluation.success_rate_min:
         failures.append("approach success")
-    if summary.contact_failure_rate > evaluation.contact_failure_rate_max:
-        failures.append("contact failures")
+    if summary.collision_rate > evaluation.collision_rate_max:
+        failures.append("simulated collisions")
     if failures:
         raise AssertionError("press acceptance failed: " + ", ".join(failures))
     _report("press approach evaluation PASSED")

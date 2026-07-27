@@ -23,7 +23,7 @@ def _contract():
         policy_rate_hz=20.0,
         action_kind="velocity",
         action_dim=4,
-        max_body_velocity_mps=0.5,
+        max_body_velocity_mps=2.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
         hover_thrust_fraction=0.4,
@@ -50,18 +50,21 @@ def test_approach_evaluation_aggregation() -> None:
 
     summary = summarize_press_approach_episodes(
         episodes=(
-            PressApproachEpisodeMetrics(True, False, False, False, 0.405, 1.0),
-            PressApproachEpisodeMetrics(False, True, False, False, 0.39, None),
-            PressApproachEpisodeMetrics(False, False, True, False, 0.44, None),
-            PressApproachEpisodeMetrics(False, False, False, True, 0.43, None),
+            PressApproachEpisodeMetrics(True, False, False, False, False, False, 0.405, 1.0),
+            PressApproachEpisodeMetrics(False, True, True, False, False, False, 0.39, None),
+            PressApproachEpisodeMetrics(False, True, False, True, False, False, 0.40, None),
+            PressApproachEpisodeMetrics(False, False, False, False, True, False, 0.44, None),
+            PressApproachEpisodeMetrics(False, False, False, False, False, True, 0.43, None),
         )
     )
-    assert summary.episodes == 4
-    assert summary.approach_success_rate == 0.25
-    assert summary.contact_failure_rate == 0.25
-    assert summary.other_flight_failure_rate == 0.25
-    assert summary.timeout_rate == 0.25
-    assert summary.mean_closest_range_m == pytest.approx(0.41625)
+    assert summary.episodes == 5
+    assert summary.approach_success_rate == 0.2
+    assert summary.collision_rate == 0.4
+    assert summary.body_collision_rate == 0.2
+    assert summary.pusher_collision_rate == 0.2
+    assert summary.other_flight_failure_rate == 0.2
+    assert summary.timeout_rate == 0.2
+    assert summary.mean_closest_range_m == pytest.approx(0.413)
     assert summary.median_completion_time_s == 1.0
 
 
@@ -102,7 +105,9 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
                 ),
                 termination=SimpleNamespace(
                     success=success,
-                    contact=torch.zeros(2, dtype=torch.bool),
+                    collision=torch.zeros(2, dtype=torch.bool),
+                    body_collision=torch.zeros(2, dtype=torch.bool),
+                    pusher_collision=torch.zeros(2, dtype=torch.bool),
                     flight_failure=torch.zeros(2, dtype=torch.bool),
                     time_out=timeout,
                 ),
@@ -144,7 +149,7 @@ def _config():
                     seeds=(101, 202, 303),
                     episodes_per_seed=1,
                     success_rate_min=0.8,
-                    contact_failure_rate_max=0.05,
+                    collision_rate_max=0.05,
                 ),
             ),
         )
@@ -194,7 +199,9 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         summary=workflow.PressApproachEvaluationSummary(
             episodes=3,
             approach_success_rate=1.0,
-            contact_failure_rate=0.0,
+            collision_rate=0.0,
+            body_collision_rate=0.0,
+            pusher_collision_rate=0.0,
             other_flight_failure_rate=0.0,
             timeout_rate=0.0,
             mean_closest_range_m=0.41,

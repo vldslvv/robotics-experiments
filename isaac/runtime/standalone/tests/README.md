@@ -32,8 +32,10 @@ arm and swept-propeller colliders, and the static wall collider. It then
 commands a slow press, verifies pad contact plus pusher and button displacement,
 advances the production N-step latch, requires exactly one lamp transition, and
 retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
-returns no dones and no approach reward, so Stage 1's contact-failure
-termination cannot reset this physical measurement path.
+returns no dones and no approach reward, so Stage 1's privileged collision
+termination cannot reset this physical measurement path. Its test-local
+press/retreat speed derives from the stable-flight speed limit rather than the
+approach reward's safe closing-speed target.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current

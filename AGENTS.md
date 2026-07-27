@@ -198,6 +198,10 @@ the current contents and the intended home for that kind of code.
   exports only press observation, handoff, task, provider, and policy-progress
   concepts. Runtime policy interface dispatch and adapter composition belong in
   the private `runtime/_policy.py`, not the fleet orchestrator or commanding.
+- When launching an RL training run for the user, provide a run-scoped
+  monitoring path (TensorBoard by default) and report the local URL and log
+  directory. Keep monitoring available while the run is active unless the user
+  asks otherwise.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor

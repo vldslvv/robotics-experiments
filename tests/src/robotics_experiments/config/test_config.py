@@ -135,7 +135,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.max_body_velocity_mps == 2.0
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert training.max_iterations == 25
+    assert training.max_iterations == 50
     assert training.learning_rate == 1.0e-6
     assert training.entropy_coef == 0.0
     assert training.save_interval == 5
@@ -145,12 +145,14 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
     assert reward.range_progress_weight == 50.0
-    assert reward.closing_speed_error_weight == 20.0
+    assert reward.closing_overspeed_weight == 100.0
     assert reward.success_weight == 150.0
+    assert reward.collision_weight == 300.0
+    assert reward.flight_failure_weight == 100.0
     assert config.rl.press.goal.stable_steps == 5
     assert config.rl.press.reset.wall_normal_min_m == 0.45
     assert config.rl.press.reset.lateral_error_min_m == -0.08
-    assert config.rl.press.evaluation.contact_failure_rate_max == 0.05
+    assert config.rl.press.evaluation.collision_rate_max == 0.05
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
 
 
@@ -245,7 +247,7 @@ def test_task_policy_validation(tmp_path, override, match):
                 "rl": {
                     "press": {
                         "evaluation": {
-                            "contact_failure_rate_max": 1.1,
+                            "collision_rate_max": 1.1,
                         }
                     }
                 }

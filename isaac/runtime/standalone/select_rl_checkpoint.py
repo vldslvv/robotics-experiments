@@ -43,8 +43,8 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 3
-_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v1"
+_REPORT_SCHEMA_VERSION = 4
+_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v2"
 
 
 class _ActorCritic(Protocol):
@@ -144,7 +144,9 @@ def _press_evaluation(
         f"checkpoint selection iteration={candidate.iteration} COMPLETE "
         f"accepted={str(evaluation.accepted).lower()} "
         f"success={summary.approach_success_rate:.3f} "
-        f"contact_failure={summary.contact_failure_rate:.3f} "
+        f"collision={summary.collision_rate:.3f} "
+        f"body_collision={summary.body_collision_rate:.3f} "
+        f"pusher_collision={summary.pusher_collision_rate:.3f} "
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
     )
@@ -159,17 +161,17 @@ def _score_press_result(
 ) -> CandidateEvaluation:
     summary = result.summary
     success_threshold = float(evaluation_config.success_rate_min)
-    contact_threshold = float(evaluation_config.contact_failure_rate_max)
+    collision_threshold = float(evaluation_config.collision_rate_max)
     success_margin = summary.approach_success_rate / success_threshold
-    contact_margin = (
-        1.0 + (contact_threshold - summary.contact_failure_rate) / contact_threshold
-        if contact_threshold > 0.0
-        else (1.0 if summary.contact_failure_rate == 0.0 else -summary.contact_failure_rate)
+    collision_margin = (
+        1.0 + (collision_threshold - summary.collision_rate) / collision_threshold
+        if collision_threshold > 0.0
+        else (1.0 if summary.collision_rate == 0.0 else -summary.collision_rate)
     )
-    normalized_margins = (success_margin, contact_margin)
+    normalized_margins = (success_margin, collision_margin)
     accepted = (
         summary.approach_success_rate >= success_threshold
-        and summary.contact_failure_rate <= contact_threshold
+        and summary.collision_rate <= collision_threshold
     )
     median_completion_time_s = summary.median_completion_time_s
     ranking_values = (
@@ -184,7 +186,9 @@ def _score_press_result(
         accepted=accepted,
         metrics=(
             MetricValue("approach_success_rate", summary.approach_success_rate),
-            MetricValue("contact_failure_rate", summary.contact_failure_rate),
+            MetricValue("collision_rate", summary.collision_rate),
+            MetricValue("body_collision_rate", summary.body_collision_rate),
+            MetricValue("pusher_collision_rate", summary.pusher_collision_rate),
             MetricValue("other_flight_failure_rate", summary.other_flight_failure_rate),
             MetricValue("timeout_rate", summary.timeout_rate),
             MetricValue("mean_closest_range_m", summary.mean_closest_range_m),
@@ -211,7 +215,7 @@ def _selection_report(
     thresholds = (
         {
             "approach_success_rate_min": float(evaluation_config.success_rate_min),
-            "contact_failure_rate_max": float(evaluation_config.contact_failure_rate_max),
+            "collision_rate_max": float(evaluation_config.collision_rate_max),
         }
         if policy_interface == "press-v1"
         else None

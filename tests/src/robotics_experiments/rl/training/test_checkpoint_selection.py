@@ -37,7 +37,9 @@ def _load_selector_module():
 def _result(
     *,
     success: float = 0.8,
-    contact: float = 0.05,
+    collision: float = 0.05,
+    body_collision: float = 0.03,
+    pusher_collision: float = 0.02,
     other_failure: float = 0.05,
     timeout: float = 0.10,
     closest: float = 0.41,
@@ -52,7 +54,9 @@ def _result(
         summary=PressApproachEvaluationSummary(
             episodes=300,
             approach_success_rate=success,
-            contact_failure_rate=contact,
+            collision_rate=collision,
+            body_collision_rate=body_collision,
+            pusher_collision_rate=pusher_collision,
             other_flight_failure_rate=other_failure,
             timeout_rate=timeout,
             mean_closest_range_m=closest,
@@ -68,7 +72,7 @@ def _evaluation(*, selector, iteration: int, result=None) -> CandidateEvaluation
         result=result or _result(),
         evaluation_config=SimpleNamespace(
             success_rate_min=0.8,
-            contact_failure_rate_max=0.05,
+            collision_rate_max=0.05,
         ),
     )
 
@@ -83,7 +87,7 @@ def test_checkpoint_enumeration_is_numeric(tmp_path: Path) -> None:
     ]
 
 
-def test_approach_acceptance_uses_success_and_contact_gates() -> None:
+def test_approach_acceptance_uses_success_and_collision_gates() -> None:
     selector = _load_selector_module()
     assert _evaluation(selector=selector, iteration=0).accepted
     assert not _evaluation(
@@ -94,7 +98,7 @@ def test_approach_acceptance_uses_success_and_contact_gates() -> None:
     assert not _evaluation(
         selector=selector,
         iteration=2,
-        result=_result(contact=0.051),
+        result=_result(collision=0.051),
     ).accepted
 
 
@@ -103,12 +107,12 @@ def test_ranking_uses_worst_normalized_acceptance_margin_first() -> None:
     unbalanced = _evaluation(
         selector=selector,
         iteration=50,
-        result=_result(success=0.8, contact=0.0),
+        result=_result(success=0.8, collision=0.0),
     )
     balanced = _evaluation(
         selector=selector,
         iteration=100,
-        result=_result(success=0.88, contact=0.045),
+        result=_result(success=0.88, collision=0.045),
     )
     assert balanced.ranking_values > unbalanced.ranking_values
 
@@ -241,7 +245,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
         evaluation_config=SimpleNamespace(
             episodes_per_seed=100,
             success_rate_min=0.8,
-            contact_failure_rate_max=0.05,
+            collision_rate_max=0.05,
         ),
         device="cuda:0",
     )
@@ -270,10 +274,10 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
     evaluation = _evaluation(
         selector=selector,
         iteration=150,
-        result=_result(success=0.1, contact=0.2),
+        result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="press-approach-gated-maximin-v1",
+        selection_method="press-approach-gated-maximin-v2",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -287,16 +291,16 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         episodes_per_seed=100,
         evaluation_config=SimpleNamespace(
             success_rate_min=0.8,
-            contact_failure_rate_max=0.05,
+            collision_rate_max=0.05,
         ),
         all_candidates=(candidate,),
     )
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["curriculum_stage"] == "approach"
     assert report["selected_accepted"] is False
     assert report["thresholds"] == {
         "approach_success_rate_min": 0.8,
-        "contact_failure_rate_max": 0.05,
+        "collision_rate_max": 0.05,
     }
     json.dumps(report, allow_nan=False)
 
@@ -330,14 +334,16 @@ def test_publication_records_evaluation_and_advances_latest(
         accepted=accepted,
         metrics=(
             MetricValue("approach_success_rate", 0.75),
-            MetricValue("contact_failure_rate", 0.04),
+            MetricValue("collision_rate", 0.04),
+            MetricValue("body_collision_rate", 0.03),
+            MetricValue("pusher_collision_rate", 0.01),
         ),
         normalized_margins=(0.9375, 1.2),
         ranking_values=(0.9375, 1.2, -0.1, -0.1, -2.0, -50.0),
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v1",
+        "press-approach-gated-maximin-v2",
         (evaluation,),
         evaluation.candidate,
     )
@@ -348,7 +354,7 @@ def test_publication_records_evaluation_and_advances_latest(
         "episodes_per_seed": 100,
         "thresholds": {
             "approach_success_rate_min": 0.8,
-            "contact_failure_rate_max": 0.05,
+            "collision_rate_max": 0.05,
         },
     }
     selector._publish_selection(  # noqa: SLF001
@@ -389,7 +395,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v1",
+        "press-approach-gated-maximin-v2",
         (),
         CheckpointCandidate(50, checkpoint),
     )

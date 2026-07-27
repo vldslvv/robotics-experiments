@@ -465,7 +465,9 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
         max_tilt = 0.0
         steps = round(config.rl.episode_length_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
-        approach_speed = config.rl.press.goal.closing_speed_far_mps
+        # This deterministic physical-actuation gate is independent of the
+        # approach reward's safe closing-speed schedule.
+        approach_speed = 2.0 * config.rl.press.goal.linear_speed_max_mps
         retreat_speed = approach_speed * 0.75
         initial_range = float((env.switch.data.root_pos_w - env.drone.data.root_pos_w)[0, 0].item())
         _report(

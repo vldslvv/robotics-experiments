@@ -12,9 +12,9 @@ Status as of 2026-07-26:
 | F1b controller tuning | Validated | The recorded gains are live and the seeded gate passed repeatedly. |
 | F2 observation and handoff | Validated | Pure observation/provider/handoff tests pass; the hover/goto side channel reaches handoff. |
 | F2b task-to-policy pipeline | Validated | Hover training, artifact publication, and strict PX4 deployment passed. |
-| F3 Stage 1 approach | Implemented and accepted | Run `approach-20260726d`, checkpoint 24 passed selection and independent evaluation at 100% approach success with zero contact/fault/timeout. |
+| F3 Stage 1 approach | Lab accepted | Collision-aware run `approach-20260727a`, checkpoint 49 passed selection and independent evaluation at 100% success with zero combined/body/pusher collisions, flight failures, or timeouts. |
 | F3 physical contact chain | Implemented | The real pusher/button/latch/lamp/retreat gate uses a test-local no-dones environment and is independent of Stage 1 termination. |
-| F3b approach deployment | Implemented and passed | `test-integration-press-approach-routine` verified stable contact-free completion, no lamp transition, return, landing, and disarm. |
+| F3b approach deployment | Dynamics mismatch recorded; failed | The accepted Lab policy contacted the pusher at 0.3807 m and 0.0782 m/s in the live PX4 routine. Keep collision privileged and investigate controller/simulator dynamics instead of changing `press-v1`. |
 | Later contact/toggle/retreat stage | Planned | It must be a new named Hydra option and policy namespace initialized actor-only from a compatible checkpoint. |
 | F4 randomization | Planned | Add stage-owned randomization without changing the shared 34-by-4 actor contract. |
 | F5 synthetic pose | Planned | Only the ground-truth provider exists. |
@@ -29,6 +29,9 @@ Status as of 2026-07-26:
 - The Stage 1 observation remains 34 values and the action remains four values.
   Compression, contact, and lamp fields remain packed for checkpoint reuse by
   later stages.
+- PhysX body/pusher collision flags are training-only inputs to reward and
+  termination. They are absent from policy state, observations, critic inputs,
+  and deployment sensing.
 - Press artifacts require both `policy_interface: press-v1` and
   `curriculum_stage: approach`. Stage-less and unknown-stage artifacts fail.
 - Actor-only initialization may read any validated

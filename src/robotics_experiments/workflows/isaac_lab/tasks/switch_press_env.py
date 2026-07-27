@@ -44,6 +44,7 @@ __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
 
 _SWITCH_PRIM_PATH = "/World/envs/env_.*/Switch"
 _WALL_PRIM_PATH = "/World/envs/env_.*/Wall"
+_BODY_PRIM_PATH = "/World/envs/env_.*/Drone/body"
 _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 # The source asset's outward plate normal is local -Y, while the policy
 # contract defines canonical switch +X as outward. Spawning the asset at -pi/2
@@ -53,11 +54,12 @@ _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
     "range_progress",
     "alignment_error",
-    "closing_speed_error",
+    "closing_overspeed",
     "upright_error",
     "action_delta",
     "success",
-    "failure",
+    "collision",
+    "flight_failure",
     "timeout",
     "total",
 )
@@ -80,7 +82,8 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
     switch_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
     wall_cfg: RigidObjectCfg = cast(RigidObjectCfg, MISSING)
-    contact_sensor_cfg: ContactSensorCfg = cast(ContactSensorCfg, MISSING)
+    body_contact_sensor_cfg: ContactSensorCfg = cast(ContactSensorCfg, MISSING)
+    pusher_contact_sensor_cfg: ContactSensorCfg = cast(ContactSensorCfg, MISSING)
     scene: InteractiveSceneCfg = cast(InteractiveSceneCfg, MISSING)
 
 
@@ -162,7 +165,12 @@ def make_switch_press_env_cfg(
             ),
             init_state=RigidObjectCfg.InitialStateCfg(pos=wall_center),
         ),
-        contact_sensor_cfg=ContactSensorCfg(
+        body_contact_sensor_cfg=ContactSensorCfg(
+            prim_path=_BODY_PRIM_PATH,
+            update_period=0.0,
+            history_length=0,
+        ),
+        pusher_contact_sensor_cfg=ContactSensorCfg(
             prim_path=_PAD_PRIM_PATH,
             update_period=0.0,
             history_length=0,
@@ -214,9 +222,16 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             action=self.actions,
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
+        self._physics_substep_index = 0
+        self._body_collision_latch = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
-        self._contact_failure_episode_count = torch.zeros((), device=self.device)
+        self._collision_episode_count = torch.zeros((), device=self.device)
+        self._body_collision_episode_count = torch.zeros((), device=self.device)
+        self._pusher_collision_episode_count = torch.zeros((), device=self.device)
         self._flight_failure_episode_count = torch.zeros((), device=self.device)
         self._timeout_episode_count = torch.zeros((), device=self.device)
 
@@ -230,10 +245,12 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self.switch = Articulation(self.cfg.switch_cfg)
         self._scale_switch_button()
         self.wall = RigidObject(self.cfg.wall_cfg)
-        self.contact_sensor = ContactSensor(self.cfg.contact_sensor_cfg)
+        self.body_contact_sensor = ContactSensor(self.cfg.body_contact_sensor_cfg)
+        self.contact_sensor = ContactSensor(self.cfg.pusher_contact_sensor_cfg)
         self.scene.articulations["drone"] = self.drone
         self.scene.articulations["switch"] = self.switch
         self.scene.rigid_objects["wall"] = self.wall
+        self.scene.sensors["body_contact"] = self.body_contact_sensor
         self.scene.sensors["pusher_contact"] = self.contact_sensor
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
         self.scene.clone_environments(copy_from_source=False)
@@ -293,12 +310,36 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         relative_quat_xyzw = relative_quat_wxyz[:, [1, 2, 3, 0]]
         return relative_position, relative_quat_xyzw
 
-    def _contact_flag(self) -> torch.Tensor:
-        force_norm = torch.linalg.norm(self.contact_sensor.data.net_forces_w, dim=-1)
+    def _collision_flag(self, *, sensor: ContactSensor) -> torch.Tensor:
+        force_norm = torch.linalg.norm(sensor.data.net_forces_w, dim=-1)
         threshold = self._experiment_config.rl.press.termination.contact_force_threshold_n
         return force_norm.amax(dim=-1) >= threshold
 
+    def _contact_flag(self) -> torch.Tensor:
+        """Return instantaneous pusher/pad contact for the policy observation."""
+        return self._collision_flag(sensor=self.contact_sensor)
+
+    def _latch_collision_sample(self) -> None:
+        self._body_collision_latch |= self._collision_flag(sensor=self.body_contact_sensor)
+        self._pusher_collision_latch |= self._collision_flag(sensor=self.contact_sensor)
+
+    def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        super()._pre_physics_step(actions)
+        self._physics_substep_index = 0
+        self._body_collision_latch.zero_()
+        self._pusher_collision_latch.zero_()
+
+    def _apply_action(self) -> None:
+        # At substep N, sensor buffers contain the result of substep N-1. Skip
+        # the first read because it belongs to the preceding policy interval;
+        # _sample() captures the final substep after the decimation loop.
+        if self._physics_substep_index > 0:
+            self._latch_collision_sample()
+        self._physics_substep_index += 1
+        super()._apply_action()
+
     def _sample(self, *, time_out: torch.Tensor) -> PressApproachInput[torch.Tensor]:
+        self._latch_collision_sample()
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
@@ -312,7 +353,8 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],
-            contact_flag=self._contact_flag(),
+            body_collision_flag=self._body_collision_latch.clone(),
+            pusher_collision_flag=self._pusher_collision_latch.clone(),
             action=self.actions,
             time_out=time_out,
         )
@@ -336,19 +378,30 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             raise RuntimeError("press transition must advance in _get_dones before rewards")
         result = self._task_result
         ended = self.reset_buf
+        collision = result.termination.collision
         self._completed_episode_count += ended.count_nonzero()
         self._successful_episode_count += (ended & result.termination.success).count_nonzero()
-        self._contact_failure_episode_count += (ended & result.termination.contact).count_nonzero()
+        self._collision_episode_count += (ended & collision).count_nonzero()
+        self._body_collision_episode_count += (
+            ended & result.termination.body_collision
+        ).count_nonzero()
+        self._pusher_collision_episode_count += (
+            ended & result.termination.pusher_collision
+        ).count_nonzero()
         self._flight_failure_episode_count += (
-            ended & result.termination.flight_failure
+            ended & result.termination.flight_failure & ~collision
         ).count_nonzero()
         self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
         self.extras["log"] = {
             "Press/completed_episodes": self._completed_episode_count,
             "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
-            "Press/contact_failure_percent": 100.0
-            * self._contact_failure_episode_count
+            "Press/collision_percent": 100.0 * self._collision_episode_count / episode_denominator,
+            "Press/body_collision_percent": 100.0
+            * self._body_collision_episode_count
+            / episode_denominator,
+            "Press/pusher_collision_percent": 100.0
+            * self._pusher_collision_episode_count
             / episode_denominator,
             "Press/flight_failure_percent": 100.0
             * self._flight_failure_episode_count
@@ -443,3 +496,5 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 relative_switch_range_m=wall_normal,
                 action=torch.zeros((count, self.cfg.action_space), device=self.device),
             )
+            self._body_collision_latch[env_ids] = False
+            self._pusher_collision_latch[env_ids] = False

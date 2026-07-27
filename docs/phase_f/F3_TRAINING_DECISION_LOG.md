@@ -1679,3 +1679,96 @@ force, and stable retreat.
 Final repository validation: the full host suite passed with 578 tests and one
 skip; all pre-commit hooks passed; the aggregate container suite passed 8/8
 targets; and the independent `test-integration-press-policy` gate passed.
+
+### 37. Penalize collision through privileged Lab state
+
+Date: 2026-07-27.
+
+Decision: Keep the deployed `press-v1` contract unchanged and add collision
+only to the Stage 1 Lab transition. The policy interface remains a schema-v1
+34-value observation and four normalized body-FLU velocity/yaw-rate actions at
+20 Hz, with 2.0 m/s velocity and 1.5 rad/s yaw-rate scaling. `contact_flag`
+continues to mean pusher/pad contact only. No body, arm, propeller, frame, or
+wall collision value enters `PressApproachState`, the actor observation, the
+critic input, artifact contract metadata, or deploy-time sensing.
+
+Training mechanics: Separate PhysX contact sensors monitor the drone body and
+pusher pad. Their boolean collision facts latch across every one of the 12 or
+13 physics substeps in a policy interval and enter only
+`PressApproachInput`. The pure transition retains both sources for diagnostics,
+applies one combined collision penalty, and terminates the episode. PPO stores
+the reward and terminal flag, while reset prevents collision from entering a
+successor policy state.
+
+Reward decision:
+
+- Range progress: `50 * (previous_range - current_range)`.
+- Alignment: `-50 * ||relative_yz||^2`.
+- Closing overspeed: `-100 * max(closing_speed - safe_target, 0)^2`.
+- Upright error: `-5 * (1 - alignment)^2`.
+- Action delta: `-0.004 * mean((action - previous_action)^2)`.
+- Success: `+150`.
+- Collision: `-300`.
+- Ordinary flight failure: `-100`.
+- Timeout: `-25`.
+
+The safe closing-speed target is 0.08 m/s at 0.50 m and tapers linearly to zero
+at 0.44 m. Slower motion has no closing-speed penalty. Collision overrides
+success and the ordinary flight-failure reward; simultaneous body and pusher
+contact still produces one collision penalty.
+
+Evaluation decision: Selection and independent evaluation report combined
+collision rate plus body and pusher source rates. Publication continues to
+require at least 0.80 approach success and at most 0.05 simulated collision
+rate over 100 episodes for each seed 101, 202, and 303. Artifact identity and
+inference metadata do not gain a collision field; checkpoint evaluation
+results retain the diagnostic rates.
+
+Deployment decision: Continue using the deployable pusher compression/contact
+and lamp providers. Do not introduce a real-world any-body collision detector
+or new drone sensor. Velocity and angular-rate disturbances may affect the
+policy indirectly, but they are not reliable collision sensing. If Lab passes
+and the live PX4 approach still visibly contacts the wall, record a dynamics
+mismatch and stop instead of changing the policy contract.
+
+Training plan: Actor-only initialize run `approach-20260727a` from
+`approach-20260726d/logs/model_24.pt`. Train for 50 iterations with fixed
+`1e-6` learning rate, 0.01 initial action noise, zero entropy, and checkpoints
+every five iterations. Then run checkpoint selection, independent approach
+evaluation, and the live PX4 routine only after publication.
+
+Training and selection evidence: The 50-iteration run completed in 75.982
+seconds. Selection evaluated iterations 0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+and 49 over all 300 deterministic episodes; every checkpoint passed both
+publication gates. Iteration 49 ranked first and was published. It achieved
+1.000 approach success; zero combined, body, and pusher collisions; zero other
+flight failures and timeouts; 0.408096 m mean closest range; and 1.300 s median
+completion. Its per-active-step reward means were 0.128475 range progress,
+-0.081518 alignment error, -0.235154 closing overspeed, effectively zero
+upright and action-delta error, 5.788526 success, zero collision,
+flight-failure, and timeout terms, and 5.600329 total.
+
+Independent evaluation evidence: `make eval-press
+RL_RUN_ID=approach-20260727a` reproduced the selected checkpoint's complete
+300-episode result: 1.000 success; zero combined, body, and pusher collisions;
+zero other flight failures and timeouts; 0.40810 m mean closest range; and
+1.300 s median completion.
+
+Deployment result: Stop on a Lab-to-PX4 dynamics mismatch. The strict live
+approach routine detected real pusher contact at 0.3807 m while the vehicle was
+still moving 0.0782 m/s. Landing recovery began, then the PX4 bridge actuator
+poll timed out after 1.000 s; PX4 reported invalid setpoints and blind-land
+failsafe. This is a failed deployment gate even though Lab selection and
+independent evaluation passed. Do not add body collision sensing to
+`press-v1`, do not retrain around a deploy-only collision observation, and do
+not claim the collision-aware artifact as live-deployment accepted. Preserve
+the run and its diagnostics for controller/simulator dynamics investigation.
+
+Repository and integration evidence: The host gate passed with 582 tests and
+one skip, and every pre-commit hook passed. The deterministic contact-chain
+gate passed with 14.02 mm maximum pusher travel, 10.90 mm button travel, one
+toggle, 11.821 N maximum contact force, and stable retreat. The independent
+press-policy gate passed. The first aggregate integration attempt passed seven
+of eight targets; multi-drone navigation hit a one-off x500 actuator-poll
+timeout after the hexacopter completed. The navigation target then passed in
+isolation, and a complete serial aggregate rerun passed all eight targets.

@@ -15,7 +15,7 @@ rl:
     task_id: Isaac-Switch-Press-Direct-v0
     vehicle_id: 0
     policy_name: press-approach
-    max_iterations: 25
+    max_iterations: 50
     num_steps_per_env: 32
     save_interval: 5
     learning_rate: 1.0e-6

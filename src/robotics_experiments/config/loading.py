@@ -246,7 +246,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.press.evaluation requires seeds and positive episodes_per_seed")
     for name, value in {
         "success_rate_min": evaluation.success_rate_min,
-        "contact_failure_rate_max": evaluation.contact_failure_rate_max,
+        "collision_rate_max": evaluation.collision_rate_max,
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")

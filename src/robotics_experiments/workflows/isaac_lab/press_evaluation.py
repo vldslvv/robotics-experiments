@@ -27,7 +27,9 @@ class PressApproachEpisodeMetrics:
     """Outcome and diagnostic values retained for one completed episode."""
 
     approach_success: bool
-    contact_failure: bool
+    collision: bool
+    body_collision: bool
+    pusher_collision: bool
     other_flight_failure: bool
     timeout: bool
     closest_range_m: float
@@ -40,7 +42,9 @@ class PressApproachEvaluationSummary:
 
     episodes: int
     approach_success_rate: float
-    contact_failure_rate: float
+    collision_rate: float
+    body_collision_rate: float
+    pusher_collision_rate: float
     other_flight_failure_rate: float
     timeout_rate: float
     mean_closest_range_m: float
@@ -103,7 +107,9 @@ def summarize_press_approach_episodes(
     return PressApproachEvaluationSummary(
         episodes=total,
         approach_success_rate=sum(episode.approach_success for episode in episodes) / total,
-        contact_failure_rate=sum(episode.contact_failure for episode in episodes) / total,
+        collision_rate=sum(episode.collision for episode in episodes) / total,
+        body_collision_rate=sum(episode.body_collision for episode in episodes) / total,
+        pusher_collision_rate=sum(episode.pusher_collision for episode in episodes) / total,
         other_flight_failure_rate=(
             sum(episode.other_flight_failure for episode in episodes) / total
         ),
@@ -126,7 +132,9 @@ def _evaluate_seed(
     reward_sample_count = torch.zeros((), dtype=torch.long, device=env.device)
     active = torch.ones(episode_count, dtype=torch.bool, device=env.device)
     success = torch.zeros_like(active)
-    contact_failure = torch.zeros_like(active)
+    collision = torch.zeros_like(active)
+    body_collision = torch.zeros_like(active)
+    pusher_collision = torch.zeros_like(active)
     other_flight_failure = torch.zeros_like(active)
     timeout = torch.zeros_like(active)
     closest_range = torch.full(
@@ -164,8 +172,10 @@ def _evaluate_seed(
             completion_time,
         )
         success |= newly_successful
-        contact_failure |= active & termination.contact
-        other_flight_failure |= active & termination.flight_failure
+        collision |= active & termination.collision
+        body_collision |= active & termination.body_collision
+        pusher_collision |= active & termination.pusher_collision
+        other_flight_failure |= active & termination.flight_failure & ~termination.collision
         timeout |= active & termination.time_out
         reward_values = torch.stack(
             [getattr(result.rewards, name) for name in reward_names],
@@ -181,7 +191,9 @@ def _evaluate_seed(
                     (
                         active.sum(),
                         success.sum(),
-                        contact_failure.sum(),
+                        collision.sum(),
+                        body_collision.sum(),
+                        pusher_collision.sum(),
                         other_flight_failure.sum(),
                         timeout.sum(),
                     )
@@ -193,8 +205,9 @@ def _evaluate_seed(
                 f"press approach evaluation seed={seed} "
                 f"progress={completed_steps}/{horizon} "
                 f"elapsed_s={time.monotonic() - started_at:.1f} active={counts[0]} "
-                f"success={counts[1]} contact={counts[2]} "
-                f"flight_failure={counts[3]} timeout={counts[4]}"
+                f"success={counts[1]} collision={counts[2]} "
+                f"body_collision={counts[3]} pusher_collision={counts[4]} "
+                f"flight_failure={counts[5]} timeout={counts[6]}"
             )
     if bool(torch.any(active)):
         raise RuntimeError("press approach evaluation exceeded the configured episode horizon")
@@ -202,7 +215,9 @@ def _evaluate_seed(
     episodes = tuple(
         PressApproachEpisodeMetrics(
             approach_success=bool(success[index].item()),
-            contact_failure=bool(contact_failure[index].item()),
+            collision=bool(collision[index].item()),
+            body_collision=bool(body_collision[index].item()),
+            pusher_collision=bool(pusher_collision[index].item()),
             other_flight_failure=bool(other_flight_failure[index].item()),
             timeout=bool(timeout[index].item()),
             closest_range_m=float(closest_range[index].item()),
@@ -219,7 +234,9 @@ def _evaluate_seed(
         f"press approach evaluation seed={seed} COMPLETE "
         f"elapsed_s={time.monotonic() - started_at:.1f} "
         f"success={summary.approach_success_rate:.3f} "
-        f"contact_failure={summary.contact_failure_rate:.3f} "
+        f"collision={summary.collision_rate:.3f} "
+        f"body_collision={summary.body_collision_rate:.3f} "
+        f"pusher_collision={summary.pusher_collision_rate:.3f} "
         f"other_flight_failure={summary.other_flight_failure_rate:.3f} "
         f"timeout={summary.timeout_rate:.3f}"
     )

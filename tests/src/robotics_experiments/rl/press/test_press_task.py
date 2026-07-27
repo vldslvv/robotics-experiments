@@ -16,6 +16,7 @@ from robotics_experiments.config import (
 from robotics_experiments.rl.press import (
     PressApproachInput,
     PressApproachRewardTerms,
+    PressApproachState,
     initial_press_approach_state,
     reset_press_approach_state,
     step_press_approach,
@@ -29,18 +30,19 @@ _GOAL = PressApproachGoalConfig(
     angular_speed_max_radps=0.40,
     body_z_alignment_min=0.965926,
     stable_steps=5,
-    closing_speed_far_mps=0.20,
+    closing_speed_far_mps=0.08,
     closing_speed_far_range_m=0.50,
-    closing_speed_zero_range_m=0.42,
+    closing_speed_zero_range_m=0.44,
 )
 _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
     alignment_error_weight=50.0,
-    closing_speed_error_weight=20.0,
+    closing_overspeed_weight=100.0,
     upright_error_weight=5.0,
     action_delta_weight=0.004,
     success_weight=150.0,
-    failure_weight=100.0,
+    collision_weight=300.0,
+    flight_failure_weight=100.0,
     timeout_weight=25.0,
 )
 _TERMINATION = PressApproachTerminationConfig(
@@ -65,12 +67,13 @@ def _sample(
     range_m: float = 0.50,
     lateral_m: float = 0.0,
     vertical_m: float = 0.0,
-    closing_speed_mps: float = 0.20,
+    closing_speed_mps: float = 0.08,
     lateral_speed_mps: float = 0.0,
     angular_speed_radps: float = 0.0,
     upright: float = 1.0,
     altitude_m: float = 1.0,
-    contact: bool = False,
+    body_collision: bool = False,
+    pusher_collision: bool = False,
     action: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0),
     time_out: bool = False,
 ) -> PressApproachInput[np.ndarray]:
@@ -80,7 +83,8 @@ def _sample(
         angular_velocity_radps=np.array([[angular_speed_radps, 0.0, 0.0]]),
         body_z_world_z=np.array([upright]),
         altitude_m=np.array([altitude_m]),
-        contact_flag=np.array([contact]),
+        body_collision_flag=np.array([body_collision]),
+        pusher_collision_flag=np.array([pusher_collision]),
         action=np.array([action]),
         time_out=np.array([time_out]),
     )
@@ -96,22 +100,43 @@ def _step(*, state=None, sample=None):
     )
 
 
-def test_reward_record_has_exactly_eight_signed_terms() -> None:
+def test_reward_record_has_exactly_nine_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
         "alignment_error",
-        "closing_speed_error",
+        "closing_overspeed",
         "upright_error",
         "action_delta",
         "success",
-        "failure",
+        "collision",
+        "flight_failure",
         "timeout",
+    ]
+
+
+def test_privileged_collision_is_input_only() -> None:
+    assert [field.name for field in fields(PressApproachState)] == [
+        "previous_range_m",
+        "previous_action",
+        "stable_goal_steps",
+        "closest_range_m",
+    ]
+    assert [field.name for field in fields(PressApproachInput)] == [
+        "relative_switch_pos_m",
+        "linear_velocity_mps",
+        "angular_velocity_radps",
+        "body_z_world_z",
+        "altitude_m",
+        "body_collision_flag",
+        "pusher_collision_flag",
+        "action",
+        "time_out",
     ]
 
 
 def test_range_progress_is_signed() -> None:
     closer = _step(sample=_sample(range_m=0.48, closing_speed_mps=0.15))
-    farther = _step(sample=_sample(range_m=0.52, closing_speed_mps=0.20))
+    farther = _step(sample=_sample(range_m=0.52, closing_speed_mps=0.08))
     assert closer.rewards.range_progress[0] == pytest.approx(1.0)
     assert farther.rewards.range_progress[0] == pytest.approx(-1.0)
 
@@ -130,9 +155,9 @@ def test_alignment_and_upright_errors_are_quadratic() -> None:
 
 @pytest.mark.parametrize(
     ("range_m", "target_mps"),
-    [(0.50, 0.20), (0.46, 0.10), (0.42, 0.0), (0.40, 0.0), (0.60, 0.20)],
+    [(0.50, 0.08), (0.47, 0.04), (0.44, 0.0), (0.40, 0.0), (0.60, 0.08)],
 )
-def test_closing_speed_target_tapers_linearly(
+def test_closing_overspeed_target_tapers_linearly(
     range_m: float,
     target_mps: float,
 ) -> None:
@@ -140,12 +165,17 @@ def test_closing_speed_target_tapers_linearly(
         state=_state(range_m=range_m),
         sample=_sample(range_m=range_m, closing_speed_mps=target_mps),
     )
-    assert result.rewards.closing_speed_error[0] == pytest.approx(0.0)
-    wrong = _step(
+    assert result.rewards.closing_overspeed[0] == pytest.approx(0.0)
+    overspeed = _step(
         state=_state(range_m=range_m),
         sample=_sample(range_m=range_m, closing_speed_mps=target_mps + 0.1),
     )
-    assert wrong.rewards.closing_speed_error[0] == pytest.approx(-0.2)
+    assert overspeed.rewards.closing_overspeed[0] == pytest.approx(-1.0)
+    underspeed = _step(
+        state=_state(range_m=range_m),
+        sample=_sample(range_m=range_m, closing_speed_mps=target_mps - 0.1),
+    )
+    assert underspeed.rewards.closing_overspeed[0] == pytest.approx(0.0)
 
 
 def test_action_delta_uses_mean_square() -> None:
@@ -180,18 +210,59 @@ def test_unstable_step_resets_success_counter() -> None:
 @pytest.mark.parametrize(
     ("sample", "flag"),
     [
-        (_sample(contact=True), "contact"),
         (_sample(upright=0.7), "crash"),
         (_sample(altitude_m=0.1), "altitude"),
         (_sample(lateral_m=0.4), "relative_envelope"),
     ],
 )
-def test_contact_and_flight_envelope_failures(sample, flag: str) -> None:
+def test_flight_envelope_failures(sample, flag: str) -> None:
     result = _step(sample=sample)
     assert getattr(result.termination, flag)[0]
     assert result.termination.terminated[0]
-    assert result.rewards.failure[0] == -100.0
+    assert result.rewards.flight_failure[0] == -100.0
     assert not result.termination.success[0]
+
+
+@pytest.mark.parametrize(
+    ("body_collision", "pusher_collision"),
+    [(True, False), (False, True), (True, True)],
+)
+def test_collision_sources_produce_one_combined_penalty(
+    body_collision: bool,
+    pusher_collision: bool,
+) -> None:
+    result = _step(
+        sample=_sample(
+            body_collision=body_collision,
+            pusher_collision=pusher_collision,
+        )
+    )
+    assert bool(result.termination.body_collision[0]) is body_collision
+    assert bool(result.termination.pusher_collision[0]) is pusher_collision
+    assert result.termination.collision[0]
+    assert result.termination.terminated[0]
+    assert result.rewards.collision[0] == -300.0
+    assert result.rewards.flight_failure[0] == 0.0
+    assert not result.termination.success[0]
+
+
+def test_collision_overrides_success_and_flight_failure() -> None:
+    state = replace(_state(range_m=0.41), stable_goal_steps=np.array([4]))
+    result = _step(
+        state=state,
+        sample=_sample(
+            range_m=0.41,
+            closing_speed_mps=0.0,
+            upright=0.7,
+            body_collision=True,
+        ),
+    )
+    assert result.termination.collision[0]
+    assert result.termination.crash[0]
+    assert not result.termination.success[0]
+    assert result.rewards.success[0] == 0.0
+    assert result.rewards.collision[0] == -300.0
+    assert result.rewards.flight_failure[0] == 0.0
 
 
 def test_timeout_is_truncation_only_and_mutually_exclusive_with_success() -> None:
@@ -258,7 +329,8 @@ def test_numpy_and_torch_transitions_match() -> None:
         angular_velocity_radps=np.array([[0.1, 0.0, 0.0], [0.2, 0.1, 0.0]]),
         body_z_world_z=np.array([1.0, 0.98]),
         altitude_m=np.array([1.0, 1.0]),
-        contact_flag=np.array([False, False]),
+        body_collision_flag=np.array([False, True]),
+        pusher_collision_flag=np.array([False, False]),
         action=np.array([[0.1, 0.0, 0.0, 0.0], [0.2, -0.1, 0.0, 0.0]]),
         time_out=np.array([False, True]),
     )

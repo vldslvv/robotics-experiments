@@ -178,15 +178,16 @@ class PressHandoffConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Weights for the eight signed approach-stage reward contributions."""
+    """Weights for the nine signed approach-stage reward contributions."""
 
     range_progress_weight: float
     alignment_error_weight: float
-    closing_speed_error_weight: float
+    closing_overspeed_weight: float
     upright_error_weight: float
     action_delta_weight: float
     success_weight: float
-    failure_weight: float
+    collision_weight: float
+    flight_failure_weight: float
     timeout_weight: float
 
 
@@ -246,7 +247,7 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
-    contact_failure_rate_max: float
+    collision_rate_max: float
 
 
 @dataclass

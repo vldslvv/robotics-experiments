@@ -48,29 +48,36 @@ class PressApproachState(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachInput(Generic[ArrayT]):
-    """One batched physical sample consumed by :func:`step_press_approach`."""
+    """One batched physical sample consumed by :func:`step_press_approach`.
+
+    Collision flags are privileged training facts latched across the preceding
+    policy interval. They are not part of :class:`PressApproachState` or the
+    policy observation.
+    """
 
     relative_switch_pos_m: ArrayT
     linear_velocity_mps: ArrayT
     angular_velocity_radps: ArrayT
     body_z_world_z: ArrayT
     altitude_m: ArrayT
-    contact_flag: ArrayT
+    body_collision_flag: ArrayT
+    pusher_collision_flag: ArrayT
     action: ArrayT
     time_out: ArrayT
 
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The eight signed per-step Stage 1 reward contributions."""
+    """The nine signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
     alignment_error: ArrayT
-    closing_speed_error: ArrayT
+    closing_overspeed: ArrayT
     upright_error: ArrayT
     action_delta: ArrayT
     success: ArrayT
-    failure: ArrayT
+    collision: ArrayT
+    flight_failure: ArrayT
     timeout: ArrayT
 
     @property
@@ -79,11 +86,12 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         return (
             self.range_progress
             + self.alignment_error
-            + self.closing_speed_error
+            + self.closing_overspeed
             + self.upright_error
             + self.action_delta
             + self.success
-            + self.failure
+            + self.collision
+            + self.flight_failure
             + self.timeout
         )
 
@@ -93,7 +101,8 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
     """Per-step success, failure, and truncation facts."""
 
     success: ArrayT
-    contact: ArrayT
+    body_collision: ArrayT
+    pusher_collision: ArrayT
     crash: ArrayT
     altitude: ArrayT
     relative_envelope: ArrayT
@@ -102,8 +111,13 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
 
     @property
     def flight_failure(self) -> ArrayT:
-        """Return non-contact flight-envelope failures."""
+        """Return raw flight-envelope failures, including collision-coincident ones."""
         return self.crash | self.altitude | self.relative_envelope
+
+    @property
+    def collision(self) -> ArrayT:
+        """Return the combined privileged collision fact."""
+        return self.body_collision | self.pusher_collision
 
 
 @dataclass(frozen=True)
@@ -155,6 +169,12 @@ def _minimum(left: ArrayT, right: ArrayT) -> ArrayT:
     if isinstance(left, torch.Tensor):
         return torch.minimum(left, right)
     return np.minimum(left, right)
+
+
+def _positive_part(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return value.clamp_min(0.0)
+    return np.maximum(value, 0.0)
 
 
 def initial_press_approach_state(
@@ -259,7 +279,7 @@ def step_press_approach(
         linear_velocity_mps=sample.linear_velocity_mps,
         angular_velocity_radps=sample.angular_velocity_radps,
         body_z_world_z=sample.body_z_world_z,
-        contact_flag=sample.contact_flag,
+        contact_flag=sample.pusher_collision_flag,
         goal_cfg=goal_cfg,
     )
     stable_goal_steps = _where(
@@ -276,13 +296,16 @@ def step_press_approach(
         | (abs(sample.relative_switch_pos_m[..., 2]) > termination_cfg.max_vertical_error_m)
     )
     flight_failure = crash | altitude | relative_envelope
-    failure = sample.contact_flag | flight_failure
+    collision = sample.body_collision_flag | sample.pusher_collision_flag
+    ordinary_flight_failure = flight_failure & ~collision
+    failure = collision | ordinary_flight_failure
     success = (stable_goal_steps >= goal_cfg.stable_steps) & ~failure
     terminated = success | failure
     time_out = sample.time_out & ~terminated
     termination = PressApproachTerminationFlags(
         success=success,
-        contact=sample.contact_flag,
+        body_collision=sample.body_collision_flag,
+        pusher_collision=sample.pusher_collision_flag,
         crash=crash,
         altitude=altitude,
         relative_envelope=relative_envelope,
@@ -295,16 +318,17 @@ def step_press_approach(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
-        closing_speed_error=(
-            -reward_cfg.closing_speed_error_weight
-            * _square(measured_closing_speed - target_closing_speed)
+        closing_overspeed=(
+            -reward_cfg.closing_overspeed_weight
+            * _square(_positive_part(measured_closing_speed - target_closing_speed))
         ),
         upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
         action_delta=(
             -reward_cfg.action_delta_weight * _mean_square(sample.action - state.previous_action)
         ),
         success=reward_cfg.success_weight * success,
-        failure=-reward_cfg.failure_weight * failure,
+        collision=-reward_cfg.collision_weight * collision,
+        flight_failure=-reward_cfg.flight_failure_weight * ordinary_flight_failure,
         timeout=-reward_cfg.timeout_weight * time_out,
     )
     successor = PressApproachState(
