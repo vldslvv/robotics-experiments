@@ -2120,3 +2120,39 @@ the physical approach remains unapproved because its complete virtual routine
 did not pass. No physical-wall command was run. Do not infer a hard velocity
 limit from the requested speed: the observed peak speeds demonstrate that it is
 a PX4 trajectory target, and PX4 retains braking responsibility.
+
+### 46. Record the successful manual mission without upgrading the actor
+
+Date: 2026-07-28.
+
+Reproducible manual command:
+
+```text
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_approach_quad.yaml
+```
+
+Run result: The complete ten-stage routine finished, including the 0.5 m/s
+staging leg, hover and final approach, policy, 0.5 m/s return, landing, and
+disarm. The bridge evidence is
+`px4/logs/2026-07-28/22_41_53_v0_bridge.log`; the paired ULog is
+`px4/logs/0/2026-07-28/22_41_53.ulg`.
+
+Policy-only result: The policy ran for 2.2 s over 45 actor samples. It moved
+from 0.47949 to 0.40823 m switch range, with 0.03223 m/s average and
+0.06621 m/s peak closing speed. Contact sensing remained valid and false,
+the lamp stayed off, and maximum pusher compression was approximately
+0.027 mm. Classify this policy interval as contact-free. The terminal actor
+sample emitted zero velocity; the following 0.5 m/s PX4-guided `goto`, not the
+policy, performed the controlled retreat.
+
+Speed interpretation: The 0.08 m/s final `goto` completed after one 20 ms
+driver tick because the preceding braking and hover had already brought the
+vehicle inside the configured 0.02 m position tolerance. This run therefore
+does not independently validate sustained PX4-guided motion at 0.08 m/s.
+
+Acceptance decision: Preserve this successful manual mission separately from
+the earlier formal approach-gate run in section 45, which failed on the landing
+timeout before later recovery disarmed. The manual result does not convert
+iteration 49 into an accepted actor, waive its rejected 6.0% collision and
+0.383841 m minimum-range selection metrics, or replace the formal gates. No
+additional warehouse-wall run is authorized by this evidence.
