@@ -375,6 +375,7 @@ def _prepare_policy_observer(
         switch_index=switch_index,
         action_dim=press_descriptors[0][1].action_dim,
         contact_force_threshold_n=(state.config.rl.press.termination.contact_force_threshold_n),
+        physical_contact_enabled=reset.physical_contact_enabled,
         button_geometry_scale=reset.button_geometry_scale,
         button_stiffness_scale=reset.button_stiffness_scale,
         switch_wall_offset_m=reset.switch_wall_offset_m,

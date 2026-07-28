@@ -8,6 +8,7 @@ from robotics_experiments.commanding._routine_model import (
     _DEFAULT_MIN_HEADING_DIST_M,
     RoutineStep,
     VehicleRoutine,
+    _GuidedSpec,
     _Invariant,
     _PolicyFactory,
     _StepPredicate,
@@ -193,6 +194,34 @@ def _build_goto_step(
     ) -> bool:
         return reached(observation, baseline) and aligned(observation, baseline)
 
+    if "ground_speed_m_s" in descriptor:
+        ground_speed_m_s = float(descriptor["ground_speed_m_s"])
+        if not math.isfinite(ground_speed_m_s) or ground_speed_m_s <= 0.0:
+            raise ValueError(
+                f"routine step {index} (goto) ground_speed_m_s must be finite "
+                f"and positive, got {ground_speed_m_s!r}"
+            )
+        return RoutineStep(
+            command=reposition(
+                float(gps["latitude"]),
+                float(gps["longitude"]),
+                float(gps["altitude"]),
+                ground_speed_m_s,
+            ),
+            is_complete=_reached_and_aligned,
+            label=f"goto[{x_m:.1f},{y_m:.1f},{z_m:.1f}]",
+            timeout_s=float(descriptor["timeout_s"]),
+            retry_on_temporarily_rejected=True,
+            invariants=_invariants(
+                gates,
+                cross_track_to_segment_below(x_m, y_m, goto_cross_track_m),
+            ),
+            guided=_GuidedSpec(
+                target_enu=(x_m, y_m, z_m),
+                min_heading_dist_m=float(goto_min_heading_dist_m),
+            ),
+        )
+
     return RoutineStep(
         command=set_offboard_mode(),
         is_complete=_reached_and_aligned,
@@ -327,12 +356,15 @@ def build_vehicle_routine(
       ``distance_m`` along world +X/east and completes once that displacement is
       observed from the active step baseline; flight gates apply.
     - ``goto`` (requires ``x``, ``y``, ``z`` and ``timeout_s``; optional
-      ``position_tol_m`` / ``heading_tol_deg``): streams OFFBOARD position
-      setpoints toward the absolute world-ENU waypoint (converted to a geodetic
-      target via ``synth_gps_from_enu`` against ``home_*``, frame-consistent with
-      the bridge's synthesized GPS), yawing toward the leg direction; completes
-      once within ``goto_position_tol_m`` of the waypoint and heading-aligned. A
-      cross-track-to-path gate plus tilt / vertical / angular gates apply.
+      ``ground_speed_m_s`` / ``position_tol_m`` / ``heading_tol_deg``): converts
+      the absolute world-ENU waypoint to a geodetic target via
+      ``synth_gps_from_enu`` against ``home_*``, frame-consistent with the
+      bridge's synthesized GPS. Without a speed it streams the original
+      OFFBOARD position target, yawing toward the leg. With a finite positive
+      speed it sends an acknowledged ``MAV_CMD_DO_REPOSITION`` carrying that
+      guided target speed and lets PX4 generate and brake the trajectory.
+      Both forms complete once position and heading are aligned and retain the
+      same cross-track, tilt, vertical, angular, and timeout gates.
     - ``policy`` (requires ``artifact`` and ``timeout_s``; optional ``hold_s`` /
       ``label`` / ``target_enu`` as world-ENU ``[x, y, z]``): streams OFFBOARD setpoints
       produced by a trained policy at its artifact-owned cadence -- the injected

@@ -7,10 +7,14 @@ failsafe / timeout) and the per-step advance callback.
 """
 
 import json
+import math
 from dataclasses import fields, replace
+
+import pytest
 
 from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_REPOSITION,
     MAV_CMD_DO_SET_MODE,
     MAV_CMD_NAV_LAND,
     MAV_RESULT_TEMPORARILY_REJECTED,
@@ -217,6 +221,7 @@ def test_routine_driver_runs_arm_takeoff_hover_to_done():
     ]
     assert [event["index"] for event in stage_events] == [0, 0, 1, 1, 2, 2]
     assert all(isinstance(event["sim_time_us"], int) for event in stage_events)
+    assert all("ground_speed_m_s" not in event for event in stage_events)
 
 
 def test_empty_routine_runs_generic_lifecycle_and_services_terminal_gcs():
@@ -473,6 +478,53 @@ def test_routine_driver_goto_streams_setpoints_and_engages_offboard():
     assert env.advanced_steps == ["goto[3.0,0.0,2.0]"]
     assert routine_driver_is_done(state=driver)
     assert env.failures == []
+
+
+def test_routine_driver_speed_authored_goto_logs_speed_and_uses_reposition():
+    steps = [
+        {
+            "kind": "goto",
+            "x": 3.0,
+            "y": 0.0,
+            "z": 2.0,
+            "ground_speed_m_s": 0.5,
+            "timeout_s": 20.0,
+        }
+    ]
+    port = FakeCommandPort()
+    env = FakeDriverEnvironment()
+    context = DriverContext(params=_params(steps), port=port, env=env, label="d0")
+    driver = create_routine_driver(
+        context=context,
+        tick=DriverTick(control_time_us=env.sim_us, monotonic_s=0.0),
+    )
+    env.connected = True
+    port.set_handshaked()
+    port.set_global_position((47.0, 8.0, 488.0))
+    env.observation = make_routine_observation(position_enu=(0.0, 0.0, 2.0))
+    for _ in range(20):
+        driver = _tick_driver(context=context, state=driver)
+        if driver.phase is DriverPhase.DRIVE:
+            break
+
+    driver = _tick_driver(context=context, state=driver)
+    assert [command.command_id for command in port.sent] == [MAV_CMD_DO_REPOSITION]
+    assert port.sent[0].params[0] == 0.5
+    assert port.sent[0].params[3] == pytest.approx(math.pi / 2.0)
+    assert port.setpoints == []
+
+    env.observation = make_routine_observation(position_enu=(3.0, 0.0, 2.0), yaw_deg=0.0)
+    driver = _tick_driver(context=context, state=driver)
+    assert routine_driver_is_done(state=driver)
+    stage_events = [
+        json.loads(message.split("ROUTINE_STAGE ", maxsplit=1)[1])
+        for message in env.logs
+        if "ROUTINE_STAGE " in message
+    ]
+    assert [(event["event"], event["ground_speed_m_s"]) for event in stage_events] == [
+        ("start", 0.5),
+        ("complete", 0.5),
+    ]
 
 
 _POLICY_STEPS = [

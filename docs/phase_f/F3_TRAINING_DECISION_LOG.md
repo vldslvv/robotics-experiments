@@ -2024,3 +2024,99 @@ replay and the already-close instantaneous controller/allocation comparison
 localize the remaining work to temporal closed-loop plant response, including
 velocity tracking, braking distance, and settling. Reconcile that response
 before another wall run.
+
+### 44. Fit temporal response, retrain, and stop before the wall
+
+Date: 2026-07-27.
+
+Trace capture: The wall-free production actor ran at nominal 0.460, 0.475, and
+0.490 m entry ranges with switch and wall collision disabled. The measured
+entry ranges were 0.456251, 0.481800, and 0.498089 m. PX4 closest ranges were
+0.406414, 0.401356, and 0.326529 m; peak closing speeds were 0.062576,
+0.089772, and 0.115816 m/s. The 0.490 m case required 0.057806 m of braking
+distance and settled after 4.96 s. The policy cadence retained its exact 40/60
+ms quantization around a 50 ms mean. Every routine step had a timeout of at
+most 20 s; nearby staging points kept the complete 19-step, three-case mission
+to 52.884 s of simulation time. Raw traces and the combined report are under
+`.build/benchmarks/press-temporal/`.
+
+Temporal fit: A first-order fit to the two outer PX4 cases estimated 0.260 s
+command delay and a 0.660 s response time constant, with 0.017398 m/s training
+velocity RMSE and 0.015558 m/s held-out-middle RMSE. Exact isolated-Lab replay
+then evaluated the production controller in physics ticks and selected a
+0.440 s Lab-only action delay from the outer cases. Outer-case velocity RMSE
+was 0.017951 m/s; the held-out 0.475 m case was 0.023553 m/s. Its middle-case
+braking-distance delta was 0.0 m and closest-range delta was +0.011787 m.
+This is an equivalent closed-loop response parameter, not evidence of a
+literal 440 ms wait in one PX4 component. PX4, actor cadence, and `press-v1`
+remain unchanged.
+
+Actor decision: The existing iteration-45 actor from
+`20260727T204645Z.223589` failed reconciled Lab evaluation over 300 episodes:
+0.517 success, 0.483 pusher collision, 0.39414 m mean closest range, and
+0.38285 m minimum closest range. Run
+`temporal-reconcile-440ms-20260728T0040Z` therefore actor-only initialized
+from that iteration and completed the prescribed 50 iterations at fixed
+`1e-6` learning rate, 0.01 initial noise, zero entropy, and five-iteration
+checkpoints. Each iteration collected 8,192 transitions from 256 environments
+and 32 policy steps. Run-scoped TensorBoard used
+`.build/training/press-approach/temporal-reconcile-440ms-20260728T0040Z/logs`.
+
+Selection outcome: No checkpoint passed all three gates. Iterations 45 and 49
+were the two best. Iteration 49 ranked first with 0.940 success, 0.060
+collisions, 0.404974 m mean closest range, and 0.383841 m minimum closest
+range. It missed both the 0.050 collision ceiling and 0.400 m minimum-range
+floor. Selection retained iteration 49 only as the rejected diagnostic and
+did not export it or advance `latest`.
+
+Publication override: At the user's explicit direction, iteration 49 was
+manually exported and `.build/training/press-approach/latest` was advanced to
+`temporal-reconcile-440ms-20260728T0040Z`. This makes the 94.0%-success model
+available for later work but does not change its rejected selection result or
+waive the virtual and physical acceptance gates.
+
+Decision: Stop at the published diagnostic actor. The required three virtual
+PX4 acceptance runs were not started, and the physical wall run was not
+performed. Physical completion, five stable samples, closest range, pusher
+contact, and visible body/arm/propeller contact therefore have no outcome for
+this cycle. To continue actor-only work later, initialize a new run from
+`.build/training/press-approach/temporal-reconcile-440ms-20260728T0040Z/logs/model_49.pt`;
+the full rejected metrics remain in that run's `checkpoint_selection.json`.
+
+### 45. Verify per-goto PX4 ground-speed control without the wall
+
+Date: 2026-07-28.
+
+Manual verification command:
+
+```text
+make test-integration-px4-navigation
+```
+
+Wall-free result: The dual-airframe navigation gate passed using a 0.5 m/s
+PX4-guided reposition leg followed by the existing streamed OFFBOARD leg. The
+x500 observed 0.568615 m/s peak and 0.453339 m/s average horizontal speed,
+0.656407 m braking distance, 0.489171 m error when the waypoint predicate
+completed, 0.069953 m final error after the following hover, zero overshoot,
+and 0.035061 m maximum cross-track error. The s550 observed 0.538365 m/s peak
+and 0.440375 m/s average horizontal speed, 2.129739 m braking distance,
+0.489472 m completion error, 0.060672 m final error, 0.039235 m overshoot, and
+0.056772 m maximum cross-track error. Both completion errors remained within
+the existing 0.5 m position gate and both cross-track errors remained within
+the existing 2.0 m gate. Run-scoped evidence is under
+`.build/docker/integration/test-integration-px4-navigation.20260728T220018Z.1260490`.
+
+Virtual approach result: The 0.5 m/s staging leg, 0.08 m/s final 0.11 m leg,
+fresh OFFBOARD policy entry, policy completion, and 0.5 m/s return leg all
+completed. The mission then failed only because the land step reached its
+required 20.0 s timeout before PX4 disarmed; ULog showed that PX4 accepted the
+Land command and the vehicle reached ground level well inside that interval.
+Recovery subsequently disarmed the vehicle. The failed run is preserved under
+`.build/docker/integration/test-integration-press-approach-routine.20260728T215628Z.1258179`;
+the timeout was not raised above the required 20 s cap.
+
+Decision: PX4-guided speed control is accepted for wall-free navigation, while
+the physical approach remains unapproved because its complete virtual routine
+did not pass. No physical-wall command was run. Do not infer a hard velocity
+limit from the requested speed: the observed peak speeds demonstrate that it is
+a PX4 trajectory target, and PX4 retains braking responsibility.

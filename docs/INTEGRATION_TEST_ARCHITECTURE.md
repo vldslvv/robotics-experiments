@@ -63,16 +63,31 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   rate, so artifacts trained before that field was introduced must be
   retrained.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
-  flight from `configs/policy_press_approach_quad.yaml`: takeoff, goto about
-  0.48 m from the switch, execute the artifact-selected approach policy, return
-  to the landing point, land, and disarm. It requires stable contact-free
-  approach completion and no lamp transition. Like the hover artifact gate, it
-  is excluded from `test-integration-all` because it needs an independently
-  accepted artifact declaring `policy_interface: press-v1` and
-  `curriculum_stage: approach`.
+  flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
+  safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
+  the short move into the 0.48 m handoff range at 0.08 m/s, execute the
+  artifact-selected approach policy, return at 0.5 m/s to the landing point,
+  land, and disarm. It requires stable contact-free approach completion and no
+  lamp transition. Like the hover artifact gate, it is excluded from
+  `test-integration-all` because it needs an independently accepted artifact
+  declaring `policy_interface: press-v1` and `curriculum_stage: approach`.
   Selection may publish an explicitly rejected diagnostic fallback at
   `.build/training/press-approach/latest`; that fallback does not satisfy this
   gate's workflow precondition.
+- `make test-integration-press-temporal-conformance` runs the production press
+  actor through three wall-free PX4 policy stages at nominal 0.460, 0.475, and
+  0.490 m entry ranges. It retains the switch pose and production observation
+  path but disables switch and proxy-wall collisions. The structured
+  `ROUTINE_STAGE` and `PRESS_POLICY` records are the raw temporal trace; this
+  target does not replace the artifact acceptance gate.
+- `make test-integration-press-temporal-replay` consumes the PX4 temporal JSON
+  under `.build/benchmarks/press-temporal/`, replays its exact observation and
+  action cadence through isolated Isaac Lab, and evaluates the configured
+  delay grid. `controller_conformance.py` fits the outer entry cases and
+  reports the held-out middle case plus velocity, braking-distance,
+  closest-range, and settling diagnostics. These two temporal targets are
+  excluded from `test-integration-all` because they require the selected press
+  artifact and explicit trace artifacts.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.
@@ -92,16 +107,22 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   its spawn, so the absolute world-ENU waypoints never converge), each on its
   own PX4 SITL instance with the per-asset airframe derived from its USD asset
   (the quad's `none_x500_v2`/`22000` and the hex's generated Hex X
-  `none_hexa_x`/`22001`). It protects OFFBOARD setpoint and transmitter-phase
-  continuity across `goto` -> `goto` and `goto` -> `hover` transitions and
-  passes only when **both** drones hold their
-  envelope. It reuses the generic multi-PX4 launch path
+  `none_hexa_x`/`22001`). Each first leg is a wall-free guided goto at 0.5 m/s
+  followed by hover; the scenario emits one `GOTO_SPEED_DIAGNOSTIC` JSON record
+  per vehicle with requested, peak, and average horizontal speed, braking
+  distance, completion/final error, overshoot, and cross-track values. The
+  braking distance starts at the last sample at or above the requested speed
+  (or the peak when the vehicle never reaches it) and ends at maximum
+  along-track progress after that sample. The
+  second leg remains speedless and protects OFFBOARD setpoint continuity across
+  `goto` -> `hover`. The target passes only when **both** drones complete
+  without breaching their position, cross-track, or flight-envelope gates. It
+  reuses the generic multi-PX4 launch path
   (`run_px4_integration_test.sh` over the enabled vehicles returned by
   `load_config(path)`, like
   the multi-drone takeoff) and the shared `_px4_navigation_scenario.py` driver,
-  whose
-  `_assert_navigation_routine_config` validates the `goto`/`goto -> hover`
-  config per flying vehicle before running the strict takeoff scenario.
+  whose `_assert_navigation_routine_config` validates the `goto`/`goto ->
+  hover` config per flying vehicle before running the strict takeoff scenario.
 
 ## Concurrency
 

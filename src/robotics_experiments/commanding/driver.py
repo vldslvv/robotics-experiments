@@ -412,6 +412,9 @@ def _log_routine_stage(
         "label": state.routine.steps[index].label,
         "sim_time_us": int(sim_time_us),
     }
+    descriptor = context.params.steps[index]
+    if "ground_speed_m_s" in descriptor:
+        payload["ground_speed_m_s"] = float(descriptor["ground_speed_m_s"])
     context.env.log(
         f"[{context.label}] ROUTINE_STAGE "
         f"{json.dumps(payload, separators=(',', ':'), sort_keys=True)}"

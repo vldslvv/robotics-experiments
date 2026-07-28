@@ -10,6 +10,7 @@ from robotics_experiments.commanding._routine_model import (
     PolicyInput,
     RoutineDecision,
     RoutineState,
+    RoutineStep,
     StreamSetpoint,
     VehicleRoutine,
     _OffboardState,
@@ -37,6 +38,7 @@ def _advanced(*, state: RoutineState, policy_state: Optional[object] = None) -> 
         baseline_position_enu=None,
         step_started_us=None,
         hold_since_us=None,
+        guided_confirmation_sent=False,
         offboard=replace(
             state.offboard,
             policy_state=None,
@@ -45,6 +47,35 @@ def _advanced(*, state: RoutineState, policy_state: Optional[object] = None) -> 
             policy_failure_reason=None,
         ),
         last_policy_state=(state.last_policy_state if policy_state is None else policy_state),
+    )
+
+
+def _command_for_step(
+    *,
+    step: RoutineStep,
+    baseline: Optional[np.ndarray],
+) -> Optional[MavlinkCommand]:
+    command = step.command
+    if command is None or step.guided is None or baseline is None:
+        return command
+    east, north, _up = step.guided.target_enu
+    de = east - float(baseline[0])
+    dn = north - float(baseline[1])
+    yaw_rad = math.nan
+    if math.hypot(de, dn) >= step.guided.min_heading_dist_m:
+        yaw_rad = math.atan2(de, dn)
+    params = command.params
+    return replace(
+        command,
+        params=(
+            params[0],
+            params[1],
+            params[2],
+            yaw_rad,
+            params[4],
+            params[5],
+            params[6],
+        ),
     )
 
 
@@ -248,7 +279,7 @@ def _enter_step(
 
     offboard = state.offboard
     setpoint = None
-    command = step.command
+    command = _command_for_step(step=step, baseline=baseline)
     diagnostics: tuple[str, ...] = ()
     if step.streaming is not None:
         offboard, setpoint, command, diagnostics = _enter_stream(
@@ -356,10 +387,32 @@ def decide(
         and not ack.accepted
     ):
         if step.retry_on_temporarily_rejected and ack.result == MAV_RESULT_TEMPORARILY_REJECTED:
-            return state, RoutineDecision.continue_(command=step.command)
+            return state, RoutineDecision.continue_(
+                command=_command_for_step(
+                    step=step,
+                    baseline=state.baseline_position_enu,
+                )
+            )
         return state, RoutineDecision.fail(
             f"step {step.label!r} rejected: command={step.command.command_id} result={ack.result}",
             failure_kind=FailureKind.COMMAND,
+        )
+    if (
+        ack is not None
+        and ack.accepted
+        and step.guided is not None
+        and step.command is not None
+        and ack.command_id == step.command.command_id
+        and not state.guided_confirmation_sent
+    ):
+        return replace(
+            state,
+            guided_confirmation_sent=True,
+        ), RoutineDecision.continue_(
+            command=_command_for_step(
+                step=step,
+                baseline=state.baseline_position_enu,
+            )
         )
 
     step_started_us = state.step_started_us

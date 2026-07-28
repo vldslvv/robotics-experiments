@@ -13,7 +13,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -39,6 +42,16 @@ _NED_TO_ENU = np.array(
     ]
 )
 _FLU_TO_FRD = np.diag([1.0, -1.0, -1.0])
+_ROUTINE_MARKER = "ROUTINE_STAGE "
+_POLICY_MARKER = "PRESS_POLICY "
+_TEMPORAL_LABEL = re.compile(r"^policy\[temporal-(?P<range>0\.\d{3})\]$")
+
+
+@dataclass(frozen=True)
+class _TemporalTrace:
+    label: str
+    nominal_entry_range_m: float
+    samples: tuple[dict[str, Any], ...]
 
 
 def _dataset(*, ulog, name: str) -> dict:
@@ -155,6 +168,408 @@ def _wrench(*, geometry: MixerGeometry, omega: np.ndarray) -> np.ndarray:
 
 def _root_mean_square(*, values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(values))))
+
+
+def _json_after_marker(*, line: str, marker: str) -> dict[str, Any] | None:
+    marker_index = line.find(marker)
+    if marker_index < 0:
+        return None
+    return json.loads(line[marker_index + len(marker) :])
+
+
+def _load_temporal_traces(*, log_path: Path) -> tuple[_TemporalTrace, ...]:
+    """Read policy-only temporal traces from one production runtime log."""
+    traces: list[_TemporalTrace] = []
+    label = ""
+    nominal_range_m = math.nan
+    samples: list[dict[str, Any]] = []
+    for line in log_path.read_text(errors="replace").splitlines():
+        routine = _json_after_marker(line=line, marker=_ROUTINE_MARKER)
+        if routine is not None and routine.get("kind") == "policy":
+            event = routine.get("event")
+            candidate = str(routine.get("label"))
+            match = _TEMPORAL_LABEL.fullmatch(candidate)
+            if match is None:
+                continue
+            if event == "start":
+                if label:
+                    raise ValueError(f"nested temporal policy stage {candidate!r} in {log_path}")
+                label = candidate
+                nominal_range_m = float(match.group("range"))
+                samples = []
+            elif event == "failed" and label == candidate:
+                raise ValueError(f"temporal policy stage {candidate!r} failed in {log_path}")
+            elif event == "complete" and label == candidate:
+                if not samples:
+                    raise ValueError(f"temporal policy stage {candidate!r} has no actor samples")
+                first_us = int(samples[0]["sim_time_us"])
+                aligned = tuple(
+                    {
+                        **sample,
+                        "time_s": (int(sample["sim_time_us"]) - first_us) * 1e-6,
+                    }
+                    for sample in samples
+                )
+                traces.append(
+                    _TemporalTrace(
+                        label=label,
+                        nominal_entry_range_m=nominal_range_m,
+                        samples=aligned,
+                    )
+                )
+                label = ""
+                nominal_range_m = math.nan
+                samples = []
+            continue
+
+        if not label:
+            continue
+        policy = _json_after_marker(line=line, marker=_POLICY_MARKER)
+        if policy is None or policy.get("event") != "actor_evaluation":
+            continue
+        observation = np.asarray(policy["observation"], dtype=np.float64)
+        action = np.asarray(policy["normalized_action"], dtype=np.float64)
+        if observation.shape != (34,) or action.shape != (4,):
+            raise ValueError(
+                "temporal sample must contain a 34-value observation and four-value action"
+            )
+        setpoint = policy["setpoint"]
+        if not isinstance(setpoint, dict):
+            raise ValueError("temporal sample setpoint must be an object")
+        samples.append(
+            {
+                "sim_time_us": int(policy["sim_time_us"]),
+                "range_m": float(observation[0]),
+                "closing_speed_mps": float(observation[10]),
+                "linear_speed_mps": float(np.linalg.norm(observation[10:13])),
+                "forward_command_mps": float(setpoint["forward_mps"]),
+                "observation": [float(value) for value in observation],
+                "action": [float(value) for value in action],
+                "stable_goal_count": int(policy["stable_goal_count"]),
+                "complete": bool(policy["complete"]),
+            }
+        )
+    if label:
+        raise ValueError(f"unterminated temporal policy stage {label!r} in {log_path}")
+    expected = [0.460, 0.475, 0.490]
+    actual = [trace.nominal_entry_range_m for trace in traces]
+    if actual != expected:
+        raise ValueError(f"temporal trace entries are {actual!r}, expected {expected!r}")
+    return tuple(traces)
+
+
+def _trace_metrics(*, trace: _TemporalTrace) -> dict[str, Any]:
+    samples = trace.samples
+    times = np.asarray([sample["time_s"] for sample in samples], dtype=np.float64)
+    ranges = np.asarray([sample["range_m"] for sample in samples], dtype=np.float64)
+    velocities = np.asarray(
+        [sample["closing_speed_mps"] for sample in samples],
+        dtype=np.float64,
+    )
+    commands = np.asarray(
+        [sample["forward_command_mps"] for sample in samples],
+        dtype=np.float64,
+    )
+    reversal_candidates = np.flatnonzero(commands <= 0.0)
+    reversal_index = int(reversal_candidates[0]) if reversal_candidates.size else len(samples) - 1
+    complete_candidates = np.flatnonzero(
+        np.asarray([sample["complete"] for sample in samples], dtype=bool)
+    )
+    settling_time_s = float(times[complete_candidates[0]]) if complete_candidates.size else None
+    cadence = np.diff(times)
+    closest_index = int(np.argmin(ranges))
+    return {
+        "sample_count": len(samples),
+        "entry_range_m": float(ranges[0]),
+        "entry_closing_speed_mps": float(velocities[0]),
+        "cadence_mean_s": float(np.mean(cadence)) if cadence.size else 0.0,
+        "cadence_min_s": float(np.min(cadence)) if cadence.size else 0.0,
+        "cadence_max_s": float(np.max(cadence)) if cadence.size else 0.0,
+        "peak_closing_speed_mps": float(np.max(velocities)),
+        "command_reversal_time_s": float(times[reversal_index]),
+        "braking_distance_m": float(ranges[reversal_index] - ranges[closest_index]),
+        "closest_range_m": float(ranges[closest_index]),
+        "closest_range_time_s": float(times[closest_index]),
+        "settling_time_s": settling_time_s,
+    }
+
+
+def _delayed_command(
+    *,
+    times: np.ndarray,
+    commands: np.ndarray,
+    query_time_s: float,
+) -> float:
+    index = int(np.searchsorted(times, query_time_s, side="right") - 1)
+    return 0.0 if index < 0 else float(commands[index])
+
+
+def _simulate_first_order_response(
+    *,
+    trace: _TemporalTrace,
+    command_delay_s: float,
+    response_time_constant_s: float,
+) -> np.ndarray:
+    times = np.asarray([sample["time_s"] for sample in trace.samples], dtype=np.float64)
+    commands = np.asarray(
+        [sample["forward_command_mps"] for sample in trace.samples],
+        dtype=np.float64,
+    )
+    observed = np.asarray(
+        [sample["closing_speed_mps"] for sample in trace.samples],
+        dtype=np.float64,
+    )
+    predicted = np.empty_like(observed)
+    predicted[0] = observed[0]
+    for index in range(1, len(predicted)):
+        dt = float(times[index] - times[index - 1])
+        command = _delayed_command(
+            times=times,
+            commands=commands,
+            query_time_s=float(times[index - 1] - command_delay_s),
+        )
+        alpha = 1.0 - math.exp(-dt / response_time_constant_s)
+        predicted[index] = predicted[index - 1] + alpha * (command - predicted[index - 1])
+    return predicted
+
+
+def _response_rmse(
+    *,
+    traces: tuple[_TemporalTrace, ...],
+    command_delay_s: float,
+    response_time_constant_s: float,
+) -> float:
+    errors = []
+    for trace in traces:
+        observed = np.asarray(
+            [sample["closing_speed_mps"] for sample in trace.samples],
+            dtype=np.float64,
+        )
+        predicted = _simulate_first_order_response(
+            trace=trace,
+            command_delay_s=command_delay_s,
+            response_time_constant_s=response_time_constant_s,
+        )
+        errors.append(predicted[1:] - observed[1:])
+    return _root_mean_square(values=np.concatenate(errors))
+
+
+def _fit_temporal_response(
+    *,
+    traces: tuple[_TemporalTrace, ...],
+) -> dict[str, Any]:
+    """Fit outer entry cases and hold the middle case out for validation."""
+    by_range = {trace.nominal_entry_range_m: trace for trace in traces}
+    training = (by_range[0.460], by_range[0.490])
+    validation = (by_range[0.475],)
+    best = (math.inf, 0.0, 0.02)
+    for delay_s in np.arange(0.0, 0.404, 0.004):
+        for tau_s in np.arange(0.02, 1.004, 0.004):
+            rmse = _response_rmse(
+                traces=training,
+                command_delay_s=float(delay_s),
+                response_time_constant_s=float(tau_s),
+            )
+            best = min(best, (rmse, float(delay_s), float(tau_s)))
+    training_rmse, delay_s, tau_s = best
+    return {
+        "method": "outer-entry-first-order-delay-grid-v1",
+        "fit_entry_ranges_m": [0.460, 0.490],
+        "validation_entry_ranges_m": [0.475],
+        "command_delay_s": delay_s,
+        "response_time_constant_s": tau_s,
+        "training_velocity_rmse_mps": training_rmse,
+        "validation_velocity_rmse_mps": _response_rmse(
+            traces=validation,
+            command_delay_s=delay_s,
+            response_time_constant_s=tau_s,
+        ),
+    }
+
+
+def _trace_from_mapping(*, value: dict[str, Any]) -> _TemporalTrace:
+    samples = value.get("samples")
+    if not isinstance(samples, list):
+        raise ValueError("temporal trace JSON requires a samples list")
+    return _TemporalTrace(
+        label=str(value["label"]),
+        nominal_entry_range_m=float(value["nominal_entry_range_m"]),
+        samples=tuple(samples),
+    )
+
+
+def _aligned_trace_diagnostics(
+    *,
+    px4: _TemporalTrace,
+    lab: _TemporalTrace,
+) -> dict[str, Any]:
+    if px4.nominal_entry_range_m != lab.nominal_entry_range_m:
+        raise ValueError("PX4 and Lab temporal traces have different entry ranges")
+    count = min(len(px4.samples), len(lab.samples))
+    if count < 2:
+        raise ValueError("PX4/Lab temporal comparison requires at least two samples")
+    px4_velocity = np.asarray(
+        [sample["closing_speed_mps"] for sample in px4.samples[:count]],
+        dtype=np.float64,
+    )
+    lab_velocity = np.asarray(
+        [sample["closing_speed_mps"] for sample in lab.samples[:count]],
+        dtype=np.float64,
+    )
+    px4_metrics = _trace_metrics(trace=px4)
+    lab_metrics = _trace_metrics(trace=lab)
+    return {
+        "aligned_sample_count": count,
+        "velocity_response_rmse_mps": _root_mean_square(values=lab_velocity - px4_velocity),
+        "braking_distance_delta_m": (
+            float(lab_metrics["braking_distance_m"]) - float(px4_metrics["braking_distance_m"])
+        ),
+        "closest_range_delta_m": (
+            float(lab_metrics["closest_range_m"]) - float(px4_metrics["closest_range_m"])
+        ),
+        "settling_time_delta_s": (
+            None
+            if px4_metrics["settling_time_s"] is None or lab_metrics["settling_time_s"] is None
+            else float(lab_metrics["settling_time_s"]) - float(px4_metrics["settling_time_s"])
+        ),
+    }
+
+
+def _aligned_velocity_rmse(
+    *,
+    px4_traces: tuple[_TemporalTrace, ...],
+    lab_traces: tuple[_TemporalTrace, ...],
+) -> float:
+    errors = []
+    for px4, lab in zip(px4_traces, lab_traces, strict=True):
+        if px4.nominal_entry_range_m != lab.nominal_entry_range_m:
+            raise ValueError("PX4 and Lab temporal traces have different entry ranges")
+        count = min(len(px4.samples), len(lab.samples))
+        if count < 2:
+            raise ValueError("PX4/Lab temporal comparison requires at least two samples")
+        px4_velocity = np.asarray(
+            [sample["closing_speed_mps"] for sample in px4.samples[:count]],
+            dtype=np.float64,
+        )
+        lab_velocity = np.asarray(
+            [sample["closing_speed_mps"] for sample in lab.samples[:count]],
+            dtype=np.float64,
+        )
+        errors.append(lab_velocity - px4_velocity)
+    return _root_mean_square(values=np.concatenate(errors))
+
+
+def _fit_lab_command_delay(
+    *,
+    px4_traces: tuple[_TemporalTrace, ...],
+    candidates: list[dict[str, Any]],
+) -> tuple[dict[str, Any], tuple[_TemporalTrace, ...]]:
+    """Select a Lab delay on outer traces and hold the middle trace out."""
+    if not candidates:
+        raise ValueError("Lab temporal replay has no delay candidates")
+    by_range = {trace.nominal_entry_range_m: trace for trace in px4_traces}
+    px4_training = (by_range[0.460], by_range[0.490])
+    px4_validation = (by_range[0.475],)
+    scored = []
+    replay_by_delay = {}
+    for candidate in candidates:
+        delay_s = float(candidate["controller_command_delay_s"])
+        values = candidate.get("traces")
+        if not isinstance(values, list):
+            raise ValueError("Lab temporal replay candidate requires a traces list")
+        traces = tuple(_trace_from_mapping(value=value) for value in values)
+        lab_by_range = {trace.nominal_entry_range_m: trace for trace in traces}
+        if set(lab_by_range) != set(by_range):
+            raise ValueError("PX4 and Lab temporal reports have different entry ranges")
+        training_rmse = _aligned_velocity_rmse(
+            px4_traces=px4_training,
+            lab_traces=(lab_by_range[0.460], lab_by_range[0.490]),
+        )
+        validation_rmse = _aligned_velocity_rmse(
+            px4_traces=px4_validation,
+            lab_traces=(lab_by_range[0.475],),
+        )
+        scored.append(
+            {
+                "controller_command_delay_s": delay_s,
+                "training_velocity_rmse_mps": training_rmse,
+                "validation_velocity_rmse_mps": validation_rmse,
+            }
+        )
+        replay_by_delay[delay_s] = traces
+    selected = min(
+        scored,
+        key=lambda value: (
+            float(value["training_velocity_rmse_mps"]),
+            float(value["controller_command_delay_s"]),
+        ),
+    )
+    selected_delay_s = float(selected["controller_command_delay_s"])
+    return (
+        {
+            "method": "outer-entry-isolated-lab-delay-grid-v1",
+            "fit_entry_ranges_m": [0.460, 0.490],
+            "validation_entry_ranges_m": [0.475],
+            "selected_controller_command_delay_s": selected_delay_s,
+            "training_velocity_rmse_mps": selected["training_velocity_rmse_mps"],
+            "validation_velocity_rmse_mps": selected["validation_velocity_rmse_mps"],
+            "candidates": scored,
+        },
+        replay_by_delay[selected_delay_s],
+    )
+
+
+def _temporal_report(
+    *,
+    px4_log_path: Path,
+    lab_trace_path: Path | None,
+) -> dict[str, object]:
+    px4_traces = _load_temporal_traces(log_path=px4_log_path)
+    report: dict[str, object] = {
+        "schema_version": 2,
+        "method": "press-policy-temporal-conformance-v1",
+        "px4_log": str(px4_log_path),
+        "fit": _fit_temporal_response(traces=px4_traces),
+        "px4_traces": [
+            {
+                "label": trace.label,
+                "nominal_entry_range_m": trace.nominal_entry_range_m,
+                "metrics": _trace_metrics(trace=trace),
+                "samples": list(trace.samples),
+            }
+            for trace in px4_traces
+        ],
+    }
+    if lab_trace_path is not None:
+        lab_payload = json.loads(lab_trace_path.read_text())
+        values = lab_payload.get("candidates")
+        if not isinstance(values, list):
+            raise ValueError("Lab temporal replay requires a candidates list")
+        lab_fit, lab_traces = _fit_lab_command_delay(
+            px4_traces=px4_traces,
+            candidates=values,
+        )
+        if len(lab_traces) != len(px4_traces):
+            raise ValueError("PX4 and Lab temporal reports have different trace counts")
+        report["lab_trace"] = str(lab_trace_path)
+        report["lab_parameter_fit"] = lab_fit
+        report["lab_traces"] = [
+            {
+                "label": trace.label,
+                "nominal_entry_range_m": trace.nominal_entry_range_m,
+                "metrics": _trace_metrics(trace=trace),
+                "samples": list(trace.samples),
+            }
+            for trace in lab_traces
+        ]
+        report["alignment"] = [
+            {
+                "nominal_entry_range_m": px4.nominal_entry_range_m,
+                **_aligned_trace_diagnostics(px4=px4, lab=lab),
+            }
+            for px4, lab in zip(px4_traces, lab_traces, strict=True)
+        ]
+    return report
 
 
 def _report(
@@ -315,23 +730,45 @@ def _report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Replay PX4 ULog state through the Isaac velocity controller"
+        description="Report instantaneous or temporal PX4/Isaac controller conformance"
     )
-    parser.add_argument("ulog", type=Path)
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--window", required=True, help="relative ULog seconds START,END")
+    parser.add_argument("ulog", type=Path, nargs="?")
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--window", help="relative ULog seconds START,END")
+    parser.add_argument(
+        "--temporal-log",
+        type=Path,
+        help="runtime log containing the three wall-free production-actor traces",
+    )
+    parser.add_argument(
+        "--lab-trace",
+        type=Path,
+        help="optional isolated-Lab replay JSON to align with --temporal-log",
+    )
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
-    start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
+    if args.temporal_log is not None:
+        if args.ulog is not None or args.config is not None or args.window is not None:
+            parser.error("--temporal-log cannot be combined with ULog/config/window arguments")
+        report = _temporal_report(
+            px4_log_path=args.temporal_log,
+            lab_trace_path=args.lab_trace,
+        )
+    else:
+        if args.lab_trace is not None:
+            parser.error("--lab-trace requires --temporal-log")
+        if args.ulog is None or args.config is None or args.window is None:
+            parser.error("ULog mode requires ulog, --config, and --window")
+        start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
 
-    from pyulog import ULog
+        from pyulog import ULog
 
-    report = _report(
-        ulog=ULog(str(args.ulog)),
-        config_path=args.config,
-        start_s=start_s,
-        end_s=end_s,
-    )
+        report = _report(
+            ulog=ULog(str(args.ulog)),
+            config_path=args.config,
+            start_s=start_s,
+            end_s=end_s,
+        )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:
         args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

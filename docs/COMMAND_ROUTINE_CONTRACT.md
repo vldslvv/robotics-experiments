@@ -78,9 +78,9 @@ the entire fleet cycle.
   `_vertical_speed_within`, `_angular_speed_below`. `EnvelopeGates` bundles the
   gate thresholds wired onto the flight steps.
 
-  A **streaming step** (the `goto` and `policy` kinds, carrying a
-  `_StreamingSpec`) is a
-  step whose `decide` may emit independent setpoint and command effects. It
+  A **streaming step** (a speedless `goto` or any `policy`, carrying a
+  `_StreamingSpec`) is a step whose `decide` may emit independent setpoint and
+  command effects. It
   primes `prime_ticks` actual OFFBOARD transmissions, sends the one-shot
   offboard-mode command, then streams at `driver.offboard_setpoint_rate_hz`
   until the step completes. The last priming transmission and mode command may
@@ -102,6 +102,21 @@ the entire fleet cycle.
   across consecutive OFFBOARD steps. A fixed `goto` payload is calculated once
   on step entry and replaces the cache, then is sent on the next scheduled
   emission; routine boundaries never create an extra transmission.
+
+  A `goto` with an authored finite positive `ground_speed_m_s` instead sends
+  one acknowledged `MAV_CMD_DO_REPOSITION`, with the requested ground speed in
+  param1 and the same ENU-to-geodetic target in params 5-7. PX4 owns trajectory
+  generation and braking; the value is a guided target speed, not a hard
+  velocity governor. At step entry, commanding derives param4 yaw from the
+  captured world-ENU baseline with the same ENU-to-NED heading conversion used
+  by a speedless goto; temporary rejection retries that same derived command.
+  After the first accepted ACK, commanding reissues the target exactly once so
+  PX4 Navigator sees a fresh reposition triplet after its Commander-driven
+  loiter-mode transition (PX4 only consumes that triplet while it is younger
+  than 500 ms). Position, heading, cross-track, flight-envelope, and timeout
+  predicates are identical to the speedless form. Omitting the field preserves
+  the streaming OFFBOARD lifecycle exactly. Guided goto entry clears any prior
+  OFFBOARD cache, and a later policy therefore performs fresh OFFBOARD priming.
 
   The **`policy` step** is the task-neutral policy plug-in over the same streaming
   lifecycle. Its `_StreamingSpec` carries an injected `PolicyAdapter` instead
@@ -289,10 +304,11 @@ that a forgiving driver stopped early.
 Every routine step emits machine-readable `ROUTINE_STAGE` JSON records for its
 `start` and `complete` boundaries (or `failed` instead of `complete`), carrying
 the configured `kind`, built label, zero-based index, and exact
-`sim_time_us`. The fleet environment sends the same record to the normal shell
-log and the vehicle-filtered bridge log. Flight analysis must select a policy
-interval from these boundaries rather than treating takeoff, waypoint travel,
-or return/landing as learned-policy behavior.
+`sim_time_us`, plus `ground_speed_m_s` when the descriptor authors it. The fleet
+environment sends the same record to the normal shell log and the
+vehicle-filtered bridge log. Flight analysis must select a policy interval from
+these boundaries rather than treating takeoff, waypoint travel, or
+return/landing as learned-policy behavior.
 
 An adapter may also return immutable diagnostic strings in `PolicyResult`.
 The pure stepper carries them to `RoutineDecision`, and the imperative driver

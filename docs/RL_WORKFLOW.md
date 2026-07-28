@@ -38,6 +38,40 @@ and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler
 alternates 13 and 12 physics samples while `step_dt` remains 0.05 s. Exported
 artifacts own evaluation and deployment cadence and action scaling.
 
+PX4 is the temporal-response oracle for the Lab velocity controller. The
+wall-free conformance workflow runs the production 34-value actor and
+four-value action at nominal 0.460, 0.475, and 0.490 m entry ranges, fits only
+the outer traces, and holds the middle trace out for validation. Isolated Lab
+replay reproduces every captured 40/60 ms policy interval and uses the captured
+action sequence unchanged. `rl.action.controller_command_delay_s` is the sole
+Lab-side reconciliation parameter; it delays the action reaching the Lab
+controller in physics ticks without changing actor cadence, PX4, or the
+`press-v1` contract. The fitted value is 0.440 s. The command buffer and
+thruster state are cleared per environment reset.
+
+Use the following sequence to capture and compare a new trace:
+
+```console
+make test-integration-press-temporal-conformance
+PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
+  --temporal-log <isaac-log> \
+  --json .build/benchmarks/press-temporal/px4-traces.json
+make test-integration-press-temporal-replay
+PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
+  --temporal-log <isaac-log> \
+  --lab-trace .build/benchmarks/press-temporal/lab-traces.json \
+  --json .build/benchmarks/press-temporal/conformance.json
+```
+
+The temporal experiment disables switch and wall collisions while preserving
+the switch pose and production observation provider. It is diagnostic and
+must not be treated as permission for a wall run. After Lab acceptance, three
+separate wall-free PX4 missions must pass before
+`test-integration-press-approach-routine` may run. If checkpoint selection or
+independent Lab evaluation fails any 80% success, 5% collision, or 0.40 m
+minimum-range threshold, do not publish the actor and do not start either PX4
+acceptance stage.
+
 ## Press observation and approach stage
 
 The press actor contract remains the schema-v1 34-value observation and
@@ -257,8 +291,12 @@ active unless asked to stop it.
 ## Approach deployment mission
 
 `configs/policy_press_approach_quad.yaml` runs arm -> takeoff -> hover -> goto
-approximately 0.48 m from the switch -> hover -> generic `policy` -> return
-goto -> land. The policy descriptor reads
+a safe staging point approximately 0.59 m from the switch -> hover -> make a
+short goto into the approximately 0.48 m handoff range -> hover -> generic
+`policy` -> return goto -> land. Splitting the approach keeps braking from the
+long navigation leg outside the pusher-to-wall clearance. The staging and
+return gotos request PX4-guided 0.5 m/s motion; the final 0.11 m approach
+requests 0.08 m/s and has a 10 s timeout. The policy descriptor reads
 `.build/training/press-approach/latest` and selects switch index zero.
 
 The runtime preflights metadata before simulator mutation. The `approach`
@@ -288,7 +326,8 @@ detection. If Lab evaluation passes while the live PX4 approach still visibly
 contacts the wall, record the dynamics mismatch and stop; do not add collision
 to the observation or artifact contract.
 
-After `make eval-press` passes, run:
+After `make eval-press` and three separate wall-free temporal PX4 missions
+pass, run:
 
 ```console
 make test-integration-press-approach-routine

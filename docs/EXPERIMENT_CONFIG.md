@@ -57,6 +57,13 @@ exactly one `RoutineDriverState`; empty `steps` follows the normal driver
 lifecycle, sends no commands, and completes. Routine descriptors use the typed
 `RoutineStepConfig` mapping and are validated by the routine builder.
 
+A `goto` descriptor may author a finite positive `ground_speed_m_s`. That form
+uses PX4's guided `MAV_CMD_DO_REPOSITION` speed parameter, so PX4 owns trajectory
+generation and braking; it is a target speed rather than a hard velocity limit.
+A `goto` without the field retains the original streamed OFFBOARD lifecycle.
+Future motion controls remain typed sibling fields rather than an untyped
+parameter map.
+
 Strict integration runs execute the same routines as live runs; only failure
 reporting differs. `routine.failure_recovery_timeout_s` bounds layered landing
 recovery after an armed failure. Fleet-wide waits derive from the active

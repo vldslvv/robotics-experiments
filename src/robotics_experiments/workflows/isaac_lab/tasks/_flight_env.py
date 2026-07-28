@@ -57,6 +57,20 @@ class _FlightDirectRLEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._applied_actions = self.actions.clone()
+        self._command_delay_steps = round(
+            experiment_config.rl.action.controller_command_delay_s
+            * experiment_config.sim.physics_hz
+        )
+        self._command_delay_index = 0
+        self._command_delay_buffer = torch.zeros(
+            (
+                self._command_delay_steps,
+                self.num_envs,
+                self.cfg.action_space,
+            ),
+            dtype=self.actions.dtype,
+            device=self.device,
+        )
         self._setup_actuation()
 
     @property
@@ -164,9 +178,15 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
-        self._applied_actions = self.actions
+        if self._command_delay_steps == 0:
+            self._applied_actions = self.actions
 
     def _apply_action(self) -> None:
+        if self._command_delay_steps:
+            delayed = self._command_delay_buffer[self._command_delay_index].clone()
+            self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
+            self._command_delay_index = (self._command_delay_index + 1) % self._command_delay_steps
+            self._applied_actions = delayed
         self.drone.set_joint_position_target(
             self._pusher_extension_target,
             joint_ids=[self._pusher_joint_id],
@@ -208,4 +228,5 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.drone.write_joint_state_to_sim(joint_position, joint_velocity, env_ids=env_ids)
         self.actions[env_ids] = 0.0
         self._applied_actions[env_ids] = 0.0
+        self._command_delay_buffer[:, env_ids] = 0.0
         self._thruster.reset_idx(env_ids)

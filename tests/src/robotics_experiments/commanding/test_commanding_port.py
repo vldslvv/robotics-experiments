@@ -15,9 +15,12 @@ import pytest
 
 from robotics_experiments.commanding import (
     MAV_CMD_COMPONENT_ARM_DISARM,
+    MAV_CMD_DO_REPOSITION,
+    MAV_DO_REPOSITION_FLAGS_CHANGE_MODE,
     CommandPortStatus,
     MavlinkCommandPort,
     PositionSetpoint,
+    reposition,
 )
 from robotics_experiments.commanding.port import _fold_feedback
 
@@ -54,10 +57,14 @@ def _msg(msg_type, *, src_system=1, src_component=1, **fields):
 
 
 class _RecordingMav:
-    """Records the ``set_position_target_global_int_send`` calls a port emits."""
+    """Records command and global-position-target calls a port emits."""
 
     def __init__(self):
+        self.commands = []
         self.setpoints = []
+
+    def command_long_send(self, *args):
+        self.commands.append(args)
 
     def set_position_target_global_int_send(self, *args):
         self.setpoints.append(dict(zip(_SETPOINT_ARG_NAMES, args, strict=True)))
@@ -223,6 +230,25 @@ def test_send_setpoint_emits_global_position_target_with_yaw():
     assert call["yaw"] == pytest.approx(math.pi / 2.0)
     # Position + yaw: ignore velocity, acceleration, and yaw-rate only.
     assert call["type_mask"] == _POSITION_TARGET_TYPEMASK_POS_YAW
+
+
+def test_send_reposition_serializes_exact_ground_speed_parameter():
+    port, mav = _handshaked_port()
+
+    port.send(reposition(47.0, 8.0, 490.0, 0.08))
+
+    command = mav.commands[-1]
+    assert command[:7] == (
+        1,
+        1,
+        MAV_CMD_DO_REPOSITION,
+        0,
+        0.08,
+        float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE),
+        0.0,
+    )
+    assert math.isnan(command[7])
+    assert command[8:] == (47.0, 8.0, 490.0)
 
 
 def test_send_setpoint_nan_yaw_sets_yaw_ignore():

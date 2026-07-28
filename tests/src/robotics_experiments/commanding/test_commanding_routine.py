@@ -45,6 +45,7 @@ from robotics_experiments.commanding import (
     hovering_stable,
     moved_forward_at_least,
     reached_world_position,
+    reposition,
     takeoff,
     tilt_below,
 )
@@ -761,6 +762,135 @@ def test_build_vehicle_routine_goto():
     assert goto_step.invariants
 
 
+def test_reposition_serializes_default_and_authored_ground_speed():
+    default_speed = reposition(47.0, 8.0, 490.0)
+    authored_speed = reposition(47.0, 8.0, 490.0, 0.08)
+
+    assert default_speed.params[0] == -1.0
+    assert authored_speed.params[:3] == (
+        0.08,
+        float(MAV_DO_REPOSITION_FLAGS_CHANGE_MODE),
+        0.0,
+    )
+    assert math.isnan(authored_speed.params[3])
+    assert authored_speed.params[4:] == (47.0, 8.0, 490.0)
+
+
+def test_build_vehicle_routine_speed_authored_goto_uses_guided_reposition():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    goto_step = routine.steps[0]
+
+    assert goto_step.command.command_id == MAV_CMD_DO_REPOSITION
+    assert goto_step.command.params[0] == pytest.approx(0.5)
+    assert goto_step.command.params[4] == pytest.approx(47.0)
+    assert goto_step.command.params[5] != pytest.approx(8.0)
+    assert goto_step.command.params[6] == pytest.approx(490.0)
+    assert goto_step.retry_on_temporarily_rejected is True
+    assert goto_step.streaming is None
+    assert goto_step.guided is not None
+    assert goto_step.guided.target_enu == (3.0, 0.0, 2.0)
+    assert goto_step.invariants
+
+
+@pytest.mark.parametrize("ground_speed_m_s", [0.0, -0.1, math.inf, -math.inf, math.nan])
+def test_build_vehicle_routine_rejects_invalid_goto_ground_speed(ground_speed_m_s):
+    with pytest.raises(ValueError, match="ground_speed_m_s must be finite and positive"):
+        _goto_routine(ground_speed_m_s=ground_speed_m_s)
+
+
+def test_decide_speed_authored_goto_preserves_ack_completion_heading_and_gates():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, decision = decide(routine, RoutineState(), _far(0))
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert decision.command.params[3] == pytest.approx(math.pi / 2.0)
+    assert decision.setpoint is None
+
+    temporary = CommandAck.from_result(
+        MAV_CMD_DO_REPOSITION,
+        MAV_RESULT_TEMPORARILY_REJECTED,
+    )
+    state, decision = decide(routine, state, _far(1, last_ack=temporary))
+    assert decision.kind is DecisionKind.CONTINUE
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert decision.command.params[3] == pytest.approx(math.pi / 2.0)
+
+    misaligned = make_routine_observation(
+        sim_time_us=60_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=90.0,
+    )
+    state, decision = decide(routine, state, misaligned)
+    assert decision.kind is DecisionKind.CONTINUE
+
+    aligned = make_routine_observation(
+        sim_time_us=80_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = decide(routine, state, aligned)
+    assert decision.kind is DecisionKind.ADVANCE
+
+    breach_routine = _goto_routine(ground_speed_m_s=0.5)
+    breach_state, _ = decide(breach_routine, RoutineState(), _far(0))
+    _, breach = decide(
+        breach_routine,
+        breach_state,
+        make_routine_observation(
+            sim_time_us=20_000,
+            position_enu=(1.0, 3.0, 2.0),
+        ),
+    )
+    assert breach.kind is DecisionKind.FAIL
+    assert breach.failure_kind is FailureKind.ENVELOPE
+
+
+def test_speed_authored_goto_derives_ned_yaw_from_step_baseline():
+    routine = _goto_routine(x=0.0, y=3.0, ground_speed_m_s=0.5)
+
+    _, decision = decide(routine, RoutineState(), _far(0))
+
+    assert decision.command.params[3] == pytest.approx(0.0)
+
+
+def test_speed_authored_goto_reconfirms_once_after_accepted_ack():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, _ = decide(routine, RoutineState(), _far(0))
+    accepted = CommandAck.from_result(MAV_CMD_DO_REPOSITION, 0)
+
+    state, confirmation = decide(routine, state, _far(1, last_ack=accepted))
+    assert confirmation.command.command_id == MAV_CMD_DO_REPOSITION
+    assert confirmation.command.params[3] == pytest.approx(math.pi / 2.0)
+    assert state.guided_confirmation_sent is True
+
+    state, successor = decide(routine, state, _far(2, last_ack=accepted))
+    assert successor.kind is DecisionKind.CONTINUE
+    assert successor.command is None
+    assert state.guided_confirmation_sent is True
+
+
+def test_decide_speed_authored_goto_preserves_hard_rejection_and_timeout():
+    routine = _goto_routine(ground_speed_m_s=0.5)
+    state, _ = decide(routine, RoutineState(), _far(0))
+    denied = CommandAck.from_result(MAV_CMD_DO_REPOSITION, 2)
+    _, rejected = decide(routine, state, _far(1, last_ack=denied))
+    assert rejected.kind is DecisionKind.FAIL
+    assert rejected.failure_kind is FailureKind.COMMAND
+    assert "rejected" in rejected.reason
+
+    state, _ = decide(routine, RoutineState(), _far(0))
+    _, timed_out = decide(
+        routine,
+        state,
+        make_routine_observation(
+            sim_time_us=21_000_000,
+            position_enu=(0.0, 0.0, 2.0),
+        ),
+    )
+    assert timed_out.kind is DecisionKind.FAIL
+    assert timed_out.failure_kind is FailureKind.COMMAND
+    assert "timed out" in timed_out.reason
+
+
 def test_build_vehicle_routine_rejects_goto_without_coordinate():
     with pytest.raises(ValueError, match="'x'"):
         _build([{"kind": "goto", "y": 0.0, "z": 1.0, "timeout_s": 10.0}])
@@ -1144,6 +1274,58 @@ def test_policy_entry_replaces_retained_goto_payload_immediately():
     assert isinstance(decision.setpoint, VelocitySetpoint)
     assert decision.setpoint is not retained_position_setpoint
     assert successor.offboard.cached_setpoint is decision.setpoint
+
+
+def test_speed_authored_goto_hover_policy_transition_primes_offboard_fresh():
+    policy_advance = _FakePolicyAdvance()
+    routine = _build(
+        [
+            {
+                "kind": "goto",
+                "x": 3.0,
+                "y": 0.0,
+                "z": 2.0,
+                "ground_speed_m_s": 0.5,
+                "timeout_s": 20.0,
+            },
+            {"kind": "hover", "hold_s": 0.0},
+            {
+                "kind": "policy",
+                "artifact": "does/not/matter",
+                "timeout_s": 10.0,
+            },
+        ],
+        policy_factory=lambda *, artifact, hold_s: PolicyAdapter(
+            policy_rate_hz=20.0,
+            initial_state=(),
+            advance=policy_advance,
+        ),
+    )
+    state, decision = decide(routine, RoutineState(), _far(0))
+    assert decision.command.command_id == MAV_CMD_DO_REPOSITION
+    assert state.offboard.transmissions == 0
+    assert state.offboard.cached_setpoint is None
+
+    reached = make_routine_observation(
+        sim_time_us=20_000,
+        position_enu=(3.0, 0.0, 2.0),
+        yaw_deg=0.0,
+    )
+    state, decision = decide(routine, state, reached)
+    assert decision.kind is DecisionKind.ADVANCE
+
+    state, decision = decide(routine, state, reached)
+    assert decision.kind is DecisionKind.CONTINUE
+    assert decision.setpoint is None
+    state, decision = decide(routine, state, replace(reached, sim_time_us=40_000))
+    assert decision.kind is DecisionKind.ADVANCE
+
+    state, decision = decide(routine, state, replace(reached, sim_time_us=60_000))
+    assert decision.kind is DecisionKind.CONTINUE
+    assert isinstance(decision.setpoint, VelocitySetpoint)
+    assert decision.command is None
+    assert state.offboard.transmissions == 1
+    assert state.offboard.requested is False
 
 
 def test_decide_policy_input_is_narrow_and_uses_step_baseline_reference():

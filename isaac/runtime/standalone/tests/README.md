@@ -96,18 +96,26 @@ navigation routine as one multi-drone scene
 (id 1, the `hexacopter_s550.usda` asset, so its PX4 instance launches the derived
 generic hexarotor-x airframe) fly the same routine concurrently in parallel lanes
 (the hex `goto` waypoints offset by its spawn so the absolute waypoints never
-converge), and the test passes only when both hold their envelope. The single
-thin entrypoint `test_px4_navigation_routine.py` runs the shared
+converge), and the test passes only when both hold their envelope. The first
+leg uses PX4 guided repositioning at 0.5 m/s and is followed by hover so the
+test can report requested, peak, and average horizontal speed, braking
+distance, final error, and overshoot in `GOTO_SPEED_DIAGNOSTIC` JSON. The
+second leg remains a speedless OFFBOARD goto followed by hover, preserving the
+stream-continuity integration check. The single thin entrypoint
+`test_px4_navigation_routine.py` runs the shared
 `_px4_navigation_scenario.py`: its `_assert_navigation_routine_config` asserts
 each flying vehicle's routine carries a `goto` leg and a `goto -> hover`
-transition (where PX4 failsafes if the OFFBOARD setpoint stream stops while
-OFFBOARD is active), then drives the same strict `_px4_takeoff_scenario.py` flight
-to completion.
+transition. Its speed collector additionally requires one guided goto followed
+by hover, while the other transition checks that OFFBOARD streaming remains
+continuous. It then drives the same strict `_px4_takeoff_scenario.py` flight to
+completion.
 
 `make test-integration-press-approach-routine` runs the artifact-dependent
 Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
-to about 0.48 m, execute the `press-v1` / `approach` artifact through the
-generic `policy` step, return, land, and disarm. The strict hook requires stable
-contact-free completion and no lamp transition. Run it only after selection
+to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
+move into the 0.48 m handoff range at 0.08 m/s, execute the `press-v1` /
+`approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
+and disarm. The strict hook requires stable contact-free completion and no lamp
+transition. Run it only after selection
 publishes `.build/training/press-approach/latest` and `make eval-press`
 independently accepts it; it is excluded from `test-integration-all`.

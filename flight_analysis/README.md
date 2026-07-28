@@ -50,6 +50,30 @@ leave both. Isaac Lab's `Thruster` is a lower actuator-realization layer; with
 the configured zero time constants its output must match the requested
 per-rotor thrust independently of this controller comparison.
 
+For closed-loop temporal comparison, first run the wall-free three-entry PX4
+mission and convert its Isaac log to the replay artifact. The report preserves
+the production actor's exact 34-value observations, four-value actions, and
+40/60 ms command cadence:
+
+```bash
+PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
+  --temporal-log <test_px4_press_temporal_conformance.log> \
+  --json .build/benchmarks/press-temporal/px4-traces.json
+make test-integration-press-temporal-replay
+PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
+  --temporal-log <test_px4_press_temporal_conformance.log> \
+  --lab-trace .build/benchmarks/press-temporal/lab-traces.json \
+  --json .build/benchmarks/press-temporal/conformance.json
+```
+
+The first-order PX4 trace fit and the isolated-Lab delay-grid fit both train on
+the 0.460 and 0.490 m cases and reserve 0.475 m for validation. The combined
+JSON reports command cadence, peak velocity, reversal, braking distance,
+closest range, settling, aligned velocity RMSE, and the selected Lab delay.
+The fitted project value is 0.440 s. This is a closed-loop equivalent delay
+covering estimator, command, controller, and response timing; it is not a
+claim that one literal PX4 component waits 440 ms.
+
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
   flight_analysis/tools/compare_logs.py <log_a.ulg> <log_b.ulg> \

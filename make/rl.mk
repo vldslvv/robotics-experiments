@@ -15,6 +15,9 @@ RL_TENSORBOARD_HOST ?= 127.0.0.1
 RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
+TEMPORAL_TRACE ?= .build/benchmarks/press-temporal/px4-traces.json
+TEMPORAL_LAB_TRACE ?= .build/benchmarks/press-temporal/lab-traces.json
+TEMPORAL_DELAY_GRID ?= 0.344,0.368,0.392,0.416,0.440,0.464,0.488,0.512,0.536
 
 # Training owns optimization, stored metadata, and checkpoints only. A direct
 # run is intentionally unpublished until select-rl-checkpoint selects it.
@@ -116,3 +119,32 @@ test-integration-press-approach-routine: generate-drone-usd
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+# Wall-free production-actor run at three entry ranges. Structured
+# ROUTINE_STAGE / PRESS_POLICY records in the isolated Isaac log are the raw
+# input to controller_conformance.py's temporal report.
+.PHONY: test-integration-press-temporal-conformance
+test-integration-press-temporal-conformance: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-temporal-conformance: HYDRA_CONFIG = configs/temporal_conformance_press_approach_quad.yaml
+test-integration-press-temporal-conformance: SCENE = @config
+test-integration-press-temporal-conformance: generate-drone-usd
+	@TEST_TARGET='test-integration-press-temporal-conformance' \
+	    HOST_ISAAC_LOG_BASENAME='test_px4_press_temporal_conformance.log' \
+	    HOST_PX4_LOG_BASENAME='test_px4_press_temporal_conformance_px4.log' \
+	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/test_px4_press_temporal_conformance.log' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_APPROACH_ROUTINE_TEST)' \
+	    PX4_TEST_CONTAINER_NAME='$(PX4_TEST_CONTAINER_NAME).test-integration-press-temporal-conformance' \
+	    STRICT='1' \
+	    $(PX4_INTEGRATION_COMMON_ENV) \
+	    bash "$(PX4_INTEGRATION_RUNNER)"
+
+.PHONY: test-integration-press-temporal-replay
+test-integration-press-temporal-replay: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+test-integration-press-temporal-replay: HYDRA_CONFIG = configs/temporal_conformance_press_approach_quad.yaml
+test-integration-press-temporal-replay: ISAAC_TEST_EXTRA_ARGS = --temporal-replay $(ISAAC_PROJECT_DIR)/$(TEMPORAL_TRACE) --temporal-output $(ISAAC_PROJECT_DIR)/$(TEMPORAL_LAB_TRACE) --temporal-delay-grid $(TEMPORAL_DELAY_GRID)
+test-integration-press-temporal-replay: generate-drone-usd
+	@TEST_TARGET='test-integration-press-temporal-replay' \
+	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \
+	    ISAAC_TEST_SCRIPT='$(ISAAC_PRESS_HOVER_GOTO_TEST)' \
+	    $(ISAAC_INTEGRATION_COMMON_ENV) \
+	    bash "$(ISAAC_INTEGRATION_RUNNER)"

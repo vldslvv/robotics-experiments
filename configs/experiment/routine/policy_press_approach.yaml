@@ -1,8 +1,12 @@
 defaults:
   - default
 
-# Navigate to 0.48 m, let the actor complete the final contact-free approach,
-# return, and land.
+# Stop at a safe staging point before the short move into the 0.48 m actor
+# handoff range. The long navigation leg must not use the handoff point as its
+# braking target because PX4 position-control overshoot can consume the
+# pusher-to-wall clearance.
+takeoff_timeout_s: 20.0
+
 steps:
   - kind: arm
   - kind: takeoff
@@ -12,10 +16,20 @@ steps:
     hold_s: 2.0
   - kind: goto
     x: 0.0
+    y: 17.40
+    z: 2.5
+    ground_speed_m_s: 0.5
+    position_tol_m: 0.05
+    timeout_s: 20.0
+  - kind: hover
+    hold_s: 2.0
+  - kind: goto
+    x: 0.0
     y: 17.51
     z: 2.5
+    ground_speed_m_s: 0.08
     position_tol_m: 0.02
-    timeout_s: 30.0
+    timeout_s: 10.0
   - kind: hover
     hold_s: 1.0
   - kind: policy
@@ -27,7 +41,8 @@ steps:
     x: 0.0
     y: 14.0
     z: 2.5
+    ground_speed_m_s: 0.5
     position_tol_m: 0.15
-    timeout_s: 30.0
+    timeout_s: 20.0
   - kind: land
-    timeout_s: 30.0
+    timeout_s: 20.0

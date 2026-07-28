@@ -54,6 +54,9 @@ reward:
   timeout_weight: 25.0
 
 reset:
+  # Temporal conformance overrides this to false so the production actor can
+  # fly against the same virtual switch pose without a wall/button interaction.
+  physical_contact_enabled: true
   button_geometry_scale: 1.5
   button_stiffness_scale: 0.5
   button_threshold_scale: 0.5

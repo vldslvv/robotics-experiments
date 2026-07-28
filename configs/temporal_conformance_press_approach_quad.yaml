@@ -1,0 +1,101 @@
+defaults:
+  - base
+  - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
+  - _self_
+
+# Wall-free production PX4/actor trace. The switch and lamp provide the exact
+# press-v1 observation resources, but their contact geometry and generated wall
+# proxy are disabled so only temporal flight response affects the trace.
+scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
+
+rl:
+  press:
+    reset:
+      physical_contact_enabled: false
+
+switches:
+  num_switches: 1
+  spawn_seed: 0
+  press_threshold: 0.005
+  spawn_bounds:
+    - min: [0.0, 17.99, 2.5]
+      max: [0.0, 17.99, 2.5]
+
+vehicles:
+  x500_01:
+    id: 0
+    ros: {namespace: /x500_01}
+    spawn:
+      position_xy: [0.0, 14.0]
+      yaw_rad: 0.0
+    routine:
+      steps:
+        - kind: arm
+        - kind: takeoff
+          climb_m: 2.5
+          min_climb_m: 1.5
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 17.40
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 17.561
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 1.0
+        - kind: policy
+          label: temporal-0.460
+          artifact: .build/training/press-approach/latest
+          switch_index: 0
+          timeout_s: 20.0
+        - kind: goto
+          x: 0.0
+          y: 17.40
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 17.518
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 1.0
+        - kind: policy
+          label: temporal-0.475
+          artifact: .build/training/press-approach/latest
+          switch_index: 0
+          timeout_s: 20.0
+        - kind: goto
+          x: 0.0
+          y: 17.40
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 2.0
+        - kind: goto
+          x: 0.0
+          y: 17.501
+          z: 2.5
+          position_tol_m: 0.05
+          timeout_s: 20.0
+        - kind: hover
+          hold_s: 1.0
+        - kind: policy
+          label: temporal-0.490
+          artifact: .build/training/press-approach/latest
+          switch_index: 0
+          timeout_s: 20.0

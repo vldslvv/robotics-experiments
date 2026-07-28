@@ -73,6 +73,10 @@ class PressActionConfig(_FreezableConfig):
             body-rate setpoint (``velocity`` cascade), length 3.
         controller_kp_rate: Per-axis P gain mapping body-rate error to desired
             body torque (both models), length 3.
+        controller_command_delay_s: Lab-only delay from a policy command to the
+            velocity controller receiving it, seconds. This models the fitted
+            PX4 closed-loop command-response latency without changing policy
+            cadence or the deployed PX4 controller.
         actuator_tau_inc_s: Official Isaac Lab thruster rise time constant,
             seconds.
         actuator_tau_dec_s: Official Isaac Lab thruster fall time constant,
@@ -91,6 +95,7 @@ class PressActionConfig(_FreezableConfig):
     controller_kd_vel: List[float]
     controller_kp_att: List[float]
     controller_kp_rate: List[float]
+    controller_command_delay_s: float
     actuator_tau_inc_s: float
     actuator_tau_dec_s: float
     actuator_max_thrust_rate_nps: float
@@ -223,6 +228,7 @@ class PressApproachGoalConfig(_FreezableConfig):
 class PressResetConfig(_FreezableConfig):
     """Easy-task physical-scene parameters for switch pressing."""
 
+    physical_contact_enabled: bool
     button_geometry_scale: float
     button_stiffness_scale: float
     button_threshold_scale: float

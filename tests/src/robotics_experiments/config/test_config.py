@@ -133,6 +133,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
+    assert config.rl.action.controller_command_delay_s == 0.440
+    assert config.rl.press.reset.physical_contact_enabled
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
     assert training.max_iterations == 50
@@ -173,6 +175,30 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     assert HandoffGate.from_config(training.rl.press.handoff) == HandoffGate.from_config(
         deployment.rl.press.handoff
     )
+    assert deployment.vehicles["x500_01"].routine.takeoff_timeout_s == 20.0
+    steps = deployment.vehicles["x500_01"].routine.steps
+    assert tuple(step["kind"] for step in steps) == (
+        "arm",
+        "takeoff",
+        "hover",
+        "goto",
+        "hover",
+        "goto",
+        "hover",
+        "policy",
+        "goto",
+        "land",
+    )
+    assert steps[3]["y"] == 17.40
+    assert steps[3]["ground_speed_m_s"] == 0.5
+    assert steps[3]["position_tol_m"] == 0.05
+    assert steps[5]["y"] == 17.51
+    assert steps[5]["ground_speed_m_s"] == 0.08
+    assert steps[5]["position_tol_m"] == 0.02
+    assert steps[5]["timeout_s"] == 10.0
+    assert steps[8]["ground_speed_m_s"] == 0.5
+    assert "ground_speed_m_s" not in steps[2]
+    assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
 
 
 @pytest.mark.parametrize(
@@ -219,6 +245,10 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
         (
             {"rl": {"hover": {"policy": {"actor": {"initial_noise_std": float("inf")}}}}},
             "initial_noise_std must be finite and non-negative",
+        ),
+        (
+            {"rl": {"action": {"controller_command_delay_s": -0.1}}},
+            "controller_command_delay_s must be finite and non-negative",
         ),
     ],
 )

@@ -213,11 +213,14 @@ class RoutineStep:
         invariants: Continuous flight-envelope gates evaluated every tick the
             step is active; the first breach fails the routine with
             ``FailureKind.ENVELOPE``.
-        streaming: When set, this is a streamed OFFBOARD step (a ``goto``): the
-            stepper primes setpoints, sends ``command`` once to engage offboard,
-            then streams the held setpoint at the configured rate until completion. When
-            ``None`` (every other kind) the step uses the send-once-then-verify
+        streaming: When set, this is a streamed OFFBOARD step (a speedless
+            ``goto`` or a ``policy``): the stepper primes setpoints, sends
+            ``command`` once to engage offboard, then streams the held setpoint
+            at the configured rate until completion. A speed-authored ``goto``
+            has no streaming spec and uses the acknowledged send-once-then-verify
             flow.
+        guided: When set, derives the one-shot reposition yaw from the active
+            step baseline and target while preserving the authored ground speed.
     """
 
     command: Optional[MavlinkCommand]
@@ -228,11 +231,20 @@ class RoutineStep:
     hold_s: float = 0.0
     invariants: tuple[_Invariant, ...] = ()
     streaming: Optional["_StreamingSpec"] = None
+    guided: Optional["_GuidedSpec"] = None
+
+
+@dataclass(frozen=True)
+class _GuidedSpec:
+    """Dynamic world target needed to orient a guided reposition command."""
+
+    target_enu: tuple[float, float, float]
+    min_heading_dist_m: float = _DEFAULT_MIN_HEADING_DIST_M
 
 
 @dataclass(frozen=True)
 class _StreamingSpec:
-    """The streamed-setpoint target for an OFFBOARD ``goto`` step.
+    """The streamed-setpoint target for an OFFBOARD ``goto`` or policy step.
 
     Attributes:
         target_enu: The absolute world-ENU waypoint ``(east, north, up)`` in
@@ -319,6 +331,8 @@ class RoutineState:
         hold_since_us: Sim time the active step's completion predicate first
             became (and has stayed) ``True``; reset to ``None`` whenever it goes
             ``False`` again. Used to enforce ``RoutineStep.hold_s``.
+        guided_confirmation_sent: Whether a guided goto has reissued its
+            reposition target once after the first accepted acknowledgement.
         offboard: Continuous OFFBOARD progress: policy and transmitter cadence,
             zero-order-held payload, actual transmission count, and mode request
             / acceptance flags. Compatible streaming and command-less verifier
@@ -333,5 +347,6 @@ class RoutineState:
     baseline_position_enu: Optional[np.ndarray] = None
     step_started_us: Optional[int] = None
     hold_since_us: Optional[int] = None
+    guided_confirmation_sent: bool = False
     offboard: _OffboardState = _OffboardState()
     last_policy_state: Optional[object] = None

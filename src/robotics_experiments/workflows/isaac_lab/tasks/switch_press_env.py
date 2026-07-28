@@ -164,7 +164,9 @@ def make_switch_press_env_cfg(
             spawn=sim_utils.CuboidCfg(
                 size=tuple(2.0 * value for value in reset.wall_half_extents_m),
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-                collision_props=sim_utils.CollisionPropertiesCfg(),
+                collision_props=sim_utils.CollisionPropertiesCfg(
+                    collision_enabled=reset.physical_contact_enabled
+                ),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.25, 0.25, 0.25)),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(pos=wall_center),
@@ -263,10 +265,16 @@ class SwitchPressEnv(_FlightDirectRLEnv):
 
     def _scale_switch_button(self) -> None:
         """Enlarge the pressable target without enlarging the boom-blocking plate."""
-        from pxr import Gf, UsdGeom
+        from pxr import Gf, UsdGeom, UsdPhysics
 
         stage = sim_utils.get_current_stage()
         switch_root = stage.GetPrimAtPath("/World/envs/env_0/Switch")
+        if not self._experiment_config.rl.press.reset.physical_contact_enabled:
+            for prim in stage.Traverse():
+                if prim.GetPath().HasPrefix(switch_root.GetPath()) and prim.HasAPI(
+                    UsdPhysics.CollisionAPI
+                ):
+                    UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
         buttons = [
             prim
             for prim in stage.Traverse()
