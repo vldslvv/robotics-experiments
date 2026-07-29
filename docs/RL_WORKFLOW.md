@@ -54,11 +54,12 @@ new alignment artifact and new training; an existing actor is never silently
 upgraded to current `best`.
 
 After Lab evaluation, `make test-integration-press-policy-transfer` runs the
-trained actor at three wall-free PX4 entry ranges. This is downstream transfer
-acceptance, not a fitting input or permission for a physical wall run. The 95%
-success, 1% collision, and 0.40 m minimum-range thresholds are advisory
-publication diagnostics; a failing independent evaluation still blocks this
-PX4 acceptance workflow.
+trained actor at three PX4 entry ranges in the production warehouse with
+physical wall and switch contact enabled. It requires every approach to finish
+without body contact, pusher contact, or a lamp transition. This is downstream
+transfer acceptance, not a fitting input. The 95% success, 1% collision, and
+0.40 m minimum-range thresholds are advisory publication diagnostics; a
+failing independent evaluation still blocks this PX4 acceptance workflow.
 
 ## Press observation and approach stage
 
@@ -367,7 +368,7 @@ detection. If Lab evaluation passes while the live PX4 approach still visibly
 contacts the wall, record the dynamics mismatch and stop; do not add collision
 to the observation or artifact contract.
 
-After `make eval-press` and the wall-free
+After `make eval-press` and the physical warehouse
 `make test-integration-press-policy-transfer` acceptance pass, run:
 
 ```console

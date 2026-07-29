@@ -161,9 +161,11 @@ controller from that embedded record. Deployment validates the alignment
 record but continues to use only `PolicyContract` for OFFBOARD interpretation.
 Policy artifacts without alignment provenance are unsupported.
 
-After training and Lab acceptance, run the wall-free
-`test-integration-press-policy-transfer` mission. It is a policy-transfer gate,
-not an alignment input. The physical press mission remains separately gated.
+After training and Lab acceptance, run the physical warehouse
+`test-integration-press-policy-transfer` mission. It exercises three actor-entry
+ranges with wall and switch contact enabled and is a policy-transfer gate, not
+an alignment input. The complete production approach mission remains
+separately gated.
 
 ## Deferred work
 

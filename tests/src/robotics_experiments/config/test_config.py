@@ -235,7 +235,8 @@ def test_policy_transfer_config_uses_distinct_entry_targets():
     config = load_config(_ROOT / "policy_transfer_press_approach_quad.yaml")
     steps = config.vehicles["x500_01"].routine.steps
 
-    assert not config.rl.press.reset.physical_contact_enabled
+    assert config.scene == "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
+    assert config.rl.press.reset.physical_contact_enabled
     assert tuple(steps[index]["label"] for index in (7, 12, 17)) == (
         "policy-transfer-0.460",
         "policy-transfer-0.475",

@@ -133,8 +133,8 @@ test-integration-press-approach-routine: generate-drone-usd
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
 
-# Wall-free trained-policy acceptance remains downstream of alignment and
-# never fits or publishes controller settings.
+# Physical warehouse trained-policy acceptance remains downstream of alignment
+# and never fits or publishes controller settings.
 .PHONY: test-integration-press-policy-transfer
 test-integration-press-policy-transfer: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-policy-transfer: HYDRA_CONFIG = configs/policy_transfer_press_approach_quad.yaml

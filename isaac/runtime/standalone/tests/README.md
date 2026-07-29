@@ -128,7 +128,8 @@ within `make train-rl` publishes `.build/training/press-approach/latest` and
 `make eval-press` independently accepts it; it is excluded from
 `test-integration-all`.
 
-`make test-integration-press-policy-transfer` is the separate wall-free
-post-training PX4 acceptance. It runs the trained press actor at three entry
-ranges with physical contact disabled. Its observations and actions are not
-controller-fitting inputs.
+`make test-integration-press-policy-transfer` is the separate post-training PX4
+acceptance in the production warehouse. It runs the trained press actor at
+three entry ranges with physical wall and switch contact enabled, and requires
+no body contact, pusher contact, or lamp transition. Its observations and
+actions are not controller-fitting inputs.

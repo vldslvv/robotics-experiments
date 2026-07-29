@@ -1,4 +1,4 @@
-"""Wall-free downstream PX4 acceptance for a trained press policy."""
+"""Physical warehouse PX4 acceptance for a trained press policy."""
 
 from __future__ import annotations
 
@@ -13,14 +13,23 @@ _TEST_NAME = "px4_press_policy_transfer"
 def _validate(*, context: SceneTestContext, fleet) -> None:
     if len(fleet.flying) != 1:
         raise AssertionError(f"policy transfer requires one flying drone, got {len(fleet.flying)}")
-    if context.config.rl.press.reset.physical_contact_enabled:
-        raise AssertionError("policy transfer requires physical_contact_enabled=false")
+    if not context.config.rl.press.reset.physical_contact_enabled:
+        raise AssertionError("policy transfer requires physical contact geometry")
     if fleet.switch_events:
         raise AssertionError(f"policy transfer toggled the switch: {fleet.switch_events!r}")
     state = fleet.flying[0].driver.routine_state.last_policy_state
     if not isinstance(state, PressApproachExecutionState) or not state.complete:
         raise AssertionError(f"policy transfer did not complete its final stage: {state!r}")
-    context.report("wall-free press policy transfer completed at three distinct entry ranges")
+    observer = fleet.flying[0].spawned.policy_observer
+    if observer is None:
+        raise AssertionError("policy transfer has no press contact diagnostics")
+    contacts = observer.read_contact_diagnostics()
+    if contacts.body_contact or contacts.pusher_contact:
+        raise AssertionError(f"policy transfer made physical contact: {contacts!r}")
+    context.report(
+        "warehouse press policy transfer completed at three distinct entry ranges "
+        "without body contact, pusher contact, or lamp transition"
+    )
 
 
 def main() -> None:
@@ -37,7 +46,7 @@ def main() -> None:
                     context=hook_context,
                     fleet=fleet,
                 ),
-                success_label="wall-free press policy transfer",
+                success_label="warehouse press policy transfer",
             ),
         ),
         description=__doc__ or "",

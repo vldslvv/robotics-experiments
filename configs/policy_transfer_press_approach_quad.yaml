@@ -3,14 +3,10 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# Wall-free post-training PX4 policy-transfer acceptance. The switch and lamp
-# provide production press-v1 observations while physical contact is disabled.
-scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
-
-rl:
-  press:
-    reset:
-      physical_contact_enabled: false
+# Post-training PX4 policy-transfer acceptance at three entry ranges. Use the
+# production warehouse geometry and keep physical contact enabled so each
+# approach must stop without touching the wall or switch.
+scene: "@isaac/assets/LightSwitchWarehouse/Warehouse.usd"
 
 switches:
   num_switches: 1

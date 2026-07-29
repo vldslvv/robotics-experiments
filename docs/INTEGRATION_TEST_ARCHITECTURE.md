@@ -81,10 +81,11 @@ sweep, fit/publication, and the alignment target-envelope gate.
   by `make/alignment.mk` and excluded from `test-integration-all` because it
   requires an alignment publication.
 - `make test-integration-press-policy-transfer` runs the trained press actor
-  through three wall-free PX4 policy stages at distinct entry ranges. It
-  retains production observations while disabling physical contact. This is a
-  downstream transfer gate and never fits or publishes controller settings.
-  It is artifact-dependent and excluded from `test-integration-all`.
+  through three PX4 policy stages at distinct entry ranges in the production
+  warehouse. Physical wall and switch contact remain enabled, and the gate
+  requires no body contact, pusher contact, or lamp transition. This is a
+  downstream transfer gate and never fits or publishes controller settings. It
+  is artifact-dependent and excluded from `test-integration-all`.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.
