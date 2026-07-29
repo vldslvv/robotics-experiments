@@ -124,8 +124,9 @@ move into the 0.48 m handoff range at 0.08 m/s, execute the `press-v1` /
 `approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
 and disarm. The strict hook requires stable contact-free completion and no lamp
 transition. Run it only after selection
-publishes `.build/training/press-approach/latest` and `make eval-press`
-independently accepts it; it is excluded from `test-integration-all`.
+within `make train-rl` publishes `.build/training/press-approach/latest` and
+`make eval-press` independently accepts it; it is excluded from
+`test-integration-all`.
 
 `make test-integration-press-policy-transfer` is the separate wall-free
 post-training PX4 acceptance. It runs the trained press actor at three entry

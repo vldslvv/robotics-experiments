@@ -53,12 +53,12 @@ to both the NumPy reference and torch twin. Changing the controller requires a
 new alignment artifact and new training; an existing actor is never silently
 upgraded to current `best`.
 
-After Lab acceptance, `make test-integration-press-policy-transfer` runs the
+After Lab evaluation, `make test-integration-press-policy-transfer` runs the
 trained actor at three wall-free PX4 entry ranges. This is downstream transfer
-acceptance, not a fitting input or permission for a physical wall run. If
-checkpoint selection or independent Lab evaluation fails any 80% success, 5%
-collision, or 0.40 m minimum-range threshold, do not publish the actor or start
-PX4 acceptance.
+acceptance, not a fitting input or permission for a physical wall run. The 80%
+success, 5% collision, and 0.40 m minimum-range thresholds are advisory
+publication diagnostics; a failing independent evaluation still blocks this
+PX4 acceptance workflow.
 
 ## Press observation and approach stage
 
@@ -171,8 +171,8 @@ current body and pusher contact sensors. A 49,152-environment run remains an
 explicit capacity probe rather than the production default.
 
 A new run writes checkpoints and `policy_meta.json` below
-`.build/training/<policy-name>/<run-id>/`. It does not export `policy.pt` or
-advance `latest`. Before it constructs the environment, training loads
+`.build/training/<policy-name>/<run-id>/`. Before it constructs the
+environment, training loads
 `rl.training.alignment_artifact` (defaulting to the controller alignment
 namespace's `best` link), validates vehicle, airframe, cadence, interface, and
 action dimension, and stores the alignment digest, run identity, fingerprints,
@@ -181,6 +181,10 @@ scales remain task-owned and may differ from the scale used by the
 policy-independent alignment probe experiment. This happens before PPO begins.
 An explicit `ALIGNMENT_ARTIFACT` or
 `--alignment-artifact` overrides the configured link for reproduction.
+After PPO, `make train-rl` automatically evaluates every saved checkpoint,
+exports the highest-scoring checkpoint, always advances the relative `latest`
+link, and advances `best` only when the score strictly improves within the
+same comparison fingerprint.
 
 The collision-aware Stage 1 procedure actor-only initializes
 from accepted run `approach-20260726d`, checkpoint 24:
@@ -209,8 +213,7 @@ make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
   TRAIN_ARGS='--export-checkpoint /isaac-sim/proj/.build/training/press-approach/<run-id>/logs/model_<iteration>.pt'
 ```
 
-Manual export does not publish `latest`. Automatic publication belongs only to
-checkpoint selection.
+Manual export does not publish either label.
 
 ## Artifact and curriculum contract
 
@@ -225,15 +228,17 @@ runtime completion.
 Malformed, missing, non-finite, stage-less press, unknown-stage press, and
 stage-mismatched artifacts fail during loading, selection, evaluation, and
 runtime preflight. Historical press or hover artifacts without alignment
-provenance are unsupported and are never upgraded from current `best`.
+provenance are unsupported and are never upgraded into the current comparison
+generation.
 Checkpoint selection, manual export, and independent evaluation reconstruct
 the exact controller settings embedded before PPO. Runtime deployment validates
 that record, while its OFFBOARD mapper continues to consume only
 `PolicyContract`.
 
-## Checkpoint selection and independent evaluation
+## Automatic checkpoint selection and independent evaluation
 
-Run selection after training:
+`make train-rl` performs checkpoint selection automatically. To repeat
+selection for an existing run:
 
 ```console
 make select-rl-checkpoint \
@@ -254,34 +259,46 @@ final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
 - Mean closest range.
 - Minimum closest range.
 - Median successful completion time.
+- Normalized terminal range, trajectory alignment, closing-speed overshoot,
+  upright, action-change, and completion-time costs.
 - Every reward-term mean.
 
-Publication requires approach success of at least 80%, simulated collisions
-of at most 5%, and no episode closer than the 0.40 m goal lower bound. If no
-checkpoint passes, selection writes the diagnostic report, fails, and does not
-export or advance `latest`. Ranking compares the worst
-normalized acceptance margin first, then the other acceptance margin, fewer
-other flight failures, fewer timeouts, faster successful completion, and
-earlier iteration. A rejected fallback is retained only in the report. PPO
-return is never a selection input.
+`held-out-press-task-quality-v1` subtracts configured collision, other-flight-
+failure, timeout, and non-success penalties plus the six normalized continuous
+costs. Higher scores are better; PPO return is never a selection input. The
+80% success, 5% collision, and 0.40 m minimum-range gates remain recorded as
+`advisory_accepted` and never block a structurally valid publication.
 
-Schema-5 `checkpoint_selection.json` uses
-`selection_method: press-approach-gated-maximin-v3` and records policy/stage
-identity, seeds, thresholds, every candidate, normalized margins, ranking
-values, reward means, selected iteration, and `selected_accepted`. Selection
-atomically advances `.build/training/press-approach/latest`.
+```text
+score = -(4.00 * collision_rate
+        + 3.00 * other_flight_failure_rate
+        + 2.00 * timeout_rate
+        + 1.00 * (1 - success_rate)
+        + 0.25 * terminal_range_cost
+        + 0.20 * trajectory_alignment_cost
+        + 0.20 * closing_speed_overshoot_cost
+        + 0.10 * upright_error_cost
+        + 0.10 * action_delta_cost
+        + 0.15 * completion_time_fraction)
+```
+
+Schema-6 `checkpoint_selection.json` records policy/stage identity, metric and
+comparison fingerprint, seeds, advisory thresholds, every candidate and score
+component, reward means, and the selected checkpoint. `latest` always points
+to the newest completed selection. `best` changes only for a strictly higher
+score under the same fingerprint; the first run under a new metric or
+evaluation fingerprint initializes a new `best`.
 
 `make eval-press` independently repeats the same workload and gates. With
 `RL_RUN_ID`, it evaluates that published run; otherwise it resolves
 `.build/training/press-approach/latest`.
 
-For a logged three-stage run, use:
+For a logged training and evaluation run, use:
 
 ```console
 make/scripts/run_training_evaluation_then_shutdown.sh \
   --hydra-config configs/train_press_approach_quad.yaml \
   --train-target train-rl \
-  --select-target select-rl-checkpoint \
   --eval-target eval-press \
   --label press-approach
 ```

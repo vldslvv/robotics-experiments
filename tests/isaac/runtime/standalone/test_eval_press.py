@@ -65,11 +65,21 @@ def test_approach_evaluation_aggregation() -> None:
 
     summary = summarize_press_approach_episodes(
         episodes=(
-            PressApproachEpisodeMetrics(True, False, False, False, False, False, 0.405, 1.0),
-            PressApproachEpisodeMetrics(False, True, True, False, False, False, 0.39, None),
-            PressApproachEpisodeMetrics(False, True, False, True, False, False, 0.40, None),
-            PressApproachEpisodeMetrics(False, False, False, False, True, False, 0.44, None),
-            PressApproachEpisodeMetrics(False, False, False, False, False, True, 0.43, None),
+            PressApproachEpisodeMetrics(
+                True, False, False, False, False, False, 0.405, 1.0, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5
+            ),
+            PressApproachEpisodeMetrics(
+                False, True, True, False, False, False, 0.39, None, 1.0, 0.2, 0.3, 0.4, 0.5, 1.0
+            ),
+            PressApproachEpisodeMetrics(
+                False, True, False, True, False, False, 0.40, None, 0.5, 0.3, 0.4, 0.5, 0.6, 1.0
+            ),
+            PressApproachEpisodeMetrics(
+                False, False, False, False, True, False, 0.44, None, 1.0, 0.4, 0.5, 0.6, 0.7, 1.0
+            ),
+            PressApproachEpisodeMetrics(
+                False, False, False, False, False, True, 0.43, None, 0.5, 0.5, 0.6, 0.7, 0.8, 1.0
+            ),
         )
     )
     assert summary.episodes == 5
@@ -82,6 +92,9 @@ def test_approach_evaluation_aggregation() -> None:
     assert summary.mean_closest_range_m == pytest.approx(0.413)
     assert summary.min_closest_range_m == pytest.approx(0.39)
     assert summary.median_completion_time_s == 1.0
+    assert summary.mean_terminal_range_cost == pytest.approx(0.6)
+    assert summary.mean_trajectory_alignment_cost == pytest.approx(0.3)
+    assert summary.mean_completion_time_fraction == pytest.approx(0.9)
 
 
 def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
@@ -117,7 +130,8 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
             timeout = torch.tensor([False, not first])
             self.press_approach_result = SimpleNamespace(
                 state=SimpleNamespace(
-                    closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43])
+                    closest_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
+                    previous_range_m=torch.tensor([0.41, 0.45 if first else 0.43]),
                 ),
                 termination=SimpleNamespace(
                     success=success,
@@ -145,6 +159,15 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
+        goal_config=SimpleNamespace(
+            range_min_m=0.40,
+            range_max_m=0.42,
+            alignment_error_max_m=0.03,
+            body_z_alignment_min=0.965926,
+            closing_speed_far_mps=0.08,
+            closing_speed_far_range_m=0.50,
+            closing_speed_zero_range_m=0.44,
+        ),
         report=lambda _message: None,
     )
     assert env.seeds == [202]
@@ -161,7 +184,15 @@ def _config():
             training=SimpleNamespace(task_id="press-task"),
             press=SimpleNamespace(
                 curriculum_stage="approach",
-                goal=SimpleNamespace(range_min_m=0.40),
+                goal=SimpleNamespace(
+                    range_min_m=0.40,
+                    range_max_m=0.42,
+                    alignment_error_max_m=0.03,
+                    body_z_alignment_min=0.965926,
+                    closing_speed_far_mps=0.08,
+                    closing_speed_far_range_m=0.50,
+                    closing_speed_zero_range_m=0.44,
+                ),
                 evaluation=SimpleNamespace(
                     seeds=(101, 202, 303),
                     episodes_per_seed=1,
@@ -224,6 +255,12 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
             mean_closest_range_m=0.41,
             min_closest_range_m=0.405,
             median_completion_time_s=1.0,
+            mean_terminal_range_cost=0.0,
+            mean_trajectory_alignment_cost=0.1,
+            mean_closing_speed_overshoot_cost=0.1,
+            mean_upright_error_cost=0.1,
+            mean_action_delta_cost=0.1,
+            mean_completion_time_fraction=0.1,
         ),
         reward_means=(RewardMean(name="success", mean=1.0),),
     )

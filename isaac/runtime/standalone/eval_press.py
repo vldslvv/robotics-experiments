@@ -65,6 +65,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             policy=policy,
             seeds=seeds,
             episodes_per_seed=evaluation.episodes_per_seed,
+            goal_config=config.rl.press.goal,
             report=_report,
         )
     finally:
@@ -82,7 +83,13 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         f"timeout={summary.timeout_rate:.3f} "
         f"mean_closest_range_m={summary.mean_closest_range_m:.5f} "
         f"min_closest_range_m={summary.min_closest_range_m:.5f} "
-        f"median_completion_s={summary.median_completion_time_s!s}"
+        f"median_completion_s={summary.median_completion_time_s!s} "
+        f"terminal_range_cost={summary.mean_terminal_range_cost:.5f} "
+        f"alignment_cost={summary.mean_trajectory_alignment_cost:.5f} "
+        f"closing_overshoot_cost={summary.mean_closing_speed_overshoot_cost:.5f} "
+        f"upright_cost={summary.mean_upright_error_cost:.5f} "
+        f"action_delta_cost={summary.mean_action_delta_cost:.5f} "
+        f"completion_fraction={summary.mean_completion_time_fraction:.5f}"
     )
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")

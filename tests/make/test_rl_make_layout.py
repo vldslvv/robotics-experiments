@@ -83,3 +83,31 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
 
     assert result.returncode == 0, result.stderr
     assert "run_isaac_integration_test.sh" in result.stdout
+
+
+def test_training_automatically_runs_checkpoint_selection_with_one_run_id() -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "-o",
+            "generate-drone-usd",
+            "train-rl",
+            "RL_RUN_ID=layout-test",
+            "HYDRA_CONFIG=configs/train_press_approach_quad.yaml",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("run_isaac_integration_test.sh") == 2
+    assert "ISAAC_TEST_SCRIPT='/isaac-sim/proj/isaac/runtime/standalone/train_rl.py'" in (
+        result.stdout
+    )
+    assert (
+        "ISAAC_TEST_SCRIPT=" "'/isaac-sim/proj/isaac/runtime/standalone/select_rl_checkpoint.py'"
+    ) in result.stdout
+    assert result.stdout.count('RL_RUN_ID="$run_id"') == 2

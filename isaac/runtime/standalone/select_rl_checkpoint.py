@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -16,11 +19,13 @@ import robotics_experiments.rl.training.rsl_rl as training
 from robotics_experiments.config import (
     ExperimentConfig,
     PressApproachEvaluationConfig,
+    PressApproachGoalConfig,
     load_config,
 )
 from robotics_experiments.rl import (
     METADATA_FILENAME,
     POLICY_FILENAME,
+    PolicyContract,
     PolicyInterface,
     load_policy_metadata,
 )
@@ -31,7 +36,7 @@ from robotics_experiments.rl.training.selection import (
     CheckpointSelection,
     MetricValue,
     enumerate_checkpoints,
-    publish_latest,
+    publish_policy_labels,
     select_checkpoint,
 )
 from robotics_experiments.workflows.isaac_lab import (
@@ -43,8 +48,7 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 5
-_PRESS_SELECTION_METHOD = "press-approach-gated-maximin-v3"
+_REPORT_SCHEMA_VERSION = 6
 
 
 class _ActorCritic(Protocol):
@@ -118,7 +122,7 @@ def _press_evaluation(
     seeds: tuple[int, ...],
     episodes_per_seed: int,
     evaluation_config: PressApproachEvaluationConfig,
-    goal_range_min_m: float,
+    goal_config: PressApproachGoalConfig,
     device: str,
 ) -> CandidateEvaluation:
     _report(f"checkpoint selection iteration={candidate.iteration} START")
@@ -133,18 +137,20 @@ def _press_evaluation(
         policy=actor,
         seeds=seeds,
         episodes_per_seed=episodes_per_seed,
+        goal_config=goal_config,
         report=_report,
     )
     evaluation = _score_press_result(
         candidate=candidate,
         result=result,
         evaluation_config=evaluation_config,
-        goal_range_min_m=goal_range_min_m,
+        goal_range_min_m=float(goal_config.range_min_m),
     )
     summary = result.summary
     _report(
         f"checkpoint selection iteration={candidate.iteration} COMPLETE "
-        f"accepted={str(evaluation.accepted).lower()} "
+        f"advisory_accepted={str(evaluation.accepted).lower()} "
+        f"score={evaluation.ranking_values[0]:.6f} "
         f"success={summary.approach_success_rate:.3f} "
         f"collision={summary.collision_rate:.3f} "
         f"body_collision={summary.body_collision_rate:.3f} "
@@ -177,14 +183,24 @@ def _score_press_result(
         and summary.collision_rate <= collision_threshold
         and summary.min_closest_range_m >= goal_range_min_m
     )
-    median_completion_time_s = summary.median_completion_time_s
-    ranking_values = (
-        *sorted(normalized_margins),
-        -summary.other_flight_failure_rate,
-        -summary.timeout_rate,
-        -(median_completion_time_s if median_completion_time_s is not None else sys.float_info.max),
-        -candidate.iteration,
+    quality_cost = (
+        float(evaluation_config.collision_penalty) * summary.collision_rate
+        + float(evaluation_config.flight_failure_penalty) * summary.other_flight_failure_rate
+        + float(evaluation_config.timeout_penalty) * summary.timeout_rate
+        + float(evaluation_config.non_success_penalty) * (1.0 - summary.approach_success_rate)
+        + float(evaluation_config.terminal_range_weight) * summary.mean_terminal_range_cost
+        + float(evaluation_config.trajectory_alignment_weight)
+        * summary.mean_trajectory_alignment_cost
+        + float(evaluation_config.closing_speed_overshoot_weight)
+        * summary.mean_closing_speed_overshoot_cost
+        + float(evaluation_config.upright_error_weight) * summary.mean_upright_error_cost
+        + float(evaluation_config.action_delta_weight) * summary.mean_action_delta_cost
+        + float(evaluation_config.completion_time_weight) * summary.mean_completion_time_fraction
     )
+    score = -quality_cost
+    if not math.isfinite(score):
+        raise ValueError(f"checkpoint {candidate.path} produced a non-finite quality score")
+    ranking_values = (score, -candidate.iteration)
     return CandidateEvaluation(
         candidate=candidate,
         accepted=accepted,
@@ -198,11 +214,71 @@ def _score_press_result(
             MetricValue("mean_closest_range_m", summary.mean_closest_range_m),
             MetricValue("min_closest_range_m", summary.min_closest_range_m),
             MetricValue("median_completion_time_s", summary.median_completion_time_s),
+            MetricValue("terminal_range_cost", summary.mean_terminal_range_cost),
+            MetricValue(
+                "trajectory_alignment_cost",
+                summary.mean_trajectory_alignment_cost,
+            ),
+            MetricValue(
+                "closing_speed_overshoot_cost",
+                summary.mean_closing_speed_overshoot_cost,
+            ),
+            MetricValue("upright_error_cost", summary.mean_upright_error_cost),
+            MetricValue("action_delta_cost", summary.mean_action_delta_cost),
+            MetricValue(
+                "completion_time_fraction",
+                summary.mean_completion_time_fraction,
+            ),
+            MetricValue("held_out_task_quality", score),
         ),
         normalized_margins=normalized_margins,
         ranking_values=ranking_values,
         reward_means=result.reward_means,
     )
+
+
+def _comparison_fingerprint(
+    *,
+    config: ExperimentConfig,
+    contract: PolicyContract,
+) -> str | None:
+    if contract.policy_interface is not PolicyInterface.PRESS_V1:
+        return None
+    vehicle_label, vehicle = next(
+        (label, item)
+        for label, item in config.vehicles.items()
+        if item.id == config.rl.training.vehicle_id
+    )
+    payload = {
+        "selection_metric": config.rl.press.evaluation.selection_metric,
+        "evaluation": asdict(config.rl.press.evaluation),
+        "goal": asdict(config.rl.press.goal),
+        "handoff": asdict(config.rl.press.handoff),
+        "reset": asdict(config.rl.press.reset),
+        "termination": asdict(config.rl.press.termination),
+        "scene": config.scene,
+        "switches": asdict(config.switches),
+        "vehicle": vehicle_label,
+        "airframe": vehicle.spawn.usd_path,
+        "lab_vehicle": asdict(config.rl.lab_vehicle),
+        "physics_hz": config.sim.physics_hz,
+        "episode_length_s": config.rl.episode_length_s,
+        "task_id": config.rl.training.task_id,
+        "policy_interface": contract.policy_interface.value,
+        "curriculum_stage": contract.curriculum_stage,
+        "observation_schema_version": contract.obs_schema_version,
+        "observation_dimension": contract.obs_dim,
+        "policy_rate_hz": contract.policy_rate_hz,
+        "action_kind": contract.action_kind,
+        "action_dimension": contract.action_dim,
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _selection_report(
@@ -217,6 +293,7 @@ def _selection_report(
     evaluation_config: PressApproachEvaluationConfig,
     goal_range_min_m: float,
     all_candidates: tuple[CheckpointCandidate, ...],
+    comparison_fingerprint: str | None,
 ) -> dict[str, Any]:
     thresholds = (
         {
@@ -246,7 +323,7 @@ def _selection_report(
         }
         if evaluation is not None:
             record |= {
-                "accepted": evaluation.accepted,
+                "advisory_accepted": evaluation.accepted,
                 "metrics": {metric.name: metric.value for metric in evaluation.metrics},
                 "normalized_margins": list(evaluation.normalized_margins),
                 "ranking_values": list(evaluation.ranking_values),
@@ -260,12 +337,16 @@ def _selection_report(
         "policy_interface": policy_interface,
         "curriculum_stage": curriculum_stage,
         "selection_method": selection.selection_method,
+        "comparison_fingerprint": comparison_fingerprint,
         "seeds": list(seeds),
         "episodes_per_seed": episodes_per_seed,
         "thresholds": thresholds,
         "candidates": candidates,
         "selected_iteration": selection.selected.iteration,
-        "selected_accepted": (
+        "selected_score": (
+            selected_evaluation.ranking_values[0] if selected_evaluation is not None else None
+        ),
+        "selected_advisory_accepted": (
             selected_evaluation.accepted if selected_evaluation is not None else None
         ),
     }
@@ -279,7 +360,7 @@ def _select_candidates(
     env: _SelectionEnvironment,
     seeds: tuple[int, ...],
     evaluation_config: PressApproachEvaluationConfig,
-    goal_range_min_m: float,
+    goal_config: PressApproachGoalConfig,
     device: str,
 ) -> CheckpointSelection:
     scorer = None
@@ -297,14 +378,14 @@ def _select_candidates(
                     seeds=seeds,
                     episodes_per_seed=evaluation_config.episodes_per_seed,
                     evaluation_config=evaluation_config,
-                    goal_range_min_m=goal_range_min_m,
+                    goal_config=goal_config,
                     device=device,
                 )
                 for candidate in scorer_candidates
             )
 
         scorer = score_press
-        selection_method = _PRESS_SELECTION_METHOD
+        selection_method = evaluation_config.selection_metric
     return select_checkpoint(
         policy_interface=policy_interface,
         candidates=candidates,
@@ -322,7 +403,7 @@ def _publish_selection(
     run_dir: Path,
     policy_root: Path,
     device: str,
-) -> None:
+) -> bool:
     selected_metadata = metadata | {
         "selected_checkpoint_iteration": selection.selected.iteration,
         "selection_method": selection.selection_method,
@@ -337,7 +418,10 @@ def _publish_selection(
     )
     if selected_evaluation is not None:
         selected_metadata["checkpoint_evaluation"] = {
-            "accepted": selected_evaluation.accepted,
+            "selection_metric": selection.selection_method,
+            "comparison_fingerprint": report["comparison_fingerprint"],
+            "score": selected_evaluation.ranking_values[0],
+            "advisory_accepted": selected_evaluation.accepted,
             "seeds": report["seeds"],
             "episodes_per_seed": report["episodes_per_seed"],
             "thresholds": report["thresholds"],
@@ -361,7 +445,12 @@ def _publish_selection(
         )
         for filename in (POLICY_FILENAME, METADATA_FILENAME, _REPORT_FILENAME):
             (stage_dir / filename).replace(run_dir / filename)
-    publish_latest(policy_root=policy_root, run_dir=run_dir)
+    return publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=run_dir,
+        comparison_fingerprint=report["comparison_fingerprint"],
+        score=report["selected_score"],
+    )
 
 
 def _selected_evaluation(selection: CheckpointSelection) -> CandidateEvaluation | None:
@@ -384,6 +473,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     policy_metadata = load_policy_metadata(artifact_dir=run_dir)
     metadata = dict(policy_metadata.values)
     contract = policy_metadata.contract
+    comparison_fingerprint = _comparison_fingerprint(config=config, contract=contract)
     if (
         contract.policy_interface is PolicyInterface.PRESS_V1
         and contract.curriculum_stage != config.rl.press.curriculum_stage
@@ -432,7 +522,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             env=env,
             seeds=seeds,
             evaluation_config=evaluation,
-            goal_range_min_m=config.rl.press.goal.range_min_m,
+            goal_config=config.rl.press.goal,
             device=device,
         )
         report = _selection_report(
@@ -446,17 +536,9 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
             evaluation_config=evaluation,
             goal_range_min_m=config.rl.press.goal.range_min_m,
             all_candidates=candidates,
+            comparison_fingerprint=comparison_fingerprint,
         )
-        selected_evaluation = _selected_evaluation(selection)
-        if selected_evaluation is not None and not selected_evaluation.accepted:
-            (run_dir / _REPORT_FILENAME).write_text(
-                json.dumps(report, indent=2, allow_nan=False) + "\n"
-            )
-            raise AssertionError(
-                "no checkpoint passed the press-approach publication gates; "
-                f"best rejected iteration={selection.selected.iteration}"
-            )
-        _publish_selection(
+        best_updated = _publish_selection(
             selection=selection,
             report=report,
             metadata=metadata,
@@ -469,11 +551,17 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         env.close()
 
     selected_evaluation = _selected_evaluation(selection)
-    outcome = "accepted" if selected_evaluation is not None else "selected"
+    outcome = (
+        f"score={selected_evaluation.ranking_values[0]:.6f} "
+        f"advisory_accepted={str(selected_evaluation.accepted).lower()}"
+        if selected_evaluation is not None
+        else "unscored"
+    )
     _report(
         f"checkpoint selection COMPLETE run={run_id} "
-        f"iteration={selection.selected.iteration} outcome={outcome} "
-        f"method={selection.selection_method} latest={policy_root / 'latest'}"
+        f"iteration={selection.selected.iteration} {outcome} "
+        f"method={selection.selection_method} latest={policy_root / 'latest'} "
+        f"best_updated={str(best_updated).lower()}"
     )
     return selection
 

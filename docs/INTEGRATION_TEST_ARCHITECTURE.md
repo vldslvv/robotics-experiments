@@ -59,8 +59,8 @@ sweep, fit/publication, and the alignment target-envelope gate.
   measurements independent of Stage 1's contact-failure termination. It is
   part of `test-integration-all` and requires no PX4 container or trained policy.
 - `make test-integration-press-policy` runs the F2b trained-policy gate on the
-  Isaac Lab image. It needs a published artifact from `make train-rl` followed
-  by `make select-rl-checkpoint`, so it is deliberately not part of
+  Isaac Lab image. It needs the automatically published artifact from
+  `make train-rl`, so it is deliberately not part of
   `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
   contract and routine config. Policy metadata includes the active policy
   rate and alignment provenance; every legacy artifact without the alignment
@@ -74,9 +74,8 @@ sweep, fit/publication, and the alignment target-envelope gate.
   lamp transition. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact
   declaring `policy_interface: press-v1` and `curriculum_stage: approach`.
-  Selection may publish an explicitly rejected diagnostic fallback at
-  `.build/training/press-approach/latest`; that fallback does not satisfy this
-  gate's workflow precondition.
+  Advisory selection failure does not block `latest` publication, but this
+  integration target remains an independent workflow gate.
 - `make test-integration-alignment-target` runs the analytic hover/goto
   stability envelope with the selected alignment `best` artifact. It is owned
   by `make/alignment.mk` and excluded from `test-integration-all` because it

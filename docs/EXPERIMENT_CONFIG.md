@@ -117,8 +117,12 @@ dimension, and scales. Controller gains, command delay, maximum tilt, and
 thruster response are not Hydra RL tunables; they are complete
 `ControllerSettings` loaded from alignment and embedded in policy metadata.
 New runs capture both the task contract and alignment provenance before PPO,
-checkpoint selection publishes the chosen actor artifact, manual export
-reloads the stored contract without optimizer state, and only the actor is
+then automatically evaluate every checkpoint and publish the chosen actor.
+`rl.press.evaluation` owns the held-out metric name, penalties, continuous
+quality weights, seeds, workload size, and advisory thresholds. `latest`
+always advances after successful selection; `best` advances only for a
+strictly higher comparable score. Manual export reloads the stored contract
+without optimizer state and publishes neither label. Only the actor is
 exported.
 `configs/train_press_approach_quad.yaml` selects the press task, the
 `press-approach` artifact namespace, ten-second episodes, and its PPO settings.

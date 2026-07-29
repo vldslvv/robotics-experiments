@@ -224,12 +224,23 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachEvaluationConfig(_FreezableConfig):
-    """Deterministic approach-policy workload and publication gates."""
+    """Deterministic approach-policy workload, advisory gates, and ranking."""
 
     seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
     collision_rate_max: float
+    selection_metric: str
+    collision_penalty: float
+    flight_failure_penalty: float
+    timeout_penalty: float
+    non_success_penalty: float
+    terminal_range_weight: float
+    trajectory_alignment_weight: float
+    closing_speed_overshoot_weight: float
+    upright_error_weight: float
+    action_delta_weight: float
+    completion_time_weight: float
 
 
 @dataclass

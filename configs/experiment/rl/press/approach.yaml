@@ -78,3 +78,14 @@ evaluation:
   episodes_per_seed: 100
   success_rate_min: 0.80
   collision_rate_max: 0.05
+  selection_metric: held-out-press-task-quality-v1
+  collision_penalty: 4.0
+  flight_failure_penalty: 3.0
+  timeout_penalty: 2.0
+  non_success_penalty: 1.0
+  terminal_range_weight: 0.25
+  trajectory_alignment_weight: 0.20
+  closing_speed_overshoot_weight: 0.20
+  upright_error_weight: 0.10
+  action_delta_weight: 0.10
+  completion_time_weight: 0.15

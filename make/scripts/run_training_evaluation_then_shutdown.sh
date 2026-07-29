@@ -8,16 +8,14 @@ Usage:
     --hydra-config PATH \
     --eval-target TARGET \
     [--train-target TARGET] \
-    [--select-target TARGET] \
     [--train-args ARGS] \
-    [--select-args ARGS] \
     [--eval-args ARGS] \
     [--label LABEL] \
     [--log-dir PATH] \
     [--shutdown]
 
-Run Make training, checkpoint-selection, and independent-evaluation targets in
-that order, preserving console and status logs. The wrapper also serves the
+Run Make training/publication and independent-evaluation targets in that order,
+preserving console and status logs. The wrapper also serves the
 training logs through TensorBoard for the lifetime of the workflow and prints
 its URL. A failed stage skips every later stage. Power-off after success,
 failure, or a handled interrupt is disabled by default and must be requested
@@ -25,9 +23,7 @@ with --shutdown.
 
 Defaults:
   --train-target train-rl
-  --select-target select-rl-checkpoint
   --train-args   ""
-  --select-args  ""
   --eval-args    ""
   --label        rl-training-evaluation
   --log-dir      .build/overnight
@@ -58,10 +54,8 @@ validate_name() {
 
 hydra_config=""
 train_target="train-rl"
-select_target="select-rl-checkpoint"
 eval_target=""
 train_args=""
-select_args=""
 eval_args=""
 run_label="rl-training-evaluation"
 log_dir=".build/overnight"
@@ -84,21 +78,12 @@ while [ "$#" -gt 0 ]; do
             eval_target="$2"
             shift 2
             ;;
-        --select-target)
-            require_value "$1" "${2:-}"
-            select_target="$2"
-            shift 2
-            ;;
         --train-args)
             train_args="${2-}"
             shift 2
             ;;
         --eval-args)
             eval_args="${2-}"
-            shift 2
-            ;;
-        --select-args)
-            select_args="${2-}"
             shift 2
             ;;
         --label)
@@ -130,7 +115,6 @@ done
 require_value "--hydra-config" "${hydra_config}"
 require_value "--eval-target" "${eval_target}"
 validate_name "training target" "${train_target}"
-validate_name "selection target" "${select_target}"
 validate_name "evaluation target" "${eval_target}"
 validate_name "label" "${run_label}"
 
@@ -153,7 +137,6 @@ run_id="${run_label}.${artifact_run_id}"
 console_log="${log_dir}/${run_id}.console.log"
 status_log="${log_dir}/${run_id}.status"
 train_status="not-run"
-select_status="not-run"
 eval_status="not-run"
 sudo_keeper_pid=""
 tensorboard_monitor_pid=""
@@ -186,14 +169,12 @@ write_status() {
     local status_line
 
     status_line="$(printf \
-        'run_id=%s artifact_run_id=%s train_target=%s select_target=%s eval_target=%s train_exit=%s select_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
+        'run_id=%s artifact_run_id=%s train_target=%s eval_target=%s train_exit=%s eval_exit=%s overall_exit=%s shutdown=%s shutdown_exit=%s' \
         "${run_id}" \
         "${artifact_run_id}" \
         "${train_target}" \
-        "${select_target}" \
         "${eval_target}" \
         "${train_status}" \
-        "${select_status}" \
         "${eval_status}" \
         "${overall_status}" \
         "${shutdown_mode}" \
@@ -338,13 +319,12 @@ run_stage() {
     fi
 }
 
-printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s select_target=%s eval_target=%s shutdown=%s\n' \
+printf '[%s] run_id=%s artifact_run_id=%s config=%s train_target=%s eval_target=%s shutdown=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${run_id}" \
     "${artifact_run_id}" \
     "${hydra_config}" \
     "${train_target}" \
-    "${select_target}" \
     "${eval_target}" \
     "${shutdown_mode}" |
     tee -a "${console_log}"
@@ -379,13 +359,6 @@ while [ ! -f "${tensorboard_ready_file}" ]; do
     fi
     sleep 0.1
 done
-
-run_stage "${select_target}" "SELECT_ARGS" "${select_args}"
-select_status="${stage_status}"
-
-if [ "${select_status}" -ne 0 ]; then
-    exit "${select_status}"
-fi
 
 run_stage "${eval_target}" "EVAL_ARGS" "${eval_args}"
 eval_status="${stage_status}"

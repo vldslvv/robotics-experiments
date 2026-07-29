@@ -272,6 +272,25 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
+    if evaluation.selection_metric != "held-out-press-task-quality-v1":
+        raise ValueError(
+            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v1'"
+        )
+    for name in (
+        "collision_penalty",
+        "flight_failure_penalty",
+        "timeout_penalty",
+        "non_success_penalty",
+        "terminal_range_weight",
+        "trajectory_alignment_weight",
+        "closing_speed_overshoot_weight",
+        "upright_error_weight",
+        "action_delta_weight",
+        "completion_time_weight",
+    ):
+        value = getattr(evaluation, name)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"rl.press.evaluation.{name} must be finite and non-negative")
 
 
 def _validate_switches(experiment: ExperimentConfig) -> None:

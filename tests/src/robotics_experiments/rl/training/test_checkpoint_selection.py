@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from robotics_experiments.rl.training.selection import (
     MetricValue,
     RewardMean,
     enumerate_checkpoints,
+    publish_policy_labels,
     select_checkpoint,
 )
 from tests.support.paths import REPO_ROOT
@@ -45,6 +47,12 @@ def _result(
     closest: float = 0.41,
     min_closest: float = 0.405,
     completion_time: float | None = 2.0,
+    terminal_range_cost: float = 0.0,
+    alignment_cost: float = 0.1,
+    overshoot_cost: float = 0.1,
+    upright_cost: float = 0.1,
+    action_delta_cost: float = 0.1,
+    completion_fraction: float = 0.2,
 ):
     from robotics_experiments.workflows.isaac_lab import (
         PressApproachEvaluationResult,
@@ -63,6 +71,12 @@ def _result(
             mean_closest_range_m=closest,
             min_closest_range_m=min_closest,
             median_completion_time_s=completion_time,
+            mean_terminal_range_cost=terminal_range_cost,
+            mean_trajectory_alignment_cost=alignment_cost,
+            mean_closing_speed_overshoot_cost=overshoot_cost,
+            mean_upright_error_cost=upright_cost,
+            mean_action_delta_cost=action_delta_cost,
+            mean_completion_time_fraction=completion_fraction,
         ),
         reward_means=(RewardMean(name="success", mean=success),),
     )
@@ -75,6 +89,16 @@ def _evaluation(*, selector, iteration: int, result=None) -> CandidateEvaluation
         evaluation_config=SimpleNamespace(
             success_rate_min=0.8,
             collision_rate_max=0.05,
+            collision_penalty=4.0,
+            flight_failure_penalty=3.0,
+            timeout_penalty=2.0,
+            non_success_penalty=1.0,
+            terminal_range_weight=0.25,
+            trajectory_alignment_weight=0.20,
+            closing_speed_overshoot_weight=0.20,
+            upright_error_weight=0.10,
+            action_delta_weight=0.10,
+            completion_time_weight=0.15,
         ),
         goal_range_min_m=0.40,
     )
@@ -88,6 +112,41 @@ def test_checkpoint_enumeration_is_numeric(tmp_path: Path) -> None:
         50,
         299,
     ]
+
+
+def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
+    selector = _load_selector_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl import PolicyContract, PolicyInterface
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    contract = PolicyContract(
+        policy_interface=PolicyInterface.PRESS_V1,
+        obs_schema_version=1,
+        obs_dim=34,
+        policy_rate_hz=20.0,
+        action_kind="velocity",
+        action_dim=4,
+        max_body_velocity_mps=2.0,
+        max_yaw_rate_radps=1.5,
+        max_body_rate_radps=6.0,
+        hover_thrust_fraction=0.4,
+        curriculum_stage="approach",
+    )
+
+    fingerprint = selector._comparison_fingerprint(  # noqa: SLF001
+        config=config,
+        contract=contract,
+    )
+
+    assert fingerprint == selector._comparison_fingerprint(  # noqa: SLF001
+        config=config,
+        contract=replace(contract, max_body_velocity_mps=3.0),
+    )
+    assert fingerprint != selector._comparison_fingerprint(  # noqa: SLF001
+        config=config,
+        contract=replace(contract, obs_dim=35),
+    )
 
 
 def test_approach_acceptance_uses_success_and_collision_gates() -> None:
@@ -110,30 +169,22 @@ def test_approach_acceptance_uses_success_and_collision_gates() -> None:
     ).accepted
 
 
-def test_ranking_uses_worst_normalized_acceptance_margin_first() -> None:
-    selector = _load_selector_module()
-    unbalanced = _evaluation(
-        selector=selector,
-        iteration=50,
-        result=_result(success=0.8, collision=0.0),
-    )
-    balanced = _evaluation(
-        selector=selector,
-        iteration=100,
-        result=_result(success=0.88, collision=0.045),
-    )
-    assert balanced.ranking_values > unbalanced.ranking_values
-
-
 @pytest.mark.parametrize(
     ("better", "worse"),
     [
+        (_result(success=0.9), _result(success=0.8)),
+        (_result(collision=0.01), _result(collision=0.02)),
         (_result(other_failure=0.01), _result(other_failure=0.02)),
         (_result(timeout=0.01), _result(timeout=0.02)),
-        (_result(completion_time=1.0), _result(completion_time=2.0)),
+        (_result(terminal_range_cost=0.1), _result(terminal_range_cost=0.2)),
+        (_result(alignment_cost=0.1), _result(alignment_cost=0.2)),
+        (_result(overshoot_cost=0.1), _result(overshoot_cost=0.2)),
+        (_result(upright_cost=0.1), _result(upright_cost=0.2)),
+        (_result(action_delta_cost=0.1), _result(action_delta_cost=0.2)),
+        (_result(completion_fraction=0.1), _result(completion_fraction=0.2)),
     ],
 )
-def test_ranking_tie_breakers(better, worse) -> None:
+def test_held_out_quality_ranks_every_component(better, worse) -> None:
     selector = _load_selector_module()
     assert (
         _evaluation(
@@ -160,7 +211,7 @@ def test_ranking_final_tie_breaker_prefers_earlier_checkpoint() -> None:
     )
 
 
-def test_missing_completion_time_is_strict_json_serializable() -> None:
+def test_quality_ranking_is_strict_json_serializable_without_completion() -> None:
     selector = _load_selector_module()
     evaluation = _evaluation(
         selector=selector,
@@ -170,7 +221,18 @@ def test_missing_completion_time_is_strict_json_serializable() -> None:
     json.dumps(evaluation.ranking_values, allow_nan=False)
 
 
-def test_accepted_candidate_always_outranks_rejected_candidate() -> None:
+def test_quality_ranking_rejects_non_finite_components() -> None:
+    selector = _load_selector_module()
+
+    with pytest.raises(ValueError, match="non-finite quality score"):
+        _evaluation(
+            selector=selector,
+            iteration=0,
+            result=_result(alignment_cost=float("nan")),
+        )
+
+
+def test_advisory_acceptance_does_not_override_quality_score() -> None:
     candidates = (
         CheckpointCandidate(0, Path("model_0.pt")),
         CheckpointCandidate(50, Path("model_50.pt")),
@@ -199,7 +261,7 @@ def test_accepted_candidate_always_outranks_rejected_candidate() -> None:
         selection_method="test",
         scorer=lambda _candidates: evaluations,
     )
-    assert selection.selected.iteration == 50
+    assert selection.selected.iteration == 0
 
 
 def test_selector_publishes_best_rejected_fallback() -> None:
@@ -254,8 +316,9 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
             episodes_per_seed=100,
             success_rate_min=0.8,
             collision_rate_max=0.05,
+            selection_metric="held-out-press-task-quality-v1",
         ),
-        goal_range_min_m=0.40,
+        goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
     )
     assert [call["candidate"] for call in calls] == list(candidates)
@@ -286,7 +349,7 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="press-approach-gated-maximin-v3",
+        selection_method="held-out-press-task-quality-v1",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -304,10 +367,13 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         ),
         goal_range_min_m=0.40,
         all_candidates=(candidate,),
+        comparison_fingerprint="comparison",
     )
-    assert report["schema_version"] == 5
+    assert report["schema_version"] == 6
     assert report["curriculum_stage"] == "approach"
-    assert report["selected_accepted"] is False
+    assert report["selected_advisory_accepted"] is False
+    assert report["selected_score"] == evaluation.ranking_values[0]
+    assert report["comparison_fingerprint"] == "comparison"
     assert report["thresholds"] == {
         "approach_success_rate_min": 0.8,
         "collision_rate_max": 0.05,
@@ -354,13 +420,15 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v3",
+        "held-out-press-task-quality-v1",
         (evaluation,),
         evaluation.candidate,
     )
     report = {
         "selected_iteration": 50,
-        "selected_accepted": accepted,
+        "selected_score": evaluation.ranking_values[0],
+        "selected_advisory_accepted": accepted,
+        "comparison_fingerprint": "comparison",
         "seeds": [101, 202, 303],
         "episodes_per_seed": 100,
         "thresholds": {
@@ -368,7 +436,7 @@ def test_publication_records_evaluation_and_advances_latest(
             "collision_rate_max": 0.05,
         },
     }
-    selector._publish_selection(  # noqa: SLF001
+    best_updated = selector._publish_selection(  # noqa: SLF001
         selection=selection,
         report=report,
         metadata={
@@ -380,10 +448,13 @@ def test_publication_records_evaluation_and_advances_latest(
         policy_root=policy_root,
         device="cpu",
     )
+    assert best_updated
     assert os.readlink(policy_root / "latest") == run_dir.name
+    assert os.readlink(policy_root / "best") == run_dir.name
     metadata = json.loads((run_dir / "policy_meta.json").read_text())
     assert metadata["selected_checkpoint_iteration"] == 50
-    assert metadata["checkpoint_evaluation"]["accepted"] is accepted
+    assert metadata["checkpoint_evaluation"]["advisory_accepted"] is accepted
+    assert metadata["checkpoint_evaluation"]["score"] == evaluation.ranking_values[0]
     assert metadata["checkpoint_evaluation"]["reward_means"] == {"success": 0.125}
 
 
@@ -406,7 +477,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "press-approach-gated-maximin-v3",
+        "held-out-press-task-quality-v1",
         (),
         CheckpointCandidate(50, checkpoint),
     )
@@ -424,3 +495,93 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
             device="cpu",
         )
     assert os.readlink(policy_root / "latest") == old_run.name
+
+
+def test_latest_always_advances_while_best_requires_strict_improvement(
+    tmp_path: Path,
+) -> None:
+    policy_root = tmp_path / "press-approach"
+
+    def run(name: str, score: float, fingerprint: str = "comparison") -> Path:
+        run_dir = policy_root / name
+        run_dir.mkdir(parents=True)
+        (run_dir / "checkpoint_selection.json").write_text(
+            json.dumps(
+                {
+                    "comparison_fingerprint": fingerprint,
+                    "selected_score": score,
+                }
+            )
+        )
+        return run_dir
+
+    first = run("first", 1.0)
+    assert publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=first,
+        comparison_fingerprint="comparison",
+        score=1.0,
+    )
+    worse = run("worse", 0.5)
+    assert not publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=worse,
+        comparison_fingerprint="comparison",
+        score=0.5,
+    )
+    assert os.readlink(policy_root / "latest") == worse.name
+    assert os.readlink(policy_root / "best") == first.name
+
+    equal = run("equal", 1.0)
+    assert not publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=equal,
+        comparison_fingerprint="comparison",
+        score=1.0,
+    )
+    assert os.readlink(policy_root / "latest") == equal.name
+    assert os.readlink(policy_root / "best") == first.name
+
+    better = run("better", 1.1)
+    assert publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=better,
+        comparison_fingerprint="comparison",
+        score=1.1,
+    )
+    assert os.readlink(policy_root / "latest") == better.name
+    assert os.readlink(policy_root / "best") == better.name
+
+
+def test_new_comparison_generation_initializes_best(tmp_path: Path) -> None:
+    policy_root = tmp_path / "press-approach"
+    old = policy_root / "old"
+    old.mkdir(parents=True)
+    (old / "checkpoint_selection.json").write_text(
+        json.dumps(
+            {
+                "comparison_fingerprint": "old-comparison",
+                "selected_score": 100.0,
+            }
+        )
+    )
+    (policy_root / "best").symlink_to(old.name)
+    current = policy_root / "current"
+    current.mkdir()
+    (current / "checkpoint_selection.json").write_text(
+        json.dumps(
+            {
+                "comparison_fingerprint": "new-comparison",
+                "selected_score": -100.0,
+            }
+        )
+    )
+
+    assert publish_policy_labels(
+        policy_root=policy_root,
+        run_dir=current,
+        comparison_fingerprint="new-comparison",
+        score=-100.0,
+    )
+    assert os.readlink(policy_root / "latest") == current.name
+    assert os.readlink(policy_root / "best") == current.name

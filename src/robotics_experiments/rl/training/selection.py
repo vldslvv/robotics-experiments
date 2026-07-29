@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import warnings
@@ -17,11 +19,12 @@ __all__ = [
     "MetricValue",
     "RewardMean",
     "enumerate_checkpoints",
-    "publish_latest",
+    "publish_policy_labels",
     "select_checkpoint",
 ]
 
 _CHECKPOINT_PATTERN = re.compile(r"model_(\d+)\.pt")
+_SELECTION_REPORT = "checkpoint_selection.json"
 
 
 @dataclass(frozen=True)
@@ -115,9 +118,7 @@ def select_checkpoint(
     evaluations = scorer(candidates)
     if tuple(evaluation.candidate for evaluation in evaluations) != candidates:
         raise ValueError("checkpoint scorer did not evaluate every candidate in order")
-    accepted = tuple(evaluation for evaluation in evaluations if evaluation.accepted)
-    ranked = accepted or evaluations
-    selected = max(ranked, key=lambda evaluation: evaluation.ranking_values)
+    selected = max(evaluations, key=lambda evaluation: evaluation.ranking_values)
     return CheckpointSelection(
         selection_method=selection_method,
         evaluations=evaluations,
@@ -125,10 +126,68 @@ def select_checkpoint(
     )
 
 
-def publish_latest(*, policy_root: Path, run_dir: Path) -> None:
-    """Atomically advance the policy namespace's relative ``latest`` symlink."""
-    link = policy_root / "latest"
-    temp = policy_root / f".latest.{os.getpid()}.tmp"
+def _publish_label(*, policy_root: Path, run_dir: Path, label: str) -> None:
+    link = policy_root / label
+    temp = policy_root / f".{label}.{os.getpid()}.tmp"
     temp.unlink(missing_ok=True)
     temp.symlink_to(run_dir.name)
     temp.replace(link)
+
+
+def _comparable_best_score(
+    *,
+    policy_root: Path,
+    comparison_fingerprint: str,
+) -> float | None:
+    best = policy_root / "best"
+    if not best.is_symlink():
+        return None
+    target = Path(os.readlink(best))
+    if target.is_absolute() or len(target.parts) != 1:
+        return None
+    report_path = policy_root / target / _SELECTION_REPORT
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if report.get("comparison_fingerprint") != comparison_fingerprint:
+        return None
+    score = report.get("selected_score")
+    if not isinstance(score, int | float) or isinstance(score, bool):
+        return None
+    score = float(score)
+    return score if math.isfinite(score) else None
+
+
+def publish_policy_labels(
+    *,
+    policy_root: Path,
+    run_dir: Path,
+    comparison_fingerprint: str | None,
+    score: float | None,
+) -> bool:
+    """Advance ``latest`` and conditionally advance comparable ``best``.
+
+    Returns:
+        Whether ``best`` advanced. Policy families without a comparison metric
+        pass ``None`` for both comparison values and publish only ``latest``.
+    """
+    if (comparison_fingerprint is None) != (score is None):
+        raise ValueError(
+            "comparison fingerprint and score must either both be set or both be absent"
+        )
+    if score is not None and not math.isfinite(score):
+        raise ValueError("policy comparison score must be finite")
+    best_score = (
+        None
+        if comparison_fingerprint is None
+        else _comparable_best_score(
+            policy_root=policy_root,
+            comparison_fingerprint=comparison_fingerprint,
+        )
+    )
+    advance_best = score is not None and (best_score is None or score > best_score)
+    _publish_label(policy_root=policy_root, run_dir=run_dir, label="latest")
+    if advance_best:
+        _publish_label(policy_root=policy_root, run_dir=run_dir, label="best")
+    return advance_best

@@ -4,8 +4,8 @@ The F2b task->policy entrypoint: composes the Hydra config, builds the
 config-selected Gymnasium task (``rl.training.task_id`` -- the hover task
 for F2b; F3 points it at the press task), runs the ``rl.training`` adapter,
 and writes checkpoints plus the policy contract under
-``.build/training/<policy-name>/<run-id>/``. Automatic artifact export and
-publication are owned by ``make select-rl-checkpoint``.
+``.build/training/<policy-name>/<run-id>/``. The outer ``make train-rl``
+workflow then evaluates the checkpoints and publishes the selected artifact.
 
 Run inside the Isaac Lab container (make train-rl):
     /isaac-sim/python.sh /isaac-sim/proj/isaac/runtime/standalone/train_rl.py
@@ -382,7 +382,7 @@ def _run_new_training(
 
     _report(
         f"train-rl COMPLETE iterations={result.iterations} "
-        f"run={run_dir} publication=pending-selection"
+        f"run={run_dir} checkpoints=ready-for-selection"
     )
 
 

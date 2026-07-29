@@ -10,6 +10,7 @@ from typing import Any, Protocol
 import numpy as np
 import torch
 
+from robotics_experiments.config import PressApproachGoalConfig
 from robotics_experiments.rl.press import PressApproachResult, PressApproachRewardTerms
 from robotics_experiments.rl.training.selection import RewardMean
 
@@ -34,6 +35,12 @@ class PressApproachEpisodeMetrics:
     timeout: bool
     closest_range_m: float
     completion_time_s: float | None
+    terminal_range_cost: float
+    trajectory_alignment_cost: float
+    closing_speed_overshoot_cost: float
+    upright_error_cost: float
+    action_delta_cost: float
+    completion_time_fraction: float
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,12 @@ class PressApproachEvaluationSummary:
     mean_closest_range_m: float
     min_closest_range_m: float
     median_completion_time_s: float | None
+    mean_terminal_range_cost: float
+    mean_trajectory_alignment_cost: float
+    mean_closing_speed_overshoot_cost: float
+    mean_upright_error_cost: float
+    mean_action_delta_cost: float
+    mean_completion_time_fraction: float
 
 
 @dataclass(frozen=True)
@@ -118,7 +131,61 @@ def summarize_press_approach_episodes(
         mean_closest_range_m=float(np.mean([episode.closest_range_m for episode in episodes])),
         min_closest_range_m=min(episode.closest_range_m for episode in episodes),
         median_completion_time_s=(float(np.median(completion_times)) if completion_times else None),
+        mean_terminal_range_cost=float(
+            np.mean([episode.terminal_range_cost for episode in episodes])
+        ),
+        mean_trajectory_alignment_cost=float(
+            np.mean([episode.trajectory_alignment_cost for episode in episodes])
+        ),
+        mean_closing_speed_overshoot_cost=float(
+            np.mean([episode.closing_speed_overshoot_cost for episode in episodes])
+        ),
+        mean_upright_error_cost=float(
+            np.mean([episode.upright_error_cost for episode in episodes])
+        ),
+        mean_action_delta_cost=float(np.mean([episode.action_delta_cost for episode in episodes])),
+        mean_completion_time_fraction=float(
+            np.mean([episode.completion_time_fraction for episode in episodes])
+        ),
     )
+
+
+def _trajectory_costs(
+    *,
+    observation: torch.Tensor,
+    action: torch.Tensor,
+    goal_config: PressApproachGoalConfig,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    relative_position = observation[:, :3]
+    alignment = torch.linalg.vector_norm(relative_position[:, 1:3], dim=-1)
+    alignment_cost = (alignment / float(goal_config.alignment_error_max_m)).clamp(0.0, 1.0)
+
+    range_m = relative_position[:, 0]
+    closing_fraction = (
+        (range_m - float(goal_config.closing_speed_zero_range_m))
+        / (
+            float(goal_config.closing_speed_far_range_m)
+            - float(goal_config.closing_speed_zero_range_m)
+        )
+    ).clamp(0.0, 1.0)
+    target_closing_speed = float(goal_config.closing_speed_far_mps) * closing_fraction
+    closing_speed = observation[:, 10]
+    overshoot_cost = (
+        (closing_speed - target_closing_speed).clamp_min(0.0)
+        / float(goal_config.closing_speed_far_mps)
+    ).clamp(0.0, 1.0)
+
+    attitude_xyzw = observation[:, 16:20]
+    body_z_world_z = 1.0 - 2.0 * (attitude_xyzw[:, 0].square() + attitude_xyzw[:, 1].square())
+    upright_cost = ((1.0 - body_z_world_z) / (1.0 - float(goal_config.body_z_alignment_min))).clamp(
+        0.0, 1.0
+    )
+
+    previous_action = observation[:, 27 : 27 + action.shape[1]]
+    action_delta_cost = (
+        torch.sqrt(torch.mean((action - previous_action).square(), dim=-1)) / 2.0
+    ).clamp(0.0, 1.0)
+    return alignment_cost, overshoot_cost, upright_cost, action_delta_cost
 
 
 def _evaluate_seed(
@@ -127,6 +194,7 @@ def _evaluate_seed(
     policy: _PressApproachPolicy,
     seed: int,
     episode_count: int,
+    goal_config: PressApproachGoalConfig,
     report: Callable[[str], None],
 ) -> tuple[tuple[PressApproachEpisodeMetrics, ...], dict[str, tuple[float, int]]]:
     reward_names = tuple(field.name for field in fields(PressApproachRewardTerms)) + ("total",)
@@ -146,6 +214,17 @@ def _evaluate_seed(
         device=env.device,
     )
     completion_time = torch.full_like(closest_range, float("nan"))
+    terminal_range_cost = torch.ones_like(closest_range)
+    trajectory_cost_sums = torch.zeros(
+        (4, episode_count),
+        dtype=torch.float32,
+        device=env.device,
+    )
+    trajectory_sample_count = torch.zeros(
+        episode_count,
+        dtype=torch.long,
+        device=env.device,
+    )
     reset_result = env.reset(seed=seed)
     observation = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     horizon = int(env.max_episode_length)
@@ -158,11 +237,35 @@ def _evaluate_seed(
     for step in range(horizon):
         with torch.no_grad():
             action = policy(observation["policy"]).clamp(-1.0, 1.0)
+        trajectory_costs = torch.stack(
+            _trajectory_costs(
+                observation=observation["policy"],
+                action=action,
+                goal_config=goal_config,
+            ),
+            dim=0,
+        )
+        trajectory_cost_sums += torch.where(active[None, :], trajectory_costs, 0.0)
+        trajectory_sample_count += active
         observation, _reward, terminated, truncated, _info = env.step(action)
         result = env.press_approach_result
         if result is None:
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
+        current_range = result.state.previous_range_m
+        range_error = torch.where(
+            current_range < float(goal_config.range_min_m),
+            float(goal_config.range_min_m) - current_range,
+            torch.where(
+                current_range > float(goal_config.range_max_m),
+                current_range - float(goal_config.range_max_m),
+                0.0,
+            ),
+        )
+        current_range_cost = (
+            range_error / (float(goal_config.range_max_m) - float(goal_config.range_min_m))
+        ).clamp(0.0, 1.0)
+        terminal_range_cost = torch.where(active, current_range_cost, terminal_range_cost)
         closest_range = torch.minimum(
             closest_range,
             torch.where(active, result.state.closest_range_m, closest_range),
@@ -186,6 +289,8 @@ def _evaluate_seed(
         reward_sums += reward_values[:, active].sum(dim=1)
         reward_sample_count += active.sum()
         active &= ~(terminated | truncated)
+        if not bool(torch.any(active)):
+            break
         completed_steps = step + 1
         if completed_steps % progress_interval == 0 or completed_steps == horizon:
             counts = (
@@ -214,6 +319,8 @@ def _evaluate_seed(
     if bool(torch.any(active)):
         raise RuntimeError("press approach evaluation exceeded the configured episode horizon")
 
+    trajectory_means = trajectory_cost_sums / trajectory_sample_count.clamp_min(1)[None, :]
+    episode_length_s = horizon * float(env.step_dt)
     episodes = tuple(
         PressApproachEpisodeMetrics(
             approach_success=bool(success[index].item()),
@@ -225,6 +332,16 @@ def _evaluate_seed(
             closest_range_m=float(closest_range[index].item()),
             completion_time_s=(
                 float(completion_time[index].item()) if bool(success[index].item()) else None
+            ),
+            terminal_range_cost=float(terminal_range_cost[index].item()),
+            trajectory_alignment_cost=float(trajectory_means[0, index].item()),
+            closing_speed_overshoot_cost=float(trajectory_means[1, index].item()),
+            upright_error_cost=float(trajectory_means[2, index].item()),
+            action_delta_cost=float(trajectory_means[3, index].item()),
+            completion_time_fraction=(
+                float(completion_time[index].item()) / episode_length_s
+                if bool(success[index].item())
+                else 1.0
             ),
         )
         for index in range(episode_count)
@@ -254,6 +371,7 @@ def evaluate_press_approach_policy(
     policy: _PressApproachPolicy,
     seeds: tuple[int, ...],
     episodes_per_seed: int,
+    goal_config: PressApproachGoalConfig,
     report: Callable[[str], None],
 ) -> PressApproachEvaluationResult:
     """Evaluate one deterministic approach actor on all configured seeds."""
@@ -265,6 +383,7 @@ def evaluate_press_approach_policy(
             policy=policy,
             seed=seed,
             episode_count=episodes_per_seed,
+            goal_config=goal_config,
             report=report,
         )
         episodes.extend(seed_episodes)

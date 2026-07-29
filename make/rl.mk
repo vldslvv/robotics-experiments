@@ -16,20 +16,36 @@ RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
 
-# Training owns optimization, stored metadata, and checkpoints only. A direct
-# run is intentionally unpublished until select-rl-checkpoint selects it.
+# Training evaluates every saved checkpoint after PPO, exports the best
+# checkpoint in the run, always advances latest, and conditionally advances
+# the comparable best label.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-train-rl: ISAAC_TEST_EXTRA_ARGS = $(TRAIN_ARGS)
 train-rl: generate-drone-usd
-	@TEST_TARGET='train-rl' \
-	    ISAAC_TEST_LOG='$(TRAIN_RL_LOG)' \
-	    ISAAC_TEST_SCRIPT='$(TRAIN_RL_SCRIPT)' \
-	    $(ISAAC_INTEGRATION_COMMON_ENV) \
-	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+	@set -e; \
+	    run_id='$(RL_RUN_ID)'; \
+	    if [ -z "$$run_id" ]; then \
+	        run_id="$$(date -u +%Y%m%dT%H%M%SZ).$$$$"; \
+	    fi; \
+	    TEST_TARGET='train-rl' \
+	        ISAAC_TEST_LOG='$(TRAIN_RL_LOG)' \
+	        ISAAC_TEST_SCRIPT='$(TRAIN_RL_SCRIPT)' \
+	        $(ISAAC_INTEGRATION_COMMON_ENV) \
+	        ISAAC_TEST_EXTRA_ARGS='$(TRAIN_ARGS)' \
+	        RL_RUN_ID="$$run_id" \
+	        bash "$(ISAAC_INTEGRATION_RUNNER)"; \
+	    case '$(TRAIN_ARGS)' in \
+	        *--export-checkpoint*) exit 0 ;; \
+	    esac; \
+	    TEST_TARGET='select-rl-checkpoint' \
+	        ISAAC_TEST_LOG='$(SELECT_RL_LOG)' \
+	        ISAAC_TEST_SCRIPT='$(SELECT_RL_SCRIPT)' \
+	        $(ISAAC_INTEGRATION_COMMON_ENV) \
+	        ISAAC_TEST_EXTRA_ARGS='$(SELECT_ARGS)' \
+	        RL_RUN_ID="$$run_id" \
+	        bash "$(ISAAC_INTEGRATION_RUNNER)"
 
-# Selection evaluates the checkpoints from RL_RUN_ID, exports the winner, and
-# is the sole automatic owner of the policy namespace's latest symlink.
+# Explicit selection re-evaluates an existing run and republishes its labels.
 .PHONY: select-rl-checkpoint
 select-rl-checkpoint: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 select-rl-checkpoint: ISAAC_TEST_EXTRA_ARGS = $(SELECT_ARGS)

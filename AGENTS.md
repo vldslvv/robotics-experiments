@@ -216,7 +216,11 @@ the current contents and the intended home for that kind of code.
   validate an alignment artifact before building Isaac Lab, embed its complete
   settings/digest/fingerprints before PPO, and selection/evaluation must reuse
   that embedded record. Policy artifacts without alignment provenance are
-  unsupported.
+  unsupported. `make train-rl` automatically evaluates every checkpoint and
+  publishes the selected run: `latest` always advances, while `best` advances
+  only for a strictly higher held-out score within the same comparison
+  fingerprint. Press acceptance gates are advisory publication diagnostics;
+  the task-owned held-out metric and weights live in Hydra.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make
   targets, or training alignment provenance. Existing `ControllerSettings`
