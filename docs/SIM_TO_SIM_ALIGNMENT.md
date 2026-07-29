@@ -92,12 +92,12 @@ estimator behavior, controller bandwidth, actuator response, state-dependent
 braking, and unmodeled dynamics. It is not evidence that PX4 contains a literal
 440 ms command delay.
 
-The currently deployed diagnostic actor was trained with 0.440 s configured.
-Do not silently switch that actor to 0.200 s because the held-out metric is
-better. A plant change changes the training distribution; retrain and repeat
-checkpoint selection, independent Lab evaluation, and PX4 acceptance gates.
-The actor remains rejected by its original collision and minimum-range gates
-regardless of the manual run evidence.
+The deployed diagnostic actor was trained with 0.440 s configured and remains
+rejected by its original collision and minimum-range gates regardless of the
+manual run evidence. New training uses the held-out-best 0.200 s candidate and
+actor-only initializes from that diagnostic actor's latest checkpoint. This
+plant change does not upgrade the old actor: the new run must repeat checkpoint
+selection, independent Lab evaluation, and PX4 acceptance gates.
 
 ## Immediate alignment work
 

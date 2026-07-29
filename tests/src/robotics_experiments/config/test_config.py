@@ -133,7 +133,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert config.rl.action.controller_command_delay_s == 0.440
+    assert config.rl.action.controller_command_delay_s == 0.200
     assert config.rl.press.reset.physical_contact_enabled
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"

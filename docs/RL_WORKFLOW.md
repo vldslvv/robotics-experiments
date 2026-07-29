@@ -46,14 +46,15 @@ replay reproduces every captured 40/60 ms policy interval and uses the captured
 action sequence unchanged. `rl.action.controller_command_delay_s` is the sole
 Lab-side reconciliation parameter; it delays the action reaching the Lab
 controller in physics ticks without changing actor cadence, PX4, or the
-`press-v1` contract. The current 0.440 s value reduced outer-trace velocity
-RMSE from 0.03640 to 0.01795 m/s, but its held-out RMSE was 0.02355 m/s,
-compared with 0.02237 at zero delay and 0.01302 at 0.200 s. It is therefore an
-equivalent proxy fitted to the outer traces, not a uniquely validated value or
-literal PX4 latency. Keep 0.440 s for the actor trained with it; changing the
-configured plant requires retraining and repeating the acceptance gates. See
-`docs/SIM_TO_SIM_ALIGNMENT.md` for interpretation and the alignment workflow.
-The command buffer and thruster state are cleared per environment reset.
+`press-v1` contract. The 0.440 s outer-trace fit reduced velocity RMSE from
+0.03640 to 0.01795 m/s, but its held-out RMSE was 0.02355 m/s, compared with
+0.02237 at zero delay and 0.01302 at 0.200 s. The configured Lab plant
+therefore uses the held-out-best 0.200 s equivalent response proxy for new
+training. It is not literal PX4 latency. Actors trained with a different plant
+retain their original evidence and must not be upgraded without retraining and
+repeating the acceptance gates. See `docs/SIM_TO_SIM_ALIGNMENT.md` for
+interpretation and the alignment workflow. The command buffer and thruster
+state are cleared per environment reset.
 
 Use the following sequence to capture and compare a new trace:
 
