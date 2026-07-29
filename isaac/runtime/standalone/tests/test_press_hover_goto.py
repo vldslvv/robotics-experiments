@@ -19,6 +19,7 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -26,7 +27,7 @@ import random
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -726,6 +727,10 @@ def _run_temporal_replay(
     class _TemporalReplayEnv(SwitchPressEnv):
         """Wall-free trace player with caller-owned physics decimation."""
 
+        def __init__(self, *, cfg, experiment_config: ExperimentConfig):
+            super().__init__(cfg=cfg, experiment_config=experiment_config)
+            self._base_actuation_params: Any = self.actuation_params
+
         def _get_dones(self):
             no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
             return no_done, no_done
@@ -750,6 +755,20 @@ def _run_temporal_replay(
                 device=self.device,
             )
             self._applied_actions.zero_()
+
+        def set_horizontal_velocity_gain_scales(
+            self,
+            *,
+            kp_scale: float,
+            kd_scale: float,
+        ) -> None:
+            kp_multiplier = self._base_actuation_params.kp_vel.new_tensor((kp_scale, kp_scale, 1.0))
+            kd_multiplier = self._base_actuation_params.kd_vel.new_tensor((kd_scale, kd_scale, 1.0))
+            self.actuation_params = replace(
+                self._base_actuation_params,
+                kp_vel=self._base_actuation_params.kp_vel * kp_multiplier,
+                kd_vel=self._base_actuation_params.kd_vel * kd_multiplier,
+            )
 
         def set_temporal_entry(self, *, observation: np.ndarray) -> None:
             from isaaclab.utils import math as math_utils
@@ -812,17 +831,43 @@ def _run_temporal_replay(
     )
     if not delay_grid or any(not math.isfinite(value) or value < 0.0 for value in delay_grid):
         raise AssertionError("temporal delay grid values must be finite and nonnegative")
+    kp_scale_grid = (
+        (1.0,)
+        if args.temporal_horizontal_kp_vel_scale_grid is None
+        else tuple(float(value) for value in args.temporal_horizontal_kp_vel_scale_grid.split(","))
+    )
+    kd_scale_grid = (
+        (1.0,)
+        if args.temporal_horizontal_kd_vel_scale_grid is None
+        else tuple(float(value) for value in args.temporal_horizontal_kd_vel_scale_grid.split(","))
+    )
+    if not kp_scale_grid or any(
+        not math.isfinite(value) or value <= 0.0 for value in kp_scale_grid
+    ):
+        raise AssertionError("temporal Kp velocity scales must be finite and positive")
+    if not kd_scale_grid or any(
+        not math.isfinite(value) or value <= 0.0 for value in kd_scale_grid
+    ):
+        raise AssertionError("temporal Kd velocity scales must be finite and positive")
     cfg = make_switch_press_env_cfg(experiment_config=config)
     cfg.scene.num_envs = 1
     cfg.episode_length_s = max(config.rl.episode_length_s, 30.0)
     env = _TemporalReplayEnv(cfg=cfg, experiment_config=config)
     candidates = []
     try:
-        for command_delay_s in delay_grid:
+        for command_delay_s, kp_scale, kd_scale in itertools.product(
+            delay_grid,
+            kp_scale_grid,
+            kd_scale_grid,
+        ):
             output_traces = []
             env.set_command_delay(
                 delay_s=command_delay_s,
                 physics_hz=config.sim.physics_hz,
+            )
+            env.set_horizontal_velocity_gain_scales(
+                kp_scale=kp_scale,
+                kd_scale=kd_scale,
             )
             _reset_env(env, args.seed)
             physics_hz = config.sim.physics_hz
@@ -896,6 +941,8 @@ def _run_temporal_replay(
                 _report(
                     "temporal replay "
                     f"delay={command_delay_s:.3f} s "
+                    f"horizontal_kp_vel_scale={kp_scale:.3f} "
+                    f"horizontal_kd_vel_scale={kd_scale:.3f} "
                     f"entry={float(source['nominal_entry_range_m']):.3f} m "
                     f"closest={min(float(sample['range_m']) for sample in lab_samples):.6f} m "
                     f"stable_steps={stable_steps}"
@@ -903,6 +950,8 @@ def _run_temporal_replay(
             candidates.append(
                 {
                     "controller_command_delay_s": command_delay_s,
+                    "controller_horizontal_kp_vel_scale": kp_scale,
+                    "controller_horizontal_kd_vel_scale": kd_scale,
                     "traces": output_traces,
                 }
             )
@@ -910,7 +959,7 @@ def _run_temporal_replay(
         env.close()
     output = {
         "schema_version": 1,
-        "method": "isaac-lab-exact-policy-cadence-delay-grid-v1",
+        "method": "isaac-lab-exact-policy-cadence-controller-grid-v2",
         "candidates": candidates,
     }
     args.temporal_output.parent.mkdir(parents=True, exist_ok=True)
@@ -1067,6 +1116,14 @@ def main() -> None:
         "--temporal-delay-grid",
         help="comma-separated Lab command delays to replay, in seconds",
     )
+    parser.add_argument(
+        "--temporal-horizontal-kp-vel-scale-grid",
+        help="comma-separated positive multipliers for Lab horizontal velocity P gains",
+    )
+    parser.add_argument(
+        "--temporal-horizontal-kd-vel-scale-grid",
+        help="comma-separated positive multipliers for Lab horizontal velocity damping gains",
+    )
     args, _unknown = parser.parse_known_args()
     if args.log_every < 1:
         raise SystemExit("--log-every must be >= 1")
@@ -1076,6 +1133,10 @@ def main() -> None:
         raise SystemExit("--temporal-replay and --temporal-output must be supplied together")
     if args.temporal_delay_grid is not None and args.temporal_replay is None:
         raise SystemExit("--temporal-delay-grid requires --temporal-replay")
+    if args.temporal_horizontal_kp_vel_scale_grid is not None and args.temporal_replay is None:
+        raise SystemExit("--temporal-horizontal-kp-vel-scale-grid requires --temporal-replay")
+    if args.temporal_horizontal_kd_vel_scale_grid is not None and args.temporal_replay is None:
+        raise SystemExit("--temporal-horizontal-kd-vel-scale-grid requires --temporal-replay")
     if args.scene:
         _report(
             f"ignoring --scene {args.scene!r}; "

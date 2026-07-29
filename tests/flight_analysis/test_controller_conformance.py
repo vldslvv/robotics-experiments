@@ -141,15 +141,22 @@ def test_temporal_alignment_reports_response_braking_range_and_settling():
     assert math.isclose(float(diagnostics["settling_time_delta_s"]), -0.05)
 
 
-def test_lab_delay_fit_uses_outer_cases_and_validates_middle_case():
+def test_lab_controller_fit_selects_on_held_out_middle_case():
     px4 = tuple(_synthetic_trace(entry_range_m=value) for value in (0.460, 0.475, 0.490))
 
-    def candidate(*, delay_s: float, velocity_error_mps: float) -> dict[str, Any]:
+    def candidate(
+        *,
+        delay_s: float,
+        training_error_mps: float,
+        validation_error_mps: float,
+        kp_scale: float = 1.0,
+        kd_scale: float = 1.0,
+    ) -> dict[str, Any]:
         traces = []
         for trace in px4:
-            error = velocity_error_mps
-            if trace.nominal_entry_range_m == 0.475:
-                error *= 2.0
+            error = (
+                validation_error_mps if trace.nominal_entry_range_m == 0.475 else training_error_mps
+            )
             traces.append(
                 {
                     "label": trace.label,
@@ -163,22 +170,43 @@ def test_lab_delay_fit_uses_outer_cases_and_validates_middle_case():
                     ],
                 }
             )
-        return {"controller_command_delay_s": delay_s, "traces": traces}
+        return {
+            "controller_command_delay_s": delay_s,
+            "controller_horizontal_kp_vel_scale": kp_scale,
+            "controller_horizontal_kd_vel_scale": kd_scale,
+            "traces": traces,
+        }
 
     fit, selected = _fit_lab_command_delay(
         px4_traces=px4,
         candidates=[
-            candidate(delay_s=0.04, velocity_error_mps=0.02),
-            candidate(delay_s=0.08, velocity_error_mps=0.005),
-            candidate(delay_s=0.12, velocity_error_mps=0.01),
+            candidate(
+                delay_s=0.04,
+                training_error_mps=0.002,
+                validation_error_mps=0.02,
+            ),
+            candidate(
+                delay_s=0.08,
+                training_error_mps=0.005,
+                validation_error_mps=0.003,
+                kp_scale=0.75,
+                kd_scale=1.5,
+            ),
+            candidate(
+                delay_s=0.12,
+                training_error_mps=0.01,
+                validation_error_mps=0.01,
+            ),
         ],
     )
 
     assert fit["fit_entry_ranges_m"] == [0.460, 0.490]
     assert fit["validation_entry_ranges_m"] == [0.475]
     assert math.isclose(float(fit["selected_controller_command_delay_s"]), 0.08)
+    assert math.isclose(float(fit["selected_controller_horizontal_kp_vel_scale"]), 0.75)
+    assert math.isclose(float(fit["selected_controller_horizontal_kd_vel_scale"]), 1.5)
     assert math.isclose(float(fit["training_velocity_rmse_mps"]), 0.005)
-    assert math.isclose(float(fit["validation_velocity_rmse_mps"]), 0.01)
+    assert math.isclose(float(fit["validation_velocity_rmse_mps"]), 0.003)
     assert [trace.nominal_entry_range_m for trace in selected] == [0.460, 0.475, 0.490]
 
 

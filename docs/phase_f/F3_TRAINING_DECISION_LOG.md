@@ -2244,3 +2244,64 @@ configured proxy, but do not call sim-to-sim alignment complete. The remaining
 work is to identify response bandwidth, per-axis dynamics, and braking
 separately from delay, then validate on new held-out commands. Do not
 automatically run another warehouse-wall mission.
+
+### 49. Sweep horizontal controller response and retain the hover gate
+
+Date: 2026-07-29.
+
+Identification input: Reuse the wall-free PX4 traces from section 48 while
+holding the actor, captured normalized actions, 40/60 ms cadence, initial
+observations, and 0.200 s command-delay proxy fixed. The first diagnostic
+swept 30 combinations of velocity proportional- and damping-gain scales. A
+second 15-combination sweep changed only the two horizontal axes, leaving the
+unexcited vertical gains unchanged. Reports are
+`.build/benchmarks/press-temporal/20260729T031246Z/controller-grid-conformance.json`
+and
+`.build/benchmarks/press-temporal/20260729T031246Z/horizontal-controller-grid-conformance.json`.
+
+Selected horizontal candidate: Scale the horizontal proportional gains by
+0.75 and horizontal damping gains by 1.50. Against the current controller,
+outer-trace velocity RMSE fell from 0.024226 to 0.012599 m/s and
+held-out-middle RMSE fell from 0.020706 to 0.007104 m/s. Closest-range deltas
+changed from -0.04117, -0.02319, and -0.01234 m to -0.01641, +0.00333, and
++0.01200 m. The all-axis exploratory sweep produced materially identical
+forward-response metrics, confirming that the observed improvement came from
+the horizontal gains.
+
+Independent flight gate: Applying the selected absolute gains
+`controller_kp_vel=[1.5, 1.5, 3.0]` and
+`controller_kd_vel=[1.8, 1.8, 1.5]` failed
+`make test-integration-press-hover-goto`: the final hover error was 0.093 m,
+but the last-one-second maximum was 0.135 m against the 0.100 m limit. A
+conservative damping-only candidate kept horizontal proportional gain at 2.0
+and raised horizontal damping to 2.4. It also failed, with 0.087 m final error
+and 0.129 m last-window maximum. Evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040349Z.12744`
+and
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040426Z.13390`.
+
+A 1.50x damping candidate, absolute horizontal damping 1.8, narrowly failed:
+final hover error was 0.065 m, but its last-window maximum was 0.101 m. The
+1.25x candidate, absolute horizontal damping 1.5, passed. Its last-window
+maximum hover error was 0.086 m, settled goto error was 0.016 m, and the press
+side-channel handoff was ready at 0.464 m. Evidence is under
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040516Z.14088`
+and
+`.build/docker/integration/test-integration-press-hover-goto.20260729T040540Z.14769`.
+The retained candidate reduces outer/held-out velocity RMSE from
+0.024226/0.020706 to 0.020522/0.016336 m/s.
+
+Decision: Retain `controller_kp_vel=[2.0, 2.0, 3.0]` and
+`controller_kd_vel=[1.5, 1.5, 1.5]`. This is the strongest measured response
+change that preserves the independent hover/goto precondition. Retraining may
+proceed from the latest accepted actor; it must repeat selection and
+independent evaluation before PX4 acceptance.
+
+Bounded delay refinement: With the retained damping fixed, delays 0.120,
+0.160, 0.200, 0.240, and 0.280 s produced held-out RMSE of 0.019700,
+0.017700, 0.016336, 0.015804, and 0.016014 m/s. The nominal 0.240 s winner
+improves on 0.200 s by only 0.000532 m/s, or approximately 3.3%. Because the
+same middle trace already informed the delay and damping decisions, this
+marginal result is insufficient independent evidence for another config
+change. Keep `controller_command_delay_s=0.200`; validate any future delay
+change on a new command shape.

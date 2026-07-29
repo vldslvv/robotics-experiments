@@ -66,6 +66,12 @@ PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
   --json .build/benchmarks/press-temporal/conformance.json
 ```
 
+The replay target accepts `TEMPORAL_DELAY_GRID`,
+`TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID`, and
+`TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID`. Horizontal gain sweeps leave vertical
+gains unchanged. The analyzer reports outer-trace error separately and selects
+the replay candidate by held-out-middle velocity RMSE.
+
 The first-order PX4 trace fit and the isolated-Lab delay-grid fit both train on
 the 0.460 and 0.490 m cases and reserve 0.475 m for validation. The combined
 JSON reports command cadence, peak velocity, reversal, braking distance,

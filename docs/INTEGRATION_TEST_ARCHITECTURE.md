@@ -83,11 +83,12 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
 - `make test-integration-press-temporal-replay` consumes the PX4 temporal JSON
   under `.build/benchmarks/press-temporal/`, replays its exact observation and
   action cadence through isolated Isaac Lab, and evaluates the configured
-  delay grid. `controller_conformance.py` fits the outer entry cases and
-  reports the held-out middle case plus velocity, braking-distance,
-  closest-range, and settling diagnostics. These two temporal targets are
-  excluded from `test-integration-all` because they require the selected press
-  artifact and explicit trace artifacts.
+  delay and horizontal velocity-gain grids. `controller_conformance.py` fits
+  the outer entry cases, selects candidates by held-out-middle velocity error,
+  and reports fitted error plus velocity, braking-distance, closest-range, and
+  settling diagnostics. These two temporal targets are excluded from
+  `test-integration-all` because they require the selected press artifact and
+  explicit trace artifacts.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

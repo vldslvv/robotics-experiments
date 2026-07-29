@@ -104,6 +104,24 @@ farther than PX4, so the delay choice is validated but full plant alignment is
 not complete. The run-scoped reports are under
 `.build/benchmarks/press-temporal/20260729T031246Z/`.
 
+A controlled horizontal-gain sweep then held the 0.200 s delay, actor, actions,
+cadence, and entries fixed. The trace-only optimum scaled proportional gain by
+0.75 and damping by 1.50, reducing outer/held-out RMSE to
+0.01260/0.00710 m/s, but it failed the independent hover gate. The retained
+Pareto point keeps horizontal proportional gain at 2.0 and increases damping
+from 1.2 to 1.5. Its outer/held-out RMSE is 0.02052/0.01634 m/s, and it passed
+the hover/goto gate with 0.086 m maximum settled hover error and 0.016 m
+maximum settled goto error. Stronger 1.50x and 2.00x damping candidates failed
+the hover gate at 0.101 and 0.129 m, respectively.
+
+A bounded delay refinement at the retained damping evaluated 0.120 through
+0.280 s in 0.040 s increments. It nominally selected 0.240 s, with
+0.01983 m/s outer and 0.01580 m/s held-out RMSE, versus 0.02052 and
+0.01634 m/s at 0.200 s. The 0.00053 m/s held-out improvement is too small to
+justify reusing the same validation trace for another parameter change.
+Retain 0.200 s until a new held-out command shape independently supports a
+different delay.
+
 `controller_command_delay_s` is an equivalent fitted proxy. It may absorb
 estimator behavior, controller bandwidth, actuator response, state-dependent
 braking, and unmodeled dynamics. It is not evidence that PX4 contains a literal

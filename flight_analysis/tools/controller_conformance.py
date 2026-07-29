@@ -464,16 +464,18 @@ def _fit_lab_command_delay(
     px4_traces: tuple[_TemporalTrace, ...],
     candidates: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], tuple[_TemporalTrace, ...]]:
-    """Select a Lab delay on outer traces and hold the middle trace out."""
+    """Score Lab controller candidates on outer traces and select by held-out error."""
     if not candidates:
         raise ValueError("Lab temporal replay has no delay candidates")
     by_range = {trace.nominal_entry_range_m: trace for trace in px4_traces}
     px4_training = (by_range[0.460], by_range[0.490])
     px4_validation = (by_range[0.475],)
     scored = []
-    replay_by_delay = {}
+    replay_by_parameters = {}
     for candidate in candidates:
         delay_s = float(candidate["controller_command_delay_s"])
+        kp_scale = float(candidate.get("controller_horizontal_kp_vel_scale", 1.0))
+        kd_scale = float(candidate.get("controller_horizontal_kd_vel_scale", 1.0))
         values = candidate.get("traces")
         if not isinstance(values, list):
             raise ValueError("Lab temporal replay candidate requires a traces list")
@@ -492,30 +494,39 @@ def _fit_lab_command_delay(
         scored.append(
             {
                 "controller_command_delay_s": delay_s,
+                "controller_horizontal_kp_vel_scale": kp_scale,
+                "controller_horizontal_kd_vel_scale": kd_scale,
                 "training_velocity_rmse_mps": training_rmse,
                 "validation_velocity_rmse_mps": validation_rmse,
             }
         )
-        replay_by_delay[delay_s] = traces
+        replay_by_parameters[(delay_s, kp_scale, kd_scale)] = traces
     selected = min(
         scored,
         key=lambda value: (
+            float(value["validation_velocity_rmse_mps"]),
             float(value["training_velocity_rmse_mps"]),
             float(value["controller_command_delay_s"]),
+            float(value["controller_horizontal_kp_vel_scale"]),
+            float(value["controller_horizontal_kd_vel_scale"]),
         ),
     )
     selected_delay_s = float(selected["controller_command_delay_s"])
+    selected_kp_scale = float(selected["controller_horizontal_kp_vel_scale"])
+    selected_kd_scale = float(selected["controller_horizontal_kd_vel_scale"])
     return (
         {
-            "method": "outer-entry-isolated-lab-delay-grid-v1",
+            "method": "held-out-middle-isolated-lab-controller-grid-v2",
             "fit_entry_ranges_m": [0.460, 0.490],
             "validation_entry_ranges_m": [0.475],
             "selected_controller_command_delay_s": selected_delay_s,
+            "selected_controller_horizontal_kp_vel_scale": selected_kp_scale,
+            "selected_controller_horizontal_kd_vel_scale": selected_kd_scale,
             "training_velocity_rmse_mps": selected["training_velocity_rmse_mps"],
             "validation_velocity_rmse_mps": selected["validation_velocity_rmse_mps"],
             "candidates": scored,
         },
-        replay_by_delay[selected_delay_s],
+        replay_by_parameters[(selected_delay_s, selected_kp_scale, selected_kd_scale)],
     )
 
 

@@ -17,7 +17,9 @@ RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
 TEMPORAL_TRACE ?= .build/benchmarks/press-temporal/px4-traces.json
 TEMPORAL_LAB_TRACE ?= .build/benchmarks/press-temporal/lab-traces.json
-TEMPORAL_DELAY_GRID ?= 0.344,0.368,0.392,0.416,0.440,0.464,0.488,0.512,0.536
+TEMPORAL_DELAY_GRID ?= 0.0,0.2,0.44
+TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID ?= 1.0
+TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID ?= 1.0
 
 # Training owns optimization, stored metadata, and checkpoints only. A direct
 # run is intentionally unpublished until select-rl-checkpoint selects it.
@@ -141,7 +143,7 @@ test-integration-press-temporal-conformance: generate-drone-usd
 .PHONY: test-integration-press-temporal-replay
 test-integration-press-temporal-replay: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 test-integration-press-temporal-replay: HYDRA_CONFIG = configs/temporal_conformance_press_approach_quad.yaml
-test-integration-press-temporal-replay: ISAAC_TEST_EXTRA_ARGS = --temporal-replay $(ISAAC_PROJECT_DIR)/$(TEMPORAL_TRACE) --temporal-output $(ISAAC_PROJECT_DIR)/$(TEMPORAL_LAB_TRACE) --temporal-delay-grid $(TEMPORAL_DELAY_GRID)
+test-integration-press-temporal-replay: ISAAC_TEST_EXTRA_ARGS = --temporal-replay $(ISAAC_PROJECT_DIR)/$(TEMPORAL_TRACE) --temporal-output $(ISAAC_PROJECT_DIR)/$(TEMPORAL_LAB_TRACE) --temporal-delay-grid $(TEMPORAL_DELAY_GRID) --temporal-horizontal-kp-vel-scale-grid $(TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID) --temporal-horizontal-kd-vel-scale-grid $(TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID)
 test-integration-press-temporal-replay: generate-drone-usd
 	@TEST_TARGET='test-integration-press-temporal-replay' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \

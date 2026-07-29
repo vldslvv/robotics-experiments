@@ -70,6 +70,12 @@ PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
   --json .build/benchmarks/press-temporal/conformance.json
 ```
 
+`TEMPORAL_DELAY_GRID`, `TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID`, and
+`TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID` control replay ablations. Gain scales
+affect only the two horizontal axes; vertical gains require independently
+exciting vertical motion. Candidate selection ranks held-out-middle velocity
+RMSE first and reports outer-trace error separately.
+
 The temporal experiment disables switch and wall collisions while preserving
 the switch pose and production observation provider. Its final entry-goto
 setpoints are calibrated to spread the policy entries around the nominal

@@ -74,7 +74,9 @@ action:
   max_tilt_cmd_deg: 30.0
   hover_thrust_fraction: 0.4
   controller_kp_vel: [2.0, 2.0, 3.0]
-  controller_kd_vel: [1.2, 1.2, 1.5]
+  # The wall-free PX4 trace sweep selects 1.25x horizontal damping while the
+  # independent Lab hover/goto gate rejects stronger candidates.
+  controller_kd_vel: [1.5, 1.5, 1.5]
   controller_kp_att: [6.0, 6.0, 2.0]
   controller_kp_rate: [1.2, 1.2, 0.4]
   # Lab-only PX4 temporal-response reconciliation. The held-out temporal trace
