@@ -2156,3 +2156,91 @@ timeout before later recovery disarmed. The manual result does not convert
 iteration 49 into an accepted actor, waive its rejected 6.0% collision and
 0.383841 m minimum-range selection metrics, or replace the formal gates. No
 additional warehouse-wall run is authorized by this evidence.
+
+### 47. Retrain the held-out delay candidate and analyze the manual mission
+
+Date: 2026-07-29.
+
+Retraining command:
+
+```text
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_approach_quad.yaml \
+  --train-target train-rl \
+  --select-target select-rl-checkpoint \
+  --eval-target eval-press \
+  --train-args '--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/latest/logs/model_49.pt' \
+  --label press-approach-200ms
+```
+
+Run `20260729T024615Z.21141` actor-only initialized from iteration 49 of the
+rejected 0.440 s diagnostic run and trained for 50 iterations with the
+held-out-best 0.200 s Lab response proxy. All eleven checkpoints passed
+selection. Iteration 49 was selected and published to
+`.build/training/press-approach/latest`. Independent evaluation over 300
+episodes achieved 1.000 success, zero body or pusher collisions, zero other
+flight failures and timeouts, 0.406831 m mean closest range, 0.401545 m
+minimum closest range, and 1.450 s median completion.
+
+GPU observation: This run inherited the conservative 256-environment config
+and sustained approximately 45-59% GPU utilization with about 6.5 GB of
+24.6 GB VRAM. Earlier capacity measurements placed 32,768 environments near
+the throughput peak at approximately 86-89% utilization and 17.5 GB VRAM,
+while 49,152 used approximately 22.5 GB without improving throughput. New
+training therefore uses 32,768 environments in the tracked Hydra config;
+49,152 remains an explicit capacity probe.
+
+Manual command:
+
+```text
+make run-all-autorun HYDRA_CONFIG=configs/policy_press_approach_quad.yaml
+```
+
+The complete ten-stage mission finished, including return, landing, and
+disarm. Evidence is in
+`px4/logs/2026-07-29/02_51_45_v0_bridge.log` and the paired ULog
+`px4/logs/0/2026-07-29/02_51_46.ulg`. The policy ran for 2.2 s over 45 actor
+samples, moved from 0.485541 to 0.404858 m, and had 0.036674 m/s average and
+0.081813 m/s peak observed closing speed. Contact sensing stayed valid and
+false, the lamp stayed off, and maximum pusher compression was approximately
+0.028 mm, so classify the policy interval as contact-free.
+
+The policy ended with a zero-velocity command. The following 0.5 m/s
+PX4-guided `goto`, not the policy, performed the retreat. Residual momentum
+continued for approximately 0.364 s and 14.6 mm after the return command,
+placing the estimated closest post-policy range near 0.390 m before reversal.
+There was no logged contact or lamp activation. This successful mission is
+strong deployment evidence, but post-policy coasting below the Lab 0.40 m
+floor keeps temporal plant alignment open.
+
+Instantaneous ULog replay remained close: normalized rotor-speed RMSE was
+0.00794, collective-thrust RMSE was 0.03701 N, and mean collective thrust was
+23.0303 N in PX4 versus 23.0542 N in the Lab controller reference. These are
+diagnostics, not accepted publication thresholds.
+
+### 48. Revalidate the 0.200 s proxy on fresh wall-free traces
+
+Date: 2026-07-29.
+
+The calibrated wall-free temporal mission passed under
+`.build/docker/integration/test-integration-press-temporal-conformance.20260729T031246Z.41668`.
+The measured policy-entry ranges were 0.473103, 0.495020, and 0.499409 m;
+the analyzer uses these measured observations even though the stable labels
+remain nominal 0.460, 0.475, and 0.490 cases. PX4 closest ranges were
+0.406176, 0.403244, and 0.401688 m, and peak closing speeds were 0.063719,
+0.090268, and 0.096454 m/s.
+
+Exact-action Isaac Lab replay evaluated zero, 0.200, and 0.440 s delay
+candidates. Outer-trace RMSE was 0.031966, 0.024226, and 0.025795 m/s,
+respectively. Held-out-middle RMSE was 0.030365, 0.020706, and 0.025401 m/s.
+The fresh evidence therefore selects 0.200 s on both fitted and held-out
+metrics. The first-order PX4-only fit estimated 0.164 s delay and a 0.612 s
+response time constant; this supports interpreting the Lab delay as an
+equivalent proxy rather than literal transport latency.
+
+The 0.200 s Lab replay still ended 0.04117, 0.02319, and 0.01234 m closer than
+PX4 across the three traces. Decision: retain the accepted 0.200 s actor and
+configured proxy, but do not call sim-to-sim alignment complete. The remaining
+work is to identify response bandwidth, per-axis dynamics, and braking
+separately from delay, then validate on new held-out commands. Do not
+automatically run another warehouse-wall mission.

@@ -46,7 +46,7 @@ vehicles:
           hold_s: 2.0
         - kind: goto
           x: 0.0
-          y: 17.561
+          y: 17.563
           z: 2.5
           position_tol_m: 0.05
           timeout_s: 20.0
@@ -67,7 +67,7 @@ vehicles:
           hold_s: 2.0
         - kind: goto
           x: 0.0
-          y: 17.518
+          y: 17.507
           z: 2.5
           position_tol_m: 0.05
           timeout_s: 20.0
@@ -88,7 +88,7 @@ vehicles:
           hold_s: 2.0
         - kind: goto
           x: 0.0
-          y: 17.501
+          y: 17.476
           z: 2.5
           position_tol_m: 0.05
           timeout_s: 20.0

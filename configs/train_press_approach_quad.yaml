@@ -7,7 +7,7 @@ defaults:
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
-  num_envs: 256
+  num_envs: 32768
   episode_length_s: 10.0
   action:
     max_body_velocity_mps: 2.0

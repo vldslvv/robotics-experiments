@@ -135,6 +135,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.action.max_body_velocity_mps == 2.0
     assert config.rl.action.controller_command_delay_s == 0.200
     assert config.rl.press.reset.physical_contact_enabled
+    assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
     assert training.max_iterations == 50
@@ -199,6 +200,26 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     assert steps[8]["ground_speed_m_s"] == 0.5
     assert "ground_speed_m_s" not in steps[2]
     assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
+
+
+def test_temporal_conformance_config_uses_calibrated_entry_targets():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "temporal_conformance_press_approach_quad.yaml")
+    steps = config.vehicles["x500_01"].routine.steps
+
+    assert not config.rl.press.reset.physical_contact_enabled
+    assert tuple(steps[index]["label"] for index in (7, 12, 17)) == (
+        "temporal-0.460",
+        "temporal-0.475",
+        "temporal-0.490",
+    )
+    assert tuple(steps[index]["y"] for index in (5, 10, 15)) == (
+        17.563,
+        17.507,
+        17.476,
+    )
+    assert all(steps[index]["position_tol_m"] == 0.05 for index in (5, 10, 15))
 
 
 @pytest.mark.parametrize(

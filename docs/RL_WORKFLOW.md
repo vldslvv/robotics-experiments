@@ -71,9 +71,14 @@ PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
 ```
 
 The temporal experiment disables switch and wall collisions while preserving
-the switch pose and production observation provider. It is diagnostic and
-must not be treated as permission for a wall run. After Lab acceptance, three
-separate wall-free PX4 missions must pass before
+the switch pose and production observation provider. Its final entry-goto
+setpoints are calibrated to spread the policy entries around the nominal
+0.460, 0.475, and 0.490 m wall-normal cases despite the three-dimensional
+completion tolerance and measured lateral estimator offset. The 5 cm tolerance
+remains reachable while the measured policy-entry ranges, rather than the
+nominal labels or setpoints, determine conformance.
+It is diagnostic and must not be treated as permission for a wall run. After
+Lab acceptance, three separate wall-free PX4 missions must pass before
 `test-integration-press-approach-routine` may run. If checkpoint selection or
 independent Lab evaluation fails any 80% success, 5% collision, or 0.40 m
 minimum-range threshold, do not publish the actor and do not start either PX4
@@ -184,7 +189,10 @@ the approach transition.
 namespace. The actor and critic remain independent `[256, 256, 128]` MLPs with
 ELU activation; the actor still maps 34 values to four action means.
 `rl.training` owns PPO settings, rollout length, checkpoints, seed, task ID,
-vehicle ID, and policy namespace.
+vehicle ID, and policy namespace. The training config uses 32,768 parallel
+environments, the prior measured throughput peak with VRAM headroom for the
+current body and pusher contact sensors. A 49,152-environment run remains an
+explicit capacity probe rather than the production default.
 
 A new run writes checkpoints and `policy_meta.json` below
 `.build/training/<policy-name>/<run-id>/`. It does not export `policy.pt` or

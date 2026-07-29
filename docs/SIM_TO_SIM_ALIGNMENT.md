@@ -87,6 +87,23 @@ fast and supplied a plant under which to retrain. It also performed worse on
 the held-out trace than both zero delay and 0.200 s. The value therefore
 overfit the two outer traces.
 
+A fresh wall-free capture on 2026-07-29 used the retrained 0.200 s actor. The
+measured PX4 entry ranges were 0.47310, 0.49502, and 0.49941 m; the nominal
+labels remain identifiers, while the analyzer initializes Lab from the
+measured state. Replaying the exact actions and 40/60 ms cadence produced:
+
+| Lab command delay | Outer-trace RMSE | Held-out RMSE |
+| --- | ---: | ---: |
+| 0.000 s | 0.03197 m/s | 0.03037 m/s |
+| 0.200 s | 0.02423 m/s | 0.02071 m/s |
+| 0.440 s | 0.02579 m/s | 0.02540 m/s |
+
+The fresh evidence selects 0.200 s on both fitted and held-out error. Its
+closest-range deltas were -0.04117, -0.02319, and -0.01234 m: Lab still moved
+farther than PX4, so the delay choice is validated but full plant alignment is
+not complete. The run-scoped reports are under
+`.build/benchmarks/press-temporal/20260729T031246Z/`.
+
 `controller_command_delay_s` is an equivalent fitted proxy. It may absorb
 estimator behavior, controller bandwidth, actuator response, state-dependent
 braking, and unmodeled dynamics. It is not evidence that PX4 contains a literal

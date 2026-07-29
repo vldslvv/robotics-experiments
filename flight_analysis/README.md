@@ -70,9 +70,11 @@ The first-order PX4 trace fit and the isolated-Lab delay-grid fit both train on
 the 0.460 and 0.490 m cases and reserve 0.475 m for validation. The combined
 JSON reports command cadence, peak velocity, reversal, braking distance,
 closest range, settling, aligned velocity RMSE, and the selected Lab delay.
-The fitted project value is 0.440 s. This is a closed-loop equivalent delay
-covering estimator, command, controller, and response timing; it is not a
-claim that one literal PX4 component waits 440 ms.
+The historical outer-trace fit selected 0.440 s, but that value overfit its
+two fitting traces. The configured value for new training is the held-out-best
+0.200 s candidate. Both are closed-loop equivalent response proxies covering
+estimator, command, controller, and plant timing; neither claims that one
+literal PX4 component waits for the configured duration.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \
