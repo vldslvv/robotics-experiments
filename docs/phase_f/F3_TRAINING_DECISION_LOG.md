@@ -2305,3 +2305,45 @@ same middle trace already informed the delay and damping decisions, this
 marginal result is insufficient independent evidence for another config
 change. Keep `controller_command_delay_s=0.200`; validate any future delay
 change on a new command shape.
+
+### 50. Retrain the hover-safe damping plant at production parallelism
+
+Date: 2026-07-29.
+
+Run command:
+
+```text
+make/scripts/run_training_evaluation_then_shutdown.sh \
+  --hydra-config configs/train_press_approach_quad.yaml \
+  --train-target train-rl \
+  --select-target select-rl-checkpoint \
+  --eval-target eval-press \
+  --train-args '--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/latest/logs/model_49.pt' \
+  --label press-approach-damped-200ms
+```
+
+Run `20260729T041316Z.27604` used source commit `468e408`, 32,768 parallel
+environments, the retained 0.200 s delay, and horizontal damping 1.5. It
+actor-only initialized from iteration 49 of accepted run
+`20260729T024615Z.21141`. Fifty iterations collected 52,428,800 transitions
+in 328.8 s. Mean reported throughput across iterations 1-49 was approximately
+174,104 steps/s, ranging from 159,369 to 186,917 steps/s. Live GPU sampling
+showed 84% utilization, 16.8-18.0 GB of 24.6 GB VRAM, and 229-278 W. This
+confirms that the tracked 32,768-environment default materially uses the GPU
+while retaining VRAM headroom.
+
+All eleven saved checkpoints passed the 300-episode selection gates with
+1.000 success and zero collisions, other flight failures, or timeouts.
+Maximin selection chose iteration 20 and published it to
+`.build/training/press-approach/latest`. Independent evaluation of that exact
+artifact reproduced 1.000 success, zero body and pusher collisions, zero other
+flight failures and timeouts, 0.405855 m mean closest range, 0.400629 m
+minimum closest range, and 1.400 s median completion.
+
+Decision: Accept iteration 20 as the Lab artifact for the retained
+delay-and-damping plant. This completes retraining, checkpoint selection, and
+independent Lab evaluation, but it does not by itself complete sim-to-sim
+alignment or authorize an automatic warehouse-wall run. The next acceptance
+evidence is a fresh wall-free PX4 temporal capture using this actor, followed
+by exact-action Lab replay on a command shape not used to select the current
+delay and damping.
