@@ -175,9 +175,11 @@ A new run writes checkpoints and `policy_meta.json` below
 advance `latest`. Before it constructs the environment, training loads
 `rl.training.alignment_artifact` (defaulting to the controller alignment
 namespace's `best` link), validates vehicle, airframe, cadence, interface, and
-action scales, and stores the alignment digest, run identity, fingerprints,
-quality status, and complete settings in `policy_meta.json`. This happens
-before PPO begins. An explicit `ALIGNMENT_ARTIFACT` or
+action dimension, and stores the alignment digest, run identity, fingerprints,
+quality status, and complete settings in `policy_meta.json`. Normalized action
+scales remain task-owned and may differ from the scale used by the
+policy-independent alignment probe experiment. This happens before PPO begins.
+An explicit `ALIGNMENT_ARTIFACT` or
 `--alignment-artifact` overrides the configured link for reproduction.
 
 The collision-aware Stage 1 procedure actor-only initializes

@@ -94,6 +94,59 @@ def test_train_rl_uses_the_requested_artifact_run_id(tmp_path: Path) -> None:
     assert not (policy_root / "latest").exists()
 
 
+def test_training_alignment_keeps_normalized_action_scales_task_owned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train_rl = _load_train_rl_module()
+    artifact_path = tmp_path / ".build" / "alignment" / "test" / "best"
+    artifact_path.mkdir(parents=True)
+    (artifact_path / "alignment.json").write_text("{}")
+    artifact = SimpleNamespace(
+        vehicle="x500_01",
+        airframe="holybro_x500_v2.usda",
+        command_rate_hz=20.0,
+        command_interface=SimpleNamespace(
+            kind="body-flu-velocity-yaw-rate-v1",
+            dimension=4,
+            linear_scale_mps=3.0,
+            yaw_rate_scale_radps=1.5,
+        ),
+        advisory_quality_passed=True,
+    )
+    monkeypatch.setattr(train_rl, "load_alignment_artifact", lambda _path: artifact)
+    config = SimpleNamespace(
+        vehicles={
+            "x500_01": SimpleNamespace(
+                id=0,
+                spawn=SimpleNamespace(usd_path="@assets/holybro_x500_v2.usda"),
+            )
+        },
+        rl=SimpleNamespace(
+            policy_rate_hz=20.0,
+            action=SimpleNamespace(
+                kind="velocity",
+                action_dim=4,
+                max_body_velocity_mps=2.0,
+                max_yaw_rate_radps=1.0,
+            ),
+            training=SimpleNamespace(
+                vehicle_id=0,
+                alignment_artifact=".build/alignment/test/best",
+            ),
+        ),
+    )
+
+    loaded, digest = train_rl._load_training_alignment(  # noqa: SLF001
+        args=SimpleNamespace(alignment_artifact=None),
+        config=config,
+        repo_root=tmp_path,
+    )
+
+    assert loaded is artifact
+    assert digest
+
+
 @pytest.mark.parametrize("policy_name", ["", ".", "..", "/hover", "hover/latest", "hover.latest"])
 def test_train_rl_rejects_invalid_policy_names(policy_name: str, tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()

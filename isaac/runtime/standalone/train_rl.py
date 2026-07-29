@@ -270,11 +270,6 @@ def _load_training_alignment(
         mismatches.append(f"interface {artifact.command_interface.kind!r}")
     if action.kind != "velocity" or action.action_dim != artifact.command_interface.dimension:
         mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
-    if (
-        action.max_body_velocity_mps != artifact.command_interface.linear_scale_mps
-        or action.max_yaw_rate_radps != artifact.command_interface.yaw_rate_scale_radps
-    ):
-        mismatches.append("normalized action scales differ")
     if mismatches:
         raise ValueError("alignment artifact is incompatible: " + "; ".join(mismatches))
     alignment_path = artifact_path / "alignment.json" if artifact_path.is_dir() else artifact_path

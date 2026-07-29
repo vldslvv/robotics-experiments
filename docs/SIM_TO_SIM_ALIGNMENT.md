@@ -150,9 +150,11 @@ Training resolves `rl.training.alignment_artifact`, which defaults to the
 alignment namespace's `best` link. `ALIGNMENT_ARTIFACT` or
 `--alignment-artifact` selects an exact run for reproduction or ablation.
 Training validates vehicle, airframe, cadence, interface, action dimension, and
-action scales before constructing Isaac Lab. It stores the selected settings,
-artifact digest, run identity, definition fingerprints, and comparison
-fingerprint in `policy_meta.json` before PPO starts.
+backend compatibility before constructing Isaac Lab. Normalized action scales
+remain task-owned and may differ from the scale used by the alignment probe
+experiment. Training stores the selected settings, artifact digest, run
+identity, definition fingerprints, and comparison fingerprint in
+`policy_meta.json` before PPO starts.
 
 Checkpoint selection, export, and independent evaluation reconstruct the
 controller from that embedded record. Deployment validates the alignment

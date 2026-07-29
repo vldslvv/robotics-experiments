@@ -208,7 +208,9 @@ the current contents and the intended home for that kind of code.
   exports only press observation, handoff, task, provider, and policy-progress
   concepts. Runtime policy interface dispatch and adapter composition belong in
   the private `runtime/_policy.py`, not the fleet orchestrator or commanding.
-  `rl.action` owns only normalized action interpretation and scales.
+  `rl.action` owns only normalized action interpretation and scales. Those
+  scales remain task-owned and need not equal the alignment probe experiment's
+  normalized command scales.
   Controller/actuator internals come from
   `robotics_experiments.alignment.ControllerSettings`. Training must load and
   validate an alignment artifact before building Isaac Lab, embed its complete
