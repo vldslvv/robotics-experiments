@@ -55,8 +55,8 @@ upgraded to current `best`.
 
 After Lab evaluation, `make test-integration-press-policy-transfer` runs the
 trained actor at three wall-free PX4 entry ranges. This is downstream transfer
-acceptance, not a fitting input or permission for a physical wall run. The 80%
-success, 5% collision, and 0.40 m minimum-range thresholds are advisory
+acceptance, not a fitting input or permission for a physical wall run. The 95%
+success, 1% collision, and 0.40 m minimum-range thresholds are advisory
 publication diagnostics; a failing independent evaluation still blocks this
 PX4 acceptance workflow.
 
@@ -80,11 +80,18 @@ lateral/vertical error, at most 0.02 m/s wall-normal and lateral speed, at most
 0.05 rad/s angular speed, upright attitude, valid pose/contact samples, no
 contact, zero previous action, pre-contact mode, and a healthy estimator.
 
-The only implemented curriculum stage is the named `approach` stage. There is
-no automatic promotion and no fixed multi-stage enum. Future stages add their
-own Hydra option, policy namespace, transition, reward record, evaluator, and
-runtime completion predicate. They may initialize a compatible actor from an
-earlier checkpoint.
+The curriculum is intentionally staged:
+
+1. Stage 1, the implemented `approach` stage, learns a controlled contact-free
+   approach, alignment, and stable stop.
+2. Stage 2 will learn contact and switch activation.
+3. Stage 3 will learn controlled post-contact retreat and may initialize from a
+   compatible earlier stage.
+
+There is no automatic promotion and no fixed multi-stage enum. Each future
+stage adds its own Hydra option, policy namespace, transition, reward record,
+evaluator, and runtime completion predicate. The routine's ordinary return
+`goto` remains downstream of Stage 1 and is not learned retreat behavior.
 
 Stage 1 is the frozen `PressApproachState` advanced by
 `step_press_approach(...)`. State contains previous range, previous action,
@@ -124,7 +131,7 @@ pre-contact. Reset owns no independent entry-velocity tunables.
 
 - `range_progress = 50 * (previous_range - current_range)`.
 - `alignment_error = -50 * ||relative_yz||^2`.
-- `closing_overspeed = -100 * max(closing_speed - safe_target, 0)^2`.
+- `velocity_tracking = -100 * ||measured_velocity - target_velocity||^2`.
 - `upright_error = -5 * (1 - clamped_body_z_alignment)^2`.
 - `action_delta = -0.004 * mean((action - previous_action)^2)`.
 - `success = 150` on the successful terminal step.
@@ -132,15 +139,17 @@ pre-contact. Reset owns no independent entry-velocity tunables.
 - `flight_failure = -100` on an ordinary flight-envelope failure.
 - `timeout = -25` on truncation.
 
-The safe wall-normal closing speed is 0.08 m/s at and beyond 0.50 m, tapers
-linearly to zero at 0.44 m, and stays zero closer than that. Slower motion is
-not penalized. Collision overrides success and the ordinary flight-failure
-penalty; simultaneous body and pusher collision produces one collision reward
-penalty. `PressApproachTerminationFlags` still retains both collision sources
-for diagnostics. `Reward/` TensorBoard scalars enumerate every contribution
-plus `total`. `Press/` reports completed episodes, success, combined collision,
-body-collision, pusher-collision, other-flight-failure, and timeout
-percentages.
+The contact-frame velocity target is dense in all three axes. Its wall-normal
+component is `clip(1.25 * (range - 0.41), -0.04, 0.08)` m/s. Its tangential
+components are twice the lateral and vertical switch errors, radially limited
+to 0.10 m/s. This target teaches braking, small controlled retreat after range
+undershoot, and simultaneous alignment without encoding a task-specific actor.
+Collision overrides success and the ordinary flight-failure penalty;
+simultaneous body and pusher collision produces one collision reward penalty.
+`PressApproachTerminationFlags` still retains both collision sources for
+diagnostics. `Reward/` TensorBoard scalars enumerate every contribution plus
+`total`. `Press/` reports completed episodes, success, combined collision,
+body-collision, pusher-collision, other-flight-failure, and timeout percentages.
 
 The actor action drives training physics directly. No deterministic
 near-wall governor changes the forward command in training or deployment.
@@ -164,11 +173,14 @@ the approach transition.
 `approach` Hydra option, ten-second episodes, and the `press-approach` policy
 namespace. The actor and critic remain independent `[256, 256, 128]` MLPs with
 ELU activation; the actor still maps 34 values to four action means.
-`rl.training` owns PPO settings, rollout length, checkpoints, seed, task ID,
-vehicle ID, and policy namespace. The training config uses 32,768 parallel
-environments, the prior measured throughput peak with VRAM headroom for the
-current body and pusher contact sensors. A 49,152-environment run remains an
-explicit capacity probe rather than the production default.
+`rl.training` owns the explicit training mode, PPO settings, rollout length,
+checkpoints, seed, task ID, vehicle ID, and policy namespace. Scratch training
+uses 32,768 parallel environments, 300 iterations, 32 steps per environment,
+an adaptive `1e-4` learning rate, `0.0001` entropy coefficient, five epochs,
+eight minibatches, and checkpoints every ten iterations. This is approximately
+315 million transitions and about 35 minutes of PPO on the measured GPU. A
+49,152-environment run remains an explicit capacity probe rather than the
+production default.
 
 A new run writes checkpoints and `policy_meta.json` below
 `.build/training/<policy-name>/<run-id>/`. Before it constructs the
@@ -186,24 +198,30 @@ exports the highest-scoring checkpoint, always advances the relative `latest`
 link, and advances `best` only when the score strictly improves within the
 same comparison fingerprint.
 
-The collision-aware Stage 1 procedure actor-only initializes
-from accepted run `approach-20260726d`, checkpoint 24:
+`training_mode: scratch` forbids `--initialize-checkpoint`. After rsl_rl builds
+the actor and critic from random weights, the task-neutral
+`scratch-neutral-output` method orthogonally initializes the final actor layer
+with gain `0.01` and zero bias. The initial action mean is therefore near zero,
+while Gaussian exploration starts at standard deviation `0.03`. Metadata
+records this initialization method before PPO begins.
+
+`training_mode: actor-only` requires `--initialize-checkpoint` and copies only
+compatible `actor.*` tensors into a fresh run. Critic, optimizer, exploration
+standard deviation, and iteration counter remain fresh. The separate
+`configs/train_press_approach_quad_finetune.yaml` retains the former
+50-iteration, fixed `1e-6`, 0.01-noise, zero-entropy recipe:
 
 ```console
-make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \
   RL_RUN_ID=<run-id> \
-  TRAIN_ARGS='--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/approach-20260726d/logs/model_24.pt'
+  TRAIN_ARGS='--initialize-checkpoint /isaac-sim/proj/.build/training/press-approach/<source-run>/logs/model_<iteration>.pt'
 ```
 
-`--initialize-checkpoint` starts a fresh run and copies only compatible
-`actor.*` tensors. Critic, optimizer, exploration standard deviation, and
-iteration counter remain fresh. A source may be any validated
+The source may be any validated
 `.build/training/<source-policy>/<run>/logs/model_N.pt`; observation/action
 dimensions and actor tensor layout must match. Initialization provenance
 records method, source policy, source stage, source run, iteration, path, and
-source commit. This run uses 50 iterations, a fixed `1e-6` learning rate, 0.01
-initial action noise, zero entropy bonus, and checkpoints every five
-iterations.
+source commit.
 
 Manual export remains restricted to the configured namespace that owns the
 checkpoint:
@@ -259,15 +277,16 @@ final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
 - Mean closest range.
 - Minimum closest range.
 - Median successful completion time.
-- Normalized terminal range, trajectory alignment, closing-speed overshoot,
+- Normalized terminal range, trajectory alignment, target-velocity tracking,
   upright, action-change, and completion-time costs.
 - Every reward-term mean.
 
-`held-out-press-task-quality-v1` subtracts configured collision, other-flight-
+`held-out-press-task-quality-v2` subtracts configured collision, other-flight-
 failure, timeout, and non-success penalties plus the six normalized continuous
 costs. Higher scores are better; PPO return is never a selection input. The
-80% success, 5% collision, and 0.40 m minimum-range gates remain recorded as
-`advisory_accepted` and never block a structurally valid publication.
+95% success, 1% collision, 0.40 m minimum-range, finite completed trace, and
+zero flight-envelope-failure gates are recorded as `advisory_accepted` and
+never block a structurally valid publication.
 
 ```text
 score = -(4.00 * collision_rate
@@ -276,13 +295,13 @@ score = -(4.00 * collision_rate
         + 1.00 * (1 - success_rate)
         + 0.25 * terminal_range_cost
         + 0.20 * trajectory_alignment_cost
-        + 0.20 * closing_speed_overshoot_cost
+        + 0.20 * velocity_tracking_cost
         + 0.10 * upright_error_cost
         + 0.10 * action_delta_cost
         + 0.15 * completion_time_fraction)
 ```
 
-Schema-6 `checkpoint_selection.json` records policy/stage identity, metric and
+Schema-7 `checkpoint_selection.json` records policy/stage identity, metric and
 comparison fingerprint, seeds, advisory thresholds, every candidate and score
 component, reward means, and the selected checkpoint. `latest` always points
 to the newest completed selection. `best` changes only for a strictly higher

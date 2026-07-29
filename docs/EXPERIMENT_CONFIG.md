@@ -88,25 +88,27 @@ pusher effort/velocity limits. Pusher stiffness and damping are inherited from
 the generated vehicle USD. `rl.hover` owns the hover task definition and its
 `policy`; `rl.press` composes the named `approach` curriculum option and owns
 its separate `policy`.
-Each policy contains a shared activation, actor hidden dimensions and initial
-noise, and critic hidden dimensions. Hidden dimensions must be positive, the
-activation must be non-empty, and initial noise must be finite and
-non-negative.
+Each policy contains a shared activation, actor hidden dimensions, initial
+noise, output initialization, and critic hidden dimensions. Hidden dimensions
+must be positive, the activation must be non-empty, initial noise must be
+finite and non-negative, and the output initialization is
+`scratch-neutral-output`.
 
 `rl.press.curriculum_stage` is required and currently accepts only `approach`.
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
 deployment; `goal` owns the stable range/alignment/speed/upright predicate and
-braking schedule; `reward` owns the nine non-negative reward magnitudes;
-`reset` owns only the physical scene; `termination` owns contact sensing and
-flight envelopes; and `evaluation` owns deterministic seeds/count plus the 80%
-success and 5% maximum-contact gates. Independent reset velocity/range
-tunables are intentionally absent so training and deployment cannot resolve
-different entry bounds. Invalid handoff/goal/braking bounds, negative or
-non-finite reward weights, invalid rates, and unknown stages fail during
-`load_config`.
+three-axis velocity reference; `reward` owns the nine non-negative reward
+magnitudes; `reset` owns only the physical scene; `termination` owns contact
+sensing and flight envelopes; and `evaluation` owns deterministic seeds/count
+plus the 95% success and 1% maximum-contact gates. Independent reset
+velocity/range tunables are intentionally absent so training and deployment
+cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
+bounds, negative or non-finite reward weights, invalid rates, and unknown
+stages fail during `load_config`.
 
-`rl.training` owns PPO optimization, rollout, checkpoint cadence, task
-selection, artifact namespace, seed settings, and
+`rl.training` owns the explicit `scratch` / `actor-only` training mode, PPO
+optimization, rollout, checkpoint cadence, task selection, artifact namespace,
+seed settings, and
 `alignment_artifact`. The latter defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `ALIGNMENT_ARTIFACT` or the training CLI override selects an exact

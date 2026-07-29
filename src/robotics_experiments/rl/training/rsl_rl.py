@@ -5,7 +5,8 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
 ``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
-``initialize_actor_from_checkpoint`` / ``export_policy`` plus ``TrainingResult``
+``initialize_actor_output`` / ``initialize_actor_from_checkpoint`` /
+``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
 """
@@ -33,6 +34,7 @@ __all__ = [
     "deterministic_actor",
     "export_policy",
     "initialize_actor_from_checkpoint",
+    "initialize_actor_output",
     "load_checkpoint",
     "train",
 ]
@@ -158,6 +160,22 @@ def _policy_module(runner: _PolicyRunner) -> _ActorCritic:
     # rsl_rl 3.x names the PPO policy `alg.policy`; 2.x used `alg.actor_critic`.
     policy = getattr(runner.alg, "policy", None)
     return policy if policy is not None else runner.alg.actor_critic
+
+
+def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
+    """Apply a task-neutral near-zero initialization to the actor output."""
+    if method != "scratch-neutral-output":
+        raise ValueError(f"unsupported actor output initialization {method!r}")
+    actor = _policy_module(runner).actor
+    output_layers = tuple(
+        module for module in actor.modules() if isinstance(module, torch.nn.Linear)
+    )
+    if not output_layers:
+        raise ValueError("actor has no linear output layer")
+    output = output_layers[-1]
+    torch.nn.init.orthogonal_(output.weight, gain=0.01)
+    if output.bias is not None:
+        torch.nn.init.zeros_(output.bias)
 
 
 def initialize_actor_from_checkpoint(

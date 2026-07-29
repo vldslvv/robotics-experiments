@@ -38,18 +38,18 @@ def _load_selector_module():
 
 def _result(
     *,
-    success: float = 0.8,
-    collision: float = 0.05,
-    body_collision: float = 0.03,
-    pusher_collision: float = 0.02,
-    other_failure: float = 0.05,
-    timeout: float = 0.10,
+    success: float = 0.95,
+    collision: float = 0.01,
+    body_collision: float = 0.006,
+    pusher_collision: float = 0.004,
+    other_failure: float = 0.0,
+    timeout: float = 0.04,
     closest: float = 0.41,
     min_closest: float = 0.405,
     completion_time: float | None = 2.0,
     terminal_range_cost: float = 0.0,
     alignment_cost: float = 0.1,
-    overshoot_cost: float = 0.1,
+    velocity_tracking_cost: float = 0.1,
     upright_cost: float = 0.1,
     action_delta_cost: float = 0.1,
     completion_fraction: float = 0.2,
@@ -73,7 +73,7 @@ def _result(
             median_completion_time_s=completion_time,
             mean_terminal_range_cost=terminal_range_cost,
             mean_trajectory_alignment_cost=alignment_cost,
-            mean_closing_speed_overshoot_cost=overshoot_cost,
+            mean_velocity_tracking_cost=velocity_tracking_cost,
             mean_upright_error_cost=upright_cost,
             mean_action_delta_cost=action_delta_cost,
             mean_completion_time_fraction=completion_fraction,
@@ -87,15 +87,15 @@ def _evaluation(*, selector, iteration: int, result=None) -> CandidateEvaluation
         candidate=CheckpointCandidate(iteration, Path(f"model_{iteration}.pt")),
         result=result or _result(),
         evaluation_config=SimpleNamespace(
-            success_rate_min=0.8,
-            collision_rate_max=0.05,
+            success_rate_min=0.95,
+            collision_rate_max=0.01,
             collision_penalty=4.0,
             flight_failure_penalty=3.0,
             timeout_penalty=2.0,
             non_success_penalty=1.0,
             terminal_range_weight=0.25,
             trajectory_alignment_weight=0.20,
-            closing_speed_overshoot_weight=0.20,
+            velocity_tracking_weight=0.20,
             upright_error_weight=0.10,
             action_delta_weight=0.10,
             completion_time_weight=0.15,
@@ -155,30 +155,38 @@ def test_approach_acceptance_uses_success_and_collision_gates() -> None:
     assert not _evaluation(
         selector=selector,
         iteration=1,
-        result=_result(success=0.79),
+        result=_result(success=0.949),
     ).accepted
     assert not _evaluation(
         selector=selector,
         iteration=2,
-        result=_result(collision=0.051),
+        result=_result(collision=0.011),
     ).accepted
     assert not _evaluation(
         selector=selector,
         iteration=3,
         result=_result(min_closest=0.399),
     ).accepted
+    assert not _evaluation(
+        selector=selector,
+        iteration=4,
+        result=_result(other_failure=0.001),
+    ).accepted
 
 
 @pytest.mark.parametrize(
     ("better", "worse"),
     [
-        (_result(success=0.9), _result(success=0.8)),
+        (_result(success=0.99), _result(success=0.95)),
         (_result(collision=0.01), _result(collision=0.02)),
         (_result(other_failure=0.01), _result(other_failure=0.02)),
         (_result(timeout=0.01), _result(timeout=0.02)),
         (_result(terminal_range_cost=0.1), _result(terminal_range_cost=0.2)),
         (_result(alignment_cost=0.1), _result(alignment_cost=0.2)),
-        (_result(overshoot_cost=0.1), _result(overshoot_cost=0.2)),
+        (
+            _result(velocity_tracking_cost=0.1),
+            _result(velocity_tracking_cost=0.2),
+        ),
         (_result(upright_cost=0.1), _result(upright_cost=0.2)),
         (_result(action_delta_cost=0.1), _result(action_delta_cost=0.2)),
         (_result(completion_fraction=0.1), _result(completion_fraction=0.2)),
@@ -230,6 +238,18 @@ def test_quality_ranking_rejects_non_finite_components() -> None:
             iteration=0,
             result=_result(alignment_cost=float("nan")),
         )
+
+
+def test_advisory_acceptance_requires_finite_completed_traces() -> None:
+    selector = _load_selector_module()
+
+    evaluation = _evaluation(
+        selector=selector,
+        iteration=0,
+        result=_result(closest=float("nan")),
+    )
+
+    assert not evaluation.accepted
 
 
 def test_advisory_acceptance_does_not_override_quality_score() -> None:
@@ -314,9 +334,9 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
         seeds=(101, 202, 303),
         evaluation_config=SimpleNamespace(
             episodes_per_seed=100,
-            success_rate_min=0.8,
-            collision_rate_max=0.05,
-            selection_metric="held-out-press-task-quality-v1",
+            success_rate_min=0.95,
+            collision_rate_max=0.01,
+            selection_metric="held-out-press-task-quality-v2",
         ),
         goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
@@ -340,7 +360,7 @@ def test_no_scorer_warns_and_selects_final_checkpoint() -> None:
     assert selection.selected.iteration == 299
 
 
-def test_stage_three_report_records_stage_and_thresholds() -> None:
+def test_approach_report_records_stage_and_v2_thresholds() -> None:
     selector = _load_selector_module()
     candidate = CheckpointCandidate(150, Path("/tmp/run/logs/model_150.pt"))
     evaluation = _evaluation(
@@ -349,7 +369,7 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="held-out-press-task-quality-v1",
+        selection_method="held-out-press-task-quality-v2",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -362,21 +382,21 @@ def test_stage_three_report_records_stage_and_thresholds() -> None:
         seeds=(101, 202, 303),
         episodes_per_seed=100,
         evaluation_config=SimpleNamespace(
-            success_rate_min=0.8,
-            collision_rate_max=0.05,
+            success_rate_min=0.95,
+            collision_rate_max=0.01,
         ),
         goal_range_min_m=0.40,
         all_candidates=(candidate,),
         comparison_fingerprint="comparison",
     )
-    assert report["schema_version"] == 6
+    assert report["schema_version"] == 7
     assert report["curriculum_stage"] == "approach"
     assert report["selected_advisory_accepted"] is False
     assert report["selected_score"] == evaluation.ranking_values[0]
     assert report["comparison_fingerprint"] == "comparison"
     assert report["thresholds"] == {
-        "approach_success_rate_min": 0.8,
-        "collision_rate_max": 0.05,
+        "approach_success_rate_min": 0.95,
+        "collision_rate_max": 0.01,
         "min_closest_range_m": 0.40,
     }
     json.dumps(report, allow_nan=False)
@@ -420,7 +440,7 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v1",
+        "held-out-press-task-quality-v2",
         (evaluation,),
         evaluation.candidate,
     )
@@ -432,8 +452,8 @@ def test_publication_records_evaluation_and_advances_latest(
         "seeds": [101, 202, 303],
         "episodes_per_seed": 100,
         "thresholds": {
-            "approach_success_rate_min": 0.8,
-            "collision_rate_max": 0.05,
+            "approach_success_rate_min": 0.95,
+            "collision_rate_max": 0.01,
         },
     }
     best_updated = selector._publish_selection(  # noqa: SLF001
@@ -477,7 +497,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v1",
+        "held-out-press-task-quality-v2",
         (),
         CheckpointCandidate(50, checkpoint),
     )

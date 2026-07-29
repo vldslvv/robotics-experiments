@@ -489,7 +489,7 @@ def _run_contact_chain(
         steps = round(config.rl.episode_length_s / env.step_dt)
         max_velocity = float(config.rl.action.max_body_velocity_mps)
         # This deterministic physical-actuation gate is independent of the
-        # approach reward's safe closing-speed schedule.
+        # approach reward's dense velocity reference.
         approach_speed = 2.0 * config.rl.press.goal.linear_speed_max_mps
         retreat_speed = approach_speed * 0.75
         initial_range = float((env.switch.data.root_pos_w - env.drone.data.root_pos_w)[0, 0].item())
@@ -561,7 +561,7 @@ def _run_contact_chain(
                 and float(relative[0, 0].item()) >= initial_range
                 and float(torch.linalg.norm(relative[0, 1:3]).item())
                 <= config.rl.press.goal.alignment_error_max_m
-                and linear_speed <= config.rl.press.goal.closing_speed_far_mps
+                and linear_speed <= config.rl.press.goal.linear_speed_max_mps
                 and angular_speed <= config.rl.press.goal.angular_speed_max_radps
             )
             stable_retreat_steps = stable_retreat_steps + 1 if retreat_stable_now else 0

@@ -58,7 +58,7 @@ _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
     "range_progress",
     "alignment_error",
-    "closing_overspeed",
+    "velocity_tracking",
     "upright_error",
     "action_delta",
     "success",

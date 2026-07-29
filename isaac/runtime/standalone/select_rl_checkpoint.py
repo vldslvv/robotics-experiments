@@ -48,7 +48,7 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 6
+_REPORT_SCHEMA_VERSION = 7
 
 
 class _ActorCritic(Protocol):
@@ -178,10 +178,31 @@ def _score_press_result(
         else (1.0 if summary.collision_rate == 0.0 else -summary.collision_rate)
     )
     normalized_margins = (success_margin, collision_margin)
+    finite_trace_values = (
+        summary.approach_success_rate,
+        summary.collision_rate,
+        summary.body_collision_rate,
+        summary.pusher_collision_rate,
+        summary.other_flight_failure_rate,
+        summary.timeout_rate,
+        summary.mean_closest_range_m,
+        summary.min_closest_range_m,
+        summary.mean_terminal_range_cost,
+        summary.mean_trajectory_alignment_cost,
+        summary.mean_velocity_tracking_cost,
+        summary.mean_upright_error_cost,
+        summary.mean_action_delta_cost,
+        summary.mean_completion_time_fraction,
+    )
+    traces_finite = all(math.isfinite(value) for value in finite_trace_values) and (
+        summary.median_completion_time_s is None or math.isfinite(summary.median_completion_time_s)
+    )
     accepted = (
-        summary.approach_success_rate >= success_threshold
+        traces_finite
+        and summary.approach_success_rate >= success_threshold
         and summary.collision_rate <= collision_threshold
         and summary.min_closest_range_m >= goal_range_min_m
+        and summary.other_flight_failure_rate == 0.0
     )
     quality_cost = (
         float(evaluation_config.collision_penalty) * summary.collision_rate
@@ -191,8 +212,7 @@ def _score_press_result(
         + float(evaluation_config.terminal_range_weight) * summary.mean_terminal_range_cost
         + float(evaluation_config.trajectory_alignment_weight)
         * summary.mean_trajectory_alignment_cost
-        + float(evaluation_config.closing_speed_overshoot_weight)
-        * summary.mean_closing_speed_overshoot_cost
+        + float(evaluation_config.velocity_tracking_weight) * summary.mean_velocity_tracking_cost
         + float(evaluation_config.upright_error_weight) * summary.mean_upright_error_cost
         + float(evaluation_config.action_delta_weight) * summary.mean_action_delta_cost
         + float(evaluation_config.completion_time_weight) * summary.mean_completion_time_fraction
@@ -220,8 +240,8 @@ def _score_press_result(
                 summary.mean_trajectory_alignment_cost,
             ),
             MetricValue(
-                "closing_speed_overshoot_cost",
-                summary.mean_closing_speed_overshoot_cost,
+                "velocity_tracking_cost",
+                summary.mean_velocity_tracking_cost,
             ),
             MetricValue("upright_error_cost", summary.mean_upright_error_cost),
             MetricValue("action_delta_cost", summary.mean_action_delta_cost),

@@ -15,14 +15,15 @@ rl:
     task_id: Isaac-Switch-Press-Direct-v0
     vehicle_id: 0
     policy_name: press-approach
-    max_iterations: 50
+    training_mode: scratch
+    max_iterations: 300
     num_steps_per_env: 32
-    save_interval: 5
-    learning_rate: 1.0e-6
-    schedule: fixed
+    save_interval: 10
+    learning_rate: 1.0e-4
+    schedule: adaptive
     gamma: 0.995
     lam: 0.95
-    entropy_coef: 0.0
+    entropy_coef: 0.0001
     clip_param: 0.2
     value_loss_coef: 1.0
     num_learning_epochs: 5

@@ -57,6 +57,24 @@ def _load_eval_press_module():
     return module
 
 
+def _goal():
+    return SimpleNamespace(
+        range_min_m=0.40,
+        range_max_m=0.42,
+        alignment_error_max_m=0.03,
+        linear_speed_max_mps=0.10,
+        body_z_alignment_min=0.965926,
+        velocity_reference=SimpleNamespace(
+            range_center_m=0.41,
+            wall_normal_gain_per_s=1.25,
+            wall_normal_min_mps=-0.04,
+            wall_normal_max_mps=0.08,
+            tangential_gain_per_s=2.0,
+            tangential_speed_max_mps=0.10,
+        ),
+    )
+
+
 def test_approach_evaluation_aggregation() -> None:
     from robotics_experiments.workflows.isaac_lab import (
         PressApproachEpisodeMetrics,
@@ -94,7 +112,33 @@ def test_approach_evaluation_aggregation() -> None:
     assert summary.median_completion_time_s == 1.0
     assert summary.mean_terminal_range_cost == pytest.approx(0.6)
     assert summary.mean_trajectory_alignment_cost == pytest.approx(0.3)
+    assert summary.mean_velocity_tracking_cost == pytest.approx(0.4)
     assert summary.mean_completion_time_fraction == pytest.approx(0.9)
+
+
+def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.workflows.isaac_lab import press_evaluation
+
+    observation = torch.zeros((1, 34))
+    observation[:, :3] = torch.tensor([[0.45, 0.03, 0.04]])
+    observation[:, 3:7] = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
+    observation[:, 10:13] = torch.tensor([[0.05, 0.06, 0.08]])
+    observation[:, 19] = 1.0
+    costs = press_evaluation._trajectory_costs(  # noqa: SLF001
+        observation=observation,
+        action=torch.zeros((1, 4)),
+        goal_config=_goal(),
+    )
+
+    assert costs[1].item() == pytest.approx(0.0, abs=1.0e-6)
+    observation[:, 12] = -0.02
+    mismatched = press_evaluation._trajectory_costs(  # noqa: SLF001
+        observation=observation,
+        action=torch.zeros((1, 4)),
+        goal_config=_goal(),
+    )
+    assert mismatched[1].item() == pytest.approx(1.0)
 
 
 def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
@@ -159,15 +203,7 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
-        goal_config=SimpleNamespace(
-            range_min_m=0.40,
-            range_max_m=0.42,
-            alignment_error_max_m=0.03,
-            body_z_alignment_min=0.965926,
-            closing_speed_far_mps=0.08,
-            closing_speed_far_range_m=0.50,
-            closing_speed_zero_range_m=0.44,
-        ),
+        goal_config=_goal(),
         report=lambda _message: None,
     )
     assert env.seeds == [202]
@@ -184,20 +220,12 @@ def _config():
             training=SimpleNamespace(task_id="press-task"),
             press=SimpleNamespace(
                 curriculum_stage="approach",
-                goal=SimpleNamespace(
-                    range_min_m=0.40,
-                    range_max_m=0.42,
-                    alignment_error_max_m=0.03,
-                    body_z_alignment_min=0.965926,
-                    closing_speed_far_mps=0.08,
-                    closing_speed_far_range_m=0.50,
-                    closing_speed_zero_range_m=0.44,
-                ),
+                goal=_goal(),
                 evaluation=SimpleNamespace(
                     seeds=(101, 202, 303),
                     episodes_per_seed=1,
-                    success_rate_min=0.8,
-                    collision_rate_max=0.05,
+                    success_rate_min=0.95,
+                    collision_rate_max=0.01,
                 ),
             ),
         )
@@ -257,7 +285,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
             median_completion_time_s=1.0,
             mean_terminal_range_cost=0.0,
             mean_trajectory_alignment_cost=0.1,
-            mean_closing_speed_overshoot_cost=0.1,
+            mean_velocity_tracking_cost=0.1,
             mean_upright_error_cost=0.1,
             mean_action_delta_cost=0.1,
             mean_completion_time_fraction=0.1,

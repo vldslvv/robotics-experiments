@@ -37,6 +37,7 @@ from robotics_experiments.rl.press.task import (
     PressApproachTerminationFlags,
     initial_press_approach_state,
     press_approach_goal_satisfied,
+    press_approach_target_velocity,
     reset_press_approach_state,
     step_press_approach,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "initial_press_approach_state",
     "pack_press_observation",
     "press_approach_goal_satisfied",
+    "press_approach_target_velocity",
     "reset_press_approach_state",
     "step_press_approach",
     "to_vector",

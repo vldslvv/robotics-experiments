@@ -13,6 +13,7 @@ from robotics_experiments.config import (
     PressApproachGoalConfig,
     PressApproachRewardConfig,
     PressApproachTerminationConfig,
+    PressApproachVelocityReferenceConfig,
 )
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "PressApproachTerminationFlags",
     "initial_press_approach_state",
     "press_approach_goal_satisfied",
+    "press_approach_target_velocity",
     "reset_press_approach_state",
     "step_press_approach",
 ]
@@ -72,7 +74,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
 
     range_progress: ArrayT
     alignment_error: ArrayT
-    closing_overspeed: ArrayT
+    velocity_tracking: ArrayT
     upright_error: ArrayT
     action_delta: ArrayT
     success: ArrayT
@@ -86,7 +88,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         return (
             self.range_progress
             + self.alignment_error
-            + self.closing_overspeed
+            + self.velocity_tracking
             + self.upright_error
             + self.action_delta
             + self.success
@@ -153,6 +155,12 @@ def _mean_square(value: ArrayT) -> ArrayT:
     return np.square(value).mean(axis=-1)
 
 
+def _sum_square(value: ArrayT) -> ArrayT:
+    if isinstance(value, torch.Tensor):
+        return value.square().sum(dim=-1)
+    return np.square(value).sum(axis=-1)
+
+
 def _square(value: ArrayT) -> ArrayT:
     if isinstance(value, torch.Tensor):
         return value.square()
@@ -169,12 +177,6 @@ def _minimum(left: ArrayT, right: ArrayT) -> ArrayT:
     if isinstance(left, torch.Tensor):
         return torch.minimum(left, right)
     return np.minimum(left, right)
-
-
-def _positive_part(value: ArrayT) -> ArrayT:
-    if isinstance(value, torch.Tensor):
-        return value.clamp_min(0.0)
-    return np.maximum(value, 0.0)
 
 
 def initial_press_approach_state(
@@ -220,18 +222,42 @@ def reset_press_approach_state(
     )
 
 
-def _closing_speed_target(
+def press_approach_target_velocity(
     *,
-    current_range_m: ArrayT,
-    goal_cfg: PressApproachGoalConfig,
+    relative_switch_pos_m: ArrayT,
+    reference_cfg: PressApproachVelocityReferenceConfig,
 ) -> ArrayT:
-    fraction = _clip(
-        (current_range_m - goal_cfg.closing_speed_zero_range_m)
-        / (goal_cfg.closing_speed_far_range_m - goal_cfg.closing_speed_zero_range_m),
-        0.0,
-        1.0,
+    """Return the clipped three-axis contact-frame approach velocity."""
+    if isinstance(relative_switch_pos_m, torch.Tensor):
+        wall_normal = (
+            reference_cfg.wall_normal_gain_per_s
+            * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m)
+        ).clamp(
+            reference_cfg.wall_normal_min_mps,
+            reference_cfg.wall_normal_max_mps,
+        )
+        tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
+        tangential_norm = torch.linalg.norm(tangential, dim=-1)
+        denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
+        scale = reference_cfg.tangential_speed_max_mps / denominator
+        return torch.cat((wall_normal[..., None], tangential * scale[..., None]), dim=-1)
+    wall_normal = np.clip(
+        reference_cfg.wall_normal_gain_per_s
+        * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
+        reference_cfg.wall_normal_min_mps,
+        reference_cfg.wall_normal_max_mps,
     )
-    return goal_cfg.closing_speed_far_mps * fraction
+    tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
+    tangential_norm = np.linalg.norm(tangential, axis=-1)
+    denominator = np.maximum(
+        tangential_norm,
+        reference_cfg.tangential_speed_max_mps,
+    )
+    scale = reference_cfg.tangential_speed_max_mps / denominator
+    return np.concatenate(
+        (wall_normal[..., None], tangential * scale[..., None]),
+        axis=-1,
+    )
 
 
 def press_approach_goal_satisfied(
@@ -268,10 +294,9 @@ def step_press_approach(
     current_range = sample.relative_switch_pos_m[..., 0]
     alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
     upright_alignment = _clip(sample.body_z_world_z, 0.0, 1.0)
-    measured_closing_speed = sample.linear_velocity_mps[..., 0]
-    target_closing_speed = _closing_speed_target(
-        current_range_m=current_range,
-        goal_cfg=goal_cfg,
+    target_velocity = press_approach_target_velocity(
+        relative_switch_pos_m=sample.relative_switch_pos_m,
+        reference_cfg=goal_cfg.velocity_reference,
     )
 
     stable_goal = press_approach_goal_satisfied(
@@ -318,9 +343,9 @@ def step_press_approach(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
-        closing_overspeed=(
-            -reward_cfg.closing_overspeed_weight
-            * _square(_positive_part(measured_closing_speed - target_closing_speed))
+        velocity_tracking=(
+            -reward_cfg.velocity_tracking_weight
+            * _sum_square(sample.linear_velocity_mps - target_velocity)
         ),
         upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
         action_delta=(

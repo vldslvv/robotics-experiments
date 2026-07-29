@@ -172,6 +172,8 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     if not experiment.rl.training.alignment_artifact.strip():
         raise ValueError("rl.training.alignment_artifact must be non-empty")
+    if experiment.rl.training.training_mode not in {"scratch", "actor-only"}:
+        raise ValueError("rl.training.training_mode must be either 'scratch' or 'actor-only'")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,
@@ -193,6 +195,10 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         if not math.isfinite(noise) or noise < 0.0:
             raise ValueError(
                 f"{path}.actor.initial_noise_std must be finite and non-negative, got {noise!r}"
+            )
+        if policy.actor.output_initialization != "scratch-neutral-output":
+            raise ValueError(
+                f"{path}.actor.output_initialization must be " "'scratch-neutral-output'"
             )
 
 
@@ -232,10 +238,19 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
-    if not goal.closing_speed_zero_range_m < goal.closing_speed_far_range_m:
+    reference = goal.velocity_reference
+    if not goal.range_min_m <= reference.range_center_m <= goal.range_max_m:
         raise ValueError(
-            "rl.press.goal closing_speed_zero_range_m must be less than "
-            "closing_speed_far_range_m"
+            "rl.press.goal.velocity_reference.range_center_m must lie inside " "the goal range"
+        )
+    if not (
+        math.isfinite(reference.wall_normal_min_mps)
+        and math.isfinite(reference.wall_normal_max_mps)
+        and reference.wall_normal_min_mps < reference.wall_normal_max_mps
+        and reference.wall_normal_min_mps <= 0.0 <= reference.wall_normal_max_mps
+    ):
+        raise ValueError(
+            "rl.press.goal.velocity_reference wall-normal limits must be " "finite and ordered"
         )
     if not 0.0 <= goal.body_z_alignment_min <= 1.0:
         raise ValueError("rl.press.goal.body_z_alignment_min must be between 0 and 1")
@@ -243,7 +258,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "alignment_error_max_m": goal.alignment_error_max_m,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
-        "closing_speed_far_mps": goal.closing_speed_far_mps,
+        "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
+        "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
+        "velocity_reference.tangential_speed_max_mps": (reference.tangential_speed_max_mps),
     }
     for name, value in positive_goal_values.items():
         if not math.isfinite(value) or value <= 0.0:
@@ -272,9 +289,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
-    if evaluation.selection_metric != "held-out-press-task-quality-v1":
+    if evaluation.selection_metric != "held-out-press-task-quality-v2":
         raise ValueError(
-            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v1'"
+            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v2'"
         )
     for name in (
         "collision_penalty",
@@ -283,7 +300,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "non_success_penalty",
         "terminal_range_weight",
         "trajectory_alignment_weight",
-        "closing_speed_overshoot_weight",
+        "velocity_tracking_weight",
         "upright_error_weight",
         "action_delta_weight",
         "completion_time_weight",

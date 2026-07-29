@@ -26,6 +26,7 @@ training:
   task_id: Isaac-Drone-Hover-Direct-v0
   vehicle_id: 0
   policy_name: hover
+  training_mode: scratch
   alignment_artifact: .build/alignment/x500-velocity-px4-v1/best
   max_iterations: 1500
   num_steps_per_env: 24
@@ -50,6 +51,7 @@ hover:
     actor:
       hidden_dims: [128, 128]
       initial_noise_std: 1.0
+      output_initialization: scratch-neutral-output
     critic:
       hidden_dims: [128, 128]
   reward_pos_weight: 1.0

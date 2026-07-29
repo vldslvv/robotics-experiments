@@ -11,6 +11,7 @@ __all__ = [
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
     "PressApproachTerminationConfig",
+    "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
     "PressResetConfig",
     "PressTaskConfig",
@@ -79,6 +80,7 @@ class RlPolicyActorConfig(_FreezableConfig):
 
     hidden_dims: List[int]
     initial_noise_std: float
+    output_initialization: str
 
 
 @dataclass
@@ -171,7 +173,7 @@ class PressApproachRewardConfig(_FreezableConfig):
 
     range_progress_weight: float
     alignment_error_weight: float
-    closing_overspeed_weight: float
+    velocity_tracking_weight: float
     upright_error_weight: float
     action_delta_weight: float
     success_weight: float
@@ -181,8 +183,20 @@ class PressApproachRewardConfig(_FreezableConfig):
 
 
 @dataclass
+class PressApproachVelocityReferenceConfig(_FreezableConfig):
+    """Dense contact-frame velocity reference for the approach stage."""
+
+    range_center_m: float
+    wall_normal_gain_per_s: float
+    wall_normal_min_mps: float
+    wall_normal_max_mps: float
+    tangential_gain_per_s: float
+    tangential_speed_max_mps: float
+
+
+@dataclass
 class PressApproachGoalConfig(_FreezableConfig):
-    """Stable approach target and wall-normal braking schedule."""
+    """Stable approach target and dense velocity reference."""
 
     range_min_m: float
     range_max_m: float
@@ -191,9 +205,7 @@ class PressApproachGoalConfig(_FreezableConfig):
     angular_speed_max_radps: float
     body_z_alignment_min: float
     stable_steps: int
-    closing_speed_far_mps: float
-    closing_speed_far_range_m: float
-    closing_speed_zero_range_m: float
+    velocity_reference: PressApproachVelocityReferenceConfig
 
 
 @dataclass
@@ -237,7 +249,7 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     non_success_penalty: float
     terminal_range_weight: float
     trajectory_alignment_weight: float
-    closing_speed_overshoot_weight: float
+    velocity_tracking_weight: float
     upright_error_weight: float
     action_delta_weight: float
     completion_time_weight: float
@@ -257,6 +269,8 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
+        training_mode: Weight-initialization mode (``scratch`` or
+            ``actor-only``).
         alignment_artifact: Controller alignment run directory or publication
             link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.
@@ -279,6 +293,7 @@ class RlTrainingConfig(_FreezableConfig):
     task_id: str
     vehicle_id: int
     policy_name: str
+    training_mode: str
     alignment_artifact: str
     max_iterations: int
     num_steps_per_env: int
@@ -305,7 +320,7 @@ class PressTaskConfig(_FreezableConfig):
         curriculum_stage: Required stage name written to artifacts.
         policy: Task-owned actor/critic topology.
         handoff: Thresholds for the nav -> policy handoff gate.
-        goal: Stable approach target and braking schedule.
+        goal: Stable approach target and dense velocity reference.
         reward: Approach-stage reward weights.
         reset: Physical scene and initial-state ranges.
         termination: Contact and flight-envelope failure conditions.

@@ -298,6 +298,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     training_cfg = SimpleNamespace(
         task_id="press-task",
         policy_name="press-approach",
+        training_mode="scratch",
         seed=7,
         max_iterations=2,
         alignment_artifact=".build/alignment/test/best",
@@ -307,7 +308,12 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
             action=action,
             policy_rate_hz=17.0,
             training=training_cfg,
-            press=SimpleNamespace(curriculum_stage="approach"),
+            press=SimpleNamespace(
+                curriculum_stage="approach",
+                policy=SimpleNamespace(
+                    actor=SimpleNamespace(output_initialization="scratch-neutral-output")
+                ),
+            ),
         )
     )
     env = SimpleNamespace(close=lambda: None)
@@ -315,7 +321,9 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         observation_schema_version=1,
         observation_space=34,
         policy_interface="press-v1",
-        policy_config=SimpleNamespace(),
+        policy_config=SimpleNamespace(
+            actor=SimpleNamespace(output_initialization="scratch-neutral-output")
+        ),
     )
     runner = object()
     before_ppo = {}
@@ -341,6 +349,12 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         return runner
 
     monkeypatch.setattr(training, "build_runner", build_runner)
+    initialization_calls = []
+    monkeypatch.setattr(
+        training,
+        "initialize_actor_output",
+        lambda **kwargs: initialization_calls.append(kwargs),
+    )
     monkeypatch.setattr(
         training,
         "train",
@@ -366,6 +380,9 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
     assert before_ppo["alignment"]["artifact_digest"] == "digest"
+    assert before_ppo["training_mode"] == "scratch"
+    assert before_ppo["initialization"] == {"method": "scratch-neutral-output"}
+    assert initialization_calls == [{"runner": runner, "method": "scratch-neutral-output"}]
     assert export_calls == []
     assert not (tmp_path / ".build" / "training" / "press-approach" / "latest").exists()
 
@@ -444,6 +461,70 @@ def test_actor_only_initialization_preserves_fresh_training_state(tmp_path: Path
     assert torch.equal(policy.std, std_before)
     assert optimizer.state_dict() == optimizer_before
     assert runner.current_learning_iteration == 0
+
+
+def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> None:
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.rl.training import rsl_rl
+
+    actor = torch.nn.Sequential(
+        torch.nn.Linear(34, 256),
+        torch.nn.ELU(),
+        torch.nn.Linear(256, 4),
+    )
+    runner = SimpleNamespace(alg=SimpleNamespace(policy=SimpleNamespace(actor=actor)))
+
+    rsl_rl.initialize_actor_output(
+        runner=runner,
+        method="scratch-neutral-output",
+    )
+
+    output = actor[-1]
+    assert torch.count_nonzero(output.bias) == 0
+    gram = output.weight @ output.weight.T
+    torch.testing.assert_close(
+        gram,
+        torch.eye(4) * 0.01**2,
+        atol=1.0e-10,
+        rtol=1.0e-5,
+    )
+    action_mean = actor(torch.zeros((128, 34)))
+    assert float(action_mean.abs().max()) < 0.01
+
+
+@pytest.mark.parametrize(
+    ("training_mode", "checkpoint", "match"),
+    [
+        ("scratch", Path("model_1.pt"), "scratch training forbids"),
+        ("actor-only", None, "actor-only training requires"),
+        ("resume", None, "unsupported"),
+    ],
+)
+def test_training_mode_validates_checkpoint_contract(
+    training_mode: str,
+    checkpoint: Path | None,
+    match: str,
+) -> None:
+    train_rl = _load_train_rl_module()
+
+    with pytest.raises(ValueError, match=match):
+        train_rl._validate_training_mode(  # noqa: SLF001
+            training_mode=training_mode,
+            initialization_checkpoint=checkpoint,
+        )
+
+
+def test_valid_training_modes_accept_their_checkpoint_contract() -> None:
+    train_rl = _load_train_rl_module()
+
+    train_rl._validate_training_mode(  # noqa: SLF001
+        training_mode="scratch",
+        initialization_checkpoint=None,
+    )
+    train_rl._validate_training_mode(  # noqa: SLF001
+        training_mode="actor-only",
+        initialization_checkpoint=Path("model_1.pt"),
+    )
 
 
 def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: Path) -> None:
@@ -565,6 +646,7 @@ def test_training_adapter_uses_yaml_owned_schedule() -> None:
         actor=SimpleNamespace(
             hidden_dims=[256, 256, 128],
             initial_noise_std=0.2,
+            output_initialization="scratch-neutral-output",
         ),
         critic=SimpleNamespace(hidden_dims=[256, 256, 128]),
     )

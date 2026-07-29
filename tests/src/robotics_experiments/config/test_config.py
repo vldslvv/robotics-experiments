@@ -137,22 +137,31 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
+    assert training.training_mode == "scratch"
     assert config.rl.press.curriculum_stage == "approach"
-    assert training.max_iterations == 50
-    assert training.learning_rate == 1.0e-6
-    assert training.entropy_coef == 0.0
-    assert training.save_interval == 5
-    assert training.schedule == "fixed"
-    assert policy.actor.initial_noise_std == 0.01
+    assert training.max_iterations == 300
+    assert training.learning_rate == 1.0e-4
+    assert training.entropy_coef == 0.0001
+    assert training.save_interval == 10
+    assert training.schedule == "adaptive"
+    assert policy.actor.initial_noise_std == 0.03
+    assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
     assert reward.range_progress_weight == 50.0
-    assert reward.closing_overspeed_weight == 100.0
+    assert reward.velocity_tracking_weight == 100.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0
     assert reward.flight_failure_weight == 100.0
     assert config.rl.press.goal.stable_steps == 5
+    reference = config.rl.press.goal.velocity_reference
+    assert reference.range_center_m == 0.41
+    assert reference.wall_normal_gain_per_s == 1.25
+    assert reference.wall_normal_min_mps == -0.04
+    assert reference.wall_normal_max_mps == 0.08
+    assert reference.tangential_gain_per_s == 2.0
+    assert reference.tangential_speed_max_mps == 0.10
     assert config.rl.press.handoff.switch_range_min_m == 0.45
     assert config.rl.press.handoff.switch_range_max_m == 0.50
     assert config.rl.press.handoff.lateral_align_max_m == 0.08
@@ -162,11 +171,26 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.handoff.body_z_alignment_min == 0.965926
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
-    assert config.rl.press.evaluation.collision_rate_max == 0.05
-    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v1"
+    assert config.rl.press.evaluation.success_rate_min == 0.95
+    assert config.rl.press.evaluation.collision_rate_max == 0.01
+    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v2"
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+def test_press_approach_finetune_config_preserves_low_noise_actor_only_recipe():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
+
+    assert config.rl.training.training_mode == "actor-only"
+    assert config.rl.training.max_iterations == 50
+    assert config.rl.training.learning_rate == 1.0e-6
+    assert config.rl.training.entropy_coef == 0.0
+    assert config.rl.training.save_interval == 5
+    assert config.rl.training.schedule == "fixed"
+    assert config.rl.press.policy.actor.initial_noise_std == 0.01
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
@@ -274,6 +298,14 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             {"rl": {"training": {"alignment_artifact": "  "}}},
             "alignment_artifact must be non-empty",
         ),
+        (
+            {"rl": {"training": {"training_mode": "resume"}}},
+            "training_mode",
+        ),
+        (
+            {"rl": {"press": {"policy": {"actor": {"output_initialization": "task-controller"}}}}},
+            "output_initialization",
+        ),
     ],
 )
 def test_task_policy_validation(tmp_path, override, match):
@@ -297,16 +329,22 @@ def test_task_policy_validation(tmp_path, override, match):
             "range bounds",
         ),
         (
+            {"rl": {"press": {"goal": {"velocity_reference": {"range_center_m": 0.43}}}}},
+            "range_center_m",
+        ),
+        (
             {
                 "rl": {
                     "press": {
                         "goal": {
-                            "closing_speed_zero_range_m": 0.51,
+                            "velocity_reference": {
+                                "wall_normal_min_mps": 0.1,
+                            }
                         }
                     }
                 }
             },
-            "closing_speed_zero_range_m",
+            "wall-normal limits",
         ),
         (
             {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},

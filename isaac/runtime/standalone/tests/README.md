@@ -42,7 +42,7 @@ retreats within the stability envelope. A test-local `SwitchPressEnv` subclass
 returns no dones and no approach reward, so Stage 1's privileged collision
 termination cannot reset this physical measurement path. Its test-local
 press/retreat speed derives from the stable-flight speed limit rather than the
-approach reward's safe closing-speed target.
+approach reward's dense velocity reference.
 
 Integration Make targets default to the minimal
 `@isaac/assets/TestScenes/MinimalIntegration.usda` scene because the current

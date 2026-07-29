@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -86,7 +87,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
         f"median_completion_s={summary.median_completion_time_s!s} "
         f"terminal_range_cost={summary.mean_terminal_range_cost:.5f} "
         f"alignment_cost={summary.mean_trajectory_alignment_cost:.5f} "
-        f"closing_overshoot_cost={summary.mean_closing_speed_overshoot_cost:.5f} "
+        f"velocity_tracking_cost={summary.mean_velocity_tracking_cost:.5f} "
         f"upright_cost={summary.mean_upright_error_cost:.5f} "
         f"action_delta_cost={summary.mean_action_delta_cost:.5f} "
         f"completion_fraction={summary.mean_completion_time_fraction:.5f}"
@@ -94,13 +95,36 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
 
+    finite_trace_values = (
+        summary.approach_success_rate,
+        summary.collision_rate,
+        summary.body_collision_rate,
+        summary.pusher_collision_rate,
+        summary.other_flight_failure_rate,
+        summary.timeout_rate,
+        summary.mean_closest_range_m,
+        summary.min_closest_range_m,
+        summary.mean_terminal_range_cost,
+        summary.mean_trajectory_alignment_cost,
+        summary.mean_velocity_tracking_cost,
+        summary.mean_upright_error_cost,
+        summary.mean_action_delta_cost,
+        summary.mean_completion_time_fraction,
+    )
     failures = []
+    if not all(math.isfinite(value) for value in finite_trace_values) or (
+        summary.median_completion_time_s is not None
+        and not math.isfinite(summary.median_completion_time_s)
+    ):
+        failures.append("non-finite traces")
     if summary.approach_success_rate < evaluation.success_rate_min:
         failures.append("approach success")
     if summary.collision_rate > evaluation.collision_rate_max:
         failures.append("simulated collisions")
     if summary.min_closest_range_m < config.rl.press.goal.range_min_m:
         failures.append("range undershoot")
+    if summary.other_flight_failure_rate > 0.0:
+        failures.append("flight-envelope failure")
     if failures:
         raise AssertionError("press acceptance failed: " + ", ".join(failures))
     _report("press approach evaluation PASSED")

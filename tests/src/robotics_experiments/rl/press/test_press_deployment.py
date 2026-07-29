@@ -6,7 +6,10 @@ from dataclasses import fields, replace
 
 import numpy as np
 
-from robotics_experiments.config import PressApproachGoalConfig
+from robotics_experiments.config import (
+    PressApproachGoalConfig,
+    PressApproachVelocityReferenceConfig,
+)
 from robotics_experiments.rl.press import (
     HandoffGate,
     PressApproachExecutionParams,
@@ -26,9 +29,14 @@ _GOAL = PressApproachGoalConfig(
     angular_speed_max_radps=0.40,
     body_z_alignment_min=0.965926,
     stable_steps=5,
-    closing_speed_far_mps=0.20,
-    closing_speed_far_range_m=0.50,
-    closing_speed_zero_range_m=0.42,
+    velocity_reference=PressApproachVelocityReferenceConfig(
+        range_center_m=0.41,
+        wall_normal_gain_per_s=1.25,
+        wall_normal_min_mps=-0.04,
+        wall_normal_max_mps=0.08,
+        tangential_gain_per_s=2.0,
+        tangential_speed_max_mps=0.10,
+    ),
 )
 _GATE = HandoffGate(
     pose_confidence_min=0.85,

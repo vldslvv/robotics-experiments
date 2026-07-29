@@ -301,6 +301,25 @@ def _validate_initialization_contract(
         )
 
 
+def _validate_training_mode(
+    *,
+    training_mode: str,
+    initialization_checkpoint: Path | None,
+) -> None:
+    if training_mode == "scratch":
+        if initialization_checkpoint is not None:
+            raise ValueError(
+                "scratch training forbids --initialize-checkpoint; use the "
+                "actor-only training mode"
+            )
+        return
+    if training_mode == "actor-only":
+        if initialization_checkpoint is None:
+            raise ValueError("actor-only training requires --initialize-checkpoint")
+        return
+    raise ValueError(f"unsupported rl.training.training_mode={training_mode!r}")
+
+
 def _run_new_training(
     *,
     args: argparse.Namespace,
@@ -316,6 +335,10 @@ def _run_new_training(
 ) -> None:
     training_cfg = config.rl.training
     initialization_checkpoint = args.initialize_checkpoint
+    _validate_training_mode(
+        training_mode=training_cfg.training_mode,
+        initialization_checkpoint=initialization_checkpoint,
+    )
     initialization = None
     source_contract = None
     if initialization_checkpoint is not None:
@@ -326,7 +349,7 @@ def _run_new_training(
         )
     run_dir = _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
     initialization_report = (
-        ""
+        ", actor_init=scratch-neutral-output"
         if initialization is None
         else (
             f", actor_init={initialization['source_run']}/"
@@ -360,8 +383,11 @@ def _run_new_training(
             alignment_artifact=alignment_artifact,
             alignment_digest=alignment_digest,
         )
-        if initialization is not None:
-            metadata["initialization"] = initialization
+        output_initialization = env_cfg.policy_config.actor.output_initialization
+        metadata["training_mode"] = training_cfg.training_mode
+        metadata["initialization"] = (
+            {"method": output_initialization} if initialization is None else initialization
+        )
         _write_artifact_metadata(run_dir=run_dir, metadata=metadata)
         runner = training.build_runner(
             env=env,
@@ -370,7 +396,12 @@ def _run_new_training(
             log_dir=str(run_dir / "logs"),
             device=device,
         )
-        if initialization_checkpoint is not None:
+        if initialization_checkpoint is None:
+            training.initialize_actor_output(
+                runner=runner,
+                method=output_initialization,
+            )
+        else:
             training.initialize_actor_from_checkpoint(
                 runner=runner,
                 checkpoint_path=initialization_checkpoint,
@@ -453,6 +484,10 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             device=device,
         )
         return
+    _validate_training_mode(
+        training_mode=training_cfg.training_mode,
+        initialization_checkpoint=args.initialize_checkpoint,
+    )
     alignment_artifact, alignment_digest = _load_training_alignment(
         args=args,
         config=config,

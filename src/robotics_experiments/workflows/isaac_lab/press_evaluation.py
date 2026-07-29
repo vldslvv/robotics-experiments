@@ -11,7 +11,11 @@ import numpy as np
 import torch
 
 from robotics_experiments.config import PressApproachGoalConfig
-from robotics_experiments.rl.press import PressApproachResult, PressApproachRewardTerms
+from robotics_experiments.rl.press import (
+    PressApproachResult,
+    PressApproachRewardTerms,
+    press_approach_target_velocity,
+)
 from robotics_experiments.rl.training.selection import RewardMean
 
 __all__ = [
@@ -37,7 +41,7 @@ class PressApproachEpisodeMetrics:
     completion_time_s: float | None
     terminal_range_cost: float
     trajectory_alignment_cost: float
-    closing_speed_overshoot_cost: float
+    velocity_tracking_cost: float
     upright_error_cost: float
     action_delta_cost: float
     completion_time_fraction: float
@@ -59,7 +63,7 @@ class PressApproachEvaluationSummary:
     median_completion_time_s: float | None
     mean_terminal_range_cost: float
     mean_trajectory_alignment_cost: float
-    mean_closing_speed_overshoot_cost: float
+    mean_velocity_tracking_cost: float
     mean_upright_error_cost: float
     mean_action_delta_cost: float
     mean_completion_time_fraction: float
@@ -137,8 +141,8 @@ def summarize_press_approach_episodes(
         mean_trajectory_alignment_cost=float(
             np.mean([episode.trajectory_alignment_cost for episode in episodes])
         ),
-        mean_closing_speed_overshoot_cost=float(
-            np.mean([episode.closing_speed_overshoot_cost for episode in episodes])
+        mean_velocity_tracking_cost=float(
+            np.mean([episode.velocity_tracking_cost for episode in episodes])
         ),
         mean_upright_error_cost=float(
             np.mean([episode.upright_error_cost for episode in episodes])
@@ -160,19 +164,22 @@ def _trajectory_costs(
     alignment = torch.linalg.vector_norm(relative_position[:, 1:3], dim=-1)
     alignment_cost = (alignment / float(goal_config.alignment_error_max_m)).clamp(0.0, 1.0)
 
-    range_m = relative_position[:, 0]
-    closing_fraction = (
-        (range_m - float(goal_config.closing_speed_zero_range_m))
-        / (
-            float(goal_config.closing_speed_far_range_m)
-            - float(goal_config.closing_speed_zero_range_m)
-        )
-    ).clamp(0.0, 1.0)
-    target_closing_speed = float(goal_config.closing_speed_far_mps) * closing_fraction
-    closing_speed = observation[:, 10]
-    overshoot_cost = (
-        (closing_speed - target_closing_speed).clamp_min(0.0)
-        / float(goal_config.closing_speed_far_mps)
+    relative_quat_xyzw = observation[:, 3:7]
+    body_velocity = observation[:, 10:13]
+    quat_vector = relative_quat_xyzw[:, :3]
+    twice_cross = 2.0 * torch.linalg.cross(quat_vector, body_velocity)
+    contact_velocity = (
+        body_velocity
+        + relative_quat_xyzw[:, 3:4] * twice_cross
+        + torch.linalg.cross(quat_vector, twice_cross)
+    )
+    target_velocity = press_approach_target_velocity(
+        relative_switch_pos_m=relative_position,
+        reference_cfg=goal_config.velocity_reference,
+    )
+    velocity_tracking_cost = (
+        torch.linalg.vector_norm(contact_velocity - target_velocity, dim=-1)
+        / float(goal_config.linear_speed_max_mps)
     ).clamp(0.0, 1.0)
 
     attitude_xyzw = observation[:, 16:20]
@@ -185,7 +192,7 @@ def _trajectory_costs(
     action_delta_cost = (
         torch.sqrt(torch.mean((action - previous_action).square(), dim=-1)) / 2.0
     ).clamp(0.0, 1.0)
-    return alignment_cost, overshoot_cost, upright_cost, action_delta_cost
+    return alignment_cost, velocity_tracking_cost, upright_cost, action_delta_cost
 
 
 def _evaluate_seed(
@@ -335,7 +342,7 @@ def _evaluate_seed(
             ),
             terminal_range_cost=float(terminal_range_cost[index].item()),
             trajectory_alignment_cost=float(trajectory_means[0, index].item()),
-            closing_speed_overshoot_cost=float(trajectory_means[1, index].item()),
+            velocity_tracking_cost=float(trajectory_means[1, index].item()),
             upright_error_cost=float(trajectory_means[2, index].item()),
             action_delta_cost=float(trajectory_means[3, index].item()),
             completion_time_fraction=(

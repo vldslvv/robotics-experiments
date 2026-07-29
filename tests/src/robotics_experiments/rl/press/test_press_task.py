@@ -12,12 +12,14 @@ from robotics_experiments.config import (
     PressApproachGoalConfig,
     PressApproachRewardConfig,
     PressApproachTerminationConfig,
+    PressApproachVelocityReferenceConfig,
 )
 from robotics_experiments.rl.press import (
     PressApproachInput,
     PressApproachRewardTerms,
     PressApproachState,
     initial_press_approach_state,
+    press_approach_target_velocity,
     reset_press_approach_state,
     step_press_approach,
 )
@@ -30,14 +32,19 @@ _GOAL = PressApproachGoalConfig(
     angular_speed_max_radps=0.40,
     body_z_alignment_min=0.965926,
     stable_steps=5,
-    closing_speed_far_mps=0.08,
-    closing_speed_far_range_m=0.50,
-    closing_speed_zero_range_m=0.44,
+    velocity_reference=PressApproachVelocityReferenceConfig(
+        range_center_m=0.41,
+        wall_normal_gain_per_s=1.25,
+        wall_normal_min_mps=-0.04,
+        wall_normal_max_mps=0.08,
+        tangential_gain_per_s=2.0,
+        tangential_speed_max_mps=0.10,
+    ),
 )
 _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
     alignment_error_weight=50.0,
-    closing_overspeed_weight=100.0,
+    velocity_tracking_weight=100.0,
     upright_error_weight=5.0,
     action_delta_weight=0.004,
     success_weight=150.0,
@@ -69,6 +76,7 @@ def _sample(
     vertical_m: float = 0.0,
     closing_speed_mps: float = 0.08,
     lateral_speed_mps: float = 0.0,
+    vertical_speed_mps: float = 0.0,
     angular_speed_radps: float = 0.0,
     upright: float = 1.0,
     altitude_m: float = 1.0,
@@ -79,7 +87,7 @@ def _sample(
 ) -> PressApproachInput[np.ndarray]:
     return PressApproachInput(
         relative_switch_pos_m=np.array([[range_m, lateral_m, vertical_m]]),
-        linear_velocity_mps=np.array([[closing_speed_mps, lateral_speed_mps, 0.0]]),
+        linear_velocity_mps=np.array([[closing_speed_mps, lateral_speed_mps, vertical_speed_mps]]),
         angular_velocity_radps=np.array([[angular_speed_radps, 0.0, 0.0]]),
         body_z_world_z=np.array([upright]),
         altitude_m=np.array([altitude_m]),
@@ -104,7 +112,7 @@ def test_reward_record_has_exactly_nine_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
         "alignment_error",
-        "closing_overspeed",
+        "velocity_tracking",
         "upright_error",
         "action_delta",
         "success",
@@ -155,27 +163,54 @@ def test_alignment_and_upright_errors_are_quadratic() -> None:
 
 @pytest.mark.parametrize(
     ("range_m", "target_mps"),
-    [(0.50, 0.08), (0.47, 0.04), (0.44, 0.0), (0.40, 0.0), (0.60, 0.08)],
+    [(0.50, 0.08), (0.47, 0.075), (0.41, 0.0), (0.39, -0.025), (0.30, -0.04)],
 )
-def test_closing_overspeed_target_tapers_linearly(
+def test_wall_normal_velocity_target_is_linear_and_clipped(
     range_m: float,
     target_mps: float,
 ) -> None:
-    result = _step(
-        state=_state(range_m=range_m),
-        sample=_sample(range_m=range_m, closing_speed_mps=target_mps),
+    target = press_approach_target_velocity(
+        relative_switch_pos_m=np.array([[range_m, 0.0, 0.0]]),
+        reference_cfg=_GOAL.velocity_reference,
     )
-    assert result.rewards.closing_overspeed[0] == pytest.approx(0.0)
-    overspeed = _step(
-        state=_state(range_m=range_m),
-        sample=_sample(range_m=range_m, closing_speed_mps=target_mps + 0.1),
+    assert target[0].tolist() == pytest.approx([target_mps, 0.0, 0.0])
+
+
+def test_tangential_velocity_target_is_radially_limited() -> None:
+    target = press_approach_target_velocity(
+        relative_switch_pos_m=np.array([[0.41, 0.03, 0.04], [0.41, 0.06, 0.08]]),
+        reference_cfg=_GOAL.velocity_reference,
     )
-    assert overspeed.rewards.closing_overspeed[0] == pytest.approx(-1.0)
-    underspeed = _step(
-        state=_state(range_m=range_m),
-        sample=_sample(range_m=range_m, closing_speed_mps=target_mps - 0.1),
+    np.testing.assert_allclose(
+        target,
+        [[0.0, 0.06, 0.08], [0.0, 0.06, 0.08]],
     )
-    assert underspeed.rewards.closing_overspeed[0] == pytest.approx(0.0)
+
+
+def test_velocity_tracking_penalizes_three_axis_error_in_both_directions() -> None:
+    matched = _step(
+        state=_state(range_m=0.41),
+        sample=_sample(
+            range_m=0.41,
+            lateral_m=0.03,
+            vertical_m=0.04,
+            closing_speed_mps=0.0,
+            lateral_speed_mps=0.06,
+            vertical_speed_mps=0.08,
+        ),
+    )
+    assert matched.rewards.velocity_tracking[0] == pytest.approx(0.0)
+    for wall_normal_error in (-0.1, 0.1):
+        mismatched = _step(
+            state=_state(range_m=0.41),
+            sample=_sample(
+                range_m=0.41,
+                closing_speed_mps=wall_normal_error,
+                lateral_speed_mps=0.02,
+                vertical_speed_mps=-0.03,
+            ),
+        )
+        assert mismatched.rewards.velocity_tracking[0] == pytest.approx(-1.13)
 
 
 def test_action_delta_uses_mean_square() -> None:
