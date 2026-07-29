@@ -2347,3 +2347,46 @@ alignment or authorize an automatic warehouse-wall run. The next acceptance
 evidence is a fresh wall-free PX4 temporal capture using this actor, followed
 by exact-action Lab replay on a command shape not used to select the current
 delay and damping.
+
+### 51. Reject the retrained actor at fresh PX4 temporal validation
+
+Date: 2026-07-29.
+
+Command:
+
+```text
+make test-integration-press-temporal-conformance
+```
+
+The fresh wall-free mission used selected iteration 20 from run
+`20260729T041316Z.27604`. Its first two policy stages completed, but their
+PX4 trajectories overshot the Lab safety floor before recovering:
+
+| Trace | Measured entry | Closest range | Terminal range | Peak closing speed | Duration |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `temporal-0.460` | 0.470444 m | 0.355108 m | 0.403326 m | 0.083668 m/s | 4.66 s |
+| `temporal-0.475` | 0.491539 m | 0.348231 m | 0.402060 m | 0.106641 m/s | 4.80 s |
+
+Both stages eventually accumulated five stable-goal samples, but closest
+range was approximately 45-52 mm below the 0.40 m Lab collision floor. This
+is a material PX4/Lab braking-response mismatch and rejects the actor for a
+warehouse-wall run despite its perfect Lab evaluation.
+
+The third stage did not exercise the actor. Its `goto`/hover sequence entered
+at 0.523123 m, outside the shared 0.45-0.50 m handoff envelope. The policy
+correctly transmitted zero velocity with `handoff_reason=too_far` until the
+20 s stage timeout. Landing recovery was accepted but exhausted its 30 s
+disarm wait. Treat this separately as a temporal-harness staging failure, not
+an actor or contact failure. Evidence is under
+`.build/docker/integration/test-integration-press-temporal-conformance.20260729T042714Z.46121`.
+
+Decision: The 0.200 s delay plus horizontal damping 1.5 improves trace RMSE
+for the previous actor but is insufficient to transfer the retrained actor's
+braking behavior. Keep iteration 20 as a Lab-accepted diagnostic artifact,
+not a PX4-accepted actor. Do not run a warehouse-wall mission. The next
+alignment cycle should use policy-independent step/ramp/reversal excitation
+and fit response bandwidth and braking dynamics separately from pure delay;
+identified ranges should then be randomized during training. The temporal
+staging harness also needs a wall-normal entry predicate that does not rely on
+one three-dimensional waypoint tolerance before it can provide three valid
+acceptance traces.

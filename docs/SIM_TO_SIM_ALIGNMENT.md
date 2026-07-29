@@ -122,6 +122,14 @@ justify reusing the same validation trace for another parameter change.
 Retain 0.200 s until a new held-out command shape independently supports a
 different delay.
 
+The newly retrained iteration-20 actor then failed fresh wall-free PX4
+temporal validation. Its first two stages entered at 0.47044 and 0.49154 m,
+reached 0.35511 and 0.34823 m, and only then recovered to stable completion
+near 0.403 m. Those closest ranges are 45-52 mm below the Lab collision floor.
+The third stage was invalid because its 0.52312 m entry remained outside the
+handoff envelope. This rejects a warehouse-wall run and demonstrates that
+delay plus one horizontal damping point does not complete plant alignment.
+
 `controller_command_delay_s` is an equivalent fitted proxy. It may absorb
 estimator behavior, controller bandwidth, actuator response, state-dependent
 braking, and unmodeled dynamics. It is not evidence that PX4 contains a literal
