@@ -26,6 +26,7 @@ training:
   task_id: Isaac-Drone-Hover-Direct-v0
   vehicle_id: 0
   policy_name: hover
+  alignment_artifact: .build/alignment/x500-velocity-px4-v1/best
   max_iterations: 1500
   num_steps_per_env: 24
   save_interval: 200
@@ -61,30 +62,12 @@ hover:
   reset_xy_half_m: 0.5
   reset_z_half_m: 0.3
 
-# Pluggable RL action level. `kind` selects the in-Lab actuation model
-# (velocity | ctbr); switching is a one-line edit. Gains are a superset covering
-# both models; the validation gate (make test-integration-press-hover-goto)
-# tunes them against the airframe.
+# Task-neutral normalized policy-action contract. Controller and actuator
+# settings come from the selected alignment artifact.
 action:
   kind: velocity
   action_dim: 4
   max_body_velocity_mps: 3.0
   max_yaw_rate_radps: 1.5
   max_body_rate_radps: 6.0
-  max_tilt_cmd_deg: 30.0
   hover_thrust_fraction: 0.4
-  controller_kp_vel: [2.0, 2.0, 3.0]
-  # The wall-free PX4 trace sweep selects 1.25x horizontal damping while the
-  # independent Lab hover/goto gate rejects stronger candidates.
-  controller_kd_vel: [1.5, 1.5, 1.5]
-  controller_kp_att: [6.0, 6.0, 2.0]
-  controller_kp_rate: [1.2, 1.2, 0.4]
-  # Lab-only PX4 temporal-response reconciliation. The held-out temporal trace
-  # selects this equivalent response proxy; it is not literal PX4 latency.
-  controller_command_delay_s: 0.200
-  # The pinned Isaac Lab contrib Thruster owns motor realization. Zero time
-  # constants preserve the instantaneous Pegasus motor model until a paired
-  # hardware/PX4 trace supplies measured rise/fall values.
-  actuator_tau_inc_s: 0.0
-  actuator_tau_dec_s: 0.0
-  actuator_max_thrust_rate_nps: 100000.0

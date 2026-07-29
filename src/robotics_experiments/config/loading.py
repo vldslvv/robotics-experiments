@@ -170,12 +170,8 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
 
 
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
-    command_delay_s = experiment.rl.action.controller_command_delay_s
-    if not math.isfinite(command_delay_s) or command_delay_s < 0.0:
-        raise ValueError(
-            "rl.action.controller_command_delay_s must be finite and "
-            f"non-negative, got {command_delay_s!r}"
-        )
+    if not experiment.rl.training.alignment_artifact.strip():
+        raise ValueError("rl.training.alignment_artifact must be non-empty")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,

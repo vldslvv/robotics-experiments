@@ -1,177 +1,172 @@
-# Sim-to-sim control alignment
+# Controller alignment subsystem
 
-This guide defines how to interpret and improve the control-response alignment
-between Isaac Lab training and PX4 SITL deployment. It complements
-`docs/RL_WORKFLOW.md`; that document remains the source of truth for training,
-artifact selection, and deployment gates.
+This document is the contract and operational guide for aligning the
+high-throughput Isaac Lab velocity controller to the PX4 SITL closed-loop
+response. Alignment is upstream of RL: policy training consumes a published
+alignment artifact, while trained-policy PX4 missions remain downstream
+acceptance and never fit controller settings.
 
-## Current control boundary
+## Package and dependency boundary
 
-The policy interface is shared, but the plants below it are not:
+`robotics_experiments.alignment` is host-safe and imports without Isaac Sim,
+Kit, Isaac Lab, or a PX4 container. Its public API is exactly:
 
-- In Isaac Lab, the normalized policy action enters the project velocity
-  controller, rotor allocation, and Isaac Lab thruster dynamics. Lab applies
-  the resulting wrench directly to the simulated articulation. PX4 is bypassed
-  so hundreds of environments can collect transitions concurrently.
-- In deployment, the same policy observation, action scaling, cadence, and
-  frame convention produce a PX4 OFFBOARD velocity setpoint. PX4 SITL owns
-  estimation, cascaded flight control, mixing, and the actuator commands
-  returned through the HIL bridge before Isaac applies dynamics.
+- `ControllerDefinition`
+- `ControllerSettings`
+- `AlignmentArtifact`
+- `load_controller_definition(path)`
+- `load_alignment_artifact(path)`
+- `align(target, reference)`
 
-This makes Lab a controller surrogate, not a second execution of the PX4
-control stack. Matching the policy-facing interface is necessary, but it does
-not guarantee matching closed-loop velocity response, braking, saturation, or
-settling.
+The package direction is `config -> alignment -> rl -> workflows`.
+Alignment may consume the public config boundary and RL may consume
+`ControllerSettings`; alignment must not depend on RL. The V1 concrete
+backends are `isaac-lab` as the target and `px4-sitl` as the reference.
 
-PX4-guided `goto` speed and policy alignment solve different parts of the
-mission. Guided repositioning controls the pre-policy staging and post-policy
-return trajectories. Temporal alignment still matters during the policy step,
-when the actor streams velocity commands through PX4 OFFBOARD.
+Controller definitions live under `configs/alignment/controllers/`. A
+definition fixes the controller identity, backend, experiment and vehicle,
+policy-facing body-FLU velocity interface, 20 Hz command cadence, complete base
+settings, fit and validation probes, declarative parameter candidates, named
+selection metric, and image identity.
 
-## Why use a surrogate
+`ControllerSettings` owns all controller and actuator internals:
 
-Putting a complete external flight-controller instance behind every training
-environment would constrain parallelism, add orchestration and synchronization
-cost, and make resets more expensive. A compact simulator-native controller is
-a practical way to obtain high-throughput RL. The cost is a model discrepancy
-that must be measured and managed explicitly.
+- command delay;
+- per-axis velocity P and damping gains;
+- attitude and body-rate gains;
+- maximum commanded tilt;
+- thruster rise and fall time constants;
+- per-rotor maximum thrust rate.
 
-Public sim-to-real practice treats this as an empirical transfer problem:
+`rl.action` owns only normalized action kind, dimension, and scales. Adding an
+existing settings field to a fit is a controller-definition YAML edit. Adding a
+new setting requires extending `ControllerSettings` and the Isaac Lab binding,
+not the candidate expansion, ranking, Make, or publication loops.
 
-- [Tan et al.](https://roboticsproceedings.org/rss14/p10.html) combine system
-  identification, an actuator model, simulated latency, physical-parameter
-  randomization, and real-robot evaluation.
-- [Molchanov et al.](https://arxiv.org/abs/1903.04628) evaluate how noise and
-  domain randomization affect low-level policies transferred to multiple
-  quadrotors.
-- [BayesSim](https://roboticsproceedings.org/rss15/p29.html) infers a posterior
-  distribution over simulator parameters from observed trajectories instead of
-  treating one fitted parameter vector as ground truth.
-- [Swift](https://www.nature.com/articles/s41586-023-06419-4) trains its racing
-  controller in simulation, fits empirical perception and dynamics residual
-  models from physical data, performs controlled ablations, and validates the
-  complete system on the physical vehicle.
+## Probe and evaluator contract
 
-The corresponding project practice is:
+Alignment uses policy-independent body-FLU velocity probes. Fit and validation
+each cover x, y, and z independently. Fit profiles contain settling, positive
+and negative steps, reversals, and return-to-zero settling. Validation uses
+different amplitudes and ramp/reversal shapes.
 
-1. Preserve policy-interface parity across training and deployment.
-2. Identify response parameters from policy-independent and policy-driven
-   traces.
-3. Select parameters on held-out trajectories, not only fitted traces.
-4. Model actuator dynamics, response lag, command delay, and saturation as
-   distinct effects where the data supports them.
-5. Train over identified parameter distributions when a point estimate is not
-   stable.
-6. Use a residual model only when a simpler physical model leaves repeatable
-   structure in the error.
-7. Treat final PX4 SITL, HIL, or hardware evaluation as the acceptance
-   authority.
+The PX4 capture uses the normal fleet driver and an explicitly injected
+`PolicyAdapter`; there is no new commanding routine kind. The adapter streams
+the deterministic probes through the existing `{kind: policy}` OFFBOARD
+lifecycle. Every trace records:
 
-## Current temporal-fit evidence
+- the actual initial position, attitude, linear velocity, and angular velocity;
+- exact command timestamps and body-FLU commands;
+- measured body-FLU velocity;
+- completion or flight-envelope failure.
 
-The wall-free temporal experiment used the production actor at nominal 0.460,
-0.475, and 0.490 m entry ranges. It fitted the two outer traces and reserved
-the middle trace for validation.
+The Isaac Lab sweep initializes each replay from the corresponding PX4 state
+and advances the exact captured command intervals. It keeps one hover
+environment alive for the sweep and reapplies the complete controller settings,
+including a fresh delay buffer and actuator state, before each candidate. An
+interval must be exactly representable at the configured physics rate.
+Non-finite output, a backend exception, or an incomplete trace makes only that
+candidate unusable. If all candidates are unusable, alignment fails and
+publishes nothing.
 
-| Lab command delay | Outer-trace RMSE | Held-out RMSE |
-| --- | ---: | ---: |
-| 0.000 s | 0.03640 m/s | 0.02237 m/s |
-| 0.200 s | 0.02455 m/s | 0.01302 m/s |
-| 0.344 s | 0.01897 m/s | 0.01807 m/s |
-| 0.392 s | 0.01814 m/s | 0.02076 m/s |
-| 0.440 s | 0.01795 m/s | 0.02355 m/s |
+## Metrics and ranking
 
-The 0.440 s candidate cut outer-trace error by about half, so the experiment
-was useful: it demonstrated that the original Lab response was materially too
-fast and supplied a plant under which to retrain. It also performed worse on
-the held-out trace than both zero delay and 0.200 s. The value therefore
-overfit the two outer traces.
+Metric selection is by stable registry name. V1 uses
+`worst-axis-validation-velocity-nrmse-v1` and ranks:
 
-A fresh wall-free capture on 2026-07-29 used the retrained 0.200 s actor. The
-measured PX4 entry ranges were 0.47310, 0.49502, and 0.49941 m; the nominal
-labels remain identifiers, while the analyzer initializes Lab from the
-measured state. Replaying the exact actions and 40/60 ms cadence produced:
+1. lowest worst-axis validation velocity NRMSE;
+2. lowest aggregate validation velocity RMSE;
+3. lowest fit velocity RMSE;
+4. stable candidate order.
 
-| Lab command delay | Outer-trace RMSE | Held-out RMSE |
-| --- | ---: | ---: |
-| 0.000 s | 0.03197 m/s | 0.03037 m/s |
-| 0.200 s | 0.02423 m/s | 0.02071 m/s |
-| 0.440 s | 0.02579 m/s | 0.02540 m/s |
+The artifact also reports per-axis error, aggregate error, overshoot, settling,
+and stability diagnostics. Fit and validation samples are never pooled for
+selection.
 
-The fresh evidence selects 0.200 s on both fitted and held-out error. Its
-closest-range deltas were -0.04117, -0.02319, and -0.01234 m: Lab still moved
-farther than PX4, so the delay choice is validated but full plant alignment is
-not complete. The run-scoped reports are under
-`.build/benchmarks/press-temporal/20260729T031246Z/`.
+The advisory quality target is worst-axis validation NRMSE at most 15%, with
+all selected traces finite and completed without a flight-envelope failure.
+Poor quality is visible and produces a training warning, but a structurally
+valid artifact remains loadable and consumable.
 
-A controlled horizontal-gain sweep then held the 0.200 s delay, actor, actions,
-cadence, and entries fixed. The trace-only optimum scaled proportional gain by
-0.75 and damping by 1.50, reducing outer/held-out RMSE to
-0.01260/0.00710 m/s, but it failed the independent hover gate. The retained
-Pareto point keeps horizontal proportional gain at 2.0 and increases damping
-from 1.2 to 1.5. Its outer/held-out RMSE is 0.02052/0.01634 m/s, and it passed
-the hover/goto gate with 0.086 m maximum settled hover error and 0.016 m
-maximum settled goto error. Stronger 1.50x and 2.00x damping candidates failed
-the hover gate at 0.101 and 0.129 m, respectively.
+Changing the definition, probe suite, metric identity, resolved experiment,
+image identity, or command interface changes the comparison fingerprint.
+Results from different comparison fingerprints are separate generations and
+are never ranked against one another.
 
-A bounded delay refinement at the retained damping evaluated 0.120 through
-0.280 s in 0.040 s increments. It nominally selected 0.240 s, with
-0.01983 m/s outer and 0.01580 m/s held-out RMSE, versus 0.02052 and
-0.01634 m/s at 0.200 s. The 0.00053 m/s held-out improvement is too small to
-justify reusing the same validation trace for another parameter change.
-Retain 0.200 s until a new held-out command shape independently supports a
-different delay.
+## Artifact and publication contract
 
-The newly retrained iteration-20 actor then failed fresh wall-free PX4
-temporal validation. Its first two stages entered at 0.47044 and 0.49154 m,
-reached 0.35511 and 0.34823 m, and only then recovered to stable completion
-near 0.403 m. Those closest ranges are 45-52 mm below the Lab collision floor.
-The third stage was invalid because its 0.52312 m entry remained outside the
-handoff envelope. This rejects a warehouse-wall run and demonstrates that
-delay plus one horizontal damping point does not complete plant alignment.
+Completed immutable runs live at:
 
-`controller_command_delay_s` is an equivalent fitted proxy. It may absorb
-estimator behavior, controller bandwidth, actuator response, state-dependent
-braking, and unmodeled dynamics. It is not evidence that PX4 contains a literal
-440 ms command delay.
+```text
+.build/alignment/<alignment-id>/<run-id>/
+```
 
-The deployed diagnostic actor was trained with 0.440 s configured and remains
-rejected by its original collision and minimum-range gates regardless of the
-manual run evidence. New training uses the held-out-best 0.200 s candidate and
-actor-only initializes from that diagnostic actor's latest checkpoint. This
-plant change does not upgrade the old actor: the new run must repeat checkpoint
-selection, independent Lab evaluation, and PX4 acceptance gates.
+`alignment.json` is the only training contract. Reference and target trace
+JSON files in the run directory are diagnostics. The artifact includes:
 
-## Immediate alignment work
+- schema, alignment, and run identity;
+- target/reference definition and comparison fingerprints;
+- experiment, vehicle, airframe, source commit/dirty state, and images;
+- probe and selection-metric identities;
+- complete selected `ControllerSettings`;
+- declared parameters and every evaluated candidate;
+- selected ranking values, fit/validation metrics, and advisory quality.
 
-For the next identification cycle:
+Loading rejects malformed schemas, missing provenance, non-finite settings,
+bad vector shapes, unsupported backend/interface contracts, and an invalid
+selected candidate. Advisory quality failure is not a loader error.
 
-- Include zero and low-delay candidates in every sweep.
-- Rank candidates by held-out evidence first, with fitted-trace error reported
-  separately.
-- Collect policy-independent step, ramp, and reversal commands across axes,
-  amplitudes, and operating points. Keep policy traces as an end-to-end check,
-  not the only excitation source.
-- Fit pure command delay separately from response bandwidth, rise/fall
-  behavior, slew limits, and saturation. A single delay should not stand in for
-  every response effect when the traces distinguish them.
-- Run controlled ablations that hold the actor fixed while changing the plant,
-  and hold the plant fixed while changing the actor. Record exact artifact,
-  config, and trace provenance.
+Publication uses atomic relative directory symlinks:
 
-## Longer-term alignment work
+- `latest` always advances to the newest completed run;
+- `best` advances only for a better comparable ranking;
+- the first completed run in a new comparison generation becomes `best`,
+  regardless of advisory quality.
 
-- Identify per-axis delay, bandwidth, saturation, and actuator rise/fall
-  parameters rather than assuming one scalar describes the full vehicle.
-- Estimate uncertainty or a credible parameter range, then randomize training
-  within the identified range instead of optimizing against one fitted point.
-- Reserve trajectories, entry states, and command shapes that are never used
-  for fitting. Periodically rotate in new held-out data without leaking it into
-  the fit.
-- Re-identify after PX4, estimator, airframe, mass, actuator, or simulator
-  changes.
-- Where the remaining error is structured and repeatable, evaluate a small
-  residual response model with a simpler model as an ablation.
-- Use PX4-in-loop fine-tuning or residual adaptation only when its added runtime
-  cost is justified, and retain independent PX4 SITL, HIL, or hardware
-  acceptance afterward.
+## Operational workflow
+
+Defaults select the Isaac Lab and PX4 SITL x500 velocity definitions. Override
+them with `ALIGNMENT_TARGET`, `ALIGNMENT_REFERENCE`, and an optional stable
+`ALIGNMENT_RUN_ID`.
+
+```console
+make alignment-capture-reference
+make alignment-sweep-target
+make alignment-fit
+```
+
+The end-to-end wrapper preserves one run ID across all stages:
+
+```console
+make align-controllers
+make test-integration-alignment-target
+```
+
+Separate Make invocations should author the same `ALIGNMENT_RUN_ID`. Capture
+writes `reference.json`, sweep writes `target_candidates.json`, and fit writes
+`alignment.json` before updating `latest` and `best`.
+
+Training resolves `rl.training.alignment_artifact`, which defaults to the
+alignment namespace's `best` link. `ALIGNMENT_ARTIFACT` or
+`--alignment-artifact` selects an exact run for reproduction or ablation.
+Training validates vehicle, airframe, cadence, interface, action dimension, and
+action scales before constructing Isaac Lab. It stores the selected settings,
+artifact digest, run identity, definition fingerprints, and comparison
+fingerprint in `policy_meta.json` before PPO starts.
+
+Checkpoint selection, export, and independent evaluation reconstruct the
+controller from that embedded record. Deployment validates the alignment
+record but continues to use only `PolicyContract` for OFFBOARD interpretation.
+Policy artifacts without alignment provenance are unsupported.
+
+After training and Lab acceptance, run the wall-free
+`test-integration-press-policy-transfer` mission. It is a policy-transfer gate,
+not an alignment input. The physical press mission remains separately gated.
+
+## Deferred work
+
+Parameter uncertainty distributions, domain randomization, real-flight
+capture, residual response models, and PX4-in-loop training are deliberately
+deferred. Adding a backend requires an evaluator adapter and a new stable
+backend contract; it must not weaken V1 artifact validation or comparison
+fingerprinting.

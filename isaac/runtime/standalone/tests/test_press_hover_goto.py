@@ -19,20 +19,23 @@ Run inside the Isaac Sim container:
 from __future__ import annotations
 
 import argparse
-import itertools
-import json
 import math
 import os
 import random
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from robotics_experiments.config import ExperimentConfig, PressActionConfig, load_config
+from robotics_experiments.alignment import (
+    ControllerSettings,
+    load_alignment_artifact,
+    load_controller_definition,
+)
+from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -53,6 +56,8 @@ _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
+_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
+_TARGET_DEFINITION = "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
 # target along +X, outward plate normal facing the approaching drone. This keeps
@@ -216,7 +221,7 @@ def _make_env(
 
 
 def _ctbr_hover_action(
-    env: DroneHoverEnv, action_cfg: PressActionConfig
+    env: DroneHoverEnv, action_cfg: RlActionConfig
 ) -> tuple[torch.Tensor, float]:
     mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
     max_total_thrust = float(env.actuation_params.max_total_thrust)
@@ -230,7 +235,8 @@ def _run_ctbr_sanity(
     *,
     args: argparse.Namespace,
     config: ExperimentConfig,
-    action_cfg: PressActionConfig,
+    action_cfg: RlActionConfig,
+    controller_settings: ControllerSettings,
     env_cls: type[DroneHoverEnv],
 ) -> None:
     # Isaac Lab workflow code is imported after AppLauncher.
@@ -245,6 +251,7 @@ def _run_ctbr_sanity(
             num_envs=num_envs,
         ),
         experiment_config=config,
+        controller_settings=controller_settings,
     )
     try:
         _reset_env(env, args.seed)
@@ -413,7 +420,12 @@ def _pusher_tool_geometry_summary(stage, root_path: str) -> str:
     )
 
 
-def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
+def _run_contact_chain(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    controller_settings: ControllerSettings,
+) -> None:
     from pxr import UsdLux
 
     from robotics_experiments.environment import SwitchState, step_switches
@@ -443,7 +455,11 @@ def _run_contact_chain(*, args: argparse.Namespace, config: ExperimentConfig) ->
     cfg.episode_length_s = config.rl.episode_length_s + _EPISODE_MARGIN_S
     if hasattr(cfg, "seed"):
         cfg.seed = args.seed
-    env = _ContactChainEnv(cfg=cfg, experiment_config=config)
+    env = _ContactChainEnv(
+        cfg=cfg,
+        experiment_config=config,
+        controller_settings=controller_settings,
+    )
     try:
         _reset_env(env, args.seed)
         stage = _spawn_contact_chain_lamp(lamp_usd_path=config.switches.lamp_usd_path)
@@ -698,281 +714,26 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
         )
 
 
-def _temporal_goal_satisfied(*, observation: np.ndarray, config: ExperimentConfig) -> bool:
-    goal = config.rl.press.goal
-    attitude = observation[16:20]
-    body_z_world_z = 1.0 - 2.0 * (attitude[0] ** 2 + attitude[1] ** 2)
-    return bool(
-        goal.range_min_m <= observation[0] <= goal.range_max_m
-        and np.linalg.norm(observation[1:3]) <= goal.alignment_error_max_m
-        and np.linalg.norm(observation[10:13]) <= goal.linear_speed_max_mps
-        and np.linalg.norm(observation[13:16]) <= goal.angular_speed_max_radps
-        and body_z_world_z >= goal.body_z_alignment_min
-        and not bool(observation[23])
-    )
-
-
-def _run_temporal_replay(
-    *,
-    args: argparse.Namespace,
-    config: ExperimentConfig,
-) -> None:
-    from isaaclab.envs import DirectRLEnv
-
-    from robotics_experiments.workflows.isaac_lab import (
-        SwitchPressEnv,
-        make_switch_press_env_cfg,
-    )
-
-    class _TemporalReplayEnv(SwitchPressEnv):
-        """Wall-free trace player with caller-owned physics decimation."""
-
-        def __init__(self, *, cfg, experiment_config: ExperimentConfig):
-            super().__init__(cfg=cfg, experiment_config=experiment_config)
-            self._base_actuation_params: Any = self.actuation_params
-
-        def _get_dones(self):
-            no_done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-            return no_done, no_done
-
-        def _get_rewards(self):
-            return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-
-        def step_with_physics_steps(self, *, action: torch.Tensor, physics_steps: int):
-            self.cfg.decimation = physics_steps
-            return DirectRLEnv.step(self, action)
-
-        def set_command_delay(self, *, delay_s: float, physics_hz: float) -> None:
-            self._command_delay_steps = round(delay_s * physics_hz)
-            self._command_delay_index = 0
-            self._command_delay_buffer = torch.zeros(
-                (
-                    self._command_delay_steps,
-                    self.num_envs,
-                    self.cfg.action_space,
-                ),
-                dtype=self.actions.dtype,
-                device=self.device,
-            )
-            self._applied_actions.zero_()
-
-        def set_horizontal_velocity_gain_scales(
-            self,
-            *,
-            kp_scale: float,
-            kd_scale: float,
-        ) -> None:
-            kp_multiplier = self._base_actuation_params.kp_vel.new_tensor((kp_scale, kp_scale, 1.0))
-            kd_multiplier = self._base_actuation_params.kd_vel.new_tensor((kd_scale, kd_scale, 1.0))
-            self.actuation_params = replace(
-                self._base_actuation_params,
-                kp_vel=self._base_actuation_params.kp_vel * kp_multiplier,
-                kd_vel=self._base_actuation_params.kd_vel * kd_multiplier,
-            )
-
-        def set_temporal_entry(self, *, observation: np.ndarray) -> None:
-            from isaaclab.utils import math as math_utils
-
-            relative_position = torch.as_tensor(
-                observation[:3],
-                dtype=torch.float32,
-                device=self.device,
-            ).reshape(1, 3)
-            relative_xyzw = torch.as_tensor(
-                observation[3:7],
-                dtype=torch.float32,
-                device=self.device,
-            ).reshape(1, 4)
-            relative_wxyz = relative_xyzw[:, [3, 0, 1, 2]]
-            contact_quat = self._contact_frame_quat()[:1]
-            world_quat = math_utils.quat_mul(contact_quat, relative_wxyz)
-            switch_position = self.switch.data.root_pos_w[:1]
-            world_position = switch_position - math_utils.quat_apply(
-                contact_quat,
-                relative_position,
-            )
-            body_velocity = torch.as_tensor(
-                observation[10:13],
-                dtype=torch.float32,
-                device=self.device,
-            ).reshape(1, 3)
-            body_angular_velocity = torch.as_tensor(
-                observation[13:16],
-                dtype=torch.float32,
-                device=self.device,
-            ).reshape(1, 3)
-            root_state = self.drone.data.default_root_state[:1].clone()
-            root_state[:, :3] = world_position
-            root_state[:, 3:7] = world_quat
-            root_state[:, 7:10] = math_utils.quat_apply(
-                world_quat,
-                body_velocity,
-            )
-            root_state[:, 10:13] = math_utils.quat_apply(
-                world_quat,
-                body_angular_velocity,
-            )
-            self._reset_drone(
-                env_ids=torch.tensor([0], device=self.device),
-                root_state=root_state,
-            )
-
-        def read_policy_observation(self) -> np.ndarray:
-            return self._get_observations()["policy"][0].detach().cpu().numpy().astype(np.float64)
-
-    if config.rl.press.reset.physical_contact_enabled:
-        raise AssertionError("temporal Lab replay requires physical_contact_enabled=false")
-    payload = json.loads(args.temporal_replay.read_text())
-    source_traces = payload["px4_traces"]
-    delay_grid = (
-        (config.rl.action.controller_command_delay_s,)
-        if args.temporal_delay_grid is None
-        else tuple(float(value) for value in args.temporal_delay_grid.split(","))
-    )
-    if not delay_grid or any(not math.isfinite(value) or value < 0.0 for value in delay_grid):
-        raise AssertionError("temporal delay grid values must be finite and nonnegative")
-    kp_scale_grid = (
-        (1.0,)
-        if args.temporal_horizontal_kp_vel_scale_grid is None
-        else tuple(float(value) for value in args.temporal_horizontal_kp_vel_scale_grid.split(","))
-    )
-    kd_scale_grid = (
-        (1.0,)
-        if args.temporal_horizontal_kd_vel_scale_grid is None
-        else tuple(float(value) for value in args.temporal_horizontal_kd_vel_scale_grid.split(","))
-    )
-    if not kp_scale_grid or any(
-        not math.isfinite(value) or value <= 0.0 for value in kp_scale_grid
-    ):
-        raise AssertionError("temporal Kp velocity scales must be finite and positive")
-    if not kd_scale_grid or any(
-        not math.isfinite(value) or value <= 0.0 for value in kd_scale_grid
-    ):
-        raise AssertionError("temporal Kd velocity scales must be finite and positive")
-    cfg = make_switch_press_env_cfg(experiment_config=config)
-    cfg.scene.num_envs = 1
-    cfg.episode_length_s = max(config.rl.episode_length_s, 30.0)
-    env = _TemporalReplayEnv(cfg=cfg, experiment_config=config)
-    candidates = []
-    try:
-        for command_delay_s, kp_scale, kd_scale in itertools.product(
-            delay_grid,
-            kp_scale_grid,
-            kd_scale_grid,
-        ):
-            output_traces = []
-            env.set_command_delay(
-                delay_s=command_delay_s,
-                physics_hz=config.sim.physics_hz,
-            )
-            env.set_horizontal_velocity_gain_scales(
-                kp_scale=kp_scale,
-                kd_scale=kd_scale,
-            )
-            _reset_env(env, args.seed)
-            physics_hz = config.sim.physics_hz
-            for source in source_traces:
-                source_samples = source["samples"]
-                if not source_samples:
-                    raise AssertionError("temporal replay source trace is empty")
-                env.set_temporal_entry(
-                    observation=np.asarray(source_samples[0]["observation"], dtype=np.float64),
-                )
-                lab_samples = []
-                stable_steps = 0
-                previous_action: torch.Tensor | None = None
-                previous_time_s = 0.0
-                for index, source_sample in enumerate(source_samples):
-                    time_s = float(source_sample["time_s"])
-                    if index:
-                        interval_s = time_s - previous_time_s
-                        physics_steps = round(interval_s * physics_hz)
-                        if not math.isclose(
-                            physics_steps / physics_hz,
-                            interval_s,
-                            abs_tol=1e-9,
-                        ):
-                            raise AssertionError(
-                                f"trace interval {interval_s} s is not representable at "
-                                f"{physics_hz} Hz"
-                            )
-                        assert previous_action is not None
-                        env.step_with_physics_steps(
-                            action=previous_action,
-                            physics_steps=physics_steps,
-                        )
-                    observation = env.read_policy_observation()
-                    stable_steps = (
-                        stable_steps + 1
-                        if _temporal_goal_satisfied(
-                            observation=observation,
-                            config=config,
-                        )
-                        else 0
-                    )
-                    action = torch.as_tensor(
-                        source_sample["action"],
-                        dtype=torch.float32,
-                        device=env.device,
-                    ).reshape(1, -1)
-                    lab_samples.append(
-                        {
-                            "sim_time_us": round(time_s * 1_000_000),
-                            "time_s": time_s,
-                            "range_m": float(observation[0]),
-                            "closing_speed_mps": float(observation[10]),
-                            "linear_speed_mps": float(np.linalg.norm(observation[10:13])),
-                            "forward_command_mps": float(source_sample["forward_command_mps"]),
-                            "observation": [float(value) for value in observation],
-                            "action": [float(value) for value in action[0].cpu().tolist()],
-                            "stable_goal_count": stable_steps,
-                            "complete": stable_steps >= config.rl.press.goal.stable_steps,
-                        }
-                    )
-                    previous_action = action
-                    previous_time_s = time_s
-                output_traces.append(
-                    {
-                        "label": source["label"],
-                        "nominal_entry_range_m": source["nominal_entry_range_m"],
-                        "samples": lab_samples,
-                    }
-                )
-                _report(
-                    "temporal replay "
-                    f"delay={command_delay_s:.3f} s "
-                    f"horizontal_kp_vel_scale={kp_scale:.3f} "
-                    f"horizontal_kd_vel_scale={kd_scale:.3f} "
-                    f"entry={float(source['nominal_entry_range_m']):.3f} m "
-                    f"closest={min(float(sample['range_m']) for sample in lab_samples):.6f} m "
-                    f"stable_steps={stable_steps}"
-                )
-            candidates.append(
-                {
-                    "controller_command_delay_s": command_delay_s,
-                    "controller_horizontal_kp_vel_scale": kp_scale,
-                    "controller_horizontal_kd_vel_scale": kd_scale,
-                    "traces": output_traces,
-                }
-            )
-    finally:
-        env.close()
-    output = {
-        "schema_version": 1,
-        "method": "isaac-lab-exact-policy-cadence-controller-grid-v2",
-        "candidates": candidates,
-    }
-    args.temporal_output.parent.mkdir(parents=True, exist_ok=True)
-    args.temporal_output.write_text(json.dumps(output, indent=2, sort_keys=True) + "\n")
-    _report(f"temporal Lab replay wrote {args.temporal_output}")
+def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
+    repo_root = Path(__file__).resolve().parents[4]
+    explicit = os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
+    authored = explicit or config.rl.training.alignment_artifact
+    artifact_path = Path(authored)
+    if not artifact_path.is_absolute():
+        artifact_path = repo_root / artifact_path
+    if explicit or artifact_path.exists():
+        return load_alignment_artifact(artifact_path).selected_settings
+    return load_controller_definition(repo_root / _TARGET_DEFINITION).base_settings
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
-    if args.temporal_replay is not None:
-        _run_temporal_replay(args=args, config=config)
-        return
+    controller_settings = _controller_settings(config=config)
     if args.contact_chain:
-        _run_contact_chain(args=args, config=config)
+        _run_contact_chain(
+            args=args,
+            config=config,
+            controller_settings=controller_settings,
+        )
         return
     action_cfg = config.rl.action
     if args.ctbr_sanity:
@@ -988,6 +749,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             args=args,
             config=config,
             action_cfg=action_cfg,
+            controller_settings=controller_settings,
             env_cls=DroneHoverEnv,
         )
         return
@@ -1011,6 +773,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             num_envs=num_envs,
         ),
         experiment_config=config,
+        controller_settings=controller_settings,
     )
     try:
         _reset_env(env, args.seed)
@@ -1102,41 +865,11 @@ def main() -> None:
         action="store_true",
         help="run the one-env real pusher/button/latch/lamp/retreat gate",
     )
-    parser.add_argument(
-        "--temporal-replay",
-        type=Path,
-        help="replay the PX4 temporal report's exact observation/action cadence in Lab",
-    )
-    parser.add_argument(
-        "--temporal-output",
-        type=Path,
-        help="write isolated-Lab temporal samples as JSON",
-    )
-    parser.add_argument(
-        "--temporal-delay-grid",
-        help="comma-separated Lab command delays to replay, in seconds",
-    )
-    parser.add_argument(
-        "--temporal-horizontal-kp-vel-scale-grid",
-        help="comma-separated positive multipliers for Lab horizontal velocity P gains",
-    )
-    parser.add_argument(
-        "--temporal-horizontal-kd-vel-scale-grid",
-        help="comma-separated positive multipliers for Lab horizontal velocity damping gains",
-    )
     args, _unknown = parser.parse_known_args()
     if args.log_every < 1:
         raise SystemExit("--log-every must be >= 1")
     if args.num_envs is not None and args.num_envs < 1:
         raise SystemExit("--num-envs must be >= 1")
-    if (args.temporal_replay is None) != (args.temporal_output is None):
-        raise SystemExit("--temporal-replay and --temporal-output must be supplied together")
-    if args.temporal_delay_grid is not None and args.temporal_replay is None:
-        raise SystemExit("--temporal-delay-grid requires --temporal-replay")
-    if args.temporal_horizontal_kp_vel_scale_grid is not None and args.temporal_replay is None:
-        raise SystemExit("--temporal-horizontal-kp-vel-scale-grid requires --temporal-replay")
-    if args.temporal_horizontal_kd_vel_scale_grid is not None and args.temporal_replay is None:
-        raise SystemExit("--temporal-horizontal-kd-vel-scale-grid requires --temporal-replay")
     if args.scene:
         _report(
             f"ignoring --scene {args.scene!r}; "
@@ -1153,9 +886,7 @@ def main() -> None:
         except KeyError as exc:
             raise RuntimeError(f"missing required environment variable {_CONFIG_PATH_ENV}") from exc
         _run(args=args, config=load_config(config_path))
-        if args.temporal_replay is not None:
-            _report("press temporal Lab replay PASSED")
-        elif args.contact_chain:
+        if args.contact_chain:
             _report("press contact-chain validation PASSED")
         elif args.ctbr_sanity:
             _report("ctbr sanity validation PASSED")

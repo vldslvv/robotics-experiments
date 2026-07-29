@@ -23,6 +23,13 @@ Run it with `make test-integration-press-hover-goto`; it needs no PX4 container.
 It prints the same `[isaac-standalone-test] ERROR:` failure sentinel the harness
 greps for.
 
+`alignment_capture_reference.py` is the PX4-backed alignment capture shell. It
+uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
+lifecycle, with a test-only injected adapter that emits the controller
+definition's x/y/z probes. It writes exact command timing, initial state, and
+measured body-FLU velocity to the selected alignment run directory. It is not a
+press-policy scenario and adds no commanding routine kind.
+
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one
 environment. It spawns the real paired switch/lamp, orients the switch into the
@@ -119,3 +126,8 @@ and disarm. The strict hook requires stable contact-free completion and no lamp
 transition. Run it only after selection
 publishes `.build/training/press-approach/latest` and `make eval-press`
 independently accepts it; it is excluded from `test-integration-all`.
+
+`make test-integration-press-policy-transfer` is the separate wall-free
+post-training PX4 acceptance. It runs the trained press actor at three entry
+ranges with physical contact disabled. Its observations and actions are not
+controller-fitting inputs.

@@ -46,3 +46,17 @@ until landing recovery terminates; strict mode then raises the original typed
 failure. Rebind every lifecycle, bridge, and driver transition result. Helpers
 that report simulated elapsed time receive a sim-time callable; they must not
 depend on mutable resource properties.
+
+Controller alignment has two standalone backends. The PX4 capture entrypoint
+under `tests/alignment_capture_reference.py` starts through the normal
+`SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
+`alignment_sweep_target.py` constructs `AppLauncher` before importing
+`isaaclab`, builds one hover environment, reapplies each complete
+`ControllerSettings` candidate with fresh delay and actuator state, restores
+recorded PX4 initial states, and replays the captured physics-step intervals.
+Keep their imports in this order; neither runner may import Kit/Isaac Lab at
+module import time.
+
+`alignment_fit.py` is host-safe and performs no simulator imports. It consumes
+the two diagnostic trace files, writes the canonical `alignment.json`, and
+updates relative `latest`/`best` links.

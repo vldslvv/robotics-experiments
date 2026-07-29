@@ -133,9 +133,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert config.rl.action.controller_kp_vel == (2.0, 2.0, 3.0)
-    assert config.rl.action.controller_kd_vel == (1.5, 1.5, 1.5)
-    assert config.rl.action.controller_command_delay_s == 0.200
+    assert training.alignment_artifact == ".build/alignment/x500-velocity-px4-v1/best"
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
@@ -204,17 +202,17 @@ def test_training_and_manual_press_configs_share_one_actor_entry_contract():
     assert all(float(step.get("timeout_s", 20.0)) <= 20.0 for step in steps)
 
 
-def test_temporal_conformance_config_uses_calibrated_entry_targets():
+def test_policy_transfer_config_uses_distinct_entry_targets():
     from robotics_experiments.config import load_config
 
-    config = load_config(_ROOT / "temporal_conformance_press_approach_quad.yaml")
+    config = load_config(_ROOT / "policy_transfer_press_approach_quad.yaml")
     steps = config.vehicles["x500_01"].routine.steps
 
     assert not config.rl.press.reset.physical_contact_enabled
     assert tuple(steps[index]["label"] for index in (7, 12, 17)) == (
-        "temporal-0.460",
-        "temporal-0.475",
-        "temporal-0.490",
+        "policy-transfer-0.460",
+        "policy-transfer-0.475",
+        "policy-transfer-0.490",
     )
     assert tuple(steps[index]["y"] for index in (5, 10, 15)) == (
         17.563,
@@ -270,8 +268,8 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "initial_noise_std must be finite and non-negative",
         ),
         (
-            {"rl": {"action": {"controller_command_delay_s": -0.1}}},
-            "controller_command_delay_s must be finite and non-negative",
+            {"rl": {"training": {"alignment_artifact": "  "}}},
+            "alignment_artifact must be non-empty",
         ),
     ],
 )

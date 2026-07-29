@@ -7,11 +7,12 @@ Assertions are on that public realized wrench, not model internals.
 """
 
 import math
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.config import RlActionConfig
 from robotics_experiments.px4_bridge import (
     ActuatorCommands,
     PegasusQuadraticThrustModel,
@@ -69,24 +70,38 @@ def _thrust_model() -> PegasusQuadraticThrustModel:
     )
 
 
-def _action_cfg(kind: str) -> SimpleNamespace:
-    return SimpleNamespace(
+def _action_cfg(kind: str) -> RlActionConfig:
+    return RlActionConfig(
         kind=kind,
         action_dim=4,
         max_body_velocity_mps=3.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        max_tilt_cmd_deg=30.0,
         hover_thrust_fraction=0.4,
-        controller_kp_vel=[4.0, 4.0, 5.0],
-        controller_kd_vel=[0.5, 0.5, 0.5],
-        controller_kp_att=[8.0, 8.0, 3.0],
-        controller_kp_rate=[0.3, 0.3, 0.1],
+    )
+
+
+def _controller_settings() -> ControllerSettings:
+    return ControllerSettings(
+        command_delay_s=0.0,
+        kp_vel=(4.0, 4.0, 5.0),
+        kd_vel=(0.5, 0.5, 0.5),
+        kp_att=(8.0, 8.0, 3.0),
+        kp_rate=(0.3, 0.3, 0.1),
+        max_tilt_cmd_deg=30.0,
+        thruster_tau_inc_s=0.0,
+        thruster_tau_dec_s=0.0,
+        thruster_max_thrust_rate_nps=100000.0,
     )
 
 
 def _params(kind: str):
-    return build_actuation_params(_quad_geometry(), _action_cfg(kind), _MASS_KG)
+    return build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg(kind),
+        controller_settings=_controller_settings(),
+        mass=_MASS_KG,
+    )
 
 
 def _level_rest_state():
@@ -153,12 +168,22 @@ def test_velocity_left_command_tilts_toward_plus_y():
 
 def test_build_actuation_params_rejects_unimplemented_kind():
     with pytest.raises(ValueError, match="attitude"):
-        build_actuation_params(_quad_geometry(), _action_cfg("attitude"), _MASS_KG)
+        build_actuation_params(
+            geometry=_quad_geometry(),
+            action_cfg=_action_cfg("attitude"),
+            controller_settings=_controller_settings(),
+            mass=_MASS_KG,
+        )
 
 
 def test_built_actuation_parameter_arrays_are_read_only_and_non_aliased():
     geometry = _quad_geometry()
-    params = build_actuation_params(geometry, _action_cfg("velocity"), _MASS_KG)
+    params = build_actuation_params(
+        geometry=geometry,
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=_controller_settings(),
+        mass=_MASS_KG,
+    )
     arrays = (
         params.geometry.positions_body,
         params.geometry.rot_dir,

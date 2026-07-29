@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.alignment import ControllerSettings
 from tests.support.paths import REPO_ROOT
 
 
@@ -20,6 +21,58 @@ def _load_train_rl_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _controller_settings() -> ControllerSettings:
+    return ControllerSettings(
+        command_delay_s=0.2,
+        kp_vel=(2.0, 2.0, 3.0),
+        kd_vel=(1.5, 1.5, 1.5),
+        kp_att=(6.0, 6.0, 2.0),
+        kp_rate=(1.2, 1.2, 0.4),
+        max_tilt_cmd_deg=30.0,
+        thruster_tau_inc_s=0.0,
+        thruster_tau_dec_s=0.0,
+        thruster_max_thrust_rate_nps=100000.0,
+    )
+
+
+def _alignment_artifact():
+    return SimpleNamespace(
+        schema_version=1,
+        alignment_id="test-alignment",
+        run_id="alignment-run",
+        comparison_fingerprint="comparison",
+        target_definition_fingerprint="target",
+        reference_definition_fingerprint="reference",
+        selected_settings=_controller_settings(),
+        advisory_quality_passed=True,
+    )
+
+
+def _alignment_metadata() -> dict:
+    settings = _controller_settings()
+    return {
+        "schema_version": 1,
+        "alignment_id": "test-alignment",
+        "run_id": "alignment-run",
+        "artifact_digest": "digest",
+        "comparison_fingerprint": "comparison",
+        "target_definition_fingerprint": "target",
+        "reference_definition_fingerprint": "reference",
+        "settings": {
+            "command_delay_s": settings.command_delay_s,
+            "kp_vel": list(settings.kp_vel),
+            "kd_vel": list(settings.kd_vel),
+            "kp_att": list(settings.kp_att),
+            "kp_rate": list(settings.kp_rate),
+            "max_tilt_cmd_deg": settings.max_tilt_cmd_deg,
+            "thruster_tau_inc_s": settings.thruster_tau_inc_s,
+            "thruster_tau_dec_s": settings.thruster_tau_dec_s,
+            "thruster_max_thrust_rate_nps": settings.thruster_max_thrust_rate_nps,
+        },
+        "advisory_quality_passed": True,
+    }
 
 
 def test_train_rl_uses_the_requested_artifact_run_id(tmp_path: Path) -> None:
@@ -74,6 +127,8 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         env_cfg=env_cfg,
         source_metadata={"source_commit": "abc123", "source_dirty": False},
         artifact_run_id="run-1",
+        alignment_artifact=_alignment_artifact(),
+        alignment_digest="digest",
     )
 
     assert metadata["obs_schema_version"] == 1
@@ -150,17 +205,21 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
         },
         "source_commit": "captured",
         "source_dirty": False,
+        "alignment": _alignment_metadata(),
     }
     train_rl._write_artifact_metadata(  # noqa: SLF001
         run_dir=tmp_path,
         metadata=metadata,
     )
 
-    stored, contract = train_rl._stored_artifact_metadata(run_dir=tmp_path)  # noqa: SLF001
+    stored, policy_metadata = train_rl._stored_artifact_metadata(  # noqa: SLF001
+        run_dir=tmp_path
+    )
 
     assert stored == metadata
-    assert contract.policy_rate_hz == 17.0
-    assert contract.max_body_velocity_mps == 0.5
+    assert policy_metadata.contract.policy_rate_hz == 17.0
+    assert policy_metadata.contract.max_body_velocity_mps == 0.5
+    assert policy_metadata.controller_settings == _controller_settings()
 
 
 def test_checkpoint_export_rejects_run_without_stored_contract(tmp_path: Path) -> None:
@@ -188,6 +247,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         policy_name="press-approach",
         seed=7,
         max_iterations=2,
+        alignment_artifact=".build/alignment/test/best",
     )
     config = SimpleNamespace(
         rl=SimpleNamespace(
@@ -210,6 +270,11 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
 
     monkeypatch.setattr(train_rl, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(train_rl, "_build_env", lambda **_kwargs: (env, env_cfg))
+    monkeypatch.setattr(
+        train_rl,
+        "_load_training_alignment",
+        lambda **_kwargs: (_alignment_artifact(), "digest"),
+    )
     monkeypatch.setattr(
         train_rl,
         "_git_source_metadata",
@@ -239,6 +304,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         num_envs=None,
         export_checkpoint=None,
         initialize_checkpoint=None,
+        alignment_artifact=None,
     )
 
     train_rl._run(args=args, config=config)  # noqa: SLF001
@@ -246,6 +312,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["policy_rate_hz"] == 17.0
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
+    assert before_ppo["alignment"]["artifact_digest"] == "digest"
     assert export_calls == []
     assert not (tmp_path / ".build" / "training" / "press-approach" / "latest").exists()
 
@@ -376,6 +443,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         },
         "source_commit": "source-commit",
         "source_dirty": False,
+        "alignment": _alignment_metadata(),
     }
     train_rl._write_artifact_metadata(run_dir=run_dir, metadata=metadata)  # noqa: SLF001
 

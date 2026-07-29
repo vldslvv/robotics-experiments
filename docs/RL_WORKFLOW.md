@@ -28,7 +28,8 @@ control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
 PX4 is bypassed in Lab, but the pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
-references. Its rise/fall constants and thrust-rate limit are Hydra tunables.
+references. Controller gains, command delay, tilt, and thruster response come
+from an immutable alignment artifact rather than `rl.action`.
 The project still owns allocation, per-rotor yaw reaction, drag, and the sole
 body-wrench sink because the pusher-equipped articulation is not a pure
 multirotor asset.
@@ -38,57 +39,26 @@ and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler
 alternates 13 and 12 physics samples while `step_dt` remains 0.05 s. Exported
 artifacts own evaluation and deployment cadence and action scaling.
 
-PX4 is the temporal-response oracle for the Lab velocity controller. The
-wall-free conformance workflow runs the production 34-value actor and
-four-value action at nominal 0.460, 0.475, and 0.490 m entry ranges, fits only
-the outer traces, and holds the middle trace out for validation. Isolated Lab
-replay reproduces every captured 40/60 ms policy interval and uses the captured
-action sequence unchanged. `rl.action.controller_command_delay_s` is the sole
-Lab-side reconciliation parameter; it delays the action reaching the Lab
-controller in physics ticks without changing actor cadence, PX4, or the
-`press-v1` contract. The 0.440 s outer-trace fit reduced velocity RMSE from
-0.03640 to 0.01795 m/s, but its held-out RMSE was 0.02355 m/s, compared with
-0.02237 at zero delay and 0.01302 at 0.200 s. The configured Lab plant
-therefore uses the held-out-best 0.200 s equivalent response proxy for new
-training. It is not literal PX4 latency. Actors trained with a different plant
-retain their original evidence and must not be upgraded without retraining and
-repeating the acceptance gates. See `docs/SIM_TO_SIM_ALIGNMENT.md` for
-interpretation and the alignment workflow. The command buffer and thruster
-state are cleared per environment reset.
+PX4 SITL is the response reference for the separate, policy-independent
+alignment subsystem. Run `make align-controllers`, then
+`make test-integration-alignment-target`; see
+`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
+`.build/alignment/<alignment-id>/best` by default and may select an exact run
+with `ALIGNMENT_ARTIFACT`. The command buffer and thruster state are cleared on
+every environment reset.
 
-Use the following sequence to capture and compare a new trace:
+`rl.action` now contains only normalized action kind, dimension, and scales.
+The selected alignment's complete `ControllerSettings` is supplied explicitly
+to both the NumPy reference and torch twin. Changing the controller requires a
+new alignment artifact and new training; an existing actor is never silently
+upgraded to current `best`.
 
-```console
-make test-integration-press-temporal-conformance
-PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
-  --temporal-log <isaac-log> \
-  --json .build/benchmarks/press-temporal/px4-traces.json
-make test-integration-press-temporal-replay
-PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
-  --temporal-log <isaac-log> \
-  --lab-trace .build/benchmarks/press-temporal/lab-traces.json \
-  --json .build/benchmarks/press-temporal/conformance.json
-```
-
-`TEMPORAL_DELAY_GRID`, `TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID`, and
-`TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID` control replay ablations. Gain scales
-affect only the two horizontal axes; vertical gains require independently
-exciting vertical motion. Candidate selection ranks held-out-middle velocity
-RMSE first and reports outer-trace error separately.
-
-The temporal experiment disables switch and wall collisions while preserving
-the switch pose and production observation provider. Its final entry-goto
-setpoints are calibrated to spread the policy entries around the nominal
-0.460, 0.475, and 0.490 m wall-normal cases despite the three-dimensional
-completion tolerance and measured lateral estimator offset. The 5 cm tolerance
-remains reachable while the measured policy-entry ranges, rather than the
-nominal labels or setpoints, determine conformance.
-It is diagnostic and must not be treated as permission for a wall run. After
-Lab acceptance, three separate wall-free PX4 missions must pass before
-`test-integration-press-approach-routine` may run. If checkpoint selection or
-independent Lab evaluation fails any 80% success, 5% collision, or 0.40 m
-minimum-range threshold, do not publish the actor and do not start either PX4
-acceptance stage.
+After Lab acceptance, `make test-integration-press-policy-transfer` runs the
+trained actor at three wall-free PX4 entry ranges. This is downstream transfer
+acceptance, not a fitting input or permission for a physical wall run. If
+checkpoint selection or independent Lab evaluation fails any 80% success, 5%
+collision, or 0.40 m minimum-range threshold, do not publish the actor or start
+PX4 acceptance.
 
 ## Press observation and approach stage
 
@@ -202,7 +172,15 @@ explicit capacity probe rather than the production default.
 
 A new run writes checkpoints and `policy_meta.json` below
 `.build/training/<policy-name>/<run-id>/`. It does not export `policy.pt` or
-advance `latest`. The collision-aware Stage 1 procedure actor-only initializes
+advance `latest`. Before it constructs the environment, training loads
+`rl.training.alignment_artifact` (defaulting to the controller alignment
+namespace's `best` link), validates vehicle, airframe, cadence, interface, and
+action scales, and stores the alignment digest, run identity, fingerprints,
+quality status, and complete settings in `policy_meta.json`. This happens
+before PPO begins. An explicit `ALIGNMENT_ARTIFACT` or
+`--alignment-artifact` overrides the configured link for reproduction.
+
+The collision-aware Stage 1 procedure actor-only initializes
 from accepted run `approach-20260726d`, checkpoint 24:
 
 ```console
@@ -236,16 +214,20 @@ checkpoint selection.
 
 An artifact is `policy.pt` plus `policy_meta.json`. The metadata owns
 `policy_interface`, observation schema/dimension, policy rate, action
-kind/dimension/scales, source commit, and dirty-worktree status. A `press-v1`
+kind/dimension/scales, aligned controller settings and provenance, source
+commit, and dirty-worktree status. A `press-v1`
 artifact also requires `curriculum_stage: approach`. `press-v1` describes the
 shared 34-by-4 family; `curriculum_stage` selects stage-specific evaluation and
 runtime completion.
 
 Malformed, missing, non-finite, stage-less press, unknown-stage press, and
 stage-mismatched artifacts fail during loading, selection, evaluation, and
-runtime preflight. Historical press artifacts without stage metadata are not
-inferred. Legacy hover metadata can still infer `hover-v1` from its complete
-contract.
+runtime preflight. Historical press or hover artifacts without alignment
+provenance are unsupported and are never upgraded from current `best`.
+Checkpoint selection, manual export, and independent evaluation reconstruct
+the exact controller settings embedded before PPO. Runtime deployment validates
+that record, while its OFFBOARD mapper continues to consume only
+`PolicyContract`.
 
 ## Checkpoint selection and independent evaluation
 
@@ -347,8 +329,8 @@ detection. If Lab evaluation passes while the live PX4 approach still visibly
 contacts the wall, record the dynamics mismatch and stop; do not add collision
 to the observation or artifact contract.
 
-After `make eval-press` and three separate wall-free temporal PX4 missions
-pass, run:
+After `make eval-press` and the wall-free
+`make test-integration-press-policy-transfer` acceptance pass, run:
 
 ```console
 make test-integration-press-approach-routine

@@ -4,7 +4,8 @@ This is the architecture and rationale for the container-backed integration
 tests. Use the Make targets as the public entrypoints; run harness scripts
 directly only when debugging the harness itself. The orchestration, caching,
 artifact-isolation, and timing details live here. The authoritative definitions
-are `make/integration-tests.mk`, `make/rl.mk`, `make/config.mk`,
+are `make/integration-tests.mk`, `make/alignment.mk`, `make/rl.mk`,
+`make/config.mk`,
 `make/scripts/run_isaac_integration_test.sh`,
 `make/scripts/run_px4_integration_test.sh`,
 `make/scripts/run_isaac_test_in_container.sh`,
@@ -19,7 +20,9 @@ scenario-specific notes.
 `make/integration-tests.mk` owns the general integration harness variables,
 aggregate suite, and non-RL target definitions. `make/rl.mk` owns training,
 checkpoint selection, independent press evaluation, and all press/Isaac Lab
-target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
+task targets. `make/alignment.mk` exclusively owns controller capture, target
+sweep, fit/publication, and the alignment target-envelope gate.
+`INTEGRATION_TEST_TARGETS` deliberately remains in
 `make/integration-tests.mk`; GNU Make resolves the included definitions from
 `make/rl.mk` when the aggregate runs.
 
@@ -60,8 +63,8 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   by `make select-rl-checkpoint`, so it is deliberately not part of
   `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
   contract and routine config. Policy metadata includes the active policy
-  rate, so artifacts trained before that field was introduced must be
-  retrained.
+  rate and alignment provenance; every legacy artifact without the alignment
+  record must be retrained.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
   flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
   safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
@@ -74,21 +77,15 @@ target definitions. `INTEGRATION_TEST_TARGETS` deliberately remains in
   Selection may publish an explicitly rejected diagnostic fallback at
   `.build/training/press-approach/latest`; that fallback does not satisfy this
   gate's workflow precondition.
-- `make test-integration-press-temporal-conformance` runs the production press
-  actor through three wall-free PX4 policy stages at nominal 0.460, 0.475, and
-  0.490 m entry ranges. It retains the switch pose and production observation
-  path but disables switch and proxy-wall collisions. The structured
-  `ROUTINE_STAGE` and `PRESS_POLICY` records are the raw temporal trace; this
-  target does not replace the artifact acceptance gate.
-- `make test-integration-press-temporal-replay` consumes the PX4 temporal JSON
-  under `.build/benchmarks/press-temporal/`, replays its exact observation and
-  action cadence through isolated Isaac Lab, and evaluates the configured
-  delay and horizontal velocity-gain grids. `controller_conformance.py` fits
-  the outer entry cases, selects candidates by held-out-middle velocity error,
-  and reports fitted error plus velocity, braking-distance, closest-range, and
-  settling diagnostics. These two temporal targets are excluded from
-  `test-integration-all` because they require the selected press artifact and
-  explicit trace artifacts.
+- `make test-integration-alignment-target` runs the analytic hover/goto
+  stability envelope with the selected alignment `best` artifact. It is owned
+  by `make/alignment.mk` and excluded from `test-integration-all` because it
+  requires an alignment publication.
+- `make test-integration-press-policy-transfer` runs the trained press actor
+  through three wall-free PX4 policy stages at distinct entry ranges. It
+  retains production observations while disabling physical contact. This is a
+  downstream transfer gate and never fits or publishes controller settings.
+  It is artifact-dependent and excluded from `test-integration-all`.
 - `make test-integration-px4-takeoff` starts a temporary PX4 SITL container, runs
   the standalone Isaac PX4 arm/takeoff stability scenario, preserves isolated
   artifacts, and removes the temporary PX4 container.

@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 from _runtime import SceneTestContext, TimingReporter, format_vehicle_state_vectors
 
-from robotics_experiments.commanding import FailureKind, MavlinkCommandPort
+from robotics_experiments.commanding import FailureKind, MavlinkCommandPort, PolicyAdapter
 from robotics_experiments.px4_bridge import IsaacArticulationIO, tilt_angle_deg
 
 if TYPE_CHECKING:
@@ -389,7 +389,10 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
         fleet = apply_settings(state=fleet)
 
     with timing.timed_stage("spawn_drones"):
-        fleet = spawn_fleet(state=fleet)
+        fleet = spawn_fleet(
+            state=fleet,
+            preflight_policy_artifacts=options.policy_factory is None,
+        )
     drone_count = len(fleet.drones)
     context.report(f"{options.test_name}: built {drone_count} drone(s)")
     if not _bridged(fleet):
@@ -452,7 +455,11 @@ def _run_scenario(context: SceneTestContext, options: Px4TakeoffScenarioOptions)
             fleet.drones[0].label,
         )
         with timing.timed_stage("build_drivers", sim_time_us=sim_time_us):
-            fleet = build_drivers(state=fleet, make_env=make_env)
+            fleet = build_drivers(
+                state=fleet,
+                make_env=make_env,
+                policy_factory=options.policy_factory,
+            )
 
         with timing.timed_stage("drive_routine", sim_time_us=sim_time_us):
             fleet = _drive_to_done(context, fleet, options.routine_tick_hook)
@@ -494,6 +501,7 @@ class Px4TakeoffScenarioOptions:
     post_takeoff_hook: Callable[[SceneTestContext, BridgeHost], None] | None = None
     routine_tick_hook: Callable[[FleetState], None] | None = None
     post_routine_hook: Callable[[SceneTestContext, Any], None] | None = None
+    policy_factory: Callable[..., PolicyAdapter] | None = None
     success_label: str = "configured routine"
 
 

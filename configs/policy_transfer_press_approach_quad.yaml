@@ -3,9 +3,8 @@ defaults:
   - experiment/vehicle@vehicles.x500_01: holybro_x500_v2
   - _self_
 
-# Wall-free production PX4/actor trace. The switch and lamp provide the exact
-# press-v1 observation resources, but their contact geometry and generated wall
-# proxy are disabled so only temporal flight response affects the trace.
+# Wall-free post-training PX4 policy-transfer acceptance. The switch and lamp
+# provide production press-v1 observations while physical contact is disabled.
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
 rl:
@@ -53,7 +52,7 @@ vehicles:
         - kind: hover
           hold_s: 1.0
         - kind: policy
-          label: temporal-0.460
+          label: policy-transfer-0.460
           artifact: .build/training/press-approach/latest
           switch_index: 0
           timeout_s: 20.0
@@ -74,7 +73,7 @@ vehicles:
         - kind: hover
           hold_s: 1.0
         - kind: policy
-          label: temporal-0.475
+          label: policy-transfer-0.475
           artifact: .build/training/press-approach/latest
           switch_index: 0
           timeout_s: 20.0
@@ -95,7 +94,7 @@ vehicles:
         - kind: hover
           hold_s: 1.0
         - kind: policy
-          label: temporal-0.490
+          label: policy-transfer-0.490
           artifact: .build/training/press-approach/latest
           switch_index: 0
           timeout_s: 20.0

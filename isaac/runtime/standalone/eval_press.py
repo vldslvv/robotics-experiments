@@ -32,7 +32,8 @@ def _repo_root() -> Path:
 def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvaluationResult:
     evaluation = config.rl.press.evaluation
     seeds = tuple(int(seed) for seed in evaluation.seeds)
-    contract = validate_policy_artifact(artifact_dir=artifact_dir).contract
+    metadata = validate_policy_artifact(artifact_dir=artifact_dir)
+    contract = metadata.contract
     if contract.curriculum_stage != config.rl.press.curriculum_stage:
         raise ValueError(
             f"press artifact stage {contract.curriculum_stage!r} does not match "
@@ -41,6 +42,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     env, env_cfg = make_isaac_lab_env(
         task_id=config.rl.training.task_id,
         experiment_config=config,
+        controller_settings=metadata.controller_settings,
         seed=seeds[0],
         num_envs=evaluation.episodes_per_seed,
         policy_contract=contract,

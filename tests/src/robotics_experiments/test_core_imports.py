@@ -57,6 +57,15 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         simulation = importlib.import_module("robotics_experiments.simulation")
         assert simulation.__all__ == ["apply_settings"]
         importlib.import_module("robotics_experiments.px4_bridge")
+        alignment = importlib.import_module("robotics_experiments.alignment")
+        assert alignment.__all__ == [
+            "AlignmentArtifact",
+            "ControllerDefinition",
+            "ControllerSettings",
+            "align",
+            "load_alignment_artifact",
+            "load_controller_definition",
+        ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
         # must import without carb/omni present.
         runtime = importlib.import_module("robotics_experiments.runtime")
@@ -366,13 +375,13 @@ def test_config_eagerly_imports_hydra() -> None:
         "HoverTaskConfig",
         "IsaacLabVehicleConfig",
         "LightSwitchConfig",
-        "PressActionConfig",
         "PressApproachEvaluationConfig",
         "PressApproachGoalConfig",
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
         "PressResetConfig",
         "Px4BridgeConfig",
+        "RlActionConfig",
         "RlPolicyActorConfig",
         "RlPolicyConfig",
         "RlPolicyCriticConfig",

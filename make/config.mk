@@ -69,6 +69,7 @@ ISAAC_PRESS_CONTACT_CHAIN_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_pres
 ISAAC_PRESS_POLICY_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_press_policy_hover.log
 ISAAC_PRESS_APPROACH_ROUTINE_TEST = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_press_approach_routine.py
 ISAAC_PRESS_APPROACH_ROUTINE_TEST_LOG = /isaac-sim/.nvidia-omniverse/logs/test_px4_press_approach_routine.log
+ISAAC_PRESS_POLICY_TRANSFER_TEST = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/test_px4_press_policy_transfer.py
 ISAAC_TEST_ERROR_FILTER = ERROR|Error|Exception|Traceback|Could not|No matching|Failed|failed
 ISAAC_TEST_LOG_FILTER = ^\[isaac-standalone-test\]|^Traceback|^[[:space:]]+File |^[A-Za-z_]+(Error|Exception):
 ISAAC_TEST_FAILURE_FILTER = ^\[isaac-standalone-test\] ERROR:

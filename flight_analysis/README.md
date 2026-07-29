@@ -28,19 +28,20 @@ for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
 yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real
 gap once real flights exist, and to track sim-vs-sim drift in the meantime.
 
-`controller_conformance.py` isolates the deploy/train controller boundary. It
+`controller_state_replay.py` is an independent instantaneous state-replay
+diagnostic. It
 replays PX4 ULog estimator state and velocity setpoints through the numpy
 reference for Isaac Lab's velocity cascade, converts PX4 motor controls through
 the configured Pegasus scaling, and compares per-rotor angular velocity,
-collective thrust, and body torque at the same timestamps. This is a diagnostic
-calibration step, not a publication gate: establish reviewed tolerances from an
-isolated command trace before using its result to unblock training.
+collective thrust, and body torque at the same timestamps. This is a diagnostic,
+not the controller-alignment publication path.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
-  flight_analysis/tools/controller_conformance.py <flight.ulg> \
+  flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --window 28.3,30.7 --json /tmp/controller-conformance.json
+  --alignment-artifact .build/alignment/x500-velocity-px4-v1/best \
+  --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 
 Use a window containing finite OFFBOARD velocity setpoints. The comparison
@@ -50,37 +51,10 @@ leave both. Isaac Lab's `Thruster` is a lower actuator-realization layer; with
 the configured zero time constants its output must match the requested
 per-rotor thrust independently of this controller comparison.
 
-For closed-loop temporal comparison, first run the wall-free three-entry PX4
-mission and convert its Isaac log to the replay artifact. The report preserves
-the production actor's exact 34-value observations, four-value actions, and
-40/60 ms command cadence:
-
-```bash
-PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
-  --temporal-log <test_px4_press_temporal_conformance.log> \
-  --json .build/benchmarks/press-temporal/px4-traces.json
-make test-integration-press-temporal-replay
-PYTHONPATH=src uv run python flight_analysis/tools/controller_conformance.py \
-  --temporal-log <test_px4_press_temporal_conformance.log> \
-  --lab-trace .build/benchmarks/press-temporal/lab-traces.json \
-  --json .build/benchmarks/press-temporal/conformance.json
-```
-
-The replay target accepts `TEMPORAL_DELAY_GRID`,
-`TEMPORAL_HORIZONTAL_KP_VEL_SCALE_GRID`, and
-`TEMPORAL_HORIZONTAL_KD_VEL_SCALE_GRID`. Horizontal gain sweeps leave vertical
-gains unchanged. The analyzer reports outer-trace error separately and selects
-the replay candidate by held-out-middle velocity RMSE.
-
-The first-order PX4 trace fit and the isolated-Lab delay-grid fit both train on
-the 0.460 and 0.490 m cases and reserve 0.475 m for validation. The combined
-JSON reports command cadence, peak velocity, reversal, braking distance,
-closest range, settling, aligned velocity RMSE, and the selected Lab delay.
-The historical outer-trace fit selected 0.440 s, but that value overfit its
-two fitting traces. The configured value for new training is the held-out-best
-0.200 s candidate. Both are closed-loop equivalent response proxies covering
-estimator, command, controller, and plant timing; neither claims that one
-literal PX4 component waits for the configured duration.
+Closed-loop controller fitting belongs exclusively to
+`robotics_experiments.alignment` and `make/alignment.mk`; see
+`docs/SIM_TO_SIM_ALIGNMENT.md`. Trained press-policy logs are downstream
+acceptance evidence and are not ingested by flight-analysis fitting code.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache uv run --no-project --with pyulog --with numpy python \

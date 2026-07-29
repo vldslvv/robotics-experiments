@@ -6,7 +6,7 @@ from robotics_experiments.config._immutability import _FreezableConfig
 __all__ = [
     "HoverTaskConfig",
     "IsaacLabVehicleConfig",
-    "PressActionConfig",
+    "RlActionConfig",
     "PressApproachEvaluationConfig",
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
@@ -39,14 +39,14 @@ class IsaacLabVehicleConfig(_FreezableConfig):
 
 
 @dataclass
-class PressActionConfig(_FreezableConfig):
-    """RL action-level (``kind``) selection plus its controller tunables.
+class RlActionConfig(_FreezableConfig):
+    """Normalized policy-action interpretation, independent of its controller.
 
     The ``kind`` picks the in-Lab actuation model (see
     :mod:`robotics_experiments.rl`): ``velocity`` (cascaded PD:
     body-frame velocity + yaw rate) or ``ctbr`` (collective thrust + body-rate
-    setpoint). The gains/limits below are a superset covering both; the selected
-    ``kind`` reads the subset it needs, so switching is a one-line ``kind`` edit.
+    setpoint). Controller gains, command delay, tilt limit, and actuator response
+    are owned separately by the selected alignment artifact.
 
     Attributes:
         kind: Action level selecting the actuation model (``velocity`` /
@@ -60,28 +60,9 @@ class PressActionConfig(_FreezableConfig):
             ``velocity`` action.
         max_body_rate_radps: Body-rate command scale (rad/s) for a normalized
             ``ctbr`` action.
-        max_tilt_cmd_deg: Saturation on the commanded tilt of the desired thrust
-            axis in the ``velocity`` cascade, degrees.
         hover_thrust_fraction: Collective thrust at hover as a fraction of the
             summed per-rotor static max thrust; centers the ``ctbr`` collective
             command and the ``velocity`` thrust feed-forward.
-        controller_kp_vel: Per-axis P gain on world-frame velocity error
-            (``velocity`` cascade), length 3.
-        controller_kd_vel: Per-axis damping gain on world-frame velocity
-            (``velocity`` cascade), length 3.
-        controller_kp_att: Per-axis P gain mapping geometric attitude error to a
-            body-rate setpoint (``velocity`` cascade), length 3.
-        controller_kp_rate: Per-axis P gain mapping body-rate error to desired
-            body torque (both models), length 3.
-        controller_command_delay_s: Lab-only delay from a policy command to the
-            velocity controller receiving it, seconds. This models the fitted
-            PX4 closed-loop command-response latency without changing policy
-            cadence or the deployed PX4 controller.
-        actuator_tau_inc_s: Official Isaac Lab thruster rise time constant,
-            seconds.
-        actuator_tau_dec_s: Official Isaac Lab thruster fall time constant,
-            seconds.
-        actuator_max_thrust_rate_nps: Per-rotor thrust slew-rate limit, N/s.
     """
 
     kind: str
@@ -89,16 +70,7 @@ class PressActionConfig(_FreezableConfig):
     max_body_velocity_mps: float
     max_yaw_rate_radps: float
     max_body_rate_radps: float
-    max_tilt_cmd_deg: float
     hover_thrust_fraction: float
-    controller_kp_vel: List[float]
-    controller_kd_vel: List[float]
-    controller_kp_att: List[float]
-    controller_kp_rate: List[float]
-    controller_command_delay_s: float
-    actuator_tau_inc_s: float
-    actuator_tau_dec_s: float
-    actuator_max_thrust_rate_nps: float
 
 
 @dataclass
@@ -274,6 +246,8 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
+        alignment_artifact: Controller alignment run directory or publication
+            link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
         save_interval: Checkpoint save interval, iterations.
@@ -294,6 +268,7 @@ class RlTrainingConfig(_FreezableConfig):
     task_id: str
     vehicle_id: int
     policy_name: str
+    alignment_artifact: str
     max_iterations: int
     num_steps_per_env: int
     save_interval: int
@@ -356,7 +331,7 @@ class RlConfig(_FreezableConfig):
         policy_rate_hz: Exact-average RL policy decision rate.
     """
 
-    action: PressActionConfig
+    action: RlActionConfig
     lab_vehicle: IsaacLabVehicleConfig
     training: RlTrainingConfig
     hover: HoverTaskConfig

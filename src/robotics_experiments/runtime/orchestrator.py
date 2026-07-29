@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -24,6 +25,7 @@ from robotics_experiments.commanding import (
     EnvelopeGates,
     FailureKind,
     MavlinkCommandPort,
+    PolicyAdapter,
     RoutineDriverState,
     RoutineObservation,
     create_routine_driver,
@@ -251,13 +253,17 @@ def apply_settings(*, state: FleetState) -> FleetState:
     return state
 
 
-def spawn_fleet(*, state: FleetState) -> FleetState:
-    """Spawn the ordered vehicle mapping and compose bridge resources."""
+def spawn_fleet(
+    *,
+    state: FleetState,
+    preflight_policy_artifacts: bool = True,
+) -> FleetState:
+    """Spawn vehicles and optionally preflight production policy artifacts."""
     if state.stage is None:
         raise RuntimeError(f"{_LOG_PREFIX} spawn_fleet called before the stage was adopted")
     switch_rate_hz = state.switch_rate_hz
     policy_preflight = _PolicyPreflight(policies=(), press_rate_hz=None)
-    if any(
+    if preflight_policy_artifacts and any(
         descriptor.get("kind") == "policy"
         for vehicle in state.config.vehicles.values()
         for descriptor in vehicle.routine.steps
@@ -390,8 +396,9 @@ def build_drivers(
     *,
     state: FleetState,
     make_env: Callable[[SpawnedDrone, MavlinkCommandPort], DriverEnvironment],
+    policy_factory: Callable[..., PolicyAdapter] | None = None,
 ) -> FleetState:
-    """Compose one frozen routine driver state per bridge-enabled drone."""
+    """Compose drivers, optionally with an alignment-shell policy factory."""
     clock_host = next((drone.host for drone in state.drones if drone.host is not None), None)
     control_time_ns = (
         read_bridge_host_status(host=clock_host).sim_time_us * 1_000
@@ -407,6 +414,15 @@ def build_drivers(
         if spawned.host is None:
             continue
         routine = spawned.vehicle.routine
+        active_policy_factory = (
+            policy_factory
+            if policy_factory is not None
+            else partial(
+                _make_policy_adapter,
+                config=state.config,
+                repo_root=_repo_root(),
+            )
+        )
         port = MavlinkCommandPort(
             gcs_endpoint=f"udp:127.0.0.1:{spawned.vehicle.gcs_port}",
             heartbeat_period_s=spawned.vehicle.routine.gcs_heartbeat_period_s,
@@ -444,12 +460,7 @@ def build_drivers(
                 prearm_backstop_floor_s=state.config.driver.prearm_backstop_floor_s,
                 prearm_backstop_multiplier=state.config.driver.prearm_backstop_multiplier,
                 drive_budget_multiplier=state.config.driver.drive_budget_multiplier,
-                policy_factory=lambda *, artifact, hold_s: _make_policy_adapter(
-                    config=state.config,
-                    artifact=artifact,
-                    hold_s=hold_s,
-                    repo_root=_repo_root(),
-                ),
+                policy_factory=active_policy_factory,
             ),
             port=port,
             env=make_env(spawned, port),

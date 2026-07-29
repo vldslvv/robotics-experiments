@@ -37,9 +37,9 @@ Read area docs on demand when a task touches that area:
 - RL workflow: `docs/RL_WORKFLOW.md` for `src/robotics_experiments/rl/`,
   `src/robotics_experiments/workflows/isaac_lab/`, Isaac Lab images, training,
   policy artifacts, and RL integration gates.
-- Sim-to-sim alignment: `docs/SIM_TO_SIM_ALIGNMENT.md` for the Isaac Lab/PX4
-  controller boundary, temporal fitting, held-out evidence, parameter
-  randomization, and final validation.
+- Controller alignment: `docs/SIM_TO_SIM_ALIGNMENT.md` for the host-safe
+  alignment package, task-neutral PX4/Isaac Lab probes, artifact publication,
+  controller settings, metric registry, and training provenance.
 - Integration tests: `docs/INTEGRATION_TEST_ARCHITECTURE.md` for integration
   target mechanics, harness scripts, caching, artifacts, concurrency, and
   multi-instance PX4.
@@ -70,6 +70,9 @@ Read area docs on demand when a task touches that area:
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
+- `src/robotics_experiments/alignment/` -> Host-safe controller definitions,
+  generic candidate fitting/ranking, immutable alignment artifacts, and
+  publication. Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
 - `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
   `FleetState` lifecycle transitions (the one runtime pipeline) and the PX4
   `BridgeHost` /
@@ -138,9 +141,10 @@ the current contents and the intended home for that kind of code.
   for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
   Docker environment; keep those workarounds in Isaac-only lazy leaf modules so
   core imports still work on the host.
-- Package layering runs `config -> domain (drone / environment / simulation /
-  px4_bridge) -> Isaac extensions`, and `import robotics_experiments` (plus its
-  subpackages) must succeed with Isaac absent. A domain leaf module that is
+- Package layering runs `config -> alignment -> rl -> workflows` for controller
+  alignment and learning, alongside `config -> domain (drone / environment /
+  simulation / px4_bridge) -> Isaac extensions`; `import robotics_experiments`
+  (plus its subpackages) must succeed with Isaac absent. A domain leaf module that is
   wholly Isaac-only (every function operates on a live USD stage) may keep
   top-level `carb`/`pxr`/`isaacsim` imports rather than scattering function-scope
   imports, but it must (a) carry a module docstring declaring the exception and
@@ -204,6 +208,22 @@ the current contents and the intended home for that kind of code.
   exports only press observation, handoff, task, provider, and policy-progress
   concepts. Runtime policy interface dispatch and adapter composition belong in
   the private `runtime/_policy.py`, not the fleet orchestrator or commanding.
+  `rl.action` owns only normalized action interpretation and scales.
+  Controller/actuator internals come from
+  `robotics_experiments.alignment.ControllerSettings`. Training must load and
+  validate an alignment artifact before building Isaac Lab, embed its complete
+  settings/digest/fingerprints before PPO, and selection/evaluation must reuse
+  that embedded record. Policy artifacts without alignment provenance are
+  unsupported.
+- Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
+  `src/robotics_experiments/alignment/`, controller definitions, alignment Make
+  targets, or training alignment provenance. Existing `ControllerSettings`
+  fields are added to a fit only through declarative `ParameterSpec` candidates.
+  Search and replacement stay generic. Selection metrics are stable registered
+  names; changing a metric/schema, definition, probe suite, environment, image,
+  or controller interface starts a new comparison fingerprint. Structurally
+  valid poor-quality results remain consumable and report advisory failure.
+  `latest` always advances and `best` compares only within one fingerprint.
 - When launching an RL training run for the user, provide a run-scoped
   monitoring path (TensorBoard by default) and report the local URL and log
   directory. Keep monitoring available while the run is active unless the user
@@ -277,11 +297,14 @@ the current contents and the intended home for that kind of code.
 - Key persistent targets: `make build`, `make run-isaac`, `make run-ros`,
   `make run-px4`, `make stop`, and `make destroy`.
 - General integration targets and the aggregate suite are defined in
-  `make/integration-tests.mk`; RL, Isaac Lab, and press workflow targets are
-  defined in `make/rl.mk`. Read
+  `make/integration-tests.mk`; controller-alignment targets are defined in
+  `make/alignment.mk`; RL, Isaac Lab, and press workflow targets are defined in
+  `make/rl.mk`. Read
   `docs/INTEGRATION_TEST_ARCHITECTURE.md` before changing the harness,
   standalone integration scripts, or targets such as `make test-integration`,
   `make test-integration-all`, `make test-integration-press-hover-goto`,
+  `make test-integration-alignment-target`,
+  `make test-integration-press-policy-transfer`,
   `make test-integration-press-policy`, `make test-integration-px4-takeoff`,
   `make test-integration-px4-navigation`,
   `make test-integration-px4-takeoff-instability`, or

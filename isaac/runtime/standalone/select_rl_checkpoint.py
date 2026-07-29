@@ -402,6 +402,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     env, env_cfg = make_isaac_lab_env(
         task_id=training_config.task_id,
         experiment_config=config,
+        controller_settings=policy_metadata.controller_settings,
         seed=env_seed,
         num_envs=num_envs,
         policy_contract=contract,

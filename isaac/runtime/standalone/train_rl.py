@@ -14,6 +14,7 @@ Run inside the Isaac Lab container (make train-rl):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -28,6 +29,7 @@ import torch
 
 import robotics_experiments.rl as rl
 import robotics_experiments.rl.training.rsl_rl as training
+from robotics_experiments.alignment import AlignmentArtifact, load_alignment_artifact
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import METADATA_FILENAME
 from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
@@ -37,6 +39,7 @@ _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CHECKPOINT_NAME_PATTERN = re.compile(r"model_(\d+)\.pt")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
+_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
 
 
 def _report(message: str) -> None:
@@ -128,11 +131,13 @@ def _build_env(
     seed: int,
     num_envs: int | None,
     experiment_config: ExperimentConfig,
+    controller_settings,
     policy_contract=None,
 ):
     return make_isaac_lab_env(
         task_id=task_id,
         experiment_config=experiment_config,
+        controller_settings=controller_settings,
         seed=seed,
         num_envs=num_envs,
         policy_contract=policy_contract,
@@ -145,9 +150,13 @@ def _artifact_metadata(
     env_cfg,
     source_metadata: dict[str, str | bool],
     artifact_run_id: str,
+    alignment_artifact: AlignmentArtifact,
+    alignment_digest: str,
 ):
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
+        alignment_artifact=alignment_artifact,
+        alignment_digest=alignment_digest,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rl.policy_rate_hz,
@@ -165,7 +174,7 @@ def _write_artifact_metadata(*, run_dir: Path, metadata: dict) -> None:
     (run_dir / METADATA_FILENAME).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
 
 
-def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
+def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, rl.PolicyMetadata]:
     metadata_path = run_dir / rl.METADATA_FILENAME
     if not metadata_path.is_file():
         raise ValueError(
@@ -173,13 +182,12 @@ def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, object]:
             "the original training contract cannot be recovered"
         )
     loaded = rl.load_policy_metadata(artifact_dir=run_dir)
-    contract = loaded.contract
     metadata = dict(loaded.values)
     if not isinstance(metadata.get("source_commit"), str) or not metadata["source_commit"]:
         raise ValueError(f"checkpoint run {run_dir} metadata has no source_commit provenance")
     if type(metadata.get("source_dirty")) is not bool:
         raise ValueError(f"checkpoint run {run_dir} metadata has no source_dirty provenance")
-    return metadata, contract
+    return metadata, loaded
 
 
 def _initialization_provenance(
@@ -210,7 +218,7 @@ def _initialization_provenance(
     match = _CHECKPOINT_NAME_PATTERN.fullmatch(checkpoint_path.name)
     if match is None:
         raise ValueError("--initialize-checkpoint must name a numeric model_<iteration>.pt")
-    source_metadata, source_contract = _stored_artifact_metadata(run_dir=run_dir)
+    source_metadata, source_policy_metadata = _stored_artifact_metadata(run_dir=run_dir)
     relative_checkpoint = checkpoint_path.resolve().relative_to(repo_root.resolve())
     return (
         {
@@ -222,8 +230,62 @@ def _initialization_provenance(
             "checkpoint_path": str(relative_checkpoint),
             "source_commit": str(source_metadata["source_commit"]),
         },
-        source_contract,
+        source_policy_metadata.contract,
     )
+
+
+def _load_training_alignment(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    repo_root: Path,
+) -> tuple[AlignmentArtifact, str]:
+    authored = (
+        args.alignment_artifact
+        or os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
+        or config.rl.training.alignment_artifact
+    )
+    artifact_path = Path(authored)
+    if not artifact_path.is_absolute():
+        artifact_path = repo_root / artifact_path
+    artifact = load_alignment_artifact(artifact_path)
+    vehicle_id = config.rl.training.vehicle_id
+    try:
+        vehicle_label, vehicle = next(
+            (label, item) for label, item in config.vehicles.items() if item.id == vehicle_id
+        )
+    except StopIteration as exc:
+        raise ValueError(f"rl.training.vehicle_id={vehicle_id} is not in the experiment") from exc
+    action = config.rl.action
+    mismatches = []
+    if artifact.vehicle != vehicle_label:
+        mismatches.append(f"vehicle {artifact.vehicle!r} != {vehicle_label!r}")
+    if artifact.airframe != Path(vehicle.spawn.usd_path).name:
+        mismatches.append(
+            f"airframe {artifact.airframe!r} != {Path(vehicle.spawn.usd_path).name!r}"
+        )
+    if artifact.command_rate_hz != config.rl.policy_rate_hz:
+        mismatches.append(f"cadence {artifact.command_rate_hz} != {config.rl.policy_rate_hz}")
+    if artifact.command_interface.kind != "body-flu-velocity-yaw-rate-v1":
+        mismatches.append(f"interface {artifact.command_interface.kind!r}")
+    if action.kind != "velocity" or action.action_dim != artifact.command_interface.dimension:
+        mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
+    if (
+        action.max_body_velocity_mps != artifact.command_interface.linear_scale_mps
+        or action.max_yaw_rate_radps != artifact.command_interface.yaw_rate_scale_radps
+    ):
+        mismatches.append("normalized action scales differ")
+    if mismatches:
+        raise ValueError("alignment artifact is incompatible: " + "; ".join(mismatches))
+    alignment_path = artifact_path / "alignment.json" if artifact_path.is_dir() else artifact_path
+    digest = hashlib.sha256(alignment_path.read_bytes()).hexdigest()
+    if not artifact.advisory_quality_passed:
+        _report(
+            "WARNING: consuming advisory-quality-failed alignment "
+            f"{artifact.alignment_id}/{artifact.run_id}: "
+            + "; ".join(artifact.advisory_quality_reasons)
+        )
+    return artifact, digest
 
 
 def _validate_initialization_contract(
@@ -254,6 +316,8 @@ def _run_new_training(
     training_root: Path,
     repo_root: Path,
     device: str,
+    alignment_artifact: AlignmentArtifact,
+    alignment_digest: str,
 ) -> None:
     training_cfg = config.rl.training
     initialization_checkpoint = args.initialize_checkpoint
@@ -284,6 +348,7 @@ def _run_new_training(
         seed=seed,
         num_envs=args.num_envs,
         experiment_config=config,
+        controller_settings=alignment_artifact.selected_settings,
     )
     try:
         if source_contract is not None:
@@ -297,6 +362,8 @@ def _run_new_training(
             env_cfg=env_cfg,
             source_metadata=_git_source_metadata(repo_root=repo_root),
             artifact_run_id=run_dir.name,
+            alignment_artifact=alignment_artifact,
+            alignment_digest=alignment_digest,
         )
         if initialization is not None:
             metadata["initialization"] = initialization
@@ -336,7 +403,7 @@ def _run_manual_export(
     checkpoint_path = args.export_checkpoint
     assert checkpoint_path is not None
     run_dir = _checkpoint_run_dir(checkpoint_path=checkpoint_path, out_root=out_root)
-    metadata, policy_contract = _stored_artifact_metadata(run_dir=run_dir)
+    metadata, policy_metadata = _stored_artifact_metadata(run_dir=run_dir)
     _report(
         f"exporting {training_cfg.task_id} checkpoint {checkpoint_path} "
         f"(policy={training_cfg.policy_name}, device={device}) -> {run_dir}"
@@ -346,7 +413,8 @@ def _run_manual_export(
         seed=seed,
         num_envs=args.num_envs,
         experiment_config=config,
-        policy_contract=policy_contract,
+        controller_settings=policy_metadata.controller_settings,
+        policy_contract=policy_metadata.contract,
     )
     try:
         runner = training.build_runner(
@@ -390,6 +458,11 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
             device=device,
         )
         return
+    alignment_artifact, alignment_digest = _load_training_alignment(
+        args=args,
+        config=config,
+        repo_root=repo_root,
+    )
     _run_new_training(
         args=args,
         config=config,
@@ -399,6 +472,8 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         training_root=training_root,
         repo_root=repo_root,
         device=device,
+        alignment_artifact=alignment_artifact,
+        alignment_digest=alignment_digest,
     )
 
 
@@ -422,6 +497,12 @@ def main() -> None:
         type=Path,
         default=None,
         help="export an existing run checkpoint without additional training",
+    )
+    parser.add_argument(
+        "--alignment-artifact",
+        type=Path,
+        default=None,
+        help="override rl.training.alignment_artifact for training",
     )
     checkpoint_group.add_argument(
         "--initialize-checkpoint",

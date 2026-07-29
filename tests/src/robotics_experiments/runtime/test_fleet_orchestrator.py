@@ -334,6 +334,40 @@ def test_policy_preflight_fails_before_stage_mutation(monkeypatch):
     assert rec.despawned == []
 
 
+def test_injected_policy_factory_skips_production_preflight(monkeypatch):
+    module, rec = _import_orchestrator(monkeypatch)
+    orchestrator = importlib.import_module("robotics_experiments.runtime.orchestrator")
+    monkeypatch.setattr(
+        orchestrator,
+        "_preflight_policy_artifacts",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("production policy preflight must not run")
+        ),
+    )
+    vehicle = _vehicle(
+        0,
+        "Drone",
+        (0.0, 0.0),
+        enabled=True,
+        steps=[{"kind": "policy", "artifact": "alignment-probe"}],
+    )
+    fleet = replace(module.create_fleet(config=_env(vehicle)), stage=object())
+    factory = object()
+
+    fleet = module.spawn_fleet(
+        state=fleet,
+        preflight_policy_artifacts=False,
+    )
+    fleet = module.build_drivers(
+        state=fleet,
+        make_env=lambda spawned, port: object(),
+        policy_factory=factory,
+    )
+
+    assert rec.spawned == [("Drone", (0.0, 0.0))]
+    assert fleet.flying[0].context.params.policy_factory is factory
+
+
 def test_spawn_fleet_rolls_back_drones_after_observer_failure(monkeypatch):
     module, rec = _import_orchestrator(monkeypatch)
     env = _env(

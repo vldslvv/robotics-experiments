@@ -12,6 +12,7 @@ from isaaclab_contrib.actuators import Thruster, ThrusterCfg
 from isaaclab_contrib.utils.types import MultiRotorActions
 
 from robotics_experiments._cadence import _CadenceState, _next_interval_steps
+from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     action_to_rotor_omega,
@@ -45,11 +46,13 @@ class _FlightDirectRLEnv(DirectRLEnv):
         *,
         cfg,
         experiment_config: ExperimentConfig,
+        controller_settings: ControllerSettings,
         policy_contract=None,
         render_mode: str | None = None,
         **kwargs,
     ):
         self._experiment_config = experiment_config
+        self._controller_settings = controller_settings
         self._policy_contract = policy_contract
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
         self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
@@ -58,8 +61,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._applied_actions = self.actions.clone()
         self._command_delay_steps = round(
-            experiment_config.rl.action.controller_command_delay_s
-            * experiment_config.sim.physics_hz
+            controller_settings.command_delay_s * experiment_config.sim.physics_hz
         )
         self._command_delay_index = 0
         self._command_delay_buffer = torch.zeros(
@@ -120,6 +122,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
             min_rotor_velocity=bridge.min_rotor_velocity,
             max_rotor_velocity=bridge.max_rotor_velocity,
             action_cfg=action_cfg,
+            controller_settings=self._controller_settings,
             policy_contract=self._policy_contract,
             mass=total_mass,
             device=self.device,
@@ -144,15 +147,15 @@ class _FlightDirectRLEnv(DirectRLEnv):
             cfg=ThrusterCfg(
                 dt=1.0 / self._experiment_config.sim.physics_hz,
                 thrust_range=(0.0, thrust_max),
-                max_thrust_rate=action_cfg.actuator_max_thrust_rate_nps,
+                max_thrust_rate=self._controller_settings.thruster_max_thrust_rate_nps,
                 thrust_const_range=(thrust_constant_min, thrust_constant_max),
                 tau_inc_range=(
-                    action_cfg.actuator_tau_inc_s,
-                    action_cfg.actuator_tau_inc_s,
+                    self._controller_settings.thruster_tau_inc_s,
+                    self._controller_settings.thruster_tau_inc_s,
                 ),
                 tau_dec_range=(
-                    action_cfg.actuator_tau_dec_s,
-                    action_cfg.actuator_tau_dec_s,
+                    self._controller_settings.thruster_tau_dec_s,
+                    self._controller_settings.thruster_tau_dec_s,
                 ),
                 torque_to_thrust_ratio=0.0,
                 use_discrete_approximation=True,

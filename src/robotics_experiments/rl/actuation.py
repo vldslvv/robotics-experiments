@@ -31,6 +31,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.config import RlActionConfig
 from robotics_experiments.px4_bridge import GRAVITY_M_S2, rotate_vector_wxyz
 
 __all__ = [
@@ -295,11 +297,13 @@ def rotor_forces_to_body_wrench(
 
 
 def build_actuation_params(
+    *,
     geometry: MixerGeometry,
-    action_cfg,
+    action_cfg: RlActionConfig,
+    controller_settings: ControllerSettings,
     mass: float,
 ) -> ActuationParams:
-    """Build the frozen actuation params for ``action_cfg.kind``.
+    """Build frozen actuation params from action and aligned controller contracts.
 
     Precomputes the allocation pseudoinverse and the max total thrust once, so
     the per-call functions consume only frozen state (mirroring the torch
@@ -330,15 +334,15 @@ def build_actuation_params(
         geometry=frozen_geometry,
         allocation_pinv=allocation_pinv,
         max_total_thrust=_max_total_thrust(frozen_geometry),
-        kp_rate=_readonly_copy(action_cfg.controller_kp_rate),
+        kp_rate=_readonly_copy(controller_settings.kp_rate),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
         hover_thrust_fraction=float(action_cfg.hover_thrust_fraction),
-        kp_vel=_readonly_copy(action_cfg.controller_kp_vel),
-        kd_vel=_readonly_copy(action_cfg.controller_kd_vel),
-        kp_att=_readonly_copy(action_cfg.controller_kp_att),
+        kp_vel=_readonly_copy(controller_settings.kp_vel),
+        kd_vel=_readonly_copy(controller_settings.kd_vel),
+        kp_att=_readonly_copy(controller_settings.kp_att),
         max_body_velocity_mps=float(action_cfg.max_body_velocity_mps),
         max_yaw_rate_radps=float(action_cfg.max_yaw_rate_radps),
-        max_tilt_rad=float(np.radians(float(action_cfg.max_tilt_cmd_deg))),
+        max_tilt_rad=float(np.radians(controller_settings.max_tilt_cmd_deg)),
     )
 
 

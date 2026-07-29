@@ -8,6 +8,7 @@ from importlib.util import find_spec
 
 import gymnasium as gym
 
+from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.rl import PolicyContract, PolicyInterface
 
@@ -95,6 +96,7 @@ def make_isaac_lab_env(
     *,
     task_id: str,
     experiment_config: ExperimentConfig,
+    controller_settings: ControllerSettings,
     seed: int | None = None,
     num_envs: int | None = None,
     policy_contract: PolicyContract | None = None,
@@ -130,5 +132,6 @@ def make_isaac_lab_env(
         cfg=env_cfg,
         experiment_config=experiment_config,
         policy_contract=policy_contract,
+        controller_settings=controller_settings,
     ).unwrapped
     return env, env_cfg

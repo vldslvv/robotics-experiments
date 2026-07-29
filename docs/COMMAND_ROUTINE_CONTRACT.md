@@ -145,6 +145,15 @@ the entire fleet cycle.
   a task-specific routine kind. The fleet orchestrator only preflights
   configured artifacts, prepares interface-required resources, and injects the
   module's adapter factory.
+  Controller alignment reuses this lifecycle through the narrow optional
+  `build_drivers(..., policy_factory=...)` seam in its standalone PX4 shell.
+  That shell injects a deterministic immutable velocity-probe adapter for an
+  ordinary `{kind: policy}` descriptor and calls
+  `spawn_fleet(..., preflight_policy_artifacts=False)` because the probe is not
+  a production policy artifact. Production callers retain the default
+  preflight and omit the factory argument, continuing to use the private
+  runtime policy factory. Alignment adds no routine kind, artifact interface,
+  or task branch to commanding.
   Because the artifact path is per step, a single routine can sequence multiple
   policy steps backed by different named artifacts, such as
   `.build/training/hover/latest` followed by

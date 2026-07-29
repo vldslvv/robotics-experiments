@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.alignment import ControllerSettings
 from tests.support.paths import REPO_ROOT
 
 
@@ -28,6 +29,20 @@ def _contract():
         max_body_rate_radps=6.0,
         hover_thrust_fraction=0.4,
         curriculum_stage="approach",
+    )
+
+
+def _controller_settings() -> ControllerSettings:
+    return ControllerSettings(
+        command_delay_s=0.2,
+        kp_vel=(2.0, 2.0, 3.0),
+        kd_vel=(1.5, 1.5, 1.5),
+        kp_att=(6.0, 6.0, 2.0),
+        kp_rate=(1.2, 1.2, 0.4),
+        max_tilt_cmd_deg=30.0,
+        thruster_tau_inc_s=0.0,
+        thruster_tau_dec_s=0.0,
+        thruster_max_thrust_rate_nps=100000.0,
     )
 
 
@@ -221,7 +236,10 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
-        lambda **_kwargs: SimpleNamespace(contract=_contract()),
+        lambda **_kwargs: SimpleNamespace(
+            contract=_contract(),
+            controller_settings=_controller_settings(),
+        ),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
 
@@ -256,7 +274,10 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
-        lambda **_kwargs: SimpleNamespace(contract=_contract()),
+        lambda **_kwargs: SimpleNamespace(
+            contract=_contract(),
+            controller_settings=_controller_settings(),
+        ),
     )
     monkeypatch.setattr(
         evaluator.torch.jit,

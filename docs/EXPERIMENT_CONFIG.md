@@ -106,9 +106,19 @@ non-finite reward weights, invalid rates, and unknown stages fail during
 `load_config`.
 
 `rl.training` owns PPO optimization, rollout, checkpoint cadence, task
-selection, artifact namespace, and seed settings. New runs capture the task
-contract before PPO, checkpoint selection publishes the chosen actor artifact,
-manual export reloads an existing run contract without optimizer state, and
-only the actor is exported.
+selection, artifact namespace, seed settings, and
+`alignment_artifact`. The latter defaults to
+`.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
+constructed. `ALIGNMENT_ARTIFACT` or the training CLI override selects an exact
+run for reproduction.
+
+`rl.action` is task-neutral and contains only normalized action kind,
+dimension, and scales. Controller gains, command delay, maximum tilt, and
+thruster response are not Hydra RL tunables; they are complete
+`ControllerSettings` loaded from alignment and embedded in policy metadata.
+New runs capture both the task contract and alignment provenance before PPO,
+checkpoint selection publishes the chosen actor artifact, manual export
+reloads the stored contract without optimizer state, and only the actor is
+exported.
 `configs/train_press_approach_quad.yaml` selects the press task, the
 `press-approach` artifact namespace, ten-second episodes, and its PPO settings.

@@ -133,6 +133,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     env, returned_cfg = registration.make_isaac_lab_env(
         task_id=registration.SWITCH_PRESS_TASK_ID,
         experiment_config="training-yaml",
+        controller_settings="aligned-controller",
         seed=123,
         num_envs=8,
         policy_contract=contract,
@@ -142,6 +143,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert returned_cfg is env_cfg
     assert calls["factory"]["policy_contract"] is contract
     assert calls["gym"][1]["policy_contract"] is contract
+    assert calls["gym"][1]["controller_settings"] == "aligned-controller"
     assert env_cfg.scene.num_envs == 8
 
 
