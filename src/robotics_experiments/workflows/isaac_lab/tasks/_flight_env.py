@@ -15,9 +15,7 @@ from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-    _latch_velocity_action_world,
     _replace_controller_settings_batch,
-    _world_velocity_action_to_body,
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
@@ -62,11 +60,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
         self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
         self._policy_cadence = _CadenceState(previous_time_ns=0)
-        self._setpoint_stream_cadence = _CadenceState(previous_time_ns=0)
-        self._setpoint_stream_steps_remaining = 0
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
-        self._controller_actions = self.actions.clone()
         self._applied_actions = self.actions.clone()
         self._command_delay_steps: torch.Tensor
         self._command_delay_index: int
@@ -198,42 +193,18 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-1.0, 1.0)
 
     def _apply_action(self) -> None:
-        if self._setpoint_stream_steps_remaining == 0:
-            if self.actuation_params.kind == "velocity":
-                self._controller_actions = _latch_velocity_action_world(
-                    self.actions,
-                    self.drone.data.root_quat_w,
-                )
-            else:
-                self._controller_actions = self.actions.clone()
-            (
-                self._setpoint_stream_cadence,
-                self._setpoint_stream_steps_remaining,
-            ) = _next_interval_steps(
-                state=self._setpoint_stream_cadence,
-                source_period_ns=self._physics_period_ns,
-                rate_hz=self._experiment_config.driver.offboard_setpoint_rate_hz,
-            )
-        self._command_delay_buffer[self._command_delay_index].copy_(self._controller_actions)
+        self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
         delayed_indices = (
             self._command_delay_index - self._command_delay_steps
         ) % self._command_delay_buffer.shape[0]
         environment_indices = torch.arange(self.num_envs, device=self.device)
-        delayed_actions = self._command_delay_buffer[
+        self._applied_actions = self._command_delay_buffer[
             delayed_indices,
             environment_indices,
         ].clone()
-        if self.actuation_params.kind == "velocity":
-            self._applied_actions = _world_velocity_action_to_body(
-                delayed_actions,
-                self.drone.data.root_quat_w,
-            )
-        else:
-            self._applied_actions = delayed_actions
         self._command_delay_index = (
             self._command_delay_index + 1
         ) % self._command_delay_buffer.shape[0]
-        self._setpoint_stream_steps_remaining -= 1
         self.drone.set_joint_position_target(
             self._pusher_extension_target,
             joint_ids=[self._pusher_joint_id],
@@ -313,10 +284,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
                 device=self.device,
             )
         )
-        self._setpoint_stream_cadence = _CadenceState(previous_time_ns=0)
-        self._setpoint_stream_steps_remaining = 0
         self._applied_actions.zero_()
-        self._controller_actions.zero_()
         self._controller_state = initial_flight_controller_state(
             num_envs=self.num_envs,
             device=self.device,
@@ -360,7 +328,6 @@ class _FlightDirectRLEnv(DirectRLEnv):
         joint_velocity = self.drone.data.default_joint_vel[env_ids].clone()
         self.drone.write_joint_state_to_sim(joint_position, joint_velocity, env_ids=env_ids)
         self.actions[env_ids] = 0.0
-        self._controller_actions[env_ids] = 0.0
         self._applied_actions[env_ids] = 0.0
         self._command_delay_buffer[:, env_ids] = 0.0
         self._controller_state = reset_flight_controller_state(

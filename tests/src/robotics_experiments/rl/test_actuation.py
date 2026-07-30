@@ -557,44 +557,6 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
     assert body_ids == [2]
 
 
-def test_lab_velocity_action_latches_world_setpoint_at_command_boundary():
-    torch = pytest.importorskip("torch")
-    from robotics_experiments._cadence import _CadenceState, _next_interval_steps
-    from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-        _latch_velocity_action_world,
-        _world_velocity_action_to_body,
-    )
-
-    action = torch.tensor([[0.4, -0.2, 0.1, 0.3]])
-    cadence = _CadenceState(previous_time_ns=0)
-    steps_remaining = 0
-    latched_world_actions = []
-    world_action = torch.zeros_like(action)
-    for index in range(11):
-        yaw = math.radians(30.0 + 5.0 * index)
-        attitude = torch.tensor([[math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]])
-        if steps_remaining == 0:
-            world_action = _latch_velocity_action_world(action, attitude)
-            cadence, steps_remaining = _next_interval_steps(
-                state=cadence,
-                source_period_ns=4_000_000,
-                rate_hz=50.0,
-            )
-        current_body_action = _world_velocity_action_to_body(world_action, attitude)
-        recovered_world_action = _latch_velocity_action_world(
-            current_body_action,
-            attitude,
-        )
-        assert torch.allclose(recovered_world_action, world_action, atol=1e-6)
-        latched_world_actions.append(world_action.clone())
-        steps_remaining -= 1
-
-    assert torch.equal(latched_world_actions[0], latched_world_actions[4])
-    assert torch.equal(latched_world_actions[5], latched_world_actions[9])
-    assert not torch.equal(latched_world_actions[4], latched_world_actions[5])
-    assert torch.equal(world_action[:, 2:], action[:, 2:])
-
-
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (

@@ -147,14 +147,10 @@ offset and makes the reduced Lab wrench equivalent to the bridge's individual
 rotor forces at their body-frame positions without using PhysX's substantially
 slower positioned-force path.
 
-The velocity policy interface remains body-FLU. At each configured OFFBOARD
-setpoint-stream update, Lab rotates the retained body velocity into a world-ENU
-setpoint using the current heading and latches it through the intervening
-physics ticks. The stream uses the same exact-average cadence scheduler as the
-runtime driver. This reproduces PX4 v1.17's `MAV_FRAME_BODY_NED` receive
-boundary: each MAVLink message is converted once to a local-frame trajectory
-setpoint rather than being reinterpreted against changing yaw at controller
-rate.
+The velocity policy interface remains body-FLU. On each controller tick, Lab
+interprets the retained body velocity against the current heading inside the
+pure NumPy/Torch controller seam. Command delay remains a physics-rate action
+buffer upstream of that interpretation.
 
 Old manual missions and trained warehouse-policy traces are diagnostic design
 inputs only. They must never be included in fit or validation samples.
