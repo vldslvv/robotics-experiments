@@ -119,6 +119,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "policy_metadata",
             "initial_actuation_controller_state",
             "rotor_forces_to_body_wrench",
+            "seed_actuation_controller_state",
             "validate_policy_artifact",
         ]
         press = importlib.import_module("robotics_experiments.rl.press")

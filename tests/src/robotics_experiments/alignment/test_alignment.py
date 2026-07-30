@@ -24,6 +24,7 @@ from robotics_experiments.alignment._align import (
 )
 from robotics_experiments.alignment._io import (
     _index_candidate_diagnostics,
+    _trace,
     _TraceFileEvaluator,
     publish_alignment,
     write_alignment_artifact,
@@ -280,6 +281,35 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     )
     assert extended.parameters[-1].stage == 2
     assert extended.parameters[-1].candidates == (20.0, 30.0)
+
+
+def test_legacy_trace_loads_with_zero_controller_boundary() -> None:
+    raw = json.loads(
+        json.dumps(
+            asdict(
+                _response_traces(
+                    profiles=_profiles(),
+                    settings=_settings(),
+                )[0]
+            )
+        )
+    )
+    for field in (
+        "initial_controller_state_valid",
+        "initial_acceleration_setpoint_enu_mps2",
+        "initial_linear_acceleration_enu_mps2",
+        "initial_angular_acceleration_body_flu_radps2",
+        "initial_rate_integral_body_flu",
+    ):
+        raw.pop(field)
+
+    trace = _trace(value=raw, name="legacy")  # noqa: SLF001 - legacy trace contract
+
+    assert not trace.initial_controller_state_valid
+    assert trace.initial_acceleration_setpoint_enu_mps2 == _ZERO3
+    assert trace.initial_linear_acceleration_enu_mps2 == _ZERO3
+    assert trace.initial_angular_acceleration_body_flu_radps2 == _ZERO3
+    assert trace.initial_rate_integral_body_flu == _ZERO3
 
 
 def test_align_recovers_known_delay_and_per_axis_gain_on_validation(

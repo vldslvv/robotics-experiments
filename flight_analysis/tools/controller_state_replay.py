@@ -30,7 +30,7 @@ from robotics_experiments.rl import (
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
-    initial_actuation_controller_state,
+    seed_actuation_controller_state,
 )
 
 __all__ = ["main"]
@@ -271,6 +271,122 @@ def _profile_topic(
     }
 
 
+def _controller_boundary(
+    *,
+    local_setpoint: dict,
+    local_position: dict,
+    angular_velocity: dict,
+    rate_status: dict,
+    timestamp_us: int,
+) -> tuple[dict[str, np.ndarray], dict[str, int]]:
+    def held_index(*, topic: dict) -> tuple[int, int]:
+        time_us = _topic_time_us(topic=topic)
+        index = int(_hold_indices(source_t=time_us, query_t=np.array([timestamp_us]))[0])
+        return index, timestamp_us - int(time_us[index])
+
+    def interpolated_vector(*, topic: dict, fields: tuple[str, str, str]) -> np.ndarray:
+        return _linear_interpolate(
+            source_t=_topic_time_us(topic=topic).astype(np.float64),
+            values=np.column_stack(
+                [np.asarray(topic[field], dtype=np.float64) for field in fields]
+            ),
+            query_t=np.array([timestamp_us], dtype=np.float64),
+        )[0]
+
+    setpoint_index, setpoint_age_us = held_index(topic=local_setpoint)
+    rate_index, rate_age_us = held_index(topic=rate_status)
+    acceleration_setpoint_ned = np.array(
+        [local_setpoint[f"acceleration[{axis}]"][setpoint_index] for axis in range(3)],
+        dtype=np.float64,
+    )
+    linear_acceleration_ned = interpolated_vector(
+        topic=local_position,
+        fields=("ax", "ay", "az"),
+    )
+    angular_acceleration_frd = interpolated_vector(
+        topic=angular_velocity,
+        fields=(
+            "xyz_derivative[0]",
+            "xyz_derivative[1]",
+            "xyz_derivative[2]",
+        ),
+    )
+    rate_integral_frd = np.array(
+        [
+            rate_status["rollspeed_integ"][rate_index],
+            rate_status["pitchspeed_integ"][rate_index],
+            rate_status["yawspeed_integ"][rate_index],
+        ],
+        dtype=np.float64,
+    )
+    vectors = {
+        "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
+        "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
+        "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
+        "initial_rate_integral_body_flu": _FLU_TO_FRD @ rate_integral_frd,
+    }
+    if not all(np.all(np.isfinite(values)) for values in vectors.values()):
+        raise ValueError("initial controller boundary contains non-finite values")
+    return (
+        vectors,
+        {
+            "vehicle_local_position_setpoint": setpoint_age_us,
+            "rate_ctrl_status": rate_age_us,
+        },
+    )
+
+
+def _augment_reference_controller_state(
+    *,
+    ulog,
+    reference_path: Path,
+) -> dict:
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") != 3:
+        raise ValueError(f"{reference_path} must use alignment trace schema 3")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
+    local_position = _dataset(ulog=ulog, name="vehicle_local_position")
+    angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+
+    profile_reports = []
+    for raw_profile in raw_profiles:
+        start_us = int(raw_profile["start_sim_time_us"])
+        controller_vectors, source_age_us = _controller_boundary(
+            local_setpoint=local_setpoint,
+            local_position=local_position,
+            angular_velocity=angular_velocity,
+            rate_status=rate_status,
+            timestamp_us=start_us,
+        )
+        raw_profile.update(
+            {
+                "initial_controller_state_valid": True,
+                **{name: values.tolist() for name, values in controller_vectors.items()},
+                "initial_controller_state_source_age_us": source_age_us,
+            }
+        )
+        profile_reports.append(
+            {
+                "profile": raw_profile["profile"],
+                "start_sim_time_us": start_us,
+                "source_age_us": raw_profile["initial_controller_state_source_age_us"],
+            }
+        )
+    reference["schema_version"] = 4
+    reference_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
+    return {
+        "schema_version": 1,
+        "method": "px4-ulog-controller-boundary-v1",
+        "reference": str(reference_path),
+        "profiles": profile_reports,
+    }
+
+
 def _actuator_boundary_report(
     *,
     ulog,
@@ -295,8 +411,8 @@ def _actuator_boundary_report(
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") != 3:
-        raise ValueError(f"{reference_path} must use alignment trace schema 3")
+    if reference.get("schema_version") not in (3, 4):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3 or 4")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -513,6 +629,8 @@ def _report(
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
+    rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     start_timestamp = float(ulog.start_timestamp)
 
@@ -569,7 +687,24 @@ def _report(
     isaac_wrench_rows: list[np.ndarray] = []
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
-    controller_state = initial_actuation_controller_state()
+    controller_vectors, controller_source_age_us = _controller_boundary(
+        local_setpoint=local_setpoint,
+        local_position=local_position,
+        angular_velocity=angular_velocity,
+        rate_status=rate_status,
+        timestamp_us=round(start_timestamp + start_s * 1e6),
+    )
+    controller_state = seed_actuation_controller_state(
+        params=params,
+        linear_velocity_enu=_NED_TO_ENU @ local_velocity_ned[0],
+        angular_velocity_body_flu=_FLU_TO_FRD @ angular_velocity_frd[0],
+        acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
+        linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
+        angular_acceleration_body_flu_radps2=controller_vectors[
+            "initial_angular_acceleration_body_flu_radps2"
+        ],
+        rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
+    )
     isaac_omega_grid = []
 
     for velocity_setpoint_ned, yaw_setpoint_rate, velocity_state_ned, quaternion, rates_frd in zip(
@@ -678,6 +813,7 @@ def _report(
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
+        "controller_state_source_age_us": controller_source_age_us,
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
@@ -703,6 +839,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--alignment-artifact", type=Path)
     parser.add_argument("--window", help="relative ULog seconds START,END")
+    parser.add_argument("--augment-reference", type=Path)
     parser.add_argument("--audit-reference", type=Path)
     parser.add_argument("--bridge-log", type=Path)
     parser.add_argument("--json", type=Path)
@@ -713,7 +850,14 @@ def main() -> None:
     ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
     if ulog_path is None:
         parser.error("one ULog path is required")
-    if args.audit_reference is not None or args.bridge_log is not None:
+    if args.augment_reference is not None:
+        if args.audit_reference is not None or args.bridge_log is not None:
+            parser.error("--augment-reference cannot be combined with audit options")
+        report = _augment_reference_controller_state(
+            ulog=ULog(str(ulog_path)),
+            reference_path=args.augment_reference,
+        )
+    elif args.audit_reference is not None or args.bridge_log is not None:
         if args.audit_reference is None or args.bridge_log is None:
             parser.error("--audit-reference and --bridge-log must be provided together")
         report = _actuator_boundary_report(

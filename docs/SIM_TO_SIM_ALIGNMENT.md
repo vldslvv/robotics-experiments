@@ -58,7 +58,10 @@ rate integral, and initialization state. NumPy is the single-environment
 reference and Torch is the batched Isaac Lab twin. Both advance once per
 physics sample and must remain sequentially equivalent. Controller state,
 command-delay buffers, and thruster state are cleared on every environment
-reset, probe reset, and candidate change.
+reset and candidate change. Alignment trace schema 4 then restores the PX4
+velocity acceleration/setpoint boundary and body-rate derivative/integral
+boundary after each probe's kinematic reset. Older trace schemas preserve the
+zero-controller-state replay under which they were captured.
 
 The attitude stage uses PX4's reduced-quaternion law: roll and pitch align the
 thrust vector first, yaw error is weighted and recombined, and world-Z yaw-rate
@@ -111,7 +114,12 @@ simulation start time, exact command timestamps,
 body-FLU velocity commands, yaw-rate commands, position, attitude, body/world
 velocity, angular velocity, completion, and flight-envelope failure. Isaac Lab
 restores the captured initial state and replays the exact command intervals at
-the configured physics cadence. The alignment-only routine ends when the probe
+the configured physics cadence. Schema-4 reference traces also record
+`vehicle_local_position_setpoint` acceleration, estimated linear and angular
+acceleration, and `rate_ctrl_status` integrals at each absolute profile start.
+The target derives each candidate's initial velocity integral so its first
+neutral desired-acceleration boundary equals PX4, then restores the logged
+rate boundary in body-FLU. The alignment-only routine ends when the probe
 adapter completes and teardown stops the ephemeral simulator; landing and
 auto-disarm are outside the policy-execution controller target and cannot
 invalidate an otherwise complete capture. The target runner assigns one Lab

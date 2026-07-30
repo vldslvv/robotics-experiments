@@ -47,6 +47,7 @@ __all__ = [
     "hover_action",
     "initial_actuation_controller_state",
     "rotor_forces_to_body_wrench",
+    "seed_actuation_controller_state",
 ]
 
 _EPS = 1e-9
@@ -851,6 +852,64 @@ def initial_actuation_controller_state() -> ActuationControllerState:
         angular_acceleration_body_flu=_readonly_copy(zero),
         rate_integral_body_flu=_readonly_copy(zero),
         initialized=False,
+    )
+
+
+def seed_actuation_controller_state(
+    *,
+    params: ActuationParams,
+    linear_velocity_enu: np.ndarray,
+    angular_velocity_body_flu: np.ndarray,
+    acceleration_setpoint_enu_mps2: np.ndarray,
+    linear_acceleration_enu_mps2: np.ndarray,
+    angular_acceleration_body_flu_radps2: np.ndarray,
+    rate_integral_body_flu: np.ndarray,
+) -> ActuationControllerState:
+    """Match a neutral-command PX4 controller boundary for one replay."""
+    if params.kind != "velocity":
+        raise ValueError("controller-state seeding requires velocity actuation")
+
+    def vector(values: np.ndarray, name: str) -> np.ndarray:
+        result = np.asarray(values, dtype=np.float64)
+        if result.shape != (3,) or not np.all(np.isfinite(result)):
+            raise ValueError(f"{name} must contain three finite values")
+        return result
+
+    velocity = vector(linear_velocity_enu, "linear_velocity_enu")
+    angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
+    acceleration_setpoint = vector(
+        acceleration_setpoint_enu_mps2,
+        "acceleration_setpoint_enu_mps2",
+    )
+    acceleration = vector(
+        linear_acceleration_enu_mps2,
+        "linear_acceleration_enu_mps2",
+    )
+    angular_acceleration = vector(
+        angular_acceleration_body_flu_radps2,
+        "angular_acceleration_body_flu_radps2",
+    )
+    rate_integral = vector(rate_integral_body_flu, "rate_integral_body_flu")
+    velocity_error = -velocity
+    velocity_integral = np.clip(
+        acceleration_setpoint - params.kp_vel * velocity_error + params.kd_vel * acceleration,
+        -params.velocity_integral_limit_mps2,
+        params.velocity_integral_limit_mps2,
+    )
+    return ActuationControllerState(
+        filtered_velocity_enu=_readonly_copy(velocity),
+        acceleration_enu=_readonly_copy(acceleration),
+        velocity_integral_enu=_readonly_copy(velocity_integral),
+        previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
+        angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
+        rate_integral_body_flu=_readonly_copy(
+            np.clip(
+                rate_integral,
+                -params.rate_integral_limit_nm,
+                params.rate_integral_limit_nm,
+            )
+        ),
+        initialized=True,
     )
 
 

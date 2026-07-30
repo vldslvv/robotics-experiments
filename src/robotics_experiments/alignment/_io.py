@@ -33,8 +33,8 @@ from robotics_experiments.alignment._models import (
 
 __all__: list[str] = []
 
-_TRACE_SCHEMA_VERSION = 3
-_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3})
+_TRACE_SCHEMA_VERSION = 4
+_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4})
 _ARTIFACT_SCHEMA_VERSION = 5
 _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
@@ -393,6 +393,12 @@ def _nonnegative_integer(*, value: Any, name: str) -> int:
     return value
 
 
+def _boolean(*, value: Any, name: str) -> bool:
+    if type(value) is not bool:
+        raise ValueError(f"{name} must be boolean")
+    return value
+
+
 def _search(*, value: Any) -> SearchSpec:
     search = _object(value=value, name="search")
     strategy = _string(value=search.get("strategy"), name="search.strategy")
@@ -501,6 +507,29 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             name=f"{name}.initial_angular_velocity_body_flu_radps",
         ),
         completed=completed,
+        initial_controller_state_valid=_boolean(
+            value=trace.get("initial_controller_state_valid", False),
+            name=f"{name}.initial_controller_state_valid",
+        ),
+        initial_acceleration_setpoint_enu_mps2=_vector(
+            value=trace.get("initial_acceleration_setpoint_enu_mps2", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_acceleration_setpoint_enu_mps2",
+        ),
+        initial_linear_acceleration_enu_mps2=_vector(
+            value=trace.get("initial_linear_acceleration_enu_mps2", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_linear_acceleration_enu_mps2",
+        ),
+        initial_angular_acceleration_body_flu_radps2=_vector(
+            value=trace.get(
+                "initial_angular_acceleration_body_flu_radps2",
+                (0.0, 0.0, 0.0),
+            ),
+            name=f"{name}.initial_angular_acceleration_body_flu_radps2",
+        ),
+        initial_rate_integral_body_flu=_vector(
+            value=trace.get("initial_rate_integral_body_flu", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_rate_integral_body_flu",
+        ),
         start_sim_time_us=_nonnegative_integer(
             value=trace.get("start_sim_time_us", 0),
             name=f"{name}.start_sim_time_us",

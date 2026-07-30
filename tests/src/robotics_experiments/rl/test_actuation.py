@@ -27,6 +27,7 @@ from robotics_experiments.rl import (
     hover_action,
     initial_actuation_controller_state,
     rotor_forces_to_body_wrench,
+    seed_actuation_controller_state,
 )
 from robotics_experiments.rl.actuation import _normalized_controls_to_omega
 
@@ -500,6 +501,35 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
     assert controller.filtered_velocity_enu[0] == pytest.approx(1.0)
 
 
+def test_seed_controller_state_matches_neutral_acceleration_boundary():
+    params = _params("velocity")
+    velocity = np.array([0.1, -0.2, 0.05])
+    acceleration = np.array([0.3, -0.4, 0.2])
+    acceleration_setpoint = np.array([0.7, -0.8, 0.9])
+    angular_velocity = np.array([0.01, -0.02, 0.03])
+    angular_acceleration = np.array([0.1, -0.2, 0.3])
+    rate_integral = np.array([0.04, -0.05, 0.06])
+
+    state = seed_actuation_controller_state(
+        params=params,
+        linear_velocity_enu=velocity,
+        angular_velocity_body_flu=angular_velocity,
+        acceleration_setpoint_enu_mps2=acceleration_setpoint,
+        linear_acceleration_enu_mps2=acceleration,
+        angular_acceleration_body_flu_radps2=angular_acceleration,
+        rate_integral_body_flu=rate_integral,
+    )
+    reconstructed = (
+        params.kp_vel * -velocity + state.velocity_integral_enu - params.kd_vel * acceleration
+    )
+
+    assert state.initialized
+    assert reconstructed == pytest.approx(acceleration_setpoint)
+    assert state.previous_angular_velocity_body_flu == pytest.approx(angular_velocity)
+    assert state.angular_acceleration_body_flu == pytest.approx(angular_acceleration)
+    assert state.rate_integral_body_flu == pytest.approx(rate_integral)
+
+
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
@@ -508,6 +538,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
         build_flight_actuation_params,
         initial_flight_controller_state,
+        seed_flight_controller_state,
     )
 
     geometry = replace(
@@ -546,8 +577,47 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         controller_dt_s=0.004,
         device="cpu",
     )
-    numpy_controller = initial_actuation_controller_state()
-    torch_controller = initial_flight_controller_state(num_envs=1, device="cpu")
+    seed_velocity = np.array([0.03, -0.02, 0.01])
+    seed_angular_velocity = np.array([0.01, -0.015, 0.02])
+    seed_acceleration_setpoint = np.array([0.04, -0.03, 0.02])
+    seed_acceleration = np.array([0.05, -0.04, 0.03])
+    seed_angular_acceleration = np.array([0.1, -0.2, 0.3])
+    seed_rate_integral = np.array([0.01, -0.02, 0.03])
+    numpy_controller = seed_actuation_controller_state(
+        params=numpy_params,
+        linear_velocity_enu=seed_velocity,
+        angular_velocity_body_flu=seed_angular_velocity,
+        acceleration_setpoint_enu_mps2=seed_acceleration_setpoint,
+        linear_acceleration_enu_mps2=seed_acceleration,
+        angular_acceleration_body_flu_radps2=seed_angular_acceleration,
+        rate_integral_body_flu=seed_rate_integral,
+    )
+    torch_controller = seed_flight_controller_state(
+        state=initial_flight_controller_state(num_envs=1, device="cpu"),
+        params=torch_params,
+        linear_velocity_world=torch.as_tensor(seed_velocity, dtype=torch.float32).reshape(1, 3),
+        angular_velocity_body=torch.as_tensor(
+            seed_angular_velocity,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        acceleration_setpoint_world=torch.as_tensor(
+            seed_acceleration_setpoint,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        linear_acceleration_world=torch.as_tensor(
+            seed_acceleration,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        angular_acceleration_body=torch.as_tensor(
+            seed_angular_acceleration,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        rate_integral_body=torch.as_tensor(
+            seed_rate_integral,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        valid=torch.tensor([True]),
+    )
     actions = (
         np.array([0.0, 0.0, 0.0, 0.0]),
         np.array([0.4, -0.2, 0.1, 0.3]),

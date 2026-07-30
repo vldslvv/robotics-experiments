@@ -32,6 +32,10 @@ alignment-capture-reference: generate-drone-usd
 	    STRICT='1' \
 	    $(PX4_INTEGRATION_COMMON_ENV) \
 	    bash "$(PX4_INTEGRATION_RUNNER)"
+	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
+	    --config configs/alignment_px4_x500_velocity.yaml \
+	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
+	    --augment-reference '$(ALIGNMENT_RUN_DIR)/reference.json'
 
 .PHONY: alignment-audit-actuators
 alignment-audit-actuators:

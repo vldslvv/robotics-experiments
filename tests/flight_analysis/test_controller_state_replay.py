@@ -1,11 +1,14 @@
 """Frame and sampling tests for the PX4/Isaac controller replay."""
 
+import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from flight_analysis.tools.controller_state_replay import (
+    _augment_reference_controller_state,
     _bridge_actuator_samples,
     _hold_indices,
     _interpolate_quaternions,
@@ -105,4 +108,88 @@ def test_profile_topic_uses_absolute_simulation_window():
     assert report == {
         "timestamp_us": [100_000, 104_000],
         "values": [[1.0], [2.0]],
+    }
+
+
+def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
+    reference = tmp_path / "reference.json"
+    reference.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "traces": [
+                    {
+                        "profile": "validation",
+                        "start_sim_time_us": 104_000,
+                    }
+                ],
+            }
+        )
+    )
+
+    def dataset(name, data):
+        return SimpleNamespace(name=name, data=data)
+
+    ulog = SimpleNamespace(
+        data_list=[
+            dataset(
+                "vehicle_local_position_setpoint",
+                {
+                    "timestamp": np.array([100_000]),
+                    "acceleration[0]": np.array([1.0]),
+                    "acceleration[1]": np.array([2.0]),
+                    "acceleration[2]": np.array([3.0]),
+                },
+            ),
+            dataset(
+                "vehicle_local_position",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "ax": np.array([2.0, 4.0]),
+                    "ay": np.array([4.0, 8.0]),
+                    "az": np.array([6.0, 12.0]),
+                },
+            ),
+            dataset(
+                "vehicle_angular_velocity",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "xyz_derivative[0]": np.array([1.0, 3.0]),
+                    "xyz_derivative[1]": np.array([2.0, 4.0]),
+                    "xyz_derivative[2]": np.array([3.0, 5.0]),
+                },
+            ),
+            dataset(
+                "rate_ctrl_status",
+                {
+                    "timestamp": np.array([100_000]),
+                    "rollspeed_integ": np.array([0.1]),
+                    "pitchspeed_integ": np.array([0.2]),
+                    "yawspeed_integ": np.array([0.3]),
+                },
+            ),
+        ]
+    )
+
+    report = _augment_reference_controller_state(  # noqa: SLF001 - focused diagnostic test
+        ulog=ulog,
+        reference_path=reference,
+    )
+    payload = json.loads(reference.read_text())
+    trace = payload["traces"][0]
+
+    assert report["method"] == "px4-ulog-controller-boundary-v1"
+    assert payload["schema_version"] == 4
+    assert trace["initial_controller_state_valid"]
+    assert trace["initial_acceleration_setpoint_enu_mps2"] == [2.0, 1.0, -3.0]
+    assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
+    assert trace["initial_angular_acceleration_body_flu_radps2"] == [
+        2.0,
+        -3.0,
+        -4.0,
+    ]
+    assert trace["initial_rate_integral_body_flu"] == [0.1, -0.2, -0.3]
+    assert trace["initial_controller_state_source_age_us"] == {
+        "vehicle_local_position_setpoint": 4000,
+        "rate_ctrl_status": 4000,
     }

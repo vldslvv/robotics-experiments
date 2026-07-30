@@ -228,6 +228,10 @@ def _make_env(
         def set_initial_states(self, *, traces: list[dict[str, Any]]) -> None:
             from isaaclab.utils import math as math_utils
 
+            from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+                seed_flight_controller_state,
+            )
+
             if len(traces) != self.num_envs:
                 raise ValueError(
                     f"alignment replay has {len(traces)} traces for {self.num_envs} environments"
@@ -261,6 +265,61 @@ def _make_env(
             self._reset_drone(
                 env_ids=torch.arange(self.num_envs, device=self.device),
                 root_state=root_state,
+            )
+            self._controller_state = seed_flight_controller_state(
+                state=self._controller_state,  # type: ignore[has-type]  # Isaac base owns state.
+                params=self.actuation_params,
+                linear_velocity_world=root_state[:, 7:10],
+                angular_velocity_body=angular_body,
+                acceleration_setpoint_world=torch.as_tensor(
+                    [
+                        trace.get(
+                            "initial_acceleration_setpoint_enu_mps2",
+                            (0.0, 0.0, 0.0),
+                        )
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                linear_acceleration_world=torch.as_tensor(
+                    [
+                        trace.get(
+                            "initial_linear_acceleration_enu_mps2",
+                            (0.0, 0.0, 0.0),
+                        )
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                angular_acceleration_body=torch.as_tensor(
+                    [
+                        trace.get(
+                            "initial_angular_acceleration_body_flu_radps2",
+                            (0.0, 0.0, 0.0),
+                        )
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                rate_integral_body=torch.as_tensor(
+                    [
+                        trace.get(
+                            "initial_rate_integral_body_flu",
+                            (0.0, 0.0, 0.0),
+                        )
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                valid=torch.as_tensor(
+                    [trace.get("initial_controller_state_valid", False) for trace in traces],
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
             )
 
         def body_velocities(self) -> list[tuple[float, float, float]]:
@@ -394,11 +453,11 @@ def _candidate_trace_batch(
     physics_hz = config.sim.physics_hz
     action_scale = config.rl.action.max_body_velocity_mps
     routine = config.vehicles[vehicle_label].routine
-    env.set_initial_states(traces=reference_traces * candidate_capacity)
     env.apply_controller_settings_batch(
         controller_settings=padded_settings,
         traces_per_candidate=traces_per_candidate,
     )
+    env.set_initial_states(traces=reference_traces * candidate_capacity)
     times = [[float(value) for value in source["time_s"]] for source in reference_traces]
     sample_indices = [1 for _source in reference_traces]
     trace_initial_positions = [

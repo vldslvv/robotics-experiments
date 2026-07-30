@@ -51,6 +51,7 @@ __all__ = [
     "reset_flight_controller_state",
     "rotor_omega_to_body_wrench",
     "rotor_thrust_to_body_wrench",
+    "seed_flight_controller_state",
 ]
 
 _GRAVITY_M_S2 = 9.81
@@ -993,6 +994,86 @@ def reset_flight_controller_state(
         tensor[env_ids] = 0
         values[name] = tensor
     return _FlightControllerState(**values)
+
+
+def seed_flight_controller_state(
+    *,
+    state: _FlightControllerState,
+    params: _FlightActuationParams,
+    linear_velocity_world: torch.Tensor,
+    angular_velocity_body: torch.Tensor,
+    acceleration_setpoint_world: torch.Tensor,
+    linear_acceleration_world: torch.Tensor,
+    angular_acceleration_body: torch.Tensor,
+    rate_integral_body: torch.Tensor,
+    valid: torch.Tensor,
+) -> _FlightControllerState:
+    """Restore per-environment neutral-command PX4 controller boundaries."""
+    if params.kind != "velocity":
+        raise ValueError("controller-state seeding requires velocity actuation")
+    expected = state.filtered_velocity_world.shape
+    vectors = {
+        "linear_velocity_world": linear_velocity_world,
+        "angular_velocity_body": angular_velocity_body,
+        "acceleration_setpoint_world": acceleration_setpoint_world,
+        "linear_acceleration_world": linear_acceleration_world,
+        "angular_acceleration_body": angular_acceleration_body,
+        "rate_integral_body": rate_integral_body,
+    }
+    for name, value in vectors.items():
+        if value.shape != expected:
+            raise ValueError(f"{name} has shape {tuple(value.shape)}, expected {expected}")
+    if valid.shape != state.initialized.shape:
+        raise ValueError(
+            f"valid has shape {tuple(valid.shape)}, expected {tuple(state.initialized.shape)}"
+        )
+    selected = valid.unsqueeze(-1)
+    velocity_error = -linear_velocity_world
+    velocity_integral = torch.clamp(
+        acceleration_setpoint_world
+        - params.kp_vel * velocity_error
+        + params.kd_vel * linear_acceleration_world,
+        -params.velocity_integral_limit_mps2,
+        params.velocity_integral_limit_mps2,
+    )
+    clipped_rate_integral = torch.clamp(
+        rate_integral_body,
+        -params.rate_integral_limit_nm,
+        params.rate_integral_limit_nm,
+    )
+    return _FlightControllerState(
+        filtered_velocity_world=torch.where(
+            selected,
+            linear_velocity_world,
+            state.filtered_velocity_world,
+        ),
+        acceleration_world=torch.where(
+            selected,
+            linear_acceleration_world,
+            state.acceleration_world,
+        ),
+        velocity_integral_world=torch.where(
+            selected,
+            velocity_integral,
+            state.velocity_integral_world,
+        ),
+        previous_angular_velocity_body=torch.where(
+            selected,
+            angular_velocity_body,
+            state.previous_angular_velocity_body,
+        ),
+        angular_acceleration_body=torch.where(
+            selected,
+            angular_acceleration_body,
+            state.angular_acceleration_body,
+        ),
+        rate_integral_body=torch.where(
+            selected,
+            clipped_rate_integral,
+            state.rate_integral_body,
+        ),
+        initialized=state.initialized | valid,
+    )
 
 
 def action_to_rotor_omega(
