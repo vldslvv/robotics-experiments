@@ -65,6 +65,7 @@ def _controller_settings() -> ControllerSettings:
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        rate_output_scale_nm=(1.0, 1.0, 1.0),
         rate_derivative_filter_hz=30.0,
         rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,

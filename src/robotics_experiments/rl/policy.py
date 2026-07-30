@@ -231,7 +231,8 @@ def _alignment_settings(
                 f"policy artifact {artifact_dir} metadata alignment.{name} "
                 "must be a non-empty string"
             )
-    if alignment.get("schema_version") != 2:
+    schema_version = alignment.get("schema_version")
+    if schema_version not in (2, 3):
         raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
     if type(alignment.get("advisory_quality_passed")) is not bool:
         raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
@@ -257,6 +258,11 @@ def _alignment_settings(
             for item in value
         )
         return parsed[0], parsed[1], parsed[2]
+
+    def rate_output_scale() -> tuple[float, float, float]:
+        if schema_version == 2 and "rate_output_scale_nm" not in settings:
+            return 1.0, 1.0, 1.0
+        return vector("rate_output_scale_nm")
 
     delay = settings.get("command_delay_s")
     if (
@@ -295,6 +301,7 @@ def _alignment_settings(
         ki_rate=vector("ki_rate"),
         kd_rate=vector("kd_rate"),
         kff_rate=vector("kff_rate"),
+        rate_output_scale_nm=rate_output_scale(),
         rate_derivative_filter_hz=_finite_positive(
             value=settings.get("rate_derivative_filter_hz"),
             name="alignment.settings.rate_derivative_filter_hz",

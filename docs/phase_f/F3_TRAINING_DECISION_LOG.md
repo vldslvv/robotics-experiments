@@ -2593,6 +2593,45 @@ Existing actors also remain incompatible with any eventually accepted new
 controller settings, so a fresh 300-iteration Stage 1 training run is required
 only after alignment passes.
 
+### 55. Authorize alignment v3 attempt 1: physical rate-output scaling
+
+Date: 2026-07-30.
+
+Candidate-wide analysis of the section 54 artifact found that no v2 candidate
+passed stop time, worst-axis velocity NRMSE, heading, or combined endpoint
+quality. The best observed values were 0.300 s, 55.09%, 3.038 degrees, and
+61.87 mm respectively. None passed three or more advisory gates. Nevertheless,
+the lexicographic v2 metric selected the globally smallest braking-distance
+error even though 375 candidates already passed that gate. The next search must
+therefore preserve candidates that lead each independent gate and rank overall
+feasibility before improving an already-passing first metric.
+
+The controller-state replay also confirmed a structural unit mismatch. PX4's
+rate PID produces normalized torque demand for its control allocator, while
+the Lab cascade applied the copied numeric gains directly as physical N-m.
+Regressing `vehicle_torque_setpoint` against the physical body wrench
+reconstructed from logged motor output over the usable ULog window estimated
+per-axis scales `[6.3051, 5.8242, 1.2801]` N-m per normalized unit, with fit
+RMSE `[0.02774, 0.01230, 0.00006]` N-m. Attempt 1 therefore starts a new
+`x500-velocity-px4-v3` comparison and schema 3, centers the scale candidates at
+`[6.5, 6.5, 1.3]`, and retains `[1, 1, 1]` as the exact v2 behavior.
+
+The v3 metric minimizes failed-gate count, largest normalized gate excess, and
+total normalized excess before applying the v2 tie-breakers.
+`staged-beam-v2` retains the per-gate champions in a deterministic 16-setting
+beam. Existing v2 artifacts remain loadable with an implicit unit scale and
+are not reinterpreted as v3.
+
+This campaign permits at most five completed alignment attempts. An attempt is
+material progress when it lowers the failed-gate count, or lowers the largest
+normalized gate excess by at least 20% without regressing an already-passed
+gate. A no-progress result triggers an evidence-backed expansion of up to four
+controller parameters or ranges, rather than repeated fitting of the same
+space. Two consecutive no-progress attempts after expansion stop the campaign
+early. Every attempt receives a separate commit before execution and a result
+commit afterward. Advisory acceptance requires every exact-action gate to pass;
+only then may the alignment integration and closed-loop divergence gates run.
+
 Proceed in this order:
 
 1. Diagnose the per-probe x-axis residual and stop-time traces before expanding

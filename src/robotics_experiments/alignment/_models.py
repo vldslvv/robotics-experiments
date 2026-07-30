@@ -31,6 +31,7 @@ class ControllerSettings:
     ki_rate: Vector3
     kd_rate: Vector3
     kff_rate: Vector3
+    rate_output_scale_nm: Vector3
     rate_derivative_filter_hz: float
     rate_integral_limit_nm: Vector3
     max_tilt_cmd_deg: float
@@ -217,6 +218,7 @@ class MetricResult:
     ranking_values: tuple[float, ...]
     fit_metrics: Mapping[str, float]
     validation_metrics: Mapping[str, float]
+    beam_values: tuple[float, ...] = ()
 
 
 MetricFunction = Callable[

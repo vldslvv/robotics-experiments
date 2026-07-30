@@ -13,8 +13,18 @@ __all__: list[str] = []
 
 _V1_METRIC = "worst-axis-validation-velocity-nrmse-v1"
 _V2_METRIC = "policy-execution-controller-quality-v2"
+_V3_METRIC = "policy-execution-controller-quality-v3"
 _STOP_SPEED_MPS = 0.01
 _METRICS: dict[str, MetricFunction] = {}
+_QUALITY_LIMITS = (
+    ("braking_distance_error_m", 0.005),
+    ("residual_speed_error_mps", 0.01),
+    ("stop_time_error_s", 0.10),
+    ("worst_axis_velocity_nrmse", 0.10),
+    ("yaw_rate_nrmse", 0.10),
+    ("heading_error_deg", 3.0),
+    ("combined_endpoint_error_m", 0.01),
+)
 
 
 def _trace_map(*, traces: tuple[ProbeTrace, ...]) -> Mapping[str, ProbeTrace]:
@@ -300,6 +310,29 @@ def _metric_result(
     )
 
 
+def _feasibility_metric_result(
+    reference_traces: tuple[ProbeTrace, ...],
+    target_traces: tuple[ProbeTrace, ...],
+    /,
+) -> MetricResult:
+    result = _metric_result(reference_traces, target_traces)
+    validation = result.validation_metrics
+    ratios = tuple(validation[name] / limit for name, limit in _QUALITY_LIMITS)
+    excesses = tuple(max(ratio - 1.0, 0.0) for ratio in ratios)
+    return MetricResult(
+        metrics=result.metrics,
+        ranking_values=(
+            float(sum(excess > 0.0 for excess in excesses)),
+            max(excesses),
+            sum(excesses),
+            *result.ranking_values,
+        ),
+        fit_metrics=result.fit_metrics,
+        validation_metrics=validation,
+        beam_values=ratios,
+    )
+
+
 def _worst_axis_velocity_nrmse(
     reference_traces: tuple[ProbeTrace, ...],
     target_traces: tuple[ProbeTrace, ...],
@@ -344,6 +377,7 @@ def _finite_metric_result(*, result: MetricResult) -> bool:
     values = (
         *result.metrics.values(),
         *result.ranking_values,
+        *result.beam_values,
         *result.fit_metrics.values(),
         *result.validation_metrics.values(),
     )
@@ -352,3 +386,4 @@ def _finite_metric_result(*, result: MetricResult) -> bool:
 
 register_metric(name=_V1_METRIC, metric=_worst_axis_velocity_nrmse)
 register_metric(name=_V2_METRIC, metric=_metric_result)
+register_metric(name=_V3_METRIC, metric=_feasibility_metric_result)

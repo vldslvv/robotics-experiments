@@ -168,6 +168,44 @@ def _staged_beam_search(
     def evaluate(settings: ControllerSettings, /) -> CandidateScore:
         return evaluate_many((settings,))[0]
 
+    def retain(
+        scores: list[CandidateScore],
+        /,
+    ) -> tuple[ControllerSettings, ...]:
+        ordered = sorted(scores, key=lambda score: (score.ranking_values, score.index))
+        if target.search.strategy == "staged-beam-v1":
+            return tuple(score.settings for score in ordered[: target.search.beam_width])
+        retained_scores: list[CandidateScore] = []
+        beam_width = target.search.beam_width
+        objective_count = max(
+            (len(results_by_index[score.index].beam_values) for score in ordered),
+            default=0,
+        )
+        for objective_index in range(objective_count):
+            candidates = [
+                score
+                for score in ordered
+                if len(results_by_index[score.index].beam_values) > objective_index
+            ]
+            champion = min(
+                candidates,
+                key=lambda score: (
+                    results_by_index[score.index].beam_values[objective_index],
+                    score.ranking_values,
+                    score.index,
+                ),
+            )
+            if champion not in retained_scores:
+                retained_scores.append(champion)
+            if len(retained_scores) == beam_width:
+                break
+        for score in ordered:
+            if score not in retained_scores:
+                retained_scores.append(score)
+            if len(retained_scores) == beam_width:
+                break
+        return tuple(score.settings for score in retained_scores)
+
     retained = (target.base_settings,)
     evaluate(target.base_settings)
     stages = tuple(sorted({parameter.stage for parameter in target.parameters}))
@@ -191,8 +229,7 @@ def _staged_beam_search(
                         f"every alignment candidate was unusable while fitting "
                         f"stage {stage} field {parameter.field!r}"
                     )
-                usable.sort(key=lambda score: (score.ranking_values, score.index))
-                retained = tuple(score.settings for score in usable[: target.search.beam_width])
+                retained = retain(usable)
     final_scores = evaluate_many(retained)
     final_usable = [score for score in final_scores if score.usable]
     if not final_usable:
@@ -229,7 +266,7 @@ def _validate_pair(
         if getattr(target, name) != getattr(reference, name):
             mismatches.append(name)
     if target.backend != "isaac-lab" or reference.backend != "px4-sitl":
-        raise ValueError("alignment v2 requires an isaac-lab target and px4-sitl reference")
+        raise ValueError("alignment requires an isaac-lab target and px4-sitl reference")
     if mismatches:
         raise ValueError(f"incompatible controller definitions: {', '.join(mismatches)}")
 
@@ -339,7 +376,10 @@ def align(
             "combined-path endpoint error exceeds 10 mm",
         ),
     )
-    if target.selection_metric != "policy-execution-controller-quality-v2":
+    if target.selection_metric not in (
+        "policy-execution-controller-quality-v2",
+        "policy-execution-controller-quality-v3",
+    ):
         quality_thresholds = (
             (
                 "worst_axis_velocity_nrmse",
@@ -371,7 +411,7 @@ def align(
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return AlignmentArtifact(
-        schema_version=2,
+        schema_version=3,
         alignment_id=target.alignment_id,
         run_id=run_id,
         target_controller_id=target.controller_id,

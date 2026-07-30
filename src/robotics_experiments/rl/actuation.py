@@ -125,6 +125,7 @@ class ActuationParams:
     ki_rate: np.ndarray
     kd_rate: np.ndarray
     kff_rate: np.ndarray
+    rate_output_scale_nm: np.ndarray
     rate_derivative_filter_hz: float
     rate_integral_limit_nm: np.ndarray
     max_body_rate_radps: float
@@ -283,7 +284,7 @@ def _rate_to_omega(
         -params.rate_integral_limit_nm,
         params.rate_integral_limit_nm,
     )
-    body_torque = (
+    body_torque = params.rate_output_scale_nm * (
         params.kp_rate * rate_error
         + rate_integral
         - params.kd_rate * angular_acceleration
@@ -509,6 +510,7 @@ def build_actuation_params(
         ki_rate=_readonly_copy(controller_settings.ki_rate),
         kd_rate=_readonly_copy(controller_settings.kd_rate),
         kff_rate=_readonly_copy(controller_settings.kff_rate),
+        rate_output_scale_nm=_readonly_copy(controller_settings.rate_output_scale_nm),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
         rate_integral_limit_nm=_readonly_copy(controller_settings.rate_integral_limit_nm),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),

@@ -198,6 +198,17 @@ def _root_mean_square(*, values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(values))))
 
 
+def _linear_scale_with_intercept(
+    *,
+    controller_output: np.ndarray,
+    physical_output: np.ndarray,
+) -> tuple[float, float, float]:
+    design = np.column_stack([controller_output, np.ones(len(controller_output))])
+    scale, intercept = np.linalg.lstsq(design, physical_output, rcond=None)[0]
+    residual = physical_output - (scale * controller_output + intercept)
+    return float(scale), float(intercept), _root_mean_square(values=residual)
+
+
 def _report(
     *,
     ulog,
@@ -232,6 +243,7 @@ def _report(
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     start_timestamp = float(ulog.start_timestamp)
 
     motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
@@ -369,9 +381,27 @@ def _report(
     omega_error = isaac_omega_array - px4_omega_array
     wrench_error = isaac_wrench_array - px4_wrench_array
     max_omega = np.asarray(bridge.max_rotor_velocity)
+    torque_index = _nearest_indices(
+        source_t=relative_time(torque_setpoint),
+        query_t=np.asarray(used_t),
+    )
+    torque_setpoint_flu = np.column_stack(
+        [
+            np.asarray(torque_setpoint[f"xyz[{index}]"], dtype=np.float64)[torque_index]
+            for index in range(3)
+        ]
+    )
+    torque_setpoint_flu *= np.array([1.0, -1.0, -1.0])
+    scale_fits = [
+        _linear_scale_with_intercept(
+            controller_output=torque_setpoint_flu[:, axis],
+            physical_output=px4_wrench_array[:, axis + 1],
+        )
+        for axis in range(3)
+    ]
     return {
-        "schema_version": 2,
-        "method": "px4-ulog-state-replay-v2-250hz",
+        "schema_version": 3,
+        "method": "px4-ulog-state-replay-v3-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
@@ -387,6 +417,9 @@ def _report(
             "body_torque_rmse_nm": [
                 _root_mean_square(values=wrench_error[:, index]) for index in range(1, 4)
             ],
+            "rate_output_scale_nm_estimate": [fit[0] for fit in scale_fits],
+            "rate_output_scale_intercept_nm": [fit[1] for fit in scale_fits],
+            "rate_output_scale_fit_rmse_nm": [fit[2] for fit in scale_fits],
             "px4_mean_collective_thrust_n": float(np.mean(px4_wrench_array[:, 0])),
             "isaac_mean_collective_thrust_n": float(np.mean(isaac_wrench_array[:, 0])),
         },

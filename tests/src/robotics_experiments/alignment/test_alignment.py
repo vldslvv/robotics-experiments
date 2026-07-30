@@ -18,13 +18,20 @@ from robotics_experiments.alignment import (
     load_alignment_artifact,
     load_controller_definition,
 )
-from robotics_experiments.alignment._align import _resolved_experiment_fingerprint
+from robotics_experiments.alignment._align import (
+    _resolved_experiment_fingerprint,
+    _staged_beam_search,
+)
 from robotics_experiments.alignment._io import (
     _TraceFileEvaluator,
     publish_alignment,
     write_alignment_artifact,
 )
-from robotics_experiments.alignment._metrics import metric, register_metric
+from robotics_experiments.alignment._metrics import (
+    _feasibility_metric_result,
+    metric,
+    register_metric,
+)
 from robotics_experiments.alignment._models import (
     CommandInterface,
     MetricResult,
@@ -60,6 +67,7 @@ def _settings(
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.01, 0.01, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        rate_output_scale_nm=(1.0, 1.0, 1.0),
         rate_derivative_filter_hz=30.0,
         rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
@@ -335,6 +343,60 @@ def test_staged_beam_search_is_deterministic() -> None:
     assert first.selected_settings == second.selected_settings
 
 
+def test_staged_beam_v2_retains_per_objective_champions() -> None:
+    name = "test-diverse-beam-v1"
+
+    def diverse_metric(reference, target, /):
+        del reference
+        peak = max(abs(value[0]) for trace in target for value in trace.velocity_body_flu_mps)
+        return MetricResult(
+            metrics={"velocity_rmse_mps": 0.0},
+            ranking_values=(abs(peak - 2.0),),
+            fit_metrics={"velocity_rmse_mps": 0.0},
+            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
+            beam_values=(abs(peak - 1.0), abs(peak - 3.0)),
+        )
+
+    register_metric(name=name, metric=diverse_metric)
+    parameters = (
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (2.0, 1.0, 1.0), (3.0, 1.0, 1.0)),
+        ),
+        ParameterSpec("max_tilt_cmd_deg", 2, (20.0, 40.0)),
+    )
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_Evaluator(),
+            parameters=parameters,
+            metric_name=name,
+        ),
+        search=SearchSpec(
+            strategy="staged-beam-v2",
+            beam_width=2,
+            passes_per_stage=1,
+        ),
+    )
+    reference_traces = _response_traces(
+        profiles=target.probes,
+        settings=_settings(kp=(1.0, 1.0, 1.0)),
+    )
+
+    outcome = _staged_beam_search(
+        target=target,
+        reference_traces=reference_traces,
+    )
+
+    stage_two_x_gains = {
+        score.settings.kp_vel[0]
+        for score in outcome.candidate_scores
+        if score.settings.max_tilt_cmd_deg != 30.0
+    }
+    assert {1.0, 3.0} <= stage_two_x_gains
+
+
 def test_staged_beam_search_batches_without_changing_deterministic_order() -> None:
     known = _settings(delay=0.05, kp=(2.0, 3.0, 4.0))
     parameters = (
@@ -480,6 +542,35 @@ def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:
 
     assert result.validation_metrics["braking_distance_error_m"] > 0.0
     assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+
+
+def test_v3_metric_prioritizes_gate_feasibility_and_includes_stop_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validation = {
+        "braking_distance_error_m": 0.004,
+        "residual_speed_error_mps": 0.009,
+        "stop_time_error_s": 0.20,
+        "worst_axis_velocity_nrmse": 0.09,
+        "yaw_rate_nrmse": 0.09,
+        "heading_error_deg": 2.0,
+        "combined_endpoint_error_m": 0.009,
+    }
+    base = MetricResult(
+        metrics={},
+        ranking_values=(0.004, 0.009, 0.09, 0.09, 2.0, 0.009, 0.0, 0.0),
+        fit_metrics={},
+        validation_metrics=validation,
+    )
+    monkeypatch.setattr(
+        "robotics_experiments.alignment._metrics._metric_result",
+        lambda _reference, _target: base,
+    )
+
+    result = _feasibility_metric_result((), ())
+
+    assert result.ranking_values[:3] == pytest.approx((1.0, 1.0, 1.0))
+    assert result.beam_values[2] == 2.0
 
 
 def test_registered_metric_can_change_selection_without_changing_aligner(
@@ -635,6 +726,31 @@ def test_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="unsupported schema_version=1"):
         load_alignment_artifact(path)
+
+
+def test_artifact_schema_v3_and_legacy_v2_rate_output_scale(tmp_path: Path) -> None:
+    known = _settings(kp=(1.0, 1.0, 1.0))
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=known),
+    )
+    target = _definition(backend="isaac-lab", evaluator=_Evaluator())
+    run_dir = tmp_path / "run"
+    artifact = align(target, reference)
+    assert artifact.schema_version == 3
+    write_alignment_artifact(artifact=artifact, run_dir=run_dir)
+    path = run_dir / "alignment.json"
+    payload = json.loads(path.read_text())
+    payload["schema_version"] = 2
+    payload["selected_settings"].pop("rate_output_scale_nm")
+    for candidate in payload["candidates"]:
+        candidate["settings"].pop("rate_output_scale_nm")
+    path.write_text(json.dumps(payload))
+
+    loaded = load_alignment_artifact(path)
+
+    assert loaded.schema_version == 2
+    assert loaded.selected_settings.rate_output_scale_nm == (1.0, 1.0, 1.0)
 
 
 def test_artifact_loader_rejects_unsupported_backend_and_ranking_mismatch(

@@ -26,10 +26,12 @@ Both tasks use the task-neutral actuation seam from
 body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
 control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
-PX4 is bypassed in Lab, but the schema-2 aligned controller is a stateful
+PX4 is bypassed in Lab, but the schema-3 aligned controller is a stateful
 PX4-like velocity, attitude, and rate cascade with filtered acceleration
 feedback, integrators, thrust saturation/anti-windup, and rate
-PID/feed-forward. The pinned Isaac Lab
+PID/feed-forward. Its per-axis rate-output scale converts PX4's normalized
+rate-controller output to the physical N-m body torque used by Lab. Schema-2
+artifacts retain their original unit scale for reproducibility. The pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
 references. Controller gains, filters, integral and thrust limits, command
 delay, tilt, and thruster response come from an immutable alignment artifact
@@ -47,9 +49,10 @@ PX4 SITL is the response reference for the separate, policy-independent
 alignment subsystem. Run `make align-controllers`, then
 `make test-integration-alignment-target`; see
 `docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
-`.build/alignment/x500-velocity-px4-v2/best` by default and may select an exact
-run with `ALIGNMENT_ARTIFACT`. The command buffer, velocity/rate controller
-state, and thruster state are cleared on every environment reset.
+`.build/alignment/x500-velocity-px4-v2/best` by default until v3 alignment is
+accepted, and may select an exact run with `ALIGNMENT_ARTIFACT`. The command
+buffer, velocity/rate controller state, and thruster state are cleared on every
+environment reset.
 
 `rl.action` now contains only normalized action kind, dimension, and scales.
 The selected alignment's complete `ControllerSettings` is supplied explicitly

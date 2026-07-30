@@ -35,14 +35,16 @@ configured 250 Hz physics grid. Setpoints use zero-order hold, velocities and
 rates are linearly interpolated, and attitudes use normalized shortest-path
 quaternion interpolation. The tool converts PX4 motor controls through the
 configured Pegasus scaling and compares per-rotor angular velocity, collective
-thrust, and body torque at logged actuator timestamps.
+thrust, and body torque at logged actuator timestamps. It also regresses the
+logged normalized PX4 torque setpoint against reconstructed physical body
+torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
 This is a diagnostic, not the controller-alignment publication path.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --alignment-artifact .build/alignment/x500-velocity-px4-v2/best \
+  --alignment-artifact .build/alignment/x500-velocity-px4-v3/latest \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 

@@ -31,10 +31,12 @@ from robotics_experiments.alignment._models import (
 
 __all__: list[str] = []
 
-_SCHEMA_VERSION = 2
+_TRACE_SCHEMA_VERSION = 2
+_ARTIFACT_SCHEMA_VERSION = 3
+_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
-_SEARCH_STRATEGY = "staged-beam-v1"
+_SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 
 
@@ -78,8 +80,15 @@ def _vector(*, value: Any, name: str, length: int = 3) -> tuple[float, ...]:
     return parsed
 
 
-def _settings(*, value: Any, name: str) -> ControllerSettings:
+def _settings(
+    *,
+    value: Any,
+    name: str,
+    legacy_schema: bool = False,
+) -> ControllerSettings:
     settings = _object(value=value, name=name)
+    if legacy_schema and "rate_output_scale_nm" not in settings:
+        settings["rate_output_scale_nm"] = [1.0, 1.0, 1.0]
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -119,6 +128,10 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
         ki_rate=_vector(value=settings["ki_rate"], name=f"{name}.ki_rate"),
         kd_rate=_vector(value=settings["kd_rate"], name=f"{name}.kd_rate"),
         kff_rate=_vector(value=settings["kff_rate"], name=f"{name}.kff_rate"),
+        rate_output_scale_nm=_vector(
+            value=settings["rate_output_scale_nm"],
+            name=f"{name}.rate_output_scale_nm",
+        ),
         rate_derivative_filter_hz=_finite(
             value=settings["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",
@@ -174,6 +187,7 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
         "ki_rate",
         "kd_rate",
         "kff_rate",
+        "rate_output_scale_nm",
         "rate_integral_limit_nm",
     ):
         if any(value < 0.0 for value in getattr(parsed, field_name)):
@@ -346,7 +360,7 @@ def _positive_integer(*, value: Any, name: str) -> int:
 def _search(*, value: Any) -> SearchSpec:
     search = _object(value=value, name="search")
     strategy = _string(value=search.get("strategy"), name="search.strategy")
-    if strategy != _SEARCH_STRATEGY:
+    if strategy not in _SEARCH_STRATEGIES:
         raise ValueError(f"unsupported search.strategy={strategy!r}")
     return SearchSpec(
         strategy=strategy,
@@ -497,7 +511,7 @@ class _TraceFileEvaluator:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
         payload = self._load_payload(path=path)
-        if payload.get("schema_version") != _SCHEMA_VERSION:
+        if payload.get("schema_version") != _TRACE_SCHEMA_VERSION:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
             raise RuntimeError(f"{path} was captured for a different controller")
@@ -597,7 +611,12 @@ def _artifact_payload(artifact: AlignmentArtifact, /) -> dict[str, Any]:
     return payload
 
 
-def _candidate_score(*, value: Any, name: str) -> CandidateScore:
+def _candidate_score(
+    *,
+    value: Any,
+    name: str,
+    legacy_schema: bool,
+) -> CandidateScore:
     candidate = _object(value=value, name=name)
     metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
     ranking = candidate.get("ranking_values")
@@ -616,7 +635,11 @@ def _candidate_score(*, value: Any, name: str) -> CandidateScore:
         raise ValueError(f"{name}.index must be a non-negative integer")
     return CandidateScore(
         index=index,
-        settings=_settings(value=candidate.get("settings"), name=f"{name}.settings"),
+        settings=_settings(
+            value=candidate.get("settings"),
+            name=f"{name}.settings",
+            legacy_schema=legacy_schema,
+        ),
         usable=usable,
         metrics={
             key: _finite(value=item, name=f"{name}.metrics.{key}") for key, item in metrics.items()
@@ -638,11 +661,13 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot load alignment artifact {artifact_path}: {exc}") from exc
     artifact = _object(value=loaded, name=str(artifact_path))
-    if artifact.get("schema_version") != _SCHEMA_VERSION:
+    schema_version = artifact.get("schema_version")
+    if schema_version not in _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS:
         raise ValueError(
             f"alignment artifact {artifact_path} has unsupported "
-            f"schema_version={artifact.get('schema_version')!r}"
+            f"schema_version={schema_version!r}"
         )
+    legacy_schema = schema_version == 2
     command_interface = _interface(
         value=artifact.get("command_interface"),
         name="command_interface",
@@ -664,7 +689,11 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     if not isinstance(raw_candidates, list) or not raw_candidates:
         raise ValueError("alignment artifact candidates must be a non-empty list")
     candidates = tuple(
-        _candidate_score(value=value, name=f"candidates[{index}]")
+        _candidate_score(
+            value=value,
+            name=f"candidates[{index}]",
+            legacy_schema=legacy_schema,
+        )
         for index, value in enumerate(raw_candidates)
     )
     if tuple(candidate.index for candidate in candidates) != tuple(range(len(candidates))):
@@ -678,6 +707,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     parsed_selected_settings = _settings(
         value=artifact.get("selected_settings"),
         name="selected_settings",
+        legacy_schema=legacy_schema,
     )
     if parsed_selected_settings != selected_matches[0].settings:
         raise ValueError("selected_settings do not match selected candidate")
@@ -706,7 +736,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         name="validation_metrics",
     )
     result = AlignmentArtifact(
-        schema_version=_SCHEMA_VERSION,
+        schema_version=schema_version,
         alignment_id=_string(value=artifact.get("alignment_id"), name="alignment_id"),
         run_id=_string(value=artifact.get("run_id"), name="run_id"),
         target_controller_id=_string(

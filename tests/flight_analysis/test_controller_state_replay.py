@@ -8,6 +8,7 @@ from flight_analysis.tools.controller_state_replay import (
     _hold_indices,
     _interpolate_quaternions,
     _linear_interpolate,
+    _linear_scale_with_intercept,
     _nearest_indices,
     _px4_attitude_to_isaac,
 )
@@ -53,3 +54,17 @@ def test_identity_ned_frd_attitude_becomes_north_facing_enu_flu():
 
     assert yaw == math.pi / 2.0
     assert np.allclose(quaternion, [math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)])
+
+
+def test_rate_output_scale_fit_separates_constant_torque_bias():
+    controller = np.array([-1.0, 0.0, 1.0, 2.0])
+    physical = controller * 6.5 - 0.08
+
+    scale, intercept, rmse = _linear_scale_with_intercept(
+        controller_output=controller,
+        physical_output=physical,
+    )
+
+    assert math.isclose(scale, 6.5)
+    assert math.isclose(intercept, -0.08)
+    assert rmse < 1e-12

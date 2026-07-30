@@ -22,11 +22,12 @@ The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v2` is a new comparison generation and uses alignment
-artifact schema 2. Schema-1 artifacts are not upgraded or reinterpreted by the
-schema-2 loader. Policies trained against schema 1 likewise remain tied to
-their old controller and are unsupported by the current training/runtime
-preflight.
+`x500-velocity-px4-v3` is the current comparison generation and uses alignment
+artifact schema 3. It adds the explicit conversion from PX4's normalized rate
+controller output to the physical body torque consumed by the Lab allocation.
+Schema-2 artifacts retain a unit conversion of one and therefore preserve their
+original behavior; they are not silently promoted to v3 settings. Policies
+remain tied to the complete controller record embedded when they were trained.
 
 ## Controller contract
 
@@ -38,6 +39,8 @@ preflight.
 - attitude P gains and yaw weight;
 - body-rate P/I/D/feed-forward gains, rate-derivative filtering, and
   rate-integral limits;
+- per-axis conversion from normalized rate-controller output to physical body
+  torque in N-m;
 - tilt, minimum/maximum collective-thrust fractions, and horizontal-thrust
   margin used by saturation and anti-windup;
 - thruster rise/fall constants and maximum thrust slew.
@@ -112,7 +115,7 @@ inputs only. They must never be included in fit or validation samples.
 ## Deterministic staged search
 
 The target definition declares each `ParameterSpec` in fixed order with a
-positive stage. Search uses `staged-beam-v1`:
+positive stage. The current generation uses `staged-beam-v2`:
 
 1. Start from the complete base setting.
 2. For the current parameter, expand every retained setting with every declared
@@ -120,14 +123,19 @@ positive stage. Search uses `staged-beam-v1`:
 3. Deduplicate settings and cache every evaluation.
 4. Replay all uncached settings in the expansion as one GPU batch, then score
    them in their original deterministic order.
-5. Rank deterministically and retain the best eight.
-6. Make two passes through every parameter in the stage.
+5. Reserve a beam slot for the best candidate on each advisory-gate objective,
+   then fill the remaining slots by the registered deterministic ranking.
+6. Retain at most 16 settings.
+7. Make two passes through every parameter in the stage.
 
 Stage 1 fits delay, velocity filtering, and velocity P/I/D. Stage 2 fits
-attitude/yaw, rate P/I/D/feed-forward, rate filtering, and tilt. Candidate
-centers come from pinned PX4 v1.17 values and use deterministic 0.5x, 0.75x,
-1.0x, 1.25x, and 1.5x values; zero is included for delay, integral,
-derivative, and feed-forward terms where meaningful.
+attitude/yaw, rate P/I/D/feed-forward, rate-output torque scale, rate filtering,
+and tilt. Candidate centers come from pinned PX4 v1.17 values and use
+deterministic 0.5x, 0.75x, 1.0x, 1.25x, and 1.5x values; zero is included for
+delay, integral, derivative, and feed-forward terms where meaningful. The
+torque-scale center comes from regressing logged normalized
+`vehicle_torque_setpoint` against the physical wrench reconstructed from the
+same ULog's motor outputs and the shared rotor model.
 The velocity-filter center is the first-order cutoff equivalent of the pinned
 `EKF2_TAU_VEL=0.25 s` (`1 / (2*pi*tau)`, approximately 0.637 Hz); velocity-D
 and rate-D centers use the pinned 5 Hz `MPC_VELD_LP` and 20 Hz
@@ -144,7 +152,13 @@ after every probe reset; they are not absorbed into the controller stages.
 
 ## Metrics, quality, and publication
 
-`policy-execution-controller-quality-v2` ranks candidates by:
+`policy-execution-controller-quality-v3` first ranks candidates by:
+
+1. number of failed advisory gates;
+2. largest normalized advisory-gate excess;
+3. total normalized advisory-gate excess.
+
+It then uses the v2 ordering as deterministic tie-breakers:
 
 1. worst held-out braking-distance error;
 2. worst held-out residual-speed error;
@@ -158,7 +172,7 @@ per-axis velocity metrics, stop-time error, overshoot, settling, and aggregate
 fit/validation diagnostics. Fit and validation are never pooled. All
 moderate-speed traces must still be finite and complete.
 
-Advisory v2 quality requires:
+Advisory quality requires:
 
 - braking-distance error at most 5 mm;
 - residual-speed error at most 0.01 m/s;
@@ -216,12 +230,24 @@ from approximately 3.47 to 1.10 candidates/s because the Isaac/PhysX processes
 contended. Active evaluation still records the 95% utilization target. This
 measured PhysX bottleneck is reported rather than masked with duplicate work.
 
-Training defaults to `.build/alignment/x500-velocity-px4-v2/best`. Only after
-v2 advisory quality and the exact-action diagnosis pass may Stage 1 be
+Training remains pinned to `.build/alignment/x500-velocity-px4-v2/best` while
+v3 is unaccepted. Only after v3 advisory quality and the exact-action diagnosis
+pass is the training default advanced to the accepted v3 artifact and Stage 1
 retrained from scratch for the existing 300 iterations without reward or PPO
 changes. Run checkpoint selection, independent Lab evaluation, the three-range
 physical transfer gate, and the complete approach mission in that order. Stop
 and preserve diagnostics at the first failure.
+
+An alignment campaign makes at most five completed attempts. Every attempt is
+committed separately with its hypothesis and result. If an attempt does not
+reduce the failed-gate count, or reduce the largest normalized gate excess by
+at least 20% without regressing a passed gate, use trace and ULog evidence to
+expand up to four meaningful controller parameters or ranges before the next
+attempt. Candidate additions may cover acceleration/jerk limits, saturation,
+integral limits, or further estimator/controller filters when the evidence
+locates the mismatch there; plant-owned quantities remain outside gain fitting.
+Two consecutive no-progress attempts after an evidence-backed expansion end
+the campaign early.
 
 Parameter uncertainty, domain randomization, real-flight capture, residual
 models, and PX4-in-loop training remain deferred.

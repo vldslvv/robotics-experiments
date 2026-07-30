@@ -81,6 +81,7 @@ class _FlightActuationParams:
     ki_rate: torch.Tensor
     kd_rate: torch.Tensor
     kff_rate: torch.Tensor
+    rate_output_scale_nm: torch.Tensor
     rate_derivative_filter_hz: float | torch.Tensor
     rate_integral_limit_nm: torch.Tensor
     max_body_rate_radps: float
@@ -286,7 +287,7 @@ def _rate_to_omega(
         -params.rate_integral_limit_nm,
         params.rate_integral_limit_nm,
     )
-    body_torque = (
+    body_torque = params.rate_output_scale_nm * (
         params.kp_rate * rate_error
         + rate_integral
         - params.kd_rate * angular_acceleration
@@ -499,6 +500,7 @@ def build_flight_actuation_params(
         ki_rate=_tensor(controller_settings.ki_rate),
         kd_rate=_tensor(controller_settings.kd_rate),
         kff_rate=_tensor(controller_settings.kff_rate),
+        rate_output_scale_nm=_tensor(controller_settings.rate_output_scale_nm),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
         rate_integral_limit_nm=_tensor(controller_settings.rate_integral_limit_nm),
         max_body_rate_radps=float(
@@ -571,6 +573,7 @@ def _replace_controller_settings_batch(
         ki_rate=_vectors("ki_rate"),
         kd_rate=_vectors("kd_rate"),
         kff_rate=_vectors("kff_rate"),
+        rate_output_scale_nm=_vectors("rate_output_scale_nm"),
         rate_derivative_filter_hz=_scalars("rate_derivative_filter_hz"),
         rate_integral_limit_nm=_vectors("rate_integral_limit_nm"),
         kp_vel=_vectors("kp_vel"),

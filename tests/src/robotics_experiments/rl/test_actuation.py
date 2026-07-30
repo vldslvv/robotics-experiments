@@ -98,6 +98,7 @@ def _controller_settings() -> ControllerSettings:
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        rate_output_scale_nm=(1.0, 1.0, 1.0),
         rate_derivative_filter_hz=30.0,
         rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
@@ -197,6 +198,28 @@ def test_velocity_yaw_rate_command_produces_positive_yaw_torque():
     )
 
     assert torque_body[2] > 1e-4
+
+
+def test_rate_output_scale_converts_normalized_pid_output_to_physical_torque():
+    base = _controller_settings()
+    action = np.array([0.0, 0.1, 0.0, 0.0])
+    unit_params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("ctbr"),
+        controller_settings=base,
+        mass=_MASS_KG,
+    )
+    scaled_params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("ctbr"),
+        controller_settings=replace(base, rate_output_scale_nm=(2.0, 1.0, 1.0)),
+        mass=_MASS_KG,
+    )
+
+    _force, unit_torque = _realized_wrench(unit_params, action, _level_rest_state())
+    _force, scaled_torque = _realized_wrench(scaled_params, action, _level_rest_state())
+
+    assert scaled_torque[0] == pytest.approx(2.0 * unit_torque[0])
 
 
 def test_velocity_integral_does_not_wind_up_against_thrust_saturation():
@@ -389,6 +412,7 @@ def test_built_actuation_parameter_arrays_are_read_only_and_non_aliased():
         params.ki_rate,
         params.kd_rate,
         params.kff_rate,
+        params.rate_output_scale_nm,
         params.rate_integral_limit_nm,
         params.kp_vel,
         params.ki_vel,
