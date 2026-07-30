@@ -2761,3 +2761,63 @@ Attempt 2 also validated the useful-parallelism change. One worker averaged
 evaluations/s, 28.1% more than attempt 1's 5.26 candidates/s. This is retained
 because it increased independent useful throughput; additional worker
 processes remain disabled because their measured contention reduced it.
+
+### 58. Reject v3 attempt 3 and authorize hover-thrust attempt 4
+
+Date: 2026-07-30.
+
+Attempt 3 ran from source commit `1f91de7` and completed
+`x500-velocity-px4-v3/20260730T055107Z`. The sweep evaluated 4767 unique
+candidates and selected candidate 4743 under comparison fingerprint
+`54ced12bbeb14d57048b5ae7850f2b72daf09e5a28bd15f01aaa9600bac244de`.
+
+| Held-out metric | Attempt 3 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.281 mm | 5 mm |
+| Residual-speed error | 0.00395 m/s | 0.01 m/s |
+| Stop-time error | 0.060 s | 0.10 s |
+| Worst-axis velocity NRMSE | 25.87% | 10% |
+| Yaw-rate NRMSE | 4.77% | 10% |
+| Heading error | 2.491 deg | 3 deg |
+| Combined endpoint error | 38.534 mm | 10 mm |
+
+This is material progress: failed gates fell from three to two, and braking
+distance and stop time newly passed without regressing residual speed, yaw
+rate, or heading. Of 4662 usable candidates, 605 failed exactly two gates and
+every one of those candidates failed the same pair: velocity NRMSE and
+combined endpoint. Individual candidates passed each remaining gate
+(candidate-wide minima were 8.87% NRMSE and 9.166 mm endpoint), but no
+candidate combined them. The selected NRMSE is vertical-dominated at 25.87%;
+X and Y were 12.24% and 4.34% respectively.
+
+The selected held-out combined turn ended 13.8 mm beyond PX4 in X, 16.9 mm
+beyond it in Y, and 31.8 mm above it in Z. PX4 lost 44.6 mm of altitude over
+that nominally horizontal trace while the reset Lab controller lost only
+12.8 mm. This and the vertical NRMSE frontier identify the collective
+acceleration mapping as the next structural seam, not another reason to widen
+the already independent velocity gains.
+
+Pinned PX4 v1.17 computes normalized collective thrust from the active hover
+thrust estimate and vertical acceleration, then divides by the desired body-Z
+vertical projection. The Lab cascade instead uses ideal physical
+`mass * (acceleration + gravity)` feed-forward and has no aligned hover-thrust
+setting. The diagnostic ULog from the last manual run records
+`MPC_THR_HOVER=0.5`, `MPC_USE_HTE=1`, and an in-flight hover estimate spanning
+0.5488 to 0.5812 with median 0.5721. This ULog remains diagnostic evidence
+only; attempt 4 will fit the new setting exclusively from the alignment
+probes.
+
+Attempt 4 therefore adds the missing PX4 collective-thrust equation and a
+declarative hover-thrust-fraction parameter centered on 0.57. It starts a new
+controller generation and artifact schema so v3 artifacts retain their exact
+physical-feed-forward behavior. NumPy and Torch use the same equation and
+receive sequential parity and legacy-artifact tests. This is the first
+new-field expansion in the campaign and is evidence-backed rather than a
+repeat of the attempt-3 search space.
+
+Attempt 3 used one worker, 37 GPU batches, and 938.31 s for the useful sweep,
+or 5.08 candidate evaluations/s. GPU utilization averaged 26.01%, reached
+37% at p95 and 49% at peak, and used 4776 MiB peak memory. The retained large
+batches already contain independent candidate environments; Isaac/PhysX
+sequential stepping is the measured bottleneck. Multi-process sharding remains
+disabled because it previously reduced useful throughput by 3.27 times.
