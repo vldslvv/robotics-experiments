@@ -37,7 +37,8 @@ controller record embedded when they were trained.
 - command delay;
 - velocity P/I/D gains, with D applied to a filtered acceleration estimate;
 - velocity and velocity-derivative filter cutoffs, velocity-integral limits,
-  and hover-thrust fraction;
+  and the actuator-realized hover-thrust fraction after the shared quadratic
+  rotor curve;
 - attitude P gains and yaw weight;
 - body-rate P/I/D/feed-forward gains, rate-derivative filtering, and
   rate-integral limits;
@@ -65,8 +66,9 @@ Velocity saturation uses conditional integration: an axis does not integrate
 when its error would push farther into a saturated thrust request. Integral
 limits remain active independently. The velocity controller forms desired
 body Z from horizontal acceleration and gravity, converts vertical acceleration
-to normalized collective with the hover-thrust fraction, and divides by the
-body-Z vertical projection, matching PX4's acceleration-control mapping.
+to collective with the actuator-realized hover-thrust fraction, and divides by
+the body-Z vertical projection, matching PX4's acceleration-control mapping at
+the physical thrust boundary.
 `VehicleState` remains a per-tick kinematic snapshot and does not gain
 acceleration; alignment derives acceleration from timestamped trace velocity.
 

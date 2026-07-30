@@ -23,8 +23,9 @@ settings:
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
-  # PX4 MPC_USE_HTE was active and estimated 0.55-0.58 in diagnostic flight.
-  hover_thrust_fraction: 0.57
+  # Physical collective fraction after the quadratic rotor curve. The
+  # diagnostic PX4 hover estimate maps to approximately 0.25-0.28 here.
+  hover_thrust_fraction: 0.27
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -61,7 +62,7 @@ parameters:
     candidates: [2.5, 3.75, 5.0, 6.25, 7.5]
   - field: hover_thrust_fraction
     stage: 1
-    candidates: [0.45, 0.50, 0.55, 0.57, 0.60, 0.65]
+    candidates: [0.23, 0.25, 0.26, 0.27, 0.28, 0.30, 0.32]
   - field: kp_vel
     stage: 1
     candidates:

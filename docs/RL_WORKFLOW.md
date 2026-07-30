@@ -31,7 +31,9 @@ PX4-like velocity, attitude, and rate cascade with filtered acceleration
 feedback, integrators, thrust saturation/anti-windup, and rate
 PID/feed-forward. Its per-axis rate-output scale converts PX4's normalized
 rate-controller output to the physical N-m body torque used by Lab. Its
-hover-thrust fraction maps acceleration to normalized PX4 collective demand.
+hover-thrust fraction is the actuator-realized physical collective fraction
+corresponding to PX4's normalized hover estimate after the shared quadratic
+rotor curve, and maps acceleration to collective demand.
 Schema-2 and schema-3 artifacts retain their original physical collective
 feed-forward for reproducibility, and schema 2 retains its unit rate-output
 scale. Attitude tracking uses PX4's thrust-prioritized reduced-quaternion law,

@@ -2821,3 +2821,51 @@ or 5.08 candidate evaluations/s. GPU utilization averaged 26.01%, reached
 batches already contain independent candidate environments; Isaac/PhysX
 sequential stepping is the measured bottleneck. Multi-process sharding remains
 disabled because it previously reduced useful throughput by 3.27 times.
+
+### 59. Reject v4 attempt 4 and correct the hover-thrust plant boundary
+
+Date: 2026-07-30.
+
+Attempt 4 ran from source commit `1354344` and completed
+`x500-velocity-px4-v4/20260730T062943Z`. The sweep evaluated 4900 unique
+candidates and selected candidate 4700 under comparison fingerprint
+`e355bbe5ca7d2c8f116091e0db312797faa356ade28d2eb29a5306a9843485ed`.
+
+| Held-out metric | Attempt 4 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 398.587 mm | 5 mm |
+| Residual-speed error | 0.27203 m/s | 0.01 m/s |
+| Stop-time error | 1.240 s | 0.10 s |
+| Worst-axis velocity NRMSE | 487.38% | 10% |
+| Yaw-rate NRMSE | 3.80% | 10% |
+| Heading error | 2.451 deg | 3 deg |
+| Combined endpoint error | 864.570 mm | 10 mm |
+
+This is the first no-progress attempt after a new-field expansion. All 4741
+usable candidates failed at least five gates. The selected hover-thrust
+fraction reached the search minimum of 0.45, and even the independent minima
+were 395.6 mm braking error, 1.240 s stop-time error, 178.66% velocity NRMSE,
+and 320.3 mm endpoint error. The range, rather than another gain tradeoff, was
+therefore invalid.
+
+The invalid range came from comparing two different thrust boundaries.
+PX4's hover-thrust estimate is a normalized rotor command. The Lab field is
+consumed after allocation as a physical collective-thrust fraction. With
+`THR_MDL_FAC=0`, bridge input scaling of 1000 rad/s, rotor maximum 1100 rad/s,
+and the shared quadratic thrust curve, normalized estimate `h` maps to the
+physical fraction `(h * 1000 / 1100)^2`. The diagnostic estimate range
+0.5488 to 0.5812 therefore maps to 0.2489 to 0.2791, with median 0.2705.
+Attempt 4 incorrectly searched 0.45 to 0.65, guaranteeing excessive thrust.
+
+Attempt 5 is the final campaign attempt. It preserves the schema-4 equation
+and corrects only this confirmed plant-boundary conversion, searching physical
+fractions 0.23 through 0.32 around 0.27. The ULog values choose the range but
+remain diagnostic only; selection still uses fresh held-out alignment traces.
+If attempt 5 does not pass every exact-action gate, record the terminal
+frontier and stop the campaign without training.
+
+Attempt 4 used one worker, 39 GPU batches, and 983.21 s for the useful sweep,
+or 4.98 candidate evaluations/s. GPU utilization averaged 26.73%, reached
+38% at p95 and 49% at peak, and used 4840 MiB peak memory. This repeats the
+measured Isaac/PhysX sequential-stepping bottleneck; adding worker processes
+would reintroduce the previously measured throughput regression.
