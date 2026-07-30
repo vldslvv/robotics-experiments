@@ -530,6 +530,34 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
 
 
+def test_lab_body_wrench_is_applied_at_body_origin():
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.workflows.isaac_lab.tasks.flight import apply_body_wrench
+
+    class Articulation:
+        def set_external_force_and_torque(
+            self,
+            *,
+            forces,
+            torques,
+            positions,
+            body_ids,
+        ):
+            self.arguments = forces, torques, positions, body_ids
+
+    articulation = Articulation()
+    force = torch.tensor([[1.0, 2.0, 3.0]])
+    torque = torch.tensor([[4.0, 5.0, 6.0]])
+
+    apply_body_wrench(articulation, 2, force, torque)
+
+    forces, torques, positions, body_ids = articulation.arguments
+    assert torch.equal(forces, force.unsqueeze(1))
+    assert torch.equal(torques, torque.unsqueeze(1))
+    assert torch.equal(positions, torch.zeros_like(forces))
+    assert body_ids == [2]
+
+
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (

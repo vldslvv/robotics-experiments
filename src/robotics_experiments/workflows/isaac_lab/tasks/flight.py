@@ -19,9 +19,11 @@ term-for-term:
 of package-root ``IsaacArticulationIO.apply_dynamics``:
 per-rotor thrust ``[0, 0, T_i]`` at the body-FLU rotor offsets, the body-Z yaw
 reaction, and linear drag, reduced to one equivalent wrench per env applied at
-the body origin in the body frame (Isaac Lab's
-``set_external_force_and_torque`` applies in the body frame, so no body->world
-rotation is needed -- unlike the bridge's ``is_global=True`` path).
+the body origin in the body frame. The origin is passed explicitly because a
+missing wrench position makes PhysX apply the force at the center of mass,
+which is not equivalent for an airframe whose body COM is offset. Isaac Lab
+accepts the force, torque, and position in the body frame, so no body->world
+rotation is needed -- unlike the bridge's ``is_global=True`` path.
 
 Normalized controls pass through the bridge-owned affine motor mapping. The
 realized thrust is then ``T_i = rotor_constant_i * omega_i^2`` clipped to
@@ -1155,10 +1157,16 @@ def apply_body_wrench(
 
     ``force_body`` / ``torque_body`` are ``[B, 3]`` in body-FLU. Isaac Lab's
     ``set_external_force_and_torque`` stores the wrench (applied every sim step
-    until changed) at the body origin in the body frame; the env's
-    ``write_data_to_sim`` flushes it. Implementation note: verify the installed
-    Isaac Lab signature -- some versions take ``body_ids`` positionally.
+    until changed); an explicit zero position applies the origin-reduced rotor
+    wrench at the body origin instead of PhysX's default center of mass. The
+    env's ``write_data_to_sim`` flushes it.
     """
     forces = force_body.unsqueeze(1)
     torques = torque_body.unsqueeze(1)
-    articulation.set_external_force_and_torque(forces, torques, body_ids=[body_id])
+    positions = torch.zeros_like(forces)
+    articulation.set_external_force_and_torque(
+        forces=forces,
+        torques=torques,
+        positions=positions,
+        body_ids=[body_id],
+    )
