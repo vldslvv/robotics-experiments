@@ -40,6 +40,26 @@ logged normalized PX4 torque setpoint against reconstructed physical body
 torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
 This is a diagnostic, not the controller-alignment publication path.
 
+Alignment trace schema 3 records every profile's absolute PX4 simulation start
+time. The same tool uses those boundaries to audit the captured ULog against
+the bridge log without manual windows. It reports thrust and torque setpoints,
+motor controls, bridge-mapped rotor speed, reconstructed wrench, hover-thrust
+estimate, and timestamp errors per fit, validation, and stability profile:
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
+  flight_analysis/tools/controller_state_replay.py \
+  --ulog .build/alignment/<alignment-id>/<run-id>/reference.ulg \
+  --config configs/alignment_px4_x500_velocity.yaml \
+  --audit-reference .build/alignment/<alignment-id>/<run-id>/reference.json \
+  --bridge-log .build/alignment/<alignment-id>/<run-id>/bridge.log \
+  --json .build/alignment/<alignment-id>/<run-id>/actuator_audit.json
+```
+
+The audit fails on incomplete topic coverage, a join error above one 4 ms
+physics tick, normalized motor RMSE above 0.01, or collective-thrust RMSE above
+0.05 N.
+
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
@@ -165,6 +185,9 @@ Important bridge fields:
 - `last_actuator_us`: PX4 actuator timestamp last received by the bridge.
 - `actuator_lag_us`: `sim_time_us - last_actuator_us`; should settle near one
   sensor period during healthy lockstep.
+- `PX4 bridge dynamics` records both fields beside the rotor commands and
+  realized wrench, so actuator audits do not infer the applied command's
+  timestamp from log-line order.
 - `input_reference`: scaled PX4 actuator controls from Pegasus' backend.
 - `commands`: rotor angular velocity references sent to the thrust model.
 - `forces_n`: per-rotor forces actually applied in Isaac.

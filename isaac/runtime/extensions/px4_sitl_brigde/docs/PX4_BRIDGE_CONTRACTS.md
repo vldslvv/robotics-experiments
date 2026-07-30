@@ -366,6 +366,11 @@ def tick_px4_bridge(*, state: Px4BridgeState, dt: float, sim_time_us: int) -> Px
 def stop_px4_bridge(*, state: Px4BridgeState) -> Px4BridgeState: ...
 ```
 
+Sampled `PX4 bridge dynamics` diagnostics record
+`last_actuator_receive_us` as `last_actuator_us` and the corresponding
+`actuator_lag_us` beside the mapped rotor commands and realized wrench. This is
+the timestamp contract used to join bridge actuation to PX4 ULog topics.
+
 **Lockstep ordering contract:** a tick decomposes into `send(state)` -- which
 sends `HIL_SENSOR` (advancing `time_usec`) without blocking and returns `None`
 when an actuator is owed -- and `poll()`, which blocks for the paired

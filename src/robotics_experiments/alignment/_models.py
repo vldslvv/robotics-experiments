@@ -112,6 +112,7 @@ class ProbeTrace:
     initial_linear_velocity_enu_mps: Vector3
     initial_angular_velocity_body_flu_radps: Vector3
     completed: bool
+    start_sim_time_us: int = 0
     failure_reason: str | None = None
 
 

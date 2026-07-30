@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -302,6 +303,7 @@ def _assert_yaw_response_sign(*, samples: tuple[_Sample, ...]) -> None:
 
 def _write_capture(
     *,
+    bridge_log_path: Path,
     definition: ControllerDefinition,
     run_dir: Path,
     state: _ProbeState,
@@ -319,6 +321,7 @@ def _write_capture(
                 "profile": profile.name,
                 "split": profile.split,
                 "axis": profile.axis,
+                "start_sim_time_us": initial.sim_time_us,
                 "time_s": [(sample.sim_time_us - initial.sim_time_us) * 1e-6 for sample in samples],
                 "command_velocity_body_flu_mps": [
                     list(sample.command_velocity_body_flu_mps) for sample in samples
@@ -345,7 +348,7 @@ def _write_capture(
     (run_dir / "reference.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": os.environ.get(
@@ -359,6 +362,26 @@ def _write_capture(
         )
         + "\n"
     )
+    shutil.copy2(bridge_log_path, run_dir / "bridge.log")
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifacts": {
+                    "reference_trace": "reference.json",
+                    "px4_ulog": "reference.ulg",
+                    "bridge_log": "bridge.log",
+                    "actuator_audit": "actuator_audit.json",
+                    "target_candidates": "target_candidates.json",
+                    "gpu_telemetry": "gpu_utilization.json",
+                    "alignment_artifact": "alignment.json",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
@@ -366,7 +389,17 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
         state = fleet.flying[0].driver.routine_state.last_policy_state
         if not isinstance(state, _ProbeState):
             raise AssertionError("alignment routine retained no probe state")
-        _write_capture(definition=definition, run_dir=run_dir, state=state)
+        from robotics_experiments.runtime import read_bridge_host_status
+
+        debug_log_path = read_bridge_host_status(host=fleet.flying[0].host).debug_log_path
+        if debug_log_path is None:
+            raise AssertionError("alignment capture has no bridge debug log")
+        _write_capture(
+            bridge_log_path=Path(debug_log_path),
+            definition=definition,
+            run_dir=run_dir,
+            state=state,
+        )
 
     run_px4_takeoff_scenario(
         context,

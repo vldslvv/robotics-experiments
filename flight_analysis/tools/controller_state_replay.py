@@ -11,8 +11,10 @@ per-rotor angular velocity and the resulting body wrench.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +43,17 @@ _NED_TO_ENU = np.array(
     ]
 )
 _FLU_TO_FRD = np.diag([1.0, -1.0, -1.0])
+_PHYSICS_TICK_US = 4_000
+_MAX_NORMALIZED_MOTOR_RMSE = 0.01
+_MAX_COLLECTIVE_RMSE_N = 0.05
+_BRIDGE_DYNAMICS_PATTERN = re.compile(
+    r"PX4 bridge dynamics: .* sim_time_us=(?P<sim_time_us>\d+) "
+    r"last_actuator_us=(?P<actuator_time_us>\d+) "
+    r"actuator_lag_us=(?P<join_error_us>\d+).* "
+    r"commands=(?P<rotor_speed>\[[^\]]+\]) "
+    r"forces_n=(?P<forces>\[[^\]]+\]) "
+    r"body_torque_n_m=(?P<body_torque>\[[^\]]+\])"
+)
 
 
 def _dataset(*, ulog, name: str) -> dict:
@@ -196,6 +209,254 @@ def _wrench(*, geometry: MixerGeometry, omega: np.ndarray) -> np.ndarray:
 
 def _root_mean_square(*, values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(values))))
+
+
+def _topic_time_us(*, topic: dict) -> np.ndarray:
+    return np.asarray(topic["timestamp"], dtype=np.int64)
+
+
+def _topic_vectors(*, topic: dict, field: str, length: int) -> np.ndarray:
+    return np.column_stack(
+        [np.asarray(topic[f"{field}[{index}]"], dtype=np.float64) for index in range(length)]
+    )
+
+
+def _bridge_actuator_samples(
+    *,
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    actuator_times: list[int] = []
+    rotor_speeds: list[list[float]] = []
+    forces: list[list[float]] = []
+    join_errors: list[int] = []
+    body_torques: list[list[float]] = []
+    for line in path.read_text().splitlines():
+        dynamics_match = _BRIDGE_DYNAMICS_PATTERN.search(line)
+        if dynamics_match is not None:
+            actuator_times.append(int(dynamics_match.group("actuator_time_us")))
+            rotor_speeds.append(list(ast.literal_eval(dynamics_match.group("rotor_speed"))))
+            forces.append(list(ast.literal_eval(dynamics_match.group("forces"))))
+            join_errors.append(int(dynamics_match.group("join_error_us")))
+            body_torques.append(list(ast.literal_eval(dynamics_match.group("body_torque"))))
+    if not actuator_times:
+        raise ValueError(f"bridge log {path} has incomplete actuator diagnostics")
+    return (
+        np.asarray(actuator_times, dtype=np.int64),
+        np.asarray(rotor_speeds, dtype=np.float64),
+        np.asarray(forces, dtype=np.float64),
+        np.column_stack(
+            [
+                np.asarray(join_errors, dtype=np.int64),
+                np.asarray(body_torques, dtype=np.float64),
+            ]
+        ),
+    )
+
+
+def _profile_topic(
+    *,
+    topic: dict,
+    values: np.ndarray,
+    start_us: int,
+    end_us: int,
+) -> dict:
+    time_us = _topic_time_us(topic=topic)
+    selected = (time_us >= start_us) & (time_us <= end_us)
+    return {
+        "timestamp_us": time_us[selected].tolist(),
+        "values": values[selected].tolist(),
+    }
+
+
+def _actuator_boundary_report(
+    *,
+    ulog,
+    config_path: Path,
+    reference_path: Path,
+    bridge_log_path: Path,
+) -> dict:
+    config = load_config(config_path)
+    vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
+    airframe_name = Path(vehicle.spawn.usd_path).stem
+    base_geometry, mass = _geometry_and_mass(airframe_name=airframe_name)
+    bridge = vehicle.bridge
+    geometry = MixerGeometry(
+        positions_body=base_geometry.positions_body,
+        rot_dir=base_geometry.rot_dir,
+        rotor_constant=np.asarray(bridge.rotor_constant),
+        rolling_moment_coefficient=np.asarray(bridge.rolling_moment_coefficient),
+        min_rotor_velocity=np.asarray(bridge.min_rotor_velocity),
+        max_rotor_velocity=np.asarray(bridge.max_rotor_velocity),
+    )
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") != 3:
+        raise ValueError(f"{reference_path} must use alignment trace schema 3")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+
+    thrust = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
+    torque = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
+    motors = _dataset(ulog=ulog, name="actuator_motors")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
+    rotor_count = len(bridge.input_scaling)
+    thrust_values = _topic_vectors(topic=thrust, field="xyz", length=3)
+    torque_values = _topic_vectors(topic=torque, field="xyz", length=3)
+    motor_values = _topic_vectors(topic=motors, field="control", length=rotor_count)
+    hover_values = np.asarray(hover["hover_thrust"], dtype=np.float64)[:, None]
+    (
+        bridge_time_us,
+        bridge_rotor_speed,
+        bridge_forces,
+        bridge_join_and_torque,
+    ) = _bridge_actuator_samples(path=bridge_log_path)
+    bridge_dynamics_join_error_us = bridge_join_and_torque[:, 0].astype(np.int64)
+    bridge_body_torque = bridge_join_and_torque[:, 1:]
+
+    motor_time_us = _topic_time_us(topic=motors)
+    motor_index = _nearest_indices(source_t=motor_time_us, query_t=bridge_time_us)
+    motor_join_error_us = np.abs(motor_time_us[motor_index] - bridge_time_us)
+    input_scaling = np.asarray(bridge.input_scaling, dtype=np.float64)
+    input_offset = np.asarray(bridge.input_offset, dtype=np.float64)
+    armed_zero = np.asarray(bridge.zero_position_armed, dtype=np.float64)
+    bridge_normalized_motor = (bridge_rotor_speed - armed_zero) / input_scaling - input_offset
+    expected_rotor_speed = (
+        motor_values[motor_index] * input_scaling + armed_zero + input_offset * input_scaling
+    )
+    expected_collective = np.sum(
+        geometry.rotor_constant * np.square(expected_rotor_speed),
+        axis=1,
+    )
+    bridge_collective = np.sum(bridge_forces, axis=1)
+    bridge_torque = np.column_stack(
+        [
+            np.sum(geometry.positions_body[:, 1] * bridge_forces, axis=1),
+            -np.sum(geometry.positions_body[:, 0] * bridge_forces, axis=1),
+            bridge_body_torque[:, 2],
+        ]
+    )
+
+    profile_reports = []
+    audit_failures: list[str] = []
+    for raw_profile in raw_profiles:
+        profile_name = str(raw_profile["profile"])
+        start_us = int(raw_profile["start_sim_time_us"])
+        relative_time_s = raw_profile["time_s"]
+        end_us = start_us + round(float(relative_time_s[-1]) * 1_000_000)
+        bridge_selected = (bridge_time_us >= start_us) & (bridge_time_us <= end_us)
+        topic_reports = {
+            "vehicle_thrust_setpoint": _profile_topic(
+                topic=thrust,
+                values=thrust_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "vehicle_torque_setpoint": _profile_topic(
+                topic=torque,
+                values=torque_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "actuator_motors": _profile_topic(
+                topic=motors,
+                values=motor_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "hover_thrust_estimate": _profile_topic(
+                topic=hover,
+                values=hover_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+        }
+        missing_topics = [
+            name for name, topic_report in topic_reports.items() if not topic_report["timestamp_us"]
+        ]
+        if missing_topics or not np.any(bridge_selected):
+            audit_failures.append(
+                f"{profile_name}: incomplete topic coverage "
+                f"{missing_topics + ([] if np.any(bridge_selected) else ['bridge'])}"
+            )
+        profile_motor_error = (
+            bridge_normalized_motor[bridge_selected] - motor_values[motor_index][bridge_selected]
+        )
+        profile_collective_error = (
+            bridge_collective[bridge_selected] - expected_collective[bridge_selected]
+        )
+        normalized_motor_rmse = (
+            _root_mean_square(values=profile_motor_error) if profile_motor_error.size else math.inf
+        )
+        collective_rmse_n = (
+            _root_mean_square(values=profile_collective_error)
+            if profile_collective_error.size
+            else math.inf
+        )
+        max_join_error_us = int(
+            max(
+                np.max(motor_join_error_us[bridge_selected], initial=0),
+                np.max(bridge_dynamics_join_error_us[bridge_selected], initial=0),
+            )
+        )
+        if max_join_error_us > _PHYSICS_TICK_US:
+            audit_failures.append(
+                f"{profile_name}: timestamp join error {max_join_error_us} us exceeds "
+                f"{_PHYSICS_TICK_US} us"
+            )
+        if normalized_motor_rmse > _MAX_NORMALIZED_MOTOR_RMSE:
+            audit_failures.append(
+                f"{profile_name}: normalized motor RMSE {normalized_motor_rmse:.6f} "
+                f"exceeds {_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
+        if collective_rmse_n > _MAX_COLLECTIVE_RMSE_N:
+            audit_failures.append(
+                f"{profile_name}: collective RMSE {collective_rmse_n:.6f} N "
+                f"exceeds {_MAX_COLLECTIVE_RMSE_N:.6f} N"
+            )
+        profile_reports.append(
+            {
+                "profile": profile_name,
+                "split": raw_profile["split"],
+                "axis": raw_profile["axis"],
+                "start_sim_time_us": start_us,
+                "end_sim_time_us": end_us,
+                **topic_reports,
+                "bridge": {
+                    "actuator_timestamp_us": bridge_time_us[bridge_selected].tolist(),
+                    "mapped_rotor_speed_radps": bridge_rotor_speed[bridge_selected].tolist(),
+                    "reconstructed_collective_thrust_n": bridge_collective[
+                        bridge_selected
+                    ].tolist(),
+                    "reconstructed_body_torque_nm": bridge_torque[bridge_selected].tolist(),
+                    "timestamp_join_error_us": {
+                        "actuator_motors": motor_join_error_us[bridge_selected].tolist(),
+                        "dynamics": bridge_dynamics_join_error_us[bridge_selected].tolist(),
+                    },
+                },
+                "metrics": {
+                    "normalized_motor_rmse": normalized_motor_rmse,
+                    "collective_thrust_rmse_n": collective_rmse_n,
+                    "max_timestamp_join_error_us": max_join_error_us,
+                },
+            }
+        )
+    return {
+        "schema_version": 1,
+        "method": "px4-ulog-bridge-actuator-boundary-v1",
+        "config": str(config_path),
+        "reference": str(reference_path),
+        "bridge_log": str(bridge_log_path),
+        "airframe": airframe_name,
+        "composed_mass_kg": mass,
+        "limits": {
+            "timestamp_join_error_us": _PHYSICS_TICK_US,
+            "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
+            "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
+        },
+        "profiles": profile_reports,
+        "passed": not audit_failures,
+        "failures": audit_failures,
+    }
 
 
 def _linear_scale_with_intercept(
@@ -428,26 +689,46 @@ def _report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("ulog", type=Path)
+    parser.add_argument("ulog_positional", nargs="?", type=Path)
+    parser.add_argument("--ulog", type=Path)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--alignment-artifact", type=Path, required=True)
-    parser.add_argument("--window", required=True, help="relative ULog seconds START,END")
+    parser.add_argument("--alignment-artifact", type=Path)
+    parser.add_argument("--window", help="relative ULog seconds START,END")
+    parser.add_argument("--audit-reference", type=Path)
+    parser.add_argument("--bridge-log", type=Path)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
-    start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
 
     from pyulog import ULog
 
-    report = _report(
-        ulog=ULog(str(args.ulog)),
-        config_path=args.config,
-        alignment_artifact_path=args.alignment_artifact,
-        start_s=start_s,
-        end_s=end_s,
-    )
+    ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
+    if ulog_path is None:
+        parser.error("one ULog path is required")
+    if args.audit_reference is not None or args.bridge_log is not None:
+        if args.audit_reference is None or args.bridge_log is None:
+            parser.error("--audit-reference and --bridge-log must be provided together")
+        report = _actuator_boundary_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            reference_path=args.audit_reference,
+            bridge_log_path=args.bridge_log,
+        )
+    else:
+        if args.alignment_artifact is None or args.window is None:
+            parser.error("--alignment-artifact and --window are required for controller replay")
+        start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
+        report = _report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            alignment_artifact_path=args.alignment_artifact,
+            start_s=start_s,
+            end_s=end_s,
+        )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:
         args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if report.get("passed") is False:
+        raise SystemExit("actuator-boundary audit failed")
 
 
 if __name__ == "__main__":

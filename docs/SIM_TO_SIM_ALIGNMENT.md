@@ -24,7 +24,9 @@ definitions live under `configs/alignment/controllers/`.
 
 `x500-velocity-px4-v4` is the current comparison generation and uses alignment
 artifact schema 4. It adds PX4's hover-thrust-scaled collective acceleration
-mapping. Schema-2 and schema-3 artifacts retain the exact physical
+mapping. Its physical hover fraction is weight divided by the composed plant's
+maximum thrust: the 2.3472 kg X500 and 61.389629 N maximum require approximately
+0.375. Schema-2 and schema-3 artifacts retain the exact physical
 `mass * (acceleration + gravity)` feed-forward used when they were published;
 schema-2 artifacts also retain a unit rate-output conversion. Legacy artifacts
 are not silently promoted to v4 settings. Policies remain tied to the complete
@@ -98,7 +100,8 @@ stable-speed/rate/tilt window. The first profile therefore starts after PX4 has
 accepted OFFBOARD rather than while the driver is still priming the stream, and
 later profiles begin from the same near-equilibrium controller boundary used by
 the reset Lab replay. A failed stability timeout invalidates capture.
-Every trace records the actual initial state, exact command timestamps,
+Every trace records the actual initial state, the profile's absolute PX4
+simulation start time, exact command timestamps,
 body-FLU velocity commands, yaw-rate commands, position, attitude, body/world
 velocity, angular velocity, completion, and flight-envelope failure. Isaac Lab
 restores the captured initial state and replays the exact command intervals at
@@ -222,6 +225,7 @@ fitting. A verified mismatch there is fixed in the plant contract.
 
 ```console
 make alignment-capture-reference
+make alignment-audit-actuators
 make alignment-sweep-target
 make alignment-fit
 
@@ -230,9 +234,11 @@ make test-integration-alignment-target
 ```
 
 The end-to-end wrapper preserves one run ID. Capture writes `reference.json`,
-the live staged sweep writes `target_candidates.json`, and fit reproduces the
-same deterministic search from those cached traces before writing and
-publishing `alignment.json`. The file-backed evaluator loads each diagnostic
+copies its finalized `reference.ulg` and `bridge.log` into the same run, and
+writes a relative-path `manifest.json`. The actuator audit writes
+`actuator_audit.json`, the live staged sweep writes `target_candidates.json`
+and `gpu_utilization.json`, and fit reproduces the same deterministic search
+from those cached traces before writing and publishing `alignment.json`. The file-backed evaluator loads each diagnostic
 file once; it does not reparse the complete candidate file for every setting,
 and it releases parsed target traces after their metrics are recorded.
 

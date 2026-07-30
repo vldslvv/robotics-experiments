@@ -2928,3 +2928,41 @@ under `.build/`, commit this terminal diagnosis, keep the accepted training
 pointer unchanged, and shut down the machine. A future run must begin from
 the actuator-boundary diagnosis above rather than silently continuing this
 search.
+
+### 61. Correct the attempt-5 plant diagnosis and authorize a fresh campaign
+
+Date: 2026-07-30.
+
+Section 60 used the generic bridge defaults, `omega = 100 + 1000*u` with a
+1100 rad/s maximum, instead of the composed Holybro X500 configuration. The
+actual vehicle mapping is `omega = 50 + 475*u` with a 525 rad/s maximum. Its
+composed 2.3472 kg mass and 61.389629 N maximum collective thrust require a
+physical hover fraction of 0.37495 at standard gravity. Independently, the
+latest PX4 hover estimate maps through the composed affine motor boundary and
+quadratic rotor curve to approximately 0.37505. Attempts 4 and 5 therefore
+searched above and below the evidenced boundary without testing it.
+
+This correction is appended rather than rewriting the historical attempt-5
+record. Reopen alignment as a fresh campaign of at most five completed
+attempts. Attempt 1 is a schema-4 calibration control: keep
+`x500-velocity-px4-v4`, every probe, advisory gate, controller equation, policy
+interface, reward, and training setting unchanged; set the base physical hover
+fraction to 0.375 and search
+`[0.35, 0.36, 0.365, 0.375, 0.385, 0.39, 0.40]`. Compare material progress with
+v3 attempt 3, which failed two gates with a largest normalized excess of 2.853.
+This control does not start the consecutive schema-5 stall counter.
+
+Every fresh capture now records absolute per-profile PX4 simulation start
+times and keeps `reference.json`, `reference.ulg`, `bridge.log`,
+`actuator_audit.json`, `target_candidates.json`, `gpu_utilization.json`, and
+`alignment.json` under one run directory described by `manifest.json`. The
+actuator-boundary audit must cover thrust and torque setpoints, motor controls,
+bridge rotor speed and reconstructed wrench, and hover estimate for every
+profile. It fails on incomplete coverage, timestamp error above 4 ms,
+normalized motor RMSE above 0.01, or collective RMSE above 0.05 N.
+
+If this corrected control passes all seven exact-action limits, proceed to the
+alignment integration gate and the diagnostic closed-loop actor comparison
+without schema 5. If it remains rejected, implement the normalized PX4
+allocator boundary as schema 5 before beginning the no-progress streak. Do not
+retrain during this campaign.

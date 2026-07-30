@@ -1,15 +1,18 @@
 """Frame and sampling tests for the PX4/Isaac controller replay."""
 
 import math
+from pathlib import Path
 
 import numpy as np
 
 from flight_analysis.tools.controller_state_replay import (
+    _bridge_actuator_samples,
     _hold_indices,
     _interpolate_quaternions,
     _linear_interpolate,
     _linear_scale_with_intercept,
     _nearest_indices,
+    _profile_topic,
     _px4_attitude_to_isaac,
 )
 
@@ -68,3 +71,38 @@ def test_rate_output_scale_fit_separates_constant_torque_bias():
     assert math.isclose(scale, 6.5)
     assert math.isclose(intercept, -0.08)
     assert rmse < 1e-12
+
+
+def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
+    log = tmp_path / "bridge.log"
+    log.write_text(
+        "PX4 bridge dynamics: tick=26 sim_time_us=104000 "
+        "last_actuator_us=100000 actuator_lag_us=4000 connected=True armed=True "
+        "commands=[100.0, 101.0, 102.0, 103.0] "
+        "forces_n=[1.0, 1.1, 1.2, 1.3] "
+        "body_torque_n_m=[0.0, 0.0, 0.01]\n"
+    )
+
+    time_us, rotor_speed, forces, join_and_torque = _bridge_actuator_samples(path=log)
+
+    assert time_us.tolist() == [100000]
+    assert rotor_speed.tolist() == [[100.0, 101.0, 102.0, 103.0]]
+    assert forces.tolist() == [[1.0, 1.1, 1.2, 1.3]]
+    assert join_and_torque.tolist() == [[4000.0, 0.0, 0.0, 0.01]]
+
+
+def test_profile_topic_uses_absolute_simulation_window():
+    topic = {
+        "timestamp": np.array([96_000, 100_000, 104_000, 108_000]),
+    }
+    report = _profile_topic(
+        topic=topic,
+        values=np.array([[0.0], [1.0], [2.0], [3.0]]),
+        start_us=100_000,
+        end_us=104_000,
+    )
+
+    assert report == {
+        "timestamp_us": [100_000, 104_000],
+        "values": [[1.0], [2.0]],
+    }

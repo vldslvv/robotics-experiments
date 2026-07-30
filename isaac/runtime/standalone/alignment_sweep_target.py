@@ -836,7 +836,7 @@ def _run(
     (run_dir / "target_candidates.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "controller_id": target.controller_id,
                 "definition_fingerprint": target.definition_fingerprint,
                 "image": os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),

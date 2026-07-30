@@ -23,9 +23,9 @@ settings:
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
-  # Physical collective fraction after the quadratic rotor curve. The
-  # diagnostic PX4 hover estimate maps to approximately 0.25-0.28 here.
-  hover_thrust_fraction: 0.27
+  # Physical collective fraction of the composed X500's maximum thrust. The
+  # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
+  hover_thrust_fraction: 0.375
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -62,7 +62,7 @@ parameters:
     candidates: [2.5, 3.75, 5.0, 6.25, 7.5]
   - field: hover_thrust_fraction
     stage: 1
-    candidates: [0.23, 0.25, 0.26, 0.27, 0.28, 0.30, 0.32]
+    candidates: [0.35, 0.36, 0.365, 0.375, 0.385, 0.39, 0.40]
   - field: kp_vel
     stage: 1
     candidates:

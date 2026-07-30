@@ -31,7 +31,8 @@ from robotics_experiments.alignment._models import (
 
 __all__: list[str] = []
 
-_TRACE_SCHEMA_VERSION = 2
+_TRACE_SCHEMA_VERSION = 3
+_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3})
 _ARTIFACT_SCHEMA_VERSION = 4
 _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
@@ -370,6 +371,12 @@ def _positive_integer(*, value: Any, name: str) -> int:
     return value
 
 
+def _nonnegative_integer(*, value: Any, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
 def _search(*, value: Any) -> SearchSpec:
     search = _object(value=value, name="search")
     strategy = _string(value=search.get("strategy"), name="search.strategy")
@@ -478,6 +485,10 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             name=f"{name}.initial_angular_velocity_body_flu_radps",
         ),
         completed=completed,
+        start_sim_time_us=_nonnegative_integer(
+            value=trace.get("start_sim_time_us", 0),
+            name=f"{name}.start_sim_time_us",
+        ),
         failure_reason=failure_reason,
     )
 
@@ -524,7 +535,7 @@ class _TraceFileEvaluator:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
         payload = self._load_payload(path=path)
-        if payload.get("schema_version") != _TRACE_SCHEMA_VERSION:
+        if payload.get("schema_version") not in _SUPPORTED_TRACE_SCHEMA_VERSIONS:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
             raise RuntimeError(f"{path} was captured for a different controller")
