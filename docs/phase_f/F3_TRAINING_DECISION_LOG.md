@@ -3490,3 +3490,58 @@ Attempt 7 used one worker, 41 GPU batches, and 1134.52 s for the useful sweep,
 or 5.04 candidate evaluations/s. GPU utilization averaged 32.04%, reached 50%
 at p95 and 58% at peak, and used 9301 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the measured bottleneck, so worker count stays at one.
+
+### 72. Refine attempt 8 latching to the measured transport cadence
+
+Date: 2026-07-30.
+
+Attempt 8 completed from clean source commit `a63eef7` as
+`x500-velocity-px4-v5/20260730T221628Z`. Its fresh capture restored valid
+controller state for all 11 profiles. The actuator audit passed every profile:
+timestamp joins stayed within one 4 ms physics tick, normalized motor RMSE
+peaked at 0.00083, and reconstructed collective RMSE peaked at 0.0123 N. The
+sweep evaluated 5593 unique candidates, 5470 of them usable, and selected
+candidate 5549 under comparison fingerprint
+`20bafd5a1429ae9b71d900d310cba9866fd693c6d4e911e2c0cee405a18e2873`.
+
+| Held-out metric | Attempt 8 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.459 mm | 5 mm |
+| Residual-speed error | 0.00990 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.83% | 10% |
+| Yaw-rate NRMSE | 7.50% | 10% |
+| Heading error | 5.750 deg | 3 deg |
+| Combined endpoint error | 38.437 mm | 10 mm |
+
+The attempt remains rejected with the same two failed gates and a largest
+normalized excess of 2.844, regressing from attempt 7's 2.517. It is the first
+consecutive no-progress attempt. Among usable candidates, 1400 failed two
+gates, 910 failed three, 1462 failed four, 1258 failed five, 438 failed six,
+and 2 failed all seven. Candidate-wide minima were 1.781 mm braking error,
+0.00026 m/s residual speed, 0.040 s stop-time error, 4.81% velocity NRMSE,
+3.03% yaw-rate NRMSE, 2.358 degrees heading error, and 20.707 mm endpoint
+error. The endpoint floor therefore worsened rather than improving.
+
+The attempt-8 implementation latched the body-frame action when the 20 Hz
+policy action entered the Lab environment. The capture log provides the
+missing cadence evidence: the routine driver retransmits the retained
+`MAV_FRAME_BODY_NED` setpoint every 20 ms, at its configured 50 Hz control
+rate. PX4 v1.17 rotates the body velocity at every received message, not only
+when the policy computes a new action. The attempt-8 target consequently held
+each local-frame velocity setpoint for 50 ms, while PX4 refreshes it every
+20 ms. The pre-attempt continuous 4 ms reinterpretation was closer to that
+transport behavior, which explains the observed regression.
+
+Attempt 9 will keep the local-frame latching correction but refresh it from the
+retained body action and current attitude on the existing 50 Hz driver cadence.
+The 20 Hz policy action cadence remains unchanged. The cadence will use the
+shared exact-average scheduler so it remains derived from configured physics
+and driver rates. Controller candidates, controller state, allocator, plant,
+probes, gates, worker count, policy interface, reward, and training
+configuration remain unchanged.
+
+Attempt 8 used one worker, 41 GPU batches, and 1480.14 s for the useful sweep,
+or 3.78 candidate evaluations/s. GPU utilization averaged 31.78%, reached 45%
+at p95 and 59% at peak, and used 9154 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the measured bottleneck, so worker count stays at one.
