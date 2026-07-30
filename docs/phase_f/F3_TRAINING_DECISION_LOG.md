@@ -3282,3 +3282,60 @@ Attempt 4 used one worker, 39 GPU batches, and 1332.64 s for the useful sweep,
 or 4.10 candidate evaluations/s. GPU utilization averaged 29.03%, reached 42%
 at p95 and 50% at peak, and used 5441 MiB peak memory. Sequential
 Isaac/PhysX stepping remains the bottleneck, so worker count stays at one.
+
+### 68. Reject attempt 5 at the force-application boundary
+
+Date: 2026-07-30.
+
+Attempt 5 ran from clean source commit `16d234c` and completed
+`x500-velocity-px4-v5/20260730T194712Z`. Its schema-4 capture contains valid
+controller-state snapshots for all 11 profiles. The actuator audit passed every
+profile: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE ranged from 0.00027 to 0.00084, and reconstructed collective RMSE ranged
+from 0.0081 N to 0.0122 N. The sweep evaluated 4971 unique candidates, 4866 of
+them usable, and selected candidate 4520 under comparison fingerprint
+`60472abacac866598f97caf5f1d24c00281f6d1ea74000943030029b0bd36c5d`.
+
+| Held-out metric | Attempt 5 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 30.402 mm | 5 mm |
+| Residual-speed error | 0.00340 m/s | 0.01 m/s |
+| Stop-time error | 0.640 s | 0.10 s |
+| Worst-axis velocity NRMSE | 22.78% | 10% |
+| Yaw-rate NRMSE | 5.41% | 10% |
+| Heading error | 2.650 deg | 3 deg |
+| Combined endpoint error | 51.681 mm | 10 mm |
+
+The attempt is rejected with four failed gates and a largest normalized excess
+of 5.400, regressing from attempt 4. None of the usable candidates failed fewer
+than four gates: 816 failed four, 3019 failed five, and 1031 failed six.
+Candidate-wide minima were 13.718 mm braking error, 0.00065 m/s residual speed,
+0.300 s stop-time error, 11.12% velocity NRMSE, 3.13% yaw-rate NRMSE,
+2.362 degrees heading error, and 11.246 mm endpoint error. Thus restoring the
+complete logged state cannot pass braking, stop time, velocity NRMSE, or
+endpoint error anywhere in the declared parameter table.
+
+The regression appears before the first maneuver rather than at a tunable
+controller range. During each one-second neutral lead-in, the restored PX4
+pitch-rate integral drives the Lab vehicle approximately 0.01-0.03 m/s in
+negative X while the PX4 reference remains near trim. The generated X500 body
+has a 3.067 mm positive-X center-of-mass offset. PX4 applies rotor forces at
+their local positions, so collective thrust at the body origin contributes the
+corresponding trim torque. Lab reduces the rotor forces to an origin-referenced
+wrench but calls `set_external_force_and_torque` without a position; the pinned
+API forwards a null position to PhysX, which applies the force at the center of
+mass. This drops approximately 0.071 N m of hover pitch moment, consistent with
+the approximately 0.012 normalized PX4 pitch-rate integral and its measured
+torque scale.
+
+The first failed boundary is therefore force application, after normalized
+controller output, allocation, bridge mapping, rotor speed, and collective
+reconstruction have passed. The next attempt will make one plant-seam change:
+apply the reduced Lab wrench explicitly at the body-frame origin. Controller
+state, candidates, probes, gates, allocator, mass, geometry, drag, policy
+interface, reward, and training configuration remain unchanged.
+
+Attempt 5 used one worker, 39 GPU batches, and 1303.68 s for the useful sweep,
+or 3.81 candidate evaluations/s. GPU utilization averaged 29.58%, reached 43%
+at p95 and 49% at peak, and used 5761 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the measured bottleneck, so worker count stays at one.
