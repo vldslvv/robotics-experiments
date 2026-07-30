@@ -62,6 +62,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
         self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
         self._policy_cadence = _CadenceState(previous_time_ns=0)
+        self._setpoint_stream_cadence = _CadenceState(previous_time_ns=0)
+        self._setpoint_stream_steps_remaining = 0
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._controller_actions = self.actions.clone()
@@ -194,15 +196,24 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
-        if self.actuation_params.kind == "velocity":
-            self._controller_actions = _latch_velocity_action_world(
-                self.actions,
-                self.drone.data.root_quat_w,
-            )
-        else:
-            self._controller_actions = self.actions.clone()
 
     def _apply_action(self) -> None:
+        if self._setpoint_stream_steps_remaining == 0:
+            if self.actuation_params.kind == "velocity":
+                self._controller_actions = _latch_velocity_action_world(
+                    self.actions,
+                    self.drone.data.root_quat_w,
+                )
+            else:
+                self._controller_actions = self.actions.clone()
+            (
+                self._setpoint_stream_cadence,
+                self._setpoint_stream_steps_remaining,
+            ) = _next_interval_steps(
+                state=self._setpoint_stream_cadence,
+                source_period_ns=self._physics_period_ns,
+                rate_hz=self._experiment_config.driver.offboard_setpoint_rate_hz,
+            )
         self._command_delay_buffer[self._command_delay_index].copy_(self._controller_actions)
         delayed_indices = (
             self._command_delay_index - self._command_delay_steps
@@ -222,6 +233,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self._command_delay_index = (
             self._command_delay_index + 1
         ) % self._command_delay_buffer.shape[0]
+        self._setpoint_stream_steps_remaining -= 1
         self.drone.set_joint_position_target(
             self._pusher_extension_target,
             joint_ids=[self._pusher_joint_id],
@@ -301,6 +313,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
                 device=self.device,
             )
         )
+        self._setpoint_stream_cadence = _CadenceState(previous_time_ns=0)
+        self._setpoint_stream_steps_remaining = 0
         self._applied_actions.zero_()
         self._controller_actions.zero_()
         self._controller_state = initial_flight_controller_state(

@@ -3534,7 +3534,8 @@ each local-frame velocity setpoint for 50 ms, while PX4 refreshes it every
 transport behavior, which explains the observed regression.
 
 Attempt 9 will keep the local-frame latching correction but refresh it from the
-retained body action and current attitude on the existing 50 Hz driver cadence.
+retained body action and current attitude on the existing 50 Hz OFFBOARD
+setpoint-stream cadence.
 The 20 Hz policy action cadence remains unchanged. The cadence will use the
 shared exact-average scheduler so it remains derived from configured physics
 and driver rates. Controller candidates, controller state, allocator, plant,
