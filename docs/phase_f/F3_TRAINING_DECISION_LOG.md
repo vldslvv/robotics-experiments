@@ -3426,3 +3426,67 @@ Attempt 6 used one worker, 39 GPU batches, and 1351.32 s for the useful sweep,
 or 3.81 candidate evaluations/s. GPU utilization averaged 30.42%, reached 45%
 at p95 and 61% at peak, and used 9120 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the measured bottleneck, so worker count stays at one.
+
+### 71. Continue after attempt 7 isolates command-frame latching
+
+Date: 2026-07-30.
+
+Attempt 7 completed from clean source commit `93b579a` as
+`x500-velocity-px4-v5/20260730T213019Z`. Its fresh capture restored valid
+controller state for all 11 profiles, and the actuator audit passed every
+profile within one 4 ms physics tick. The sweep evaluated 5715 unique
+candidates, 5616 of them usable, and selected candidate 5344 under comparison
+fingerprint
+`246dab4718de078c0a6da086c38f90e548be34841a06134f2595d5f6301fab2c`.
+
+| Held-out metric | Attempt 7 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 3.957 mm | 5 mm |
+| Residual-speed error | 0.00469 m/s | 0.01 m/s |
+| Stop-time error | 0.040 s | 0.10 s |
+| Worst-axis velocity NRMSE | 3.02% | 10% |
+| Yaw-rate NRMSE | 4.57% | 10% |
+| Heading error | 3.728 deg | 3 deg |
+| Combined endpoint error | 35.172 mm | 10 mm |
+
+The attempt remains rejected with two failed gates, but it makes material
+progress: the failed-gate count falls from three to two while braking and stop
+time pass without regressing any attempt-6 passed gate. This resets the
+no-progress streak. Among usable candidates, 1709 failed two gates, 710 failed
+three, 1745 failed four, 933 failed five, and 519 failed six. Candidate-wide
+minima were 2.383 mm braking error, 0.00021 m/s residual speed, 0.040 s
+stop-time error, 2.59% velocity NRMSE, 3.01% yaw-rate NRMSE, 2.311 degrees
+heading error, and 11.142 mm endpoint error. Every gate except endpoint
+therefore passes independently in this search, but no evaluated candidate
+combines fewer than two failures.
+
+The selected settings return to zero command delay and 0.570 normalized hover.
+The new rate-integral search selects `[0.4, 0.4, 0.4]`, but the 0.45 candidate
+does not improve the failure count. Matched-state replay of the selected
+controller stays below 0.01 normalized motor RMSE on the held-out yaw and
+combined profiles, while collective RMSE reaches 0.111 N and 0.120 N. The
+direct ULog-to-bridge actuator audit remains below 0.012 N on the same
+profiles, locating the remaining difference before the plant-owned actuator
+mapping.
+
+The combined trace exposes a command-interface seam. The target ends 34.10 mm
+positive in world Y relative to PX4 even though held-out Y-velocity NRMSE is
+only 3.02%. PX4 v1.17 handles each `MAV_FRAME_BODY_NED` message by reading
+attitude, rotating its body velocity into the local frame, and publishing that
+local velocity once. The Lab controller instead rotates the retained body
+command by the current yaw on every 4 ms physics tick. The discrepancy is
+active only while body velocity and yaw rate are commanded together, matching
+the remaining endpoint and heading failures.
+
+Attempt 8 will make one structural command-boundary correction: latch the
+world-frame velocity setpoint from body action and attitude once per policy
+command update, then retain that local setpoint through the intervening
+physics/controller ticks exactly as PX4 does. The normalized yaw-rate command,
+controller candidates, controller state, allocator, plant, probes, gates,
+worker count, policy interface, reward, and training configuration remain
+unchanged.
+
+Attempt 7 used one worker, 41 GPU batches, and 1134.52 s for the useful sweep,
+or 5.04 candidate evaluations/s. GPU utilization averaged 32.04%, reached 50%
+at p95 and 58% at peak, and used 9301 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the measured bottleneck, so worker count stays at one.
