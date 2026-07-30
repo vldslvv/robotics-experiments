@@ -2966,3 +2966,53 @@ alignment integration gate and the diagnostic closed-loop actor comparison
 without schema 5. If it remains rejected, implement the normalized PX4
 allocator boundary as schema 5 before beginning the no-progress streak. Do not
 retrain during this campaign.
+
+### 62. Reject the corrected schema-4 control and authorize schema 5
+
+Date: 2026-07-30.
+
+The calibration control ran from clean source commit `66d4468` and completed
+`x500-velocity-px4-v4/20260730T164305Z`. The sweep evaluated 5099 unique
+candidates and selected candidate 4110 under comparison fingerprint
+`16448ce91e56aaacba2a36eb60991b8be30167fa6888b7581fa25103525e1c67`.
+The selected physical hover fraction is 0.375.
+
+| Held-out metric | Attempt 1 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 15.066 mm | 5 mm |
+| Residual-speed error | 0.00925 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.95% | 10% |
+| Yaw-rate NRMSE | 4.51% | 10% |
+| Heading error | 2.730 deg | 3 deg |
+| Combined endpoint error | 30.211 mm | 10 mm |
+
+The control remains rejected with two failed gates. Its largest normalized
+excess fell from the v3 attempt-3 frontier's 2.853 to 2.021, a 29.2% reduction,
+but braking distance regressed from passed to failed. It therefore does not
+meet the campaign definition of material progress. This calibration control
+does not start the schema-5 consecutive-stall counter.
+
+All 5000 usable candidates failed at least two gates; 518 failed exactly
+braking distance and combined endpoint, and none failed fewer. Candidate-wide
+minima were 3.927 mm braking distance, 0.00076 m/s residual speed, 0.060 s stop
+time, 6.34% velocity NRMSE, 2.66% yaw-rate NRMSE, 2.303 degrees heading error,
+and 14.137 mm endpoint error. Thus no declared schema-4 candidate passed the
+endpoint gate, and no candidate combined the passing braking champion with
+the endpoint frontier.
+
+The actuator audit passed every fit, validation, and stability profile.
+Timestamp joins were exact, normalized motor RMSE ranged from 0.00027 to
+0.00030, and reconstructed collective RMSE ranged from 0.0088 N to 0.0109 N.
+The captured hover estimate ranged from 0.57077 to 0.57316 with median 0.57162,
+while normalized vertical thrust ranged from -0.64765 to -0.44687. Motor
+controls, the composed `50 + 475*u` mapping, rotor speed, and reconstructed
+wrench agree, so the first unresolved target boundary remains the normalized
+thrust-setpoint and PX4 allocator behavior that schema 4 does not represent.
+The next attempt must implement schema 5 at that boundary; the confirmed plant
+mapping must remain unchanged.
+
+Attempt 1 used one worker, 39 GPU batches, and 1036.29 s for the useful sweep,
+or 4.92 candidate evaluations/s. GPU utilization averaged 28.49%, reached 40%
+at p95 and 57% at peak, and used 5632 MiB peak memory. The recorded bottleneck
+remains sequential Isaac/PhysX stepping, so worker count stays at one.
