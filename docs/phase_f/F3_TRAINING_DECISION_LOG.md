@@ -3138,3 +3138,76 @@ regressing a passed gate. This is the second consecutive schema-5 attempt; if
 it does not make material progress, the campaign terminates at the required
 two-attempt no-progress limit. It will use one worker and run from a new clean
 source commit after the complete host quality gates.
+
+### 66. Continue after schema-5 attempt 3 makes material progress
+
+Date: 2026-07-30.
+
+Attempt 3 ran from clean source commit `2dedeca` and completed
+`x500-velocity-px4-v5/20260730T181602Z`. The sweep evaluated 4991 unique
+candidates, 4892 of them usable, and selected candidate 4780 under comparison
+fingerprint
+`0d0da659af0ec8fcfd2fb252eb8eeb92f89f50f5816a59492b16fabd7ea367cb`.
+The selected velocity-derivative filter is the new 1 Hz candidate.
+
+| Held-out metric | Attempt 3 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.935 mm | 5 mm |
+| Residual-speed error | 0.00796 m/s | 0.01 m/s |
+| Stop-time error | 0.060 s | 0.10 s |
+| Worst-axis velocity NRMSE | 12.97% | 10% |
+| Yaw-rate NRMSE | 4.74% | 10% |
+| Heading error | 2.724 deg | 3 deg |
+| Combined endpoint error | 76.228 mm | 10 mm |
+
+The attempt remains rejected, but it makes material progress by reducing the
+failed-gate count from three to two without regressing any gate that passed in
+attempt 2. This resets the no-progress streak. There are 431 candidates with
+exactly the same two failures, 428 with three, 751 with four, 2333 with five,
+and 949 with six. Candidate-wide minima pass all seven limits independently:
+3.073 mm braking error, 0.00022 m/s residual speed, 0.040 s stop-time error,
+6.96% velocity NRMSE, 2.82% yaw-rate NRMSE, 2.245 degrees heading error, and
+8.553 mm endpoint error. No candidate in the declared table combines the
+passing velocity-NRMSE and endpoint regions.
+
+All 431 two-failure candidates share the same stage-1 controller settings:
+zero delay, `kp_vel=[1.35, 1.35, 3]`, `ki_vel=[0.2, 0.2, 1]`,
+`kd_vel=[0.2, 0.2, 0]`, a 5 Hz velocity filter, a 1 Hz derivative filter,
+`velocity_integral_limit_mps2=[2, 2, 4]`, and normalized hover thrust 0.572.
+The held-out forward profile has 0.01095 m/s x-velocity RMSE and 0.00407 m/s
+bias. The combined profile has 0.01403 m/s y-velocity RMSE and 0.01245 m/s
+lateral bias; that persistent bias accounts for most of its 76 mm endpoint
+error. The existing asymmetric proportional-gain candidates all force vertical
+gain to 6 and do not test the evidenced horizontal frontier while preserving
+the selected vertical gain of 3.
+
+The fresh actuator audit passed every fit, validation, and stability profile.
+Timestamp joins stayed within one 4 ms tick, normalized motor RMSE ranged from
+0.00028 to 0.00259, and reconstructed collective RMSE ranged from 0.0083 N to
+0.0112 N. Matched-state replay of the selected controller stayed within both
+limits on the forward and lateral validation profiles. Its dynamic mismatch
+first crossed the collective limit on the vertical profile and the motor limit
+on yaw/combined profiles; stability crossed both. Because the direct ULog to
+bridge audit passes those same profiles, this does not evidence a plant-owned
+offset, scale, rotor curve, mass, or geometry error.
+
+Attempt 4 therefore makes no structural change and adds four complete
+axis-separated `kp_vel` candidates around the selected frontier:
+`[1.575, 1.8, 3]`, `[1.575, 2.25, 3]`, `[1.8, 1.8, 3]`, and
+`[1.8, 2.25, 3]`. The hypothesis is that modestly higher forward bandwidth
+will pass worst-axis NRMSE while independent lateral bandwidth removes the
+combined-profile bias without discarding the passing vertical, braking, and
+stop-time response.
+
+The user has explicitly authorized additional attempts for as long as an
+attempt makes progress or trace evidence supports another meaningful test.
+That instruction supersedes the earlier five-attempt and two-no-progress
+terminal limits for this active campaign. Every attempt still requires a
+committed hypothesis, clean-source capture, audit, sweep, fit, result record,
+and the unchanged exact-action acceptance gates.
+
+Attempt 3 used one worker, 39 GPU batches, and 1112.21 s for the useful sweep,
+or 4.49 candidate evaluations/s. GPU utilization averaged 29.86%, reached 42%
+at p95 and 50% at peak, and used 5506 MiB peak memory. Sequential
+Isaac/PhysX stepping remains the measured bottleneck, so worker count stays at
+one.
