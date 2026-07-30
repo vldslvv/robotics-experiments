@@ -258,5 +258,11 @@ locates the mismatch there; plant-owned quantities remain outside gain fitting.
 Two consecutive no-progress attempts after an evidence-backed expansion end
 the campaign early.
 
+Vector-valued `ParameterSpec` candidates need not keep roll/pitch or
+horizontal-axis values tied. When per-probe evidence shows conflicting axis
+requirements, the candidate table carries asymmetric complete vectors so the
+generic search can fit those axes independently without introducing
+field-specific search logic.
+
 Parameter uncertainty, domain randomization, real-flight capture, residual
 models, and PX4-in-loop training remain deferred.

@@ -2713,3 +2713,51 @@ Attempt 2 corrects those equations in both NumPy and Torch, uses PX4's exact
 disabled, and keeps the existing gain ranges. Sequential NumPy/Torch parity is
 tested with non-level attitudes. This attempt isolates confirmed controller
 structure before adding asymmetric lateral parameters.
+
+### 57. Reject v3 attempt 2 and authorize axis-separated attempt 3
+
+Date: 2026-07-30.
+
+Attempt 2 ran from source commit `e2b0c8d` and completed
+`x500-velocity-px4-v3/20260730T052836Z`. The sweep evaluated 3905 unique
+candidates and selected candidate 3468 under comparison fingerprint
+`1834b08a114bebba455663763459ffc98f311f86cc44a1b1be52881f96ea5276`.
+
+| Held-out metric | Attempt 2 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 12.100 mm | 5 mm |
+| Residual-speed error | 0.00820 m/s | 0.01 m/s |
+| Stop-time error | 0.240 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.75% | 10% |
+| Yaw-rate NRMSE | 5.27% | 10% |
+| Heading error | 2.818 deg | 3 deg |
+| Combined endpoint error | 30.486 mm | 10 mm |
+
+The attempt is material progress: failed gates fell from four to three,
+residual speed newly passed, and the largest normalized excess fell from 7.99
+to 2.05. Braking, stop time, and endpoint remain the only failures. Among 3809
+usable candidates, 100 failed exactly those three gates and none failed fewer.
+The independent gate champions reached 6.413 mm braking distance, 0.140 s stop
+time, and 15.799 mm endpoint error, so no declared candidate passed any of the
+three remaining gates individually.
+
+Per-event diagnostics localized the selected candidate's worst braking error
+to the lateral reversal: Lab traveled 40.44 mm after braking versus PX4's
+52.54 mm. The worst stop-time mismatch moved to the vertical reversal, where
+Lab stopped 0.24 s later. On the combined turn, Lab under-traveled the final
+PX4 position by approximately 6.7 mm in X, 20.6 mm in Y, and 21.5 mm in Z.
+The existing vector candidates always tie horizontal axes and change the
+vertical gain with both, so these conflicting axis requirements cannot be
+combined even though their individual champions are close.
+
+Attempt 3 adds three evidence-backed candidate degrees of freedom:
+axis-separated velocity P, I, and D vectors. The new candidates preserve the
+passing forward settings while varying lateral persistence and vertical
+bandwidth. No plant field, probe, gate, reward, actor, or policy interface
+changes. The deterministic 32-setting beam remains.
+
+Attempt 2 also validated the useful-parallelism change. One worker averaged
+30.22% GPU utilization and 4580 MiB peak memory, but processed 6.75 candidate
+evaluations/s, 28.1% more than attempt 1's 5.26 candidates/s. This is retained
+because it increased independent useful throughput; additional worker
+processes remain disabled because their measured contention reduced it.
