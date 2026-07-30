@@ -2869,3 +2869,62 @@ or 4.98 candidate evaluations/s. GPU utilization averaged 26.73%, reached
 38% at p95 and 49% at peak, and used 4840 MiB peak memory. This repeats the
 measured Isaac/PhysX sequential-stepping bottleneck; adding worker processes
 would reintroduce the previously measured throughput regression.
+
+### 60. Stop after v4 attempt 5: exact-action alignment remains rejected
+
+Date: 2026-07-30.
+
+Attempt 5 ran from source commit `9bcc79e` and completed
+`x500-velocity-px4-v4/20260730T065643Z`. The sweep evaluated 4831 unique
+candidates and selected candidate 4495 under comparison fingerprint
+`fc79958ed6fcd7a1f492f7879aead990fa658f78c0e7e1ab9b622ff18a95d0d9`.
+
+| Held-out metric | Attempt 5 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 758.484 mm | 5 mm |
+| Residual-speed error | 0.28091 m/s | 0.01 m/s |
+| Stop-time error | 2.200 s | 0.10 s |
+| Worst-axis velocity NRMSE | 185.95% | 10% |
+| Yaw-rate NRMSE | 3.36% | 10% |
+| Heading error | 2.741 deg | 3 deg |
+| Combined endpoint error | 1394.719 mm | 10 mm |
+
+This is the second consecutive no-progress attempt after the hover-thrust
+field expansion, and it reaches the campaign limit of five completed attempts.
+All 4713 usable candidates failed at least five gates. Candidate-wide minima
+were 42.57 mm braking error, 0.01495 m/s residual speed, 1.040 s stop-time
+error, 185.71% velocity NRMSE, and 1394.717 mm endpoint error. Only yaw rate
+and heading could pass. The selected hover fraction reached the corrected
+range maximum of 0.32, while attempt 4 selected its original range minimum of
+0.45. A scalar physical hover fraction between those ranges is not enough to
+represent the PX4 normalized collective, control-allocation output, actuator
+command, and quadratic rotor-thrust chain.
+
+The terminal diagnosis is that the new schema-4 collective mapping was placed
+at the wrong abstraction boundary. A future campaign should not widen this
+scalar again. It should capture PX4 normalized thrust setpoint, allocated motor
+commands, and realized collective on the same timestamps; model or fit the
+normalized-collective-to-per-rotor command curve before physical allocation;
+and include any required thrust-model factor or allocator normalization as
+declarative settings. The v3 attempt-3 artifact remains the strongest
+diagnostic frontier at two failed gates, but it is advisory-failed and must not
+authorize training.
+
+The exact-action gate failed, so the alignment integration target,
+closed-loop observation/action/state divergence comparison, retraining,
+checkpoint selection, physical transfer, and complete mission were not run.
+No policy or reward conclusion can be drawn from this campaign.
+
+Attempt 5 used one worker, 39 GPU batches, and 1011.74 s for the useful sweep,
+or 4.77 candidate evaluations/s. GPU utilization averaged 28.07%, reached
+41% at p95 and 52% at peak, and used 4776 MiB peak memory. Independent
+candidate environments were already batched; sequential Isaac/PhysX stepping
+remained the limiting factor.
+
+Decision: stop the alignment campaign under both terminal conditions: five
+completed attempts and two consecutive no-progress attempts after parameter
+expansion. Preserve every trace, candidate set, fit artifact, and runtime log
+under `.build/`, commit this terminal diagnosis, keep the accepted training
+pointer unchanged, and shut down the machine. A future run must begin from
+the actuator-boundary diagnosis above rather than silently continuing this
+search.
