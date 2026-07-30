@@ -56,7 +56,7 @@ search:
 parameters:
   - field: command_delay_s
     stage: 1
-    candidates: [0.0, 0.024, 0.036, 0.048, 0.060, 0.072]
+    candidates: [0.0, 0.024, 0.036, 0.048, 0.060, 0.072, 0.084, 0.096]
   - field: velocity_filter_hz
     stage: 1
     candidates: [0.0, 0.5, 1.0, 2.0, 5.0, 10.0]
@@ -65,7 +65,7 @@ parameters:
     candidates: [1.0, 2.5, 3.75, 5.0, 6.25, 7.5]
   - field: hover_thrust_normalized
     stage: 1
-    candidates: [0.54, 0.55, 0.56, 0.57, 0.572, 0.58, 0.59, 0.60]
+    candidates: [0.54, 0.55, 0.56, 0.57, 0.5715, 0.572, 0.58, 0.59, 0.60]
   - field: kp_vel
     stage: 1
     candidates:
@@ -141,6 +141,14 @@ parameters:
       - [0.20, 0.20, 0.10]
       - [0.25, 0.25, 0.125]
       - [0.30, 0.30, 0.15]
+  - field: rate_integral_limit_nm
+    stage: 2
+    candidates:
+      - [0.15, 0.15, 0.15]
+      - [0.20, 0.20, 0.20]
+      - [0.30, 0.30, 0.30]
+      - [0.40, 0.40, 0.40]
+      - [0.45, 0.45, 0.45]
   - field: kd_rate
     stage: 2
     candidates:
