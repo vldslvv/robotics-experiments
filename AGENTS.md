@@ -386,6 +386,12 @@ the current contents and the intended home for that kind of code.
 - Containers often run with `--network=host`.
 - GPU support is required (NVIDIA runtime).
 - Headless must work by default.
+- Design GPU-backed workloads with independent work units for parallel
+  execution from the outset. Size and batch them to aim for 95% measured GPU
+  utilization, and verify utilization during representative execution. When a
+  dependency or another measured bottleneck prevents that target, preserve
+  deterministic behavior and report the limiting factor instead of adding
+  semantically meaningless work solely to inflate utilization.
 
 ## When uncertain
 Don't do anything, ask for instructions.

@@ -18,6 +18,20 @@ from robotics_experiments.alignment._io import (
 )
 
 
+def _diagnostic_image(path: Path, /) -> str:
+    with path.open() as diagnostics:
+        for line in diagnostics:
+            stripped = line.strip()
+            if stripped.startswith('"image":'):
+                value = json.loads("{" + stripped.rstrip(",") + "}").get("image")
+                if isinstance(value, str) and value:
+                    return value
+                break
+            if stripped.startswith('"candidates":') or stripped.startswith('"traces":'):
+                break
+    raise ValueError(f"{path} has no image header")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=Path, required=True)
@@ -26,15 +40,13 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     os.environ["ROBOTICS_ALIGNMENT_RUN_DIR"] = str(args.run_dir)
-    target_diagnostics = json.loads((args.run_dir / "target_candidates.json").read_text())
-    reference_diagnostics = json.loads((args.run_dir / "reference.json").read_text())
     target = replace(
         load_controller_definition(args.target),
-        image=str(target_diagnostics["image"]),
+        image=_diagnostic_image(args.run_dir / "target_candidates.json"),
     )
     reference = replace(
         load_controller_definition(args.reference),
-        image=str(reference_diagnostics["image"]),
+        image=_diagnostic_image(args.run_dir / "reference.json"),
     )
     artifact = replace(
         align(

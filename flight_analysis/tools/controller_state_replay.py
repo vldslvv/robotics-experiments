@@ -28,6 +28,7 @@ from robotics_experiments.rl import (
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
+    initial_actuation_controller_state,
 )
 
 __all__ = ["main"]
@@ -215,6 +216,8 @@ def _report(
     isaac_wrench_rows: list[np.ndarray] = []
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
+    controller_state = initial_actuation_controller_state()
+    previous_time_s = math.nan
 
     for time_s, mi, ti, pi, ai, wi in zip(
         sample_t,
@@ -282,7 +285,19 @@ def _report(
             + np.asarray(bridge.zero_position_armed)
             + np.asarray(bridge.input_offset) * np.asarray(bridge.input_scaling)
         )
-        isaac_omega = action_to_rotor_omega(params, action, state)
+        dt_s = (
+            params.controller_dt_s
+            if math.isnan(previous_time_s)
+            else float(time_s - previous_time_s)
+        )
+        controller_state, isaac_omega = action_to_rotor_omega(
+            params,
+            controller_state,
+            action,
+            state,
+            dt_s,
+        )
+        previous_time_s = float(time_s)
         used_t.append(float(time_s))
         px4_omega_rows.append(px4_omega)
         isaac_omega_rows.append(isaac_omega)

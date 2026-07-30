@@ -97,6 +97,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         assert "robotics_experiments.rl.press" not in sys.modules
         assert rl.__all__ == [
             "ActuationParams",
+            "ActuationControllerState",
             "ActuationState",
             "HOVER_OBSERVATION_DIM",
             "HOVER_OBSERVATION_SCHEMA_VERSION",
@@ -116,6 +117,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "pack_hover_observation",
             "policy_action_to_offboard",
             "policy_metadata",
+            "initial_actuation_controller_state",
             "rotor_forces_to_body_wrench",
             "validate_policy_artifact",
         ]

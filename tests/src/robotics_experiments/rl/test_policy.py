@@ -54,10 +54,23 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.003, 0.003, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
@@ -66,7 +79,7 @@ def _controller_settings() -> ControllerSettings:
 
 def _alignment_artifact():
     return SimpleNamespace(
-        schema_version=1,
+        schema_version=2,
         alignment_id="test-alignment",
         run_id="test-run",
         comparison_fingerprint="comparison",
@@ -521,6 +534,10 @@ def test_current_press_artifact_preflights_when_available() -> None:
     metadata = json.loads((artifact / METADATA_FILENAME).read_text())
     if "alignment" not in metadata:
         with pytest.raises(ValueError, match="alignment"):
+            validate_policy_artifact(artifact_dir=artifact)
+        return
+    if metadata["alignment"].get("schema_version") != 2:
+        with pytest.raises(ValueError, match="alignment schema"):
             validate_policy_artifact(artifact_dir=artifact)
         return
     validated = _preflight_policy_artifacts(

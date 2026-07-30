@@ -85,9 +85,35 @@ def __getattr__(name: str):
             "make_switch_press_env_cfg": make_switch_press_env_cfg,
         }[name]
     if name == "compute_lab_rotor_omega":
-        from robotics_experiments.workflows.isaac_lab.tasks.flight import action_to_rotor_omega
+        from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+            action_to_rotor_omega,
+            initial_flight_controller_state,
+        )
 
-        return action_to_rotor_omega
+        def compute_lab_rotor_omega(
+            params,
+            action,
+            attitude_wxyz,
+            linear_velocity_world,
+            angular_velocity_body,
+            /,
+        ):
+            state = initial_flight_controller_state(
+                num_envs=int(action.shape[0]),
+                device=action.device,
+            )
+            _successor, omega = action_to_rotor_omega(
+                params,
+                state,
+                action,
+                attitude_wxyz,
+                linear_velocity_world,
+                angular_velocity_body,
+                params.controller_dt_s,
+            )
+            return omega
+
+        return compute_lab_rotor_omega
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -99,4 +125,5 @@ if TYPE_CHECKING:
         attitude_wxyz: torch.Tensor,
         linear_velocity_world: torch.Tensor,
         angular_velocity_body: torch.Tensor,
+        /,
     ) -> torch.Tensor: ...

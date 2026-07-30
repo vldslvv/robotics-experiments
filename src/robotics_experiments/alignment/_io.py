@@ -25,14 +25,16 @@ from robotics_experiments.alignment._models import (
     ProbeCommand,
     ProbeProfile,
     ProbeTrace,
+    SearchSpec,
     SettingValue,
 )
 
 __all__: list[str] = []
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
+_SEARCH_STRATEGY = "staged-beam-v1"
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 
 
@@ -91,13 +93,60 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
             nonnegative=True,
         ),
         kp_vel=_vector(value=settings["kp_vel"], name=f"{name}.kp_vel"),
+        ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
+        velocity_filter_hz=_finite(
+            value=settings["velocity_filter_hz"],
+            name=f"{name}.velocity_filter_hz",
+            positive=True,
+        ),
+        velocity_derivative_filter_hz=_finite(
+            value=settings["velocity_derivative_filter_hz"],
+            name=f"{name}.velocity_derivative_filter_hz",
+            positive=True,
+        ),
+        velocity_integral_limit_mps2=_vector(
+            value=settings["velocity_integral_limit_mps2"],
+            name=f"{name}.velocity_integral_limit_mps2",
+        ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
+        attitude_yaw_weight=_finite(
+            value=settings["attitude_yaw_weight"],
+            name=f"{name}.attitude_yaw_weight",
+            nonnegative=True,
+        ),
         kp_rate=_vector(value=settings["kp_rate"], name=f"{name}.kp_rate"),
+        ki_rate=_vector(value=settings["ki_rate"], name=f"{name}.ki_rate"),
+        kd_rate=_vector(value=settings["kd_rate"], name=f"{name}.kd_rate"),
+        kff_rate=_vector(value=settings["kff_rate"], name=f"{name}.kff_rate"),
+        rate_derivative_filter_hz=_finite(
+            value=settings["rate_derivative_filter_hz"],
+            name=f"{name}.rate_derivative_filter_hz",
+            positive=True,
+        ),
+        rate_integral_limit_nm=_vector(
+            value=settings["rate_integral_limit_nm"],
+            name=f"{name}.rate_integral_limit_nm",
+        ),
         max_tilt_cmd_deg=_finite(
             value=settings["max_tilt_cmd_deg"],
             name=f"{name}.max_tilt_cmd_deg",
             positive=True,
+        ),
+        min_collective_thrust_fraction=_finite(
+            value=settings["min_collective_thrust_fraction"],
+            name=f"{name}.min_collective_thrust_fraction",
+            nonnegative=True,
+        ),
+        max_collective_thrust_fraction=_finite(
+            value=settings["max_collective_thrust_fraction"],
+            name=f"{name}.max_collective_thrust_fraction",
+            positive=True,
+        ),
+        horizontal_thrust_margin_fraction=_finite(
+            value=settings["horizontal_thrust_margin_fraction"],
+            name=f"{name}.horizontal_thrust_margin_fraction",
+            nonnegative=True,
         ),
         thruster_tau_inc_s=_finite(
             value=settings["thruster_tau_inc_s"],
@@ -115,9 +164,31 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
             positive=True,
         ),
     )
-    for field_name in ("kp_vel", "kd_vel", "kp_att", "kp_rate"):
+    for field_name in (
+        "kp_vel",
+        "ki_vel",
+        "kd_vel",
+        "velocity_integral_limit_mps2",
+        "kp_att",
+        "kp_rate",
+        "ki_rate",
+        "kd_rate",
+        "kff_rate",
+        "rate_integral_limit_nm",
+    ):
         if any(value < 0.0 for value in getattr(parsed, field_name)):
             raise ValueError(f"{name}.{field_name} values must be non-negative")
+    if not 0.0 <= parsed.attitude_yaw_weight <= 1.0:
+        raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
+    if not (
+        0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0
+    ):
+        raise ValueError(f"{name} collective thrust fractions must satisfy 0 <= min < max <= 1")
+    if parsed.horizontal_thrust_margin_fraction >= parsed.max_collective_thrust_fraction:
+        raise ValueError(
+            f"{name}.horizontal_thrust_margin_fraction must be below the maximum "
+            "collective thrust fraction"
+        )
     return parsed
 
 
@@ -162,11 +233,11 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
             raise ValueError(f"duplicate probe name {profile_name!r}")
         names.add(profile_name)
         split = _string(value=profile.get("split"), name=f"{name}.split")
-        if split not in ("fit", "validation"):
-            raise ValueError(f"{name}.split must be 'fit' or 'validation'")
+        if split not in ("fit", "validation", "stability"):
+            raise ValueError(f"{name}.split must be 'fit', 'validation', or 'stability'")
         axis = _string(value=profile.get("axis"), name=f"{name}.axis")
-        if axis not in ("x", "y", "z"):
-            raise ValueError(f"{name}.axis must be x, y, or z")
+        if axis not in ("x", "y", "z", "yaw", "combined"):
+            raise ValueError(f"{name}.axis must be x, y, z, yaw, or combined")
         raw_commands = profile.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
             raise ValueError(f"{name}.commands must be a non-empty list")
@@ -177,6 +248,13 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
                         "velocity_body_flu_mps"
                     ),
                     name=f"{name}.commands[{command_index}].velocity_body_flu_mps",
+                ),
+                yaw_rate_radps=_finite(
+                    value=_object(
+                        value=command,
+                        name=f"{name}.commands[{command_index}]",
+                    ).get("yaw_rate_radps"),
+                    name=f"{name}.commands[{command_index}].yaw_rate_radps",
                 ),
                 duration_s=_finite(
                     value=_object(
@@ -198,10 +276,14 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
             )
         )
     covered = {(profile.split, profile.axis) for profile in profiles}
-    expected = {(split, axis) for split in ("fit", "validation") for axis in ("x", "y", "z")}
-    if covered != expected:
+    expected = {
+        (split, axis)
+        for split in ("fit", "validation")
+        for axis in ("x", "y", "z", "yaw", "combined")
+    }
+    if not expected <= covered:
         raise ValueError(
-            "probes must cover x, y, and z for fit and validation; "
+            "probes must cover x, y, z, yaw, and combined behavior for fit and validation; "
             f"missing={sorted(expected - covered)!r}"
         )
     return tuple(profiles)
@@ -238,6 +320,10 @@ def _parameters(
         parameters.append(
             ParameterSpec(
                 field=field_name,
+                stage=_positive_integer(
+                    value=parameter.get("stage"),
+                    name=f"{name}.stage",
+                ),
                 candidates=tuple(
                     _candidate(
                         value=candidate,
@@ -251,6 +337,30 @@ def _parameters(
     return tuple(parameters)
 
 
+def _positive_integer(*, value: Any, name: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _search(*, value: Any) -> SearchSpec:
+    search = _object(value=value, name="search")
+    strategy = _string(value=search.get("strategy"), name="search.strategy")
+    if strategy != _SEARCH_STRATEGY:
+        raise ValueError(f"unsupported search.strategy={strategy!r}")
+    return SearchSpec(
+        strategy=strategy,
+        beam_width=_positive_integer(
+            value=search.get("beam_width"),
+            name="search.beam_width",
+        ),
+        passes_per_stage=_positive_integer(
+            value=search.get("passes_per_stage"),
+            name="search.passes_per_stage",
+        ),
+    )
+
+
 def _trace(*, value: Any, name: str) -> ProbeTrace:
     trace = _object(value=value, name=name)
     failure_reason = trace.get("failure_reason")
@@ -261,14 +371,33 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         raise ValueError(f"{name}.completed must be boolean")
     time = trace.get("time_s")
     commands = trace.get("command_velocity_body_flu_mps")
+    yaw_commands = trace.get("command_yaw_rate_radps")
+    positions = trace.get("position_enu_m")
+    attitudes = trace.get("attitude_flu_enu_wxyz")
     velocities = trace.get("velocity_body_flu_mps")
+    world_velocities = trace.get("velocity_enu_mps")
+    angular_velocities = trace.get("angular_velocity_body_flu_radps")
     if (
         not isinstance(time, list)
         or not isinstance(commands, list)
+        or not isinstance(yaw_commands, list)
+        or not isinstance(positions, list)
+        or not isinstance(attitudes, list)
         or not isinstance(velocities, list)
+        or not isinstance(world_velocities, list)
+        or not isinstance(angular_velocities, list)
     ):
         raise ValueError(f"{name} samples must be lists")
-    if not time or len(time) != len(commands) or len(time) != len(velocities):
+    sample_lengths = (
+        len(commands),
+        len(yaw_commands),
+        len(positions),
+        len(attitudes),
+        len(velocities),
+        len(world_velocities),
+        len(angular_velocities),
+    )
+    if not time or any(length != len(time) for length in sample_lengths):
         raise ValueError(f"{name} sample lists must be non-empty and equal length")
     parsed_time = tuple(_finite(value=item, name=f"{name}.time_s") for item in time)
     if any(
@@ -284,8 +413,25 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         command_velocity_body_flu_mps=tuple(
             _vector(value=item, name=f"{name}.command_velocity_body_flu_mps") for item in commands
         ),
+        command_yaw_rate_radps=tuple(
+            _finite(value=item, name=f"{name}.command_yaw_rate_radps") for item in yaw_commands
+        ),
+        position_enu_m=tuple(
+            _vector(value=item, name=f"{name}.position_enu_m") for item in positions
+        ),
+        attitude_flu_enu_wxyz=tuple(
+            _vector(value=item, name=f"{name}.attitude_flu_enu_wxyz", length=4)
+            for item in attitudes
+        ),
         velocity_body_flu_mps=tuple(
             _vector(value=item, name=f"{name}.velocity_body_flu_mps") for item in velocities
+        ),
+        velocity_enu_mps=tuple(
+            _vector(value=item, name=f"{name}.velocity_enu_mps") for item in world_velocities
+        ),
+        angular_velocity_body_flu_radps=tuple(
+            _vector(value=item, name=f"{name}.angular_velocity_body_flu_radps")
+            for item in angular_velocities
         ),
         initial_position_enu_m=_vector(
             value=trace.get("initial_position_enu_m"),
@@ -312,6 +458,23 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
 class _TraceFileEvaluator:
     def __init__(self, *, backend: str) -> None:
         self._backend = backend
+        self._retain_traces = False
+        self._path: Path | None = None
+        self._payload: dict[str, Any] | None = None
+
+    def _load_payload(self, *, path: Path) -> dict[str, Any]:
+        if self._path == path and self._payload is not None:
+            return self._payload
+        try:
+            loaded = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"cannot load {self._backend} alignment traces from {path}: {exc}"
+            ) from exc
+        payload = _object(value=loaded, name=str(path))
+        self._path = path
+        self._payload = payload
+        return payload
 
     def evaluate(
         self,
@@ -333,13 +496,7 @@ class _TraceFileEvaluator:
         else:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
-        try:
-            payload = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                f"cannot load {self._backend} alignment traces from {path}: {exc}"
-            ) from exc
-        payload = _object(value=payload, name=str(path))
+        payload = self._load_payload(path=path)
         if payload.get("schema_version") != _SCHEMA_VERSION:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
@@ -414,6 +571,7 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("parameters", []),
             base_settings=base_settings,
         ),
+        search=_search(value=definition.get("search")),
         selection_metric=selection_metric,
         publication_metrics=publication_metrics,
         evaluator=_TraceFileEvaluator(backend=backend),

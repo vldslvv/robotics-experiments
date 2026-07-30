@@ -20,10 +20,23 @@ class ControllerSettings:
 
     command_delay_s: float
     kp_vel: Vector3
+    ki_vel: Vector3
     kd_vel: Vector3
+    velocity_filter_hz: float
+    velocity_derivative_filter_hz: float
+    velocity_integral_limit_mps2: Vector3
     kp_att: Vector3
+    attitude_yaw_weight: float
     kp_rate: Vector3
+    ki_rate: Vector3
+    kd_rate: Vector3
+    kff_rate: Vector3
+    rate_derivative_filter_hz: float
+    rate_integral_limit_nm: Vector3
     max_tilt_cmd_deg: float
+    min_collective_thrust_fraction: float
+    max_collective_thrust_fraction: float
+    horizontal_thrust_margin_fraction: float
     thruster_tau_inc_s: float
     thruster_tau_dec_s: float
     thruster_max_thrust_rate_nps: float
@@ -42,9 +55,10 @@ class CommandInterface:
 
 @dataclass(frozen=True)
 class ProbeCommand:
-    """One held body-FLU velocity command and its exact duration."""
+    """One held body-FLU velocity/yaw-rate command and its exact duration."""
 
     velocity_body_flu_mps: Vector3
+    yaw_rate_radps: float
     duration_s: float
 
 
@@ -63,7 +77,17 @@ class ParameterSpec:
     """Declarative candidates for one existing :class:`ControllerSettings` field."""
 
     field: str
+    stage: int
     candidates: tuple[SettingValue, ...]
+
+
+@dataclass(frozen=True)
+class SearchSpec:
+    """Deterministic staged beam-search contract."""
+
+    strategy: str
+    beam_width: int
+    passes_per_stage: int
 
 
 @dataclass(frozen=True)
@@ -75,7 +99,12 @@ class ProbeTrace:
     axis: str
     time_s: tuple[float, ...]
     command_velocity_body_flu_mps: tuple[Vector3, ...]
+    command_yaw_rate_radps: tuple[float, ...]
+    position_enu_m: tuple[Vector3, ...]
+    attitude_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
     velocity_body_flu_mps: tuple[Vector3, ...]
+    velocity_enu_mps: tuple[Vector3, ...]
+    angular_velocity_body_flu_radps: tuple[Vector3, ...]
     initial_position_enu_m: Vector3
     initial_attitude_flu_enu_wxyz: tuple[float, float, float, float]
     initial_linear_velocity_enu_mps: Vector3
@@ -112,6 +141,7 @@ class ControllerDefinition:
     base_settings: ControllerSettings
     probes: tuple[ProbeProfile, ...]
     parameters: tuple[ParameterSpec, ...]
+    search: SearchSpec
     selection_metric: str
     publication_metrics: tuple[str, ...]
     evaluator: BackendEvaluator = field(compare=False, repr=False)

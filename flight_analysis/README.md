@@ -28,19 +28,19 @@ for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
 yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real
 gap once real flights exist, and to track sim-vs-sim drift in the meantime.
 
-`controller_state_replay.py` is an independent instantaneous state-replay
-diagnostic. It
-replays PX4 ULog estimator state and velocity setpoints through the numpy
-reference for Isaac Lab's velocity cascade, converts PX4 motor controls through
-the configured Pegasus scaling, and compares per-rotor angular velocity,
-collective thrust, and body torque at the same timestamps. This is a diagnostic,
-not the controller-alignment publication path.
+`controller_state_replay.py` is an independent timestamped state-replay
+diagnostic. It replays PX4 ULog estimator state and velocity setpoints
+sequentially through the stateful numpy reference for Isaac Lab's velocity
+cascade, advances filters and integrators by each logged interval, converts PX4
+motor controls through the configured Pegasus scaling, and compares per-rotor
+angular velocity, collective thrust, and body torque at the same timestamps.
+This is a diagnostic, not the controller-alignment publication path.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --alignment-artifact .build/alignment/x500-velocity-px4-v1/best \
+  --alignment-artifact .build/alignment/x500-velocity-px4-v2/best \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 

@@ -44,7 +44,12 @@ class _Sample:
     profile: str
     sim_time_us: int
     command_velocity_body_flu_mps: tuple[float, float, float]
+    command_yaw_rate_radps: float
+    position_enu_m: tuple[float, float, float]
+    attitude_flu_enu_wxyz: tuple[float, float, float, float]
     velocity_body_flu_mps: tuple[float, float, float]
+    velocity_enu_mps: tuple[float, float, float]
+    angular_velocity_body_flu_radps: tuple[float, float, float]
 
 
 @dataclass(frozen=True)
@@ -128,13 +133,20 @@ def _advance_factory(*, definition: ControllerDefinition):
                 setpoint=VelocitySetpoint(0.0, 0.0, 0.0, 0.0),
                 complete=True,
             )
-        command = profiles[profile_index].commands[command_index].velocity_body_flu_mps
+        probe_command = profiles[profile_index].commands[command_index]
+        command = probe_command.velocity_body_flu_mps
+        vehicle = policy_input.vehicle_state
         velocity = body_velocity_flu_from_state(policy_input.vehicle_state)
         sample = _Sample(
             profile=profiles[profile_index].name,
             sim_time_us=policy_input.sim_time_us,
             command_velocity_body_flu_mps=command,
+            command_yaw_rate_radps=probe_command.yaw_rate_radps,
+            position_enu_m=_float3(vehicle.position_enu),
+            attitude_flu_enu_wxyz=_float4(vehicle.orientation_flu_enu_wxyz),
             velocity_body_flu_mps=_float3(velocity),
+            velocity_enu_mps=_float3(vehicle.linear_velocity_enu),
+            angular_velocity_body_flu_radps=_float3(vehicle.angular_velocity_flu),
         )
         successor = _ProbeState(
             profile_index=profile_index,
@@ -150,7 +162,7 @@ def _advance_factory(*, definition: ControllerDefinition):
                 forward_mps=command[0],
                 right_mps=-command[1],
                 down_mps=-command[2],
-                yaw_rate_radps=0.0,
+                yaw_rate_radps=probe_command.yaw_rate_radps,
             ),
         )
 
@@ -199,7 +211,14 @@ def _write_capture(
                 "command_velocity_body_flu_mps": [
                     list(sample.command_velocity_body_flu_mps) for sample in samples
                 ],
+                "command_yaw_rate_radps": [sample.command_yaw_rate_radps for sample in samples],
+                "position_enu_m": [list(sample.position_enu_m) for sample in samples],
+                "attitude_flu_enu_wxyz": [list(sample.attitude_flu_enu_wxyz) for sample in samples],
                 "velocity_body_flu_mps": [list(sample.velocity_body_flu_mps) for sample in samples],
+                "velocity_enu_mps": [list(sample.velocity_enu_mps) for sample in samples],
+                "angular_velocity_body_flu_radps": [
+                    list(sample.angular_velocity_body_flu_radps) for sample in samples
+                ],
                 "initial_position_enu_m": list(initial.position_enu_m),
                 "initial_attitude_flu_enu_wxyz": list(initial.attitude_flu_enu_wxyz),
                 "initial_linear_velocity_enu_mps": list(initial.linear_velocity_enu_mps),
@@ -214,7 +233,7 @@ def _write_capture(
     (run_dir / "reference.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": os.environ.get(

@@ -15,9 +15,12 @@ from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+    _replace_controller_settings_batch,
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
+    initial_flight_controller_state,
+    reset_flight_controller_state,
     rotor_thrust_to_body_wrench,
 )
 
@@ -60,18 +63,16 @@ class _FlightDirectRLEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._applied_actions = self.actions.clone()
-        self._command_delay_steps = round(
-            controller_settings.command_delay_s * experiment_config.sim.physics_hz
-        )
-        self._command_delay_index = 0
-        self._command_delay_buffer = torch.zeros(
-            (
-                self._command_delay_steps,
-                self.num_envs,
-                self.cfg.action_space,
-            ),
-            dtype=self.actions.dtype,
-            device=self.device,
+        self._command_delay_steps: torch.Tensor
+        self._command_delay_index: int
+        self._command_delay_buffer: torch.Tensor
+        self._set_command_delay_steps(
+            delay_steps=torch.full(
+                (self.num_envs,),
+                round(controller_settings.command_delay_s * experiment_config.sim.physics_hz),
+                dtype=torch.long,
+                device=self.device,
+            )
         )
         self._setup_actuation()
 
@@ -125,6 +126,11 @@ class _FlightDirectRLEnv(DirectRLEnv):
             controller_settings=self._controller_settings,
             policy_contract=self._policy_contract,
             mass=total_mass,
+            controller_dt_s=1.0 / self._experiment_config.sim.physics_hz,
+            device=self.device,
+        )
+        self._controller_state = initial_flight_controller_state(
+            num_envs=self.num_envs,
             device=self.device,
         )
         rotor_count = len(rotors.rot_dir)
@@ -181,25 +187,32 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
-        if self._command_delay_steps == 0:
-            self._applied_actions = self.actions
 
     def _apply_action(self) -> None:
-        if self._command_delay_steps:
-            delayed = self._command_delay_buffer[self._command_delay_index].clone()
-            self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
-            self._command_delay_index = (self._command_delay_index + 1) % self._command_delay_steps
-            self._applied_actions = delayed
+        self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
+        delayed_indices = (
+            self._command_delay_index - self._command_delay_steps
+        ) % self._command_delay_buffer.shape[0]
+        environment_indices = torch.arange(self.num_envs, device=self.device)
+        self._applied_actions = self._command_delay_buffer[
+            delayed_indices,
+            environment_indices,
+        ].clone()
+        self._command_delay_index = (
+            self._command_delay_index + 1
+        ) % self._command_delay_buffer.shape[0]
         self.drone.set_joint_position_target(
             self._pusher_extension_target,
             joint_ids=[self._pusher_joint_id],
         )
-        omega = action_to_rotor_omega(
+        self._controller_state, omega = action_to_rotor_omega(
             self.actuation_params,
+            self._controller_state,
             self._applied_actions,
             self.drone.data.root_quat_w,
             self.drone.data.root_lin_vel_w,
             self.drone.data.root_ang_vel_b,
+            self.actuation_params.controller_dt_s,
         )
         desired_thrust = self.actuation_params.rotor_constant * omega.square()
         realized = self._thruster.compute(
@@ -218,6 +231,56 @@ class _FlightDirectRLEnv(DirectRLEnv):
         )
         apply_body_wrench(self.drone, self._body_id, force_body, torque_body)
 
+    def _set_command_delay_steps(self, *, delay_steps: torch.Tensor) -> None:
+        if delay_steps.shape != (self.num_envs,):
+            raise ValueError(
+                f"command delays have shape {tuple(delay_steps.shape)}, "
+                f"expected {(self.num_envs,)}"
+            )
+        self._command_delay_steps = delay_steps
+        self._command_delay_index = 0
+        self._command_delay_buffer = torch.zeros(
+            (
+                int(delay_steps.max().item()) + 1,
+                self.num_envs,
+                self.cfg.action_space,
+            ),
+            dtype=self.actions.dtype,
+            device=self.device,
+        )
+
+    def _set_controller_settings_batch(
+        self,
+        *,
+        controller_settings: Sequence[ControllerSettings],
+        environments_per_setting: int,
+    ) -> None:
+        if len(controller_settings) * environments_per_setting != self.num_envs:
+            raise ValueError("controller batch does not cover every environment")
+        self.actuation_params = _replace_controller_settings_batch(
+            params=self.actuation_params,
+            controller_settings=controller_settings,
+            environments_per_setting=environments_per_setting,
+        )
+        delay_steps = [
+            round(settings.command_delay_s * self._experiment_config.sim.physics_hz)
+            for settings in controller_settings
+            for _environment in range(environments_per_setting)
+        ]
+        self._set_command_delay_steps(
+            delay_steps=torch.as_tensor(
+                delay_steps,
+                dtype=torch.long,
+                device=self.device,
+            )
+        )
+        self._applied_actions.zero_()
+        self._controller_state = initial_flight_controller_state(
+            num_envs=self.num_envs,
+            device=self.device,
+        )
+        self._thruster.reset_idx(torch.arange(self.num_envs, device=self.device))
+
     def _reset_drone(
         self,
         *,
@@ -232,4 +295,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.actions[env_ids] = 0.0
         self._applied_actions[env_ids] = 0.0
         self._command_delay_buffer[:, env_ids] = 0.0
+        self._controller_state = reset_flight_controller_state(
+            state=self._controller_state,
+            env_ids=env_ids,
+        )
         self._thruster.reset_idx(env_ids)

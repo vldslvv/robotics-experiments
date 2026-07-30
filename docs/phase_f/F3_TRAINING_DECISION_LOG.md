@@ -2390,3 +2390,119 @@ identified ranges should then be randomized during training. The temporal
 staging harness also needs a wall-normal entry predicate that does not rely on
 one three-dimensional waypoint tolerance before it can provide three valid
 acceptance traces.
+
+### 52. Reject the scratch actor's physical transfer and start alignment v2
+
+Date: 2026-07-29.
+
+The newest scratch Stage 1 actor passed its Isaac Lab validation with a
+0.4114 m minimum range. In the physical warehouse transfer it nevertheless
+contacted the switch at 0.3832 m. Its trace still requested approximately
+0.078 m/s forward at 0.400 m range. This is a downstream physical-transfer
+failure: the actor is not accepted and the complete approach mission must not
+run from this evidence.
+
+The continued forward command means controller lag cannot be assumed to be the
+only cause. Preserve this trace as a diagnostic design input, never as an
+alignment fit or validation trace. The next diagnosis first replays identical
+initial state, cadence, and actions through PX4 and Lab. If that exact-action
+response passes while closed-loop observations or actions diverge, classify the
+remaining issue as observation/state distribution or policy behavior instead
+of continuing to tune controller gains.
+
+The new comparison generation is `x500-velocity-px4-v2`, artifact schema 2,
+with policy-scale linear/yaw and combined probes. Its staged beam fits velocity
+delay/filter/PID terms before attitude/rate terms and ranks held-out braking,
+residual motion, velocity, yaw, and endpoint error. Schema-1 artifacts are not
+upgraded. Instantaneous actuator response remains fixed because the fresh
+diagnostics from section 47 measured normalized rotor-speed RMSE 0.00794 and
+collective-thrust RMSE 0.03701 N, both below the v2 third-stage triggers.
+
+No v2 selected settings, advisory result, retraining provenance, or final gate
+distribution exist at this entry. Record them only from a completed fresh
+alignment run. Retraining is authorized only after v2 advisory quality and the
+exact-action diagnosis pass; it must then be a new 300-iteration scratch run
+with unchanged reward and PPO hyperparameters. Checkpoint selection,
+independent Lab evaluation, the three-range physical transfer gate, and the
+complete mission remain ordered stop-on-failure gates.
+
+### 53. Reject alignment v2 at the advisory exact-action gate
+
+Date: 2026-07-30.
+
+Fresh run `20260730T012000Z` captured all 11 PX4 probe traces and evaluated 799
+unique Isaac Lab candidates. The deterministic staged beam selected candidate
+587 with:
+
+- zero command delay;
+- velocity P/I/D `[1.35, 1.35, 3.0]`, `[0, 0, 0]`, and
+  `[0.3, 0.3, 0]`;
+- velocity and derivative cutoffs 0.95493 and 2.5 Hz;
+- attitude P `[6, 6, 4.2]` with yaw weight 0.3;
+- the pinned rate P/I `[0.15, 0.15, 0.2]` and
+  `[0.2, 0.2, 0.1]`, with zero rate D/feed-forward;
+- the pinned 20 Hz rate-derivative cutoff and a 67.5 degree tilt limit.
+
+The selected exact-action response failed every advisory v2 category:
+
+| Held-out metric | Result | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 5.346 mm | 5 mm |
+| Residual-speed error | 0.01125 m/s | 0.01 m/s |
+| Stop-time error | 0.200 s | 0.10 s |
+| Worst-axis velocity NRMSE | 58.30% | 10% |
+| Yaw-rate NRMSE | 48.36% | 10% |
+| Heading error | 56.25 deg | 3 deg |
+| Combined endpoint error | 206.25 mm | 10 mm |
+
+Candidate-level GPU batching evaluated the largest expansion as 48 settings
+times 11 probes, or 528 independent environments. The sweep completed in
+297.4 s; the interrupted sequential implementation had reached only 620
+candidates after approximately 48 minutes. Representative GPU sampling on
+this hardware averaged approximately 35% utilization, peaked at 47%, and used
+about 5.24/24.56 GB VRAM. A measured 4x scene replication experiment did not
+increase GPU utilization and slowed equal search progress by approximately
+33%, so it was removed as semantically meaningless load. The remaining ceiling
+is the single Isaac/PhysX process; future improvement requires useful
+multi-process candidate sharding with deterministic beam coordination.
+
+Decision: Reject v2 run `20260730T012000Z` at the first advisory gate. Preserve
+its reference, candidates, artifact, and integration logs under `.build/`.
+Because identical-action controller response itself fails, do not start the
+closed-loop actor comparison, do not retrain Stage 1, and do not run checkpoint,
+physical-transfer, or mission gates. Continue controller/plant diagnosis from
+these traces before expanding the search or changing the actor.
+
+Proceed in this order:
+
+1. Use the preserved per-probe PX4 and Lab traces to localize the velocity and
+   yaw failures. Verify frames, initial state, command cadence, controller-state
+   reset, filter and anti-windup transitions, saturation, attitude/rate
+   response, thrust allocation, and the shared mass, rotor geometry, thrust
+   curve, and drag contract. Fix a confirmed plant or controller
+   implementation mismatch directly; do not absorb it into fitted gains.
+2. Before another broad GPU search, add useful multi-process candidate sharding
+   around the deterministic beam coordinator and measure aggregate throughput
+   and GPU utilization. Preserve candidate ordering and score equivalence
+   across worker counts. Do not restore replicated environments that perform no
+   additional candidate work.
+3. If the implementation and plant contracts are correct, revise the
+   declarative `ParameterSpec` ranges or staging using the failed-trace
+   diagnosis, then perform a fresh reference capture, instantaneous actuator
+   replay, target sweep, and held-out fit. Start a new comparison fingerprint
+   if the probe suite, metrics, environment, image, schema, or controller
+   interface changes.
+4. Require every v2 advisory threshold to pass on identical actions before
+   comparing the closed-loop actor. Report observation, action, and state
+   divergence separately; if exact-action response passes but actions diverge,
+   classify the remaining failure as observation/state distribution or policy
+   behavior instead of tuning the controller again.
+5. Once alignment and the closed-loop diagnosis pass, retrain Stage 1 from
+   scratch for 300 iterations with the selected v2 artifact embedded as
+   provenance. Existing actors are incompatible with the newly selected
+   controller dynamics. Keep rewards, PPO hyperparameters, domain
+   randomization, and the policy interface unchanged.
+6. Run automatic checkpoint selection, independent Lab evaluation, the
+   three-range physical warehouse transfer gate, and then the complete approach
+   mission. Stop at the first failed gate and append its artifact references and
+   metric distribution here.

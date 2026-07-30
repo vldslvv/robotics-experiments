@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import replace
+import math
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -15,12 +17,12 @@ from robotics_experiments.alignment import (
     load_alignment_artifact,
     load_controller_definition,
 )
-from robotics_experiments.alignment._align import _settings_candidates
 from robotics_experiments.alignment._io import (
+    _TraceFileEvaluator,
     publish_alignment,
     write_alignment_artifact,
 )
-from robotics_experiments.alignment._metrics import register_metric
+from robotics_experiments.alignment._metrics import metric, register_metric
 from robotics_experiments.alignment._models import (
     CommandInterface,
     MetricResult,
@@ -28,6 +30,7 @@ from robotics_experiments.alignment._models import (
     ProbeCommand,
     ProbeProfile,
     ProbeTrace,
+    SearchSpec,
 )
 from tests.support.paths import REPO_ROOT
 
@@ -44,10 +47,23 @@ def _settings(
     return ControllerSettings(
         command_delay_s=delay,
         kp_vel=kp,
+        ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.01, 0.01, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
@@ -68,13 +84,37 @@ def _profiles() -> tuple[ProbeProfile, ...]:
                     split=split,
                     axis=axis,
                     commands=(
-                        ProbeCommand(_ZERO3, 0.1),
-                        ProbeCommand(tuple(positive), 0.15),
-                        ProbeCommand(tuple(negative), 0.1),
-                        ProbeCommand(_ZERO3, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand(tuple(positive), 0.0, 0.15),
+                        ProbeCommand(tuple(negative), 0.0, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
                     ),
                 )
             )
+        profiles.extend(
+            (
+                ProbeProfile(
+                    name=f"{split}-yaw",
+                    split=split,
+                    axis="yaw",
+                    commands=(
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand(_ZERO3, amplitude * 0.2, 0.15),
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                    ),
+                ),
+                ProbeProfile(
+                    name=f"{split}-combined",
+                    split=split,
+                    axis="combined",
+                    commands=(
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand((amplitude, amplitude * 0.5, 0.0), 0.2, 0.15),
+                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                    ),
+                ),
+            )
+        )
     return tuple(profiles)
 
 
@@ -82,6 +122,13 @@ def _command_samples(profile: ProbeProfile, /) -> tuple[tuple[float, float, floa
     values = []
     for command in profile.commands:
         values.extend([command.velocity_body_flu_mps] * round(command.duration_s / 0.05))
+    return tuple(values)
+
+
+def _yaw_samples(profile: ProbeProfile, /) -> tuple[float, ...]:
+    values = []
+    for command in profile.commands:
+        values.extend([command.yaw_rate_radps] * round(command.duration_s / 0.05))
     return tuple(values)
 
 
@@ -94,15 +141,25 @@ def _response_traces(
     delay_steps = round(settings.command_delay_s / 0.05)
     for profile in profiles:
         commands = _command_samples(profile)
-        axis_index = {"x": 0, "y": 1, "z": 2}[profile.axis]
+        yaw_commands = _yaw_samples(profile)
         velocities = []
+        angular_velocities = []
+        positions = []
+        attitudes = []
+        position = [0.0, 0.0, 0.0]
+        yaw = 0.0
         for index in range(len(commands)):
             delayed = _ZERO3 if index < delay_steps else commands[index - delay_steps]
-            velocity = [0.0, 0.0, 0.0]
-            velocity[axis_index] = (
-                delayed[axis_index] * settings.kp_vel[axis_index] / settings.kd_vel[axis_index]
+            delayed_yaw = 0.0 if index < delay_steps else yaw_commands[index - delay_steps]
+            velocity = tuple(
+                delayed[axis] * settings.kp_vel[axis] / settings.kd_vel[axis] for axis in range(3)
             )
-            velocities.append(tuple(velocity))
+            position = [value + velocity[axis] * 0.05 for axis, value in enumerate(position)]
+            yaw += delayed_yaw * 0.05
+            velocities.append(velocity)
+            positions.append(tuple(position))
+            attitudes.append((math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)))
+            angular_velocities.append((0.0, 0.0, delayed_yaw))
         traces.append(
             ProbeTrace(
                 profile=profile.name,
@@ -110,7 +167,12 @@ def _response_traces(
                 axis=profile.axis,
                 time_s=tuple(index * 0.05 for index in range(len(commands))),
                 command_velocity_body_flu_mps=commands,
+                command_yaw_rate_radps=yaw_commands,
+                position_enu_m=tuple(positions),
+                attitude_flu_enu_wxyz=tuple(attitudes),
                 velocity_body_flu_mps=tuple(velocities),
+                velocity_enu_mps=tuple(velocities),
+                angular_velocity_body_flu_radps=tuple(angular_velocities),
                 initial_position_enu_m=_ZERO3,
                 initial_attitude_flu_enu_wxyz=_IDENTITY,
                 initial_linear_velocity_enu_mps=_ZERO3,
@@ -128,6 +190,23 @@ class _Evaluator:
     def evaluate(self, *, definition, settings, reference_traces):
         active = self._reference_settings or settings
         return _response_traces(profiles=definition.probes, settings=active)
+
+
+class _BatchEvaluator(_Evaluator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_sizes: list[int] = []
+
+    def evaluate_batch(self, *, definition, settings, reference_traces):
+        self.batch_sizes.append(len(settings))
+        return tuple(
+            self.evaluate(
+                definition=definition,
+                settings=value,
+                reference_traces=reference_traces,
+            )
+            for value in settings
+        )
 
 
 def _definition(
@@ -156,6 +235,11 @@ def _definition(
         base_settings=_settings(delay=0.0, kp=(1.0, 1.0, 1.0)),
         probes=_profiles(),
         parameters=parameters,
+        search=SearchSpec(
+            strategy="staged-beam-v1",
+            beam_width=8,
+            passes_per_stage=2,
+        ),
         selection_metric=metric_name,
         publication_metrics=("velocity_rmse_mps",),
         evaluator=evaluator,
@@ -169,18 +253,15 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
     )
     assert target.backend == "isaac-lab"
-    assert len(_settings_candidates(target)) == 36
-
     extended = replace(
         target,
         parameters=(
             *target.parameters,
-            ParameterSpec("max_tilt_cmd_deg", (20.0, 30.0)),
+            ParameterSpec("max_tilt_cmd_deg", 2, (20.0, 30.0)),
         ),
     )
-    candidates = _settings_candidates(extended)
-    assert len(candidates) == 72
-    assert {candidate.max_tilt_cmd_deg for candidate in candidates} == {20.0, 30.0}
+    assert extended.parameters[-1].stage == 2
+    assert extended.parameters[-1].candidates == (20.0, 30.0)
 
 
 def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
@@ -188,9 +269,10 @@ def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
 ) -> None:
     known = _settings(delay=0.05, kp=(2.0, 3.0, 4.0))
     parameters = (
-        ParameterSpec("command_delay_s", (0.0, 0.05, 0.1)),
+        ParameterSpec("command_delay_s", 1, (0.0, 0.05, 0.1)),
         ParameterSpec(
             "kp_vel",
+            1,
             ((1.0, 1.0, 1.0), (2.0, 3.0, 4.0), (4.0, 3.0, 2.0)),
         ),
     )
@@ -211,6 +293,188 @@ def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
     assert artifact.advisory_quality_passed
 
 
+def test_staged_beam_search_is_deterministic() -> None:
+    known = _settings(delay=0.05, kp=(2.0, 3.0, 4.0))
+    parameters = (
+        ParameterSpec("command_delay_s", 1, (0.0, 0.05, 0.1)),
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (2.0, 3.0, 4.0), (4.0, 3.0, 2.0)),
+        ),
+        ParameterSpec(
+            "kd_vel",
+            1,
+            ((0.5, 0.5, 0.5), (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+        ),
+        ParameterSpec("max_tilt_cmd_deg", 2, (20.0, 30.0, 40.0)),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=known),
+    )
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=_Evaluator(),
+        parameters=parameters,
+    )
+
+    first = align(target, reference)
+    second = align(target, reference)
+
+    assert [candidate.settings for candidate in first.candidates] == [
+        candidate.settings for candidate in second.candidates
+    ]
+    assert first.selected_settings == second.selected_settings
+
+
+def test_staged_beam_search_batches_without_changing_deterministic_order() -> None:
+    known = _settings(delay=0.05, kp=(2.0, 3.0, 4.0))
+    parameters = (
+        ParameterSpec("command_delay_s", 1, (0.0, 0.05, 0.1)),
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (2.0, 3.0, 4.0), (4.0, 3.0, 2.0)),
+        ),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=known),
+    )
+    serial = align(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_Evaluator(),
+            parameters=parameters,
+        ),
+        reference,
+    )
+    batch_evaluator = _BatchEvaluator()
+    batched = align(
+        _definition(
+            backend="isaac-lab",
+            evaluator=batch_evaluator,
+            parameters=parameters,
+        ),
+        reference,
+    )
+
+    assert [candidate.settings for candidate in batched.candidates] == [
+        candidate.settings for candidate in serial.candidates
+    ]
+    assert [candidate.ranking_values for candidate in batched.candidates] == [
+        candidate.ranking_values for candidate in serial.candidates
+    ]
+    assert batched.selected_settings == serial.selected_settings
+    assert max(batch_evaluator.batch_sizes) > 1
+
+
+def test_file_evaluator_loads_candidate_diagnostics_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings()
+    definition = _definition(
+        backend="isaac-lab",
+        evaluator=_Evaluator(),
+    )
+    encoded = json.dumps(
+        asdict(settings),
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    key = hashlib.sha256(encoded).hexdigest()
+    path = tmp_path / "target_candidates.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "controller_id": definition.controller_id,
+                "definition_fingerprint": definition.definition_fingerprint,
+                "image": definition.image,
+                "candidates": {
+                    key: [
+                        asdict(trace)
+                        for trace in _response_traces(
+                            profiles=definition.probes,
+                            settings=settings,
+                        )
+                    ]
+                },
+                "failures": {},
+            }
+        )
+    )
+    original_read_text = Path.read_text
+    read_count = 0
+
+    def counted_read_text(source: Path) -> str:
+        nonlocal read_count
+        if source == path:
+            read_count += 1
+        return original_read_text(source)
+
+    monkeypatch.setenv("ROBOTICS_ALIGNMENT_RUN_DIR", str(tmp_path))
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    evaluator = _TraceFileEvaluator(backend="isaac-lab")
+
+    first = evaluator.evaluate(
+        definition=definition,
+        settings=settings,
+        reference_traces=None,
+    )
+    second = evaluator.evaluate(
+        definition=definition,
+        settings=settings,
+        reference_traces=None,
+    )
+
+    assert first == second
+    assert read_count == 1
+
+
+def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:
+    settings = _settings(kp=(1.0, 1.0, 1.0))
+    reference = _response_traces(profiles=_profiles(), settings=settings)
+    trace_index = next(
+        index for index, trace in enumerate(reference) if trace.profile == "validation-x"
+    )
+    source = reference[trace_index]
+    transition = next(
+        index
+        for index in range(1, len(source.command_velocity_body_flu_mps))
+        if source.command_velocity_body_flu_mps[index - 1][0] != 0.0
+        and source.command_velocity_body_flu_mps[index][0] == 0.0
+    )
+    target_velocity = list(source.velocity_body_flu_mps)
+    target_world_velocity = list(source.velocity_enu_mps)
+    target_position = list(source.position_enu_m)
+    target_velocity[transition] = (0.02, 0.0, 0.0)
+    target_world_velocity[transition] = (0.02, 0.0, 0.0)
+    target_position[transition + 1] = (
+        target_position[transition][0] + 0.02,
+        target_position[transition][1],
+        target_position[transition][2],
+    )
+    modified = replace(
+        source,
+        velocity_body_flu_mps=tuple(target_velocity),
+        velocity_enu_mps=tuple(target_world_velocity),
+        position_enu_m=tuple(target_position),
+    )
+    target = (*reference[:trace_index], modified, *reference[trace_index + 1 :])
+
+    result = metric(name="policy-execution-controller-quality-v2")(
+        reference,
+        target,
+    )
+
+    assert result.validation_metrics["braking_distance_error_m"] > 0.0
+    assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+
+
 def test_registered_metric_can_change_selection_without_changing_aligner(
     tmp_path: Path,
 ) -> None:
@@ -226,7 +490,13 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
         )
 
     register_metric(name=name, metric=highest_x)
-    parameters = (ParameterSpec("kp_vel", ((1.0, 1.0, 1.0), (3.0, 1.0, 1.0))),)
+    parameters = (
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (3.0, 1.0, 1.0)),
+        ),
+    )
     reference = _definition(
         backend="px4-sitl",
         evaluator=_Evaluator(reference_settings=_settings(kp=(1.0, 1.0, 1.0))),
@@ -253,7 +523,7 @@ def test_artifact_publication_tracks_latest_best_and_comparable_generation(
     target = _definition(
         backend="isaac-lab",
         evaluator=_Evaluator(),
-        parameters=(ParameterSpec("kp_vel", ((1.0, 1.0, 1.0),)),),
+        parameters=(ParameterSpec("kp_vel", 1, ((1.0, 1.0, 1.0),)),),
     )
     root = tmp_path / "alignment" / "synthetic"
     first = replace(align(target, reference), run_id="first")
@@ -297,7 +567,7 @@ def test_artifact_loader_rejects_nonfinite_settings(tmp_path: Path) -> None:
     target = _definition(
         backend="isaac-lab",
         evaluator=_Evaluator(),
-        parameters=(ParameterSpec("kp_vel", ((1.0, 1.0, 1.0),)),),
+        parameters=(ParameterSpec("kp_vel", 1, ((1.0, 1.0, 1.0),)),),
     )
     run_dir = tmp_path / "run"
     write_alignment_artifact(artifact=align(target, reference), run_dir=run_dir)
@@ -307,6 +577,27 @@ def test_artifact_loader_rejects_nonfinite_settings(tmp_path: Path) -> None:
     payload["candidates"][0]["settings"]["command_delay_s"] = float("nan")
     path.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="finite"):
+        load_alignment_artifact(path)
+
+
+def test_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None:
+    known = _settings(kp=(1.0, 1.0, 1.0))
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=known),
+    )
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=_Evaluator(),
+    )
+    run_dir = tmp_path / "run"
+    write_alignment_artifact(artifact=align(target, reference), run_dir=run_dir)
+    path = run_dir / "alignment.json"
+    payload = json.loads(path.read_text())
+    payload["schema_version"] = 1
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="unsupported schema_version=1"):
         load_alignment_artifact(path)
 
 

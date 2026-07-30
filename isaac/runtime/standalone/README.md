@@ -51,9 +51,21 @@ Controller alignment has two standalone backends. The PX4 capture entrypoint
 under `tests/alignment_capture_reference.py` starts through the normal
 `SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
 `alignment_sweep_target.py` constructs `AppLauncher` before importing
-`isaaclab`, builds one hover environment, reapplies each complete
-`ControllerSettings` candidate with fresh delay and actuator state, restores
-recorded PX4 initial states, and replays the captured physics-step intervals.
+`isaaclab`, builds one hover environment per candidate/probe pair, and runs the
+configured deterministic staged beam search. The scene capacity is derived
+from the largest possible beam expansion. Each expansion replays all uncached
+candidates concurrently with per-environment gains, filters, integrals, and
+sub-physics-step command delays; smaller expansions are padded to keep the
+fixed scene occupied. `rl.num_envs` must equal the maximum candidate/probe
+batch. Each batch starts with fresh controller, delay, and actuator state,
+restores every recorded PX4 initial state, and advances the timestamp events in
+one vectorized simulation while preserving each trace's captured physics-step
+intervals. Results are scored in the original deterministic candidate order.
+V2 traces retain position, attitude, body/world velocity, angular velocity, and
+yaw-rate commands in addition to the initial state and cadence. The PX4
+alignment routine ends when its probe policy completes; teardown stops the
+ephemeral simulator because landing and auto-disarm are outside the controller
+target.
 Keep their imports in this order; neither runner may import Kit/Isaac Lab at
 module import time.
 

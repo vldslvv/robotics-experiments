@@ -1,5 +1,5 @@
-alignment_id: x500-velocity-px4-v1
-controller_id: isaac-lab-x500-velocity-v1
+alignment_id: x500-velocity-px4-v2
+controller_id: isaac-lab-x500-velocity-v2
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -15,86 +15,237 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.2
-  kp_vel: [2.0, 2.0, 3.0]
-  kd_vel: [1.5, 1.5, 1.5]
-  kp_att: [6.0, 6.0, 2.0]
-  kp_rate: [1.2, 1.2, 0.4]
-  max_tilt_cmd_deg: 30.0
+  command_delay_s: 0.048
+  kp_vel: [1.8, 1.8, 4.0]
+  ki_vel: [0.4, 0.4, 2.0]
+  kd_vel: [0.2, 0.2, 0.0]
+  # EKF2_TAU_VEL=0.25 s expressed as an equivalent first-order cutoff.
+  velocity_filter_hz: 0.6366197724
+  velocity_derivative_filter_hz: 5.0
+  velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
+  kp_att: [4.0, 4.0, 2.8]
+  attitude_yaw_weight: 0.4
+  kp_rate: [0.15, 0.15, 0.20]
+  ki_rate: [0.20, 0.20, 0.10]
+  kd_rate: [0.003, 0.003, 0.0]
+  kff_rate: [0.0, 0.0, 0.0]
+  rate_derivative_filter_hz: 20.0
+  rate_integral_limit_nm: [0.30, 0.30, 0.30]
+  max_tilt_cmd_deg: 45.0
+  min_collective_thrust_fraction: 0.12
+  max_collective_thrust_fraction: 1.0
+  horizontal_thrust_margin_fraction: 0.30
   thruster_tau_inc_s: 0.0
   thruster_tau_dec_s: 0.0
   thruster_max_thrust_rate_nps: 100000.0
 
+search:
+  strategy: staged-beam-v1
+  beam_width: 8
+  passes_per_stage: 2
+
 parameters:
   - field: command_delay_s
-    candidates: [0.0, 0.1, 0.2, 0.3]
+    stage: 1
+    candidates: [0.0, 0.024, 0.036, 0.048, 0.060, 0.072]
+  - field: velocity_filter_hz
+    stage: 1
+    candidates: [0.3183098862, 0.4774648293, 0.6366197724, 0.7957747155, 0.9549296586]
+  - field: velocity_derivative_filter_hz
+    stage: 1
+    candidates: [2.5, 3.75, 5.0, 6.25, 7.5]
   - field: kp_vel
+    stage: 1
     candidates:
-      - [1.5, 1.5, 2.5]
-      - [2.0, 2.0, 3.0]
-      - [2.5, 2.5, 3.5]
+      - [0.9, 0.9, 2.0]
+      - [1.35, 1.35, 3.0]
+      - [1.8, 1.8, 4.0]
+      - [2.25, 2.25, 5.0]
+      - [2.7, 2.7, 6.0]
+  - field: ki_vel
+    stage: 1
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.2, 0.2, 1.0]
+      - [0.3, 0.3, 1.5]
+      - [0.4, 0.4, 2.0]
+      - [0.5, 0.5, 2.5]
+      - [0.6, 0.6, 3.0]
   - field: kd_vel
+    stage: 1
     candidates:
-      - [1.2, 1.2, 1.2]
-      - [1.5, 1.5, 1.5]
-      - [1.8, 1.8, 1.8]
+      - [0.0, 0.0, 0.0]
+      - [0.1, 0.1, 0.0]
+      - [0.15, 0.15, 0.0]
+      - [0.2, 0.2, 0.0]
+      - [0.25, 0.25, 0.0]
+      - [0.3, 0.3, 0.0]
+  - field: kp_att
+    stage: 2
+    candidates:
+      - [2.0, 2.0, 1.4]
+      - [3.0, 3.0, 2.1]
+      - [4.0, 4.0, 2.8]
+      - [5.0, 5.0, 3.5]
+      - [6.0, 6.0, 4.2]
+  - field: attitude_yaw_weight
+    stage: 2
+    candidates: [0.2, 0.3, 0.4, 0.5, 0.6]
+  - field: kp_rate
+    stage: 2
+    candidates:
+      - [0.075, 0.075, 0.10]
+      - [0.1125, 0.1125, 0.15]
+      - [0.15, 0.15, 0.20]
+      - [0.1875, 0.1875, 0.25]
+      - [0.225, 0.225, 0.30]
+  - field: ki_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.10, 0.10, 0.05]
+      - [0.15, 0.15, 0.075]
+      - [0.20, 0.20, 0.10]
+      - [0.25, 0.25, 0.125]
+      - [0.30, 0.30, 0.15]
+  - field: kd_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.0015, 0.0015, 0.0]
+      - [0.00225, 0.00225, 0.0]
+      - [0.003, 0.003, 0.0]
+      - [0.00375, 0.00375, 0.0]
+      - [0.0045, 0.0045, 0.0]
+  - field: kff_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.025, 0.025, 0.025]
+      - [0.0375, 0.0375, 0.0375]
+      - [0.05, 0.05, 0.05]
+      - [0.0625, 0.0625, 0.0625]
+      - [0.075, 0.075, 0.075]
+  - field: rate_derivative_filter_hz
+    stage: 2
+    candidates: [10.0, 15.0, 20.0, 25.0, 30.0]
+  - field: max_tilt_cmd_deg
+    stage: 2
+    candidates: [22.5, 33.75, 45.0, 56.25, 67.5]
 
-selection_metric: worst-axis-validation-velocity-nrmse-v1
+selection_metric: policy-execution-controller-quality-v2
 publication_metrics:
   - velocity_rmse_mps
+  - acceleration_rmse_mps2
   - worst_axis_velocity_nrmse
-  - overshoot_mps
-  - settling_rmse_mps
+  - braking_distance_error_m
+  - residual_speed_error_mps
+  - stop_time_error_s
+  - yaw_rate_nrmse
+  - heading_error_deg
+  - combined_endpoint_error_m
 
 probes:
-  - name: fit-x-steps
+  - name: fit-forward-low-speed
     split: fit
     axis: x
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.8, 0.0, 0.0], duration_s: 1.5}
-      - {velocity_body_flu_mps: [-0.6, 0.0, 0.0], duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-  - name: fit-y-steps
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: fit-lateral-low-speed
     split: fit
     axis: y
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.8, 0.0], duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, -0.6, 0.0], duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-  - name: fit-z-steps
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: fit-vertical-low-speed
     split: fit
     axis: z
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.5], duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, -0.4], duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-  - name: validation-x-ramp-reversal
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.08], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.06], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: fit-yaw-steps
+    split: fit
+    axis: yaw
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.35, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.25, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: fit-combined-turns
+    split: fit
+    axis: combined
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.30, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: -0.30, duration_s: 1.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-stage1-approach-brake
     split: validation
     axis: x
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.25, 0.0, 0.0], duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.5, 0.0, 0.0], duration_s: 0.5}
-      - {velocity_body_flu_mps: [-0.35, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-  - name: validation-y-ramp-reversal
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-lateral-ramp-reversal
     split: validation
     axis: y
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.25, 0.0], duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.5, 0.0], duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, -0.35, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-  - name: validation-z-ramp-reversal
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.05, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.09, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, -0.06, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-vertical-ramp-reversal
     split: validation
     axis: z
     commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.15], duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.3], duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, -0.2], duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.05], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-yaw-ramp-reversal
+    split: validation
+    axis: yaw
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.20, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.40, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.30, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-combined-turns
+    split: validation
+    axis: combined
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.25, duration_s: 1.25}
+      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: -0.35, duration_s: 1.25}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: stability-moderate-envelope
+    split: stability
+    axis: combined
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.8, 0.0, 0.0], yaw_rate_radps: 0.6, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, -0.6, 0.3], yaw_rate_radps: -0.5, duration_s: 1.0}
+      - {velocity_body_flu_mps: [-0.5, 0.0, -0.25], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
