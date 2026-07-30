@@ -92,6 +92,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_fraction=0.0,
         kp_att=(8.0, 8.0, 3.0),
         attitude_yaw_weight=0.4,
         kp_rate=(0.3, 0.3, 0.1),
@@ -153,6 +154,27 @@ def test_velocity_hover_action_cancels_weight():
     assert force_body[2] == pytest.approx(_MASS_KG * _GRAVITY, rel=1e-6)
     assert abs(force_body[0]) < 1e-9
     assert abs(force_body[1]) < 1e-9
+    assert np.allclose(torque_body, 0.0, atol=1e-9)
+
+
+def test_velocity_px4_hover_fraction_sets_collective_feed_forward():
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_fraction=0.57,
+        kp_vel=(0.0, 0.0, 0.0),
+        ki_vel=(0.0, 0.0, 0.0),
+        kd_vel=(0.0, 0.0, 0.0),
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+
+    force_body, torque_body = _realized_wrench(params, np.zeros(4), _level_rest_state())
+
+    assert force_body[2] == pytest.approx(0.57 * params.max_total_thrust)
     assert np.allclose(torque_body, 0.0, atol=1e-9)
 
 
@@ -351,7 +373,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     )
 
     geometry = _quad_geometry()
-    settings = _controller_settings()
+    settings = replace(_controller_settings(), hover_thrust_fraction=0.57)
     action_cfg = _action_cfg("velocity")
     numpy_params = build_actuation_params(
         geometry=geometry,

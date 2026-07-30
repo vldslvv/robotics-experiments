@@ -25,6 +25,7 @@ class ControllerSettings:
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3
+    hover_thrust_fraction: float
     kp_att: Vector3
     attitude_yaw_weight: float
     kp_rate: Vector3

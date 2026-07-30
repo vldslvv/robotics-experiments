@@ -85,7 +85,7 @@ class _FlightActuationParams:
     rate_derivative_filter_hz: float | torch.Tensor
     rate_integral_limit_nm: torch.Tensor
     max_body_rate_radps: float
-    hover_thrust_fraction: float
+    hover_thrust_fraction: float | torch.Tensor
     kp_vel: torch.Tensor
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
@@ -331,7 +331,30 @@ def _limited_thrust_world(
     desired_acceleration: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     gravity = torch.tensor([0.0, 0.0, _GRAVITY_M_S2], device=params.device)
-    requested = params.mass * (desired_acceleration + gravity)
+    physical_requested = params.mass * (desired_acceleration + gravity)
+    desired_z = torch.cat(
+        [
+            desired_acceleration[:, :2],
+            torch.full_like(desired_acceleration[:, 2:3], _GRAVITY_M_S2),
+        ],
+        dim=-1,
+    )
+    desired_z = desired_z / desired_z.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    hover_fraction = _environment_values(
+        params.hover_thrust_fraction,
+        desired_acceleration[:, 2],
+    )
+    collective_fraction = (
+        hover_fraction
+        * (1.0 + desired_acceleration[:, 2] / _GRAVITY_M_S2)
+        / desired_z[:, 2].clamp_min(_EPS)
+    )
+    px4_requested = desired_z * collective_fraction.unsqueeze(-1) * params.max_total_thrust
+    requested = torch.where(
+        (hover_fraction > 0.0).unsqueeze(-1),
+        px4_requested,
+        physical_requested,
+    )
     maximum = _environment_values(
         params.max_total_thrust * params.max_collective_thrust_fraction,
         requested[:, 2],
@@ -621,9 +644,13 @@ def build_flight_actuation_params(
             else policy_contract.max_body_rate_radps
         ),
         hover_thrust_fraction=float(
-            action_cfg.hover_thrust_fraction
-            if policy_contract is None
-            else policy_contract.hover_thrust_fraction
+            controller_settings.hover_thrust_fraction
+            if kind == "velocity"
+            else (
+                action_cfg.hover_thrust_fraction
+                if policy_contract is None
+                else policy_contract.hover_thrust_fraction
+            )
         ),
         kp_vel=_tensor(controller_settings.kp_vel),
         ki_vel=_tensor(controller_settings.ki_vel),
@@ -694,6 +721,7 @@ def _replace_controller_settings_batch(
         velocity_filter_hz=_scalars("velocity_filter_hz"),
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
+        hover_thrust_fraction=_scalars("hover_thrust_fraction"),
         kp_att=_vectors("kp_att"),
         attitude_yaw_weight=_scalars("attitude_yaw_weight"),
         max_tilt_rad=_scalars("max_tilt_cmd_deg", radians=True),

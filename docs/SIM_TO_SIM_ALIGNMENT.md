@@ -22,12 +22,13 @@ The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v3` is the current comparison generation and uses alignment
-artifact schema 3. It adds the explicit conversion from PX4's normalized rate
-controller output to the physical body torque consumed by the Lab allocation.
-Schema-2 artifacts retain a unit conversion of one and therefore preserve their
-original behavior; they are not silently promoted to v3 settings. Policies
-remain tied to the complete controller record embedded when they were trained.
+`x500-velocity-px4-v4` is the current comparison generation and uses alignment
+artifact schema 4. It adds PX4's hover-thrust-scaled collective acceleration
+mapping. Schema-2 and schema-3 artifacts retain the exact physical
+`mass * (acceleration + gravity)` feed-forward used when they were published;
+schema-2 artifacts also retain a unit rate-output conversion. Legacy artifacts
+are not silently promoted to v4 settings. Policies remain tied to the complete
+controller record embedded when they were trained.
 
 ## Controller contract
 
@@ -35,7 +36,8 @@ remain tied to the complete controller record embedded when they were trained.
 
 - command delay;
 - velocity P/I/D gains, with D applied to a filtered acceleration estimate;
-- velocity and velocity-derivative filter cutoffs and velocity-integral limits;
+- velocity and velocity-derivative filter cutoffs, velocity-integral limits,
+  and hover-thrust fraction;
 - attitude P gains and yaw weight;
 - body-rate P/I/D/feed-forward gains, rate-derivative filtering, and
   rate-integral limits;
@@ -61,9 +63,12 @@ large-error reduction factor for the next cycle.
 
 Velocity saturation uses conditional integration: an axis does not integrate
 when its error would push farther into a saturated thrust request. Integral
-limits remain active independently. `VehicleState` remains a per-tick
-kinematic snapshot and does not gain acceleration; alignment derives
-acceleration from timestamped trace velocity.
+limits remain active independently. The velocity controller forms desired
+body Z from horizontal acceleration and gravity, converts vertical acceleration
+to normalized collective with the hover-thrust fraction, and divides by the
+body-Z vertical projection, matching PX4's acceleration-control mapping.
+`VehicleState` remains a per-tick kinematic snapshot and does not gain
+acceleration; alignment derives acceleration from timestamped trace velocity.
 
 The public policy contract is unchanged: `press-v1` still consumes 34
 observations and emits four normalized body-velocity/yaw-rate actions.

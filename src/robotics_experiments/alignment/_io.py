@@ -32,8 +32,8 @@ from robotics_experiments.alignment._models import (
 __all__: list[str] = []
 
 _TRACE_SCHEMA_VERSION = 2
-_ARTIFACT_SCHEMA_VERSION = 3
-_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3})
+_ARTIFACT_SCHEMA_VERSION = 4
+_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
@@ -84,11 +84,16 @@ def _settings(
     *,
     value: Any,
     name: str,
-    legacy_schema: bool = False,
+    legacy_rate_output_scale: bool = False,
+    legacy_hover_thrust: bool = False,
 ) -> ControllerSettings:
     settings = _object(value=value, name=name)
-    if legacy_schema and "rate_output_scale_nm" not in settings:
+    if legacy_rate_output_scale and "rate_output_scale_nm" not in settings:
         settings["rate_output_scale_nm"] = [1.0, 1.0, 1.0]
+    if legacy_hover_thrust and "hover_thrust_fraction" not in settings:
+        # Zero is an internal legacy sentinel for the exact physical
+        # mass*(acceleration+gravity) feed-forward used by schema 2 and 3.
+        settings["hover_thrust_fraction"] = 0.0
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -117,6 +122,12 @@ def _settings(
         velocity_integral_limit_mps2=_vector(
             value=settings["velocity_integral_limit_mps2"],
             name=f"{name}.velocity_integral_limit_mps2",
+        ),
+        hover_thrust_fraction=_finite(
+            value=settings["hover_thrust_fraction"],
+            name=f"{name}.hover_thrust_fraction",
+            nonnegative=legacy_hover_thrust,
+            positive=not legacy_hover_thrust,
         ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
         attitude_yaw_weight=_finite(
@@ -194,6 +205,8 @@ def _settings(
             raise ValueError(f"{name}.{field_name} values must be non-negative")
     if not 0.0 <= parsed.attitude_yaw_weight <= 1.0:
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
+    if parsed.hover_thrust_fraction > 1.0:
+        raise ValueError(f"{name}.hover_thrust_fraction must not exceed 1")
     if not (
         0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0
     ):
@@ -615,7 +628,8 @@ def _candidate_score(
     *,
     value: Any,
     name: str,
-    legacy_schema: bool,
+    legacy_rate_output_scale: bool,
+    legacy_hover_thrust: bool,
 ) -> CandidateScore:
     candidate = _object(value=value, name=name)
     metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
@@ -638,7 +652,8 @@ def _candidate_score(
         settings=_settings(
             value=candidate.get("settings"),
             name=f"{name}.settings",
-            legacy_schema=legacy_schema,
+            legacy_rate_output_scale=legacy_rate_output_scale,
+            legacy_hover_thrust=legacy_hover_thrust,
         ),
         usable=usable,
         metrics={
@@ -667,7 +682,8 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
             f"alignment artifact {artifact_path} has unsupported "
             f"schema_version={schema_version!r}"
         )
-    legacy_schema = schema_version == 2
+    legacy_rate_output_scale = schema_version == 2
+    legacy_hover_thrust = schema_version in (2, 3)
     command_interface = _interface(
         value=artifact.get("command_interface"),
         name="command_interface",
@@ -692,7 +708,8 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         _candidate_score(
             value=value,
             name=f"candidates[{index}]",
-            legacy_schema=legacy_schema,
+            legacy_rate_output_scale=legacy_rate_output_scale,
+            legacy_hover_thrust=legacy_hover_thrust,
         )
         for index, value in enumerate(raw_candidates)
     )
@@ -707,7 +724,8 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     parsed_selected_settings = _settings(
         value=artifact.get("selected_settings"),
         name="selected_settings",
-        legacy_schema=legacy_schema,
+        legacy_rate_output_scale=legacy_rate_output_scale,
+        legacy_hover_thrust=legacy_hover_thrust,
     )
     if parsed_selected_settings != selected_matches[0].settings:
         raise ValueError("selected_settings do not match selected candidate")

@@ -312,7 +312,20 @@ def _limited_thrust_world(
     desired_acceleration: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     gravity = np.array([0.0, 0.0, GRAVITY_M_S2])
-    requested = params.mass * (desired_acceleration + gravity)
+    if params.hover_thrust_fraction > 0.0:
+        desired_z = np.array(
+            [desired_acceleration[0], desired_acceleration[1], GRAVITY_M_S2],
+            dtype=np.float64,
+        )
+        desired_z /= max(float(np.linalg.norm(desired_z)), _EPS)
+        collective_fraction = (
+            params.hover_thrust_fraction
+            * (1.0 + desired_acceleration[2] / GRAVITY_M_S2)
+            / max(float(desired_z[2]), _EPS)
+        )
+        requested = desired_z * collective_fraction * params.max_total_thrust
+    else:
+        requested = params.mass * (desired_acceleration + gravity)
     maximum = params.max_total_thrust * params.max_collective_thrust_fraction
     minimum = params.max_total_thrust * params.min_collective_thrust_fraction
     vertical = float(np.clip(requested[2], minimum, maximum))
@@ -600,7 +613,11 @@ def build_actuation_params(
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
         rate_integral_limit_nm=_readonly_copy(controller_settings.rate_integral_limit_nm),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
-        hover_thrust_fraction=float(action_cfg.hover_thrust_fraction),
+        hover_thrust_fraction=float(
+            controller_settings.hover_thrust_fraction
+            if kind == "velocity"
+            else action_cfg.hover_thrust_fraction
+        ),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),

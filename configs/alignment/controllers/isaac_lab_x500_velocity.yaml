@@ -1,5 +1,5 @@
-alignment_id: x500-velocity-px4-v3
-controller_id: isaac-lab-x500-velocity-v3
+alignment_id: x500-velocity-px4-v4
+controller_id: isaac-lab-x500-velocity-v4
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -23,6 +23,8 @@ settings:
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
+  # PX4 MPC_USE_HTE was active and estimated 0.55-0.58 in diagnostic flight.
+  hover_thrust_fraction: 0.57
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -57,6 +59,9 @@ parameters:
   - field: velocity_derivative_filter_hz
     stage: 1
     candidates: [2.5, 3.75, 5.0, 6.25, 7.5]
+  - field: hover_thrust_fraction
+    stage: 1
+    candidates: [0.45, 0.50, 0.55, 0.57, 0.60, 0.65]
   - field: kp_vel
     stage: 1
     candidates:

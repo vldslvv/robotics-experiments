@@ -61,6 +61,7 @@ def _settings(
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
+        hover_thrust_fraction=0.5,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
@@ -728,7 +729,7 @@ def test_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None
         load_alignment_artifact(path)
 
 
-def test_artifact_schema_v3_and_legacy_v2_rate_output_scale(tmp_path: Path) -> None:
+def test_artifact_schema_v4_preserves_legacy_controller_mappings(tmp_path: Path) -> None:
     known = _settings(kp=(1.0, 1.0, 1.0))
     reference = _definition(
         backend="px4-sitl",
@@ -737,20 +738,36 @@ def test_artifact_schema_v3_and_legacy_v2_rate_output_scale(tmp_path: Path) -> N
     target = _definition(backend="isaac-lab", evaluator=_Evaluator())
     run_dir = tmp_path / "run"
     artifact = align(target, reference)
-    assert artifact.schema_version == 3
+    assert artifact.schema_version == 4
     write_alignment_artifact(artifact=artifact, run_dir=run_dir)
     path = run_dir / "alignment.json"
     payload = json.loads(path.read_text())
+    schema4_payload = json.loads(json.dumps(payload))
+    payload["schema_version"] = 3
+    payload["selected_settings"].pop("hover_thrust_fraction")
+    for candidate in payload["candidates"]:
+        candidate["settings"].pop("hover_thrust_fraction")
+    path.write_text(json.dumps(payload))
+
+    loaded = load_alignment_artifact(path)
+
+    assert loaded.schema_version == 3
+    assert loaded.selected_settings.hover_thrust_fraction == 0.0
+
+    payload = schema4_payload
     payload["schema_version"] = 2
     payload["selected_settings"].pop("rate_output_scale_nm")
+    payload["selected_settings"].pop("hover_thrust_fraction")
     for candidate in payload["candidates"]:
         candidate["settings"].pop("rate_output_scale_nm")
+        candidate["settings"].pop("hover_thrust_fraction")
     path.write_text(json.dumps(payload))
 
     loaded = load_alignment_artifact(path)
 
     assert loaded.schema_version == 2
     assert loaded.selected_settings.rate_output_scale_nm == (1.0, 1.0, 1.0)
+    assert loaded.selected_settings.hover_thrust_fraction == 0.0
 
 
 def test_artifact_loader_rejects_unsupported_backend_and_ranking_mismatch(

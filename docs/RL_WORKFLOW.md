@@ -26,18 +26,20 @@ Both tasks use the task-neutral actuation seam from
 body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
 control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
-PX4 is bypassed in Lab, but the schema-3 aligned controller is a stateful
+PX4 is bypassed in Lab, but the schema-4 aligned controller is a stateful
 PX4-like velocity, attitude, and rate cascade with filtered acceleration
 feedback, integrators, thrust saturation/anti-windup, and rate
 PID/feed-forward. Its per-axis rate-output scale converts PX4's normalized
-rate-controller output to the physical N-m body torque used by Lab. Schema-2
-artifacts retain their original unit scale for reproducibility. Attitude
-tracking uses PX4's thrust-prioritized reduced-quaternion law, and zero
-velocity-filter cutoff has PX4's disabled/pass-through meaning. The pinned Isaac Lab
-`isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
-references. Controller gains, filters, integral and thrust limits, command
-delay, tilt, and thruster response come from an immutable alignment artifact
-rather than `rl.action`.
+rate-controller output to the physical N-m body torque used by Lab. Its
+hover-thrust fraction maps acceleration to normalized PX4 collective demand.
+Schema-2 and schema-3 artifacts retain their original physical collective
+feed-forward for reproducibility, and schema 2 retains its unit rate-output
+scale. Attitude tracking uses PX4's thrust-prioritized reduced-quaternion law,
+and zero velocity-filter cutoff has PX4's disabled/pass-through meaning. The
+pinned Isaac Lab `isaaclab_contrib.actuators.Thruster` realizes the resulting
+per-rotor thrust references. Controller gains, filters, integral and thrust
+limits, command delay, tilt, and thruster response come from an immutable
+alignment artifact rather than `rl.action`.
 The project still owns allocation, per-rotor yaw reaction, drag, and the sole
 body-wrench sink because the pusher-equipped articulation is not a pure
 multirotor asset.
@@ -51,7 +53,7 @@ PX4 SITL is the response reference for the separate, policy-independent
 alignment subsystem. Run `make align-controllers`, then
 `make test-integration-alignment-target`; see
 `docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
-`.build/alignment/x500-velocity-px4-v2/best` by default until v3 alignment is
+`.build/alignment/x500-velocity-px4-v2/best` by default until v4 alignment is
 accepted, and may select an exact run with `ALIGNMENT_ARTIFACT`. The command
 buffer, velocity/rate controller state, and thruster state are cleared on every
 environment reset.

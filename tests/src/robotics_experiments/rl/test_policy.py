@@ -59,6 +59,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_fraction=0.5,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
@@ -178,6 +179,17 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="max_yaw_rate_radps"):
         load_policy_metadata(artifact_dir=tmp_path)
+
+
+def test_schema3_policy_metadata_preserves_physical_collective_mapping(tmp_path: Path) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 3
+    metadata["alignment"]["settings"].pop("hover_thrust_fraction")
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.hover_thrust_fraction == 0.0
 
 
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
@@ -537,7 +549,7 @@ def test_current_press_artifact_preflights_when_available() -> None:
         with pytest.raises(ValueError, match="alignment"):
             validate_policy_artifact(artifact_dir=artifact)
         return
-    if metadata["alignment"].get("schema_version") != 2:
+    if metadata["alignment"].get("schema_version") not in (2, 3, 4):
         with pytest.raises(ValueError, match="alignment schema"):
             validate_policy_artifact(artifact_dir=artifact)
         return

@@ -33,6 +33,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_fraction=0.5,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),

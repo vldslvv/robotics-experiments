@@ -232,7 +232,7 @@ def _alignment_settings(
                 "must be a non-empty string"
             )
     schema_version = alignment.get("schema_version")
-    if schema_version not in (2, 3):
+    if schema_version not in (2, 3, 4):
         raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
     if type(alignment.get("advisory_quality_passed")) is not bool:
         raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
@@ -264,6 +264,15 @@ def _alignment_settings(
             return 1.0, 1.0, 1.0
         return vector("rate_output_scale_nm")
 
+    def hover_thrust_fraction() -> float:
+        if schema_version in (2, 3) and "hover_thrust_fraction" not in settings:
+            return 0.0
+        return _finite_positive(
+            value=settings.get("hover_thrust_fraction"),
+            name="alignment.settings.hover_thrust_fraction",
+            artifact_dir=artifact_dir,
+        )
+
     delay = settings.get("command_delay_s")
     if (
         isinstance(delay, bool)
@@ -280,7 +289,7 @@ def _alignment_settings(
         kp_vel=vector("kp_vel"),
         ki_vel=vector("ki_vel"),
         kd_vel=vector("kd_vel"),
-        velocity_filter_hz=_finite_positive(
+        velocity_filter_hz=_finite_nonnegative(
             value=settings.get("velocity_filter_hz"),
             name="alignment.settings.velocity_filter_hz",
             artifact_dir=artifact_dir,
@@ -291,6 +300,7 @@ def _alignment_settings(
             artifact_dir=artifact_dir,
         ),
         velocity_integral_limit_mps2=vector("velocity_integral_limit_mps2"),
+        hover_thrust_fraction=hover_thrust_fraction(),
         kp_att=vector("kp_att"),
         attitude_yaw_weight=_finite_nonnegative(
             value=settings.get("attitude_yaw_weight"),
@@ -348,6 +358,11 @@ def _alignment_settings(
         raise ValueError(
             f"policy artifact {artifact_dir} alignment.settings.attitude_yaw_weight "
             "must be in [0, 1]"
+        )
+    if controller_settings.hover_thrust_fraction > 1.0:
+        raise ValueError(
+            f"policy artifact {artifact_dir} alignment.settings.hover_thrust_fraction "
+            "must not exceed 1"
         )
     if not (
         0.0
