@@ -557,6 +557,35 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
     assert body_ids == [2]
 
 
+def test_lab_velocity_action_latches_world_setpoint_at_command_boundary():
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+        _latch_velocity_action_world,
+        _world_velocity_action_to_body,
+    )
+
+    initial_yaw = math.radians(30.0)
+    current_yaw = math.radians(75.0)
+    action = torch.tensor([[0.4, -0.2, 0.1, 0.3]])
+    initial_attitude = torch.tensor(
+        [[math.cos(initial_yaw / 2.0), 0.0, 0.0, math.sin(initial_yaw / 2.0)]]
+    )
+    current_attitude = torch.tensor(
+        [[math.cos(current_yaw / 2.0), 0.0, 0.0, math.sin(current_yaw / 2.0)]]
+    )
+
+    world_action = _latch_velocity_action_world(action, initial_attitude)
+    current_body_action = _world_velocity_action_to_body(world_action, current_attitude)
+    recovered_world_action = _latch_velocity_action_world(
+        current_body_action,
+        current_attitude,
+    )
+
+    assert torch.allclose(recovered_world_action, world_action, atol=1e-6)
+    assert torch.equal(world_action[:, 2:], action[:, 2:])
+    assert not torch.allclose(current_body_action[:, :2], action[:, :2])
+
+
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (

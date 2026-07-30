@@ -144,6 +144,36 @@ def _matrix_from_quat_wxyz(quat: torch.Tensor) -> torch.Tensor:
     return torch.stack([row0, row1, row2], dim=-2)
 
 
+def _latch_velocity_action_world(
+    action: torch.Tensor,
+    attitude_wxyz: torch.Tensor,
+    /,
+) -> torch.Tensor:
+    """Rotate a body-velocity action into the world frame at command receipt."""
+    rotation = _matrix_from_quat_wxyz(attitude_wxyz)
+    yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
+    cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
+    latched = action.clone()
+    latched[:, 0] = cos_yaw * action[:, 0] - sin_yaw * action[:, 1]
+    latched[:, 1] = sin_yaw * action[:, 0] + cos_yaw * action[:, 1]
+    return latched
+
+
+def _world_velocity_action_to_body(
+    action: torch.Tensor,
+    attitude_wxyz: torch.Tensor,
+    /,
+) -> torch.Tensor:
+    """Express a latched world-velocity action in the current body-yaw frame."""
+    rotation = _matrix_from_quat_wxyz(attitude_wxyz)
+    yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
+    cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
+    body = action.clone()
+    body[:, 0] = cos_yaw * action[:, 0] + sin_yaw * action[:, 1]
+    body[:, 1] = -sin_yaw * action[:, 0] + cos_yaw * action[:, 1]
+    return body
+
+
 def _canonical_quat(quat: torch.Tensor, /) -> torch.Tensor:
     normalized = quat / quat.norm(dim=-1, keepdim=True).clamp_min(_EPS)
     return torch.where(normalized[:, :1] < 0.0, -normalized, normalized)

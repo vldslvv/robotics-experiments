@@ -147,6 +147,13 @@ offset and makes the reduced Lab wrench equivalent to the bridge's individual
 rotor forces at their body-frame positions without using PhysX's substantially
 slower positioned-force path.
 
+The velocity policy interface remains body-FLU. At each policy command update,
+Lab rotates that body velocity into a world-ENU setpoint using the current
+heading and latches it through the intervening physics ticks. This reproduces
+PX4 v1.17's `MAV_FRAME_BODY_NED` receive boundary: each MAVLink message is
+converted once to a local-frame trajectory setpoint rather than being
+reinterpreted against changing yaw at controller rate.
+
 Old manual missions and trained warehouse-policy traces are diagnostic design
 inputs only. They must never be included in fit or validation samples.
 
@@ -286,16 +293,17 @@ changes. Run checkpoint selection, independent Lab evaluation, the three-range
 physical transfer gate, and the complete approach mission in that order. Stop
 and preserve diagnostics at the first failure.
 
-An alignment campaign makes at most five completed attempts. Every attempt is
-committed separately with its hypothesis and result. If an attempt does not
-reduce the failed-gate count, or reduce the largest normalized gate excess by
-at least 20% without regressing a passed gate, use trace and ULog evidence to
-expand up to four meaningful controller parameters or ranges before the next
-attempt. Candidate additions may cover acceleration/jerk limits, saturation,
-integral limits, or further estimator/controller filters when the evidence
-locates the mismatch there; plant-owned quantities remain outside gain fitting.
-Two consecutive no-progress attempts after an evidence-backed expansion end
-the campaign early.
+An alignment campaign has no fixed attempt cap while a completed attempt makes
+material progress or trace and ULog evidence identifies a new correction to
+test. Every attempt is committed separately with its hypothesis and result. If
+an attempt does not reduce the failed-gate count, or reduce the largest
+normalized gate excess by at least 20% without regressing a passed gate, use
+trace and ULog evidence to expand up to four meaningful controller parameters
+or ranges before the next attempt. Candidate additions may cover
+acceleration/jerk limits, saturation, integral limits, or further
+estimator/controller filters when the evidence locates the mismatch there;
+plant-owned quantities remain outside gain fitting. Two consecutive
+no-progress attempts with no evidence-backed correction left end the campaign.
 
 Vector-valued `ParameterSpec` candidates need not keep roll/pitch or
 horizontal-axis values tied. When per-probe evidence shows conflicting axis
