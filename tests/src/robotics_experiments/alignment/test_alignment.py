@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from robotics_experiments.alignment import (
     load_alignment_artifact,
     load_controller_definition,
 )
+from robotics_experiments.alignment._align import _resolved_experiment_fingerprint
 from robotics_experiments.alignment._io import (
     _TraceFileEvaluator,
     publish_alignment,
@@ -253,6 +255,11 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
     )
     assert target.backend == "isaac-lab"
+    assert [(parameter.field, parameter.stage) for parameter in target.parameters[-3:]] == [
+        ("thruster_tau_inc_s", 3),
+        ("thruster_tau_dec_s", 3),
+        ("thruster_max_thrust_rate_nps", 3),
+    ]
     extended = replace(
         target,
         parameters=(
@@ -556,6 +563,35 @@ def test_artifact_publication_tracks_latest_best_and_comparable_generation(
     loaded = load_alignment_artifact(root / "best")
     assert loaded.run_id == "third"
     assert not loaded.advisory_quality_passed
+
+
+def test_experiment_fingerprint_includes_capture_but_excludes_execution(
+    tmp_path: Path,
+) -> None:
+    definition = _definition(backend="isaac-lab", evaluator=_Evaluator())
+    fingerprints = []
+    for name, old, new in (
+        ("baseline", "", ""),
+        ("execution", "worker_count: 3", "worker_count: 2"),
+        ("capture", "stable_hold_s: 0.5", "stable_hold_s: 0.6"),
+    ):
+        root = tmp_path / name / "configs"
+        shutil.copytree(REPO_ROOT / "configs", root)
+        base = root / "base.yaml"
+        if old:
+            base.write_text(base.read_text().replace(old, new))
+        fingerprints.append(
+            _resolved_experiment_fingerprint(
+                target=replace(
+                    definition,
+                    experiment_config=str(root / "alignment_px4_x500_velocity.yaml"),
+                ),
+                repo_root=REPO_ROOT,
+            )
+        )
+
+    assert fingerprints[0] == fingerprints[1]
+    assert fingerprints[0] != fingerprints[2]
 
 
 def test_artifact_loader_rejects_nonfinite_settings(tmp_path: Path) -> None:

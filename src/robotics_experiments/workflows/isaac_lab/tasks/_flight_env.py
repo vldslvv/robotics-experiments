@@ -279,7 +279,32 @@ class _FlightDirectRLEnv(DirectRLEnv):
             num_envs=self.num_envs,
             device=self.device,
         )
-        self._thruster.reset_idx(torch.arange(self.num_envs, device=self.device))
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        self._thruster.reset_idx(env_ids)
+        tau_inc = [
+            settings.thruster_tau_inc_s
+            for settings in controller_settings
+            for _environment in range(environments_per_setting)
+        ]
+        tau_dec = [
+            settings.thruster_tau_dec_s
+            for settings in controller_settings
+            for _environment in range(environments_per_setting)
+        ]
+        max_rate = [
+            settings.thruster_max_thrust_rate_nps
+            for settings in controller_settings
+            for _environment in range(environments_per_setting)
+        ]
+        self._thruster.tau_inc_s[:] = torch.as_tensor(
+            tau_inc, dtype=torch.float32, device=self.device
+        ).unsqueeze(1)
+        self._thruster.tau_dec_s[:] = torch.as_tensor(
+            tau_dec, dtype=torch.float32, device=self.device
+        ).unsqueeze(1)
+        self._thruster.max_rate[:] = torch.as_tensor(
+            max_rate, dtype=torch.float32, device=self.device
+        ).unsqueeze(1)
 
     def _reset_drone(
         self,

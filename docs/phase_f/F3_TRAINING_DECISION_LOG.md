@@ -2506,3 +2506,115 @@ Proceed in this order:
    three-range physical warehouse transfer gate, and then the complete approach
    mission. Stop at the first failed gate and append its artifact references and
    metric distribution here.
+
+### 54. Reject the corrected alignment v2 run at the exact-action gate
+
+Date: 2026-07-30.
+
+The diagnosis from section 53 confirmed two reference-capture defects. PX4
+expects NED yaw-rate setpoints, but the FLU probe yaw rate had been sent without
+the required sign inversion. In addition, each probe captured its initial state
+while the vehicle could still be settling from the preceding priming motion.
+The capture now sends a neutral setpoint before every profile and requires both
+a minimum neutral duration and a continuous stable hold before recording. The
+stability predicate covers linear and angular speed plus tilt, has an explicit
+timeout, and the yaw probe rejects a response with the wrong sign.
+
+The first corrected capture stopped at profile 5 because its original
+0.01 m/s linear and 0.02 rad/s angular stability bounds were below the measured
+PX4 hover noise. The preserved ULog showed linear speed up to 0.0140 m/s,
+angular speed up to 0.0286 rad/s, and tilt below 0.117 degrees during the
+failed precondition. The bounds were therefore changed to 0.02 m/s and
+0.03 rad/s while retaining a 3.0 s minimum neutral period and a 0.5 s
+continuous stable hold. These are capture-validity tolerances, not controller
+fit parameters. The next capture completed all 11 profiles:
+
+- run: `.build/alignment/x500-velocity-px4-v2/20260730T035141Z`;
+- integration artifact:
+  `.build/docker/integration/alignment-capture-reference.20260730T035143Z.21779`;
+- PX4 ULog: `px4/logs/0/2026-07-30/03_51_54.ulg`.
+
+The corrected instantaneous search evaluated 818 candidates and selected
+candidate 558. Its exact-action result improved yaw substantially but still
+failed residual speed, stop time, worst-axis velocity, heading, and combined
+endpoint quality. A fresh controller-state replay measured normalized
+rotor-speed RMSE 0.00865 and collective-thrust RMSE 0.08518 N. The latter
+exceeded the 0.05 N trigger, so the declared third search stage was activated
+for actuator rise, fall, and thrust-slew settings.
+
+The complete three-stage run
+`.build/alignment/x500-velocity-px4-v2/20260730T041659Z` reused the byte-identical
+fresh reference, evaluated 921 candidates, and selected candidate 849 with:
+
+- command delay `0.036 s`;
+- velocity P/I/D `[2.7, 2.7, 6.0]`, `[0.3, 0.3, 1.5]`, and
+  `[0.2, 0.2, 0.0]`;
+- velocity and velocity-derivative cutoffs `0.95493 Hz` and `2.5 Hz`;
+- attitude P `[4.0, 4.0, 2.8]` with yaw weight `0.5`;
+- rate P/I/D `[0.15, 0.15, 0.2]`, `[0.2, 0.2, 0.1]`, and
+  `[0.0015, 0.0015, 0.0]`, with zero feed-forward;
+- rate-derivative cutoff `30 Hz` and tilt limit `45 degrees`;
+- actuator rise/fall time constants `0.01/0.0 s` and effectively unlimited
+  thrust slew (`100000 N/s`).
+
+Its held-out result was:
+
+| Held-out metric | Result | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 2.725 mm | 5 mm |
+| Residual-speed error | 0.01841 m/s | 0.01 m/s |
+| Stop-time error | 0.840 s | 0.10 s |
+| Worst-axis velocity NRMSE | 80.32% | 10% |
+| Yaw-rate NRMSE | 4.23% | 10% |
+| Heading error | 3.761 deg | 3 deg |
+| Combined endpoint error | 101.55 mm | 10 mm |
+
+The x/y/z velocity NRMSE values were 80.32%, 35.13%, and 22.06%;
+aggregate validation velocity RMSE was 0.04137 m/s. Braking distance and yaw
+rate pass, but the other five criteria do not. This corrected run therefore
+replaces section 53 as the current exact-action evidence and is rejected at the
+same first advisory gate. The comparison fingerprint is
+`0dab2650c46eb4c6e15552704970759770154c1442be191f12cfb3d8c41cbb34`.
+
+Candidate sharding is now configurable and preserves deterministic candidate
+partitioning and merge order. A three-worker run averaged 95.49% GPU
+utilization but processed only 1.10 candidates/s over 743 s. The one-worker
+three-stage run averaged 37.07% GPU utilization but processed
+3.60 candidates/s over 256 s. The three-worker configuration contends in
+Isaac/PhysX and is 3.27 times slower in useful throughput, so one worker is the
+current default. Retain the sharding architecture for hardware where measured
+candidate throughput improves; GPU utilization alone is not an acceptance
+metric.
+
+Decision: Do not run the alignment integration target, closed-loop actor
+comparison, retraining, checkpoint selection, physical transfer, or complete
+mission. Exact-action controller response still fails before those gates.
+Existing actors also remain incompatible with any eventually accepted new
+controller settings, so a fresh 300-iteration Stage 1 training run is required
+only after alignment passes.
+
+Proceed in this order:
+
+1. Diagnose the per-probe x-axis residual and stop-time traces before expanding
+   the search. The selected horizontal and vertical velocity P gains reached
+   the current candidate maxima and the derivative cutoff reached its minimum;
+   treat those boundary selections as evidence to inspect, not automatic
+   authority to widen ranges.
+2. Verify that the compared state and filter inputs represent the same PX4
+   estimator quantities and that actuator-realized collective thrust is
+   compared at the correct boundary. Confirm the shared mass, rotor geometry,
+   thrust curve, allocation, drag, saturation, and anti-windup contracts.
+3. Fix any confirmed controller or plant mismatch directly. If the contracts
+   are correct, revise only declarative `ParameterSpec` ranges or staging from
+   the failed-trace evidence and rerun capture, replay, sweep, and held-out fit
+   under the resulting comparison fingerprint.
+4. Require all v2 advisory thresholds to pass before the closed-loop actor
+   comparison. Then report observation, action, and state divergence
+   separately.
+5. Only after exact-action and closed-loop alignment pass, retrain Stage 1 from
+   scratch for 300 iterations with the accepted artifact embedded as
+   provenance, unchanged reward and PPO parameters, and no domain
+   randomization.
+6. Continue with automatic checkpoint selection, independent Lab evaluation,
+   the three-range physical transfer gate, and the complete approach mission,
+   stopping and preserving diagnostics at the first failed gate.

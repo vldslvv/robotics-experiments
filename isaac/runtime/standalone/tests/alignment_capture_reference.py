@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ from robotics_experiments.commanding import (
     PolicyResult,
     VelocitySetpoint,
 )
+from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.px4_bridge import body_velocity_flu_from_state
 
 _REFERENCE_ENV = "ALIGNMENT_REFERENCE"
@@ -56,6 +58,9 @@ class _Sample:
 class _ProbeState:
     profile_index: int
     command_index: int
+    phase: str
+    phase_started_us: int
+    stable_started_us: int
     command_started_us: int
     initials: tuple[_InitialState, ...]
     samples: tuple[_Sample, ...]
@@ -87,7 +92,23 @@ def _initial(*, profile: str, policy_input: PolicyInput) -> _InitialState:
     )
 
 
-def _advance_factory(*, definition: ControllerDefinition):
+def _is_stable(*, policy_input: PolicyInput, config: ExperimentConfig) -> bool:
+    vehicle = policy_input.vehicle_state
+    linear_speed = math.sqrt(sum(float(value) ** 2 for value in vehicle.linear_velocity_enu))
+    angular_speed = math.sqrt(sum(float(value) ** 2 for value in vehicle.angular_velocity_flu))
+    w, x, y, _z = (float(value) for value in vehicle.orientation_flu_enu_wxyz)
+    body_z_alignment = max(-1.0, min(1.0, 1.0 - 2.0 * (x * x + y * y)))
+    tilt_deg = math.degrees(math.acos(body_z_alignment))
+    capture = config.alignment.capture
+    return (
+        linear_speed <= capture.max_linear_speed_mps
+        and angular_speed <= capture.max_angular_speed_radps
+        and tilt_deg <= capture.max_tilt_deg
+        and math.isfinite(w)
+    )
+
+
+def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
     profiles = definition.probes
 
     def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
@@ -95,15 +116,62 @@ def _advance_factory(*, definition: ControllerDefinition):
             raise TypeError(f"alignment probe state has unexpected type {type(state).__name__}")
         profile_index = state.profile_index
         command_index = state.command_index
+        phase = state.phase
+        phase_started_us = state.phase_started_us
+        stable_started_us = state.stable_started_us
         command_started_us = state.command_started_us
         initials = state.initials
-        if command_started_us < 0:
-            command_started_us = policy_input.sim_time_us
-            initials = (_initial(profile=profiles[0].name, policy_input=policy_input),)
+        now_us = policy_input.sim_time_us
+        capture = config.alignment.capture
+        neutral = VelocitySetpoint(0.0, 0.0, 0.0, 0.0)
+        if phase == "precondition":
+            if phase_started_us < 0:
+                phase_started_us = now_us
+            elapsed_us = now_us - phase_started_us
+            if elapsed_us > round(capture.timeout_s * 1_000_000):
+                return PolicyResult(
+                    state=state,
+                    setpoint=neutral,
+                    failure_reason=(
+                        f"alignment profile {profiles[profile_index].name!r} did not "
+                        f"stabilize within {capture.timeout_s:.1f}s"
+                    ),
+                )
+            minimum_elapsed = elapsed_us >= round(capture.minimum_neutral_s * 1_000_000)
+            if minimum_elapsed and _is_stable(policy_input=policy_input, config=config):
+                if stable_started_us < 0:
+                    stable_started_us = now_us
+            else:
+                stable_started_us = -1
+            stable_elapsed = stable_started_us >= 0 and (
+                now_us - stable_started_us >= round(capture.stable_hold_s * 1_000_000)
+            )
+            if not stable_elapsed:
+                return PolicyResult(
+                    state=_ProbeState(
+                        profile_index=profile_index,
+                        command_index=0,
+                        phase="precondition",
+                        phase_started_us=phase_started_us,
+                        stable_started_us=stable_started_us,
+                        command_started_us=-1,
+                        initials=initials,
+                        samples=state.samples,
+                        complete=False,
+                    ),
+                    setpoint=neutral,
+                )
+            initials = (
+                *initials,
+                _initial(profile=profiles[profile_index].name, policy_input=policy_input),
+            )
+            phase = "probe"
+            command_index = 0
+            command_started_us = now_us
         while profile_index < len(profiles):
             command = profiles[profile_index].commands[command_index]
             duration_us = int(round(command.duration_s * 1_000_000))
-            if policy_input.sim_time_us - command_started_us < duration_us:
+            if now_us - command_started_us < duration_us:
                 break
             command_started_us += duration_us
             command_index += 1
@@ -112,17 +180,27 @@ def _advance_factory(*, definition: ControllerDefinition):
             profile_index += 1
             command_index = 0
             if profile_index < len(profiles):
-                initials = (
-                    *initials,
-                    _initial(
-                        profile=profiles[profile_index].name,
-                        policy_input=policy_input,
+                return PolicyResult(
+                    state=_ProbeState(
+                        profile_index=profile_index,
+                        command_index=0,
+                        phase="precondition",
+                        phase_started_us=now_us,
+                        stable_started_us=-1,
+                        command_started_us=-1,
+                        initials=initials,
+                        samples=state.samples,
+                        complete=False,
                     ),
+                    setpoint=neutral,
                 )
         if profile_index == len(profiles):
             successor = _ProbeState(
                 profile_index=profile_index,
                 command_index=0,
+                phase="complete",
+                phase_started_us=phase_started_us,
+                stable_started_us=stable_started_us,
                 command_started_us=command_started_us,
                 initials=initials,
                 samples=state.samples,
@@ -151,6 +229,9 @@ def _advance_factory(*, definition: ControllerDefinition):
         successor = _ProbeState(
             profile_index=profile_index,
             command_index=command_index,
+            phase=phase,
+            phase_started_us=phase_started_us,
+            stable_started_us=stable_started_us,
             command_started_us=command_started_us,
             initials=initials,
             samples=(*state.samples, sample),
@@ -162,14 +243,14 @@ def _advance_factory(*, definition: ControllerDefinition):
                 forward_mps=command[0],
                 right_mps=-command[1],
                 down_mps=-command[2],
-                yaw_rate_radps=probe_command.yaw_rate_radps,
+                yaw_rate_radps=-probe_command.yaw_rate_radps,
             ),
         )
 
     return advance
 
 
-def _policy_factory(*, definition: ControllerDefinition):
+def _policy_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
     def factory(*, artifact: str, hold_s: float | None) -> PolicyAdapter:
         if artifact != "alignment-probe" or hold_s is not None:
             raise ValueError("alignment capture requires its injected alignment-probe step")
@@ -178,15 +259,45 @@ def _policy_factory(*, definition: ControllerDefinition):
             initial_state=_ProbeState(
                 profile_index=0,
                 command_index=0,
+                phase="precondition",
+                phase_started_us=-1,
+                stable_started_us=-1,
                 command_started_us=-1,
                 initials=(),
                 samples=(),
                 complete=False,
             ),
-            advance=_advance_factory(definition=definition),
+            advance=_advance_factory(definition=definition, config=config),
         )
 
     return factory
+
+
+def _assert_yaw_response_sign(*, samples: tuple[_Sample, ...]) -> None:
+    segment: list[_Sample] = []
+    previous_command = 0.0
+
+    def validate(values: list[_Sample], command: float) -> None:
+        if not values or abs(command) < 1e-9:
+            return
+        settled = values[len(values) // 2 :]
+        mean_rate = sum(sample.angular_velocity_body_flu_radps[2] for sample in settled) / len(
+            settled
+        )
+        if command * mean_rate <= 0.0:
+            raise AssertionError(
+                "PX4 alignment yaw response sign disagrees with the body-FLU "
+                f"command: command={command:.3f}rad/s response={mean_rate:.3f}rad/s"
+            )
+
+    for sample in samples:
+        command = sample.command_yaw_rate_radps
+        if segment and not math.isclose(command, previous_command, abs_tol=1e-9):
+            validate(segment, previous_command)
+            segment = []
+        segment.append(sample)
+        previous_command = command
+    validate(segment, previous_command)
 
 
 def _write_capture(
@@ -197,6 +308,7 @@ def _write_capture(
 ) -> None:
     if not state.complete or len(state.initials) != len(definition.probes):
         raise AssertionError("PX4 alignment probe adapter did not complete every profile")
+    _assert_yaw_response_sign(samples=state.samples)
     traces = []
     for profile, initial in zip(definition.probes, state.initials, strict=True):
         samples = tuple(sample for sample in state.samples if sample.profile == profile.name)
@@ -262,7 +374,7 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
             test_name=_TEST_NAME,
             px4_container_log_name="alignment_capture_reference_px4.log",
             post_routine_hook=post_routine,
-            policy_factory=_policy_factory(definition=definition),
+            policy_factory=_policy_factory(definition=definition, config=context.config),
             success_label="PX4 controller alignment probes",
         ),
     )

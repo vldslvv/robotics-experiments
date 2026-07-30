@@ -30,10 +30,12 @@ gap once real flights exist, and to track sim-vs-sim drift in the meantime.
 
 `controller_state_replay.py` is an independent timestamped state-replay
 diagnostic. It replays PX4 ULog estimator state and velocity setpoints
-sequentially through the stateful numpy reference for Isaac Lab's velocity
-cascade, advances filters and integrators by each logged interval, converts PX4
-motor controls through the configured Pegasus scaling, and compares per-rotor
-angular velocity, collective thrust, and body torque at the same timestamps.
+through the stateful numpy reference for Isaac Lab's velocity cascade on the
+configured 250 Hz physics grid. Setpoints use zero-order hold, velocities and
+rates are linearly interpolated, and attitudes use normalized shortest-path
+quaternion interpolation. The tool converts PX4 motor controls through the
+configured Pegasus scaling and compares per-rotor angular velocity, collective
+thrust, and body torque at logged actuator timestamps.
 This is a diagnostic, not the controller-alignment publication path.
 
 ```bash

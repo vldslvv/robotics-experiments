@@ -5,10 +5,6 @@ defaults:
 
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
-# One environment per pair in the largest candidate/probe beam expansion.
-rl:
-  num_envs: 528
-
 vehicles:
   x500_01:
     id: 0
@@ -25,4 +21,4 @@ vehicles:
         - kind: policy
           label: alignment-probes
           artifact: alignment-probe
-          timeout_s: 90.0
+          timeout_s: 150.0

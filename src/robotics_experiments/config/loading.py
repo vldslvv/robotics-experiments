@@ -169,6 +169,35 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
 
 
+def _validate_alignment(experiment: ExperimentConfig) -> None:
+    capture = experiment.alignment.capture
+    positive_capture = {
+        "minimum_neutral_s": capture.minimum_neutral_s,
+        "stable_hold_s": capture.stable_hold_s,
+        "timeout_s": capture.timeout_s,
+        "max_linear_speed_mps": capture.max_linear_speed_mps,
+        "max_angular_speed_radps": capture.max_angular_speed_radps,
+        "max_tilt_deg": capture.max_tilt_deg,
+    }
+    for name, value in positive_capture.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"alignment.capture.{name} must be finite and positive")
+    if capture.timeout_s <= capture.minimum_neutral_s + capture.stable_hold_s:
+        raise ValueError(
+            "alignment.capture.timeout_s must exceed minimum_neutral_s plus stable_hold_s"
+        )
+    execution = experiment.alignment.execution
+    if execution.worker_count <= 0:
+        raise ValueError("alignment.execution.worker_count must be positive")
+    if (
+        not math.isfinite(execution.gpu_target_percent)
+        or not 0.0 < execution.gpu_target_percent <= 100.0
+    ):
+        raise ValueError("alignment.execution.gpu_target_percent must be in (0, 100]")
+    if not math.isfinite(execution.gpu_sample_interval_s) or execution.gpu_sample_interval_s <= 0.0:
+        raise ValueError("alignment.execution.gpu_sample_interval_s must be finite and positive")
+
+
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     if not experiment.rl.training.alignment_artifact.strip():
         raise ValueError("rl.training.alignment_artifact must be non-empty")
@@ -448,6 +477,7 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
+    _validate_alignment(experiment)
     _validate_rl_policies(experiment)
     _validate_press_approach(experiment)
     _validate_switches(experiment)

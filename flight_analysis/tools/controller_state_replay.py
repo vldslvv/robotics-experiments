@@ -58,6 +58,45 @@ def _nearest_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray
     return np.where(use_lower, lower, upper)
 
 
+def _hold_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray:
+    return np.clip(np.searchsorted(source_t, query_t, side="right") - 1, 0, len(source_t) - 1)
+
+
+def _linear_interpolate(
+    *,
+    source_t: np.ndarray,
+    values: np.ndarray,
+    query_t: np.ndarray,
+) -> np.ndarray:
+    columns = values.reshape(len(values), -1)
+    result = np.column_stack(
+        [np.interp(query_t, source_t, columns[:, index]) for index in range(columns.shape[1])]
+    )
+    return result.reshape((len(query_t), *values.shape[1:]))
+
+
+def _interpolate_quaternions(
+    *,
+    source_t: np.ndarray,
+    quaternions_wxyz: np.ndarray,
+    query_t: np.ndarray,
+) -> np.ndarray:
+    upper = np.clip(np.searchsorted(source_t, query_t, side="right"), 1, len(source_t) - 1)
+    lower = upper - 1
+    denominator = source_t[upper] - source_t[lower]
+    fraction = np.divide(
+        query_t - source_t[lower],
+        denominator,
+        out=np.zeros_like(query_t),
+        where=denominator > 0.0,
+    )
+    first = quaternions_wxyz[lower]
+    second = quaternions_wxyz[upper].copy()
+    second[np.sum(first * second, axis=1) < 0.0] *= -1.0
+    interpolated = first + fraction[:, None] * (second - first)
+    return interpolated / np.linalg.norm(interpolated, axis=1)[:, None]
+
+
 def _quat_to_matrix(*, quaternion_wxyz: np.ndarray) -> np.ndarray:
     w, x, y, z = quaternion_wxyz / np.linalg.norm(quaternion_wxyz)
     return np.array(
@@ -204,11 +243,43 @@ def _report(
     def relative_time(data: dict) -> np.ndarray:
         return (np.asarray(data["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
 
-    trajectory_index = _nearest_indices(source_t=relative_time(trajectory), query_t=sample_t)
-    position_index = _nearest_indices(source_t=relative_time(local_position), query_t=sample_t)
-    attitude_index = _nearest_indices(source_t=relative_time(attitude), query_t=sample_t)
-    angular_index = _nearest_indices(source_t=relative_time(angular_velocity), query_t=sample_t)
     motor_index = np.flatnonzero(selected)
+    controller_dt_s = 1.0 / config.sim.physics_hz
+    replay_t = np.arange(
+        start_s,
+        end_s + controller_dt_s * 0.5,
+        controller_dt_s,
+        dtype=np.float64,
+    )
+    trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
+    velocity_ned = np.column_stack(
+        [
+            np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
+            for index in range(3)
+        ]
+    )
+    yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    local_velocity_ned = _linear_interpolate(
+        source_t=relative_time(local_position),
+        values=np.column_stack(
+            [np.asarray(local_position[name], dtype=np.float64) for name in ("vx", "vy", "vz")]
+        ),
+        query_t=replay_t,
+    )
+    quaternion_frd_ned = _interpolate_quaternions(
+        source_t=relative_time(attitude),
+        quaternions_wxyz=np.column_stack(
+            [np.asarray(attitude[f"q[{index}]"], dtype=np.float64) for index in range(4)]
+        ),
+        query_t=replay_t,
+    )
+    angular_velocity_frd = _linear_interpolate(
+        source_t=relative_time(angular_velocity),
+        values=np.column_stack(
+            [np.asarray(angular_velocity[f"xyz[{index}]"], dtype=np.float64) for index in range(3)]
+        ),
+        query_t=replay_t,
+    )
 
     px4_omega_rows: list[np.ndarray] = []
     isaac_omega_rows: list[np.ndarray] = []
@@ -217,37 +288,26 @@ def _report(
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
     controller_state = initial_actuation_controller_state()
-    previous_time_s = math.nan
+    isaac_omega_grid = []
 
-    for time_s, mi, ti, pi, ai, wi in zip(
-        sample_t,
-        motor_index,
-        trajectory_index,
-        position_index,
-        attitude_index,
-        angular_index,
+    for velocity_setpoint_ned, yaw_setpoint_rate, velocity_state_ned, quaternion, rates_frd in zip(
+        velocity_ned,
+        yaw_speed,
+        local_velocity_ned,
+        quaternion_frd_ned,
+        angular_velocity_frd,
         strict=True,
     ):
-        velocity_ned = np.array(
-            [
-                trajectory["velocity[0]"][ti],
-                trajectory["velocity[1]"][ti],
-                trajectory["velocity[2]"][ti],
-            ],
-            dtype=np.float64,
-        )
-        controls = np.array(
-            [motor[f"control[{index}]"][mi] for index in range(rotor_count)],
-            dtype=np.float64,
-        )
-        if not np.all(np.isfinite(velocity_ned)) or not np.all(np.isfinite(controls)):
-            continue
-        quaternion_frd_ned = np.array(
-            [attitude[f"q[{index}]"][ai] for index in range(4)],
-            dtype=np.float64,
-        )
-        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion_frd_ned)
-        velocity_setpoint_enu = _NED_TO_ENU @ velocity_ned
+        if not (
+            np.all(np.isfinite(velocity_setpoint_ned))
+            and math.isfinite(float(yaw_setpoint_rate))
+            and np.all(np.isfinite(velocity_state_ned))
+            and np.all(np.isfinite(quaternion))
+            and np.all(np.isfinite(rates_frd))
+        ):
+            raise ValueError("selected replay window contains non-finite controller inputs")
+        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion)
+        velocity_setpoint_enu = _NED_TO_ENU @ velocity_setpoint_ned
         heading = np.array(
             [
                 [math.cos(yaw), -math.sin(yaw), 0.0],
@@ -257,47 +317,42 @@ def _report(
         )
         action = np.zeros(4)
         action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
-        yaw_speed = float(trajectory["yawspeed"][ti])
-        action[3] = -yaw_speed / config.rl.action.max_yaw_rate_radps
+        action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
         action = np.clip(action, -1.0, 1.0)
 
         state = ActuationState(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
-            linear_velocity_enu=_NED_TO_ENU
-            @ np.array(
-                [
-                    local_position["vx"][pi],
-                    local_position["vy"][pi],
-                    local_position["vz"][pi],
-                ]
-            ),
-            angular_velocity_body_flu=_FLU_TO_FRD
-            @ np.array(
-                [
-                    angular_velocity["xyz[0]"][wi],
-                    angular_velocity["xyz[1]"][wi],
-                    angular_velocity["xyz[2]"][wi],
-                ]
-            ),
-        )
-        px4_omega = (
-            controls * np.asarray(bridge.input_scaling)
-            + np.asarray(bridge.zero_position_armed)
-            + np.asarray(bridge.input_offset) * np.asarray(bridge.input_scaling)
-        )
-        dt_s = (
-            params.controller_dt_s
-            if math.isnan(previous_time_s)
-            else float(time_s - previous_time_s)
+            linear_velocity_enu=_NED_TO_ENU @ velocity_state_ned,
+            angular_velocity_body_flu=_FLU_TO_FRD @ rates_frd,
         )
         controller_state, isaac_omega = action_to_rotor_omega(
             params,
             controller_state,
             action,
             state,
-            dt_s,
+            controller_dt_s,
         )
-        previous_time_s = float(time_s)
+        isaac_omega_grid.append(isaac_omega)
+
+    replay_index = _nearest_indices(source_t=replay_t, query_t=sample_t)
+    for time_s, mi, replay_sample_index in zip(
+        sample_t,
+        motor_index,
+        replay_index,
+        strict=True,
+    ):
+        controls = np.array(
+            [motor[f"control[{index}]"][mi] for index in range(rotor_count)],
+            dtype=np.float64,
+        )
+        if not np.all(np.isfinite(controls)):
+            continue
+        px4_omega = (
+            controls * np.asarray(bridge.input_scaling)
+            + np.asarray(bridge.zero_position_armed)
+            + np.asarray(bridge.input_offset) * np.asarray(bridge.input_scaling)
+        )
+        isaac_omega = isaac_omega_grid[replay_sample_index]
         used_t.append(float(time_s))
         px4_omega_rows.append(px4_omega)
         isaac_omega_rows.append(isaac_omega)
@@ -315,12 +370,14 @@ def _report(
     wrench_error = isaac_wrench_array - px4_wrench_array
     max_omega = np.asarray(bridge.max_rotor_velocity)
     return {
-        "schema_version": 1,
-        "method": "px4-ulog-state-replay-v1",
+        "schema_version": 2,
+        "method": "px4-ulog-state-replay-v2-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
         "sample_count": len(used_t),
+        "controller_sample_count": len(replay_t),
+        "controller_rate_hz": config.sim.physics_hz,
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),

@@ -5,8 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import multiprocessing
 import os
+import queue
+import statistics
+import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -43,6 +48,145 @@ def _settings_fingerprint(settings: ControllerSettings, /) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _partition_settings(
+    settings: tuple[ControllerSettings, ...],
+    worker_count: int,
+    /,
+) -> tuple[tuple[tuple[int, ControllerSettings], ...], ...]:
+    active_workers = min(worker_count, len(settings))
+    base, extra = divmod(len(settings), active_workers)
+    shards = []
+    offset = 0
+    for worker_index in range(active_workers):
+        size = base + int(worker_index < extra)
+        shards.append(tuple(enumerate(settings[offset : offset + size], start=offset)))
+        offset += size
+    return tuple(shards)
+
+
+def _merge_indexed_results(
+    *,
+    result_count: int,
+    shards: list[tuple[tuple[int, list[dict[str, Any]] | str], ...]],
+) -> tuple[list[dict[str, Any]] | str, ...]:
+    merged: list[list[dict[str, Any]] | str | None] = [None] * result_count
+    for shard in shards:
+        for index, result in shard:
+            if merged[index] is not None:
+                raise RuntimeError(f"alignment worker returned duplicate candidate index {index}")
+            merged[index] = result
+    missing = [index for index, result in enumerate(merged) if result is None]
+    if missing:
+        raise RuntimeError(f"alignment workers omitted candidate indices {missing}")
+    return tuple(result for result in merged if result is not None)
+
+
+class _GpuSampler:
+    def __init__(self, *, run_dir: Path, target_percent: float, interval_s: float) -> None:
+        self._path = run_dir / "gpu_utilization.json"
+        self._target_percent = target_percent
+        self._interval_s = interval_s
+        self._active = threading.Event()
+        self._stop = threading.Event()
+        self._samples: list[tuple[float, float, float]] = []
+        self._warning = ""
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def set_active(self, active: bool) -> None:
+        if active:
+            self._active.set()
+        else:
+            self._active.clear()
+
+    def _sample_loop(self) -> None:
+        while not self._stop.is_set():
+            if not self._active.wait(timeout=self._interval_s):
+                continue
+            try:
+                result = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu,memory.used,memory.total",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                rows = [
+                    tuple(float(value.strip()) for value in line.split(","))
+                    for line in result.stdout.splitlines()
+                    if line.strip()
+                ]
+                if rows:
+                    self._samples.append(
+                        (
+                            statistics.fmean(row[0] for row in rows),
+                            sum(row[1] for row in rows),
+                            sum(row[2] for row in rows),
+                        )
+                    )
+            except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+                self._warning = f"GPU sampling unavailable: {exc}"
+                self._stop.set()
+                break
+            self._stop.wait(self._interval_s)
+
+    def finish(
+        self,
+        *,
+        worker_count: int,
+        evaluations: int,
+        batches: int,
+        elapsed_s: float,
+    ) -> None:
+        self._active.clear()
+        self._stop.set()
+        self._thread.join()
+        utilization = [sample[0] for sample in self._samples]
+        ordered = sorted(utilization)
+        percentile_index = max(0, math.ceil(0.95 * len(ordered)) - 1)
+        average = statistics.fmean(utilization) if utilization else None
+        payload = {
+            "schema_version": 1,
+            "worker_count": worker_count,
+            "target_utilization_percent": self._target_percent,
+            "sample_interval_s": self._interval_s,
+            "sample_count": len(self._samples),
+            "average_utilization_percent": average,
+            "p95_utilization_percent": ordered[percentile_index] if ordered else None,
+            "peak_utilization_percent": max(utilization) if utilization else None,
+            "peak_memory_used_mib": (
+                max(sample[1] for sample in self._samples) if self._samples else None
+            ),
+            "total_memory_mib": (
+                max(sample[2] for sample in self._samples) if self._samples else None
+            ),
+            "candidate_evaluations": evaluations,
+            "gpu_batches": batches,
+            "elapsed_s": elapsed_s,
+            "candidates_per_second": evaluations / elapsed_s if elapsed_s > 0.0 else 0.0,
+            "target_reached": bool(
+                utilization and average is not None and average >= self._target_percent
+            ),
+            "warning": self._warning,
+        }
+        self._path.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
+        if self._warning:
+            _report(self._warning)
+        elif average is None:
+            _report("GPU sampling returned no active-evaluation samples")
+        elif not payload["target_reached"]:
+            _report(
+                f"GPU utilization averaged {average:.1f}% below the "
+                f"{self._target_percent:.1f}% target; preserve deterministic work "
+                "and inspect the recorded bottleneck metrics"
+            )
 
 
 def _make_env(
@@ -247,14 +391,14 @@ def _candidate_trace_batch(
         )
     traces_per_candidate = len(reference_traces)
     padded_settings = settings + (settings[-1],) * (candidate_capacity - len(settings))
-    env.apply_controller_settings_batch(
-        controller_settings=padded_settings,
-        traces_per_candidate=traces_per_candidate,
-    )
     physics_hz = config.sim.physics_hz
     action_scale = config.rl.action.max_body_velocity_mps
     routine = config.vehicles[vehicle_label].routine
     env.set_initial_states(traces=reference_traces * candidate_capacity)
+    env.apply_controller_settings_batch(
+        controller_settings=padded_settings,
+        traces_per_candidate=traces_per_candidate,
+    )
     times = [[float(value) for value in source["time_s"]] for source in reference_traces]
     sample_indices = [1 for _source in reference_traces]
     trace_initial_positions = [
@@ -383,24 +527,195 @@ def _candidate_trace_batch(
     return tuple(results)
 
 
+def _worker_main(
+    *,
+    worker_index: int,
+    config_path: str,
+    target_path: str,
+    reference_traces: list[dict[str, Any]],
+    candidate_capacity: int,
+    task_queue,
+    result_queue,
+) -> None:
+    simulation_app = None
+    env = None
+    try:
+        from isaaclab.app import AppLauncher
+
+        app_launcher = AppLauncher(headless=True)
+        simulation_app = app_launcher.app
+        config = load_config(config_path)
+        target = load_controller_definition(target_path)
+        env = _make_env(
+            config=config,
+            num_envs=candidate_capacity * len(reference_traces),
+            settings=target.base_settings,
+        )
+        result_queue.put(("ready", worker_index, None))
+        while True:
+            task = task_queue.get()
+            if task is None:
+                break
+            batch_id, indexed_settings = task
+            settings = tuple(setting for _index, setting in indexed_settings)
+            raw = _candidate_trace_batch(
+                env=env,
+                config=config,
+                settings=settings,
+                candidate_capacity=candidate_capacity,
+                reference_traces=reference_traces,
+                vehicle_label=target.vehicle,
+            )
+            result_queue.put(
+                (
+                    "result",
+                    worker_index,
+                    (
+                        batch_id,
+                        tuple(
+                            (index, result)
+                            for (index, _setting), result in zip(indexed_settings, raw, strict=True)
+                        ),
+                    ),
+                )
+            )
+    except BaseException as exc:
+        result_queue.put(("error", worker_index, f"{type(exc).__name__}: {exc}"))
+    finally:
+        if env is not None:
+            env.close()
+        if simulation_app is not None:
+            simulation_app.close()
+
+
+class _WorkerPool:
+    def __init__(
+        self,
+        *,
+        config_path: str,
+        target_path: Path,
+        reference_traces: list[dict[str, Any]],
+        worker_count: int,
+        candidate_capacity: int,
+    ) -> None:
+        context = multiprocessing.get_context("spawn")
+        self.worker_count = worker_count
+        self._result_queue = context.Queue()
+        self._task_queues = [context.Queue() for _index in range(worker_count)]
+        self._processes = [
+            context.Process(
+                target=_worker_main,
+                kwargs={
+                    "worker_index": index,
+                    "config_path": config_path,
+                    "target_path": str(target_path),
+                    "reference_traces": reference_traces,
+                    "candidate_capacity": candidate_capacity,
+                    "task_queue": self._task_queues[index],
+                    "result_queue": self._result_queue,
+                },
+                name=f"alignment-worker-{index}",
+            )
+            for index in range(worker_count)
+        ]
+        for process in self._processes:
+            process.start()
+        try:
+            self._wait_for_ready()
+        except BaseException:
+            self.terminate()
+            raise
+        self._batch_id = 0
+
+    def _receive(self):
+        while True:
+            try:
+                return self._result_queue.get(timeout=1.0)
+            except queue.Empty:
+                failed = [
+                    f"{process.name} exited with code {process.exitcode}"
+                    for process in self._processes
+                    if process.exitcode is not None and process.exitcode != 0
+                ]
+                if failed:
+                    raise RuntimeError("alignment worker failure: " + "; ".join(failed)) from None
+
+    def _wait_for_ready(self) -> None:
+        ready: set[int] = set()
+        while len(ready) < self.worker_count:
+            kind, worker_index, payload = self._receive()
+            if kind == "error":
+                raise RuntimeError(f"alignment worker {worker_index} failed to start: {payload}")
+            if kind != "ready":
+                raise RuntimeError(f"unexpected alignment worker message {kind!r}")
+            ready.add(worker_index)
+
+    def evaluate(
+        self,
+        settings: tuple[ControllerSettings, ...],
+        /,
+    ) -> tuple[list[dict[str, Any]] | str, ...]:
+        indexed_shards = _partition_settings(settings, self.worker_count)
+        batch_id = self._batch_id
+        self._batch_id += 1
+        for worker_index, shard in enumerate(indexed_shards):
+            self._task_queues[worker_index].put((batch_id, shard))
+        results: list[tuple[tuple[int, list[dict[str, Any]] | str], ...]] = []
+        while len(results) < len(indexed_shards):
+            kind, worker_index, payload = self._receive()
+            if kind == "error":
+                raise RuntimeError(f"alignment worker {worker_index} failed: {payload}")
+            if kind != "result":
+                raise RuntimeError(f"unexpected alignment worker message {kind!r}")
+            result_batch_id, shard = payload
+            if result_batch_id != batch_id:
+                raise RuntimeError(
+                    f"alignment worker returned batch {result_batch_id}, expected {batch_id}"
+                )
+            results.append(shard)
+        return _merge_indexed_results(result_count=len(settings), shards=results)
+
+    def close(self) -> None:
+        for task_queue in self._task_queues:
+            task_queue.put(None)
+        for process in self._processes:
+            process.join()
+        failures = [
+            f"{process.name} exited with code {process.exitcode}"
+            for process in self._processes
+            if process.exitcode != 0
+        ]
+        if failures:
+            raise RuntimeError("alignment worker shutdown failure: " + "; ".join(failures))
+
+    def terminate(self) -> None:
+        for process in self._processes:
+            if process.is_alive():
+                process.terminate()
+        for process in self._processes:
+            process.join()
+
+
 class _LiveEvaluator:
     def __init__(
         self,
         *,
-        env,
-        config: ExperimentConfig,
-        reference_traces: list[dict[str, Any]],
-        vehicle_label: str,
-        candidate_capacity: int,
+        pool: _WorkerPool,
+        sampler: _GpuSampler,
     ) -> None:
-        self._env = env
-        self._config = config
-        self._reference_traces = reference_traces
-        self._vehicle_label = vehicle_label
-        self._candidate_capacity = candidate_capacity
+        self._pool = pool
+        self._sampler = sampler
         self._evaluations = 0
         self._batches = 0
         self._started_s = time.monotonic()
+
+    def finish_sampling(self) -> None:
+        self._sampler.finish(
+            worker_count=self._pool.worker_count,
+            evaluations=self._evaluations,
+            batches=self._batches,
+            elapsed_s=time.monotonic() - self._started_s,
+        )
 
     def evaluate(
         self,
@@ -428,14 +743,11 @@ class _LiveEvaluator:
         del definition, reference_traces
         self._evaluations += len(settings)
         self._batches += 1
-        raw_results = _candidate_trace_batch(
-            env=self._env,
-            config=self._config,
-            settings=settings,
-            candidate_capacity=self._candidate_capacity,
-            reference_traces=self._reference_traces,
-            vehicle_label=self._vehicle_label,
-        )
+        self._sampler.set_active(True)
+        try:
+            raw_results = self._pool.evaluate(settings)
+        finally:
+            self._sampler.set_active(False)
         elapsed_s = time.monotonic() - self._started_s
         _report(
             f"alignment target evaluated {self._evaluations} candidates in "
@@ -470,30 +782,29 @@ def _run(
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
-    candidate_capacity = max(
+    maximum_expansion = max(
         target.search.beam_width * len(parameter.candidates) for parameter in target.parameters
     )
-    base_environment_count = candidate_capacity * len(reference_traces)
-    if config.rl.num_envs != base_environment_count:
-        raise ValueError(
-            f"rl.num_envs={config.rl.num_envs} must equal the derived alignment "
-            f"batch size {base_environment_count}"
-        )
-    env = _make_env(
-        config=config,
-        num_envs=config.rl.num_envs,
-        settings=target.base_settings,
+    worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
+    candidate_capacity = math.ceil(maximum_expansion / worker_count)
+    sampler = _GpuSampler(
+        run_dir=run_dir,
+        target_percent=config.alignment.execution.gpu_target_percent,
+        interval_s=config.alignment.execution.gpu_sample_interval_s,
     )
+    pool = _WorkerPool(
+        config_path=os.environ[_CONFIG_PATH_ENV],
+        target_path=target_path,
+        reference_traces=reference_traces,
+        worker_count=worker_count,
+        candidate_capacity=candidate_capacity,
+    )
+    sampler.start()
+    evaluator = _LiveEvaluator(pool=pool, sampler=sampler)
     try:
         live_target = replace(
             target,
-            evaluator=_LiveEvaluator(
-                env=env,
-                config=config,
-                reference_traces=reference_traces,
-                vehicle_label=target.vehicle,
-                candidate_capacity=candidate_capacity,
-            ),
+            evaluator=evaluator,
         )
         parsed_reference = tuple(
             _trace(value=trace, name=f"reference[{index}]")
@@ -503,8 +814,12 @@ def _run(
             target=live_target,
             reference_traces=parsed_reference,
         )
+        pool.close()
+    except BaseException:
+        pool.terminate()
+        raise
     finally:
-        env.close()
+        evaluator.finish_sampling()
     candidates = {
         _settings_fingerprint(settings): [asdict(trace) for trace in traces]
         for settings, traces in outcome.target_traces.items()
@@ -536,10 +851,6 @@ def _run(
 
 
 def main() -> None:
-    from isaaclab.app import AppLauncher
-
-    app_launcher = AppLauncher(headless=True)
-    simulation_app = app_launcher.app
     try:
         config = load_config(os.environ[_CONFIG_PATH_ENV])
         _run(
@@ -550,8 +861,6 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise
-    finally:
-        simulation_app.close()
 
 
 if __name__ == "__main__":

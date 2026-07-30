@@ -132,6 +132,15 @@ parameters:
   - field: max_tilt_cmd_deg
     stage: 2
     candidates: [22.5, 33.75, 45.0, 56.25, 67.5]
+  - field: thruster_tau_inc_s
+    stage: 3
+    candidates: [0.0, 0.01, 0.02, 0.04, 0.08]
+  - field: thruster_tau_dec_s
+    stage: 3
+    candidates: [0.0, 0.01, 0.02, 0.04, 0.08]
+  - field: thruster_max_thrust_rate_nps
+    stage: 3
+    candidates: [100.0, 250.0, 500.0, 1000.0, 100000.0]
 
 selection_metric: policy-execution-controller-quality-v2
 publication_metrics:

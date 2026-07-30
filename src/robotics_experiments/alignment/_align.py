@@ -290,7 +290,9 @@ def _resolved_experiment_fingerprint(
             "controller definition is incompatible with its resolved experiment: "
             + "; ".join(mismatches)
         )
-    return _fingerprint(_plain(experiment))
+    resolved = _plain(experiment)
+    del resolved["alignment"]["execution"]
+    return _fingerprint(resolved)
 
 
 def align(

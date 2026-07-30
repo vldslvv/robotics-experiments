@@ -76,6 +76,12 @@ combined probe is a flight-envelope check; it can invalidate a candidate but
 does not enter the low-speed ranking.
 
 PX4 capture uses the normal fleet driver and an injected `PolicyAdapter`.
+Before each recorded profile, the adapter streams a neutral velocity/yaw
+setpoint for at least the configured minimum and then requires a continuous
+stable-speed/rate/tilt window. The first profile therefore starts after PX4 has
+accepted OFFBOARD rather than while the driver is still priming the stream, and
+later profiles begin from the same near-equilibrium controller boundary used by
+the reset Lab replay. A failed stability timeout invalidates capture.
 Every trace records the actual initial state, exact command timestamps,
 body-FLU velocity commands, yaw-rate commands, position, attitude, body/world
 velocity, angular velocity, completion, and flight-envelope failure. Isaac Lab
@@ -84,14 +90,19 @@ the configured physics cadence. The alignment-only routine ends when the probe
 adapter completes and teardown stops the ephemeral simulator; landing and
 auto-disarm are outside the policy-execution controller target and cannot
 invalidate an otherwise complete capture. The target runner assigns one Lab
-environment to every candidate/probe pair. It evaluates one complete beam
-expansion concurrently, padding smaller expansions to the derived maximum
-capacity so the fixed Isaac scene keeps steady GPU occupancy. `rl.num_envs`
-must equal the derived maximum expansion times the probe count. Every
+environment to every local candidate/probe pair. It evaluates one complete
+beam expansion concurrently across its workers, padding smaller local shards
+to the per-worker capacity so each fixed Isaac scene remains occupied. The
+alignment capacity is derived independently of the training `rl.num_envs`. Every
 environment has independent gains, filters, integrals, command delay, and
-controller state. This batching changes throughput only, not candidate order,
-ranking, per-trace initial state, command sequence, sampling cadence, or
-controller reset.
+controller state. The deterministic coordinator partitions each expansion
+across persistent spawned Isaac workers, merges results by original candidate
+index, and records active-batch GPU utilization and throughput in
+`gpu_utilization.json`. Each worker pads only its own fixed-capacity scene.
+Worker loss is an infrastructure failure; a candidate flight-envelope breach
+remains an ordinary unusable candidate. Worker count and GPU telemetry settings
+change throughput only, not candidate order, ranking, initial state, commands,
+cadence, controller reset, or the comparison fingerprint.
 The runner uses the experiment's authored training seed for deterministic Lab
 initialization before restoring every captured state.
 
@@ -125,9 +136,11 @@ and rate-D centers use the pinned 5 Hz `MPC_VELD_LP` and 20 Hz
 
 Actuator response stays instantaneous (`tau_inc=tau_dec=0`, effectively
 unlimited slew) while a fresh instantaneous replay remains below both
-normalized rotor-speed RMSE 0.01 and collective-thrust RMSE 0.05 N. A failure
-of either diagnostic starts a new definition with an explicit third actuator
-stage; it is not absorbed into the controller stages.
+normalized rotor-speed RMSE 0.01 and collective-thrust RMSE 0.05 N. The
+corrected 250 Hz replay crossed the collective-thrust threshold, so the current
+definition includes an explicit third stage for rise/fall time constants and
+thrust slew. These candidates are applied independently per Lab environment
+after every probe reset; they are not absorbed into the controller stages.
 
 ## Metrics, quality, and publication
 
@@ -192,6 +205,16 @@ same deterministic search from those cached traces before writing and
 publishing `alignment.json`. The file-backed evaluator loads each diagnostic
 file once; it does not reparse the complete candidate file for every setting,
 and it releases parsed target traces after their metrics are recorded.
+
+Alignment capture and execution settings live under the top-level Hydra
+`alignment` group. Capture preconditioning is behavior-affecting and is included
+in the experiment fingerprint. Worker count, GPU target, and sample interval
+are execution-only and deliberately excluded. The coordinator supports
+persistent worker sharding, but the measured default is one worker: three
+workers reached 95.49% average GPU utilization while reducing useful throughput
+from approximately 3.47 to 1.10 candidates/s because the Isaac/PhysX processes
+contended. Active evaluation still records the 95% utilization target. This
+measured PhysX bottleneck is reported rather than masked with duplicate work.
 
 Training defaults to `.build/alignment/x500-velocity-px4-v2/best`. Only after
 v2 advisory quality and the exact-action diagnosis pass may Stage 1 be

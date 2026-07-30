@@ -106,8 +106,14 @@ def test_default_experiment_has_only_global_root_config():
         "vehicles",
         "driver",
         "flight_benchmark",
+        "alignment",
     }
     assert config.flight_benchmark.airborne_duration_s == 5.0
+    assert config.alignment.capture.minimum_neutral_s == 3.0
+    assert config.alignment.capture.max_linear_speed_mps == 0.02
+    assert config.alignment.capture.max_angular_speed_radps == 0.03
+    assert config.alignment.execution.worker_count == 1
+    assert config.alignment.execution.gpu_target_percent == 95.0
     vehicle = config.vehicles["x500_01"]
     assert vehicle.spawn.position_xy == (0.0, 0.0)
     assert vehicle.spawn.usd_path.endswith("/holybro_x500_v2.usda")

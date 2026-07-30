@@ -28,10 +28,15 @@ uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
 lifecycle, with a test-only injected adapter that emits the controller
 definition's linear-velocity, yaw-rate, and combined probes. It writes exact
 command timing, initial state, position, attitude, body/world velocity, and
-angular velocity to the selected alignment run directory. Its alignment-only
-routine ends with the probe policy and lets teardown stop the ephemeral
-simulator; landing and auto-disarm are outside this controller target. It is
-not a press-policy scenario and adds no commanding routine kind.
+angular velocity to the selected alignment run directory. Before each profile,
+the adapter holds a neutral setpoint through the configured minimum and
+continuous speed/rate/tilt stability window. This excludes OFFBOARD priming
+from the recorded policy-execution response and gives each reset Lab replay a
+near-equilibrium initial state. Trace yaw remains body-FLU +CCW while the
+outbound PX4 setpoint is converted to NED +clockwise. Its alignment-only routine
+ends with the probe policy and lets teardown stop the ephemeral simulator;
+landing and auto-disarm are outside this controller target. It is not a
+press-policy scenario and adds no commanding routine kind.
 
 The same script's `--contact-chain` mode is the deterministic F3 real-asset
 gate, invoked by `make test-integration-press-contact-chain` with one

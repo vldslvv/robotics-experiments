@@ -50,17 +50,25 @@ depend on mutable resource properties.
 Controller alignment has two standalone backends. The PX4 capture entrypoint
 under `tests/alignment_capture_reference.py` starts through the normal
 `SimulationApp` fleet harness and injects only a deterministic `PolicyAdapter`.
-`alignment_sweep_target.py` constructs `AppLauncher` before importing
-`isaaclab`, builds one hover environment per candidate/probe pair, and runs the
-configured deterministic staged beam search. The scene capacity is derived
-from the largest possible beam expansion. Each expansion replays all uncached
-candidates concurrently with per-environment gains, filters, integrals, and
-sub-physics-step command delays; smaller expansions are padded to keep the
-fixed scene occupied. `rl.num_envs` must equal the maximum candidate/probe
-batch. Each batch starts with fresh controller, delay, and actuator state,
-restores every recorded PX4 initial state, and advances the timestamp events in
-one vectorized simulation while preserving each trace's captured physics-step
-intervals. Results are scored in the original deterministic candidate order.
+The adapter streams a neutral setpoint through a minimum handoff period and a
+continuous stability window before recording each profile; its body-FLU yaw
+command is sign-converted only at the PX4 NED wire boundary.
+`alignment_sweep_target.py` is a host-safe coordinator. It spawns the configured
+number of persistent workers, and each worker constructs `AppLauncher` before
+importing `isaaclab` and builds one hover environment per local
+candidate/probe pair. Scene capacity is derived from the largest beam expansion
+divided across workers. Each expansion replays all uncached candidates
+concurrently with per-environment gains, filters, integrals, and
+sub-physics-step command delays; smaller local shards are padded to keep each
+fixed scene occupied. Each batch starts with fresh controller, delay, and
+actuator state, restores every recorded PX4 initial state, and advances the
+timestamp events while preserving each trace's captured physics-step intervals.
+The coordinator merges results by original candidate index, and worker count
+does not change scores or the comparison fingerprint. Active evaluation writes
+GPU utilization and throughput beside the run artifacts. Worker sharding stays
+configurable, but the measured default is one process because three processes
+saturate the GPU while materially reducing candidate throughput through
+PhysX contention.
 V2 traces retain position, attitude, body/world velocity, angular velocity, and
 yaw-rate commands in addition to the initial state and cadence. The PX4
 alignment routine ends when its probe policy completes; teardown stops the
