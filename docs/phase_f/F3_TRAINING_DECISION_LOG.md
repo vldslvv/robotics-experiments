@@ -3546,3 +3546,58 @@ Attempt 8 used one worker, 41 GPU batches, and 1480.14 s for the useful sweep,
 or 3.78 candidate evaluations/s. GPU utilization averaged 31.78%, reached 45%
 at p95 and 59% at peak, and used 9154 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the measured bottleneck, so worker count stays at one.
+
+### 73. Return to the strongest frontier after attempt 9 rejects stream latching
+
+Date: 2026-07-30.
+
+Attempt 9 completed from clean source commit `a59fd94` as
+`x500-velocity-px4-v5/20260730T225539Z`. Its fresh capture restored valid
+controller state for all 11 profiles. The actuator audit passed every profile:
+timestamp joins stayed within one 4 ms physics tick, normalized motor RMSE
+peaked at 0.00076, and reconstructed collective RMSE peaked at 0.0123 N. The
+sweep evaluated 5907 unique candidates, 5796 of them usable, and selected
+candidate 4998 under comparison fingerprint
+`df0f4a31f93781cceeefb34e9a66a3c8efe29f6900f83b792a53e3aebbdc1c40`.
+
+| Held-out metric | Attempt 9 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 8.262 mm | 5 mm |
+| Residual-speed error | 0.00301 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 7.31% | 10% |
+| Yaw-rate NRMSE | 4.34% | 10% |
+| Heading error | 2.805 deg | 3 deg |
+| Combined endpoint error | 52.359 mm | 10 mm |
+
+The attempt remains rejected with two failed gates. Although heading now
+passes, braking regresses and the largest normalized excess rises to 4.236.
+This is a second consecutive no-progress result for the stream-latching
+branch. Among usable candidates, 1488 failed two gates, 727 failed three, 1847
+failed four, 1214 failed five, and 520 failed six. Candidate-wide minima were
+1.652 mm braking error, 0.00063 m/s residual speed, 0.060 s stop-time error,
+4.38% velocity NRMSE, 3.18% yaw-rate NRMSE, 2.493 degrees heading error, and
+24.154 mm endpoint error.
+
+Refreshing the local setpoint at the measured 50 Hz OFFBOARD stream cadence
+improves heading relative to attempt 8 but does not recover attempt 7's
+braking or endpoint frontier. The structural branch is therefore rejected.
+Attempt 10 will remove stream latching and return to attempt 7's controller-rate
+body-action interpretation, whose selected candidate passed braking and whose
+candidate-wide endpoint floor was 11.142 mm.
+
+Attempt 7's retained frontier also exposes two confounded parameter tables.
+Yaw feed-forward `[0.025, 0.025, 0.025]` produced passing heading but regressed
+braking because roll and pitch feed-forward changed simultaneously. The
+combined trace under-traveled world Y by 34.10 mm, while the available
+Y-gain candidates also changed X or Z. Attempt 10 will therefore add exactly
+four declarative candidates: yaw-only rate feed-forward `[0, 0, 0.025]`,
+Y-only velocity proportional gain `[1.8, 2.25, 4.0]`, and Y-only velocity
+integral gains `[0.4, 0.5, 2.0]` and `[0.4, 0.6, 2.0]`. No other controller,
+allocator, plant, probe, gate, worker, policy-interface, reward, or training
+change is made.
+
+Attempt 9 used one worker, 41 GPU batches, and 1426.14 s for the useful sweep,
+or 4.14 candidate evaluations/s. GPU utilization averaged 28.88%, reached 43%
+at p95 and 53% at peak, and used 8742 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the measured bottleneck, so worker count stays at one.
