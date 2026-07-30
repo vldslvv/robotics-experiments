@@ -3363,3 +3363,66 @@ producing the same net force and moment as the bridge's rotor forces. No
 controller, candidate, probe, gate, plant property, or worker setting changes.
 The existing fresh capture and passed actuator audit remain valid; the target
 sweep will restart from the new clean implementation commit.
+
+### 70. Continue after attempt 6 confirms the body-origin correction
+
+Date: 2026-07-30.
+
+Attempt 6 completed from clean source commit `79be38b` as
+`x500-velocity-px4-v5/20260730T204909Z`. The final run used a fresh
+exact-commit capture rather than reusing the valid pre-correction capture. Its
+actuator audit passed all profiles: timestamp joins stayed within one 4 ms
+tick, normalized motor RMSE peaked at 0.00074, and reconstructed collective
+RMSE peaked at 0.0118 N. The sweep evaluated 5146 unique candidates, 5035 of
+them usable, and selected candidate 5092 under comparison fingerprint
+`0156fc635a3648195652e0d3754e91919f0cdade3d32f0d3889cb7c749aea80f`.
+
+| Held-out metric | Attempt 6 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 13.769 mm | 5 mm |
+| Residual-speed error | 0.00498 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.91% | 10% |
+| Yaw-rate NRMSE | 3.17% | 10% |
+| Heading error | 2.982 deg | 3 deg |
+| Combined endpoint error | 25.813 mm | 10 mm |
+
+The attempt remains rejected with three failed gates; stop time exceeds its
+limit only by floating-point representation at 0.10000000000000053 s. It
+nevertheless makes material progress: the failed-gate count falls from four to
+three, worst-axis velocity NRMSE passes, and the largest normalized excess
+falls 67.5%, from 5.400 to 1.754. This resets the no-progress streak. There
+were 867 usable candidates with three failed gates, 2421 with four, 1325 with
+five, 412 with six, and 10 with all seven.
+
+Candidate-wide minima were 11.435 mm braking error, 0.00091 m/s residual
+speed, 0.100 s stop-time error, 8.32% velocity NRMSE, 3.11% yaw-rate NRMSE,
+2.309 degrees heading error, and 5.899 mm endpoint error. Braking and stop time
+therefore remain candidate-wide floors, while endpoint passes independently.
+The selected delay is the 0.072 s upper boundary, normalized hover is 0.572,
+and the selected horizontal velocity integral is the lowest nonzero
+axis-separated candidate `[0, 0.2, 1]`.
+
+Matched-state controller replay stays within both motor and collective limits
+on the Stage 1 brake and lateral validation profiles. Their remaining motion
+error is therefore downstream of the logged controller boundary, although the
+body-origin correction reduced it substantially. Replay first exceeds the
+motor limit on yaw and combined profiles; validation combined reaches 0.0176
+normalized-motor RMSE and 0.102 N collective RMSE. The direct ULog-to-bridge
+actuator audit continues to pass those profiles, so this is an evidenced
+normalized torque/controller mismatch rather than an affine motor or rotor
+curve error.
+
+Attempt 7 makes no structural change and adds four evidence-routed declarative
+entries: 0.084 s and 0.096 s command delays beyond the selected boundary, a
+0.5715 normalized-hover candidate matching the captured held-out estimator
+level, and a rate-integral-limit search around the pinned 0.30 normalized
+limit. No hover-estimate dynamics are added because held-out variation is only
+approximately 0.0002 and does not correlate with the failing profiles. The
+existing probes, gates, controller state, allocator, plant, worker count,
+policy interface, reward, and training configuration remain unchanged.
+
+Attempt 6 used one worker, 39 GPU batches, and 1351.32 s for the useful sweep,
+or 3.81 candidate evaluations/s. GPU utilization averaged 30.42%, reached 45%
+at p95 and 61% at peak, and used 9120 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the measured bottleneck, so worker count stays at one.
