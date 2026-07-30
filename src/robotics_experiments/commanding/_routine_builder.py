@@ -373,8 +373,8 @@ def build_vehicle_routine(
       artifact, so a bad config fails at build time). Reuses the ``goto``
       OFFBOARD prime/engage/stream lifecycle. Without an authored ``target_enu``
       the adapter receives the position captured when the step began. The
-      adapter owns completion; ``hover-v1`` requires ``hold_s``, while
-      ``press-v1`` does not. Completion advances only after PX4 accepts OFFBOARD,
+      adapter owns completion; ``hover`` requires ``hold_s``, while
+      ``press-approach`` does not. Completion advances only after PX4 accepts OFFBOARD,
       and the flight gates remain invariants so a bad policy fails as
       ``ENVELOPE``. A routine should follow a policy step with an
       explicit-command step (e.g. ``land``): a command-less verifier would keep

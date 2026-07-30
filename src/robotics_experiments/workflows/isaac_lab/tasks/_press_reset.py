@@ -6,6 +6,7 @@ import math
 
 import torch
 
+from robotics_experiments.config import PressApproachTrainingResetConfig
 from robotics_experiments.rl.press import HandoffGate
 
 __all__: list[str] = []
@@ -60,3 +61,41 @@ def _press_entry_state_from_unit_samples(
         dim=-1,
     )
     return wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity
+
+
+def _press_training_entry_state_from_unit_samples(
+    *,
+    unit_samples: torch.Tensor,
+    gate: HandoffGate,
+    training_reset: PressApproachTrainingResetConfig,
+    hard_case_fraction: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Mix the full handoff envelope with the configured hard-case annulus."""
+    if unit_samples.ndim != 2 or unit_samples.shape[1] != 10:
+        raise ValueError("press training reset requires unit_samples with shape (count, 10)")
+
+    wall_normal, lateral_vertical, linear_velocity, angular_velocity = (
+        _press_entry_state_from_unit_samples(
+            unit_samples=unit_samples[:, :9],
+            gate=gate,
+        )
+    )
+    hard_wall_normal = training_reset.range_min_m + unit_samples[:, 0] * (
+        training_reset.range_max_m - training_reset.range_min_m
+    )
+    radius_squared = training_reset.tangential_error_min_m**2 + unit_samples[:, 1] * (
+        training_reset.tangential_error_max_m**2 - training_reset.tangential_error_min_m**2
+    )
+    angle = unit_samples[:, 2] * (2.0 * math.pi)
+    radius = torch.sqrt(radius_squared)
+    hard_lateral_vertical = torch.stack(
+        (radius * torch.cos(angle), radius * torch.sin(angle)),
+        dim=-1,
+    )
+    hard_case = unit_samples[:, 9] < hard_case_fraction
+    return (
+        torch.where(hard_case, hard_wall_normal, wall_normal),
+        torch.where(hard_case[:, None], hard_lateral_vertical, lateral_vertical),
+        linear_velocity,
+        angular_velocity,
+    )

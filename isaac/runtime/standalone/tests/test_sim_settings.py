@@ -98,7 +98,13 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
             f"PhysX solver mismatch: expected {expected.solver_type}, "
             f"got {physx_api.GetSolverTypeAttr().Get()}"
         )
-
+    actual_enhanced_determinism = bool(physx_api.GetEnableEnhancedDeterminismAttr().Get())
+    if actual_enhanced_determinism != expected.enhanced_determinism:
+        raise AssertionError(
+            "PhysX enhanced determinism mismatch: "
+            f"expected {expected.enhanced_determinism}, "
+            f"got {actual_enhanced_determinism}"
+        )
     carb_settings = carb.settings.get_settings()
     if not carb_settings.get("/app/runLoops/main/rateLimitEnabled"):
         raise AssertionError("Expected Kit main run-loop rate limit to be enabled")
@@ -113,6 +119,7 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
         f"physics_hz={expected.physics_hz}, "
         f"rendering_hz={expected.rendering_hz}, "
         f"solver_type={expected.solver_type}, "
+        f"enhanced_determinism={expected.enhanced_determinism}, "
         f"gravity={tuple(expected.gravity)}"
     )
 

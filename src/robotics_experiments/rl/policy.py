@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -21,8 +21,12 @@ from typing import Any
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import AlignmentArtifact, ControllerSettings
 from robotics_experiments.config import RlActionConfig
+from robotics_experiments.controller import (
+    ControllerArtifact,
+    ControllerSettings,
+    controller_artifact_from_payload,
+)
 from robotics_experiments.rl._interfaces import INTERFACE_OBSERVATIONS, PolicyInterface
 
 __all__ = [
@@ -46,7 +50,6 @@ _SCALE_FIELDS = (
     "max_body_velocity_mps",
     "max_yaw_rate_radps",
     "max_body_rate_radps",
-    "hover_thrust_fraction",
 )
 _ACTION_DIMENSIONS = {"velocity": 4, "ctbr": 4}
 
@@ -64,7 +67,7 @@ class PolicyContract:
     max_body_velocity_mps: float
     max_yaw_rate_radps: float
     max_body_rate_radps: float
-    hover_thrust_fraction: float
+    hover_thrust_normalized: float
     curriculum_stage: str | None = None
 
 
@@ -74,9 +77,9 @@ class PolicyMetadata:
 
     contract: PolicyContract
     controller_settings: ControllerSettings
-    alignment_run_id: str
-    alignment_digest: str
-    alignment_comparison_fingerprint: str
+    controller_run_id: str
+    controller_digest: str
+    controller_comparison_fingerprint: str
     values: Mapping[str, Any]
 
 
@@ -136,8 +139,8 @@ def _finite_positive(*, value: Any, name: str, artifact_dir: Path) -> float:
 def policy_metadata(
     *,
     action_cfg: RlActionConfig,
-    alignment_artifact: AlignmentArtifact,
-    alignment_digest: str,
+    controller_artifact: ControllerArtifact,
+    controller_digest: str,
     obs_schema_version: int,
     obs_dim: int,
     policy_rate_hz: float,
@@ -147,6 +150,8 @@ def policy_metadata(
     """Compose metadata for a contract authored by a training config."""
     interface = PolicyInterface(policy_interface)
     metadata = {
+        "artifact_kind": "robotics-experiments-policy",
+        "schema_version": 1,
         "policy_interface": interface.value,
         "obs_schema_version": int(obs_schema_version),
         "obs_dim": int(obs_dim),
@@ -154,36 +159,15 @@ def policy_metadata(
         "action_kind": str(action_cfg.kind),
         "action_dim": int(action_cfg.action_dim),
         "action_scales": {name: float(getattr(action_cfg, name)) for name in _SCALE_FIELDS},
-        "alignment": {
-            "schema_version": alignment_artifact.schema_version,
-            "alignment_id": alignment_artifact.alignment_id,
-            "run_id": alignment_artifact.run_id,
-            "artifact_digest": alignment_digest,
-            "comparison_fingerprint": alignment_artifact.comparison_fingerprint,
-            "target_definition_fingerprint": (alignment_artifact.target_definition_fingerprint),
-            "reference_definition_fingerprint": (
-                alignment_artifact.reference_definition_fingerprint
-            ),
-            "settings": {
-                "command_delay_s": alignment_artifact.selected_settings.command_delay_s,
-                "kp_vel": list(alignment_artifact.selected_settings.kp_vel),
-                "kd_vel": list(alignment_artifact.selected_settings.kd_vel),
-                "kp_att": list(alignment_artifact.selected_settings.kp_att),
-                "kp_rate": list(alignment_artifact.selected_settings.kp_rate),
-                "max_tilt_cmd_deg": (alignment_artifact.selected_settings.max_tilt_cmd_deg),
-                "thruster_tau_inc_s": (alignment_artifact.selected_settings.thruster_tau_inc_s),
-                "thruster_tau_dec_s": (alignment_artifact.selected_settings.thruster_tau_dec_s),
-                "thruster_max_thrust_rate_nps": (
-                    alignment_artifact.selected_settings.thruster_max_thrust_rate_nps
-                ),
-            },
-            "advisory_quality_passed": alignment_artifact.advisory_quality_passed,
+        "controller": {
+            "artifact": asdict(controller_artifact),
+            "digest": controller_digest,
         },
     }
-    if interface is PolicyInterface.PRESS_V1:
+    if interface is PolicyInterface.PRESS_APPROACH:
         if curriculum_stage != "approach":
             raise ValueError(
-                "press-v1 metadata requires curriculum_stage='approach', "
+                "press-approach metadata requires curriculum_stage='approach', "
                 f"got {curriculum_stage!r}"
             )
         metadata["curriculum_stage"] = curriculum_stage
@@ -213,130 +197,45 @@ def _read_metadata(*, artifact_dir: Path) -> dict[str, Any]:
     return dict(loaded)
 
 
-def _alignment_settings(
+def _controller_settings(
     *,
     metadata: Mapping[str, Any],
     artifact_dir: Path,
 ) -> tuple[ControllerSettings, str, str, str]:
-    alignment = _metadata_value(
+    controller = _metadata_value(
         metadata=metadata,
-        name="alignment",
+        name="controller",
         artifact_dir=artifact_dir,
     )
-    if not isinstance(alignment, dict):
+    if not isinstance(controller, dict) or set(controller) != {"artifact", "digest"}:
         raise ValueError(
-            f"policy artifact {artifact_dir} metadata alignment must be an object; "
-            "legacy policy artifacts without alignment provenance are unsupported"
+            f"policy artifact {artifact_dir} metadata controller must contain "
+            "exactly artifact and digest"
         )
-    required_strings = (
-        "alignment_id",
-        "run_id",
-        "artifact_digest",
-        "comparison_fingerprint",
-        "target_definition_fingerprint",
-        "reference_definition_fingerprint",
-    )
-    for name in required_strings:
-        value = alignment.get(name)
-        if not isinstance(value, str) or not value:
-            raise ValueError(
-                f"policy artifact {artifact_dir} metadata alignment.{name} "
-                "must be a non-empty string"
-            )
-    if alignment.get("schema_version") != 1:
-        raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
-    if type(alignment.get("advisory_quality_passed")) is not bool:
-        raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
-    settings = alignment.get("settings")
-    if not isinstance(settings, dict):
-        raise ValueError(
-            f"policy artifact {artifact_dir} metadata alignment.settings must be an object"
-        )
-
-    def vector(name: str) -> tuple[float, float, float]:
-        value = settings.get(name)
-        if not isinstance(value, list) or len(value) != 3:
-            raise ValueError(
-                f"policy artifact {artifact_dir} alignment.settings.{name} "
-                "must contain three finite values"
-            )
-        parsed = tuple(
-            _finite_nonnegative(
-                value=item,
-                name=f"alignment.settings.{name}",
-                artifact_dir=artifact_dir,
-            )
-            for item in value
-        )
-        return parsed[0], parsed[1], parsed[2]
-
-    delay = settings.get("command_delay_s")
-    if (
-        isinstance(delay, bool)
-        or not isinstance(delay, (int, float))
-        or not math.isfinite(delay)
-        or delay < 0.0
-    ):
-        raise ValueError(
-            f"policy artifact {artifact_dir} alignment.settings.command_delay_s "
-            "must be finite and non-negative"
-        )
-    controller_settings = ControllerSettings(
-        command_delay_s=float(delay),
-        kp_vel=vector("kp_vel"),
-        kd_vel=vector("kd_vel"),
-        kp_att=vector("kp_att"),
-        kp_rate=vector("kp_rate"),
-        max_tilt_cmd_deg=_finite_positive(
-            value=settings.get("max_tilt_cmd_deg"),
-            name="alignment.settings.max_tilt_cmd_deg",
-            artifact_dir=artifact_dir,
-        ),
-        thruster_tau_inc_s=_finite_nonnegative(
-            value=settings.get("thruster_tau_inc_s"),
-            name="alignment.settings.thruster_tau_inc_s",
-            artifact_dir=artifact_dir,
-        ),
-        thruster_tau_dec_s=_finite_nonnegative(
-            value=settings.get("thruster_tau_dec_s"),
-            name="alignment.settings.thruster_tau_dec_s",
-            artifact_dir=artifact_dir,
-        ),
-        thruster_max_thrust_rate_nps=_finite_positive(
-            value=settings.get("thruster_max_thrust_rate_nps"),
-            name="alignment.settings.thruster_max_thrust_rate_nps",
-            artifact_dir=artifact_dir,
-        ),
-    )
+    artifact = controller_artifact_from_payload(controller["artifact"])
+    digest = controller["digest"]
+    if not isinstance(digest, str) or not digest:
+        raise ValueError(f"policy artifact {artifact_dir} controller digest must be non-empty")
     return (
-        controller_settings,
-        str(alignment["run_id"]),
-        str(alignment["artifact_digest"]),
-        str(alignment["comparison_fingerprint"]),
+        artifact.selected_settings,
+        artifact.run_id,
+        digest,
+        artifact.comparison_fingerprint,
     )
-
-
-def _finite_nonnegative(*, value: Any, name: str, artifact_dir: Path) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or value < 0.0
-    ):
-        raise ValueError(
-            f"policy artifact {artifact_dir} metadata {name} must be finite and "
-            f"non-negative, got {value!r}"
-        )
-    return float(value)
 
 
 def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMetadata:
+    if (
+        metadata.get("artifact_kind") != "robotics-experiments-policy"
+        or metadata.get("schema_version") != 1
+    ):
+        raise ValueError(f"policy artifact {artifact_dir} is not the policy-v1 contract")
     (
         controller_settings,
-        alignment_run_id,
-        alignment_digest,
-        alignment_comparison_fingerprint,
-    ) = _alignment_settings(metadata=metadata, artifact_dir=artifact_dir)
+        controller_run_id,
+        controller_digest,
+        controller_comparison_fingerprint,
+    ) = _controller_settings(metadata=metadata, artifact_dir=artifact_dir)
     interface_value = _metadata_value(
         metadata=metadata,
         name="policy_interface",
@@ -362,10 +261,10 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
             f"contract {(obs_schema_version, obs_dim)!r}; expected {expected_observation!r}"
         )
     curriculum_stage = metadata.get("curriculum_stage")
-    if interface is PolicyInterface.PRESS_V1:
+    if interface is PolicyInterface.PRESS_APPROACH:
         if curriculum_stage is None:
             raise ValueError(
-                f"policy artifact {artifact_dir} press-v1 metadata is missing "
+                f"policy artifact {artifact_dir} press-approach metadata is missing "
                 "curriculum_stage; historical stage-less press artifacts are unsupported"
             )
         if curriculum_stage != "approach":
@@ -421,11 +320,6 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         )
         for name in _SCALE_FIELDS
     }
-    if parsed_scales["hover_thrust_fraction"] > 1.0:
-        raise ValueError(
-            f"policy artifact {artifact_dir} metadata "
-            "action_scales.hover_thrust_fraction must not exceed 1"
-        )
     contract = PolicyContract(
         policy_interface=interface,
         obs_schema_version=obs_schema_version,
@@ -433,15 +327,16 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
         policy_rate_hz=policy_rate_hz,
         action_kind=str(action_kind),
         action_dim=action_dim,
+        hover_thrust_normalized=controller_settings.hover_thrust_normalized,
         curriculum_stage=curriculum_stage,
         **parsed_scales,
     )
     return PolicyMetadata(
         contract=contract,
         controller_settings=controller_settings,
-        alignment_run_id=alignment_run_id,
-        alignment_digest=alignment_digest,
-        alignment_comparison_fingerprint=alignment_comparison_fingerprint,
+        controller_run_id=controller_run_id,
+        controller_digest=controller_digest,
+        controller_comparison_fingerprint=controller_comparison_fingerprint,
         values=MappingProxyType(metadata),
     )
 

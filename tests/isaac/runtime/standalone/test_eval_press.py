@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.controller import ControllerSettings
 from tests.support.paths import REPO_ROOT
 
 
@@ -18,7 +18,7 @@ def _contract():
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
     return PolicyContract(
-        policy_interface=PolicyInterface.PRESS_V1,
+        policy_interface=PolicyInterface.PRESS_APPROACH,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -27,7 +27,7 @@ def _contract():
         max_body_velocity_mps=2.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        hover_thrust_fraction=0.4,
+        hover_thrust_normalized=0.57,
         curriculum_stage="approach",
     )
 
@@ -36,10 +36,27 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
+        ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.003, 0.003, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
@@ -66,6 +83,7 @@ def _goal():
         body_z_alignment_min=0.965926,
         velocity_reference=SimpleNamespace(
             range_center_m=0.41,
+            wall_normal_alignment_gate_m=0.03,
             wall_normal_gain_per_s=1.25,
             wall_normal_min_mps=-0.04,
             wall_normal_max_mps=0.08,
@@ -123,7 +141,7 @@ def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
     observation = torch.zeros((1, 34))
     observation[:, :3] = torch.tensor([[0.45, 0.03, 0.04]])
     observation[:, 3:7] = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
-    observation[:, 10:13] = torch.tensor([[0.05, 0.06, 0.08]])
+    observation[:, 10:13] = torch.tensor([[0.0, 0.06, 0.08]])
     observation[:, 19] = 1.0
     costs = press_evaluation._trajectory_costs(  # noqa: SLF001
         observation=observation,
@@ -198,13 +216,15 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
             )
 
     env = FakeEnv()
+    reports: list[str] = []
     result = evaluate_press_approach_policy(
         env=env,
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
         goal_config=_goal(),
-        report=lambda _message: None,
+        report=reports.append,
+        trace_worst_episode=True,
     )
     assert env.seeds == [202]
     assert result.summary.approach_success_rate == 0.5
@@ -212,6 +232,10 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     assert result.summary.median_completion_time_s == pytest.approx(0.05)
     assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
+    assert any(
+        "worst trace seed=202 episode=0 closest_range_m=0.410000" in message for message in reports
+    )
+    assert any("worst trace seed=202 episode=0 step=0" in message for message in reports)
 
 
 def _config():
@@ -263,7 +287,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         return env, SimpleNamespace(
             observation_schema_version=1,
             observation_space=34,
-            policy_interface="press-v1",
+            policy_interface="press-approach",
         )
 
     monkeypatch.setattr(
@@ -332,7 +356,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
             SimpleNamespace(
                 observation_schema_version=1,
                 observation_space=34,
-                policy_interface="press-v1",
+                policy_interface="press-approach",
             ),
         ),
     )

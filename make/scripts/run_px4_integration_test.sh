@@ -100,6 +100,7 @@ done
 : "${INTEGRATION_LOG_TAIL_LINES:=120}"
 : "${INTEGRATION_VERBOSE:=0}"
 : "${ISAAC_TEST_EXTRA_ARGS:=}"
+: "${ALIGNMENT_CAPTURE_RUN_DIR:=}"
 
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=px4_airframe_manifest_check.sh
@@ -288,6 +289,20 @@ cleanup() {
         docker rm -f "${container}" >/dev/null 2>&1 || true
     done
     integration_timing "remove_px4_containers" "${stage_start_ms}"
+
+    if [ -n "${ALIGNMENT_CAPTURE_RUN_DIR}" ]; then
+        mapfile -t alignment_ulogs < <(find "${PX4_LOGS}" -type f -name '*.ulg' -print)
+        if [ "${#alignment_ulogs[@]}" -ne 1 ]; then
+            echo "Alignment capture expected exactly one ULog, found ${#alignment_ulogs[@]}." >&2
+            status=1
+            timing_status="fail"
+        else
+            mkdir -p "${ALIGNMENT_CAPTURE_RUN_DIR}"
+            cp "${alignment_ulogs[0]}" "${ALIGNMENT_CAPTURE_RUN_DIR}/reference.ulg"
+            echo "  Alignment ULog: ${ALIGNMENT_CAPTURE_RUN_DIR}/reference.ulg"
+        fi
+    fi
+
     integration_timing "total" "${SCRIPT_START_MS}" "${timing_status}"
     exit "${status}"
 }
@@ -371,7 +386,7 @@ if docker run --rm \
     -e "ISAAC_TEST_LOG_FILTER=${ISAAC_TEST_LOG_FILTER}" \
     -e "ISAAC_TEST_SCRIPT=${ISAAC_TEST_SCRIPT}" \
     -e "ISAAC_TEST_EXTRA_ARGS=${ISAAC_TEST_EXTRA_ARGS}" \
-    -e "ALIGNMENT_ARTIFACT=${ALIGNMENT_ARTIFACT:-}" \
+    -e "CONTROLLER_ARTIFACT=${CONTROLLER_ARTIFACT:-}" \
     -e "ALIGNMENT_REFERENCE=${ALIGNMENT_REFERENCE:-}" \
     -e "ALIGNMENT_TARGET=${ALIGNMENT_TARGET:-}" \
     -e "ROBOTICS_ALIGNMENT_RUN_DIR=${ROBOTICS_ALIGNMENT_RUN_DIR:-}" \

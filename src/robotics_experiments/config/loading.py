@@ -104,6 +104,28 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
                 f"vehicle {label!r} routine.failure_recovery_timeout_s must be "
                 f"finite and positive, got {v.routine.failure_recovery_timeout_s!r}"
             )
+        if (
+            not math.isfinite(v.bridge.barometer_noise_std_pa)
+            or v.bridge.barometer_noise_std_pa < 0.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} bridge.barometer_noise_std_pa must be "
+                f"finite and non-negative, got {v.bridge.barometer_noise_std_pa!r}"
+            )
+        if v.bridge.sensor_excitation_mode not in {"stochastic", "deterministic"}:
+            raise ValueError(
+                f"vehicle {label!r} bridge.sensor_excitation_mode must be "
+                "'stochastic' or 'deterministic', got "
+                f"{v.bridge.sensor_excitation_mode!r}"
+            )
+        if (
+            not math.isfinite(v.bridge.magnetometer_noise_scale)
+            or v.bridge.magnetometer_noise_scale < 0.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} bridge.magnetometer_noise_scale must be "
+                f"finite and non-negative, got {v.bridge.magnetometer_noise_scale!r}"
+            )
         if len(v.spawn.position_xy) != 2:
             raise ValueError(
                 f"vehicle {label!r} position_xy must have length 2, got {v.spawn.position_xy!r}"
@@ -169,11 +191,69 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
         raise ValueError("driver.control_rate_hz must not exceed sim.physics_hz")
 
 
+def _validate_alignment(experiment: ExperimentConfig) -> None:
+    capture = experiment.alignment.capture
+    if not 0 <= capture.sensor_seed <= 2**32 - 1:
+        raise ValueError("alignment.capture.sensor_seed must be a 32-bit unsigned integer")
+    positive_capture = {
+        "minimum_neutral_s": capture.minimum_neutral_s,
+        "stable_hold_s": capture.stable_hold_s,
+        "timeout_s": capture.timeout_s,
+        "max_linear_speed_mps": capture.max_linear_speed_mps,
+        "max_angular_speed_radps": capture.max_angular_speed_radps,
+        "max_tilt_deg": capture.max_tilt_deg,
+    }
+    for name, value in positive_capture.items():
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"alignment.capture.{name} must be finite and positive")
+    if capture.timeout_s <= capture.minimum_neutral_s + capture.stable_hold_s:
+        raise ValueError(
+            "alignment.capture.timeout_s must exceed minimum_neutral_s plus stable_hold_s"
+        )
+    execution = experiment.alignment.execution
+    if execution.worker_count <= 0:
+        raise ValueError("alignment.execution.worker_count must be positive")
+    if execution.candidate_capacity <= 0:
+        raise ValueError("alignment.execution.candidate_capacity must be positive")
+    if (
+        not execution.candidate_capacity_benchmark
+        or any(value <= 0 for value in execution.candidate_capacity_benchmark)
+        or len(set(execution.candidate_capacity_benchmark))
+        != len(execution.candidate_capacity_benchmark)
+    ):
+        raise ValueError(
+            "alignment.execution.candidate_capacity_benchmark must contain "
+            "unique positive values"
+        )
+    if (
+        not math.isfinite(execution.gpu_target_percent)
+        or not 0.0 < execution.gpu_target_percent <= 100.0
+    ):
+        raise ValueError("alignment.execution.gpu_target_percent must be in (0, 100]")
+    if not math.isfinite(execution.gpu_sample_interval_s) or execution.gpu_sample_interval_s <= 0.0:
+        raise ValueError("alignment.execution.gpu_sample_interval_s must be finite and positive")
+
+
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
-    if not experiment.rl.training.alignment_artifact.strip():
-        raise ValueError("rl.training.alignment_artifact must be non-empty")
-    if experiment.rl.training.training_mode not in {"scratch", "actor-only"}:
-        raise ValueError("rl.training.training_mode must be either 'scratch' or 'actor-only'")
+    training = experiment.rl.training
+    if not training.controller_artifact.strip():
+        raise ValueError("rl.training.controller_artifact must be non-empty")
+    if not training.phases:
+        raise ValueError("rl.training.phases must contain at least one phase")
+    for index, phase in enumerate(training.phases):
+        path = f"rl.training.phases[{index}]"
+        if phase.iterations <= 0 or phase.save_interval <= 0:
+            raise ValueError(f"{path} iterations and save_interval must be positive")
+        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
+            raise ValueError(f"{path}.learning_rate must be finite and positive")
+        if phase.schedule not in {"fixed", "adaptive"}:
+            raise ValueError(f"{path}.schedule must be 'fixed' or 'adaptive'")
+        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
+            raise ValueError(f"{path}.entropy_coef must be finite and non-negative")
+        if not math.isfinite(phase.hard_case_fraction) or not (
+            0.0 <= phase.hard_case_fraction <= 1.0
+        ):
+            raise ValueError(f"{path}.hard_case_fraction must be between 0 and 1")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,
@@ -235,6 +315,30 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
 
+    training_reset = press.training_reset
+    if not math.isfinite(training_reset.hard_case_fraction) or not (
+        0.0 <= training_reset.hard_case_fraction <= 1.0
+    ):
+        raise ValueError("rl.press.training_reset.hard_case_fraction must be between 0 and 1")
+    if not (
+        handoff.switch_range_min_m
+        <= training_reset.range_min_m
+        < training_reset.range_max_m
+        <= handoff.switch_range_max_m
+    ):
+        raise ValueError(
+            "rl.press.training_reset range bounds must be ordered inside the handoff range"
+        )
+    if not (
+        0.0
+        <= training_reset.tangential_error_min_m
+        < training_reset.tangential_error_max_m
+        <= handoff.lateral_align_max_m
+    ):
+        raise ValueError(
+            "rl.press.training_reset tangential bounds must be ordered inside the handoff disk"
+        )
+
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")
@@ -258,6 +362,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "alignment_error_max_m": goal.alignment_error_max_m,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "velocity_reference.wall_normal_alignment_gate_m": (reference.wall_normal_alignment_gate_m),
         "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
         "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
         "velocity_reference.tangential_speed_max_mps": (reference.tangential_speed_max_mps),
@@ -273,6 +378,11 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
         )
 
+    if (
+        not math.isfinite(press.reward.range_barrier_margin_m)
+        or press.reward.range_barrier_margin_m <= 0.0
+    ):
+        raise ValueError("rl.press.reward.range_barrier_margin_m must be finite and positive")
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)
@@ -289,9 +399,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
-    if evaluation.selection_metric != "held-out-press-task-quality-v2":
+    if evaluation.selection_metric != "held-out-press-task-quality":
         raise ValueError(
-            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v2'"
+            "rl.press.evaluation.selection_metric must be 'held-out-press-task-quality'"
         )
     for name in (
         "collision_penalty",
@@ -448,6 +558,7 @@ def load_config(path: str | PathLike[str], /) -> ExperimentConfig:
     experiment = cast(ExperimentConfig, OmegaConf.to_object(cfg))
     _validate_fleet(experiment.vehicles)
     _validate_rates(experiment)
+    _validate_alignment(experiment)
     _validate_rl_policies(experiment)
     _validate_press_approach(experiment)
     _validate_switches(experiment)

@@ -10,3 +10,23 @@ For sim to sim alignment use more variables instead of just delay
 Before doing that, refactor the alignment into a clear modules with clear inputs and outputs
 
 Consider some model registry/experiment tracker
+
+
+Simplify and refactor the alignment iterations -- squash into one/few commits
+Check if alignment can be done from scratch reliably while passing the quality gates
+Check what alignment contains and see how to simplify the artifact
+
+Train new policy after, ensure the contract between alignment component and policy training is minimal and clear
+Check training log for performance improvements for grid search
+
+
+Be able to train from scratch the alignment that passes the gates.
+Make sure to try to optimize the performance. You can check the training log for the optimization ideas.
+After this is done, implement the plan in this document -- @docs/ALIGNMENT_ARTIFACT_REWORK_PLAN.md
+Upon completion or being stuck with no progress, shutdown the machine.
+
+Fine tune the policy to pass the acceptance
+Run full test suite
+
+Simplify/refactor all the work done so far, refine contracts
+Continue with RL press curriculum?

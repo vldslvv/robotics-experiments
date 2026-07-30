@@ -1,176 +1,124 @@
-# Controller alignment subsystem
+# Controller alignment
 
-This document is the contract and operational guide for aligning the
-high-throughput Isaac Lab velocity controller to the PX4 SITL closed-loop
-response. Alignment is upstream of RL: policy training consumes a published
-alignment artifact, while trained-policy PX4 missions remain downstream
-acceptance and never fit controller settings.
+Controller alignment makes the high-throughput Isaac Lab controller reproduce
+PX4 SITL for identical body-FLU velocity and yaw-rate commands. It is upstream
+of reinforcement learning. Waypoint navigation, policy rewards, policy actions,
+and domain randomization are not fitting inputs.
 
-## Package and dependency boundary
+## Architecture and contracts
 
-`robotics_experiments.alignment` is host-safe and imports without Isaac Sim,
-Kit, Isaac Lab, or a PX4 container. Its public API is exactly:
+`robotics_experiments.controller` owns the immutable `ControllerSettings`, the
+strict controller artifact, and the pure NumPy controller/allocator/actuator
+reference. `robotics_experiments.alignment` owns probe definitions, generic
+candidate search, metrics, evidence bundles, and publication. RL depends only
+on the controller artifact and never imports alignment.
 
-- `ControllerDefinition`
-- `ControllerSettings`
-- `AlignmentArtifact`
-- `load_controller_definition(path)`
-- `load_alignment_artifact(path)`
-- `align(target, reference)`
+The dependency direction is:
 
-The package direction is `config -> alignment -> rl -> workflows`.
-Alignment may consume the public config boundary and RL may consume
-`ControllerSettings`; alignment must not depend on RL. The V1 concrete
-backends are `isaac-lab` as the target and `px4-sitl` as the reference.
+`config -> controller -> {alignment, rl} -> workflows`
 
-Controller definitions live under `configs/alignment/controllers/`. A
-definition fixes the controller identity, backend, experiment and vehicle,
-policy-facing body-FLU velocity interface, 20 Hz command cadence, complete base
-settings, fit and validation probes, declarative parameter candidates, named
-selection metric, and image identity.
+The only supported controller and alignment artifact contract is schema 1.
+There are no artifact migrations, compatibility sentinels, alternate plant
+mappings, or physical-force controller paths. Older files under `.build/` are
+inert evidence and cannot be loaded by current production code.
 
-`ControllerSettings` owns all controller and actuator internals:
+The X500 normalized controller carries velocity, attitude, and rate state into
+PX4-style normalized thrust and torque. The generated X500 effectiveness matrix
+uses `CA_METHOD=2` sequential desaturation with `MC_AIRMODE=0`. Motor controls
+are clipped to `[0, 1]`, then pass through the plant-owned input offset, input
+scale, armed-zero position, quadratic rotor curve, and actuator rise/fall model.
+The composed Holybro X500 mapping is `omega = 50 + 475*u`; its physical hover
+input is approximately 0.375. Controller hover is represented only by
+`hover_thrust_normalized` at the PX4 controller boundary.
 
-- command delay;
-- per-axis velocity P and damping gains;
-- attitude and body-rate gains;
-- maximum commanded tilt;
-- thruster rise and fall time constants;
-- per-rotor maximum thrust rate.
+NumPy is the single-environment reference and the Isaac Lab Torch seam is its
+batched twin. Both apply the same filter, saturation, anti-windup, reset, and
+allocator ordering. Sequential parity is a host-test requirement.
 
-`rl.action` owns only normalized action kind, dimension, and scales. Adding an
-existing settings field to a fit is a controller-definition YAML edit. Adding a
-new setting requires extending `ControllerSettings` and the Isaac Lab binding,
-not the candidate expansion, ranking, Make, or publication loops.
+## Search
 
-## Probe and evaluator contract
+Controller definitions live in `configs/alignment/controllers/`. Every tunable
+field must be declared as a `ParameterSpec`; search never invents controller
+fields. The `coarse-to-fine-beam` strategy:
 
-Alignment uses policy-independent body-FLU velocity probes. Fit and validation
-each cover x, y, and z independently. Fit profiles contain settling, positive
-and negative steps, reversals, and return-to-zero settling. Validation uses
-different amplitudes and ramp/reversal shapes.
+1. evaluates the committed base setting;
+2. performs one wide, large-step sweep for each declared field;
+3. retains the global beam plus per-gate champions;
+4. generates midpoints only around retained regions for two refinement levels;
+5. deduplicates settings by their exact float32 controller representation.
 
-The PX4 capture uses the normal fleet driver and an explicitly injected
-`PolicyAdapter`; there is no new commanding routine kind. The adapter streams
-the deterministic probes through the existing `{kind: policy}` OFFBOARD
-lifecycle. Every trace records:
+The default uses one persistent worker and 128 candidate slots. This is the
+measured useful-throughput optimum for the current GPU; additional workers
+increase PhysX contention. The target coordinator reports candidates per
+second, padding, cache hits, batches, and sampled GPU utilization. The 95% GPU
+target remains diagnostic; deterministic useful throughput is the optimization
+objective.
 
-- the actual initial position, attitude, linear velocity, and angular velocity;
-- exact command timestamps and body-FLU commands;
-- measured body-FLU velocity;
-- completion or flight-envelope failure.
+## Evidence and boundary audit
 
-The Isaac Lab sweep initializes each replay from the corresponding PX4 state
-and advances the exact captured command intervals. It keeps one hover
-environment alive for the sweep and reapplies the complete controller settings,
-including a fresh delay buffer and actuator state, before each candidate. An
-interval must be exactly representable at the configured physics rate.
-Non-finite output, a backend exception, or an incomplete trace makes only that
-candidate unusable. If all candidates are unusable, alignment fails and
-publishes nothing.
+PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
+adapter. Each profile records its absolute PX4 simulation start time and the
+complete initial controller state required for replay. One run directory keeps:
 
-## Metrics and ranking
+- the ULog and bridge log;
+- reference and target traces;
+- selected controller and compressed candidate selection;
+- GPU/search telemetry;
+- actuator audit and per-profile controller-boundary replay;
+- a relative-path manifest with sizes and SHA-256 hashes.
 
-Metric selection is by stable registry name. V1 uses
-`worst-axis-validation-velocity-nrmse-v1` and ranks:
+The actuator audit joins `vehicle_thrust_setpoint`,
+`vehicle_torque_setpoint`, `actuator_motors`, bridge-mapped rotor speed,
+reconstructed collective/torque, and `hover_thrust_estimate` by timestamp. It
+fails on incomplete topic coverage, a join error above one 4 ms physics tick,
+normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
+controller-boundary replay applies the selected controller to every fit,
+validation, and stability profile and enforces the same motor and collective
+limits.
 
-1. lowest worst-axis validation velocity NRMSE;
-2. lowest aggregate validation velocity RMSE;
-3. lowest fit velocity RMSE;
-4. stable candidate order.
+## Quality and acceptance
 
-The artifact also reports per-axis error, aggregate error, overshoot, settling,
-and stability diagnostics. Fit and validation samples are never pooled for
-selection.
+The registered `controller-quality` metric ranks exact-action response and
+applies these hard validation limits:
 
-The advisory quality target is worst-axis validation NRMSE at most 15%, with
-all selected traces finite and completed without a flight-envelope failure.
-Poor quality is visible and produces a training warning, but a structurally
-valid artifact remains loadable and consumable.
+- braking-distance error <= 0.005 m;
+- residual-speed error <= 0.01 m/s;
+- stop-time error <= 0.10 s;
+- worst-axis velocity NRMSE <= 0.10;
+- vertical policy-envelope velocity NRMSE <= 0.10;
+- yaw-rate NRMSE <= 0.10;
+- heading error <= 3 degrees;
+- combined endpoint error <= 0.01 m.
 
-Changing the definition, probe suite, metric identity, resolved experiment,
-image identity, or command interface changes the comparison fingerprint.
-Results from different comparison fingerprints are separate generations and
-are never ranked against one another.
+The vertical policy envelope is an independent ascent, descent, neutral-return
+profile using commands through 0.8 m/s. It prevents a low-speed aggregate from
+hiding the wrong climb/descend correction observed during policy execution.
 
-## Artifact and publication contract
+A run cannot finalize or publish unless all metric gates pass, every stability
+trace completes with finite values, the actuator audit passes, and the
+controller-boundary replay passes. Policy training rejects a controller whose
+quality record is failed. The authoritative live gate is:
 
-Completed immutable runs live at:
-
-```text
-.build/alignment/<alignment-id>/<run-id>/
-```
-
-`alignment.json` is the only training contract. Reference and target trace
-JSON files in the run directory are diagnostics. The artifact includes:
-
-- schema, alignment, and run identity;
-- target/reference definition and comparison fingerprints;
-- experiment, vehicle, airframe, source commit/dirty state, and images;
-- probe and selection-metric identities;
-- complete selected `ControllerSettings`;
-- declared parameters and every evaluated candidate;
-- selected ranking values, fit/validation metrics, and advisory quality.
-
-Loading rejects malformed schemas, missing provenance, non-finite settings,
-bad vector shapes, unsupported backend/interface contracts, and an invalid
-selected candidate. Advisory quality failure is not a loader error.
-
-Publication uses atomic relative directory symlinks:
-
-- `latest` always advances to the newest completed run;
-- `best` advances only for a better comparable ranking;
-- the first completed run in a new comparison generation becomes `best`,
-  regardless of advisory quality.
-
-## Operational workflow
-
-Defaults select the Isaac Lab and PX4 SITL x500 velocity definitions. Override
-them with `ALIGNMENT_TARGET`, `ALIGNMENT_REFERENCE`, and an optional stable
-`ALIGNMENT_RUN_ID`.
-
-```console
-make alignment-capture-reference
-make alignment-sweep-target
-make alignment-fit
-```
-
-The end-to-end wrapper preserves one run ID across all stages:
-
-```console
-make align-controllers
+```bash
 make test-integration-alignment-target
 ```
 
-Separate Make invocations should author the same `ALIGNMENT_RUN_ID`. Capture
-writes `reference.json`, sweep writes `target_candidates.json`, and fit writes
-`alignment.json` before updating `latest` and `best`.
+Run the full campaign with:
 
-Training resolves `rl.training.alignment_artifact`, which defaults to the
-alignment namespace's `best` link. `ALIGNMENT_ARTIFACT` or
-`--alignment-artifact` selects an exact run for reproduction or ablation.
-Training validates vehicle, airframe, cadence, interface, action dimension, and
-backend compatibility before constructing Isaac Lab. Normalized action scales
-remain task-owned and may differ from the scale used by the alignment probe
-experiment. Training stores the selected settings, artifact digest, run
-identity, definition fingerprints, and comparison fingerprint in
-`policy_meta.json` before PPO starts.
+```bash
+make align-controllers
+```
 
-Checkpoint selection, export, and independent evaluation reconstruct the
-controller from that embedded record. Deployment validates the alignment
-record but continues to use only `PolicyContract` for OFFBOARD interpretation.
-Policy artifacts without alignment provenance are unsupported.
+`controller.json` is the downstream product. Candidate traces and ULogs are
+valuable reproducibility evidence, but policy training consumes only the
+controller artifact. `latest` and comparable `best` links advance only for a
+fully accepted bundle.
 
-After training and Lab acceptance, run the physical warehouse
-`test-integration-press-policy-transfer` mission. It exercises three actor-entry
-ranges with wall and switch contact enabled and is a policy-transfer gate, not
-an alignment input. The complete production approach mission remains
-separately gated.
+## Change policy
 
-## Deferred work
-
-Parameter uncertainty distributions, domain randomization, real-flight
-capture, residual response models, and PX4-in-loop training are deliberately
-deferred. Adding a backend requires an evaluator adapter and a new stable
-backend contract; it must not weaken V1 artifact validation or comparison
-fingerprinting.
+Changing a metric, probe suite, environment, image, controller interface,
+controller definition, or resolved experiment starts a new comparison
+fingerprint. Plant residuals must be fixed at the plant seam; they must not be
+absorbed into controller gains. A selected parameter touching a range boundary
+is not evidence by itself: the matching trace or ULog boundary must support an
+expanded range or structural correction.

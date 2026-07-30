@@ -45,6 +45,7 @@ def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -
 def test_alignment_targets_are_defined_only_in_alignment_makefile() -> None:
     targets = (
         "alignment-capture-reference",
+        "alignment-benchmark-capacity",
         "alignment-sweep-target",
         "alignment-fit",
         "align-controllers",
@@ -58,6 +59,28 @@ def test_alignment_targets_are_defined_only_in_alignment_makefile() -> None:
             if re.search(rf"^{re.escape(target)}:", text, flags=re.MULTILINE):
                 definitions[target].append(path.name)
     assert definitions == {target: ["alignment.mk"] for target in targets}
+
+
+def test_alignment_capacity_benchmark_flag_reaches_container_runner() -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "-o",
+            "generate-drone-usd",
+            "alignment-benchmark-capacity",
+            "ALIGNMENT_RUN_ID=test-run",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ALIGNMENT_CAPACITY_BENCHMARK='1'" in result.stdout
+    runner = (REPO_ROOT / "make/scripts/run_isaac_integration_test.sh").read_text()
+    assert '-e "ALIGNMENT_CAPACITY_BENCHMARK=${ALIGNMENT_CAPACITY_BENCHMARK}"' in runner
 
 
 def test_legacy_temporal_targets_and_variables_are_removed() -> None:

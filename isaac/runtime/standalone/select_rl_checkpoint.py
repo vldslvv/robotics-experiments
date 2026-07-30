@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import sys
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -25,11 +23,11 @@ from robotics_experiments.config import (
 from robotics_experiments.rl import (
     METADATA_FILENAME,
     POLICY_FILENAME,
-    PolicyContract,
     PolicyInterface,
     load_policy_metadata,
 )
 from robotics_experiments.rl.press import PressApproachResult
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -48,7 +46,7 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 7
+_REPORT_SCHEMA_VERSION = 1
 
 
 class _ActorCritic(Protocol):
@@ -139,6 +137,7 @@ def _press_evaluation(
         episodes_per_seed=episodes_per_seed,
         goal_config=goal_config,
         report=_report,
+        trace_worst_episode=False,
     )
     evaluation = _score_press_result(
         candidate=candidate,
@@ -257,50 +256,6 @@ def _score_press_result(
     )
 
 
-def _comparison_fingerprint(
-    *,
-    config: ExperimentConfig,
-    contract: PolicyContract,
-) -> str | None:
-    if contract.policy_interface is not PolicyInterface.PRESS_V1:
-        return None
-    vehicle_label, vehicle = next(
-        (label, item)
-        for label, item in config.vehicles.items()
-        if item.id == config.rl.training.vehicle_id
-    )
-    payload = {
-        "selection_metric": config.rl.press.evaluation.selection_metric,
-        "evaluation": asdict(config.rl.press.evaluation),
-        "goal": asdict(config.rl.press.goal),
-        "handoff": asdict(config.rl.press.handoff),
-        "reset": asdict(config.rl.press.reset),
-        "termination": asdict(config.rl.press.termination),
-        "scene": config.scene,
-        "switches": asdict(config.switches),
-        "vehicle": vehicle_label,
-        "airframe": vehicle.spawn.usd_path,
-        "lab_vehicle": asdict(config.rl.lab_vehicle),
-        "physics_hz": config.sim.physics_hz,
-        "episode_length_s": config.rl.episode_length_s,
-        "task_id": config.rl.training.task_id,
-        "policy_interface": contract.policy_interface.value,
-        "curriculum_stage": contract.curriculum_stage,
-        "observation_schema_version": contract.obs_schema_version,
-        "observation_dimension": contract.obs_dim,
-        "policy_rate_hz": contract.policy_rate_hz,
-        "action_kind": contract.action_kind,
-        "action_dimension": contract.action_dim,
-    }
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _selection_report(
     *,
     selection: CheckpointSelection,
@@ -321,7 +276,7 @@ def _selection_report(
             "collision_rate_max": float(evaluation_config.collision_rate_max),
             "min_closest_range_m": goal_range_min_m,
         }
-        if policy_interface == "press-v1"
+        if policy_interface == "press-approach"
         else None
     )
     evaluated = {evaluation.candidate.iteration: evaluation for evaluation in selection.evaluations}
@@ -385,7 +340,7 @@ def _select_candidates(
 ) -> CheckpointSelection:
     scorer = None
     selection_method = "final-no-scorer"
-    if policy_interface == "press-v1":
+    if policy_interface == "press-approach":
 
         def score_press(
             scorer_candidates: tuple[CheckpointCandidate, ...],
@@ -493,9 +448,9 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     policy_metadata = load_policy_metadata(artifact_dir=run_dir)
     metadata = dict(policy_metadata.values)
     contract = policy_metadata.contract
-    comparison_fingerprint = _comparison_fingerprint(config=config, contract=contract)
+    comparison_fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
     if (
-        contract.policy_interface is PolicyInterface.PRESS_V1
+        contract.policy_interface is PolicyInterface.PRESS_APPROACH
         and contract.curriculum_stage != config.rl.press.curriculum_stage
     ):
         raise ValueError(
@@ -504,7 +459,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         )
     candidates = enumerate_checkpoints(logs_dir=run_dir / "logs")
     evaluation = config.rl.press.evaluation
-    is_press = contract.policy_interface is PolicyInterface.PRESS_V1
+    is_press = contract.policy_interface is PolicyInterface.PRESS_APPROACH
     seeds = tuple(int(seed) for seed in evaluation.seeds) if is_press else ()
     env_seed = seeds[0] if seeds else int(training_config.seed)
     num_envs = evaluation.episodes_per_seed if is_press else 1
@@ -531,6 +486,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         runner = training.build_runner(
             env=env,
             training_config=training_config,
+            phase=training_config.phases[0],
             policy_config=env_cfg.policy_config,
             log_dir=str(run_dir / "selection"),
             device=device,

@@ -10,7 +10,8 @@ resolved configuration to downstream consumers.
 
 The root contains only execution-wide configuration:
 
-- `sim`, `switches`, `rl`, `scene`, `driver`, and `flight_benchmark`;
+- `sim`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`, and
+  `alignment`;
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
 `configs/base.yaml` composes the global groups only. Vehicle-specific `spawn`,
@@ -41,6 +42,16 @@ stage mutation.
 benchmark. Keeping it in the resolved graph makes the capture duration part of
 the same canonical configuration fingerprint as the flown routine.
 
+`alignment.capture.sensor_seed` seeds NumPy before a PX4
+controller-alignment capture starts. The alignment experiment disables
+stochastic IMU and GPS terms and uses deterministic simulation-time
+barometer/magnetometer excitation: PX4 rejects a constant pressure stream as
+stale, and the composed exact magnetic field lies outside its yaw-initialization
+innovation gate. Alignment uses one tenth of both normal excitation amplitudes
+and enables `sim.enhanced_determinism`. Normal experiments retain stochastic
+sensor models and the default lower-cost PhysX execution. Complete closed-loop
+reproducibility must still be verified with replicate captures.
+
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and
 `rl.policy_rate_hz` authors training and supplies the switch-latch fallback
@@ -49,6 +60,12 @@ deployment policy cadence. All rates must be finite and positive; authored or
 artifact policy cadence and setpoint rates cannot exceed the driver rate, and
 the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50, and 20 Hz
 respectively.
+
+`sim.enhanced_determinism` remains disabled by default and is enabled by the
+alignment experiment. Rotor wrenches retain PhysX's default one-application-
+per-step behavior. The bridge and Lab controller each submit one complete
+wrench per physics tick; enabling per-TGS-iteration reapplication prevents the
+standalone X500 from lifting under saturated thrust.
 
 ## Routine behavior
 
@@ -97,8 +114,10 @@ finite and non-negative, and the output initialization is
 `rl.press.curriculum_stage` is required and currently accepts only `approach`.
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
 deployment; `goal` owns the stable range/alignment/speed/upright predicate and
-three-axis velocity reference; `reward` owns the nine non-negative reward
-magnitudes; `reset` owns only the physical scene; `termination` owns contact
+three-axis velocity reference, including its positive-motion alignment gate;
+`reward` owns the ten reward-term parameters,
+including the positive lower-range barrier margin; `reset` owns only the
+physical scene; `termination` owns contact
 sensing and flight envelopes; and `evaluation` owns deterministic seeds/count
 plus the 95% success and 1% maximum-contact gates. Independent reset
 velocity/range tunables are intentionally absent so training and deployment
@@ -106,18 +125,19 @@ cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
 bounds, negative or non-finite reward weights, invalid rates, and unknown
 stages fail during `load_config`.
 
-`rl.training` owns the explicit `scratch` / `actor-only` training mode, PPO
-optimization, rollout, checkpoint cadence, task selection, artifact namespace,
-seed settings, and
-`alignment_artifact`. The latter defaults to
+`rl.training` owns the ordered phases in one scratch PPO optimizer lineage,
+rollout settings, task selection, artifact namespace, seed, and
+`controller_artifact`. Each phase owns its iteration count, checkpoint cadence,
+learning rate, schedule, entropy, and difficult-reset fraction. Checkpoint
+initialization and resume are unsupported. The controller artifact defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
-constructed. `ALIGNMENT_ARTIFACT` or the training CLI override selects an exact
+constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
 run for reproduction.
 
 `rl.action` is task-neutral and contains only normalized action kind,
 dimension, and scales. Controller gains, command delay, maximum tilt, and
 thruster response are not Hydra RL tunables; they are complete
-`ControllerSettings` loaded from alignment and embedded in policy metadata.
+`ControllerSettings` loaded from the controller artifact and embedded in policy metadata.
 New runs capture both the task contract and alignment provenance before PPO,
 then automatically evaluate every checkpoint and publish the chosen actor.
 `rl.press.evaluation` owns the held-out metric name, penalties, continuous

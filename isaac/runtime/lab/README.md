@@ -17,8 +17,8 @@ root; the task submodules are internal implementation details except for
 Gymnasium's registered entry-point strings.
 
 The registered tasks are exported as `DRONE_HOVER_TASK_ID`
-(`Isaac-Drone-Hover-Direct-v0`) and `SWITCH_PRESS_TASK_ID`
-(`Isaac-Switch-Press-Direct-v0`), with both env/config/factory triples available
+(`Isaac-Drone-Hover-Direct-v1`) and `SWITCH_PRESS_TASK_ID`
+(`Isaac-Switch-Press-Direct-v1`), with both env/config/factory triples available
 lazily from `robotics_experiments.workflows.isaac_lab`. They fly N
 parallel drones through the pluggable in-Lab actuation seam
 (`robotics_experiments.rl`), which maps a normalized RL action to per-rotor

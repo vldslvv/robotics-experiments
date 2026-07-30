@@ -30,12 +30,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import (
-    ControllerSettings,
-    load_alignment_artifact,
-    load_controller_definition,
-)
+from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
+from robotics_experiments.controller import ControllerSettings, load_controller_artifact
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -56,7 +53,7 @@ _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
-_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
+_CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
 _TARGET_DEFINITION = "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
@@ -223,12 +220,10 @@ def _make_env(
 def _ctbr_hover_action(
     env: DroneHoverEnv, action_cfg: RlActionConfig
 ) -> tuple[torch.Tensor, float]:
-    mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
-    max_total_thrust = float(env.actuation_params.max_total_thrust)
-    hover_fraction = mass * 9.81 / max_total_thrust
     action = torch.zeros((env.num_envs, env.cfg.action_space), device=env.device)
-    action[:, 0] = hover_fraction / float(action_cfg.hover_thrust_fraction) - 1.0
-    return action, hover_fraction
+    if action_cfg.kind != "ctbr":
+        raise ValueError("CTBR sanity requires the ctbr action contract")
+    return action, float(env.actuation_params.hover_thrust_normalized)
 
 
 def _run_ctbr_sanity(
@@ -716,13 +711,13 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
 
 def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
     repo_root = Path(__file__).resolve().parents[4]
-    explicit = os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
-    authored = explicit or config.rl.training.alignment_artifact
+    explicit = os.environ.get(_CONTROLLER_ARTIFACT_ENV)
+    authored = explicit or config.rl.training.controller_artifact
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
     if explicit or artifact_path.exists():
-        return load_alignment_artifact(artifact_path).selected_settings
+        return load_controller_artifact(artifact_path).selected_settings
     return load_controller_definition(repo_root / _TARGET_DEFINITION).base_settings
 
 

@@ -141,7 +141,7 @@ the entire fleet cycle.
   and raises `ValueError` without it (or on a missing/mismatched artifact), which
   the driver's BUILD phase routes through `on_failure` as `FailureKind.COMMAND`.
   Artifact metadata contains the typed `PolicyInterface`, which selects
-  `hover-v1` or `press-v1` in the private runtime policy module without adding
+  `hover` or `press-approach` in the private runtime policy module without adding
   a task-specific routine kind. The fleet orchestrator only preflights
   configured artifacts, prepares interface-required resources, and injects the
   module's adapter factory.
@@ -161,9 +161,9 @@ the entire fleet cycle.
   `PolicyAdapter.policy_rate_hz` carries each artifact's immutable cadence, so those
   steps may run at different rates; neither `DriverParams` nor
   `VehicleRoutine` repeats a routine-wide policy rate.
-  `hover-v1` uses the authored `target_enu`, or the entry position when it is
+  `hover` uses the authored `target_enu`, or the entry position when it is
   omitted, and requires `hold_s`; its adapter completes after that duration.
-  `press-v1` consumes the injected exact 34-value `PressObservation`;
+  `press-approach` consumes the injected exact 34-value `PressObservation`;
   `curriculum_stage` selects the stage-specific adapter. The implemented
   `approach` adapter waits for the configured handoff gate, fails on contact or
   invalid observation, and completes after five stable contact-free approach

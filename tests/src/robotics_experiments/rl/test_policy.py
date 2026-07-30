@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.commanding import PolicyInput
+from robotics_experiments.controller import CommandInterface, ControllerArtifact, ControllerSettings
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -44,7 +46,6 @@ def _action_cfg(**overrides):
         "max_yaw_rate_radps": 1.5,
         "max_body_rate_radps": 6.0,
         "max_tilt_cmd_deg": 30.0,
-        "hover_thrust_fraction": 0.4,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -54,46 +55,95 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
+        ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.003, 0.003, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
     )
 
 
-def _alignment_artifact():
-    return SimpleNamespace(
+def _controller_artifact() -> ControllerArtifact:
+    settings = _controller_settings()
+    return ControllerArtifact(
+        artifact_kind="robotics-experiments-controller",
         schema_version=1,
         alignment_id="test-alignment",
         run_id="test-run",
+        target_controller_id="target",
+        reference_controller_id="reference",
+        target_backend="isaac-lab",
+        reference_backend="px4-sitl",
         comparison_fingerprint="comparison",
         target_definition_fingerprint="target",
         reference_definition_fingerprint="reference",
-        selected_settings=_controller_settings(),
+        experiment_config="configs/test.yaml",
+        experiment_fingerprint="experiment",
+        vehicle="x500_01",
+        airframe="holybro_x500_v2.usda",
+        command_rate_hz=20.0,
+        command_interface=CommandInterface(
+            kind="body-flu-velocity-yaw-rate",
+            dimension=4,
+            frame="body-flu",
+            linear_scale_mps=3.0,
+            yaw_rate_scale_radps=1.5,
+        ),
+        probe_suite_fingerprint="probes",
+        selected_settings=settings,
+        settings_fingerprint=hashlib.sha256(
+            json.dumps(
+                asdict(settings),
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
         advisory_quality_passed=True,
+        advisory_quality_reasons=(),
+        source_commit="abc123",
+        source_dirty=False,
+        target_image="target-image",
+        reference_image="reference-image",
     )
 
 
 def _metadata(
     *,
-    interface: PolicyInterface = PolicyInterface.HOVER_V1,
+    interface: PolicyInterface = PolicyInterface.HOVER,
     action_cfg=None,
     rate_hz: float = 20.0,
 ) -> dict:
     action_cfg = _action_cfg() if action_cfg is None else action_cfg
-    obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER_V1 else 34
+    obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER else 34
     return policy_metadata(
         action_cfg=action_cfg,
-        alignment_artifact=_alignment_artifact(),
-        alignment_digest="digest",
+        controller_artifact=_controller_artifact(),
+        controller_digest="digest",
         obs_schema_version=1,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
         policy_interface=interface,
-        curriculum_stage=("approach" if interface is PolicyInterface.PRESS_V1 else None),
+        curriculum_stage=("approach" if interface is PolicyInterface.PRESS_APPROACH else None),
     )
 
 
@@ -125,7 +175,7 @@ def test_missing_artifact_raises_with_hint(tmp_path: Path) -> None:
     ("mutation", "message"),
     [
         ({"policy_interface": "future-v2"}, "unsupported policy_interface"),
-        ({"obs_dim": 7}, "unsupported hover-v1 observation"),
+        ({"obs_dim": 7}, "unsupported hover observation"),
         ({"policy_rate_hz": float("nan")}, "finite and positive"),
         ({"policy_rate_hz": 0.0}, "finite and positive"),
         ({"action_kind": "attitude"}, "unsupported action_kind"),
@@ -166,6 +216,40 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
+def _obsolete_schema6_policy_metadata_loads_gain_schedule_and_schema5_is_neutral(
+    tmp_path: Path,
+) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 6
+    settings = metadata["alignment"]["settings"]
+    settings["hover_thrust_normalized"] = 0.57
+    settings["horizontal_velocity_error_gain_scale"] = 8.0 / 7.0
+    settings["horizontal_velocity_error_gain_start_mps"] = 0.15
+    settings["horizontal_velocity_error_gain_full_mps"] = 0.30
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.horizontal_velocity_error_gain_scale == pytest.approx(
+        8.0 / 7.0
+    )
+
+    metadata["alignment"]["schema_version"] = 5
+    for name in (
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+    ):
+        settings.pop(name)
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    legacy = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert legacy.controller_settings.horizontal_velocity_error_gain_scale == 1.0
+    assert legacy.controller_settings.horizontal_velocity_error_gain_start_mps == 0.15
+    assert legacy.controller_settings.horizontal_velocity_error_gain_full_mps == 0.30
+
+
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
     from robotics_experiments.commanding import VelocitySetpoint
     from robotics_experiments.px4_bridge import VehicleState
@@ -199,7 +283,7 @@ def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
 def test_load_policy_carries_metadata_contract_and_accepts_batches(tmp_path: Path) -> None:
     artifact = _write_torch_artifact(
         tmp_path,
-        _metadata(interface=PolicyInterface.PRESS_V1),
+        _metadata(interface=PolicyInterface.PRESS_APPROACH),
     )
 
     loaded = load_policy(artifact_dir=artifact)
@@ -220,18 +304,18 @@ def test_metadata_rejects_every_legacy_artifact(tmp_path: Path) -> None:
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(hover))
     assert (
         load_policy_metadata(artifact_dir=tmp_path).contract.policy_interface
-        is PolicyInterface.HOVER_V1
+        is PolicyInterface.HOVER
     )
 
-    legacy_hover = {key: value for key, value in hover.items() if key != "alignment"}
+    legacy_hover = {key: value for key, value in hover.items() if key != "controller"}
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
-    with pytest.raises(ValueError, match="alignment"):
+    with pytest.raises(ValueError, match="controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
-    legacy_press = _metadata(interface=PolicyInterface.PRESS_V1)
-    legacy_press.pop("alignment")
+    legacy_press = _metadata(interface=PolicyInterface.PRESS_APPROACH)
+    legacy_press.pop("controller")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
-    with pytest.raises(ValueError, match="alignment"):
+    with pytest.raises(ValueError, match="controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -244,7 +328,7 @@ def test_press_metadata_requires_known_curriculum_stage(
     stage: str | None,
     message: str,
 ) -> None:
-    metadata = _metadata(interface=PolicyInterface.PRESS_V1)
+    metadata = _metadata(interface=PolicyInterface.PRESS_APPROACH)
     if stage is None:
         metadata.pop("curriculum_stage")
     else:
@@ -286,14 +370,14 @@ def test_policy_preflight_ignores_deployment_action_and_rl_cadence(tmp_path: Pat
     old_run.mkdir(parents=True)
     _write_metadata_artifact(
         old_run,
-        _metadata(interface=PolicyInterface.PRESS_V1),
+        _metadata(interface=PolicyInterface.PRESS_APPROACH),
     )
     latest_run = policy_root / "latest-run"
     latest_run.mkdir()
     _write_metadata_artifact(
         latest_run,
         _metadata(
-            interface=PolicyInterface.PRESS_V1,
+            interface=PolicyInterface.PRESS_APPROACH,
             action_cfg=_action_cfg(max_body_velocity_mps=0.5),
             rate_hz=17.0,
         ),
@@ -318,7 +402,7 @@ def test_policy_preflight_rejects_conflicting_press_cadences(tmp_path: Path) -> 
         artifact.mkdir()
         _write_metadata_artifact(
             artifact,
-            _metadata(interface=PolicyInterface.PRESS_V1, rate_hz=rate_hz),
+            _metadata(interface=PolicyInterface.PRESS_APPROACH, rate_hz=rate_hz),
         )
         artifacts.append(artifact)
 
@@ -349,7 +433,7 @@ def test_hover_adapter_requires_hold_duration() -> None:
     loaded = LoadedPolicy(
         metadata=PolicyMetadata(
             contract=PolicyContract(
-                policy_interface=PolicyInterface.HOVER_V1,
+                policy_interface=PolicyInterface.HOVER,
                 obs_schema_version=1,
                 obs_dim=HOVER_OBSERVATION_DIM,
                 policy_rate_hz=20.0,
@@ -358,12 +442,12 @@ def test_hover_adapter_requires_hold_duration() -> None:
                 max_body_velocity_mps=3.0,
                 max_yaw_rate_radps=1.5,
                 max_body_rate_radps=6.0,
-                hover_thrust_fraction=0.4,
+                hover_thrust_normalized=0.57,
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda observation: np.zeros(4),
@@ -383,7 +467,7 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
     loaded = LoadedPolicy(
         metadata=PolicyMetadata(
             contract=PolicyContract(
-                policy_interface=PolicyInterface.PRESS_V1,
+                policy_interface=PolicyInterface.PRESS_APPROACH,
                 obs_schema_version=1,
                 obs_dim=34,
                 policy_rate_hz=20.0,
@@ -392,13 +476,13 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
                 max_body_velocity_mps=0.5,
                 max_yaw_rate_radps=1.5,
                 max_body_rate_radps=6.0,
-                hover_thrust_fraction=0.4,
+                hover_thrust_normalized=0.57,
                 curriculum_stage="approach",
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
@@ -434,7 +518,7 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
     loaded = LoadedPolicy(
         metadata=PolicyMetadata(
             contract=PolicyContract(
-                policy_interface=PolicyInterface.PRESS_V1,
+                policy_interface=PolicyInterface.PRESS_APPROACH,
                 obs_schema_version=1,
                 obs_dim=34,
                 policy_rate_hz=20.0,
@@ -443,13 +527,13 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
                 max_body_velocity_mps=0.5,
                 max_yaw_rate_radps=1.5,
                 max_body_rate_radps=6.0,
-                hover_thrust_fraction=0.4,
+                hover_thrust_normalized=0.57,
                 curriculum_stage="approach",
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
@@ -519,8 +603,8 @@ def test_current_press_artifact_preflights_when_available() -> None:
     if not artifact.exists():
         pytest.skip("current local press artifact is not available")
     metadata = json.loads((artifact / METADATA_FILENAME).read_text())
-    if "alignment" not in metadata:
-        with pytest.raises(ValueError, match="alignment"):
+    if metadata.get("artifact_kind") != "robotics-experiments-policy":
+        with pytest.raises(ValueError, match="policy-v1"):
             validate_policy_artifact(artifact_dir=artifact)
         return
     validated = _preflight_policy_artifacts(

@@ -57,13 +57,14 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         simulation = importlib.import_module("robotics_experiments.simulation")
         assert simulation.__all__ == ["apply_settings"]
         importlib.import_module("robotics_experiments.px4_bridge")
+        controller = importlib.import_module("robotics_experiments.controller")
+        assert "ControllerSettings" in controller.__all__
+        assert "build_actuation_params" in controller.__all__
         alignment = importlib.import_module("robotics_experiments.alignment")
         assert alignment.__all__ == [
-            "AlignmentArtifact",
+            "AlignmentResult",
             "ControllerDefinition",
-            "ControllerSettings",
             "align",
-            "load_alignment_artifact",
             "load_controller_definition",
         ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
@@ -96,27 +97,20 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         rl = importlib.import_module("robotics_experiments.rl")
         assert "robotics_experiments.rl.press" not in sys.modules
         assert rl.__all__ == [
-            "ActuationParams",
-            "ActuationState",
             "HOVER_OBSERVATION_DIM",
             "HOVER_OBSERVATION_SCHEMA_VERSION",
             "LoadedPolicy",
             "METADATA_FILENAME",
-            "MixerGeometry",
             "POLICY_FILENAME",
             "PolicyContract",
             "PolicyInterface",
             "PolicyMetadata",
-            "action_to_rotor_omega",
-            "build_actuation_params",
-            "hover_action",
             "hover_observation_from_state",
             "load_policy",
             "load_policy_metadata",
             "pack_hover_observation",
             "policy_action_to_offboard",
             "policy_metadata",
-            "rotor_forces_to_body_wrench",
             "validate_policy_artifact",
         ]
         press = importlib.import_module("robotics_experiments.rl.press")
@@ -380,6 +374,7 @@ def test_config_eagerly_imports_hydra() -> None:
         "PressApproachGoalConfig",
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
+        "PressApproachTrainingResetConfig",
         "PressApproachVelocityReferenceConfig",
         "PressResetConfig",
         "Px4BridgeConfig",
@@ -387,6 +382,7 @@ def test_config_eagerly_imports_hydra() -> None:
         "RlPolicyActorConfig",
         "RlPolicyConfig",
         "RlPolicyCriticConfig",
+        "RlTrainingPhaseConfig",
         "RlTrainingConfig",
         "RoutineStepConfig",
         "SimSettings",

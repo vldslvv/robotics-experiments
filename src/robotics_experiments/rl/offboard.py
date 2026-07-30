@@ -39,7 +39,7 @@ def _velocity_setpoint(action: np.ndarray, contract: PolicyContract) -> Velocity
 
 
 def _attitude_target(action: np.ndarray, contract: PolicyContract) -> AttitudeRateSetpoint:
-    hover_fraction = contract.hover_thrust_fraction
+    hover_fraction = contract.hover_thrust_normalized
     max_body_rate = contract.max_body_rate_radps
     thrust = float(np.clip(hover_fraction * (1.0 + float(action[0])), 0.0, 1.0))
     return AttitudeRateSetpoint(

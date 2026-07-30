@@ -4,4 +4,5 @@ defaults:
 physics_hz: 250.00
 rendering_hz: 60.0
 solver_type: TGS
+enhanced_determinism: false
 gravity: [0.0, 0.0, -9.81]

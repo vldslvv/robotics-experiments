@@ -1,0 +1,174 @@
+"""Host tests for PX4 alignment probe preconditioning and frame conversion."""
+
+import importlib.util
+import sys
+from dataclasses import replace
+from types import ModuleType, SimpleNamespace
+
+import numpy as np
+import pytest
+
+from robotics_experiments.alignment import load_controller_definition
+from robotics_experiments.alignment._models import ProbeCommand, ProbeProfile
+from robotics_experiments.commanding import PolicyInput
+from robotics_experiments.config import load_config
+from robotics_experiments.px4_bridge import VehicleState
+from tests.support.paths import REPO_ROOT
+
+
+def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    scenario = ModuleType("_px4_takeoff_scenario")
+    scenario.Px4TakeoffScenarioOptions = object  # type: ignore[attr-defined]  # dynamic fake
+    scenario.run_px4_takeoff_scenario = (  # type: ignore[attr-defined]  # dynamic fake
+        lambda *_args, **_kwargs: None
+    )
+    runtime = ModuleType("_runtime")
+    runtime.SceneTestContext = object  # type: ignore[attr-defined]  # dynamic fake
+    runtime.run_scene_test = (  # type: ignore[attr-defined]  # dynamic fake
+        lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setitem(sys.modules, "_px4_takeoff_scenario", scenario)
+    monkeypatch.setitem(sys.modules, "_runtime", runtime)
+    path = REPO_ROOT / "isaac/runtime/standalone/tests/alignment_capture_reference.py"
+    spec = importlib.util.spec_from_file_location("alignment_capture_reference", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _input(*, sim_time_us: int, linear_velocity=(0.0, 0.0, 0.0)) -> PolicyInput:
+    return PolicyInput(
+        vehicle_state=VehicleState(
+            position_enu=np.array([0.0, 0.0, 2.5]),
+            orientation_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+            linear_velocity_enu=np.asarray(linear_velocity, dtype=np.float64),
+            angular_velocity_flu=np.zeros(3),
+            sim_time_us=sim_time_us,
+        ),
+        sim_time_us=sim_time_us,
+        task_observation=(),
+        reference_position_enu=(0.0, 0.0, 2.5),
+    )
+
+
+def _yaw_definition():
+    source = load_controller_definition(
+        REPO_ROOT / "configs/alignment/controllers/px4_sitl_x500_velocity.yaml"
+    )
+    return replace(
+        source,
+        probes=(
+            ProbeProfile(
+                name="yaw",
+                split="fit",
+                axis="yaw",
+                commands=(ProbeCommand((0.0, 0.0, 0.0), 0.2, 1.0),),
+            ),
+        ),
+    )
+
+
+def test_capture_waits_for_minimum_and_stable_hold_then_converts_yaw(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
+        definition=_yaw_definition(),
+        config=config,
+    )(
+        artifact="alignment-probe",
+        hold_s=None,
+    )
+
+    first = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state)
+    minimum = adapter.advance(policy_input=_input(sim_time_us=3_000_000), state=first.state)
+    active = adapter.advance(policy_input=_input(sim_time_us=3_500_000), state=minimum.state)
+
+    assert first.setpoint.yaw_rate_radps == 0.0
+    assert minimum.setpoint.yaw_rate_radps == 0.0
+    assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
+    assert active.state.samples[0].command_yaw_rate_radps == pytest.approx(0.2)
+    assert active.state.initials[0].sim_time_us == 3_500_000
+
+
+def test_capture_stability_hold_restarts_after_motion(monkeypatch: pytest.MonkeyPatch):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
+        definition=_yaw_definition(),
+        config=config,
+    )(
+        artifact="alignment-probe",
+        hold_s=None,
+    )
+
+    state = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state).state
+    state = adapter.advance(policy_input=_input(sim_time_us=3_000_000), state=state).state
+    state = adapter.advance(
+        policy_input=_input(sim_time_us=3_250_000, linear_velocity=(0.03, 0.0, 0.0)),
+        state=state,
+    ).state
+    restarted = adapter.advance(policy_input=_input(sim_time_us=3_500_000), state=state)
+    active = adapter.advance(policy_input=_input(sim_time_us=4_000_000), state=restarted.state)
+
+    assert restarted.setpoint.yaw_rate_radps == 0.0
+    assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
+
+
+def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
+        definition=_yaw_definition(),
+        config=config,
+    )(
+        artifact="alignment-probe",
+        hold_s=None,
+    )
+
+    state = adapter.advance(policy_input=_input(sim_time_us=0), state=adapter.initial_state).state
+    failed = adapter.advance(
+        policy_input=_input(sim_time_us=12_100_000, linear_velocity=(0.03, 0.0, 0.0)),
+        state=state,
+    )
+
+    assert failed.failure_reason == "alignment profile 'yaw' did not stabilize within 12.0s"
+
+
+def test_capture_seeds_sensor_noise_before_starting_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    seeds: list[int] = []
+    monkeypatch.setattr(module.np.random, "seed", seeds.append)
+    monkeypatch.setattr(module, "Px4TakeoffScenarioOptions", lambda **kwargs: kwargs)
+    monkeypatch.setattr(module, "run_px4_takeoff_scenario", lambda *_args: None)
+
+    module._run(  # noqa: SLF001 - focused capture initialization test
+        context=SimpleNamespace(config=config),
+        definition=_yaw_definition(),
+        run_dir=tmp_path,
+    )
+
+    assert seeds == [42]
+
+
+def test_capture_rejects_wrong_body_flu_yaw_response_sign(monkeypatch: pytest.MonkeyPatch):
+    module = _load_script(monkeypatch)
+    samples = tuple(
+        SimpleNamespace(
+            command_yaw_rate_radps=0.2,
+            angular_velocity_body_flu_radps=(0.0, 0.0, -0.1),
+        )
+        for _index in range(4)
+    )
+
+    with pytest.raises(AssertionError, match="sign disagrees"):
+        module._assert_yaw_response_sign(  # noqa: SLF001 - focused validation test
+            samples=samples
+        )

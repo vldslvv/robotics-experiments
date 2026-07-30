@@ -23,6 +23,38 @@ class _FlightBenchmarkConfig(_FreezableConfig):
 
 
 @dataclass
+class _AlignmentCaptureConfig(_FreezableConfig):
+    """Behavior-affecting PX4 alignment capture preconditioning."""
+
+    sensor_seed: int
+    minimum_neutral_s: float
+    stable_hold_s: float
+    timeout_s: float
+    max_linear_speed_mps: float
+    max_angular_speed_radps: float
+    max_tilt_deg: float
+
+
+@dataclass
+class _AlignmentExecutionConfig(_FreezableConfig):
+    """Alignment throughput settings that do not affect comparison behavior."""
+
+    worker_count: int
+    candidate_capacity: int
+    candidate_capacity_benchmark: list[int]
+    gpu_target_percent: float
+    gpu_sample_interval_s: float
+
+
+@dataclass
+class _AlignmentConfig(_FreezableConfig):
+    """Controller-alignment capture and execution settings."""
+
+    capture: _AlignmentCaptureConfig
+    execution: _AlignmentExecutionConfig
+
+
+@dataclass
 class VehicleConfig(_FreezableConfig):
     """Complete authored and derived configuration for one vehicle."""
 
@@ -50,3 +82,4 @@ class ExperimentConfig(_FreezableConfig):
     vehicles: Dict[str, VehicleConfig]
     driver: DriverConfig
     flight_benchmark: _FlightBenchmarkConfig
+    alignment: _AlignmentConfig

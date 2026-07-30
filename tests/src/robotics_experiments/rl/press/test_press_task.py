@@ -34,6 +34,7 @@ _GOAL = PressApproachGoalConfig(
     stable_steps=5,
     velocity_reference=PressApproachVelocityReferenceConfig(
         range_center_m=0.41,
+        wall_normal_alignment_gate_m=0.03,
         wall_normal_gain_per_s=1.25,
         wall_normal_min_mps=-0.04,
         wall_normal_max_mps=0.08,
@@ -43,6 +44,8 @@ _GOAL = PressApproachGoalConfig(
 )
 _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
+    range_barrier_margin_m=0.02,
+    range_barrier_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
     upright_error_weight=5.0,
@@ -108,9 +111,10 @@ def _step(*, state=None, sample=None):
     )
 
 
-def test_reward_record_has_exactly_nine_signed_terms() -> None:
+def test_reward_record_has_exactly_ten_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
+        "range_barrier",
         "alignment_error",
         "velocity_tracking",
         "upright_error",
@@ -149,6 +153,18 @@ def test_range_progress_is_signed() -> None:
     assert farther.rewards.range_progress[0] == pytest.approx(-1.0)
 
 
+@pytest.mark.parametrize(
+    ("range_m", "expected"),
+    [(0.43, 0.0), (0.42, 0.0), (0.415, -0.625), (0.41, -2.5), (0.40, -10.0)],
+)
+def test_range_barrier_penalizes_approach_to_lower_boundary(
+    range_m: float,
+    expected: float,
+) -> None:
+    result = _step(sample=_sample(range_m=range_m))
+    assert result.rewards.range_barrier[0] == pytest.approx(expected)
+
+
 def test_alignment_and_upright_errors_are_quadratic() -> None:
     result = _step(
         sample=_sample(
@@ -174,6 +190,18 @@ def test_wall_normal_velocity_target_is_linear_and_clipped(
         reference_cfg=_GOAL.velocity_reference,
     )
     assert target[0].tolist() == pytest.approx([target_mps, 0.0, 0.0])
+
+
+def test_wall_normal_velocity_waits_for_alignment_but_retreat_remains_available() -> None:
+    values = [[0.45, 0.03, 0.01], [0.39, 0.03, 0.01]]
+    for relative_position in (np.asarray(values), torch.asarray(values)):
+        target = press_approach_target_velocity(
+            relative_switch_pos_m=relative_position,
+            reference_cfg=_GOAL.velocity_reference,
+        )
+        if isinstance(target, torch.Tensor):
+            target = target.cpu().numpy()
+        np.testing.assert_allclose(target[:, 0], [0.0, -0.025], rtol=1.0e-6)
 
 
 def test_tangential_velocity_target_is_radially_limited() -> None:
@@ -247,6 +275,7 @@ def test_unstable_step_resets_success_counter() -> None:
     [
         (_sample(upright=0.7), "crash"),
         (_sample(altitude_m=0.1), "altitude"),
+        (_sample(range_m=0.399), "range_undershoot"),
         (_sample(lateral_m=0.4), "relative_envelope"),
     ],
 )

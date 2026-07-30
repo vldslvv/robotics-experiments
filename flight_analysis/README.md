@@ -28,19 +28,62 @@ for the hover/dynamics signals (horizontal drift, vertical range, speed, tilt,
 yaw, body rates, and commanded motor effort). Use it to quantify the sim-to-real
 gap once real flights exist, and to track sim-vs-sim drift in the meantime.
 
-`controller_state_replay.py` is an independent instantaneous state-replay
-diagnostic. It
-replays PX4 ULog estimator state and velocity setpoints through the numpy
-reference for Isaac Lab's velocity cascade, converts PX4 motor controls through
-the configured Pegasus scaling, and compares per-rotor angular velocity,
-collective thrust, and body torque at the same timestamps. This is a diagnostic,
-not the controller-alignment publication path.
+`controller_state_replay.py` is an independent timestamped state-replay
+diagnostic. It replays PX4 ULog estimator state and velocity setpoints
+through the stateful numpy reference for Isaac Lab's velocity cascade on the
+configured 250 Hz physics grid. Setpoints use zero-order hold, velocities and
+rates are linearly interpolated, and attitudes use normalized shortest-path
+quaternion interpolation. The tool converts PX4 motor controls through the
+configured Pegasus scaling and compares per-rotor angular velocity, collective
+thrust, and body torque at logged actuator timestamps. It also regresses the
+logged normalized PX4 torque setpoint against reconstructed physical body
+torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
+This is a diagnostic, not the controller-alignment publication path.
+
+Alignment trace schema 1 records every profile's absolute PX4 simulation start
+time and its controller acceleration, rate-integral, and normalized hover-thrust
+state at that timestamp. The tool uses those boundaries to audit the captured
+ULog against the bridge log without manual windows. It reports thrust and torque setpoints,
+motor controls, bridge-mapped rotor speed, reconstructed wrench, hover-thrust
+estimate, and timestamp errors per fit, validation, and stability profile:
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
+  flight_analysis/tools/controller_state_replay.py \
+  --ulog .build/alignment/<alignment-id>/<run-id>/reference.ulg \
+  --config configs/alignment_px4_x500_velocity.yaml \
+  --audit-reference .build/alignment/<alignment-id>/<run-id>/reference.json \
+  --bridge-log .build/alignment/<alignment-id>/<run-id>/bridge.log \
+  --json .build/alignment/<alignment-id>/<run-id>/actuator_audit.json
+```
+
+The audit fails on incomplete topic coverage, a join error above one 4 ms
+physics tick, normalized motor RMSE above 0.01, or collective-thrust RMSE above
+0.05 N.
+
+After fitting, replay every recorded profile without selecting windows by hand:
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
+  flight_analysis/tools/controller_state_replay.py \
+  --ulog .build/alignment/<alignment-id>/<run-id>/reference.ulg \
+  --config configs/alignment_px4_x500_velocity.yaml \
+  --controller-artifact .build/alignment/<alignment-id>/<run-id>/controller.json \
+  --profile-reference .build/alignment/<alignment-id>/<run-id>/reference.json \
+  --json .build/alignment/<alignment-id>/<run-id>/controller_boundary_replay.json
+```
+
+Profile replay inverts unsaturated normalized motor controls through the
+generated allocator mix and reports target-versus-PX4 normalized collective
+and torque before the existing motor, rotor-speed, and physical-wrench
+metrics. Samples at either motor limit remain in output-boundary metrics but
+are excluded from upstream allocator attribution.
 
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --alignment-artifact .build/alignment/x500-velocity-px4-v1/best \
+  --controller-artifact .build/alignment/x500-px4-v1/latest \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 
@@ -161,6 +204,9 @@ Important bridge fields:
 - `last_actuator_us`: PX4 actuator timestamp last received by the bridge.
 - `actuator_lag_us`: `sim_time_us - last_actuator_us`; should settle near one
   sensor period during healthy lockstep.
+- `PX4 bridge dynamics` records both fields beside the rotor commands and
+  realized wrench, so actuator audits do not infer the applied command's
+  timestamp from log-line order.
 - `input_reference`: scaled PX4 actuator controls from Pegasus' backend.
 - `commands`: rotor angular velocity references sent to the thrust model.
 - `forces_n`: per-rotor forces actually applied in Isaac.

@@ -4,9 +4,8 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path. The ordinary
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
-``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
-``initialize_actor_output`` / ``initialize_actor_from_checkpoint`` /
-``export_policy`` plus ``TrainingResult``
+``build_runner`` / ``train_phase`` / ``load_checkpoint`` / ``deterministic_actor`` /
+``initialize_actor_output`` / ``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
 """
@@ -22,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import torch
 from rsl_rl.runners import OnPolicyRunner
 
-from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig
+from robotics_experiments.config import RlPolicyConfig, RlTrainingConfig, RlTrainingPhaseConfig
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 
 if TYPE_CHECKING:
@@ -33,10 +32,9 @@ __all__ = [
     "build_runner",
     "deterministic_actor",
     "export_policy",
-    "initialize_actor_from_checkpoint",
     "initialize_actor_output",
     "load_checkpoint",
-    "train",
+    "train_phase",
 ]
 
 
@@ -47,6 +45,10 @@ class _ActorCritic(Protocol):
 class _Algorithm(Protocol):
     policy: _ActorCritic
     actor_critic: _ActorCritic
+    optimizer: torch.optim.Optimizer
+    learning_rate: float
+    entropy_coef: float
+    schedule: str
 
 
 class _PolicyRunner(Protocol):
@@ -54,6 +56,7 @@ class _PolicyRunner(Protocol):
 
     alg: _Algorithm
     log_dir: str
+    save_interval: int
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -79,7 +82,10 @@ class TrainingResult:
 
 
 def _train_cfg(
-    *, training_config: RlTrainingConfig, policy_config: RlPolicyConfig
+    *,
+    training_config: RlTrainingConfig,
+    phase: RlTrainingPhaseConfig,
+    policy_config: RlPolicyConfig,
 ) -> dict[str, Any]:
     """Map PPO and task-owned policy config onto the rsl_rl runner dict."""
     return {
@@ -87,7 +93,7 @@ def _train_cfg(
         # critic shares it (no privileged observations yet).
         "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
         "num_steps_per_env": int(training_config.num_steps_per_env),
-        "save_interval": int(training_config.save_interval),
+        "save_interval": int(phase.save_interval),
         "empirical_normalization": False,
         "policy": {
             "class_name": "ActorCritic",
@@ -101,11 +107,11 @@ def _train_cfg(
         },
         "algorithm": {
             "class_name": "PPO",
-            "learning_rate": float(training_config.learning_rate),
-            "schedule": str(training_config.schedule),
+            "learning_rate": float(phase.learning_rate),
+            "schedule": str(phase.schedule),
             "gamma": float(training_config.gamma),
             "lam": float(training_config.lam),
-            "entropy_coef": float(training_config.entropy_coef),
+            "entropy_coef": float(phase.entropy_coef),
             "clip_param": float(training_config.clip_param),
             "value_loss_coef": float(training_config.value_loss_coef),
             "use_clipped_value_loss": True,
@@ -121,6 +127,7 @@ def build_runner(
     *,
     env: DirectRLEnv,
     training_config: RlTrainingConfig,
+    phase: RlTrainingPhaseConfig,
     policy_config: RlPolicyConfig,
     log_dir: str,
     device: str,
@@ -134,6 +141,7 @@ def build_runner(
         wrapped,
         _train_cfg(
             training_config=training_config,
+            phase=phase,
             policy_config=policy_config,
         ),
         log_dir=log_dir,
@@ -141,10 +149,27 @@ def build_runner(
     )
 
 
-def train(runner: _PolicyRunner, iterations: int) -> TrainingResult:
-    """Run the training loop and return the run summary."""
-    runner.learn(num_learning_iterations=int(iterations), init_at_random_ep_len=True)
-    return TrainingResult(iterations=int(iterations), log_dir=str(getattr(runner, "log_dir", "")))
+def train_phase(
+    *,
+    runner: _PolicyRunner,
+    phase: RlTrainingPhaseConfig,
+    first_phase: bool,
+) -> TrainingResult:
+    """Apply one declarative phase without replacing runner or optimizer state."""
+    runner.alg.learning_rate = float(phase.learning_rate)
+    runner.alg.entropy_coef = float(phase.entropy_coef)
+    runner.alg.schedule = str(phase.schedule)
+    runner.save_interval = int(phase.save_interval)
+    for parameter_group in runner.alg.optimizer.param_groups:
+        parameter_group["lr"] = float(phase.learning_rate)
+    runner.learn(
+        num_learning_iterations=int(phase.iterations),
+        init_at_random_ep_len=first_phase,
+    )
+    return TrainingResult(
+        iterations=int(phase.iterations),
+        log_dir=str(getattr(runner, "log_dir", "")),
+    )
 
 
 def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> None:
@@ -176,43 +201,6 @@ def initialize_actor_output(*, runner: _PolicyRunner, method: str) -> None:
     torch.nn.init.orthogonal_(output.weight, gain=0.01)
     if output.bias is not None:
         torch.nn.init.zeros_(output.bias)
-
-
-def initialize_actor_from_checkpoint(
-    *,
-    runner: _PolicyRunner,
-    checkpoint_path: Path,
-    device: str,
-) -> None:
-    """Load only compatible actor parameters into a freshly built runner.
-
-    The critic, action standard deviation, optimizer, and runner iteration are
-    deliberately left exactly as initialized by ``build_runner``.
-    """
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model_state = checkpoint.get("model_state_dict")
-    if not isinstance(model_state, dict):
-        raise ValueError(f"checkpoint {checkpoint_path} has no model_state_dict")
-    source_actor = {
-        name.removeprefix("actor."): value
-        for name, value in model_state.items()
-        if name.startswith("actor.")
-    }
-    target_actor = _policy_module(runner).actor
-    target_state = target_actor.state_dict()
-    if source_actor.keys() != target_state.keys():
-        raise ValueError("initialization checkpoint actor architecture is incompatible")
-    incompatible_shapes = {
-        name: (tuple(source_actor[name].shape), tuple(target.shape))
-        for name, target in target_state.items()
-        if source_actor[name].shape != target.shape
-    }
-    if incompatible_shapes:
-        raise ValueError(
-            "initialization checkpoint observation/action dimensions or actor "
-            f"architecture are incompatible: {incompatible_shapes}"
-        )
-    target_actor.load_state_dict(source_actor, strict=True)
 
 
 def _actor_module(runner: _PolicyRunner) -> torch.nn.Module:

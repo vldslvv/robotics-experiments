@@ -8,8 +8,8 @@ from importlib.util import find_spec
 
 import gymnasium as gym
 
-from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.rl import PolicyContract, PolicyInterface
 
 __all__ = [
@@ -19,8 +19,8 @@ __all__ = [
     "register_isaac_lab_tasks",
 ]
 
-DRONE_HOVER_TASK_ID = "Isaac-Drone-Hover-Direct-v0"
-SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v0"
+DRONE_HOVER_TASK_ID = "Isaac-Drone-Hover-Direct-v1"
+SWITCH_PRESS_TASK_ID = "Isaac-Switch-Press-Direct-v1"
 
 
 @dataclass(frozen=True)
@@ -100,6 +100,7 @@ def make_isaac_lab_env(
     seed: int | None = None,
     num_envs: int | None = None,
     policy_contract: PolicyContract | None = None,
+    use_training_reset_distribution: bool = False,
 ) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
     if not register_isaac_lab_tasks():
@@ -109,8 +110,8 @@ def make_isaac_lab_env(
     except KeyError as exc:
         raise ValueError(f"unknown robotics-experiments Isaac Lab task {task_id!r}") from exc
     expected_interface = {
-        DRONE_HOVER_TASK_ID: PolicyInterface.HOVER_V1,
-        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS_V1,
+        DRONE_HOVER_TASK_ID: PolicyInterface.HOVER,
+        SWITCH_PRESS_TASK_ID: PolicyInterface.PRESS_APPROACH,
     }[task_id]
     if policy_contract is not None and policy_contract.policy_interface != expected_interface:
         raise ValueError(
@@ -119,10 +120,13 @@ def make_isaac_lab_env(
         )
     module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)
     factory = getattr(importlib.import_module(module_name), factory_name)
-    env_cfg = factory(
-        experiment_config=experiment_config,
-        policy_contract=policy_contract,
-    )
+    factory_kwargs = {
+        "experiment_config": experiment_config,
+        "policy_contract": policy_contract,
+    }
+    if task_id == SWITCH_PRESS_TASK_ID:
+        factory_kwargs["use_training_reset_distribution"] = use_training_reset_distribution
+    env_cfg = factory(**factory_kwargs)
     if seed is not None and hasattr(env_cfg, "seed"):
         env_cfg.seed = seed
     if num_envs is not None:

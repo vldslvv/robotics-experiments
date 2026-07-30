@@ -16,6 +16,7 @@ from robotics_experiments.config._rl import (
     PressApproachGoalConfig,
     PressApproachRewardConfig,
     PressApproachTerminationConfig,
+    PressApproachTrainingResetConfig,
     PressApproachVelocityReferenceConfig,
     PressResetConfig,
     RlActionConfig,
@@ -23,6 +24,7 @@ from robotics_experiments.config._rl import (
     RlPolicyConfig,
     RlPolicyCriticConfig,
     RlTrainingConfig,
+    RlTrainingPhaseConfig,
 )
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
@@ -39,6 +41,7 @@ __all__ = [
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
     "PressApproachTerminationConfig",
+    "PressApproachTrainingResetConfig",
     "PressApproachVelocityReferenceConfig",
     "PressResetConfig",
     "Px4BridgeConfig",
@@ -46,6 +49,7 @@ __all__ = [
     "RlPolicyActorConfig",
     "RlPolicyConfig",
     "RlPolicyCriticConfig",
+    "RlTrainingPhaseConfig",
     "RlTrainingConfig",
     "RoutineStepConfig",
     "SimSettings",

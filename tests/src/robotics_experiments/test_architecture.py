@@ -13,22 +13,24 @@ _ROOT_PRIVATE_MODULES = frozenset({"_cadence"})
 # package may import any public facade; this table protects the reusable package
 # from acquiring a dependency back on those shells.
 _ALLOWED_DEPENDENCIES = {
-    "alignment": frozenset({"config"}),
+    "alignment": frozenset({"config", "controller"}),
     "commanding": frozenset({"config", "px4_bridge"}),
     "config": frozenset(),
+    "controller": frozenset({"config", "px4_bridge"}),
     "drone": frozenset({"config"}),
     "environment": frozenset({"config"}),
     "px4_bridge": frozenset({"config"}),
-    "rl": frozenset({"alignment", "commanding", "config", "px4_bridge"}),
+    "rl": frozenset({"commanding", "config", "controller", "px4_bridge"}),
     "runtime": frozenset(
         {"commanding", "config", "drone", "environment", "px4_bridge", "rl", "simulation"}
     ),
     "simulation": frozenset({"config"}),
     "workflows": frozenset(
         {
-            "commanding",
             "alignment",
+            "commanding",
             "config",
+            "controller",
             "drone",
             "environment",
             "px4_bridge",

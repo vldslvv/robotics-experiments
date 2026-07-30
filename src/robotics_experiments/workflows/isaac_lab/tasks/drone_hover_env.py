@@ -24,7 +24,7 @@ import torch
 from isaaclab.assets import Articulation, ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import PhysxCfg, SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
@@ -140,12 +140,15 @@ def make_drone_hover_env_cfg(
         action_space=action_dim,
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
-        policy_interface="hover-v1",
+        policy_interface="hover",
         policy_config=experiment_config.rl.hover.policy,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
             render_interval=decimation,
+            physx=PhysxCfg(
+                enable_enhanced_determinism=experiment_config.sim.enhanced_determinism,
+            ),
         ),
         drone_cfg=_make_drone_articulation_cfg(
             usd_path=vehicle.spawn.usd_path,

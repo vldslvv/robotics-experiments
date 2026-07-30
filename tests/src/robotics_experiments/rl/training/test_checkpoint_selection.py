@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -115,13 +116,12 @@ def test_checkpoint_enumeration_is_numeric(tmp_path: Path) -> None:
 
 
 def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
-    selector = _load_selector_module()
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
     config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
     contract = PolicyContract(
-        policy_interface=PolicyInterface.PRESS_V1,
+        policy_interface=PolicyInterface.PRESS_APPROACH,
         obs_schema_version=1,
         obs_dim=34,
         policy_rate_hz=20.0,
@@ -130,20 +130,20 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         max_body_velocity_mps=2.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        hover_thrust_fraction=0.4,
+        hover_thrust_normalized=0.57,
         curriculum_stage="approach",
     )
 
-    fingerprint = selector._comparison_fingerprint(  # noqa: SLF001
+    fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=contract,
     )
 
-    assert fingerprint == selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
     )
-    assert fingerprint != selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
     )
@@ -327,7 +327,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
 
     monkeypatch.setattr(selector, "_press_evaluation", fake_evaluate)
     selection = selector._select_candidates(  # noqa: SLF001
-        policy_interface="press-v1",
+        policy_interface="press-approach",
         candidates=candidates,
         runner=object(),
         env=object(),
@@ -336,7 +336,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
             episodes_per_seed=100,
             success_rate_min=0.95,
             collision_rate_max=0.01,
-            selection_metric="held-out-press-task-quality-v2",
+            selection_metric="held-out-press-task-quality",
         ),
         goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
@@ -353,7 +353,7 @@ def test_no_scorer_warns_and_selects_final_checkpoint() -> None:
     )
     with pytest.warns(RuntimeWarning, match="no checkpoint scorer"):
         selection = select_checkpoint(
-            policy_interface="hover-v1",
+            policy_interface="hover",
             candidates=candidates,
         )
     assert selection.selection_method == "final-no-scorer"
@@ -369,7 +369,7 @@ def test_approach_report_records_stage_and_v2_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="held-out-press-task-quality-v2",
+        selection_method="held-out-press-task-quality",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -377,7 +377,7 @@ def test_approach_report_records_stage_and_v2_thresholds() -> None:
         selection=selection,
         run_dir=Path("/tmp/run"),
         policy_name="press-approach",
-        policy_interface="press-v1",
+        policy_interface="press-approach",
         curriculum_stage="approach",
         seeds=(101, 202, 303),
         episodes_per_seed=100,
@@ -389,7 +389,7 @@ def test_approach_report_records_stage_and_v2_thresholds() -> None:
         all_candidates=(candidate,),
         comparison_fingerprint="comparison",
     )
-    assert report["schema_version"] == 7
+    assert report["schema_version"] == 1
     assert report["curriculum_stage"] == "approach"
     assert report["selected_advisory_accepted"] is False
     assert report["selected_score"] == evaluation.ranking_values[0]
@@ -440,7 +440,7 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality",
         (evaluation,),
         evaluation.candidate,
     )
@@ -460,7 +460,7 @@ def test_publication_records_evaluation_and_advances_latest(
         selection=selection,
         report=report,
         metadata={
-            "policy_interface": "press-v1",
+            "policy_interface": "press-approach",
             "curriculum_stage": "approach",
         },
         runner=object(),
@@ -497,7 +497,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality",
         (),
         CheckpointCandidate(50, checkpoint),
     )
@@ -506,7 +506,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
             selection=selection,
             report={"selected_iteration": 50},
             metadata={
-                "policy_interface": "press-v1",
+                "policy_interface": "press-approach",
                 "curriculum_stage": "approach",
             },
             runner=object(),

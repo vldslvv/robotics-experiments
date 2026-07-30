@@ -70,9 +70,10 @@ class PressApproachInput(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The nine signed per-step Stage 1 reward contributions."""
+    """The ten signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
+    range_barrier: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
     upright_error: ArrayT
@@ -87,6 +88,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         """Sum every named reward contribution."""
         return (
             self.range_progress
+            + self.range_barrier
             + self.alignment_error
             + self.velocity_tracking
             + self.upright_error
@@ -107,6 +109,7 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
     pusher_collision: ArrayT
     crash: ArrayT
     altitude: ArrayT
+    range_undershoot: ArrayT
     relative_envelope: ArrayT
     time_out: ArrayT
     terminated: ArrayT
@@ -114,7 +117,7 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
     @property
     def flight_failure(self) -> ArrayT:
         """Return raw flight-envelope failures, including collision-coincident ones."""
-        return self.crash | self.altitude | self.relative_envelope
+        return self.crash | self.altitude | self.range_undershoot | self.relative_envelope
 
     @property
     def collision(self) -> ArrayT:
@@ -236,6 +239,12 @@ def press_approach_target_velocity(
             reference_cfg.wall_normal_min_mps,
             reference_cfg.wall_normal_max_mps,
         )
+        alignment_error = torch.linalg.vector_norm(relative_switch_pos_m[..., 1:3], dim=-1)
+        wall_normal = torch.where(
+            (alignment_error <= reference_cfg.wall_normal_alignment_gate_m) | (wall_normal <= 0.0),
+            wall_normal,
+            torch.zeros_like(wall_normal),
+        )
         tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
         tangential_norm = torch.linalg.norm(tangential, dim=-1)
         denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
@@ -246,6 +255,12 @@ def press_approach_target_velocity(
         * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
         reference_cfg.wall_normal_min_mps,
         reference_cfg.wall_normal_max_mps,
+    )
+    alignment_error = np.linalg.norm(relative_switch_pos_m[..., 1:3], axis=-1)
+    wall_normal = np.where(
+        (alignment_error <= reference_cfg.wall_normal_alignment_gate_m) | (wall_normal <= 0.0),
+        wall_normal,
+        np.zeros_like(wall_normal),
     )
     tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
     tangential_norm = np.linalg.norm(tangential, axis=-1)
@@ -315,12 +330,13 @@ def step_press_approach(
 
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
+    range_undershoot = current_range < goal_cfg.range_min_m
     relative_envelope = (
         (abs(current_range) > termination_cfg.max_wall_normal_distance_m)
         | (abs(sample.relative_switch_pos_m[..., 1]) > termination_cfg.max_lateral_error_m)
         | (abs(sample.relative_switch_pos_m[..., 2]) > termination_cfg.max_vertical_error_m)
     )
-    flight_failure = crash | altitude | relative_envelope
+    flight_failure = crash | altitude | range_undershoot | relative_envelope
     collision = sample.body_collision_flag | sample.pusher_collision_flag
     ordinary_flight_failure = flight_failure & ~collision
     failure = collision | ordinary_flight_failure
@@ -333,6 +349,7 @@ def step_press_approach(
         pusher_collision=sample.pusher_collision_flag,
         crash=crash,
         altitude=altitude,
+        range_undershoot=range_undershoot,
         relative_envelope=relative_envelope,
         time_out=time_out,
         terminated=terminated,
@@ -341,6 +358,17 @@ def step_press_approach(
     rewards = PressApproachRewardTerms(
         range_progress=(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
+        ),
+        range_barrier=(
+            -reward_cfg.range_barrier_weight
+            * _square(
+                _clip(
+                    (goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m - current_range)
+                    / reward_cfg.range_barrier_margin_m,
+                    0.0,
+                    float("inf"),
+                )
+            )
         ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
         velocity_tracking=(

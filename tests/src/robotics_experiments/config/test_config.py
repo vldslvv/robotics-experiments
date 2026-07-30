@@ -106,8 +106,17 @@ def test_default_experiment_has_only_global_root_config():
         "vehicles",
         "driver",
         "flight_benchmark",
+        "alignment",
     }
     assert config.flight_benchmark.airborne_duration_s == 5.0
+    assert config.alignment.capture.sensor_seed == 42
+    assert config.alignment.capture.minimum_neutral_s == 3.0
+    assert config.alignment.capture.max_linear_speed_mps == 0.02
+    assert config.alignment.capture.max_angular_speed_radps == 0.03
+    assert config.alignment.execution.worker_count == 1
+    assert config.alignment.execution.candidate_capacity == 128
+    assert config.alignment.execution.candidate_capacity_benchmark == (128, 256, 384, 512)
+    assert config.alignment.execution.gpu_target_percent == 95.0
     vehicle = config.vehicles["x500_01"]
     assert vehicle.spawn.position_xy == (0.0, 0.0)
     assert vehicle.spawn.usd_path.endswith("/holybro_x500_v2.usda")
@@ -123,6 +132,94 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
+def test_alignment_experiment_uses_deterministic_sensor_excitation():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
+    bridge = config.vehicles["x500_01"].bridge
+
+    assert config.sim.enhanced_determinism
+    assert not bridge.sensor_noise_enabled
+    assert bridge.sensor_excitation_mode == "deterministic"
+    assert bridge.barometer_noise_std_pa == 0.1
+    assert bridge.magnetometer_noise_scale == 0.1
+    assert config.alignment.capture.sensor_seed == 42
+
+
+def test_bridge_rejects_unknown_sensor_excitation_mode(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_sensor_excitation",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace(
+            "sensor_excitation_mode: stochastic",
+            "sensor_excitation_mode: random",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="sensor_excitation_mode must be 'stochastic' or 'deterministic'",
+    ):
+        load_config(path)
+
+
+def test_alignment_capture_rejects_seed_outside_numpy_range(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_alignment_seed", {})
+    base = path.parent / "base.yaml"
+    base.write_text(base.read_text().replace("sensor_seed: 42", "sensor_seed: -1"))
+
+    with pytest.raises(ValueError, match="32-bit unsigned integer"):
+        load_config(path)
+
+
+def test_bridge_rejects_negative_barometer_noise(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_barometer_noise",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace("barometer_noise_std_pa: 1.0", "barometer_noise_std_pa: -1.0")
+    )
+
+    with pytest.raises(ValueError, match="barometer_noise_std_pa must be finite and non-negative"):
+        load_config(path)
+
+
+def test_bridge_rejects_negative_magnetometer_noise_scale(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_magnetometer_noise",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace(
+            "magnetometer_noise_scale: 1.0",
+            "magnetometer_noise_scale: -1.0",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="magnetometer_noise_scale must be finite and non-negative",
+    ):
+        load_config(path)
+
+
 def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     from robotics_experiments.config import load_config
 
@@ -133,33 +230,35 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert training.alignment_artifact == ".build/alignment/x500-velocity-px4-v1/best"
+    assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
-    assert training.training_mode == "scratch"
     assert config.rl.press.curriculum_stage == "approach"
-    assert training.max_iterations == 300
-    assert training.learning_rate == 1.0e-4
-    assert training.entropy_coef == 0.0001
-    assert training.save_interval == 10
-    assert training.schedule == "adaptive"
+    assert tuple(phase.iterations for phase in training.phases) == (121, 11)
+    assert tuple(phase.learning_rate for phase in training.phases) == (1.0e-4, 3.0e-5)
+    assert tuple(phase.entropy_coef for phase in training.phases) == (0.0001, 0.0)
+    assert tuple(phase.save_interval for phase in training.phases) == (30, 1)
+    assert tuple(phase.hard_case_fraction for phase in training.phases) == (0.0, 0.3)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
     assert reward.range_progress_weight == 50.0
-    assert reward.velocity_tracking_weight == 100.0
+    assert reward.range_barrier_margin_m == 0.02
+    assert reward.range_barrier_weight == 10.0
+    assert reward.velocity_tracking_weight == 300.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0
-    assert reward.flight_failure_weight == 100.0
+    assert reward.flight_failure_weight == 300.0
     assert config.rl.press.goal.stable_steps == 5
     reference = config.rl.press.goal.velocity_reference
-    assert reference.range_center_m == 0.41
+    assert reference.range_center_m == 0.415
+    assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
     assert reference.wall_normal_min_mps == -0.04
-    assert reference.wall_normal_max_mps == 0.08
+    assert reference.wall_normal_max_mps == 0.04
     assert reference.tangential_gain_per_s == 2.0
     assert reference.tangential_speed_max_mps == 0.10
     assert config.rl.press.handoff.switch_range_min_m == 0.45
@@ -171,26 +270,17 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.handoff.body_z_alignment_min == 0.965926
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
+    assert config.rl.press.training_reset.hard_case_fraction == 0.0
+    assert config.rl.press.training_reset.range_min_m == 0.45
+    assert config.rl.press.training_reset.range_max_m == 0.47
+    assert config.rl.press.training_reset.tangential_error_min_m == 0.06
+    assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
-    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v2"
+    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality"
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
-
-
-def test_press_approach_finetune_config_preserves_low_noise_actor_only_recipe():
-    from robotics_experiments.config import load_config
-
-    config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
-
-    assert config.rl.training.training_mode == "actor-only"
-    assert config.rl.training.max_iterations == 50
-    assert config.rl.training.learning_rate == 1.0e-6
-    assert config.rl.training.entropy_coef == 0.0
-    assert config.rl.training.save_interval == 5
-    assert config.rl.training.schedule == "fixed"
-    assert config.rl.press.policy.actor.initial_noise_std == 0.01
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
@@ -296,12 +386,27 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "initial_noise_std must be finite and non-negative",
         ),
         (
-            {"rl": {"training": {"alignment_artifact": "  "}}},
-            "alignment_artifact must be non-empty",
+            {"rl": {"training": {"controller_artifact": "  "}}},
+            "controller_artifact must be non-empty",
         ),
         (
-            {"rl": {"training": {"training_mode": "resume"}}},
-            "training_mode",
+            {
+                "rl": {
+                    "training": {
+                        "phases": [
+                            {
+                                "iterations": 1,
+                                "save_interval": 1,
+                                "learning_rate": 1.0e-4,
+                                "schedule": "unknown",
+                                "entropy_coef": 0.0,
+                                "hard_case_fraction": 0.0,
+                            }
+                        ]
+                    }
+                }
+            },
+            "schedule",
         ),
         (
             {"rl": {"press": {"policy": {"actor": {"output_initialization": "task-controller"}}}}},
@@ -352,8 +457,32 @@ def test_task_policy_validation(tmp_path, override, match):
             "switch_range_min_m",
         ),
         (
+            {"rl": {"press": {"training_reset": {"hard_case_fraction": 1.1}}}},
+            "hard_case_fraction",
+        ),
+        (
+            {"rl": {"press": {"training_reset": {"range_min_m": 0.48}}}},
+            "range bounds",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "training_reset": {
+                            "tangential_error_min_m": 0.081,
+                        }
+                    }
+                }
+            },
+            "tangential bounds",
+        ),
+        (
             {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},
             "finite and non-negative",
+        ),
+        (
+            {"rl": {"press": {"reward": {"range_barrier_margin_m": 0.0}}}},
+            "range_barrier_margin_m must be finite and positive",
         ),
         (
             {

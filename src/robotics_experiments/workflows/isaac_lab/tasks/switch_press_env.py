@@ -14,7 +14,7 @@ from isaaclab.assets import Articulation, ArticulationCfg, RigidObject, RigidObj
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensor, ContactSensorCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import PhysxCfg, SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, UsdFileCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
@@ -42,6 +42,7 @@ from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
 )
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
     _press_entry_state_from_unit_samples,
+    _press_training_entry_state_from_unit_samples,
 )
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
@@ -57,6 +58,7 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
     "range_progress",
+    "range_barrier",
     "alignment_error",
     "velocity_tracking",
     "upright_error",
@@ -81,6 +83,7 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     observation_space: int = cast(int, MISSING)
     policy_interface: str = cast(str, MISSING)
     policy_config: RlPolicyConfig = cast(RlPolicyConfig, MISSING)
+    use_training_reset_distribution: bool = cast(bool, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(SimulationCfg, MISSING)
     drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
@@ -95,6 +98,7 @@ def make_switch_press_env_cfg(
     *,
     experiment_config: ExperimentConfig,
     policy_contract: PolicyContract | None = None,
+    use_training_reset_distribution: bool = False,
 ) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
     vehicle = _training_vehicle(experiment_config)
@@ -130,12 +134,16 @@ def make_switch_press_env_cfg(
         action_space=action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
-        policy_interface="press-v1",
+        policy_interface="press-approach",
         policy_config=rl.press.policy,
+        use_training_reset_distribution=use_training_reset_distribution,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
             render_interval=decimation,
+            physx=PhysxCfg(
+                enable_enhanced_determinism=experiment_config.sim.enhanced_determinism,
+            ),
         ),
         drone_cfg=_make_drone_articulation_cfg(
             usd_path=vehicle.spawn.usd_path,
@@ -228,6 +236,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             action=self.actions,
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
+        self._training_hard_case_fraction = float(
+            self._experiment_config.rl.press.training_reset.hard_case_fraction
+        )
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -235,6 +246,12 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
+
+    def set_training_hard_case_fraction(self, fraction: float, /) -> None:
+        """Change the reset mixture at an in-run curriculum boundary."""
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("training hard-case fraction must be between 0 and 1")
+        self._training_hard_case_fraction = float(fraction)
         self._collision_episode_count = torch.zeros((), device=self.device)
         self._body_collision_episode_count = torch.zeros((), device=self.device)
         self._pusher_collision_episode_count = torch.zeros((), device=self.device)
@@ -474,12 +491,22 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         switch_position = self.switch.data.default_root_state[env_ids, :3]
         switch_position = switch_position + self.scene.env_origins[env_ids]
         count = len(env_ids)
-        wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
-            _press_entry_state_from_unit_samples(
-                unit_samples=torch.rand((count, 9), device=self.device),
-                gate=handoff_gate,
+        if self.cfg.use_training_reset_distribution:
+            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
+                _press_training_entry_state_from_unit_samples(
+                    unit_samples=torch.rand((count, 10), device=self.device),
+                    gate=handoff_gate,
+                    training_reset=self._experiment_config.rl.press.training_reset,
+                    hard_case_fraction=self._training_hard_case_fraction,
+                )
             )
-        )
+        else:
+            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
+                _press_entry_state_from_unit_samples(
+                    unit_samples=torch.rand((count, 9), device=self.device),
+                    gate=handoff_gate,
+                )
+            )
         root_state = self.drone.data.default_root_state[env_ids].clone()
         root_state[:, :3] = switch_position - torch.cat(
             (wall_normal[:, None], lateral_vertical),

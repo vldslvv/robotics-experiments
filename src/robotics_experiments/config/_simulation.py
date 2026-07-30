@@ -14,10 +14,13 @@ class SimSettings(_FreezableConfig):
         physics_hz: PhysX steps per second.
         rendering_hz: Kit main-loop target render frequency in Hz.
         solver_type: PhysX solver identifier (``"TGS"`` or ``"PGS"``).
+        enhanced_determinism: Enable PhysX's stronger deterministic simulation
+            ordering at a performance cost.
         gravity: World gravity vector in m/s^2 as ``(gx, gy, gz)``.
     """
 
     physics_hz: float
     rendering_hz: float
     solver_type: str
+    enhanced_determinism: bool
     gravity: Tuple[float, float, float]
