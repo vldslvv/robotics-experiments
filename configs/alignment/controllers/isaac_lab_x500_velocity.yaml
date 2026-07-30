@@ -74,11 +74,15 @@ parameters:
       - [1.8, 1.8, 4.0]
       - [2.25, 2.25, 5.0]
       - [2.7, 2.7, 6.0]
-      # Evidence-backed axis separation after v3 attempt 2: preserve the
-      # passing forward response while varying lateral and vertical bandwidth.
+      # Axis-separated candidates cover independently evidenced horizontal and
+      # vertical bandwidth regions.
       - [1.8, 1.35, 6.0]
       - [1.8, 2.25, 6.0]
       - [1.8, 2.7, 6.0]
+      - [1.575, 1.8, 3.0]
+      - [1.575, 2.25, 3.0]
+      - [1.8, 1.8, 3.0]
+      - [1.8, 2.25, 3.0]
   - field: ki_vel
     stage: 1
     candidates:
