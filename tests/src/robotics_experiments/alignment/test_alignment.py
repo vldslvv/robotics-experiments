@@ -23,6 +23,7 @@ from robotics_experiments.alignment._align import (
     _staged_beam_search,
 )
 from robotics_experiments.alignment._io import (
+    _index_candidate_diagnostics,
     _TraceFileEvaluator,
     publish_alignment,
     write_alignment_artifact,
@@ -440,7 +441,7 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     assert max(batch_evaluator.batch_sizes) > 1
 
 
-def test_file_evaluator_loads_candidate_diagnostics_once(
+def test_file_evaluator_indexes_candidate_diagnostics_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -474,20 +475,26 @@ def test_file_evaluator_loads_candidate_diagnostics_once(
                     ]
                 },
                 "failures": {},
-            }
+            },
+            indent=2,
         )
     )
-    original_read_text = Path.read_text
-    read_count = 0
+    original_index = _index_candidate_diagnostics
+    index_count = 0
 
-    def counted_read_text(source: Path) -> str:
-        nonlocal read_count
-        if source == path:
-            read_count += 1
-        return original_read_text(source)
+    def counted_index(
+        *,
+        path: Path,
+    ) -> tuple[dict[str, object], dict[str, tuple[int, int]], dict[str, str]]:
+        nonlocal index_count
+        index_count += 1
+        return original_index(path=path)
 
     monkeypatch.setenv("ROBOTICS_ALIGNMENT_RUN_DIR", str(tmp_path))
-    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    monkeypatch.setattr(
+        "robotics_experiments.alignment._io._index_candidate_diagnostics",
+        counted_index,
+    )
     evaluator = _TraceFileEvaluator(backend="isaac-lab")
 
     first = evaluator.evaluate(
@@ -502,7 +509,7 @@ def test_file_evaluator_loads_candidate_diagnostics_once(
     )
 
     assert first == second
-    assert read_count == 1
+    assert index_count == 1
 
 
 def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:

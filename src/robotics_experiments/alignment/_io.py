@@ -6,7 +6,9 @@ import dataclasses
 import hashlib
 import json
 import math
+import mmap
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -39,6 +41,9 @@ _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
+_CANDIDATE_ENTRY = re.compile(rb'(?m)^    "([0-9a-f]{64})": ')
+_CANDIDATES_MARKER = b'  "candidates": {'
+_FAILURES_MARKER = b'  "failures": {'
 
 
 def _canonical_json(value: Any, /) -> str:
@@ -493,12 +498,102 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     )
 
 
+def _json_value_bounds(*, payload: mmap.mmap, start: int, end: int) -> tuple[int, int]:
+    while start < end and payload[start] in b" \t\r\n":
+        start += 1
+    while start < end and payload[end - 1] in b" \t\r\n":
+        end -= 1
+    if start < end and payload[end - 1] == ord(","):
+        end -= 1
+        while start < end and payload[end - 1] in b" \t\r\n":
+            end -= 1
+    return start, end
+
+
+def _index_candidate_diagnostics(
+    *,
+    path: Path,
+) -> tuple[dict[str, Any], dict[str, tuple[int, int]], dict[str, str]]:
+    try:
+        with path.open("rb") as diagnostics:
+            with mmap.mmap(diagnostics.fileno(), 0, access=mmap.ACCESS_READ) as payload:
+                candidates_start = payload.find(_CANDIDATES_MARKER)
+                failures_start = payload.find(_FAILURES_MARKER, candidates_start)
+                if candidates_start < 0 or failures_start < 0:
+                    raise ValueError("candidate diagnostics must use the generated JSON layout")
+                candidates_end = payload.rfind(b"\n  },", candidates_start, failures_start)
+                failures_content_start = failures_start + len(_FAILURES_MARKER)
+                failures_end = (
+                    failures_content_start
+                    if payload[failures_content_start] == ord("}")
+                    else payload.rfind(b"\n  }\n}", failures_start)
+                )
+                if candidates_end < 0 or failures_end < 0:
+                    raise ValueError("candidate diagnostics must use the generated JSON layout")
+                header = json.loads(
+                    payload[:candidates_start] + b'  "candidates": {},\n  "failures": {}\n}'
+                )
+                metadata = _object(value=header, name=str(path))
+
+                candidate_matches = tuple(
+                    _CANDIDATE_ENTRY.finditer(
+                        payload,
+                        candidates_start + len(_CANDIDATES_MARKER),
+                        candidates_end,
+                    )
+                )
+                candidates: dict[str, tuple[int, int]] = {}
+                for index, match in enumerate(candidate_matches):
+                    end = (
+                        candidate_matches[index + 1].start()
+                        if index + 1 < len(candidate_matches)
+                        else candidates_end
+                    )
+                    start, end = _json_value_bounds(
+                        payload=payload,
+                        start=match.end(),
+                        end=end,
+                    )
+                    if start == end or payload[start] != ord("["):
+                        raise ValueError("candidate trace entry must be a JSON list")
+                    candidates[match.group(1).decode()] = (start, end)
+
+                failure_matches = tuple(
+                    _CANDIDATE_ENTRY.finditer(
+                        payload,
+                        failures_start + len(_FAILURES_MARKER),
+                        failures_end,
+                    )
+                )
+                failures: dict[str, str] = {}
+                for index, match in enumerate(failure_matches):
+                    end = (
+                        failure_matches[index + 1].start()
+                        if index + 1 < len(failure_matches)
+                        else failures_end
+                    )
+                    start, end = _json_value_bounds(
+                        payload=payload,
+                        start=match.end(),
+                        end=end,
+                    )
+                    failure = json.loads(payload[start:end])
+                    if not isinstance(failure, str):
+                        raise ValueError("candidate failure entry must be a JSON string")
+                    failures[match.group(1).decode()] = failure
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot index isaac-lab alignment traces from {path}: {exc}") from exc
+    return metadata, candidates, failures
+
+
 class _TraceFileEvaluator:
     def __init__(self, *, backend: str) -> None:
         self._backend = backend
         self._retain_traces = False
         self._path: Path | None = None
         self._payload: dict[str, Any] | None = None
+        self._candidate_offsets: dict[str, tuple[int, int]] = {}
+        self._candidate_failures: dict[str, str] = {}
 
     def _load_payload(self, *, path: Path) -> dict[str, Any]:
         if self._path == path and self._payload is not None:
@@ -513,6 +608,33 @@ class _TraceFileEvaluator:
         self._path = path
         self._payload = payload
         return payload
+
+    def _load_candidate_payload(self, *, path: Path) -> dict[str, Any]:
+        if self._path == path and self._payload is not None:
+            return self._payload
+        payload, offsets, failures = _index_candidate_diagnostics(path=path)
+        self._path = path
+        self._payload = payload
+        self._candidate_offsets = offsets
+        self._candidate_failures = failures
+        return payload
+
+    def _load_candidate_traces(self, *, path: Path, key: str) -> Any:
+        bounds = self._candidate_offsets.get(key)
+        if bounds is None:
+            failure = self._candidate_failures.get(key)
+            if failure is not None:
+                raise RuntimeError(failure)
+            return None
+        start, end = bounds
+        try:
+            with path.open("rb") as diagnostics:
+                diagnostics.seek(start)
+                return json.loads(diagnostics.read(end - start))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"cannot load isaac-lab candidate traces from {path}: {exc}"
+            ) from exc
 
     def evaluate(
         self,
@@ -531,10 +653,11 @@ class _TraceFileEvaluator:
         if self._backend == "px4-sitl":
             path = run_dir / "reference.json"
             key = "traces"
+            payload = self._load_payload(path=path)
         else:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
-        payload = self._load_payload(path=path)
+            payload = self._load_candidate_payload(path=path)
         if payload.get("schema_version") not in _SUPPORTED_TRACE_SCHEMA_VERSIONS:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
@@ -544,13 +667,7 @@ class _TraceFileEvaluator:
         if self._backend == "px4-sitl":
             raw_traces = payload.get(key)
         else:
-            raw_candidates = payload.get("candidates")
-            raw_failures = payload.get("failures")
-            if not isinstance(raw_candidates, dict) or not isinstance(raw_failures, dict):
-                raise RuntimeError(f"{path} has malformed candidate diagnostics")
-            raw_traces = raw_candidates.get(key)
-            if raw_traces is None and isinstance(raw_failures.get(key), str):
-                raise RuntimeError(raw_failures[key])
+            raw_traces = self._load_candidate_traces(path=path, key=key)
         if not isinstance(raw_traces, list):
             raise RuntimeError(f"{path} has no trace set for settings fingerprint {key!r}")
         return tuple(

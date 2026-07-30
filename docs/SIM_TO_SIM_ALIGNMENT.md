@@ -238,9 +238,10 @@ copies its finalized `reference.ulg` and `bridge.log` into the same run, and
 writes a relative-path `manifest.json`. The actuator audit writes
 `actuator_audit.json`, the live staged sweep writes `target_candidates.json`
 and `gpu_utilization.json`, and fit reproduces the same deterministic search
-from those cached traces before writing and publishing `alignment.json`. The file-backed evaluator loads each diagnostic
-file once; it does not reparse the complete candidate file for every setting,
-and it releases parsed target traces after their metrics are recorded.
+from those cached traces before writing and publishing `alignment.json`. The
+file-backed evaluator indexes the generated candidate file once and reads one
+candidate trace set at a time. It does not retain the complete diagnostic file
+or parsed target traces after their metrics are recorded.
 
 Alignment capture and execution settings live under the top-level Hydra
 `alignment` group. Capture preconditioning is behavior-affecting and is included
