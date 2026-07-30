@@ -391,7 +391,10 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
             raise AssertionError("alignment routine retained no probe state")
         from robotics_experiments.runtime import read_bridge_host_status
 
-        debug_log_path = read_bridge_host_status(host=fleet.flying[0].host).debug_log_path
+        host = fleet.flying[0].spawned.host
+        if host is None:
+            raise AssertionError("alignment capture retained no bridge host")
+        debug_log_path = read_bridge_host_status(host=host).debug_log_path
         if debug_log_path is None:
             raise AssertionError("alignment capture has no bridge debug log")
         _write_capture(
