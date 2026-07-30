@@ -195,6 +195,47 @@ def _trajectory_costs(
     return alignment_cost, velocity_tracking_cost, upright_cost, action_delta_cost
 
 
+def _report_worst_episode_trace(
+    *,
+    seed: int,
+    closest_range: torch.Tensor,
+    active_trace: list[torch.Tensor],
+    observation_trace: list[torch.Tensor],
+    action_trace: list[torch.Tensor],
+    range_trace: list[torch.Tensor],
+    body_collision_trace: list[torch.Tensor],
+    pusher_collision_trace: list[torch.Tensor],
+    step_dt: float,
+    report: Callable[[str], None],
+) -> None:
+    """Report the complete active window for one seed's closest episode."""
+    episode = int(torch.argmin(closest_range).item())
+    report(
+        f"press approach worst trace seed={seed} episode={episode} "
+        f"closest_range_m={float(closest_range[episode].item()):.6f}"
+    )
+    for step, active in enumerate(active_trace):
+        if not bool(active[episode].item()):
+            continue
+        observation = observation_trace[step][episode]
+        action = action_trace[step][episode]
+        relative_position = observation[:3].tolist()
+        body_velocity = observation[10:13].tolist()
+        body_angular_velocity = observation[13:16].tolist()
+        report(
+            f"press approach worst trace seed={seed} episode={episode} step={step} "
+            f"time_s={(step + 1) * step_dt:.3f} "
+            f"range_before_m={relative_position[0]:.6f} "
+            f"range_after_m={float(range_trace[step][episode].item()):.6f} "
+            f"lateral_m={relative_position[1]:.6f} vertical_m={relative_position[2]:.6f} "
+            f"body_velocity_mps={body_velocity} "
+            f"body_angular_velocity_radps={body_angular_velocity} "
+            f"action={action.tolist()} "
+            f"body_collision={bool(body_collision_trace[step][episode].item())} "
+            f"pusher_collision={bool(pusher_collision_trace[step][episode].item())}"
+        )
+
+
 def _evaluate_seed(
     *,
     env: _PressApproachEvaluationEnvironment,
@@ -203,6 +244,7 @@ def _evaluate_seed(
     episode_count: int,
     goal_config: PressApproachGoalConfig,
     report: Callable[[str], None],
+    trace_worst_episode: bool,
 ) -> tuple[tuple[PressApproachEpisodeMetrics, ...], dict[str, tuple[float, int]]]:
     reward_names = tuple(field.name for field in fields(PressApproachRewardTerms)) + ("total",)
     reward_sums = torch.zeros(len(reward_names), dtype=torch.float32, device=env.device)
@@ -232,6 +274,12 @@ def _evaluate_seed(
         dtype=torch.long,
         device=env.device,
     )
+    active_trace: list[torch.Tensor] = []
+    observation_trace: list[torch.Tensor] = []
+    action_trace: list[torch.Tensor] = []
+    range_trace: list[torch.Tensor] = []
+    body_collision_trace: list[torch.Tensor] = []
+    pusher_collision_trace: list[torch.Tensor] = []
     reset_result = env.reset(seed=seed)
     observation = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     horizon = int(env.max_episode_length)
@@ -242,16 +290,21 @@ def _evaluate_seed(
         f"episodes={episode_count} horizon={horizon}"
     )
     for step in range(horizon):
+        policy_observation = observation["policy"]
         with torch.no_grad():
-            action = policy(observation["policy"]).clamp(-1.0, 1.0)
+            action = policy(policy_observation).clamp(-1.0, 1.0)
         trajectory_costs = torch.stack(
             _trajectory_costs(
-                observation=observation["policy"],
+                observation=policy_observation,
                 action=action,
                 goal_config=goal_config,
             ),
             dim=0,
         )
+        if trace_worst_episode:
+            active_trace.append(active.detach().cpu().clone())
+            observation_trace.append(policy_observation.detach().cpu())
+            action_trace.append(action.detach().cpu())
         trajectory_cost_sums += torch.where(active[None, :], trajectory_costs, 0.0)
         trajectory_sample_count += active
         observation, _reward, terminated, truncated, _info = env.step(action)
@@ -260,6 +313,10 @@ def _evaluate_seed(
             raise RuntimeError("press approach environment did not publish a transition result")
         termination = result.termination
         current_range = result.state.previous_range_m
+        if trace_worst_episode:
+            range_trace.append(current_range.detach().cpu())
+            body_collision_trace.append(termination.body_collision.detach().cpu())
+            pusher_collision_trace.append(termination.pusher_collision.detach().cpu())
         range_error = torch.where(
             current_range < float(goal_config.range_min_m),
             float(goal_config.range_min_m) - current_range,
@@ -356,6 +413,19 @@ def _evaluate_seed(
     reward_sum_values = reward_sums.cpu().tolist()
     sample_count = int(reward_sample_count.item())
     summary = summarize_press_approach_episodes(episodes=episodes)
+    if trace_worst_episode:
+        _report_worst_episode_trace(
+            seed=seed,
+            closest_range=closest_range.detach().cpu(),
+            active_trace=active_trace,
+            observation_trace=observation_trace,
+            action_trace=action_trace,
+            range_trace=range_trace,
+            body_collision_trace=body_collision_trace,
+            pusher_collision_trace=pusher_collision_trace,
+            step_dt=float(env.step_dt),
+            report=report,
+        )
     report(
         f"press approach evaluation seed={seed} COMPLETE "
         f"elapsed_s={time.monotonic() - started_at:.1f} "
@@ -380,6 +450,7 @@ def evaluate_press_approach_policy(
     episodes_per_seed: int,
     goal_config: PressApproachGoalConfig,
     report: Callable[[str], None],
+    trace_worst_episode: bool,
 ) -> PressApproachEvaluationResult:
     """Evaluate one deterministic approach actor on all configured seeds."""
     episodes: list[PressApproachEpisodeMetrics] = []
@@ -392,6 +463,7 @@ def evaluate_press_approach_policy(
             episode_count=episodes_per_seed,
             goal_config=goal_config,
             report=report,
+            trace_worst_episode=trace_worst_episode,
         )
         episodes.extend(seed_episodes)
         for name, (value, count) in seed_rewards.items():

@@ -6,17 +6,19 @@ import dataclasses
 import hashlib
 import json
 import math
+import mmap
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
 
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
-    AlignmentArtifact,
     CandidateScore,
     CommandInterface,
     ControllerDefinition,
@@ -25,15 +27,22 @@ from robotics_experiments.alignment._models import (
     ProbeCommand,
     ProbeProfile,
     ProbeTrace,
+    SearchSpec,
     SettingValue,
 )
 
 __all__: list[str] = []
 
-_SCHEMA_VERSION = 1
+_TRACE_SCHEMA_VERSION = 5
+_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
+_SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS = frozenset({6})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
+_SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2", "coarse-to-fine-beam-v3"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
+_CANDIDATE_ENTRY = re.compile(rb'"([0-9a-f]{64})"\s*:\s*')
+_CANDIDATES_KEY = b'"candidates"'
+_FAILURES_KEY = b'"failures"'
 
 
 def _canonical_json(value: Any, /) -> str:
@@ -76,8 +85,28 @@ def _vector(*, value: Any, name: str, length: int = 3) -> tuple[float, ...]:
     return parsed
 
 
-def _settings(*, value: Any, name: str) -> ControllerSettings:
+def _settings(
+    *,
+    value: Any,
+    name: str,
+    legacy_rate_output_scale: bool = False,
+    legacy_hover_thrust: bool = False,
+    legacy_normalized_thrust: bool = False,
+    legacy_horizontal_gain_schedule: bool = False,
+) -> ControllerSettings:
     settings = _object(value=value, name=name)
+    if legacy_rate_output_scale and "rate_output_scale_nm" not in settings:
+        settings["rate_output_scale_nm"] = [1.0, 1.0, 1.0]
+    if legacy_hover_thrust and "hover_thrust_fraction" not in settings:
+        # Zero is an internal legacy sentinel for the exact physical
+        # mass*(acceleration+gravity) feed-forward used by schema 2 and 3.
+        settings["hover_thrust_fraction"] = 0.0
+    if legacy_normalized_thrust and "hover_thrust_normalized" not in settings:
+        settings["hover_thrust_normalized"] = 0.0
+    if legacy_horizontal_gain_schedule:
+        settings["horizontal_velocity_error_gain_scale"] = 1.0
+        settings["horizontal_velocity_error_gain_start_mps"] = 0.15
+        settings["horizontal_velocity_error_gain_full_mps"] = 0.30
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -91,13 +120,91 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
             nonnegative=True,
         ),
         kp_vel=_vector(value=settings["kp_vel"], name=f"{name}.kp_vel"),
+        horizontal_velocity_error_gain_scale=_finite(
+            value=settings["horizontal_velocity_error_gain_scale"],
+            name=f"{name}.horizontal_velocity_error_gain_scale",
+            positive=True,
+        ),
+        horizontal_velocity_error_gain_start_mps=_finite(
+            value=settings["horizontal_velocity_error_gain_start_mps"],
+            name=f"{name}.horizontal_velocity_error_gain_start_mps",
+            positive=True,
+        ),
+        horizontal_velocity_error_gain_full_mps=_finite(
+            value=settings["horizontal_velocity_error_gain_full_mps"],
+            name=f"{name}.horizontal_velocity_error_gain_full_mps",
+            positive=True,
+        ),
+        ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
+        velocity_filter_hz=_finite(
+            value=settings["velocity_filter_hz"],
+            name=f"{name}.velocity_filter_hz",
+            nonnegative=True,
+        ),
+        velocity_derivative_filter_hz=_finite(
+            value=settings["velocity_derivative_filter_hz"],
+            name=f"{name}.velocity_derivative_filter_hz",
+            positive=True,
+        ),
+        velocity_integral_limit_mps2=_vector(
+            value=settings["velocity_integral_limit_mps2"],
+            name=f"{name}.velocity_integral_limit_mps2",
+        ),
+        hover_thrust_fraction=_finite(
+            value=settings["hover_thrust_fraction"],
+            name=f"{name}.hover_thrust_fraction",
+            nonnegative=legacy_hover_thrust,
+            positive=not legacy_hover_thrust,
+        ),
+        hover_thrust_normalized=_finite(
+            value=settings["hover_thrust_normalized"],
+            name=f"{name}.hover_thrust_normalized",
+            nonnegative=legacy_normalized_thrust,
+            positive=not legacy_normalized_thrust,
+        ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
+        attitude_yaw_weight=_finite(
+            value=settings["attitude_yaw_weight"],
+            name=f"{name}.attitude_yaw_weight",
+            nonnegative=True,
+        ),
         kp_rate=_vector(value=settings["kp_rate"], name=f"{name}.kp_rate"),
+        ki_rate=_vector(value=settings["ki_rate"], name=f"{name}.ki_rate"),
+        kd_rate=_vector(value=settings["kd_rate"], name=f"{name}.kd_rate"),
+        kff_rate=_vector(value=settings["kff_rate"], name=f"{name}.kff_rate"),
+        rate_output_scale_nm=_vector(
+            value=settings["rate_output_scale_nm"],
+            name=f"{name}.rate_output_scale_nm",
+        ),
+        rate_derivative_filter_hz=_finite(
+            value=settings["rate_derivative_filter_hz"],
+            name=f"{name}.rate_derivative_filter_hz",
+            positive=True,
+        ),
+        rate_integral_limit_nm=_vector(
+            value=settings["rate_integral_limit_nm"],
+            name=f"{name}.rate_integral_limit_nm",
+        ),
         max_tilt_cmd_deg=_finite(
             value=settings["max_tilt_cmd_deg"],
             name=f"{name}.max_tilt_cmd_deg",
             positive=True,
+        ),
+        min_collective_thrust_fraction=_finite(
+            value=settings["min_collective_thrust_fraction"],
+            name=f"{name}.min_collective_thrust_fraction",
+            nonnegative=True,
+        ),
+        max_collective_thrust_fraction=_finite(
+            value=settings["max_collective_thrust_fraction"],
+            name=f"{name}.max_collective_thrust_fraction",
+            positive=True,
+        ),
+        horizontal_thrust_margin_fraction=_finite(
+            value=settings["horizontal_thrust_margin_fraction"],
+            name=f"{name}.horizontal_thrust_margin_fraction",
+            nonnegative=True,
         ),
         thruster_tau_inc_s=_finite(
             value=settings["thruster_tau_inc_s"],
@@ -115,9 +222,45 @@ def _settings(*, value: Any, name: str) -> ControllerSettings:
             positive=True,
         ),
     )
-    for field_name in ("kp_vel", "kd_vel", "kp_att", "kp_rate"):
+    for field_name in (
+        "kp_vel",
+        "ki_vel",
+        "kd_vel",
+        "velocity_integral_limit_mps2",
+        "kp_att",
+        "kp_rate",
+        "ki_rate",
+        "kd_rate",
+        "kff_rate",
+        "rate_output_scale_nm",
+        "rate_integral_limit_nm",
+    ):
         if any(value < 0.0 for value in getattr(parsed, field_name)):
             raise ValueError(f"{name}.{field_name} values must be non-negative")
+    if not 0.0 <= parsed.attitude_yaw_weight <= 1.0:
+        raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
+    if parsed.hover_thrust_fraction > 1.0:
+        raise ValueError(f"{name}.hover_thrust_fraction must not exceed 1")
+    if parsed.hover_thrust_normalized > 1.0:
+        raise ValueError(f"{name}.hover_thrust_normalized must not exceed 1")
+    if parsed.horizontal_velocity_error_gain_scale < 1.0:
+        raise ValueError(f"{name}.horizontal_velocity_error_gain_scale must be at least 1")
+    if (
+        parsed.horizontal_velocity_error_gain_start_mps
+        >= parsed.horizontal_velocity_error_gain_full_mps
+    ):
+        raise ValueError(
+            f"{name} horizontal velocity error gain transition must satisfy start < full"
+        )
+    if not (
+        0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0
+    ):
+        raise ValueError(f"{name} collective thrust fractions must satisfy 0 <= min < max <= 1")
+    if parsed.horizontal_thrust_margin_fraction >= parsed.max_collective_thrust_fraction:
+        raise ValueError(
+            f"{name}.horizontal_thrust_margin_fraction must be below the maximum "
+            "collective thrust fraction"
+        )
     return parsed
 
 
@@ -162,11 +305,11 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
             raise ValueError(f"duplicate probe name {profile_name!r}")
         names.add(profile_name)
         split = _string(value=profile.get("split"), name=f"{name}.split")
-        if split not in ("fit", "validation"):
-            raise ValueError(f"{name}.split must be 'fit' or 'validation'")
+        if split not in ("fit", "validation", "stability"):
+            raise ValueError(f"{name}.split must be 'fit', 'validation', or 'stability'")
         axis = _string(value=profile.get("axis"), name=f"{name}.axis")
-        if axis not in ("x", "y", "z"):
-            raise ValueError(f"{name}.axis must be x, y, or z")
+        if axis not in ("x", "y", "z", "yaw", "combined"):
+            raise ValueError(f"{name}.axis must be x, y, z, yaw, or combined")
         raw_commands = profile.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
             raise ValueError(f"{name}.commands must be a non-empty list")
@@ -177,6 +320,13 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
                         "velocity_body_flu_mps"
                     ),
                     name=f"{name}.commands[{command_index}].velocity_body_flu_mps",
+                ),
+                yaw_rate_radps=_finite(
+                    value=_object(
+                        value=command,
+                        name=f"{name}.commands[{command_index}]",
+                    ).get("yaw_rate_radps"),
+                    name=f"{name}.commands[{command_index}].yaw_rate_radps",
                 ),
                 duration_s=_finite(
                     value=_object(
@@ -198,10 +348,14 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
             )
         )
     covered = {(profile.split, profile.axis) for profile in profiles}
-    expected = {(split, axis) for split in ("fit", "validation") for axis in ("x", "y", "z")}
-    if covered != expected:
+    expected = {
+        (split, axis)
+        for split in ("fit", "validation")
+        for axis in ("x", "y", "z", "yaw", "combined")
+    }
+    if not expected <= covered:
         raise ValueError(
-            "probes must cover x, y, and z for fit and validation; "
+            "probes must cover x, y, z, yaw, and combined behavior for fit and validation; "
             f"missing={sorted(expected - covered)!r}"
         )
     return tuple(profiles)
@@ -238,6 +392,10 @@ def _parameters(
         parameters.append(
             ParameterSpec(
                 field=field_name,
+                stage=_positive_integer(
+                    value=parameter.get("stage"),
+                    name=f"{name}.stage",
+                ),
                 candidates=tuple(
                     _candidate(
                         value=candidate,
@@ -251,6 +409,69 @@ def _parameters(
     return tuple(parameters)
 
 
+def _positive_integer(*, value: Any, name: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _nonnegative_integer(*, value: Any, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
+def _boolean(*, value: Any, name: str) -> bool:
+    if type(value) is not bool:
+        raise ValueError(f"{name} must be boolean")
+    return value
+
+
+def _search(*, value: Any, base_settings: ControllerSettings) -> SearchSpec:
+    search = _object(value=value, name="search")
+    strategy = _string(value=search.get("strategy"), name="search.strategy")
+    if strategy not in _SEARCH_STRATEGIES:
+        raise ValueError(f"unsupported search.strategy={strategy!r}")
+    refinement_levels = _nonnegative_integer(
+        value=search.get("refinement_levels", 0),
+        name="search.refinement_levels",
+    )
+    if strategy != "coarse-to-fine-beam-v3" and refinement_levels:
+        raise ValueError("search.refinement_levels requires strategy='coarse-to-fine-beam-v3'")
+    raw_initial_settings = search.get("initial_settings", [])
+    if not isinstance(raw_initial_settings, list):
+        raise ValueError("search.initial_settings must be a list")
+    initial_settings = []
+    for index, value in enumerate(raw_initial_settings):
+        name = f"search.initial_settings[{index}]"
+        overrides = _object(value=value, name=name)
+        extra = overrides.keys() - _SETTINGS_FIELDS
+        if extra:
+            raise ValueError(f"{name} has unknown fields {sorted(extra)!r}")
+        merged = asdict(base_settings)
+        merged.update(overrides)
+        initial_settings.append(_settings(value=merged, name=name))
+    if strategy != "coarse-to-fine-beam-v3" and initial_settings:
+        raise ValueError("search.initial_settings requires strategy='coarse-to-fine-beam-v3'")
+    return SearchSpec(
+        strategy=strategy,
+        beam_width=_positive_integer(
+            value=search.get("beam_width"),
+            name="search.beam_width",
+        ),
+        passes_per_stage=_positive_integer(
+            value=search.get("passes_per_stage"),
+            name="search.passes_per_stage",
+        ),
+        refinement_levels=refinement_levels,
+        min_refinement_survivors=_positive_integer(
+            value=search.get("min_refinement_survivors", 2),
+            name="search.min_refinement_survivors",
+        ),
+        initial_settings=tuple(initial_settings),
+    )
+
+
 def _trace(*, value: Any, name: str) -> ProbeTrace:
     trace = _object(value=value, name=name)
     failure_reason = trace.get("failure_reason")
@@ -261,14 +482,33 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         raise ValueError(f"{name}.completed must be boolean")
     time = trace.get("time_s")
     commands = trace.get("command_velocity_body_flu_mps")
+    yaw_commands = trace.get("command_yaw_rate_radps")
+    positions = trace.get("position_enu_m")
+    attitudes = trace.get("attitude_flu_enu_wxyz")
     velocities = trace.get("velocity_body_flu_mps")
+    world_velocities = trace.get("velocity_enu_mps")
+    angular_velocities = trace.get("angular_velocity_body_flu_radps")
     if (
         not isinstance(time, list)
         or not isinstance(commands, list)
+        or not isinstance(yaw_commands, list)
+        or not isinstance(positions, list)
+        or not isinstance(attitudes, list)
         or not isinstance(velocities, list)
+        or not isinstance(world_velocities, list)
+        or not isinstance(angular_velocities, list)
     ):
         raise ValueError(f"{name} samples must be lists")
-    if not time or len(time) != len(commands) or len(time) != len(velocities):
+    sample_lengths = (
+        len(commands),
+        len(yaw_commands),
+        len(positions),
+        len(attitudes),
+        len(velocities),
+        len(world_velocities),
+        len(angular_velocities),
+    )
+    if not time or any(length != len(time) for length in sample_lengths):
         raise ValueError(f"{name} sample lists must be non-empty and equal length")
     parsed_time = tuple(_finite(value=item, name=f"{name}.time_s") for item in time)
     if any(
@@ -276,6 +516,13 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         for current, next_time in zip(parsed_time, parsed_time[1:], strict=False)
     ):
         raise ValueError(f"{name}.time_s must be strictly increasing")
+    initial_hover_thrust_normalized = _finite(
+        value=trace.get("initial_hover_thrust_normalized", 0.0),
+        name=f"{name}.initial_hover_thrust_normalized",
+        nonnegative=True,
+    )
+    if initial_hover_thrust_normalized > 1.0:
+        raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
     return ProbeTrace(
         profile=_string(value=trace.get("profile"), name=f"{name}.profile"),
         split=_string(value=trace.get("split"), name=f"{name}.split"),
@@ -284,8 +531,25 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         command_velocity_body_flu_mps=tuple(
             _vector(value=item, name=f"{name}.command_velocity_body_flu_mps") for item in commands
         ),
+        command_yaw_rate_radps=tuple(
+            _finite(value=item, name=f"{name}.command_yaw_rate_radps") for item in yaw_commands
+        ),
+        position_enu_m=tuple(
+            _vector(value=item, name=f"{name}.position_enu_m") for item in positions
+        ),
+        attitude_flu_enu_wxyz=tuple(
+            _vector(value=item, name=f"{name}.attitude_flu_enu_wxyz", length=4)
+            for item in attitudes
+        ),
         velocity_body_flu_mps=tuple(
             _vector(value=item, name=f"{name}.velocity_body_flu_mps") for item in velocities
+        ),
+        velocity_enu_mps=tuple(
+            _vector(value=item, name=f"{name}.velocity_enu_mps") for item in world_velocities
+        ),
+        angular_velocity_body_flu_radps=tuple(
+            _vector(value=item, name=f"{name}.angular_velocity_body_flu_radps")
+            for item in angular_velocities
         ),
         initial_position_enu_m=_vector(
             value=trace.get("initial_position_enu_m"),
@@ -305,13 +569,219 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             name=f"{name}.initial_angular_velocity_body_flu_radps",
         ),
         completed=completed,
+        initial_controller_state_valid=_boolean(
+            value=trace.get("initial_controller_state_valid", False),
+            name=f"{name}.initial_controller_state_valid",
+        ),
+        initial_hover_thrust_normalized=initial_hover_thrust_normalized,
+        initial_acceleration_setpoint_enu_mps2=_vector(
+            value=trace.get("initial_acceleration_setpoint_enu_mps2", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_acceleration_setpoint_enu_mps2",
+        ),
+        initial_linear_acceleration_enu_mps2=_vector(
+            value=trace.get("initial_linear_acceleration_enu_mps2", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_linear_acceleration_enu_mps2",
+        ),
+        initial_angular_acceleration_body_flu_radps2=_vector(
+            value=trace.get(
+                "initial_angular_acceleration_body_flu_radps2",
+                (0.0, 0.0, 0.0),
+            ),
+            name=f"{name}.initial_angular_acceleration_body_flu_radps2",
+        ),
+        initial_rate_integral_body_flu=_vector(
+            value=trace.get("initial_rate_integral_body_flu", (0.0, 0.0, 0.0)),
+            name=f"{name}.initial_rate_integral_body_flu",
+        ),
+        start_sim_time_us=_nonnegative_integer(
+            value=trace.get("start_sim_time_us", 0),
+            name=f"{name}.start_sim_time_us",
+        ),
         failure_reason=failure_reason,
     )
+
+
+def _json_value_bounds(*, payload: mmap.mmap, start: int, end: int) -> tuple[int, int]:
+    while start < end and payload[start] in b" \t\r\n":
+        start += 1
+    while start < end and payload[end - 1] in b" \t\r\n":
+        end -= 1
+    if start < end and payload[end - 1] == ord(","):
+        end -= 1
+        while start < end and payload[end - 1] in b" \t\r\n":
+            end -= 1
+    return start, end
+
+
+def _mapping_content_start(*, payload: mmap.mmap, key: bytes, start: int = 0) -> tuple[int, int]:
+    key_start = payload.find(key, start)
+    if key_start < 0:
+        raise ValueError(f"candidate diagnostics omit {key.decode()}")
+    separator = payload.find(b":", key_start + len(key))
+    if separator < 0:
+        raise ValueError(f"candidate diagnostics have malformed {key.decode()}")
+    content_start = separator + 1
+    while content_start < len(payload) and payload[content_start] in b" \t\r\n":
+        content_start += 1
+    if content_start == len(payload) or payload[content_start] != ord("{"):
+        raise ValueError(f"candidate diagnostics {key.decode()} must be a mapping")
+    return key_start, content_start + 1
+
+
+def _mapping_end_before_key(*, payload: mmap.mmap, key_start: int) -> int:
+    cursor = key_start
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord(","):
+        raise ValueError("candidate diagnostics mappings must be adjacent object members")
+    cursor -= 1
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics candidate mapping is not closed")
+    return cursor - 1
+
+
+def _final_mapping_end(*, payload: mmap.mmap) -> int:
+    cursor = len(payload)
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics root object is not closed")
+    cursor -= 1
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics failure mapping is not closed")
+    return cursor - 1
+
+
+def _index_candidate_diagnostics(
+    *,
+    path: Path,
+) -> tuple[dict[str, Any], dict[str, tuple[int, int]], dict[str, str]]:
+    try:
+        with path.open("rb") as diagnostics:
+            with mmap.mmap(diagnostics.fileno(), 0, access=mmap.ACCESS_READ) as payload:
+                candidates_key_start, candidates_content_start = _mapping_content_start(
+                    payload=payload,
+                    key=_CANDIDATES_KEY,
+                )
+                failures_key_start, failures_content_start = _mapping_content_start(
+                    payload=payload,
+                    key=_FAILURES_KEY,
+                    start=candidates_content_start,
+                )
+                candidates_end = _mapping_end_before_key(
+                    payload=payload,
+                    key_start=failures_key_start,
+                )
+                failures_end = _final_mapping_end(payload=payload)
+                header = json.loads(
+                    payload[:candidates_key_start] + b'"candidates":{},"failures":{}}'
+                )
+                metadata = _object(value=header, name=str(path))
+
+                candidate_matches = tuple(
+                    _CANDIDATE_ENTRY.finditer(
+                        payload,
+                        candidates_content_start,
+                        candidates_end,
+                    )
+                )
+                candidates: dict[str, tuple[int, int]] = {}
+                for index, match in enumerate(candidate_matches):
+                    end = (
+                        candidate_matches[index + 1].start()
+                        if index + 1 < len(candidate_matches)
+                        else candidates_end
+                    )
+                    start, end = _json_value_bounds(
+                        payload=payload,
+                        start=match.end(),
+                        end=end,
+                    )
+                    if start == end or payload[start] != ord("["):
+                        raise ValueError("candidate trace entry must be a JSON list")
+                    candidates[match.group(1).decode()] = (start, end)
+
+                failure_matches = tuple(
+                    _CANDIDATE_ENTRY.finditer(
+                        payload,
+                        failures_content_start,
+                        failures_end,
+                    )
+                )
+                failures: dict[str, str] = {}
+                for index, match in enumerate(failure_matches):
+                    end = (
+                        failure_matches[index + 1].start()
+                        if index + 1 < len(failure_matches)
+                        else failures_end
+                    )
+                    start, end = _json_value_bounds(
+                        payload=payload,
+                        start=match.end(),
+                        end=end,
+                    )
+                    failure = json.loads(payload[start:end])
+                    if not isinstance(failure, str):
+                        raise ValueError("candidate failure entry must be a JSON string")
+                    failures[match.group(1).decode()] = failure
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot index isaac-lab alignment traces from {path}: {exc}") from exc
+    return metadata, candidates, failures
 
 
 class _TraceFileEvaluator:
     def __init__(self, *, backend: str) -> None:
         self._backend = backend
+        self._retain_traces = False
+        self._path: Path | None = None
+        self._payload: dict[str, Any] | None = None
+        self._candidate_offsets: dict[str, tuple[int, int]] = {}
+        self._candidate_failures: dict[str, str] = {}
+
+    def _load_payload(self, *, path: Path) -> dict[str, Any]:
+        if self._path == path and self._payload is not None:
+            return self._payload
+        try:
+            loaded = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"cannot load {self._backend} alignment traces from {path}: {exc}"
+            ) from exc
+        payload = _object(value=loaded, name=str(path))
+        self._path = path
+        self._payload = payload
+        return payload
+
+    def _load_candidate_payload(self, *, path: Path) -> dict[str, Any]:
+        if self._path == path and self._payload is not None:
+            return self._payload
+        payload, offsets, failures = _index_candidate_diagnostics(path=path)
+        self._path = path
+        self._payload = payload
+        self._candidate_offsets = offsets
+        self._candidate_failures = failures
+        return payload
+
+    def _load_candidate_traces(self, *, path: Path, key: str) -> Any:
+        bounds = self._candidate_offsets.get(key)
+        if bounds is None:
+            failure = self._candidate_failures.get(key)
+            if failure is not None:
+                raise RuntimeError(failure)
+            return None
+        start, end = bounds
+        try:
+            with path.open("rb") as diagnostics:
+                diagnostics.seek(start)
+                return json.loads(diagnostics.read(end - start))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"cannot load isaac-lab candidate traces from {path}: {exc}"
+            ) from exc
 
     def evaluate(
         self,
@@ -330,17 +800,12 @@ class _TraceFileEvaluator:
         if self._backend == "px4-sitl":
             path = run_dir / "reference.json"
             key = "traces"
+            payload = self._load_payload(path=path)
         else:
             path = run_dir / "target_candidates.json"
             key = _fingerprint(asdict(settings))
-        try:
-            payload = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                f"cannot load {self._backend} alignment traces from {path}: {exc}"
-            ) from exc
-        payload = _object(value=payload, name=str(path))
-        if payload.get("schema_version") != _SCHEMA_VERSION:
+            payload = self._load_candidate_payload(path=path)
+        if payload.get("schema_version") not in _SUPPORTED_TRACE_SCHEMA_VERSIONS:
             raise RuntimeError(f"{path} has an unsupported trace schema")
         if payload.get("controller_id") != definition.controller_id:
             raise RuntimeError(f"{path} was captured for a different controller")
@@ -349,13 +814,7 @@ class _TraceFileEvaluator:
         if self._backend == "px4-sitl":
             raw_traces = payload.get(key)
         else:
-            raw_candidates = payload.get("candidates")
-            raw_failures = payload.get("failures")
-            if not isinstance(raw_candidates, dict) or not isinstance(raw_failures, dict):
-                raise RuntimeError(f"{path} has malformed candidate diagnostics")
-            raw_traces = raw_candidates.get(key)
-            if raw_traces is None and isinstance(raw_failures.get(key), str):
-                raise RuntimeError(raw_failures[key])
+            raw_traces = self._load_candidate_traces(path=path, key=key)
         if not isinstance(raw_traces, list):
             raise RuntimeError(f"{path} has no trace set for settings fingerprint {key!r}")
         return tuple(
@@ -392,6 +851,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     return ControllerDefinition(
         alignment_id=_string(value=definition.get("alignment_id"), name="alignment_id"),
         controller_id=_string(value=definition.get("controller_id"), name="controller_id"),
+        controller_schema_version=_positive_integer(
+            value=definition.get("controller_schema_version"),
+            name="controller_schema_version",
+        ),
         backend=backend,
         experiment_config=_string(
             value=definition.get("experiment_config"),
@@ -414,6 +877,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("parameters", []),
             base_settings=base_settings,
         ),
+        search=_search(
+            value=definition.get("search"),
+            base_settings=base_settings,
+        ),
         selection_metric=selection_metric,
         publication_metrics=publication_metrics,
         evaluator=_TraceFileEvaluator(backend=backend),
@@ -422,7 +889,7 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     )
 
 
-def _artifact_payload(artifact: AlignmentArtifact, /) -> dict[str, Any]:
+def _artifact_payload(artifact: object, /) -> dict[str, Any]:
     def plain(value: Any, /) -> Any:
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
             return {
@@ -439,7 +906,15 @@ def _artifact_payload(artifact: AlignmentArtifact, /) -> dict[str, Any]:
     return payload
 
 
-def _candidate_score(*, value: Any, name: str) -> CandidateScore:
+def _candidate_score(
+    *,
+    value: Any,
+    name: str,
+    legacy_rate_output_scale: bool,
+    legacy_hover_thrust: bool,
+    legacy_normalized_thrust: bool,
+    legacy_horizontal_gain_schedule: bool,
+) -> CandidateScore:
     candidate = _object(value=value, name=name)
     metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
     ranking = candidate.get("ranking_values")
@@ -458,7 +933,14 @@ def _candidate_score(*, value: Any, name: str) -> CandidateScore:
         raise ValueError(f"{name}.index must be a non-negative integer")
     return CandidateScore(
         index=index,
-        settings=_settings(value=candidate.get("settings"), name=f"{name}.settings"),
+        settings=_settings(
+            value=candidate.get("settings"),
+            name=f"{name}.settings",
+            legacy_rate_output_scale=legacy_rate_output_scale,
+            legacy_hover_thrust=legacy_hover_thrust,
+            legacy_normalized_thrust=legacy_normalized_thrust,
+            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
+        ),
         usable=usable,
         metrics={
             key: _finite(value=item, name=f"{name}.metrics.{key}") for key, item in metrics.items()
@@ -470,7 +952,7 @@ def _candidate_score(*, value: Any, name: str) -> CandidateScore:
     )
 
 
-def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
+def _load_v6_alignment_for_migration(path: str | Path, /) -> SimpleNamespace:
     """Load a run directory, link, or alignment JSON and reject malformed provenance."""
     artifact_path = Path(path)
     if artifact_path.is_dir():
@@ -480,11 +962,16 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot load alignment artifact {artifact_path}: {exc}") from exc
     artifact = _object(value=loaded, name=str(artifact_path))
-    if artifact.get("schema_version") != _SCHEMA_VERSION:
+    schema_version = artifact.get("schema_version")
+    if schema_version not in _SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS:
         raise ValueError(
             f"alignment artifact {artifact_path} has unsupported "
-            f"schema_version={artifact.get('schema_version')!r}"
+            f"schema_version={schema_version!r}"
         )
+    legacy_rate_output_scale = schema_version == 2
+    legacy_hover_thrust = schema_version in (2, 3)
+    legacy_normalized_thrust = schema_version in (2, 3, 4)
+    legacy_horizontal_gain_schedule = schema_version in (2, 3, 4, 5)
     command_interface = _interface(
         value=artifact.get("command_interface"),
         name="command_interface",
@@ -506,7 +993,14 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     if not isinstance(raw_candidates, list) or not raw_candidates:
         raise ValueError("alignment artifact candidates must be a non-empty list")
     candidates = tuple(
-        _candidate_score(value=value, name=f"candidates[{index}]")
+        _candidate_score(
+            value=value,
+            name=f"candidates[{index}]",
+            legacy_rate_output_scale=legacy_rate_output_scale,
+            legacy_hover_thrust=legacy_hover_thrust,
+            legacy_normalized_thrust=legacy_normalized_thrust,
+            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
+        )
         for index, value in enumerate(raw_candidates)
     )
     if tuple(candidate.index for candidate in candidates) != tuple(range(len(candidates))):
@@ -520,6 +1014,10 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     parsed_selected_settings = _settings(
         value=artifact.get("selected_settings"),
         name="selected_settings",
+        legacy_rate_output_scale=legacy_rate_output_scale,
+        legacy_hover_thrust=legacy_hover_thrust,
+        legacy_normalized_thrust=legacy_normalized_thrust,
+        legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
     )
     if parsed_selected_settings != selected_matches[0].settings:
         raise ValueError("selected_settings do not match selected candidate")
@@ -547,8 +1045,8 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         value=artifact.get("validation_metrics"),
         name="validation_metrics",
     )
-    result = AlignmentArtifact(
-        schema_version=_SCHEMA_VERSION,
+    result = SimpleNamespace(
+        schema_version=schema_version,
         alignment_id=_string(value=artifact.get("alignment_id"), name="alignment_id"),
         run_id=_string(value=artifact.get("run_id"), name="run_id"),
         target_controller_id=_string(
@@ -620,7 +1118,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     return result
 
 
-def write_alignment_artifact(*, artifact: AlignmentArtifact, run_dir: Path) -> Path:
+def _write_legacy_alignment_artifact(*, artifact: object, run_dir: Path) -> Path:
     """Write the canonical immutable run result."""
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "alignment.json"
@@ -638,14 +1136,14 @@ def _replace_relative_symlink(*, link: Path, target: Path) -> None:
     os.replace(temporary, link)
 
 
-def publish_alignment(*, artifact: AlignmentArtifact, run_dir: Path) -> None:
+def _publish_legacy_alignment(*, artifact: SimpleNamespace, run_dir: Path) -> None:
     """Advance ``latest`` and the comparable-generation ``best`` links atomically."""
     root = run_dir.parent
     _replace_relative_symlink(link=root / "latest", target=run_dir)
     best_link = root / "best"
     replace_best = True
     if best_link.exists():
-        best = load_alignment_artifact(best_link)
+        best = _load_v6_alignment_for_migration(best_link)
         if best.comparison_fingerprint == artifact.comparison_fingerprint:
             replace_best = (
                 artifact.selected_ranking_values,

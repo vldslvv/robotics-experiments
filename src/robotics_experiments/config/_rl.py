@@ -11,6 +11,7 @@ __all__ = [
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
     "PressApproachTerminationConfig",
+    "PressApproachTrainingResetConfig",
     "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
     "PressResetConfig",
@@ -169,9 +170,11 @@ class PressHandoffConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Weights for the nine signed approach-stage reward contributions."""
+    """Parameters for the ten signed approach-stage reward contributions."""
 
     range_progress_weight: float
+    range_barrier_margin_m: float
+    range_barrier_weight: float
     alignment_error_weight: float
     velocity_tracking_weight: float
     upright_error_weight: float
@@ -187,6 +190,7 @@ class PressApproachVelocityReferenceConfig(_FreezableConfig):
     """Dense contact-frame velocity reference for the approach stage."""
 
     range_center_m: float
+    wall_normal_alignment_gate_m: float
     wall_normal_gain_per_s: float
     wall_normal_min_mps: float
     wall_normal_max_mps: float
@@ -220,6 +224,17 @@ class PressResetConfig(_FreezableConfig):
     switch_wall_offset_m: float
     switch_height_m: float
     wall_half_extents_m: Tuple[float, float, float]
+
+
+@dataclass
+class PressApproachTrainingResetConfig(_FreezableConfig):
+    """Training-only mixture that concentrates samples near a hard boundary."""
+
+    hard_case_fraction: float
+    range_min_m: float
+    range_max_m: float
+    tangential_error_min_m: float
+    tangential_error_max_m: float
 
 
 @dataclass
@@ -269,9 +284,9 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
-        training_mode: Weight-initialization mode (``scratch`` or
-            ``actor-only``).
-        alignment_artifact: Controller alignment run directory or publication
+        training_mode: Weight-initialization mode (``scratch``, ``actor-only``,
+            or full-state ``resume``).
+        controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
@@ -294,7 +309,7 @@ class RlTrainingConfig(_FreezableConfig):
     vehicle_id: int
     policy_name: str
     training_mode: str
-    alignment_artifact: str
+    controller_artifact: str
     max_iterations: int
     num_steps_per_env: int
     save_interval: int
@@ -323,6 +338,7 @@ class PressTaskConfig(_FreezableConfig):
         goal: Stable approach target and dense velocity reference.
         reward: Approach-stage reward weights.
         reset: Physical scene and initial-state ranges.
+        training_reset: Training-only hard-case reset mixture.
         termination: Contact and flight-envelope failure conditions.
         evaluation: Deterministic approach workload and acceptance targets.
     """
@@ -333,6 +349,7 @@ class PressTaskConfig(_FreezableConfig):
     goal: PressApproachGoalConfig
     reward: PressApproachRewardConfig
     reset: PressResetConfig
+    training_reset: PressApproachTrainingResetConfig
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
 

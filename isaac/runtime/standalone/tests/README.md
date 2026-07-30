@@ -26,8 +26,16 @@ greps for.
 `alignment_capture_reference.py` is the PX4-backed alignment capture shell. It
 uses the shared fleet scenario and ordinary `{kind: policy}` OFFBOARD
 lifecycle, with a test-only injected adapter that emits the controller
-definition's x/y/z probes. It writes exact command timing, initial state, and
-measured body-FLU velocity to the selected alignment run directory. It is not a
+definition's linear-velocity, yaw-rate, and combined probes. It writes exact
+command timing, initial state, position, attitude, body/world velocity, and
+angular velocity to the selected alignment run directory. Before each profile,
+the adapter holds a neutral setpoint through the configured minimum and
+continuous speed/rate/tilt stability window. This excludes OFFBOARD priming
+from the recorded policy-execution response and gives each reset Lab replay a
+near-equilibrium initial state. Trace yaw remains body-FLU +CCW while the
+outbound PX4 setpoint is converted to NED +clockwise. Its alignment-only routine
+ends with the probe policy and lets teardown stop the ephemeral simulator;
+landing and auto-disarm are outside this controller target. It is not a
 press-policy scenario and adds no commanding routine kind.
 
 The same script's `--contact-chain` mode is the deterministic F3 real-asset

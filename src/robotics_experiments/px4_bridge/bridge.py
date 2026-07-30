@@ -187,11 +187,14 @@ def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
     if tick_count <= 10 or tick_count % state.dynamics_debug_interval == 0:
         status = state.port.read_status()
         _LOGGER.debug(
-            "PX4 bridge dynamics: tick=%d sim_time_us=%d connected=%s armed=%s "
+            "PX4 bridge dynamics: tick=%d sim_time_us=%d last_actuator_us=%s "
+            "actuator_lag_us=%s connected=%s armed=%s "
             "commands=%s forces_n=%s body_torque_n_m=%s body_drag_n=%s "
             "position_enu=%s quat_wxyz=%s velocity_enu=%s body_velocity_flu=%s",
             tick_count,
             pending.sim_time_us,
+            status.last_actuator_receive_us,
+            status.actuator_lag_us,
             status.is_connected,
             status.is_armed,
             np.asarray(commands.controls, dtype=np.float64).tolist(),

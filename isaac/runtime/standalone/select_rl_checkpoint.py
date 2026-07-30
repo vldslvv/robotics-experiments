@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import sys
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -25,11 +23,11 @@ from robotics_experiments.config import (
 from robotics_experiments.rl import (
     METADATA_FILENAME,
     POLICY_FILENAME,
-    PolicyContract,
     PolicyInterface,
     load_policy_metadata,
 )
 from robotics_experiments.rl.press import PressApproachResult
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -139,6 +137,7 @@ def _press_evaluation(
         episodes_per_seed=episodes_per_seed,
         goal_config=goal_config,
         report=_report,
+        trace_worst_episode=False,
     )
     evaluation = _score_press_result(
         candidate=candidate,
@@ -255,50 +254,6 @@ def _score_press_result(
         ranking_values=ranking_values,
         reward_means=result.reward_means,
     )
-
-
-def _comparison_fingerprint(
-    *,
-    config: ExperimentConfig,
-    contract: PolicyContract,
-) -> str | None:
-    if contract.policy_interface is not PolicyInterface.PRESS_V1:
-        return None
-    vehicle_label, vehicle = next(
-        (label, item)
-        for label, item in config.vehicles.items()
-        if item.id == config.rl.training.vehicle_id
-    )
-    payload = {
-        "selection_metric": config.rl.press.evaluation.selection_metric,
-        "evaluation": asdict(config.rl.press.evaluation),
-        "goal": asdict(config.rl.press.goal),
-        "handoff": asdict(config.rl.press.handoff),
-        "reset": asdict(config.rl.press.reset),
-        "termination": asdict(config.rl.press.termination),
-        "scene": config.scene,
-        "switches": asdict(config.switches),
-        "vehicle": vehicle_label,
-        "airframe": vehicle.spawn.usd_path,
-        "lab_vehicle": asdict(config.rl.lab_vehicle),
-        "physics_hz": config.sim.physics_hz,
-        "episode_length_s": config.rl.episode_length_s,
-        "task_id": config.rl.training.task_id,
-        "policy_interface": contract.policy_interface.value,
-        "curriculum_stage": contract.curriculum_stage,
-        "observation_schema_version": contract.obs_schema_version,
-        "observation_dimension": contract.obs_dim,
-        "policy_rate_hz": contract.policy_rate_hz,
-        "action_kind": contract.action_kind,
-        "action_dimension": contract.action_dim,
-    }
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _selection_report(
@@ -493,7 +448,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     policy_metadata = load_policy_metadata(artifact_dir=run_dir)
     metadata = dict(policy_metadata.values)
     contract = policy_metadata.contract
-    comparison_fingerprint = _comparison_fingerprint(config=config, contract=contract)
+    comparison_fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
     if (
         contract.policy_interface is PolicyInterface.PRESS_V1
         and contract.curriculum_stage != config.rl.press.curriculum_stage

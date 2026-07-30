@@ -16,9 +16,9 @@ test: require-venv
 .PHONY: check
 check: require-venv
 	@uv lock --check
-	@uv run ruff check
-	@uv run ruff format --check
-	@uv run mypy src tests isaac/runtime/extensions isaac/runtime/standalone \
+	@uv run --extra dev ruff check
+	@uv run --extra dev ruff format --check
+	@uv run --extra dev mypy src tests isaac/runtime/extensions isaac/runtime/standalone \
 		make/scripts flight_analysis px4/scripts
 	@uv run --extra dev vulture --config pyproject.toml
-	@uv run pytest
+	@uv run --extra dev pytest

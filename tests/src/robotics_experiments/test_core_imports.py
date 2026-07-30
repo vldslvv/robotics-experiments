@@ -59,11 +59,12 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         importlib.import_module("robotics_experiments.px4_bridge")
         alignment = importlib.import_module("robotics_experiments.alignment")
         assert alignment.__all__ == [
-            "AlignmentArtifact",
+            "AlignmentResult",
+            "ControllerArtifact",
             "ControllerDefinition",
             "ControllerSettings",
             "align",
-            "load_alignment_artifact",
+            "load_controller_artifact",
             "load_controller_definition",
         ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__
@@ -97,6 +98,7 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         assert "robotics_experiments.rl.press" not in sys.modules
         assert rl.__all__ == [
             "ActuationParams",
+            "ActuationControllerState",
             "ActuationState",
             "HOVER_OBSERVATION_DIM",
             "HOVER_OBSERVATION_SCHEMA_VERSION",
@@ -116,7 +118,9 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
             "pack_hover_observation",
             "policy_action_to_offboard",
             "policy_metadata",
+            "initial_actuation_controller_state",
             "rotor_forces_to_body_wrench",
+            "seed_actuation_controller_state",
             "validate_policy_artifact",
         ]
         press = importlib.import_module("robotics_experiments.rl.press")
@@ -380,6 +384,7 @@ def test_config_eagerly_imports_hydra() -> None:
         "PressApproachGoalConfig",
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
+        "PressApproachTrainingResetConfig",
         "PressApproachVelocityReferenceConfig",
         "PressResetConfig",
         "Px4BridgeConfig",

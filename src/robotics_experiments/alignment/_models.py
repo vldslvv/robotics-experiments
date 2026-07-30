@@ -20,10 +20,29 @@ class ControllerSettings:
 
     command_delay_s: float
     kp_vel: Vector3
+    horizontal_velocity_error_gain_scale: float
+    horizontal_velocity_error_gain_start_mps: float
+    horizontal_velocity_error_gain_full_mps: float
+    ki_vel: Vector3
     kd_vel: Vector3
+    velocity_filter_hz: float
+    velocity_derivative_filter_hz: float
+    velocity_integral_limit_mps2: Vector3
+    hover_thrust_fraction: float
+    hover_thrust_normalized: float
     kp_att: Vector3
+    attitude_yaw_weight: float
     kp_rate: Vector3
+    ki_rate: Vector3
+    kd_rate: Vector3
+    kff_rate: Vector3
+    rate_output_scale_nm: Vector3
+    rate_derivative_filter_hz: float
+    rate_integral_limit_nm: Vector3
     max_tilt_cmd_deg: float
+    min_collective_thrust_fraction: float
+    max_collective_thrust_fraction: float
+    horizontal_thrust_margin_fraction: float
     thruster_tau_inc_s: float
     thruster_tau_dec_s: float
     thruster_max_thrust_rate_nps: float
@@ -42,9 +61,10 @@ class CommandInterface:
 
 @dataclass(frozen=True)
 class ProbeCommand:
-    """One held body-FLU velocity command and its exact duration."""
+    """One held body-FLU velocity/yaw-rate command and its exact duration."""
 
     velocity_body_flu_mps: Vector3
+    yaw_rate_radps: float
     duration_s: float
 
 
@@ -63,7 +83,20 @@ class ParameterSpec:
     """Declarative candidates for one existing :class:`ControllerSettings` field."""
 
     field: str
+    stage: int
     candidates: tuple[SettingValue, ...]
+
+
+@dataclass(frozen=True)
+class SearchSpec:
+    """Deterministic staged beam-search contract."""
+
+    strategy: str
+    beam_width: int
+    passes_per_stage: int
+    refinement_levels: int = 0
+    min_refinement_survivors: int = 2
+    initial_settings: tuple[ControllerSettings, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -75,12 +108,24 @@ class ProbeTrace:
     axis: str
     time_s: tuple[float, ...]
     command_velocity_body_flu_mps: tuple[Vector3, ...]
+    command_yaw_rate_radps: tuple[float, ...]
+    position_enu_m: tuple[Vector3, ...]
+    attitude_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
     velocity_body_flu_mps: tuple[Vector3, ...]
+    velocity_enu_mps: tuple[Vector3, ...]
+    angular_velocity_body_flu_radps: tuple[Vector3, ...]
     initial_position_enu_m: Vector3
     initial_attitude_flu_enu_wxyz: tuple[float, float, float, float]
     initial_linear_velocity_enu_mps: Vector3
     initial_angular_velocity_body_flu_radps: Vector3
     completed: bool
+    initial_controller_state_valid: bool = False
+    initial_hover_thrust_normalized: float = 0.0
+    initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
+    initial_linear_acceleration_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
+    initial_angular_acceleration_body_flu_radps2: Vector3 = (0.0, 0.0, 0.0)
+    initial_rate_integral_body_flu: Vector3 = (0.0, 0.0, 0.0)
+    start_sim_time_us: int = 0
     failure_reason: str | None = None
 
 
@@ -103,6 +148,7 @@ class ControllerDefinition:
 
     alignment_id: str
     controller_id: str
+    controller_schema_version: int
     backend: str
     experiment_config: str
     vehicle: str
@@ -112,6 +158,7 @@ class ControllerDefinition:
     base_settings: ControllerSettings
     probes: tuple[ProbeProfile, ...]
     parameters: tuple[ParameterSpec, ...]
+    search: SearchSpec
     selection_metric: str
     publication_metrics: tuple[str, ...]
     evaluator: BackendEvaluator = field(compare=False, repr=False)
@@ -135,8 +182,8 @@ class CandidateScore:
 
 
 @dataclass(frozen=True)
-class AlignmentArtifact:
-    """Immutable selected controller settings plus complete comparison provenance."""
+class ControllerArtifact:
+    """Compact immutable controller contract consumed by training and runtime."""
 
     schema_version: int
     alignment_id: str
@@ -155,14 +202,8 @@ class AlignmentArtifact:
     command_rate_hz: float
     command_interface: CommandInterface
     probe_suite_fingerprint: str
-    selection_metric: str
     selected_settings: ControllerSettings
-    declared_parameters: tuple[ParameterSpec, ...]
-    candidates: tuple[CandidateScore, ...]
-    selected_candidate_index: int
-    selected_ranking_values: tuple[float, ...]
-    fit_metrics: Mapping[str, float]
-    validation_metrics: Mapping[str, float]
+    settings_fingerprint: str
     advisory_quality_passed: bool
     advisory_quality_reasons: tuple[str, ...]
     source_commit: str
@@ -170,13 +211,17 @@ class AlignmentArtifact:
     target_image: str
     reference_image: str
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "fit_metrics", MappingProxyType(dict(self.fit_metrics)))
-        object.__setattr__(
-            self,
-            "validation_metrics",
-            MappingProxyType(dict(self.validation_metrics)),
-        )
+
+@dataclass(frozen=True)
+class AlignmentResult:
+    """Selected controller contract plus the in-memory search decision."""
+
+    controller: ControllerArtifact
+    selection_metric: str
+    base_settings: ControllerSettings
+    declared_parameters: tuple[ParameterSpec, ...]
+    candidates: tuple[CandidateScore, ...]
+    selected_candidate_index: int
 
 
 @dataclass(frozen=True)
@@ -187,6 +232,7 @@ class MetricResult:
     ranking_values: tuple[float, ...]
     fit_metrics: Mapping[str, float]
     validation_metrics: Mapping[str, float]
+    beam_values: tuple[float, ...] = ()
 
 
 MetricFunction = Callable[

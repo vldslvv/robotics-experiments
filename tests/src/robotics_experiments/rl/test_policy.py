@@ -54,17 +54,36 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
+        ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_fraction=0.5,
+        hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.003, 0.003, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_output_scale_nm=(1.0, 1.0, 1.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
     )
 
 
-def _alignment_artifact():
+def _controller_artifact():
     return SimpleNamespace(
         schema_version=1,
         alignment_id="test-alignment",
@@ -87,8 +106,8 @@ def _metadata(
     obs_dim = HOVER_OBSERVATION_DIM if interface is PolicyInterface.HOVER_V1 else 34
     return policy_metadata(
         action_cfg=action_cfg,
-        alignment_artifact=_alignment_artifact(),
-        alignment_digest="digest",
+        controller_artifact=_controller_artifact(),
+        controller_digest="digest",
         obs_schema_version=1,
         obs_dim=obs_dim,
         policy_rate_hz=rate_hz,
@@ -166,6 +185,69 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
+def _obsolete_schema3_policy_metadata_preserves_physical_collective_mapping(
+    tmp_path: Path,
+) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 3
+    metadata["alignment"]["settings"].pop("hover_thrust_fraction")
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.hover_thrust_fraction == 0.0
+
+
+def _obsolete_schema5_policy_metadata_requires_normalized_hover_thrust(tmp_path: Path) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 5
+    metadata["alignment"]["settings"]["hover_thrust_normalized"] = 0.57
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.hover_thrust_normalized == pytest.approx(0.57)
+
+    metadata["alignment"]["settings"]["hover_thrust_normalized"] = 0.0
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="hover_thrust_normalized"):
+        load_policy_metadata(artifact_dir=tmp_path)
+
+
+def _obsolete_schema6_policy_metadata_loads_gain_schedule_and_schema5_is_neutral(
+    tmp_path: Path,
+) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 6
+    settings = metadata["alignment"]["settings"]
+    settings["hover_thrust_normalized"] = 0.57
+    settings["horizontal_velocity_error_gain_scale"] = 8.0 / 7.0
+    settings["horizontal_velocity_error_gain_start_mps"] = 0.15
+    settings["horizontal_velocity_error_gain_full_mps"] = 0.30
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.horizontal_velocity_error_gain_scale == pytest.approx(
+        8.0 / 7.0
+    )
+
+    metadata["alignment"]["schema_version"] = 5
+    for name in (
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+    ):
+        settings.pop(name)
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    legacy = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert legacy.controller_settings.horizontal_velocity_error_gain_scale == 1.0
+    assert legacy.controller_settings.horizontal_velocity_error_gain_start_mps == 0.15
+    assert legacy.controller_settings.horizontal_velocity_error_gain_full_mps == 0.30
+
+
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
     from robotics_experiments.commanding import VelocitySetpoint
     from robotics_experiments.px4_bridge import VehicleState
@@ -223,15 +305,15 @@ def test_metadata_rejects_every_legacy_artifact(tmp_path: Path) -> None:
         is PolicyInterface.HOVER_V1
     )
 
-    legacy_hover = {key: value for key, value in hover.items() if key != "alignment"}
+    legacy_hover = {key: value for key, value in hover.items() if key != "controller"}
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_hover))
-    with pytest.raises(ValueError, match="alignment"):
+    with pytest.raises(ValueError, match="controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
     legacy_press = _metadata(interface=PolicyInterface.PRESS_V1)
-    legacy_press.pop("alignment")
+    legacy_press.pop("controller")
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(legacy_press))
-    with pytest.raises(ValueError, match="alignment"):
+    with pytest.raises(ValueError, match="controller"):
         load_policy_metadata(artifact_dir=tmp_path)
 
 
@@ -361,9 +443,9 @@ def test_hover_adapter_requires_hold_duration() -> None:
                 hover_thrust_fraction=0.4,
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda observation: np.zeros(4),
@@ -396,9 +478,9 @@ def test_press_adapter_fails_closed_on_incompatible_task_observation(
                 curriculum_stage="approach",
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda observation: inference_calls.append(observation) or np.ones(4),  # type: ignore[func-returns-value]  # concise call recording
@@ -447,9 +529,9 @@ def test_press_adapter_emits_exact_actor_entry_diagnostic() -> None:
                 curriculum_stage="approach",
             ),
             controller_settings=_controller_settings(),
-            alignment_run_id="test-run",
-            alignment_digest="digest",
-            alignment_comparison_fingerprint="comparison",
+            controller_run_id="test-run",
+            controller_digest="digest",
+            controller_comparison_fingerprint="comparison",
             values={},
         ),
         inference=lambda _observation: np.array([1.2, -0.5, 0.25, -0.1]),
@@ -519,8 +601,12 @@ def test_current_press_artifact_preflights_when_available() -> None:
     if not artifact.exists():
         pytest.skip("current local press artifact is not available")
     metadata = json.loads((artifact / METADATA_FILENAME).read_text())
-    if "alignment" not in metadata:
-        with pytest.raises(ValueError, match="alignment"):
+    if "controller" not in metadata:
+        with pytest.raises(ValueError, match="controller"):
+            validate_policy_artifact(artifact_dir=artifact)
+        return
+    if metadata["controller"].get("schema_version") != 1:
+        with pytest.raises(ValueError, match="controller schema"):
             validate_policy_artifact(artifact_dir=artifact)
         return
     validated = _preflight_policy_artifacts(

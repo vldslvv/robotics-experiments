@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,17 +28,36 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
+        ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_filter_hz=10.0,
+        velocity_derivative_filter_hz=5.0,
+        velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
+        hover_thrust_fraction=0.5,
+        hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
+        attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
+        ki_rate=(0.2, 0.2, 0.1),
+        kd_rate=(0.003, 0.003, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+        rate_output_scale_nm=(1.0, 1.0, 1.0),
+        rate_derivative_filter_hz=30.0,
+        rate_integral_limit_nm=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
+        min_collective_thrust_fraction=0.05,
+        max_collective_thrust_fraction=1.0,
+        horizontal_thrust_margin_fraction=0.3,
         thruster_tau_inc_s=0.0,
         thruster_tau_dec_s=0.0,
         thruster_max_thrust_rate_nps=100000.0,
     )
 
 
-def _alignment_artifact():
+def _controller_artifact():
     return SimpleNamespace(
         schema_version=1,
         alignment_id="test-alignment",
@@ -50,27 +70,17 @@ def _alignment_artifact():
     )
 
 
-def _alignment_metadata() -> dict:
+def _controller_metadata() -> dict:
     settings = _controller_settings()
     return {
         "schema_version": 1,
         "alignment_id": "test-alignment",
         "run_id": "alignment-run",
-        "artifact_digest": "digest",
-        "comparison_fingerprint": "comparison",
+        "controller_digest": "digest",
+        "controller_comparison_fingerprint": "comparison",
         "target_definition_fingerprint": "target",
         "reference_definition_fingerprint": "reference",
-        "settings": {
-            "command_delay_s": settings.command_delay_s,
-            "kp_vel": list(settings.kp_vel),
-            "kd_vel": list(settings.kd_vel),
-            "kp_att": list(settings.kp_att),
-            "kp_rate": list(settings.kp_rate),
-            "max_tilt_cmd_deg": settings.max_tilt_cmd_deg,
-            "thruster_tau_inc_s": settings.thruster_tau_inc_s,
-            "thruster_tau_dec_s": settings.thruster_tau_dec_s,
-            "thruster_max_thrust_rate_nps": settings.thruster_max_thrust_rate_nps,
-        },
+        "settings": json.loads(json.dumps(asdict(settings))),
         "advisory_quality_passed": True,
     }
 
@@ -101,7 +111,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
     train_rl = _load_train_rl_module()
     artifact_path = tmp_path / ".build" / "alignment" / "test" / "best"
     artifact_path.mkdir(parents=True)
-    (artifact_path / "alignment.json").write_text("{}")
+    (artifact_path / "controller.json").write_text("{}")
     artifact = SimpleNamespace(
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
@@ -114,7 +124,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
         ),
         advisory_quality_passed=True,
     )
-    monkeypatch.setattr(train_rl, "load_alignment_artifact", lambda _path: artifact)
+    monkeypatch.setattr(train_rl, "load_controller_artifact", lambda _path: artifact)
     config = SimpleNamespace(
         vehicles={
             "x500_01": SimpleNamespace(
@@ -132,13 +142,13 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
             ),
             training=SimpleNamespace(
                 vehicle_id=0,
-                alignment_artifact=".build/alignment/test/best",
+                controller_artifact=".build/alignment/test/best",
             ),
         ),
     )
 
-    loaded, digest = train_rl._load_training_alignment(  # noqa: SLF001
-        args=SimpleNamespace(alignment_artifact=None),
+    loaded, digest = train_rl._load_training_controller(  # noqa: SLF001
+        args=SimpleNamespace(controller_artifact=None),
         config=config,
         repo_root=tmp_path,
     )
@@ -180,8 +190,8 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         env_cfg=env_cfg,
         source_metadata={"source_commit": "abc123", "source_dirty": False},
         artifact_run_id="run-1",
-        alignment_artifact=_alignment_artifact(),
-        alignment_digest="digest",
+        controller_artifact=_controller_artifact(),
+        controller_digest="digest",
     )
 
     assert metadata["obs_schema_version"] == 1
@@ -258,7 +268,7 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
         },
         "source_commit": "captured",
         "source_dirty": False,
-        "alignment": _alignment_metadata(),
+        "controller": _controller_metadata(),
     }
     train_rl._write_artifact_metadata(  # noqa: SLF001
         run_dir=tmp_path,
@@ -301,7 +311,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         training_mode="scratch",
         seed=7,
         max_iterations=2,
-        alignment_artifact=".build/alignment/test/best",
+        controller_artifact=".build/alignment/test/best",
     )
     config = SimpleNamespace(
         rl=SimpleNamespace(
@@ -333,8 +343,8 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     monkeypatch.setattr(train_rl, "_build_env", lambda **_kwargs: (env, env_cfg))
     monkeypatch.setattr(
         train_rl,
-        "_load_training_alignment",
-        lambda **_kwargs: (_alignment_artifact(), "digest"),
+        "_load_training_controller",
+        lambda **_kwargs: (_controller_artifact(), "digest"),
     )
     monkeypatch.setattr(
         train_rl,
@@ -371,7 +381,8 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         num_envs=None,
         export_checkpoint=None,
         initialize_checkpoint=None,
-        alignment_artifact=None,
+        resume_checkpoint=None,
+        controller_artifact=None,
     )
 
     train_rl._run(args=args, config=config)  # noqa: SLF001
@@ -379,7 +390,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["policy_rate_hz"] == 17.0
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
-    assert before_ppo["alignment"]["artifact_digest"] == "digest"
+    assert before_ppo["controller"]["controller_digest"] == "digest"
     assert before_ppo["training_mode"] == "scratch"
     assert before_ppo["initialization"] == {"method": "scratch-neutral-output"}
     assert initialization_calls == [{"runner": runner, "method": "scratch-neutral-output"}]
@@ -401,6 +412,30 @@ def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
     )
 
     assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
+
+
+def test_resume_restores_optimizer_state_and_applies_phase_learning_rate(tmp_path: Path) -> None:
+    from robotics_experiments.rl.training import rsl_rl
+
+    calls = []
+    optimizer = SimpleNamespace(param_groups=[{"lr": 1.0e-4}, {"lr": 1.0e-4}])
+    algorithm = SimpleNamespace(optimizer=optimizer, learning_rate=1.0e-4)
+    runner = SimpleNamespace(
+        alg=algorithm,
+        load=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    checkpoint = tmp_path / "model_299.pt"
+
+    rsl_rl.resume_training_from_checkpoint(
+        runner=runner,
+        checkpoint_path=checkpoint,
+        device="cuda:0",
+        learning_rate=3.0e-5,
+    )
+
+    assert calls == [((str(checkpoint),), {"load_optimizer": True, "map_location": "cuda:0"})]
+    assert algorithm.learning_rate == 3.0e-5
+    assert [group["lr"] for group in optimizer.param_groups] == [3.0e-5, 3.0e-5]
 
 
 def test_actor_only_initialization_preserves_fresh_training_state(tmp_path: Path) -> None:
@@ -493,16 +528,19 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
 
 
 @pytest.mark.parametrize(
-    ("training_mode", "checkpoint", "match"),
+    ("training_mode", "initialization_checkpoint", "resume_checkpoint", "match"),
     [
-        ("scratch", Path("model_1.pt"), "scratch training forbids"),
-        ("actor-only", None, "actor-only training requires"),
-        ("resume", None, "unsupported"),
+        ("scratch", Path("model_1.pt"), None, "scratch training forbids"),
+        ("scratch", None, Path("model_1.pt"), "scratch training forbids"),
+        ("actor-only", None, None, "actor-only training requires"),
+        ("resume", None, None, "resume training requires"),
+        ("unknown", None, None, "unsupported"),
     ],
 )
 def test_training_mode_validates_checkpoint_contract(
     training_mode: str,
-    checkpoint: Path | None,
+    initialization_checkpoint: Path | None,
+    resume_checkpoint: Path | None,
     match: str,
 ) -> None:
     train_rl = _load_train_rl_module()
@@ -510,7 +548,8 @@ def test_training_mode_validates_checkpoint_contract(
     with pytest.raises(ValueError, match=match):
         train_rl._validate_training_mode(  # noqa: SLF001
             training_mode=training_mode,
-            initialization_checkpoint=checkpoint,
+            initialization_checkpoint=initialization_checkpoint,
+            resume_checkpoint=resume_checkpoint,
         )
 
 
@@ -520,11 +559,93 @@ def test_valid_training_modes_accept_their_checkpoint_contract() -> None:
     train_rl._validate_training_mode(  # noqa: SLF001
         training_mode="scratch",
         initialization_checkpoint=None,
+        resume_checkpoint=None,
     )
     train_rl._validate_training_mode(  # noqa: SLF001
         training_mode="actor-only",
         initialization_checkpoint=Path("model_1.pt"),
+        resume_checkpoint=None,
     )
+    train_rl._validate_training_mode(  # noqa: SLF001
+        training_mode="resume",
+        initialization_checkpoint=None,
+        resume_checkpoint=Path("model_1.pt"),
+    )
+
+
+def test_resume_requires_matching_interface_controller_and_selection_fingerprint() -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl import PolicyContract, PolicyInterface
+    from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad_safety.yaml")
+    action = config.rl.action
+    contract = PolicyContract(
+        policy_interface=PolicyInterface.PRESS_V1,
+        obs_schema_version=1,
+        obs_dim=34,
+        policy_rate_hz=config.rl.policy_rate_hz,
+        action_kind=action.kind,
+        action_dim=action.action_dim,
+        max_body_velocity_mps=action.max_body_velocity_mps,
+        max_yaw_rate_radps=action.max_yaw_rate_radps,
+        max_body_rate_radps=action.max_body_rate_radps,
+        hover_thrust_fraction=action.hover_thrust_fraction,
+        curriculum_stage="approach",
+    )
+    fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
+    env_cfg = SimpleNamespace(
+        policy_interface="press-v1",
+        observation_schema_version=1,
+        observation_space=34,
+    )
+
+    source = SimpleNamespace(
+        contract=contract,
+        controller_digest="controller",
+        values={"checkpoint_evaluation": {"comparison_fingerprint": fingerprint}},
+    )
+    train_rl._validate_resume_contract(  # noqa: SLF001
+        source_metadata=source,
+        config=config,
+        env_cfg=env_cfg,
+        controller_digest="controller",
+    )
+
+    with pytest.raises(ValueError, match="policy interface"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=replace(contract, obs_dim=35),
+                controller_digest="controller",
+                values=source.values,
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
+    with pytest.raises(ValueError, match="controller digest"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=contract,
+                controller_digest="different",
+                values=source.values,
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
+    with pytest.raises(ValueError, match="comparison fingerprint"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=contract,
+                controller_digest="controller",
+                values={"checkpoint_evaluation": {"comparison_fingerprint": "different"}},
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
 
 
 def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: Path) -> None:
@@ -561,7 +682,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
     checkpoint = run_dir / "logs" / "model_50.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.touch()
-    metadata = {
+    source_record = {
         "policy_interface": "press-v1",
         "curriculum_stage": "approach",
         "obs_schema_version": 1,
@@ -577,14 +698,19 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         },
         "source_commit": "source-commit",
         "source_dirty": False,
-        "alignment": _alignment_metadata(),
+        "controller": _controller_metadata(),
     }
-    train_rl._write_artifact_metadata(run_dir=run_dir, metadata=metadata)  # noqa: SLF001
+    train_rl._write_artifact_metadata(  # noqa: SLF001
+        run_dir=run_dir,
+        metadata=source_record,
+    )
 
-    provenance, contract = train_rl._initialization_provenance(  # noqa: SLF001
+    provenance, loaded_metadata = train_rl._checkpoint_provenance(  # noqa: SLF001
         checkpoint_path=checkpoint,
         training_root=training_root,
         repo_root=tmp_path,
+        method="actor-only",
+        option_name="--initialize-checkpoint",
     )
 
     assert provenance == {
@@ -596,7 +722,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         "checkpoint_path": (".build/training/press-source/source-run/logs/model_50.pt"),
         "source_commit": "source-commit",
     }
-    assert contract.obs_dim == 34
+    assert loaded_metadata.contract.obs_dim == 34
     json.dumps({"initialization": provenance}, allow_nan=False)
 
 

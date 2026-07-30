@@ -11,16 +11,30 @@ rl:
   episode_length_s: 10.0
   action:
     max_body_velocity_mps: 2.0
+  press:
+    goal:
+      velocity_reference:
+        range_center_m: 0.415
+        wall_normal_max_mps: 0.04
+    reward:
+      flight_failure_weight: 300.0
+      velocity_tracking_weight: 300.0
   training:
     task_id: Isaac-Switch-Press-Direct-v0
     vehicle_id: 0
     policy_name: press-approach
     training_mode: scratch
-    max_iterations: 300
+    # The selected fixed-rate frontier is checkpoint 120; stop immediately
+    # after preserving it instead of entering the evidenced unsafe drift.
+    max_iterations: 121
     num_steps_per_env: 32
-    save_interval: 10
+    # Coarse checkpoints bound selection cost during the broad scratch phase;
+    # the resumed safety phase uses a finer interval around the frontier.
+    save_interval: 30
     learning_rate: 1.0e-4
-    schedule: adaptive
+    # Fixed rate prevents the adaptive scheduler from amplifying seed-specific
+    # KL transients into an unsafe policy collapse.
+    schedule: fixed
     gamma: 0.995
     lam: 0.95
     entropy_coef: 0.0001

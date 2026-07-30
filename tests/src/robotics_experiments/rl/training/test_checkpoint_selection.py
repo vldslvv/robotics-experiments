@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -115,7 +116,6 @@ def test_checkpoint_enumeration_is_numeric(tmp_path: Path) -> None:
 
 
 def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
-    selector = _load_selector_module()
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
@@ -134,16 +134,16 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         curriculum_stage="approach",
     )
 
-    fingerprint = selector._comparison_fingerprint(  # noqa: SLF001
+    fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=contract,
     )
 
-    assert fingerprint == selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
     )
-    assert fingerprint != selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
     )
@@ -336,7 +336,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
             episodes_per_seed=100,
             success_rate_min=0.95,
             collision_rate_max=0.01,
-            selection_metric="held-out-press-task-quality-v2",
+            selection_metric="held-out-press-task-quality-v3",
         ),
         goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
@@ -369,7 +369,7 @@ def test_approach_report_records_stage_and_v2_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="held-out-press-task-quality-v2",
+        selection_method="held-out-press-task-quality-v3",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -440,7 +440,7 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality-v3",
         (evaluation,),
         evaluation.candidate,
     )
@@ -497,7 +497,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality-v3",
         (),
         CheckpointCandidate(50, checkpoint),
     )

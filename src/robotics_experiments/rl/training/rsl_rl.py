@@ -6,7 +6,7 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 deferred until the application is running. The package-root contract --
 ``build_runner`` / ``train`` / ``load_checkpoint`` / ``deterministic_actor`` /
 ``initialize_actor_output`` / ``initialize_actor_from_checkpoint`` /
-``export_policy`` plus ``TrainingResult``
+``resume_training_from_checkpoint`` / ``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
 """
@@ -36,6 +36,7 @@ __all__ = [
     "initialize_actor_from_checkpoint",
     "initialize_actor_output",
     "load_checkpoint",
+    "resume_training_from_checkpoint",
     "train",
 ]
 
@@ -47,6 +48,8 @@ class _ActorCritic(Protocol):
 class _Algorithm(Protocol):
     policy: _ActorCritic
     actor_critic: _ActorCritic
+    optimizer: torch.optim.Optimizer
+    learning_rate: float
 
 
 class _PolicyRunner(Protocol):
@@ -154,6 +157,24 @@ def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str
         load_optimizer=False,
         map_location=device,
     )
+
+
+def resume_training_from_checkpoint(
+    *,
+    runner: _PolicyRunner,
+    checkpoint_path: Path,
+    device: str,
+    learning_rate: float,
+) -> None:
+    """Restore complete PPO state and apply the current phase's learning rate."""
+    runner.load(
+        str(checkpoint_path),
+        load_optimizer=True,
+        map_location=device,
+    )
+    runner.alg.learning_rate = float(learning_rate)
+    for parameter_group in runner.alg.optimizer.param_groups:
+        parameter_group["lr"] = float(learning_rate)
 
 
 def _policy_module(runner: _PolicyRunner) -> _ActorCritic:

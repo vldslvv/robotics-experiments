@@ -8,3 +8,21 @@ defaults:
 
 flight_benchmark:
   airborne_duration_s: 5.0
+
+alignment:
+  capture:
+    sensor_seed: 42
+    minimum_neutral_s: 3.0
+    stable_hold_s: 0.5
+    timeout_s: 12.0
+    max_linear_speed_mps: 0.02
+    max_angular_speed_radps: 0.03
+    max_tilt_deg: 0.25
+  execution:
+    worker_count: 1
+    # Candidate settings per fixed Isaac scene. Larger beam expansions are
+    # chunked through this persistent scene instead of inflating every batch.
+    candidate_capacity: 128
+    candidate_capacity_benchmark: [128, 256, 384, 512]
+    gpu_target_percent: 95.0
+    gpu_sample_interval_s: 0.5

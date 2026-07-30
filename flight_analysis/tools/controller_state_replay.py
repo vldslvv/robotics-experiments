@@ -11,13 +11,15 @@ per-rotor angular velocity and the resulting body wrench.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
 
-from robotics_experiments.alignment import load_alignment_artifact
+from robotics_experiments.alignment import load_controller_artifact
 from robotics_experiments.config import load_config
 from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
@@ -28,6 +30,7 @@ from robotics_experiments.rl import (
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
+    seed_actuation_controller_state,
 )
 
 __all__ = ["main"]
@@ -40,6 +43,18 @@ _NED_TO_ENU = np.array(
     ]
 )
 _FLU_TO_FRD = np.diag([1.0, -1.0, -1.0])
+_PHYSICS_TICK_US = 4_000
+_MAX_NORMALIZED_MOTOR_RMSE = 0.01
+_MAX_COLLECTIVE_RMSE_N = 0.05
+_MOTOR_SATURATION_EPS = 1e-6
+_BRIDGE_DYNAMICS_PATTERN = re.compile(
+    r"PX4 bridge dynamics: .* sim_time_us=(?P<sim_time_us>\d+) "
+    r"last_actuator_us=(?P<actuator_time_us>\d+) "
+    r"actuator_lag_us=(?P<join_error_us>\d+).* "
+    r"commands=(?P<rotor_speed>\[[^\]]+\]) "
+    r"forces_n=(?P<forces>\[[^\]]+\]) "
+    r"body_torque_n_m=(?P<body_torque>\[[^\]]+\])"
+)
 
 
 def _dataset(*, ulog, name: str) -> dict:
@@ -55,6 +70,45 @@ def _nearest_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray
     lower = np.clip(upper - 1, 0, len(source_t) - 1)
     use_lower = np.abs(query_t - source_t[lower]) <= np.abs(source_t[upper] - query_t)
     return np.where(use_lower, lower, upper)
+
+
+def _hold_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray:
+    return np.clip(np.searchsorted(source_t, query_t, side="right") - 1, 0, len(source_t) - 1)
+
+
+def _linear_interpolate(
+    *,
+    source_t: np.ndarray,
+    values: np.ndarray,
+    query_t: np.ndarray,
+) -> np.ndarray:
+    columns = values.reshape(len(values), -1)
+    result = np.column_stack(
+        [np.interp(query_t, source_t, columns[:, index]) for index in range(columns.shape[1])]
+    )
+    return result.reshape((len(query_t), *values.shape[1:]))
+
+
+def _interpolate_quaternions(
+    *,
+    source_t: np.ndarray,
+    quaternions_wxyz: np.ndarray,
+    query_t: np.ndarray,
+) -> np.ndarray:
+    upper = np.clip(np.searchsorted(source_t, query_t, side="right"), 1, len(source_t) - 1)
+    lower = upper - 1
+    denominator = source_t[upper] - source_t[lower]
+    fraction = np.divide(
+        query_t - source_t[lower],
+        denominator,
+        out=np.zeros_like(query_t),
+        where=denominator > 0.0,
+    )
+    first = quaternions_wxyz[lower]
+    second = quaternions_wxyz[upper].copy()
+    second[np.sum(first * second, axis=1) < 0.0] *= -1.0
+    interpolated = first + fraction[:, None] * (second - first)
+    return interpolated / np.linalg.norm(interpolated, axis=1)[:, None]
 
 
 def _quat_to_matrix(*, quaternion_wxyz: np.ndarray) -> np.ndarray:
@@ -135,6 +189,9 @@ def _geometry_and_mass(*, airframe_name: str) -> tuple[MixerGeometry, float]:
             rolling_moment_coefficient=np.empty(rotor_count),
             min_rotor_velocity=np.empty(rotor_count),
             max_rotor_velocity=np.empty(rotor_count),
+            input_offset=np.empty(rotor_count),
+            input_scaling=np.empty(rotor_count),
+            zero_position_armed=np.empty(rotor_count),
         ),
         body_mass + moving_pusher_mass,
     )
@@ -158,11 +215,487 @@ def _root_mean_square(*, values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(values))))
 
 
+def _normalized_boundary_metrics(
+    *,
+    target_motor_controls: np.ndarray,
+    px4_motor_controls: np.ndarray,
+    normalized_mix: np.ndarray,
+    px4_collective: np.ndarray,
+    px4_torque_flu: np.ndarray,
+) -> dict:
+    """Recover unsaturated target thrust/torque at the PX4 allocator boundary."""
+    target_controls = np.asarray(target_motor_controls, dtype=np.float64)
+    px4_controls = np.asarray(px4_motor_controls, dtype=np.float64)
+    if target_controls.shape != px4_controls.shape:
+        raise ValueError(
+            "target and PX4 motor controls must have matching shapes, got "
+            f"{target_controls.shape} and {px4_controls.shape}"
+        )
+    mix = np.asarray(normalized_mix, dtype=np.float64)
+    if mix.shape != (target_controls.shape[1], 4):
+        raise ValueError(
+            f"normalized mix has shape {mix.shape}, expected ({target_controls.shape[1]}, 4)"
+        )
+    collective = np.asarray(px4_collective, dtype=np.float64)
+    torque = np.asarray(px4_torque_flu, dtype=np.float64)
+    if collective.shape != (len(target_controls),):
+        raise ValueError(
+            f"PX4 collective has shape {collective.shape}, expected ({len(target_controls)},)"
+        )
+    if torque.shape != (len(target_controls), 3):
+        raise ValueError(
+            f"PX4 torque has shape {torque.shape}, expected ({len(target_controls)}, 3)"
+        )
+
+    saturated = np.any(
+        (target_controls <= _MOTOR_SATURATION_EPS)
+        | (target_controls >= 1.0 - _MOTOR_SATURATION_EPS)
+        | (px4_controls <= _MOTOR_SATURATION_EPS)
+        | (px4_controls >= 1.0 - _MOTOR_SATURATION_EPS),
+        axis=1,
+    )
+    unsaturated = ~saturated
+    recovered = target_controls @ np.linalg.pinv(mix).T
+    target_collective = -recovered[:, 3]
+    target_torque_flu = recovered[:, :3] * np.array([1.0, -1.0, -1.0])
+    return {
+        "normalized_motor_rmse": _root_mean_square(values=target_controls - px4_controls),
+        "unsaturated_sample_count": int(np.count_nonzero(unsaturated)),
+        "saturated_sample_count": int(np.count_nonzero(saturated)),
+        "normalized_collective_rmse": (
+            _root_mean_square(values=target_collective[unsaturated] - collective[unsaturated])
+            if np.any(unsaturated)
+            else None
+        ),
+        "normalized_torque_rmse": (
+            [
+                _root_mean_square(
+                    values=target_torque_flu[unsaturated, axis] - torque[unsaturated, axis]
+                )
+                for axis in range(3)
+            ]
+            if np.any(unsaturated)
+            else None
+        ),
+    }
+
+
+def _topic_time_us(*, topic: dict) -> np.ndarray:
+    return np.asarray(topic["timestamp"], dtype=np.int64)
+
+
+def _topic_vectors(*, topic: dict, field: str, length: int) -> np.ndarray:
+    return np.column_stack(
+        [np.asarray(topic[f"{field}[{index}]"], dtype=np.float64) for index in range(length)]
+    )
+
+
+def _bridge_actuator_samples(
+    *,
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    actuator_times: list[int] = []
+    rotor_speeds: list[list[float]] = []
+    forces: list[list[float]] = []
+    join_errors: list[int] = []
+    body_torques: list[list[float]] = []
+    for line in path.read_text().splitlines():
+        dynamics_match = _BRIDGE_DYNAMICS_PATTERN.search(line)
+        if dynamics_match is not None:
+            actuator_times.append(int(dynamics_match.group("actuator_time_us")))
+            rotor_speeds.append(list(ast.literal_eval(dynamics_match.group("rotor_speed"))))
+            forces.append(list(ast.literal_eval(dynamics_match.group("forces"))))
+            join_errors.append(int(dynamics_match.group("join_error_us")))
+            body_torques.append(list(ast.literal_eval(dynamics_match.group("body_torque"))))
+    if not actuator_times:
+        raise ValueError(f"bridge log {path} has incomplete actuator diagnostics")
+    return (
+        np.asarray(actuator_times, dtype=np.int64),
+        np.asarray(rotor_speeds, dtype=np.float64),
+        np.asarray(forces, dtype=np.float64),
+        np.column_stack(
+            [
+                np.asarray(join_errors, dtype=np.int64),
+                np.asarray(body_torques, dtype=np.float64),
+            ]
+        ),
+    )
+
+
+def _profile_topic(
+    *,
+    topic: dict,
+    values: np.ndarray,
+    start_us: int,
+    end_us: int,
+) -> dict:
+    time_us = _topic_time_us(topic=topic)
+    selected = (time_us >= start_us) & (time_us <= end_us)
+    return {
+        "timestamp_us": time_us[selected].tolist(),
+        "values": values[selected].tolist(),
+    }
+
+
+def _controller_boundary(
+    *,
+    local_setpoint: dict,
+    local_position: dict,
+    angular_velocity: dict,
+    rate_status: dict,
+    hover: dict,
+    timestamp_us: int,
+) -> tuple[dict[str, np.ndarray | float], dict[str, int]]:
+    def held_age_us(*, topic: dict) -> int:
+        time_us = _topic_time_us(topic=topic)
+        index = int(_hold_indices(source_t=time_us, query_t=np.array([timestamp_us]))[0])
+        return timestamp_us - int(time_us[index])
+
+    def interpolated_vector(*, topic: dict, fields: tuple[str, str, str]) -> np.ndarray:
+        return _linear_interpolate(
+            source_t=_topic_time_us(topic=topic).astype(np.float64),
+            values=np.column_stack(
+                [np.asarray(topic[field], dtype=np.float64) for field in fields]
+            ),
+            query_t=np.array([timestamp_us], dtype=np.float64),
+        )[0]
+
+    setpoint_age_us = held_age_us(topic=local_setpoint)
+    rate_age_us = held_age_us(topic=rate_status)
+    acceleration_setpoint_ned = interpolated_vector(
+        topic=local_setpoint,
+        fields=("acceleration[0]", "acceleration[1]", "acceleration[2]"),
+    )
+    linear_acceleration_ned = interpolated_vector(
+        topic=local_position,
+        fields=("ax", "ay", "az"),
+    )
+    angular_acceleration_frd = interpolated_vector(
+        topic=angular_velocity,
+        fields=(
+            "xyz_derivative[0]",
+            "xyz_derivative[1]",
+            "xyz_derivative[2]",
+        ),
+    )
+    rate_integral_frd = interpolated_vector(
+        topic=rate_status,
+        fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
+    )
+    hover_thrust_normalized = float(
+        _linear_interpolate(
+            source_t=_topic_time_us(topic=hover).astype(np.float64),
+            values=np.asarray(hover["hover_thrust"], dtype=np.float64),
+            query_t=np.array([timestamp_us], dtype=np.float64),
+        )[0]
+    )
+    vectors = {
+        "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
+        "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
+        "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
+        "initial_rate_integral_body_flu": _FLU_TO_FRD @ rate_integral_frd,
+        "initial_hover_thrust_normalized": hover_thrust_normalized,
+    }
+    if not all(np.all(np.isfinite(values)) for values in vectors.values()):
+        raise ValueError("initial controller boundary contains non-finite values")
+    if hover_thrust_normalized <= 0.0:
+        raise ValueError("initial hover thrust estimate must be positive")
+    return (
+        vectors,
+        {
+            "vehicle_local_position_setpoint": setpoint_age_us,
+            "rate_ctrl_status": rate_age_us,
+            "hover_thrust_estimate": held_age_us(topic=hover),
+        },
+    )
+
+
+def _augment_reference_controller_state(
+    *,
+    ulog,
+    reference_path: Path,
+) -> dict:
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") != 3:
+        raise ValueError(f"{reference_path} must use alignment trace schema 3")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
+    local_position = _dataset(ulog=ulog, name="vehicle_local_position")
+    angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
+
+    profile_reports = []
+    for raw_profile in raw_profiles:
+        start_us = int(raw_profile["start_sim_time_us"])
+        controller_vectors, source_age_us = _controller_boundary(
+            local_setpoint=local_setpoint,
+            local_position=local_position,
+            angular_velocity=angular_velocity,
+            rate_status=rate_status,
+            hover=hover,
+            timestamp_us=start_us,
+        )
+        raw_profile.update(
+            {
+                "initial_controller_state_valid": True,
+                **{
+                    name: values.tolist() if isinstance(values, np.ndarray) else values
+                    for name, values in controller_vectors.items()
+                },
+                "initial_controller_state_source_age_us": source_age_us,
+            }
+        )
+        profile_reports.append(
+            {
+                "profile": raw_profile["profile"],
+                "start_sim_time_us": start_us,
+                "source_age_us": raw_profile["initial_controller_state_source_age_us"],
+            }
+        )
+    reference["schema_version"] = 5
+    temporary_path = reference_path.with_suffix(".json.tmp")
+    temporary_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
+    temporary_path.replace(reference_path)
+    return {
+        "schema_version": 1,
+        "method": "px4-ulog-controller-boundary-v3",
+        "reference": str(reference_path),
+        "profiles": profile_reports,
+    }
+
+
+def _actuator_boundary_report(
+    *,
+    ulog,
+    config_path: Path,
+    reference_path: Path,
+    bridge_log_path: Path,
+) -> dict:
+    config = load_config(config_path)
+    vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
+    airframe_name = Path(vehicle.spawn.usd_path).stem
+    base_geometry, mass = _geometry_and_mass(airframe_name=airframe_name)
+    bridge = vehicle.bridge
+    geometry = MixerGeometry(
+        positions_body=base_geometry.positions_body,
+        rot_dir=base_geometry.rot_dir,
+        rotor_constant=np.asarray(bridge.rotor_constant),
+        rolling_moment_coefficient=np.asarray(bridge.rolling_moment_coefficient),
+        min_rotor_velocity=np.asarray(bridge.min_rotor_velocity),
+        max_rotor_velocity=np.asarray(bridge.max_rotor_velocity),
+        input_offset=np.asarray(bridge.input_offset),
+        input_scaling=np.asarray(bridge.input_scaling),
+        zero_position_armed=np.asarray(bridge.zero_position_armed),
+    )
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") not in (3, 4, 5):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+
+    thrust = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
+    torque = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
+    motors = _dataset(ulog=ulog, name="actuator_motors")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
+    rotor_count = len(bridge.input_scaling)
+    thrust_values = _topic_vectors(topic=thrust, field="xyz", length=3)
+    torque_values = _topic_vectors(topic=torque, field="xyz", length=3)
+    motor_values = _topic_vectors(topic=motors, field="control", length=rotor_count)
+    hover_values = np.asarray(hover["hover_thrust"], dtype=np.float64)[:, None]
+    (
+        bridge_time_us,
+        bridge_rotor_speed,
+        bridge_forces,
+        bridge_join_and_torque,
+    ) = _bridge_actuator_samples(path=bridge_log_path)
+    bridge_dynamics_join_error_us = bridge_join_and_torque[:, 0].astype(np.int64)
+    bridge_body_torque = bridge_join_and_torque[:, 1:]
+
+    motor_time_us = _topic_time_us(topic=motors)
+    motor_index = _nearest_indices(source_t=motor_time_us, query_t=bridge_time_us)
+    motor_join_error_us = np.abs(motor_time_us[motor_index] - bridge_time_us)
+    input_scaling = np.asarray(bridge.input_scaling, dtype=np.float64)
+    input_offset = np.asarray(bridge.input_offset, dtype=np.float64)
+    armed_zero = np.asarray(bridge.zero_position_armed, dtype=np.float64)
+    bridge_normalized_motor = (bridge_rotor_speed - armed_zero) / input_scaling - input_offset
+    expected_rotor_speed = (
+        motor_values[motor_index] * input_scaling + armed_zero + input_offset * input_scaling
+    )
+    expected_collective = np.sum(
+        geometry.rotor_constant * np.square(expected_rotor_speed),
+        axis=1,
+    )
+    bridge_collective = np.sum(bridge_forces, axis=1)
+    bridge_torque = np.column_stack(
+        [
+            np.sum(geometry.positions_body[:, 1] * bridge_forces, axis=1),
+            -np.sum(geometry.positions_body[:, 0] * bridge_forces, axis=1),
+            bridge_body_torque[:, 2],
+        ]
+    )
+
+    profile_reports = []
+    audit_failures: list[str] = []
+    for raw_profile in raw_profiles:
+        profile_name = str(raw_profile["profile"])
+        start_us = int(raw_profile["start_sim_time_us"])
+        relative_time_s = raw_profile["time_s"]
+        end_us = start_us + round(float(relative_time_s[-1]) * 1_000_000)
+        bridge_selected = (bridge_time_us >= start_us) & (bridge_time_us <= end_us)
+        topic_reports = {
+            "vehicle_thrust_setpoint": _profile_topic(
+                topic=thrust,
+                values=thrust_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "vehicle_torque_setpoint": _profile_topic(
+                topic=torque,
+                values=torque_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "actuator_motors": _profile_topic(
+                topic=motors,
+                values=motor_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+            "hover_thrust_estimate": _profile_topic(
+                topic=hover,
+                values=hover_values,
+                start_us=start_us,
+                end_us=end_us,
+            ),
+        }
+        missing_topics = [
+            name for name, topic_report in topic_reports.items() if not topic_report["timestamp_us"]
+        ]
+        if missing_topics or not np.any(bridge_selected):
+            audit_failures.append(
+                f"{profile_name}: incomplete topic coverage "
+                f"{missing_topics + ([] if np.any(bridge_selected) else ['bridge'])}"
+            )
+        topic_coverage = {
+            name: {
+                "sample_count": len(topic_report["timestamp_us"]),
+                "first_timestamp_us": (
+                    topic_report["timestamp_us"][0] if topic_report["timestamp_us"] else None
+                ),
+                "last_timestamp_us": (
+                    topic_report["timestamp_us"][-1] if topic_report["timestamp_us"] else None
+                ),
+            }
+            for name, topic_report in topic_reports.items()
+        }
+        profile_motor_error = (
+            bridge_normalized_motor[bridge_selected] - motor_values[motor_index][bridge_selected]
+        )
+        profile_collective_error = (
+            bridge_collective[bridge_selected] - expected_collective[bridge_selected]
+        )
+        normalized_motor_rmse = (
+            _root_mean_square(values=profile_motor_error) if profile_motor_error.size else math.inf
+        )
+        collective_rmse_n = (
+            _root_mean_square(values=profile_collective_error)
+            if profile_collective_error.size
+            else math.inf
+        )
+        max_join_error_us = int(
+            max(
+                np.max(motor_join_error_us[bridge_selected], initial=0),
+                np.max(bridge_dynamics_join_error_us[bridge_selected], initial=0),
+            )
+        )
+        if max_join_error_us > _PHYSICS_TICK_US:
+            audit_failures.append(
+                f"{profile_name}: timestamp join error {max_join_error_us} us exceeds "
+                f"{_PHYSICS_TICK_US} us"
+            )
+        if normalized_motor_rmse > _MAX_NORMALIZED_MOTOR_RMSE:
+            audit_failures.append(
+                f"{profile_name}: normalized motor RMSE {normalized_motor_rmse:.6f} "
+                f"exceeds {_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
+        if collective_rmse_n > _MAX_COLLECTIVE_RMSE_N:
+            audit_failures.append(
+                f"{profile_name}: collective RMSE {collective_rmse_n:.6f} N "
+                f"exceeds {_MAX_COLLECTIVE_RMSE_N:.6f} N"
+            )
+        profile_reports.append(
+            {
+                "profile": profile_name,
+                "split": raw_profile["split"],
+                "axis": raw_profile["axis"],
+                "start_sim_time_us": start_us,
+                "end_sim_time_us": end_us,
+                "topic_coverage": topic_coverage,
+                "bridge": {
+                    "sample_count": int(np.count_nonzero(bridge_selected)),
+                    "mean_mapped_rotor_speed_radps": np.mean(
+                        bridge_rotor_speed[bridge_selected], axis=0
+                    ).tolist(),
+                    "mean_reconstructed_collective_thrust_n": float(
+                        np.mean(bridge_collective[bridge_selected])
+                    ),
+                    "mean_reconstructed_body_torque_nm": np.mean(
+                        bridge_torque[bridge_selected], axis=0
+                    ).tolist(),
+                    "saturated_motor_sample_count": int(
+                        np.count_nonzero(
+                            (bridge_normalized_motor[bridge_selected] <= 0.0)
+                            | (bridge_normalized_motor[bridge_selected] >= 1.0)
+                        )
+                    ),
+                },
+                "metrics": {
+                    "normalized_motor_rmse": normalized_motor_rmse,
+                    "collective_thrust_rmse_n": collective_rmse_n,
+                    "max_timestamp_join_error_us": max_join_error_us,
+                },
+            }
+        )
+    return {
+        "schema_version": 1,
+        "method": "px4-ulog-bridge-actuator-boundary-v1",
+        "config": str(config_path),
+        "reference": str(reference_path),
+        "bridge_log": str(bridge_log_path),
+        "airframe": airframe_name,
+        "composed_mass_kg": mass,
+        "limits": {
+            "timestamp_join_error_us": _PHYSICS_TICK_US,
+            "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
+            "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
+        },
+        "profiles": profile_reports,
+        "passed": not audit_failures,
+        "failures": audit_failures,
+    }
+
+
+def _linear_scale_with_intercept(
+    *,
+    controller_output: np.ndarray,
+    physical_output: np.ndarray,
+) -> tuple[float, float, float]:
+    design = np.column_stack([controller_output, np.ones(len(controller_output))])
+    scale, intercept = np.linalg.lstsq(design, physical_output, rcond=None)[0]
+    residual = physical_output - (scale * controller_output + intercept)
+    return float(scale), float(intercept), _root_mean_square(values=residual)
+
+
 def _report(
     *,
     ulog,
     config_path: Path,
-    alignment_artifact_path: Path,
+    controller_artifact_path: Path,
     start_s: float,
     end_s: float,
 ) -> dict:
@@ -178,8 +711,11 @@ def _report(
         rolling_moment_coefficient=np.asarray(bridge.rolling_moment_coefficient),
         min_rotor_velocity=np.asarray(bridge.min_rotor_velocity),
         max_rotor_velocity=np.asarray(bridge.max_rotor_velocity),
+        input_offset=np.asarray(bridge.input_offset),
+        input_scaling=np.asarray(bridge.input_scaling),
+        zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
-    controller_settings = load_alignment_artifact(alignment_artifact_path).selected_settings
+    controller_settings = load_controller_artifact(controller_artifact_path).selected_settings
     params = build_actuation_params(
         geometry=geometry,
         action_cfg=config.rl.action,
@@ -192,6 +728,11 @@ def _report(
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
+    rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
+    thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
+    torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     start_timestamp = float(ulog.start_timestamp)
 
     motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
@@ -203,48 +744,92 @@ def _report(
     def relative_time(data: dict) -> np.ndarray:
         return (np.asarray(data["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
 
-    trajectory_index = _nearest_indices(source_t=relative_time(trajectory), query_t=sample_t)
-    position_index = _nearest_indices(source_t=relative_time(local_position), query_t=sample_t)
-    attitude_index = _nearest_indices(source_t=relative_time(attitude), query_t=sample_t)
-    angular_index = _nearest_indices(source_t=relative_time(angular_velocity), query_t=sample_t)
     motor_index = np.flatnonzero(selected)
+    controller_dt_s = 1.0 / config.sim.physics_hz
+    replay_t = np.arange(
+        start_s,
+        end_s + controller_dt_s * 0.5,
+        controller_dt_s,
+        dtype=np.float64,
+    )
+    trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
+    velocity_ned = np.column_stack(
+        [
+            np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
+            for index in range(3)
+        ]
+    )
+    yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    local_velocity_ned = _linear_interpolate(
+        source_t=relative_time(local_position),
+        values=np.column_stack(
+            [np.asarray(local_position[name], dtype=np.float64) for name in ("vx", "vy", "vz")]
+        ),
+        query_t=replay_t,
+    )
+    quaternion_frd_ned = _interpolate_quaternions(
+        source_t=relative_time(attitude),
+        quaternions_wxyz=np.column_stack(
+            [np.asarray(attitude[f"q[{index}]"], dtype=np.float64) for index in range(4)]
+        ),
+        query_t=replay_t,
+    )
+    angular_velocity_frd = _linear_interpolate(
+        source_t=relative_time(angular_velocity),
+        values=np.column_stack(
+            [np.asarray(angular_velocity[f"xyz[{index}]"], dtype=np.float64) for index in range(3)]
+        ),
+        query_t=replay_t,
+    )
 
     px4_omega_rows: list[np.ndarray] = []
     isaac_omega_rows: list[np.ndarray] = []
+    px4_motor_rows: list[np.ndarray] = []
+    isaac_motor_rows: list[np.ndarray] = []
     px4_wrench_rows: list[np.ndarray] = []
     isaac_wrench_rows: list[np.ndarray] = []
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
+    controller_vectors, controller_source_age_us = _controller_boundary(
+        local_setpoint=local_setpoint,
+        local_position=local_position,
+        angular_velocity=angular_velocity,
+        rate_status=rate_status,
+        hover=hover,
+        timestamp_us=round(start_timestamp + start_s * 1e6),
+    )
+    controller_state = seed_actuation_controller_state(
+        params=params,
+        linear_velocity_enu=_NED_TO_ENU @ local_velocity_ned[0],
+        angular_velocity_body_flu=_FLU_TO_FRD @ angular_velocity_frd[0],
+        acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
+        linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
+        angular_acceleration_body_flu_radps2=controller_vectors[
+            "initial_angular_acceleration_body_flu_radps2"
+        ],
+        rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
+        hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
+    )
+    isaac_omega_grid = []
 
-    for time_s, mi, ti, pi, ai, wi in zip(
-        sample_t,
-        motor_index,
-        trajectory_index,
-        position_index,
-        attitude_index,
-        angular_index,
+    for velocity_setpoint_ned, yaw_setpoint_rate, velocity_state_ned, quaternion, rates_frd in zip(
+        velocity_ned,
+        yaw_speed,
+        local_velocity_ned,
+        quaternion_frd_ned,
+        angular_velocity_frd,
         strict=True,
     ):
-        velocity_ned = np.array(
-            [
-                trajectory["velocity[0]"][ti],
-                trajectory["velocity[1]"][ti],
-                trajectory["velocity[2]"][ti],
-            ],
-            dtype=np.float64,
-        )
-        controls = np.array(
-            [motor[f"control[{index}]"][mi] for index in range(rotor_count)],
-            dtype=np.float64,
-        )
-        if not np.all(np.isfinite(velocity_ned)) or not np.all(np.isfinite(controls)):
-            continue
-        quaternion_frd_ned = np.array(
-            [attitude[f"q[{index}]"][ai] for index in range(4)],
-            dtype=np.float64,
-        )
-        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion_frd_ned)
-        velocity_setpoint_enu = _NED_TO_ENU @ velocity_ned
+        if not (
+            np.all(np.isfinite(velocity_setpoint_ned))
+            and math.isfinite(float(yaw_setpoint_rate))
+            and np.all(np.isfinite(velocity_state_ned))
+            and np.all(np.isfinite(quaternion))
+            and np.all(np.isfinite(rates_frd))
+        ):
+            raise ValueError("selected replay window contains non-finite controller inputs")
+        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion)
+        velocity_setpoint_enu = _NED_TO_ENU @ velocity_setpoint_ned
         heading = np.array(
             [
                 [math.cos(yaw), -math.sin(yaw), 0.0],
@@ -254,36 +839,49 @@ def _report(
         )
         action = np.zeros(4)
         action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
-        yaw_speed = float(trajectory["yawspeed"][ti])
-        action[3] = -yaw_speed / config.rl.action.max_yaw_rate_radps
+        action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
         action = np.clip(action, -1.0, 1.0)
 
         state = ActuationState(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
-            linear_velocity_enu=_NED_TO_ENU
-            @ np.array(
-                [
-                    local_position["vx"][pi],
-                    local_position["vy"][pi],
-                    local_position["vz"][pi],
-                ]
-            ),
-            angular_velocity_body_flu=_FLU_TO_FRD
-            @ np.array(
-                [
-                    angular_velocity["xyz[0]"][wi],
-                    angular_velocity["xyz[1]"][wi],
-                    angular_velocity["xyz[2]"][wi],
-                ]
-            ),
+            linear_velocity_enu=_NED_TO_ENU @ velocity_state_ned,
+            angular_velocity_body_flu=_FLU_TO_FRD @ rates_frd,
         )
+        controller_state, isaac_omega = action_to_rotor_omega(
+            params,
+            controller_state,
+            action,
+            state,
+            controller_dt_s,
+        )
+        isaac_omega_grid.append(isaac_omega)
+
+    replay_index = _nearest_indices(source_t=replay_t, query_t=sample_t)
+    for time_s, mi, replay_sample_index in zip(
+        sample_t,
+        motor_index,
+        replay_index,
+        strict=True,
+    ):
+        controls = np.array(
+            [motor[f"control[{index}]"][mi] for index in range(rotor_count)],
+            dtype=np.float64,
+        )
+        if not np.all(np.isfinite(controls)):
+            continue
         px4_omega = (
             controls * np.asarray(bridge.input_scaling)
             + np.asarray(bridge.zero_position_armed)
             + np.asarray(bridge.input_offset) * np.asarray(bridge.input_scaling)
         )
-        isaac_omega = action_to_rotor_omega(params, action, state)
+        isaac_omega = isaac_omega_grid[replay_sample_index]
         used_t.append(float(time_s))
+        px4_motor_rows.append(controls)
+        isaac_motor_rows.append(
+            (isaac_omega - np.asarray(bridge.zero_position_armed))
+            / np.asarray(bridge.input_scaling)
+            - np.asarray(bridge.input_offset)
+        )
         px4_omega_rows.append(px4_omega)
         isaac_omega_rows.append(isaac_omega)
         px4_wrench_rows.append(_wrench(geometry=geometry, omega=px4_omega))
@@ -294,20 +892,70 @@ def _report(
 
     px4_omega_array = np.stack(px4_omega_rows)
     isaac_omega_array = np.stack(isaac_omega_rows)
+    px4_motor_array = np.stack(px4_motor_rows)
+    isaac_motor_array = np.stack(isaac_motor_rows)
     px4_wrench_array = np.stack(px4_wrench_rows)
     isaac_wrench_array = np.stack(isaac_wrench_rows)
     omega_error = isaac_omega_array - px4_omega_array
     wrench_error = isaac_wrench_array - px4_wrench_array
     max_omega = np.asarray(bridge.max_rotor_velocity)
+    torque_index = _nearest_indices(
+        source_t=relative_time(torque_setpoint),
+        query_t=np.asarray(used_t),
+    )
+    torque_setpoint_flu = np.column_stack(
+        [
+            np.asarray(torque_setpoint[f"xyz[{index}]"], dtype=np.float64)[torque_index]
+            for index in range(3)
+        ]
+    )
+    torque_setpoint_flu *= np.array([1.0, -1.0, -1.0])
+    thrust_index = _nearest_indices(
+        source_t=relative_time(thrust_setpoint),
+        query_t=np.asarray(used_t),
+    )
+    thrust_setpoint_body = np.column_stack(
+        [
+            np.asarray(thrust_setpoint[f"xyz[{index}]"], dtype=np.float64)[thrust_index]
+            for index in range(3)
+        ]
+    )
+    if params.normalized_allocator:
+        boundary_metrics = _normalized_boundary_metrics(
+            target_motor_controls=isaac_motor_array,
+            px4_motor_controls=px4_motor_array,
+            normalized_mix=params.normalized_allocation_mix,
+            px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
+            px4_torque_flu=torque_setpoint_flu,
+        )
+    else:
+        boundary_metrics = {
+            "normalized_motor_rmse": _root_mean_square(values=isaac_motor_array - px4_motor_array),
+            "unsaturated_sample_count": 0,
+            "saturated_sample_count": len(isaac_motor_array),
+            "normalized_collective_rmse": None,
+            "normalized_torque_rmse": None,
+        }
+    scale_fits = [
+        _linear_scale_with_intercept(
+            controller_output=torque_setpoint_flu[:, axis],
+            physical_output=px4_wrench_array[:, axis + 1],
+        )
+        for axis in range(3)
+    ]
     return {
-        "schema_version": 1,
-        "method": "px4-ulog-state-replay-v1",
+        "schema_version": 5,
+        "method": "px4-ulog-state-replay-v5-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
         "sample_count": len(used_t),
+        "controller_sample_count": len(replay_t),
+        "controller_rate_hz": config.sim.physics_hz,
+        "controller_state_source_age_us": controller_source_age_us,
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
+            **boundary_metrics,
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),
@@ -315,34 +963,165 @@ def _report(
             "body_torque_rmse_nm": [
                 _root_mean_square(values=wrench_error[:, index]) for index in range(1, 4)
             ],
+            "rate_output_scale_nm_estimate": [fit[0] for fit in scale_fits],
+            "rate_output_scale_intercept_nm": [fit[1] for fit in scale_fits],
+            "rate_output_scale_fit_rmse_nm": [fit[2] for fit in scale_fits],
             "px4_mean_collective_thrust_n": float(np.mean(px4_wrench_array[:, 0])),
             "isaac_mean_collective_thrust_n": float(np.mean(isaac_wrench_array[:, 0])),
         },
     }
 
 
+def _profile_windows(*, reference_path: Path) -> list[dict]:
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") not in (3, 4, 5):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+    windows = []
+    for raw_profile in raw_profiles:
+        relative_time_s = raw_profile.get("time_s")
+        if not isinstance(relative_time_s, list) or not relative_time_s:
+            raise ValueError(f"alignment profile {raw_profile.get('profile')!r} has no samples")
+        start_s = int(raw_profile["start_sim_time_us"]) / 1_000_000.0
+        windows.append(
+            {
+                "profile": raw_profile["profile"],
+                "split": raw_profile["split"],
+                "axis": raw_profile["axis"],
+                "start_s": start_s,
+                "end_s": start_s + float(relative_time_s[-1]),
+            }
+        )
+    return windows
+
+
+def _profile_replay_report(
+    *,
+    ulog,
+    config_path: Path,
+    controller_artifact_path: Path,
+    reference_path: Path,
+) -> dict:
+    profiles = []
+    failures = []
+    for window in _profile_windows(reference_path=reference_path):
+        replay = _report(
+            ulog=ulog,
+            config_path=config_path,
+            controller_artifact_path=controller_artifact_path,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+        )
+        metrics = replay["metrics"]
+        profile_name = window["profile"]
+        if metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
+            failures.append(
+                f"{profile_name}: normalized motor RMSE "
+                f"{metrics['normalized_motor_rmse']:.6f} exceeds "
+                f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
+        if metrics["collective_thrust_rmse_n"] > _MAX_COLLECTIVE_RMSE_N:
+            failures.append(
+                f"{profile_name}: collective RMSE "
+                f"{metrics['collective_thrust_rmse_n']:.6f} N exceeds "
+                f"{_MAX_COLLECTIVE_RMSE_N:.6f} N"
+            )
+        profiles.append(
+            {
+                **window,
+                "sample_count": replay["sample_count"],
+                "controller_sample_count": replay["controller_sample_count"],
+                "controller_state_source_age_us": replay["controller_state_source_age_us"],
+                "sample_time_s": replay["sample_time_s"],
+                "metrics": metrics,
+            }
+        )
+    return {
+        "schema_version": 5,
+        "method": "px4-ulog-profile-state-replay-v5-250hz",
+        "config": str(config_path),
+        "controller_artifact": str(controller_artifact_path),
+        "reference": str(reference_path),
+        "limits": {
+            "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
+            "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
+        },
+        "profiles": profiles,
+        "passed": not failures,
+        "failures": failures,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("ulog", type=Path)
+    parser.add_argument("ulog_positional", nargs="?", type=Path)
+    parser.add_argument("--ulog", type=Path)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--alignment-artifact", type=Path, required=True)
-    parser.add_argument("--window", required=True, help="relative ULog seconds START,END")
+    parser.add_argument("--controller-artifact", type=Path)
+    parser.add_argument("--window", help="relative ULog seconds START,END")
+    parser.add_argument("--augment-reference", type=Path)
+    parser.add_argument("--audit-reference", type=Path)
+    parser.add_argument("--profile-reference", type=Path)
+    parser.add_argument("--bridge-log", type=Path)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
-    start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
 
     from pyulog import ULog
 
-    report = _report(
-        ulog=ULog(str(args.ulog)),
-        config_path=args.config,
-        alignment_artifact_path=args.alignment_artifact,
-        start_s=start_s,
-        end_s=end_s,
-    )
+    ulog_path = args.ulog if args.ulog is not None else args.ulog_positional
+    if ulog_path is None:
+        parser.error("one ULog path is required")
+    if args.augment_reference is not None:
+        if (
+            args.audit_reference is not None
+            or args.profile_reference is not None
+            or args.bridge_log is not None
+        ):
+            parser.error("--augment-reference cannot be combined with audit or profile options")
+        report = _augment_reference_controller_state(
+            ulog=ULog(str(ulog_path)),
+            reference_path=args.augment_reference,
+        )
+    elif args.audit_reference is not None or args.bridge_log is not None:
+        if args.profile_reference is not None:
+            parser.error("--profile-reference cannot be combined with actuator audit options")
+        if args.audit_reference is None or args.bridge_log is None:
+            parser.error("--audit-reference and --bridge-log must be provided together")
+        report = _actuator_boundary_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            reference_path=args.audit_reference,
+            bridge_log_path=args.bridge_log,
+        )
+    elif args.profile_reference is not None:
+        if args.controller_artifact is None or args.window is not None:
+            parser.error(
+                "--profile-reference requires --controller-artifact and cannot use --window"
+            )
+        report = _profile_replay_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            controller_artifact_path=args.controller_artifact,
+            reference_path=args.profile_reference,
+        )
+    else:
+        if args.controller_artifact is None or args.window is None:
+            parser.error("--controller-artifact and --window are required for controller replay")
+        start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
+        report = _report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            controller_artifact_path=args.controller_artifact,
+            start_s=start_s,
+            end_s=end_s,
+        )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:
         args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if args.audit_reference is not None and report.get("passed") is False:
+        raise SystemExit("actuator-boundary audit failed")
 
 
 if __name__ == "__main__":

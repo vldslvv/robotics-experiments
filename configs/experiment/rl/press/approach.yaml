@@ -40,6 +40,7 @@ goal:
   stable_steps: 5
   velocity_reference:
     range_center_m: 0.41
+    wall_normal_alignment_gate_m: 0.03
     wall_normal_gain_per_s: 1.25
     wall_normal_min_mps: -0.04
     wall_normal_max_mps: 0.08
@@ -50,6 +51,11 @@ goal:
 # documented sign to each contribution.
 reward:
   range_progress_weight: 50.0
+  # Penalize the normalized squared distance below the upper goal boundary.
+  # This supplies a direct pre-boundary braking signal while leaving the goal
+  # and acceptance range unchanged.
+  range_barrier_margin_m: 0.02
+  range_barrier_weight: 10.0
   alignment_error_weight: 50.0
   velocity_tracking_weight: 100.0
   upright_error_weight: 5.0
@@ -71,6 +77,16 @@ reset:
   switch_height_m: 1.0
   wall_half_extents_m: [0.05, 1.0, 1.0]
 
+# Training can mix the full handoff envelope with an area-uniform annulus near
+# an evidenced difficult boundary. Selection and evaluation always retain the
+# full handoff distribution.
+training_reset:
+  hard_case_fraction: 0.0
+  range_min_m: 0.45
+  range_max_m: 0.47
+  tangential_error_min_m: 0.06
+  tangential_error_max_m: 0.08
+
 termination:
   crash_tilt_cos: 0.819152
   min_altitude_m: 0.25
@@ -84,7 +100,7 @@ evaluation:
   episodes_per_seed: 100
   success_rate_min: 0.95
   collision_rate_max: 0.01
-  selection_metric: held-out-press-task-quality-v2
+  selection_metric: held-out-press-task-quality-v3
   collision_penalty: 4.0
   flight_failure_penalty: 3.0
   timeout_penalty: 2.0

@@ -85,7 +85,10 @@ maintenance. `AGENTS.md` keeps only the hard rules and points here.
 - `make check` is the canonical non-mutating host gate. It validates `uv.lock`,
   checks lint and formatting, runs mypy over every project-owned Python file
   except vendored Pegasus, runs vulture, and executes the complete host pytest
-  suite. The CPU-only pull-request workflow runs this same target.
+  suite. Every development tool is resolved with the `dev` extra so a fresh
+  environment uses the project-pinned version instead of a similarly named
+  transitive dependency. The CPU-only pull-request workflow runs this same
+  target.
 - Pre-commit remains the formatting and commit-time convenience layer. Install
   it once with `uv run pre-commit install` and run a whole-repository sweep with
   `uv run pre-commit run --all-files`. Mirror hooks may modify staged Python

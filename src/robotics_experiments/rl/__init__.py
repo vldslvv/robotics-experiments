@@ -1,13 +1,16 @@
 """Public task-neutral reinforcement-learning contract."""
 
 from robotics_experiments.rl.actuation import (
+    ActuationControllerState,
     ActuationParams,
     ActuationState,
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
     hover_action,
+    initial_actuation_controller_state,
     rotor_forces_to_body_wrench,
+    seed_actuation_controller_state,
 )
 from robotics_experiments.rl.observation import (
     HOVER_OBSERVATION_DIM,
@@ -31,6 +34,7 @@ from robotics_experiments.rl.policy import (
 
 __all__ = [
     "ActuationParams",
+    "ActuationControllerState",
     "ActuationState",
     "HOVER_OBSERVATION_DIM",
     "HOVER_OBSERVATION_SCHEMA_VERSION",
@@ -50,6 +54,8 @@ __all__ = [
     "pack_hover_observation",
     "policy_action_to_offboard",
     "policy_metadata",
+    "initial_actuation_controller_state",
     "rotor_forces_to_body_wrench",
+    "seed_actuation_controller_state",
     "validate_policy_artifact",
 ]

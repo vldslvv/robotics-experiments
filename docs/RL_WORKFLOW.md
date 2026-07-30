@@ -26,13 +26,31 @@ Both tasks use the task-neutral actuation seam from
 body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
 control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
-PX4 is bypassed in Lab, but the pinned Isaac Lab
+PX4 is bypassed in Lab, but the schema-6 aligned controller is a stateful
+PX4-like velocity, attitude, and rate cascade with filtered acceleration
+feedback, integrators, a smooth horizontal large-error gain schedule, thrust
+saturation/anti-windup, and rate
+PID/feed-forward. The velocity and rate controllers emit PX4-normalized thrust
+and torque into the pinned multirotor pseudo-inverse and sequential-desaturation
+allocator. The composed bridge offset, scaling, armed zero, and quadratic rotor
+curve then produce physical per-rotor thrust. Schema-4 artifacts retain their
+hover-scaled physical-force path; schema-2 and schema-3 artifacts retain their
+original physical collective feed-forward, and schema 2 retains its unit
+rate-output scale. Schemas 2 through 5 retain a neutral large-error gain
+multiplier. Attitude tracking uses PX4's thrust-prioritized
+reduced-quaternion law, and zero velocity-filter cutoff has PX4's
+disabled/pass-through meaning. The pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
-references. Controller gains, command delay, tilt, and thruster response come
-from an immutable alignment artifact rather than `rl.action`.
+references. Controller gains, filters, integral and thrust limits, command
+delay, tilt, and thruster response come from an immutable controller artifact
+rather than `rl.action`.
 The project still owns allocation, per-rotor yaw reaction, drag, and the sole
 body-wrench sink because the pusher-equipped articulation is not a pure
 multirotor asset.
+Both Lab flight environments pass the authored enhanced-determinism flag
+through their `SimulationCfg`. Rotor forces use PhysX's default one-application-
+per-step behavior, matching the standalone bridge's one complete wrench per
+physics tick.
 
 The shared exact-average cadence derives policy stepping from `sim.physics_hz`
 and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler
@@ -42,15 +60,16 @@ artifacts own evaluation and deployment cadence and action scaling.
 PX4 SITL is the response reference for the separate, policy-independent
 alignment subsystem. Run `make align-controllers`, then
 `make test-integration-alignment-target`; see
-`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
-`.build/alignment/<alignment-id>/best` by default and may select an exact run
-with `ALIGNMENT_ARTIFACT`. The command buffer and thruster state are cleared on
-every environment reset.
+`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves the accepted
+`.build/alignment/x500-velocity-px4-v7/best` by default and may select an exact
+run with `CONTROLLER_ARTIFACT`. The command
+buffer, velocity/rate controller state, and thruster state are cleared on every
+environment reset.
 
 `rl.action` now contains only normalized action kind, dimension, and scales.
 The selected alignment's complete `ControllerSettings` is supplied explicitly
 to both the NumPy reference and torch twin. Changing the controller requires a
-new alignment artifact and new training; an existing actor is never silently
+new controller artifact and new training; an existing actor is never silently
 upgraded to current `best`.
 
 After Lab evaluation, `make test-integration-press-policy-transfer` runs the
@@ -118,8 +137,8 @@ Success requires five consecutive 20 Hz policy samples satisfying all of:
 - Body-Z/world-Z alignment at least 0.965926.
 - No pusher collision during the policy interval.
 
-Body collision, pusher collision, crash, altitude, or relative-envelope failure
-terminates the episode.
+Body collision, pusher collision, crash, altitude, range below the unchanged
+0.40 m acceptance boundary, or relative-envelope failure terminates the episode.
 Timeout is a truncation and is mutually exclusive with terminal success or
 failure. Reset samples range from 0.45 through 0.50 m and samples lateral and
 vertical offsets uniformly inside the shared 0.08 m radial bound. Initial
@@ -128,9 +147,10 @@ and lateral speed limits, initial angular velocity is sampled inside the shared
 0.05 rad/s ball, attitude is upright, previous action is zero, and mode is
 pre-contact. Reset owns no independent entry-velocity tunables.
 
-`PressApproachRewardTerms` has exactly nine signed contributions:
+`PressApproachRewardTerms` has exactly ten signed contributions:
 
 - `range_progress = 50 * (previous_range - current_range)`.
+- `range_barrier = -10 * max(0, (0.42 - range) / 0.02)^2`.
 - `alignment_error = -50 * ||relative_yz||^2`.
 - `velocity_tracking = -100 * ||measured_velocity - target_velocity||^2`.
 - `upright_error = -5 * (1 - clamped_body_z_alignment)^2`.
@@ -143,18 +163,24 @@ pre-contact. Reset owns no independent entry-velocity tunables.
 The contact-frame velocity target is dense in all three axes. Its wall-normal
 component is `clip(1.25 * (range - 0.41), -0.04, 0.08)` m/s. Its tangential
 components are twice the lateral and vertical switch errors, radially limited
-to 0.10 m/s. This target teaches braking, small controlled retreat after range
-undershoot, and simultaneous alignment without encoding a task-specific actor.
+to 0.10 m/s. Positive wall-normal motion is held at zero until tangential error
+is within 0.03 m; retreat remains available at any alignment. This target
+teaches align-first approach, braking, and controlled retreat after range
+undershoot without encoding a task-specific actor.
 Collision overrides success and the ordinary flight-failure penalty;
 simultaneous body and pusher collision produces one collision reward penalty.
+The range barrier begins at the upper goal boundary and provides a direct
+braking signal before the unchanged 0.40 m lower acceptance boundary.
 `PressApproachTerminationFlags` still retains both collision sources for
 diagnostics. `Reward/` TensorBoard scalars enumerate every contribution plus
 `total`. `Press/` reports completed episodes, success, combined collision,
 body-collision, pusher-collision, other-flight-failure, and timeout percentages.
 
 The actor action drives training physics directly. No deterministic
-near-wall governor changes the forward command in training or deployment.
-Collision reward and termination must therefore produce the learned braking
+near-wall governor changes the forward command in training or deployment. A
+range undershoot terminates training and evaluation instead of allowing the
+actor to retreat and claim success after violating the exact-action range gate.
+The reward and terminal boundary must therefore produce the learned braking
 behavior; a flat zero-collision run from the initial checkpoint is not evidence
 of learning unless the unguided actor already satisfies the independent gates.
 
@@ -176,24 +202,26 @@ namespace. The actor and critic remain independent `[256, 256, 128]` MLPs with
 ELU activation; the actor still maps 34 values to four action means.
 `rl.training` owns the explicit training mode, PPO settings, rollout length,
 checkpoints, seed, task ID, vehicle ID, and policy namespace. Scratch training
-uses 32,768 parallel environments, 300 iterations, 32 steps per environment,
-an adaptive `1e-4` learning rate, `0.0001` entropy coefficient, five epochs,
-eight minibatches, and checkpoints every ten iterations. This is approximately
-315 million transitions and about 35 minutes of PPO on the measured GPU. A
+uses 32,768 parallel environments, 121 iterations, 32 steps per environment,
+fixed `1e-4` learning rate, `0.0001` entropy coefficient, five epochs, eight
+minibatches, and checkpoints every 30 iterations. The fixed schedule prevents
+seed-specific KL transients from raising the rate above its validated bound.
+This is approximately
+127 million transitions and about 12 minutes of PPO on the measured GPU. A
 49,152-environment run remains an explicit capacity probe rather than the
 production default.
 
 A new run writes checkpoints and `policy_meta.json` below
 `.build/training/<policy-name>/<run-id>/`. Before it constructs the
 environment, training loads
-`rl.training.alignment_artifact` (defaulting to the controller alignment
+`rl.training.controller_artifact` (defaulting to the controller alignment
 namespace's `best` link), validates vehicle, airframe, cadence, interface, and
 action dimension, and stores the alignment digest, run identity, fingerprints,
 quality status, and complete settings in `policy_meta.json`. Normalized action
 scales remain task-owned and may differ from the scale used by the
 policy-independent alignment probe experiment. This happens before PPO begins.
-An explicit `ALIGNMENT_ARTIFACT` or
-`--alignment-artifact` overrides the configured link for reproduction.
+An explicit `CONTROLLER_ARTIFACT` or
+`--controller-artifact` overrides the configured link for reproduction.
 After PPO, `make train-rl` automatically evaluates every saved checkpoint,
 exports the highest-scoring checkpoint, always advances the relative `latest`
 link, and advances `best` only when the score strictly improves within the
@@ -209,8 +237,18 @@ records this initialization method before PPO begins.
 `training_mode: actor-only` requires `--initialize-checkpoint` and copies only
 compatible `actor.*` tensors into a fresh run. Critic, optimizer, exploration
 standard deviation, and iteration counter remain fresh. The separate
-`configs/train_press_approach_quad_finetune.yaml` retains the former
-50-iteration, fixed `1e-6`, 0.01-noise, zero-entropy recipe:
+`configs/train_press_approach_quad_finetune.yaml` currently uses a 15-iteration,
+fixed `3e-5`, 0.01-noise, zero-entropy pilot recipe, saving four checkpoints for
+the unchanged held-out selection. It raises the terminal flight-failure weight
+to 300 so the evidenced range-undershoot transition outweighs success, and
+raises velocity-tracking weight to 300 so oversampled misaligned entries learn
+the configured zero-forward target. Its
+wall-normal velocity reference is capped at 0.04 m/s and centered at 0.415 m so
+actor-only refinement teaches earlier braking without changing the 0.40-0.42 m
+goal band or its acceptance limits. Its training resets mix 50% full handoff
+samples with 50% samples in the evidenced 0.45-0.47 m range and 0.06-0.08 m
+tangential-error annulus. Checkpoint selection and independent evaluation
+always use the unchanged full handoff distribution:
 
 ```console
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \
@@ -223,6 +261,35 @@ The source may be any validated
 dimensions and actor tensor layout must match. Initialization provenance
 records method, source policy, source stage, source run, iteration, path, and
 source commit.
+
+`training_mode: resume` requires `--resume-checkpoint`. It restores actor,
+critic, learned exploration standard deviation, optimizer moments, and the
+runner iteration from the selected source checkpoint. The resumed phase owns
+its configured schedule and learning rate, which are applied after optimizer
+restoration. Resume rejects a different policy interface, action contract,
+controller digest, or held-out comparison fingerprint.
+
+Scratch press training uses a reproducible coarse-to-fine schedule. The first
+121-iteration run uses the fixed `1e-4` scratch recipe and coarse 30-iteration
+checkpoints. The safety phase resumes the selected checkpoint for 11 runner
+iterations with fixed `3e-5`, zero entropy, every-update checkpoints, and a
+30% hard-case reset mixture for the production seed-42 recipe. The independently
+accepted seed-43 proof uses 20%; validation routes alternate seeds within this
+20%-30% bracket from the phase-1 failure boundary instead of chaining
+continuations. The minority hard-case stream corrects undershoot without
+overwhelming full-distribution approach behavior. The fine checkpoint grid
+resolves the narrow transition from range undershoot to safe completion or
+timeout. This horizon retains the accepted early safety frontier without
+continuing into the evidenced faster but unsafe drift. Both phases share
+terminal-failure and dense
+velocity-tracking weights of 300 and the earlier-braking reference. The second
+phase is full-state continuation, not actor-only fine-tuning:
+
+```console
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_safety.yaml \
+  RL_RUN_ID=<phase-2-run> \
+  TRAIN_ARGS='--resume-checkpoint /isaac-sim/proj/.build/training/press-approach/<phase-1-run>/logs/model_<iteration>.pt'
+```
 
 Manual export remains restricted to the configured namespace that owns the
 checkpoint:
@@ -282,7 +349,7 @@ final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
   upright, action-change, and completion-time costs.
 - Every reward-term mean.
 
-`held-out-press-task-quality-v2` subtracts configured collision, other-flight-
+`held-out-press-task-quality-v3` subtracts configured collision, other-flight-
 failure, timeout, and non-success penalties plus the six normalized continuous
 costs. Higher scores are better; PPO return is never a selection input. The
 95% success, 1% collision, 0.40 m minimum-range, finite completed trace, and
@@ -312,6 +379,10 @@ evaluation fingerprint initializes a new `best`.
 `make eval-press` independently repeats the same workload and gates. With
 `RL_RUN_ID`, it evaluates that published run; otherwise it resolves
 `.build/training/press-approach/latest`.
+The independent evaluator also records the complete active action, body
+velocity, range, and contact trace for each seed's closest episode. These
+diagnostics identify a rare boundary trajectory without adding selection-time
+logging or changing policy ranking.
 
 For a logged training and evaluation run, use:
 
