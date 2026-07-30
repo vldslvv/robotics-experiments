@@ -19,11 +19,12 @@ term-for-term:
 of package-root ``IsaacArticulationIO.apply_dynamics``:
 per-rotor thrust ``[0, 0, T_i]`` at the body-FLU rotor offsets, the body-Z yaw
 reaction, and linear drag, reduced to one equivalent wrench per env applied at
-the body origin in the body frame. The origin is passed explicitly because a
-missing wrench position makes PhysX apply the force at the center of mass,
-which is not equivalent for an airframe whose body COM is offset. Isaac Lab
-accepts the force, torque, and position in the body frame, so no body->world
-rotation is needed -- unlike the bridge's ``is_global=True`` path.
+the body origin in the body frame. PhysX's position-less force is applied at
+the center of mass, so the sink translates the origin-referenced torque to the
+COM before submission. This is equivalent to passing the origin as a wrench
+position but retains the high-throughput position-less API path. Isaac Lab
+accepts the force and torque in the body frame, so no body->world rotation is
+needed -- unlike the bridge's ``is_global=True`` path.
 
 Normalized controls pass through the bridge-owned affine motor mapping. The
 realized thrust is then ``T_i = rotor_constant_i * omega_i^2`` clipped to
@@ -1150,23 +1151,26 @@ def rotor_thrust_to_body_wrench(
 def apply_body_wrench(
     articulation,
     body_id: int,
+    body_com_position_body: torch.Tensor,
     force_body: torch.Tensor,
     torque_body: torch.Tensor,
 ) -> None:
-    """Write one body-frame wrench per env to the articulation base body.
+    """Write an origin-referenced body wrench through PhysX's COM force path.
 
-    ``force_body`` / ``torque_body`` are ``[B, 3]`` in body-FLU. Isaac Lab's
-    ``set_external_force_and_torque`` stores the wrench (applied every sim step
-    until changed); an explicit zero position applies the origin-reduced rotor
-    wrench at the body origin instead of PhysX's default center of mass. The
-    env's ``write_data_to_sim`` flushes it.
+    All vectors are ``[B, 3]`` in body-FLU. The reduced rotor torque is about
+    the body origin. Isaac Lab submits a position-less force at the center of
+    mass, so ``-com x force`` is added to preserve the same physical wrench.
+    The env's ``write_data_to_sim`` flushes the stored force and torque.
     """
     forces = force_body.unsqueeze(1)
-    torques = torque_body.unsqueeze(1)
-    positions = torch.zeros_like(forces)
+    torque_at_com = torque_body - torch.linalg.cross(
+        body_com_position_body,
+        force_body,
+        dim=-1,
+    )
+    torques = torque_at_com.unsqueeze(1)
     articulation.set_external_force_and_torque(
         forces=forces,
         torques=torques,
-        positions=positions,
         body_ids=[body_id],
     )

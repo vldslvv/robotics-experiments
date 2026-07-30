@@ -530,7 +530,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
 
 
-def test_lab_body_wrench_is_applied_at_body_origin():
+def test_lab_body_wrench_translates_origin_torque_to_com():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import apply_body_wrench
 
@@ -540,21 +540,20 @@ def test_lab_body_wrench_is_applied_at_body_origin():
             *,
             forces,
             torques,
-            positions,
             body_ids,
         ):
-            self.arguments = forces, torques, positions, body_ids
+            self.arguments = forces, torques, body_ids
 
     articulation = Articulation()
-    force = torch.tensor([[1.0, 2.0, 3.0]])
+    com_position = torch.tensor([[0.25, 0.0, 0.0]])
+    force = torch.tensor([[0.0, 0.0, 3.0]])
     torque = torch.tensor([[4.0, 5.0, 6.0]])
 
-    apply_body_wrench(articulation, 2, force, torque)
+    apply_body_wrench(articulation, 2, com_position, force, torque)
 
-    forces, torques, positions, body_ids = articulation.arguments
+    forces, torques, body_ids = articulation.arguments
     assert torch.equal(forces, force.unsqueeze(1))
-    assert torch.equal(torques, torque.unsqueeze(1))
-    assert torch.equal(positions, torch.zeros_like(forces))
+    assert torch.equal(torques, torch.tensor([[[4.0, 5.75, 6.0]]]))
     assert body_ids == [2]
 
 

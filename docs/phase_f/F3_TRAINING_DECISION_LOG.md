@@ -3339,3 +3339,27 @@ Attempt 5 used one worker, 39 GPU batches, and 1303.68 s for the useful sweep,
 or 3.81 candidate evaluations/s. GPU utilization averaged 29.58%, reached 43%
 at p95 and 49% at peak, and used 5761 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the measured bottleneck, so worker count stays at one.
+
+### 69. Preserve attempt 6 semantics after a positioned-force infrastructure stall
+
+Date: 2026-07-30.
+
+Attempt 6's first execution from commit `ba11e77` completed the fresh capture
+and actuator audit, then stalled in the third target batch. The first two
+batches retained the historical approximately 30-second duration, but the
+first expanded batch remained inside PhysX for more than ten minutes without a
+simulation completion marker. The worker and GPU remained allocated, so this
+is preserved as an incomplete infrastructure run rather than an alignment
+result.
+
+The implementation used an explicit zero body-frame force position to retain
+the X500 body's COM-offset moment. The pinned Isaac Lab wrench composer accepts
+that position but incurs a pathological positioned-force path at the
+4224-environment alignment capacity. Attempt 6 therefore retains the same
+physical hypothesis while using the equivalent COM-referenced wrench:
+`torque_at_com = torque_at_origin - com_position x force`. The position-less
+force can then use the previously stable high-throughput PhysX path while
+producing the same net force and moment as the bridge's rotor forces. No
+controller, candidate, probe, gate, plant property, or worker setting changes.
+The existing fresh capture and passed actuator audit remain valid; the target
+sweep will restart from the new clean implementation commit.

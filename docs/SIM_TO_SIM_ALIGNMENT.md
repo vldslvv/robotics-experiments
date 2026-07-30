@@ -140,11 +140,12 @@ The runner uses the experiment's authored training seed for deterministic Lab
 initialization before restoring every captured state.
 
 Lab reduces the per-rotor forces and origin-referenced moments to one body
-wrench, then passes an explicit zero body-frame application position to Isaac
-Lab. PhysX otherwise applies a position-less force at the center of mass,
-dropping the collective-thrust moment created by the X500 body's nonzero COM
-offset. The explicit origin position makes the reduced Lab wrench equivalent
-to the bridge's individual rotor forces at their body-frame positions.
+wrench. PhysX applies a position-less force at the center of mass, so Lab
+translates the reduced torque by `-com x force` before submission. This
+preserves the collective-thrust moment created by the X500 body's nonzero COM
+offset and makes the reduced Lab wrench equivalent to the bridge's individual
+rotor forces at their body-frame positions without using PhysX's substantially
+slower positioned-force path.
 
 Old manual missions and trained warehouse-policy traces are diagnostic design
 inputs only. They must never be included in fit or validation samples.
