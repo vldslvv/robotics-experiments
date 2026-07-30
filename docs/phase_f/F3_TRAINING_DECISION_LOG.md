@@ -2657,3 +2657,59 @@ Proceed in this order:
 6. Continue with automatic checkpoint selection, independent Lab evaluation,
    the three-range physical transfer gate, and the complete approach mission,
    stopping and preserving diagnostics at the first failed gate.
+
+### 56. Reject v3 attempt 1 and authorize structural attempt 2
+
+Date: 2026-07-30.
+
+Attempt 1 ran from source commit `5fb9481` and completed the fresh
+`x500-velocity-px4-v3/20260730T050034Z` capture, sweep, and fit. It evaluated
+2161 unique candidates in 36 useful GPU batches and selected candidate 1674.
+The comparison fingerprint is
+`ffa062a9c94c751be09b4f633f2bef8fb696254d605fda8b3df05b9f4c6c364d`.
+
+| Held-out metric | Attempt 1 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 26.432 mm | 5 mm |
+| Residual-speed error | 0.01606 m/s | 0.01 m/s |
+| Stop-time error | 0.540 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.27% | 10% |
+| Yaw-rate NRMSE | 4.04% | 10% |
+| Heading error | 2.856 deg | 3 deg |
+| Combined endpoint error | 89.891 mm | 10 mm |
+
+This is material progress relative to section 54: the failed-gate count fell
+from five to four, and worst-axis velocity NRMSE fell from 80.32% to 9.27%.
+Velocity, yaw rate, and heading now pass. Across all usable candidates, 293
+failed four gates and none failed fewer. The candidate-wide best stop-time
+error was 0.340 s and the best combined endpoint error was 11.453 mm. The
+selected candidate's remaining braking, residual, and stop failures all
+localized to the held-out lateral reversal; its target settled 0.54 s earlier
+than PX4 on the worst event. The combined trace under-traveled the PX4 lateral
+path by approximately 90 mm.
+
+The useful single-worker sweep averaged 32.29% GPU utilization, 5.26 candidate
+evaluations/s, and 4450 MiB peak device memory. Three-worker sharding remains
+disabled because section 54 measured 3.27 times lower useful throughput from
+Isaac/PhysX contention. Attempt 2 instead increases the deterministic beam from
+16 to 32, creating independent useful candidate work and enough memory
+headroom to measure whether larger batches improve coverage and throughput.
+
+Pinned PX4 v1.17 source inspection found three more structural discrepancies
+before another gain-range expansion:
+
+- `MPC_VEL_LP=0` disables the position-controller velocity low-pass. The Lab
+  base had incorrectly substituted the unrelated `EKF2_TAU_VEL=0.25 s`
+  equivalent and did not support zero as pass-through.
+- PX4 uses a thrust-prioritized reduced-quaternion attitude law, weighted yaw
+  recombination, and body-frame projection of world-Z yaw-rate feed-forward.
+  Lab used a geometric skew-matrix proxy and added feed-forward only on body Z.
+- PX4 computes the current rate output with the previous integral, applies its
+  large-error integral factor, and advances the integral for the next cycle.
+  Lab applied the newly advanced integral in the same cycle.
+
+Attempt 2 corrects those equations in both NumPy and Torch, uses PX4's exact
+`dt / (tau + dt)` AlphaFilter coefficient, sets the pinned velocity cutoff to
+disabled, and keeps the existing gain ranges. Sequential NumPy/Torch parity is
+tested with non-level attitudes. This attempt isolates confirmed controller
+structure before adding asymmetric lateral parameters.

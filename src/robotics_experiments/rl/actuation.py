@@ -34,7 +34,13 @@ import numpy as np
 
 from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import RlActionConfig
-from robotics_experiments.px4_bridge import GRAVITY_M_S2, rotate_vector_wxyz
+from robotics_experiments.px4_bridge import (
+    GRAVITY_M_S2,
+    normalize_quat_wxyz,
+    quat_conjugate_wxyz,
+    quat_multiply_wxyz,
+    rotate_vector_wxyz,
+)
 
 __all__ = [
     "ActuationControllerState",
@@ -177,9 +183,77 @@ def _rotation_from_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
     return np.stack([x_axis, y_axis, z_axis], axis=1)
 
 
-def _vee(matrix: np.ndarray) -> np.ndarray:
-    """Inverse hat map: the axial vector of a skew-symmetric ``3x3`` matrix."""
-    return np.array([matrix[2, 1], matrix[0, 2], matrix[1, 0]], dtype=np.float64)
+def _canonical_quat(q_wxyz: np.ndarray, /) -> np.ndarray:
+    normalized = normalize_quat_wxyz(q_wxyz)
+    return -normalized if normalized[0] < 0.0 else normalized
+
+
+def _quat_from_two_vectors(source: np.ndarray, target: np.ndarray, /) -> np.ndarray:
+    source = source / max(float(np.linalg.norm(source)), _EPS)
+    target = target / max(float(np.linalg.norm(target)), _EPS)
+    dot = float(np.clip(source @ target, -1.0, 1.0))
+    if dot < -1.0 + 1e-6:
+        basis = np.eye(3)[int(np.argmin(np.abs(source)))]
+        axis = np.cross(source, basis)
+        axis /= max(float(np.linalg.norm(axis)), _EPS)
+        return np.array([0.0, *axis], dtype=np.float64)
+    return normalize_quat_wxyz(np.array([1.0 + dot, *np.cross(source, target)]))
+
+
+def _quat_from_rotation(rotation: np.ndarray, /) -> np.ndarray:
+    m00, m01, m02 = rotation[0]
+    m10, m11, m12 = rotation[1]
+    m20, m21, m22 = rotation[2]
+    candidates = np.array(
+        [
+            [1.0 + m00 + m11 + m22, m21 - m12, m02 - m20, m10 - m01],
+            [m21 - m12, 1.0 + m00 - m11 - m22, m10 + m01, m02 + m20],
+            [m02 - m20, m10 + m01, 1.0 - m00 + m11 - m22, m12 + m21],
+            [m10 - m01, m02 + m20, m12 + m21, 1.0 - m00 - m11 + m22],
+        ],
+        dtype=np.float64,
+    )
+    magnitudes = np.sqrt(np.maximum(np.diag(candidates), 0.0))
+    index = int(np.argmax(magnitudes))
+    return normalize_quat_wxyz(candidates[index] / max(2.0 * magnitudes[index], 0.2))
+
+
+def _attitude_rate_setpoint(
+    *,
+    attitude_wxyz: np.ndarray,
+    rotation: np.ndarray,
+    desired_rotation: np.ndarray,
+    proportional_gain: np.ndarray,
+    yaw_weight: float,
+    yaw_rate_radps: float,
+) -> np.ndarray:
+    """PX4 reduced-quaternion attitude law in body-FLU/world-ENU coordinates."""
+    attitude = normalize_quat_wxyz(attitude_wxyz)
+    desired_attitude = _quat_from_rotation(desired_rotation)
+    reduced_desired = _quat_from_two_vectors(rotation[:, 2], desired_rotation[:, 2])
+    if abs(float(reduced_desired[1])) > 1.0 - 1e-5 or abs(float(reduced_desired[2])) > 1.0 - 1e-5:
+        reduced_desired = desired_attitude
+    else:
+        reduced_desired = quat_multiply_wxyz(reduced_desired, attitude)
+    delta_yaw = _canonical_quat(
+        quat_multiply_wxyz(quat_conjugate_wxyz(reduced_desired), desired_attitude)
+    )
+    weighted_yaw = np.array(
+        [
+            np.cos(yaw_weight * np.arccos(np.clip(delta_yaw[0], -1.0, 1.0))),
+            0.0,
+            0.0,
+            np.sin(yaw_weight * np.arcsin(np.clip(delta_yaw[3], -1.0, 1.0))),
+        ],
+        dtype=np.float64,
+    )
+    weighted_desired = quat_multiply_wxyz(reduced_desired, weighted_yaw)
+    error = _canonical_quat(quat_multiply_wxyz(quat_conjugate_wxyz(attitude), weighted_desired))
+    gain = np.array(proportional_gain, copy=True)
+    if yaw_weight > 1e-4:
+        gain[2] /= yaw_weight
+    rate_setpoint = 2.0 * error[1:] * gain
+    return rate_setpoint + rotation[2, :] * yaw_rate_radps
 
 
 def _clamp_tilt(thrust_world: np.ndarray, max_tilt_rad: float) -> np.ndarray:
@@ -226,7 +300,10 @@ def _wrench_to_omega(
 
 
 def _low_pass_alpha(*, cutoff_hz: float, dt_s: float) -> float:
-    return 1.0 - float(np.exp(-2.0 * np.pi * cutoff_hz * dt_s))
+    if cutoff_hz <= 0.0:
+        return 1.0
+    scaled = 2.0 * np.pi * cutoff_hz * dt_s
+    return float(scaled / (1.0 + scaled))
 
 
 def _limited_thrust_world(
@@ -279,16 +356,21 @@ def _rate_to_omega(
     else:
         angular_acceleration = np.zeros(3, dtype=np.float64)
     rate_error: np.ndarray = rate - angular_velocity
-    rate_integral = np.clip(
-        controller_state.rate_integral_body_flu + params.ki_rate * rate_error * dt_s,
-        -params.rate_integral_limit_nm,
-        params.rate_integral_limit_nm,
-    )
     body_torque = params.rate_output_scale_nm * (
         params.kp_rate * rate_error
-        + rate_integral
+        + controller_state.rate_integral_body_flu
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
+    )
+    integral_factor = np.maximum(
+        0.0,
+        1.0 - np.square(rate_error / np.radians(400.0)),
+    )
+    rate_integral = np.clip(
+        controller_state.rate_integral_body_flu
+        + integral_factor * params.ki_rate * rate_error * dt_s,
+        -params.rate_integral_limit_nm,
+        params.rate_integral_limit_nm,
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
@@ -377,10 +459,14 @@ def _velocity_action_to_omega(
     desired_x = np.cross(desired_y, desired_z)
     desired_rotation = np.stack([desired_x, desired_y, desired_z], axis=1)
 
-    attitude_error = 0.5 * _vee(desired_rotation.T @ rotation - rotation.T @ desired_rotation)
-    attitude_error[2] *= params.attitude_yaw_weight
-    body_rate_setpoint = -params.kp_att * attitude_error
-    body_rate_setpoint[2] += action[3] * params.max_yaw_rate_radps
+    body_rate_setpoint = _attitude_rate_setpoint(
+        attitude_wxyz=np.asarray(state.attitude_flu_enu_wxyz, dtype=np.float64),
+        rotation=rotation,
+        desired_rotation=desired_rotation,
+        proportional_gain=params.kp_att,
+        yaw_weight=params.attitude_yaw_weight,
+        yaw_rate_radps=float(action[3] * params.max_yaw_rate_radps),
+    )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
         acceleration_enu=_readonly_copy(acceleration),

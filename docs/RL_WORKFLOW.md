@@ -31,7 +31,9 @@ PX4-like velocity, attitude, and rate cascade with filtered acceleration
 feedback, integrators, thrust saturation/anti-windup, and rate
 PID/feed-forward. Its per-axis rate-output scale converts PX4's normalized
 rate-controller output to the physical N-m body torque used by Lab. Schema-2
-artifacts retain their original unit scale for reproducibility. The pinned Isaac Lab
+artifacts retain their original unit scale for reproducibility. Attitude
+tracking uses PX4's thrust-prioritized reduced-quaternion law, and zero
+velocity-filter cutoff has PX4's disabled/pass-through meaning. The pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
 references. Controller gains, filters, integral and thrust limits, command
 delay, tilt, and thruster response come from an immutable alignment artifact

@@ -132,9 +132,112 @@ def _matrix_from_quat_wxyz(quat: torch.Tensor) -> torch.Tensor:
     return torch.stack([row0, row1, row2], dim=-2)
 
 
-def _vee(matrix: torch.Tensor) -> torch.Tensor:
-    """Batched inverse-hat of a skew-symmetric ``[..., 3, 3]`` matrix."""
-    return torch.stack([matrix[..., 2, 1], matrix[..., 0, 2], matrix[..., 1, 0]], dim=-1)
+def _canonical_quat(quat: torch.Tensor, /) -> torch.Tensor:
+    normalized = quat / quat.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    return torch.where(normalized[:, :1] < 0.0, -normalized, normalized)
+
+
+def _quat_multiply(first: torch.Tensor, second: torch.Tensor, /) -> torch.Tensor:
+    aw, ax, ay, az = first.unbind(dim=-1)
+    bw, bx, by, bz = second.unbind(dim=-1)
+    return torch.stack(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        dim=-1,
+    )
+
+
+def _quat_conjugate(quat: torch.Tensor, /) -> torch.Tensor:
+    return torch.cat([quat[:, :1], -quat[:, 1:]], dim=-1)
+
+
+def _quat_from_two_vectors(source: torch.Tensor, target: torch.Tensor, /) -> torch.Tensor:
+    source = source / source.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    target = target / target.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    dot = (source * target).sum(dim=-1, keepdim=True).clamp(-1.0, 1.0)
+    ordinary = torch.cat([1.0 + dot, torch.cross(source, target, dim=-1)], dim=-1)
+    ordinary = ordinary / ordinary.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    basis_index = source.abs().argmin(dim=-1)
+    basis = torch.nn.functional.one_hot(basis_index, num_classes=3).to(source.dtype)
+    opposite_axis = torch.cross(source, basis, dim=-1)
+    opposite_axis = opposite_axis / opposite_axis.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    opposite = torch.cat([torch.zeros_like(dot), opposite_axis], dim=-1)
+    return torch.where(dot < -1.0 + 1e-6, opposite, ordinary)
+
+
+def _quat_from_rotation(rotation: torch.Tensor, /) -> torch.Tensor:
+    m00, m01, m02 = rotation[:, 0].unbind(dim=-1)
+    m10, m11, m12 = rotation[:, 1].unbind(dim=-1)
+    m20, m21, m22 = rotation[:, 2].unbind(dim=-1)
+    candidates = torch.stack(
+        [
+            torch.stack([1.0 + m00 + m11 + m22, m21 - m12, m02 - m20, m10 - m01], dim=-1),
+            torch.stack([m21 - m12, 1.0 + m00 - m11 - m22, m10 + m01, m02 + m20], dim=-1),
+            torch.stack([m02 - m20, m10 + m01, 1.0 - m00 + m11 - m22, m12 + m21], dim=-1),
+            torch.stack([m10 - m01, m02 + m20, m12 + m21, 1.0 - m00 - m11 + m22], dim=-1),
+        ],
+        dim=1,
+    )
+    magnitudes = torch.sqrt(torch.diagonal(candidates, dim1=-2, dim2=-1).clamp_min(0.0))
+    index = magnitudes.argmax(dim=-1)
+    selected = candidates[
+        torch.arange(len(candidates), device=rotation.device),
+        index,
+    ]
+    denominator = (2.0 * magnitudes.gather(1, index.unsqueeze(-1))).clamp_min(0.2)
+    quat = selected / denominator
+    return quat / quat.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+
+
+def _attitude_rate_setpoint(
+    *,
+    attitude_wxyz: torch.Tensor,
+    rotation: torch.Tensor,
+    desired_rotation: torch.Tensor,
+    proportional_gain: torch.Tensor,
+    yaw_weight: float | torch.Tensor,
+    yaw_rate_radps: torch.Tensor,
+) -> torch.Tensor:
+    """Batched PX4 reduced-quaternion attitude law."""
+    attitude = attitude_wxyz / attitude_wxyz.norm(dim=-1, keepdim=True).clamp_min(_EPS)
+    desired_attitude = _quat_from_rotation(desired_rotation)
+    reduced_desired = _quat_from_two_vectors(rotation[:, :, 2], desired_rotation[:, :, 2])
+    corner = (reduced_desired[:, 1].abs() > 1.0 - 1e-5) | (reduced_desired[:, 2].abs() > 1.0 - 1e-5)
+    reduced_desired = torch.where(
+        corner.unsqueeze(-1),
+        desired_attitude,
+        _quat_multiply(reduced_desired, attitude),
+    )
+    delta_yaw = _canonical_quat(_quat_multiply(_quat_conjugate(reduced_desired), desired_attitude))
+    weight = _environment_values(yaw_weight, delta_yaw[:, 0])
+    weighted_yaw = torch.stack(
+        [
+            torch.cos(weight * torch.arccos(delta_yaw[:, 0].clamp(-1.0, 1.0))),
+            torch.zeros_like(weight),
+            torch.zeros_like(weight),
+            torch.sin(weight * torch.arcsin(delta_yaw[:, 3].clamp(-1.0, 1.0))),
+        ],
+        dim=-1,
+    )
+    weighted_desired = _quat_multiply(reduced_desired, weighted_yaw)
+    error = _canonical_quat(_quat_multiply(_quat_conjugate(attitude), weighted_desired))
+    gain_values = (
+        proportional_gain
+        if proportional_gain.ndim == 2
+        else proportional_gain.unsqueeze(0).expand(len(attitude), -1)
+    )
+    yaw_gain = torch.where(
+        weight > 1e-4,
+        gain_values[:, 2] / weight.clamp_min(1e-4),
+        gain_values[:, 2],
+    )
+    gain = torch.cat([gain_values[:, :2], yaw_gain.unsqueeze(-1)], dim=-1)
+    rate_setpoint = 2.0 * error[:, 1:] * gain
+    return rate_setpoint + rotation[:, 2, :] * yaw_rate_radps.unsqueeze(-1)
 
 
 def _clamp_tilt(
@@ -203,8 +306,13 @@ def _low_pass_alpha(
     dt_s: float,
 ) -> float | torch.Tensor:
     if isinstance(cutoff_hz, torch.Tensor):
-        return 1.0 - torch.exp(-2.0 * math.pi * cutoff_hz * dt_s)
-    return 1.0 - math.exp(-2.0 * math.pi * cutoff_hz * dt_s)
+        tensor_scaled = 2.0 * math.pi * cutoff_hz * dt_s
+        filtered = tensor_scaled / (1.0 + tensor_scaled)
+        return torch.where(cutoff_hz > 0.0, filtered, torch.ones_like(filtered))
+    if cutoff_hz <= 0.0:
+        return 1.0
+    scalar_scaled = 2.0 * math.pi * cutoff_hz * dt_s
+    return scalar_scaled / (1.0 + scalar_scaled)
 
 
 def _environment_values(
@@ -282,16 +390,20 @@ def _rate_to_omega(
         torch.zeros_like(filtered_angular_acceleration),
     )
     rate_error = rate - angular_velocity_body
-    rate_integral = torch.clamp(
-        controller_state.rate_integral_body + params.ki_rate * rate_error * dt_s,
-        -params.rate_integral_limit_nm,
-        params.rate_integral_limit_nm,
-    )
     body_torque = params.rate_output_scale_nm * (
         params.kp_rate * rate_error
-        + rate_integral
+        + controller_state.rate_integral_body
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
+    )
+    integral_factor = torch.clamp(
+        1.0 - torch.square(rate_error / math.radians(400.0)),
+        min=0.0,
+    )
+    rate_integral = torch.clamp(
+        controller_state.rate_integral_body + integral_factor * params.ki_rate * rate_error * dt_s,
+        -params.rate_integral_limit_nm,
+        params.rate_integral_limit_nm,
     )
     successor = _FlightControllerState(
         filtered_velocity_world=controller_state.filtered_velocity_world,
@@ -412,14 +524,14 @@ def _velocity(
     desired_x = torch.cross(desired_y, desired_z, dim=-1)
     desired_rotation = torch.stack([desired_x, desired_y, desired_z], dim=-1)  # columns
 
-    error_matrix = desired_rotation.transpose(-1, -2) @ rotation
-    error_matrix = error_matrix - rotation.transpose(-1, -2) @ desired_rotation
-    attitude_error = 0.5 * _vee(error_matrix)
-    attitude_error = attitude_error.clone()
-    attitude_error[:, 2] = attitude_error[:, 2] * params.attitude_yaw_weight
-    body_rate_setpoint = -params.kp_att * attitude_error
-    body_rate_setpoint = body_rate_setpoint.clone()
-    body_rate_setpoint[:, 2] = body_rate_setpoint[:, 2] + action[:, 3] * params.max_yaw_rate_radps
+    body_rate_setpoint = _attitude_rate_setpoint(
+        attitude_wxyz=attitude_wxyz,
+        rotation=rotation,
+        desired_rotation=desired_rotation,
+        proportional_gain=params.kp_att,
+        yaw_weight=params.attitude_yaw_weight,
+        yaw_rate_radps=action[:, 3] * params.max_yaw_rate_radps,
+    )
     outer_successor = _FlightControllerState(
         filtered_velocity_world=filtered_velocity,
         acceleration_world=acceleration,

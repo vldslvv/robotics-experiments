@@ -107,7 +107,7 @@ def _settings(
         velocity_filter_hz=_finite(
             value=settings["velocity_filter_hz"],
             name=f"{name}.velocity_filter_hz",
-            positive=True,
+            nonnegative=True,
         ),
         velocity_derivative_filter_hz=_finite(
             value=settings["velocity_derivative_filter_hz"],

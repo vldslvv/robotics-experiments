@@ -222,6 +222,40 @@ def test_rate_output_scale_converts_normalized_pid_output_to_physical_torque():
     assert scaled_torque[0] == pytest.approx(2.0 * unit_torque[0])
 
 
+def test_rate_integral_affects_the_following_control_cycle():
+    settings = replace(
+        _controller_settings(),
+        kp_rate=(0.0, 0.0, 0.0),
+        ki_rate=(1.0, 0.0, 0.0),
+        kd_rate=(0.0, 0.0, 0.0),
+        kff_rate=(0.0, 0.0, 0.0),
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("ctbr"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+    action = np.array([0.0, 0.1, 0.0, 0.0])
+    controller, first_omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        action,
+        _level_rest_state(),
+        0.004,
+    )
+    _controller, second_omega = action_to_rotor_omega(
+        params,
+        controller,
+        action,
+        _level_rest_state(),
+        0.004,
+    )
+
+    assert np.allclose(first_omega, first_omega[0])
+    assert not np.allclose(second_omega, second_omega[0])
+
+
 def test_velocity_integral_does_not_wind_up_against_thrust_saturation():
     settings = replace(
         _controller_settings(),
@@ -277,6 +311,35 @@ def test_controller_filters_are_sequential_and_fresh_state_resets_them():
     assert np.array_equal(reset.filtered_velocity_enu, np.zeros(3))
 
 
+def test_zero_velocity_filter_cutoff_disables_filtering():
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(_controller_settings(), velocity_filter_hz=0.0),
+        mass=_MASS_KG,
+    )
+    controller, _omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    moving = replace(
+        _level_rest_state(),
+        linear_velocity_enu=np.array([1.0, 0.0, 0.0]),
+    )
+    controller, _omega = action_to_rotor_omega(
+        params,
+        controller,
+        np.zeros(4),
+        moving,
+        0.004,
+    )
+
+    assert controller.filtered_velocity_enu[0] == pytest.approx(1.0)
+
+
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
@@ -319,9 +382,18 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         np.array([-0.1, 0.3, -0.2, -0.4]),
         np.zeros(4),
     )
+    attitudes = tuple(
+        value / np.linalg.norm(value)
+        for value in (
+            np.array([1.0, 0.0, 0.0, 0.0]),
+            np.array([1.0, 0.03, -0.02, 0.05]),
+            np.array([1.0, -0.04, 0.02, -0.03]),
+            np.array([1.0, 0.01, 0.04, 0.02]),
+        )
+    )
     for index, action in enumerate(actions):
         state = ActuationState(
-            attitude_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+            attitude_flu_enu_wxyz=attitudes[index],
             linear_velocity_enu=np.array([0.05 * index, -0.02 * index, 0.01 * index]),
             angular_velocity_body_flu=np.array([0.01 * index, -0.015 * index, 0.02 * index]),
         )

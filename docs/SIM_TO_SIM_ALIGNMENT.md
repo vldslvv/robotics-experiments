@@ -53,6 +53,12 @@ physics sample and must remain sequentially equivalent. Controller state,
 command-delay buffers, and thruster state are cleared on every environment
 reset, probe reset, and candidate change.
 
+The attitude stage uses PX4's reduced-quaternion law: roll and pitch align the
+thrust vector first, yaw error is weighted and recombined, and world-Z yaw-rate
+feed-forward is transformed into the body frame. The rate PID applies the
+previous integral to the current output, then advances the integral with PX4's
+large-error reduction factor for the next cycle.
+
 Velocity saturation uses conditional integration: an axis does not integrate
 when its error would push farther into a saturated thrust request. Integral
 limits remain active independently. `VehicleState` remains a per-tick
@@ -125,7 +131,8 @@ positive stage. The current generation uses `staged-beam-v2`:
    them in their original deterministic order.
 5. Reserve a beam slot for the best candidate on each advisory-gate objective,
    then fill the remaining slots by the registered deterministic ranking.
-6. Retain at most 16 settings.
+6. Retain at most the declared beam width; the current 32-setting beam doubles
+   useful candidate coverage while remaining within measured device memory.
 7. Make two passes through every parameter in the stage.
 
 Stage 1 fits delay, velocity filtering, and velocity P/I/D. Stage 2 fits
@@ -136,11 +143,13 @@ delay, integral, derivative, and feed-forward terms where meaningful. The
 torque-scale center comes from regressing logged normalized
 `vehicle_torque_setpoint` against the physical wrench reconstructed from the
 same ULog's motor outputs and the shared rotor model.
-The velocity-filter center is the first-order cutoff equivalent of the pinned
-`EKF2_TAU_VEL=0.25 s` (`1 / (2*pi*tau)`, approximately 0.637 Hz); velocity-D
+Pinned `MPC_VEL_LP=0` disables the position controller's velocity low-pass; zero
+therefore means pass-through rather than a zero filter coefficient. Velocity-D
 and rate-D centers use the pinned 5 Hz `MPC_VELD_LP` and 20 Hz
-`IMU_DGYRO_CUTOFF` values. The base settings likewise retain the pinned
-45-degree `MPC_TILTMAX_AIR`, 0.12 `MPC_THR_MIN`, and 0.30 rate-integral limits.
+`IMU_DGYRO_CUTOFF` values. Enabled first-order filters use PX4's
+`dt / (tau + dt)` AlphaFilter coefficient. The base settings likewise retain
+the pinned 45-degree `MPC_TILTMAX_AIR`, 0.12 `MPC_THR_MIN`, and 0.30
+rate-integral limits.
 
 Actuator response stays instantaneous (`tau_inc=tau_dec=0`, effectively
 unlimited slew) while a fresh instantaneous replay remains below both
