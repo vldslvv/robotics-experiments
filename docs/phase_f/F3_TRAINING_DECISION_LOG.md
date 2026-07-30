@@ -3211,3 +3211,74 @@ or 4.49 candidate evaluations/s. GPU utilization averaged 29.86%, reached 42%
 at p95 and 50% at peak, and used 5506 MiB peak memory. Sequential
 Isaac/PhysX stepping remains the measured bottleneck, so worker count stays at
 one.
+
+### 67. Reject attempt 4 and locate the per-profile controller-state boundary
+
+Date: 2026-07-30.
+
+Attempt 4 ran from clean source commit `5a35258` and completed
+`x500-velocity-px4-v5/20260730T185057Z`. The sweep evaluated 5463 unique
+candidates, 5364 of them usable, and selected candidate 5279 under comparison
+fingerprint
+`6d5ed3ee77c0fce0bbf5fe52b6892815b2dd06a1f6d8fb1b981e4745f6a76fb8`.
+
+| Held-out metric | Attempt 4 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 12.472 mm | 5 mm |
+| Residual-speed error | 0.00362 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.82% | 10% |
+| Yaw-rate NRMSE | 4.72% | 10% |
+| Heading error | 2.710 deg | 3 deg |
+| Combined endpoint error | 54.270 mm | 10 mm |
+
+The attempt remains rejected with two failed gates. Worst-axis NRMSE now
+passes and the largest normalized excess falls 33.2%, from 6.623 to 4.427,
+but braking distance regresses from passed to failed. This is therefore not
+material progress under the strict campaign definition.
+
+Only two candidates failed exactly two gates. Candidate-wide minima were
+2.551 mm braking error, 0.00019 m/s residual speed, zero stop-time error,
+8.30% velocity NRMSE, 2.81% yaw-rate NRMSE, 2.250 degrees heading error, and
+26.303 mm endpoint error. Unlike attempt 3, no candidate passed the endpoint
+gate. The four new proportional-gain vectors did not create an endpoint
+frontier: their endpoint minima ranged from 50.5 mm to 60.9 mm. The selected
+candidate returned to `kp_vel=[1.35, 1.35, 3]`.
+
+This fresh-capture change is evidence of a missing initial-state contract, not
+another gain range. The combined profile began with world velocity
+`[-0.0110, 0.0028, -0.0067]` m/s, whereas attempts 2 and 3 began at
+`[0.0031, -0.0022, -0.0023]` and
+`[0.0108, -0.0124, -0.0007]` m/s. PX4 preconditions each profile without
+resetting its controller. Lab restores the recorded rigid-body state but
+clears velocity filters, acceleration, velocity integral, rate derivative,
+and rate integral to zero. Thus the two backends do not start at the same
+controller boundary even though they start at the same kinematic state.
+
+The ULog exposes the missing boundary. `vehicle_local_position_setpoint`
+records PX4's velocity-loop acceleration output,
+`vehicle_local_position` records estimated acceleration,
+`vehicle_angular_velocity` records angular acceleration, and
+`rate_ctrl_status` records the rate integrals. At every held-out profile start,
+the PX4 pitch-rate integral was approximately 0.0122 rather than zero.
+Derived velocity-loop bias terms ranged to approximately 0.036 m/s2. The
+selected-controller replay consequently missed collective thrust by
+0.106-0.220 N even on the forward, lateral, and vertical profiles, despite
+the direct ULog-to-bridge audit passing all profiles at 0.0080-0.0112 N.
+
+Attempt 5 makes one structural change and no declarative parameter additions.
+Reference trace schema 4 will record the per-profile PX4 acceleration
+setpoint, measured linear and angular acceleration, and rate-integral state
+at the absolute profile start. The target will restore these values after
+kinematic reset. For each candidate, its velocity integral will be initialized
+so its first neutral-command desired acceleration equals the logged PX4
+acceleration setpoint; rate integral and derivative state will be restored in
+body-FLU coordinates. Schemas 2 and 3 retain zero-state replay. The target
+controller ID and definition fingerprint will advance because replay behavior
+changes, while artifact schema 5, probes, gates, plant, allocator, settings,
+policy interface, reward, and training configuration remain unchanged.
+
+Attempt 4 used one worker, 39 GPU batches, and 1332.64 s for the useful sweep,
+or 4.10 candidate evaluations/s. GPU utilization averaged 29.03%, reached 42%
+at p95 and 50% at peak, and used 5441 MiB peak memory. Sequential
+Isaac/PhysX stepping remains the bottleneck, so worker count stays at one.
