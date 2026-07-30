@@ -3053,3 +3053,64 @@ no-progress streak. It will run capture, actuator audit, the staged sweep, and
 held-out fit from the clean implementation commit with one worker. Any rejected
 result will be routed from the first failed intermediate boundary before a
 further structural or declarative search change is authorized.
+
+### 64. Reject schema-5 attempt 2 at normalized thrust
+
+Date: 2026-07-30.
+
+Attempt 2 ran from clean source commit `9942dbc` and completed
+`x500-velocity-px4-v5/20260730T173924Z`. The sweep evaluated 4933 unique
+candidates, 4837 of them usable, and selected candidate 4457 under comparison
+fingerprint
+`46ac0d7f46a7c9d681857af061ef3e4bd98ae0ca9158bd1647a65cb73521211e`.
+The selected normalized hover thrust is 0.572.
+
+| Held-out metric | Attempt 2 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 20.789 mm | 5 mm |
+| Residual-speed error | 0.00691 m/s | 0.01 m/s |
+| Stop-time error | 0.300 s | 0.10 s |
+| Worst-axis velocity NRMSE | 16.41% | 10% |
+| Yaw-rate NRMSE | 4.42% | 10% |
+| Heading error | 2.854 deg | 3 deg |
+| Combined endpoint error | 7.666 mm | 10 mm |
+
+The attempt is rejected with three failed gates. Its largest normalized excess
+is 3.158, worse than both the corrected schema-4 control's 2.021 and the v3
+attempt-3 frontier's 2.853, while stop time and worst-axis NRMSE regress from
+passed to failed. This is the first consecutive schema-5 no-progress result.
+
+No usable candidate passed fewer than three gates: 628 failed three, 1101
+failed four, 2764 failed five, 343 failed six, and one failed all seven.
+Candidate-wide minima were 8.424 mm braking distance, 0.00019 m/s residual
+speed, 0.260 s stop time, 9.54% worst-axis velocity NRMSE, 2.83% yaw-rate
+NRMSE, 2.354 degrees heading error, and 2.966 mm endpoint error. Thus no
+declared candidate passed either braking distance or stop time.
+
+The fresh actuator audit again passed every profile. Timestamp joins stayed
+within one 4 ms physics tick, normalized motor RMSE ranged from 0.00030 to
+0.00123, and reconstructed collective RMSE ranged from 0.0078 N to 0.0120 N.
+Matched-state replay of the selected schema-5 controller remained below the
+0.01 normalized-motor limit on the forward, lateral, and vertical validation
+profiles at 0.00793, 0.00870, and 0.00922 respectively. Collective RMSE,
+however, rose to 0.255 N on the vertical profile and just exceeded 0.05 N on
+the yaw and combined profiles. The selected velocity low-pass reached its
+5 Hz upper bound and the velocity-derivative filter reached its 2.5 Hz lower
+bound, while the selected normalized hover value remained inside the measured
+0.57077-0.57316 estimator interval.
+
+The force-application seam was inspected because controller outputs were close
+while motion still failed. The pinned Isaac Lab wrench composer and Isaac Sim
+wrapper apply a position-less local force at the body-frame origin, matching
+the target's origin-reduced rotor torque and the PX4 force application. No
+center-of-mass or drag application mismatch was confirmed, so the plant remains
+unchanged. The first evidenced unresolved boundary is normalized thrust.
+Attempt 3 may extend the evidenced velocity-filter ranges and add declarative
+velocity-integral limits while retaining the current normalized-hover range.
+Hover-estimate dynamics are not authorized because its captured variation is
+small and does not correlate with the error.
+
+Attempt 2 used one worker, 36 GPU batches, and 1020.76 s for the useful sweep,
+or 4.83 candidate evaluations/s. GPU utilization averaged 30.50%, reached 42%
+at p95 and 50% at peak, and used 5633 MiB peak memory. Sequential Isaac/PhysX
+stepping remains the bottleneck, so worker count stays at one.
