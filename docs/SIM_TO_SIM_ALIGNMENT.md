@@ -151,10 +151,11 @@ positive stage. The current generation uses `staged-beam-v2`:
    useful candidate coverage while remaining within measured device memory.
 7. Make two passes through every parameter in the stage.
 
-Stage 1 fits delay, normalized hover thrust, velocity filtering, and velocity
-P/I/D. Stage 2 fits attitude/yaw, rate P/I/D/feed-forward, rate filtering, and
-tilt. The legacy physical hover fraction and rate-output torque scale are not
-fit in schema 5. Candidate centers come from pinned PX4 v1.17 values and use
+Stage 1 fits delay, normalized hover thrust, velocity filtering, velocity
+integral limits, and velocity P/I/D. Stage 2 fits attitude/yaw, rate
+P/I/D/feed-forward, rate filtering, and tilt. The legacy physical hover
+fraction and rate-output torque scale are not fit in schema 5. Candidate
+centers come from pinned PX4 v1.17 values and use
 deterministic 0.5x, 0.75x, 1.0x, 1.25x, and 1.5x values; zero is included for
 delay, integral, derivative, and feed-forward terms where meaningful. The
 Historical torque-scale diagnostics regress logged normalized

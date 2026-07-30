@@ -3114,3 +3114,27 @@ Attempt 2 used one worker, 36 GPU batches, and 1020.76 s for the useful sweep,
 or 4.83 candidate evaluations/s. GPU utilization averaged 30.50%, reached 42%
 at p95 and 50% at peak, and used 5633 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the bottleneck, so worker count stays at one.
+
+### 65. Expand the evidenced normalized-thrust search for attempt 3
+
+Date: 2026-07-30.
+
+Attempt 3 retains schema 5, the normalized allocator implementation, the
+complete 0.54-0.60 normalized-hover range, every probe and advisory gate, and
+the composed plant unchanged. It makes no structural controller or plant
+change. At the first failed normalized-thrust boundary it adds the required
+declarative velocity-integral-limit stage with lower, pinned, and upper
+candidates `[1, 1, 2]`, `[2, 2, 4]`, and `[3, 3, 6]` m/s2. Four new
+evidence-routed range candidates are introduced in total: the lower and upper
+integral-limit candidates, a 10 Hz velocity low-pass candidate beyond the
+selected 5 Hz boundary, and a 1 Hz velocity-derivative candidate below the
+selected 2.5 Hz boundary.
+
+The hypothesis is that the candidate-wide braking and stop-time floor comes
+from insufficient velocity-loop state and filter range rather than allocator
+or plant scaling. Material progress still requires fewer failed gates or at
+least a 20% reduction from the 3.158 largest normalized excess without
+regressing a passed gate. This is the second consecutive schema-5 attempt; if
+it does not make material progress, the campaign terminates at the required
+two-attempt no-progress limit. It will use one worker and run from a new clean
+source commit after the complete host quality gates.
