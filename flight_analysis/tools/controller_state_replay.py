@@ -378,7 +378,9 @@ def _augment_reference_controller_state(
             }
         )
     reference["schema_version"] = 4
-    reference_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
+    temporary_path = reference_path.with_suffix(".json.tmp")
+    temporary_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
+    temporary_path.replace(reference_path)
     return {
         "schema_version": 1,
         "method": "px4-ulog-controller-boundary-v1",

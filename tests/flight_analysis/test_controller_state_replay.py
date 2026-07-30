@@ -126,6 +126,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
             }
         )
     )
+    reference.chmod(0o444)
 
     def dataset(name, data):
         return SimpleNamespace(name=name, data=data)
