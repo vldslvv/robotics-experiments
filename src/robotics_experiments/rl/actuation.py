@@ -7,15 +7,10 @@ reference/spec implementation and the unit-test oracle; it is exported through
 ``robotics_experiments.rl``. The Isaac Lab package exposes the batched torch
 twin's external diagnostic entry point as
 ``robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega``; it must
-match this module term-for-term (both precompute the allocation pseudoinverse in
-their builder).
-
-The rotor mix inverts the exact allocation the PX4 bridge's
-``PegasusQuadraticThrustModel.commands_to_dynamics`` realizes: per-rotor thrust
-``T_i = rotor_constant_i * omega_i^2`` applied at the body-FLU rotor offsets, a
-body-Z yaw reaction ``sum(rolling_moment_coefficient_i * omega_i^2 * rot_dir_i)``,
-so feeding the output omega back through that thrust model reproduces the
-commanded collective-thrust + body-torque wrench.
+match this module term-for-term. Schema 5 reproduces PX4's normalized
+pseudo-inverse allocation and sequential desaturation before applying the
+bridge-owned affine motor mapping. Legacy schemas retain the direct physical
+wrench pseudoinverse. Both paths then use the bridge's quadratic rotor curve.
 
 Two action levels (``kind``) are provided:
 
@@ -68,10 +63,12 @@ def _readonly_copy(values: np.ndarray) -> np.ndarray:
 class MixerGeometry:
     """Airframe control-allocation geometry in PX4 motor-index order (body-FLU).
 
-    Mirrors the fields the bridge's ``PegasusQuadraticThrustModel`` consumes; the
-    per-rotor arrays are ordered by PX4 motor index. ``positions_body`` are the
-    rotor marker offsets from the body origin (from the package-root
-    ``DiscoveredRotorMapping``); ``rot_dir`` is ``+1`` CCW / ``-1`` CW.
+    Mirrors the fields the bridge's ``PegasusQuadraticThrustModel`` consumes;
+    the per-rotor arrays are ordered by PX4 motor index. ``positions_body`` are
+    the rotor marker offsets from the body origin (from the package-root
+    ``DiscoveredRotorMapping``); ``rot_dir`` is ``+1`` CCW / ``-1`` CW. The
+    input arrays define the bridge mapping from normalized motor control to
+    rotor speed.
     """
 
     positions_body: np.ndarray
@@ -80,6 +77,9 @@ class MixerGeometry:
     rolling_moment_coefficient: np.ndarray
     min_rotor_velocity: np.ndarray
     max_rotor_velocity: np.ndarray
+    input_offset: np.ndarray
+    input_scaling: np.ndarray
+    zero_position_armed: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -126,6 +126,8 @@ class ActuationParams:
     mass: float
     geometry: MixerGeometry
     allocation_pinv: np.ndarray
+    normalized_allocation_mix: np.ndarray
+    normalized_allocator: bool
     max_total_thrust: float
     kp_rate: np.ndarray
     ki_rate: np.ndarray
@@ -136,6 +138,7 @@ class ActuationParams:
     rate_integral_limit_nm: np.ndarray
     max_body_rate_radps: float
     hover_thrust_fraction: float
+    hover_thrust_normalized: float
     kp_vel: np.ndarray
     ki_vel: np.ndarray
     kd_vel: np.ndarray
@@ -168,6 +171,38 @@ def _allocation_matrix(geometry: MixerGeometry) -> np.ndarray:
     y = geometry.positions_body[:, 1]
     yaw = (geometry.rolling_moment_coefficient / geometry.rotor_constant) * geometry.rot_dir
     return np.stack([np.ones(_num_rotors(geometry)), y, -x, yaw], axis=0)
+
+
+def _normalized_allocation_mix(geometry: MixerGeometry) -> np.ndarray:
+    """PX4 normalized pseudo-inverse mix in FRD control coordinates."""
+    x = geometry.positions_body[:, 0]
+    y = geometry.positions_body[:, 1]
+    yaw = -geometry.rolling_moment_coefficient / geometry.rotor_constant * geometry.rot_dir
+    effectiveness = np.stack([y, x, yaw, -np.ones(_num_rotors(geometry))], axis=0)
+    mix = np.linalg.pinv(effectiveness)
+
+    roll_count = int(np.count_nonzero(np.abs(mix[:, 0]) > 1e-3))
+    pitch_count = int(np.count_nonzero(np.abs(mix[:, 1]) > 1e-3))
+    roll_scale = (
+        np.sqrt(float(np.sum(np.square(mix[:, 0]))) / (roll_count / 2.0)) if roll_count else 1.0
+    )
+    pitch_scale = (
+        np.sqrt(float(np.sum(np.square(mix[:, 1]))) / (pitch_count / 2.0)) if pitch_count else 1.0
+    )
+    roll_pitch_scale = max(roll_scale, pitch_scale)
+    if roll_pitch_scale > np.finfo(np.float32).eps:
+        mix[:, :2] /= roll_pitch_scale
+
+    yaw_scale = float(np.max(mix[:, 2]))
+    if yaw_scale > np.finfo(np.float32).eps:
+        mix[:, 2] /= yaw_scale
+
+    thrust_values = np.abs(mix[:, 3])
+    nonzero_thrust = thrust_values > np.finfo(np.float32).eps
+    if np.any(nonzero_thrust):
+        mix[:, 3] /= float(np.mean(thrust_values[nonzero_thrust]))
+    mix[np.abs(mix) < 1e-3] = 0.0
+    return mix
 
 
 def _max_total_thrust(geometry: MixerGeometry) -> float:
@@ -299,6 +334,77 @@ def _wrench_to_omega(
     return np.clip(omega, geometry.min_rotor_velocity, geometry.max_rotor_velocity)
 
 
+def _desaturation_gain(
+    actuator_sp: np.ndarray,
+    desaturation_vector: np.ndarray,
+    *,
+    actuator_max: float = 1.0,
+) -> float:
+    k_min = 0.0
+    k_max = 0.0
+    for setpoint, vector in zip(actuator_sp, desaturation_vector, strict=True):
+        if abs(float(vector)) < 0.2:
+            continue
+        if setpoint < 0.0:
+            gain = -float(setpoint) / float(vector)
+            k_min = min(k_min, gain)
+            k_max = max(k_max, gain)
+        if setpoint > actuator_max:
+            gain = (actuator_max - float(setpoint)) / float(vector)
+            k_min = min(k_min, gain)
+            k_max = max(k_max, gain)
+    return k_min + k_max
+
+
+def _desaturate(
+    actuator_sp: np.ndarray,
+    desaturation_vector: np.ndarray,
+    *,
+    increase_only: bool = False,
+    actuator_max: float = 1.0,
+) -> np.ndarray:
+    gain = _desaturation_gain(
+        actuator_sp,
+        desaturation_vector,
+        actuator_max=actuator_max,
+    )
+    if increase_only and gain < 0.0:
+        return actuator_sp
+    actuator_sp = actuator_sp + gain * desaturation_vector
+    gain = 0.5 * _desaturation_gain(
+        actuator_sp,
+        desaturation_vector,
+        actuator_max=actuator_max,
+    )
+    return actuator_sp + gain * desaturation_vector
+
+
+def _normalized_controls_to_omega(
+    params: ActuationParams,
+    collective: float,
+    body_torque: np.ndarray,
+) -> np.ndarray:
+    """Apply pinned PX4 sequential desaturation and the bridge motor mapping."""
+    mix = params.normalized_allocation_mix
+    control = np.array(
+        [body_torque[0], -body_torque[1], -body_torque[2], -collective],
+        dtype=np.float64,
+    )
+    actuator_sp = mix[:, 0] * control[0] + mix[:, 1] * control[1] + mix[:, 3] * control[3]
+    actuator_sp = _desaturate(actuator_sp, mix[:, 3], increase_only=True)
+    actuator_sp = _desaturate(actuator_sp, mix[:, 0])
+    actuator_sp = _desaturate(actuator_sp, mix[:, 1])
+    actuator_sp = actuator_sp + mix[:, 2] * control[2]
+    actuator_sp = _desaturate(actuator_sp, mix[:, 2], actuator_max=1.15)
+    actuator_sp = _desaturate(actuator_sp, mix[:, 3], increase_only=True)
+    actuator_sp = np.clip(actuator_sp, 0.0, 1.0)
+    geometry = params.geometry
+    omega = (
+        actuator_sp + geometry.input_offset
+    ) * geometry.input_scaling + geometry.zero_position_armed
+    return np.clip(omega, geometry.min_rotor_velocity, geometry.max_rotor_velocity)
+
+
 def _low_pass_alpha(*, cutoff_hz: float, dt_s: float) -> float:
     if cutoff_hz <= 0.0:
         return 1.0
@@ -343,6 +449,59 @@ def _limited_thrust_world(
     return limited, achieved_acceleration
 
 
+def _normalized_thrust_world(
+    *,
+    params: ActuationParams,
+    desired_acceleration: np.ndarray,
+    velocity_error: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    desired_z = _clamp_tilt(
+        np.array(
+            [desired_acceleration[0], desired_acceleration[1], GRAVITY_M_S2],
+            dtype=np.float64,
+        ),
+        params.max_tilt_rad,
+    )
+    collective = max(
+        params.hover_thrust_normalized
+        * (1.0 + desired_acceleration[2] / GRAVITY_M_S2)
+        / max(float(desired_z[2]), _EPS),
+        params.min_collective_thrust_fraction,
+    )
+    requested = desired_z * collective
+    adjusted_error = np.array(velocity_error, copy=True)
+    if (requested[2] <= params.min_collective_thrust_fraction and adjusted_error[2] <= 0.0) or (
+        requested[2] >= params.max_collective_thrust_fraction and adjusted_error[2] >= 0.0
+    ):
+        adjusted_error[2] = 0.0
+
+    horizontal = requested[:2]
+    horizontal_norm = float(np.linalg.norm(horizontal))
+    allocated_horizontal = min(
+        horizontal_norm,
+        params.horizontal_thrust_margin_fraction,
+    )
+    vertical_max = np.sqrt(
+        max(
+            params.max_collective_thrust_fraction**2 - allocated_horizontal**2,
+            0.0,
+        )
+    )
+    vertical = min(float(requested[2]), vertical_max)
+    horizontal_max = np.sqrt(max(params.max_collective_thrust_fraction**2 - vertical**2, 0.0))
+    if horizontal_norm > horizontal_max:
+        horizontal = horizontal * (horizontal_max / max(horizontal_norm, _EPS))
+    limited = np.array([horizontal[0], horizontal[1], vertical], dtype=np.float64)
+    produced_acceleration = limited[:2] * (GRAVITY_M_S2 / params.hover_thrust_normalized)
+    if float(desired_acceleration[:2] @ desired_acceleration[:2]) > float(
+        produced_acceleration @ produced_acceleration
+    ):
+        adjusted_error[:2] -= (2.0 / params.kp_vel[0]) * (
+            desired_acceleration[:2] - produced_acceleration
+        )
+    return limited, adjusted_error
+
+
 def _rate_to_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
@@ -369,11 +528,16 @@ def _rate_to_omega(
     else:
         angular_acceleration = np.zeros(3, dtype=np.float64)
     rate_error: np.ndarray = rate - angular_velocity
-    body_torque = params.rate_output_scale_nm * (
+    normalized_torque = (
         params.kp_rate * rate_error
         + controller_state.rate_integral_body_flu
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
+    )
+    body_torque = (
+        normalized_torque
+        if params.normalized_allocator
+        else params.rate_output_scale_nm * normalized_torque
     )
     integral_factor = np.maximum(
         0.0,
@@ -394,7 +558,15 @@ def _rate_to_omega(
         rate_integral_body_flu=_readonly_copy(rate_integral),
         initialized=True,
     )
-    return successor, _wrench_to_omega(params, collective_thrust, body_torque)
+    if params.normalized_allocator:
+        omega = _normalized_controls_to_omega(
+            params,
+            collective_thrust,
+            body_torque,
+        )
+    else:
+        omega = _wrench_to_omega(params, collective_thrust, body_torque)
+    return successor, omega
 
 
 def _velocity_action_to_omega(
@@ -444,19 +616,29 @@ def _velocity_action_to_omega(
         + controller_state.velocity_integral_enu
         - params.kd_vel * acceleration
     )
-    thrust_world, achieved_acceleration = _limited_thrust_world(
-        params=params,
-        desired_acceleration=desired_acceleration,
-    )
-    saturation_error = achieved_acceleration - desired_acceleration
-    may_integrate = (np.abs(saturation_error) < _SATURATION_EPS) | (
-        velocity_error * saturation_error >= 0.0
-    )
-    velocity_integral = np.where(
-        may_integrate,
-        controller_state.velocity_integral_enu + params.ki_vel * velocity_error * dt_s,
-        controller_state.velocity_integral_enu,
-    )
+    if params.normalized_allocator:
+        thrust_world, integration_error = _normalized_thrust_world(
+            params=params,
+            desired_acceleration=desired_acceleration,
+            velocity_error=velocity_error,
+        )
+        velocity_integral = (
+            controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
+        )
+    else:
+        thrust_world, achieved_acceleration = _limited_thrust_world(
+            params=params,
+            desired_acceleration=desired_acceleration,
+        )
+        saturation_error = achieved_acceleration - desired_acceleration
+        may_integrate = (np.abs(saturation_error) < _SATURATION_EPS) | (
+            velocity_error * saturation_error >= 0.0
+        )
+        velocity_integral = np.where(
+            may_integrate,
+            controller_state.velocity_integral_enu + params.ki_vel * velocity_error * dt_s,
+            controller_state.velocity_integral_enu,
+        )
     velocity_integral = np.clip(
         velocity_integral,
         -params.velocity_integral_limit_mps2,
@@ -576,9 +758,9 @@ def build_actuation_params(
 ) -> ActuationParams:
     """Build frozen actuation params from action and aligned controller contracts.
 
-    Precomputes the allocation pseudoinverse and the max total thrust once, so
-    the per-call functions consume only frozen state (mirroring the torch
-    twin's builder).
+    Precomputes the physical and normalized allocation maps and maximum thrust
+    once, so the per-call functions consume only frozen state (mirroring the
+    torch twin's builder).
 
     Raises:
         ValueError: for an unknown or not-yet-implemented action level.
@@ -595,15 +777,23 @@ def build_actuation_params(
         rolling_moment_coefficient=_readonly_copy(geometry.rolling_moment_coefficient),
         min_rotor_velocity=_readonly_copy(geometry.min_rotor_velocity),
         max_rotor_velocity=_readonly_copy(geometry.max_rotor_velocity),
+        input_offset=_readonly_copy(geometry.input_offset),
+        input_scaling=_readonly_copy(geometry.input_scaling),
+        zero_position_armed=_readonly_copy(geometry.zero_position_armed),
     )
     allocation_pinv = np.linalg.pinv(_allocation_matrix(frozen_geometry))
     allocation_pinv.setflags(write=False)
+    normalized_allocation_mix = _normalized_allocation_mix(frozen_geometry)
+    normalized_allocation_mix.setflags(write=False)
     return ActuationParams(
         kind=kind,
         action_dim=4,
         mass=float(mass),
         geometry=frozen_geometry,
         allocation_pinv=allocation_pinv,
+        normalized_allocation_mix=normalized_allocation_mix,
+        normalized_allocator=kind == "velocity"
+        and controller_settings.hover_thrust_normalized > 0.0,
         max_total_thrust=_max_total_thrust(frozen_geometry),
         kp_rate=_readonly_copy(controller_settings.kp_rate),
         ki_rate=_readonly_copy(controller_settings.ki_rate),
@@ -618,6 +808,7 @@ def build_actuation_params(
             if kind == "velocity"
             else action_cfg.hover_thrust_fraction
         ),
+        hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),

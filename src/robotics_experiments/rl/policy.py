@@ -232,7 +232,7 @@ def _alignment_settings(
                 "must be a non-empty string"
             )
     schema_version = alignment.get("schema_version")
-    if schema_version not in (2, 3, 4):
+    if schema_version not in (2, 3, 4, 5):
         raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
     if type(alignment.get("advisory_quality_passed")) is not bool:
         raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
@@ -273,6 +273,15 @@ def _alignment_settings(
             artifact_dir=artifact_dir,
         )
 
+    def hover_thrust_normalized() -> float:
+        if schema_version in (2, 3, 4):
+            return 0.0
+        return _finite_positive(
+            value=settings.get("hover_thrust_normalized"),
+            name="alignment.settings.hover_thrust_normalized",
+            artifact_dir=artifact_dir,
+        )
+
     delay = settings.get("command_delay_s")
     if (
         isinstance(delay, bool)
@@ -301,6 +310,7 @@ def _alignment_settings(
         ),
         velocity_integral_limit_mps2=vector("velocity_integral_limit_mps2"),
         hover_thrust_fraction=hover_thrust_fraction(),
+        hover_thrust_normalized=hover_thrust_normalized(),
         kp_att=vector("kp_att"),
         attitude_yaw_weight=_finite_nonnegative(
             value=settings.get("attitude_yaw_weight"),
@@ -362,6 +372,11 @@ def _alignment_settings(
     if controller_settings.hover_thrust_fraction > 1.0:
         raise ValueError(
             f"policy artifact {artifact_dir} alignment.settings.hover_thrust_fraction "
+            "must not exceed 1"
+        )
+    if controller_settings.hover_thrust_normalized > 1.0:
+        raise ValueError(
+            f"policy artifact {artifact_dir} alignment.settings.hover_thrust_normalized "
             "must not exceed 1"
         )
     if not (

@@ -8,8 +8,9 @@ term-for-term:
 
 - the actuation cascade exported by ``robotics_experiments.rl``
   (numpy single-env oracle: ``ActuationParams`` + ``action_to_rotor_omega``) --
-  this module batches the velocity/ctbr cascade over ``[num_envs]``; both
-  builders precompute the allocation pseudoinverse;
+  this module batches the velocity/ctbr cascade over ``[num_envs]``; schema 5
+  reproduces PX4's normalized allocator and legacy schemas use the physical
+  allocation pseudoinverse;
 - the per-rotor -> body-wrench reduction exported as
   ``robotics_experiments.rl.rotor_forces_to_body_wrench`` --
   ``_rotor_forces_to_body_wrench`` batches it.
@@ -22,9 +23,10 @@ the body origin in the body frame (Isaac Lab's
 ``set_external_force_and_torque`` applies in the body frame, so no body->world
 rotation is needed -- unlike the bridge's ``is_global=True`` path).
 
-The realized thrust is ``T_i = rotor_constant_i * omega_i^2`` clipped to
-``[min, max]`` rotor velocity, so an action reproduces the commanded wrench (up
-to the clips), exactly as the PX4 bridge's ``PegasusQuadraticThrustModel`` does.
+Normalized controls pass through the bridge-owned affine motor mapping. The
+realized thrust is then ``T_i = rotor_constant_i * omega_i^2`` clipped to
+``[min, max]`` rotor velocity, exactly as the PX4 bridge's
+``PegasusQuadraticThrustModel`` does.
 """
 
 from __future__ import annotations
@@ -75,7 +77,12 @@ class _FlightActuationParams:
     rolling_moment_coefficient: torch.Tensor
     min_rotor_velocity: torch.Tensor
     max_rotor_velocity: torch.Tensor
+    input_offset: torch.Tensor
+    input_scaling: torch.Tensor
+    zero_position_armed: torch.Tensor
     allocation_pinv: torch.Tensor
+    normalized_allocation_mix: torch.Tensor
+    normalized_allocator: bool
     max_total_thrust: float
     kp_rate: torch.Tensor
     ki_rate: torch.Tensor
@@ -86,6 +93,7 @@ class _FlightActuationParams:
     rate_integral_limit_nm: torch.Tensor
     max_body_rate_radps: float
     hover_thrust_fraction: float | torch.Tensor
+    hover_thrust_normalized: float | torch.Tensor
     kp_vel: torch.Tensor
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
@@ -300,6 +308,87 @@ def _wrench_to_omega(
     return torch.clamp(omega, params.min_rotor_velocity, params.max_rotor_velocity)
 
 
+def _desaturation_gain(
+    actuator_sp: torch.Tensor,
+    desaturation_vector: torch.Tensor,
+    *,
+    actuator_max: float = 1.0,
+) -> torch.Tensor:
+    valid = desaturation_vector.abs() >= 0.2
+    safe_vector = torch.where(valid, desaturation_vector, 1.0).unsqueeze(0)
+    below_gain = torch.where(
+        valid.unsqueeze(0) & (actuator_sp < 0.0),
+        -actuator_sp / safe_vector,
+        torch.zeros_like(actuator_sp),
+    )
+    above_gain = torch.where(
+        valid.unsqueeze(0) & (actuator_sp > actuator_max),
+        (actuator_max - actuator_sp) / safe_vector,
+        torch.zeros_like(actuator_sp),
+    )
+    gains = below_gain + above_gain
+    zeros = torch.zeros(len(actuator_sp), dtype=actuator_sp.dtype, device=actuator_sp.device)
+    return torch.minimum(gains.amin(dim=-1), zeros) + torch.maximum(
+        gains.amax(dim=-1),
+        zeros,
+    )
+
+
+def _desaturate(
+    actuator_sp: torch.Tensor,
+    desaturation_vector: torch.Tensor,
+    *,
+    increase_only: bool = False,
+    actuator_max: float = 1.0,
+) -> torch.Tensor:
+    gain = _desaturation_gain(
+        actuator_sp,
+        desaturation_vector,
+        actuator_max=actuator_max,
+    )
+    blocked = torch.zeros_like(gain, dtype=torch.bool)
+    if increase_only:
+        blocked = gain < 0.0
+        gain = gain.clamp_min(0.0)
+    actuator_sp = actuator_sp + gain.unsqueeze(-1) * desaturation_vector
+    gain = 0.5 * _desaturation_gain(
+        actuator_sp,
+        desaturation_vector,
+        actuator_max=actuator_max,
+    )
+    gain = torch.where(blocked, torch.zeros_like(gain), gain)
+    return actuator_sp + gain.unsqueeze(-1) * desaturation_vector
+
+
+def _normalized_controls_to_omega(
+    params: _FlightActuationParams,
+    collective: torch.Tensor,
+    body_torque: torch.Tensor,
+) -> torch.Tensor:
+    mix = params.normalized_allocation_mix
+    control = torch.stack(
+        [
+            body_torque[:, 0],
+            -body_torque[:, 1],
+            -body_torque[:, 2],
+            -collective,
+        ],
+        dim=-1,
+    )
+    actuator_sp = (
+        control[:, 0:1] * mix[:, 0] + control[:, 1:2] * mix[:, 1] + control[:, 3:4] * mix[:, 3]
+    )
+    actuator_sp = _desaturate(actuator_sp, mix[:, 3], increase_only=True)
+    actuator_sp = _desaturate(actuator_sp, mix[:, 0])
+    actuator_sp = _desaturate(actuator_sp, mix[:, 1])
+    actuator_sp = actuator_sp + control[:, 2:3] * mix[:, 2]
+    actuator_sp = _desaturate(actuator_sp, mix[:, 2], actuator_max=1.15)
+    actuator_sp = _desaturate(actuator_sp, mix[:, 3], increase_only=True)
+    actuator_sp = actuator_sp.clamp(0.0, 1.0)
+    omega = (actuator_sp + params.input_offset) * params.input_scaling + params.zero_position_armed
+    return torch.clamp(omega, params.min_rotor_velocity, params.max_rotor_velocity)
+
+
 def _low_pass_alpha(
     *,
     cutoff_hz: float | torch.Tensor,
@@ -385,6 +474,78 @@ def _limited_thrust_world(
     return limited, achieved_acceleration
 
 
+def _normalized_thrust_world(
+    *,
+    params: _FlightActuationParams,
+    desired_acceleration: torch.Tensor,
+    velocity_error: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    gravity = torch.full_like(desired_acceleration[:, 2:3], _GRAVITY_M_S2)
+    desired_z = torch.cat([desired_acceleration[:, :2], gravity], dim=-1)
+    desired_z = _clamp_tilt(desired_z, params.max_tilt_rad)
+    hover = _environment_values(
+        params.hover_thrust_normalized,
+        desired_acceleration[:, 2],
+    )
+    minimum = _environment_values(
+        params.min_collective_thrust_fraction,
+        desired_acceleration[:, 2],
+    )
+    maximum = _environment_values(
+        params.max_collective_thrust_fraction,
+        desired_acceleration[:, 2],
+    )
+    collective = torch.maximum(
+        hover
+        * (1.0 + desired_acceleration[:, 2] / _GRAVITY_M_S2)
+        / desired_z[:, 2].clamp_min(_EPS),
+        minimum,
+    )
+    requested = desired_z * collective.unsqueeze(-1)
+    block_vertical = ((requested[:, 2] <= minimum) & (velocity_error[:, 2] <= 0.0)) | (
+        (requested[:, 2] >= maximum) & (velocity_error[:, 2] >= 0.0)
+    )
+    adjusted_vertical_error = torch.where(
+        block_vertical,
+        torch.zeros_like(velocity_error[:, 2]),
+        velocity_error[:, 2],
+    )
+
+    horizontal = requested[:, :2]
+    horizontal_norm = horizontal.norm(dim=-1)
+    margin = _environment_values(
+        params.horizontal_thrust_margin_fraction,
+        horizontal_norm,
+    )
+    allocated_horizontal = torch.minimum(horizontal_norm, margin)
+    vertical_max = torch.sqrt((maximum.square() - allocated_horizontal.square()).clamp_min(0.0))
+    vertical = torch.minimum(requested[:, 2], vertical_max)
+    horizontal_max = torch.sqrt((maximum.square() - vertical.square()).clamp_min(0.0))
+    horizontal_scale = torch.minimum(
+        torch.ones_like(horizontal_norm),
+        horizontal_max / horizontal_norm.clamp_min(_EPS),
+    )
+    limited_horizontal = horizontal * horizontal_scale.unsqueeze(-1)
+    limited = torch.cat([limited_horizontal, vertical.unsqueeze(-1)], dim=-1)
+    produced_acceleration = limited_horizontal * (_GRAVITY_M_S2 / hover).unsqueeze(-1)
+    arw_active = desired_acceleration[:, :2].square().sum(
+        dim=-1
+    ) > produced_acceleration.square().sum(dim=-1)
+    gain = 2.0 / (params.kp_vel[:, 0] if params.kp_vel.ndim == 2 else params.kp_vel[0])
+    adjusted_horizontal_error = velocity_error[:, :2] - gain.unsqueeze(-1) * (
+        desired_acceleration[:, :2] - produced_acceleration
+    )
+    adjusted_horizontal_error = torch.where(
+        arw_active.unsqueeze(-1),
+        adjusted_horizontal_error,
+        velocity_error[:, :2],
+    )
+    return limited, torch.cat(
+        [adjusted_horizontal_error, adjusted_vertical_error.unsqueeze(-1)],
+        dim=-1,
+    )
+
+
 def _rate_to_omega(
     params: _FlightActuationParams,
     controller_state: _FlightControllerState,
@@ -413,11 +574,16 @@ def _rate_to_omega(
         torch.zeros_like(filtered_angular_acceleration),
     )
     rate_error = rate - angular_velocity_body
-    body_torque = params.rate_output_scale_nm * (
+    normalized_torque = (
         params.kp_rate * rate_error
         + controller_state.rate_integral_body
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
+    )
+    body_torque = (
+        normalized_torque
+        if params.normalized_allocator
+        else params.rate_output_scale_nm * normalized_torque
     )
     integral_factor = torch.clamp(
         1.0 - torch.square(rate_error / math.radians(400.0)),
@@ -437,7 +603,11 @@ def _rate_to_omega(
         rate_integral_body=rate_integral,
         initialized=torch.ones_like(controller_state.initialized),
     )
-    return successor, _wrench_to_omega(params, collective, body_torque)
+    if params.normalized_allocator:
+        omega = _normalized_controls_to_omega(params, collective, body_torque)
+    else:
+        omega = _wrench_to_omega(params, collective, body_torque)
+    return successor, omega
 
 
 def _ctbr(
@@ -519,19 +689,29 @@ def _velocity(
         + controller_state.velocity_integral_world
         - params.kd_vel * acceleration
     )
-    thrust_world, achieved_acceleration = _limited_thrust_world(
-        params=params,
-        desired_acceleration=desired_acceleration,
-    )
-    saturation_error = achieved_acceleration - desired_acceleration
-    may_integrate = (saturation_error.abs() < _SATURATION_EPS) | (
-        velocity_error * saturation_error >= 0.0
-    )
-    velocity_integral = torch.where(
-        may_integrate,
-        controller_state.velocity_integral_world + params.ki_vel * velocity_error * dt_s,
-        controller_state.velocity_integral_world,
-    )
+    if params.normalized_allocator:
+        thrust_world, integration_error = _normalized_thrust_world(
+            params=params,
+            desired_acceleration=desired_acceleration,
+            velocity_error=velocity_error,
+        )
+        velocity_integral = (
+            controller_state.velocity_integral_world + params.ki_vel * integration_error * dt_s
+        )
+    else:
+        thrust_world, achieved_acceleration = _limited_thrust_world(
+            params=params,
+            desired_acceleration=desired_acceleration,
+        )
+        saturation_error = achieved_acceleration - desired_acceleration
+        may_integrate = (saturation_error.abs() < _SATURATION_EPS) | (
+            velocity_error * saturation_error >= 0.0
+        )
+        velocity_integral = torch.where(
+            may_integrate,
+            controller_state.velocity_integral_world + params.ki_vel * velocity_error * dt_s,
+            controller_state.velocity_integral_world,
+        )
     velocity_integral = torch.clamp(
         velocity_integral,
         -params.velocity_integral_limit_mps2,
@@ -583,6 +763,9 @@ def build_flight_actuation_params(
     rolling_moment_coefficient: ArrayLike,
     min_rotor_velocity: ArrayLike,
     max_rotor_velocity: ArrayLike,
+    input_offset: ArrayLike,
+    input_scaling: ArrayLike,
+    zero_position_armed: ArrayLike,
     action_cfg: RlActionConfig,
     controller_settings: ControllerSettings,
     policy_contract: PolicyContract | None,
@@ -592,8 +775,9 @@ def build_flight_actuation_params(
 ) -> _FlightActuationParams:
     """Build actuation params from YAML controllers plus optional artifact scales.
 
-    Precomputes the device tensors, the allocation pseudoinverse, and the max
-    total thrust once (mirroring ``robotics_experiments.rl.build_actuation_params``).
+    Precomputes the device tensors, physical and normalized allocation maps, and
+    maximum thrust once (mirroring
+    ``robotics_experiments.rl.build_actuation_params``).
 
     Raises:
         ValueError: for an unknown or not-yet-implemented action level.
@@ -617,6 +801,38 @@ def build_flight_actuation_params(
     y = positions[:, 1]
     yaw = (rolling / constants) * directions
     allocation = torch.stack([torch.ones(num_rotors, device=device), y, -x, yaw], dim=0)
+    normalized_effectiveness = torch.stack(
+        [
+            y,
+            x,
+            -yaw,
+            -torch.ones(num_rotors, device=device),
+        ],
+        dim=0,
+    )
+    normalized_mix = torch.linalg.pinv(normalized_effectiveness)
+    roll_count = int((normalized_mix[:, 0].abs() > 1e-3).sum().item())
+    pitch_count = int((normalized_mix[:, 1].abs() > 1e-3).sum().item())
+    roll_scale = (
+        torch.sqrt(normalized_mix[:, 0].square().sum() / (roll_count / 2.0))
+        if roll_count
+        else torch.tensor(1.0, device=device)
+    )
+    pitch_scale = (
+        torch.sqrt(normalized_mix[:, 1].square().sum() / (pitch_count / 2.0))
+        if pitch_count
+        else torch.tensor(1.0, device=device)
+    )
+    roll_pitch_scale = torch.maximum(roll_scale, pitch_scale)
+    normalized_mix[:, :2] /= roll_pitch_scale
+    normalized_mix[:, 2] /= normalized_mix[:, 2].max()
+    thrust_values = normalized_mix[:, 3].abs()
+    normalized_mix[:, 3] /= thrust_values[thrust_values > torch.finfo(torch.float32).eps].mean()
+    normalized_mix = torch.where(
+        normalized_mix.abs() < 1e-3,
+        torch.zeros_like(normalized_mix),
+        normalized_mix,
+    )
 
     return _FlightActuationParams(
         kind=kind,
@@ -629,7 +845,13 @@ def build_flight_actuation_params(
         rolling_moment_coefficient=rolling,
         min_rotor_velocity=_tensor(min_rotor_velocity),
         max_rotor_velocity=max_velocity,
+        input_offset=_tensor(input_offset),
+        input_scaling=_tensor(input_scaling),
+        zero_position_armed=_tensor(zero_position_armed),
         allocation_pinv=torch.linalg.pinv(allocation),  # (N, 4)
+        normalized_allocation_mix=normalized_mix,
+        normalized_allocator=kind == "velocity"
+        and controller_settings.hover_thrust_normalized > 0.0,
         max_total_thrust=float((constants * max_velocity.square()).sum().item()),
         kp_rate=_tensor(controller_settings.kp_rate),
         ki_rate=_tensor(controller_settings.ki_rate),
@@ -652,6 +874,7 @@ def build_flight_actuation_params(
                 else policy_contract.hover_thrust_fraction
             )
         ),
+        hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_tensor(controller_settings.kp_vel),
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
@@ -722,6 +945,7 @@ def _replace_controller_settings_batch(
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
         hover_thrust_fraction=_scalars("hover_thrust_fraction"),
+        hover_thrust_normalized=_scalars("hover_thrust_normalized"),
         kp_att=_vectors("kp_att"),
         attitude_yaw_weight=_scalars("attitude_yaw_weight"),
         max_tilt_rad=_scalars("max_tilt_cmd_deg", radians=True),

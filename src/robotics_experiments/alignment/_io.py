@@ -35,8 +35,8 @@ __all__: list[str] = []
 
 _TRACE_SCHEMA_VERSION = 3
 _SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3})
-_ARTIFACT_SCHEMA_VERSION = 4
-_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4})
+_ARTIFACT_SCHEMA_VERSION = 5
+_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
@@ -92,6 +92,7 @@ def _settings(
     name: str,
     legacy_rate_output_scale: bool = False,
     legacy_hover_thrust: bool = False,
+    legacy_normalized_thrust: bool = False,
 ) -> ControllerSettings:
     settings = _object(value=value, name=name)
     if legacy_rate_output_scale and "rate_output_scale_nm" not in settings:
@@ -100,6 +101,8 @@ def _settings(
         # Zero is an internal legacy sentinel for the exact physical
         # mass*(acceleration+gravity) feed-forward used by schema 2 and 3.
         settings["hover_thrust_fraction"] = 0.0
+    if legacy_normalized_thrust and "hover_thrust_normalized" not in settings:
+        settings["hover_thrust_normalized"] = 0.0
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -134,6 +137,12 @@ def _settings(
             name=f"{name}.hover_thrust_fraction",
             nonnegative=legacy_hover_thrust,
             positive=not legacy_hover_thrust,
+        ),
+        hover_thrust_normalized=_finite(
+            value=settings["hover_thrust_normalized"],
+            name=f"{name}.hover_thrust_normalized",
+            nonnegative=legacy_normalized_thrust,
+            positive=not legacy_normalized_thrust,
         ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
         attitude_yaw_weight=_finite(
@@ -213,6 +222,8 @@ def _settings(
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
     if parsed.hover_thrust_fraction > 1.0:
         raise ValueError(f"{name}.hover_thrust_fraction must not exceed 1")
+    if parsed.hover_thrust_normalized > 1.0:
+        raise ValueError(f"{name}.hover_thrust_normalized must not exceed 1")
     if not (
         0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0
     ):
@@ -758,6 +769,7 @@ def _candidate_score(
     name: str,
     legacy_rate_output_scale: bool,
     legacy_hover_thrust: bool,
+    legacy_normalized_thrust: bool,
 ) -> CandidateScore:
     candidate = _object(value=value, name=name)
     metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
@@ -782,6 +794,7 @@ def _candidate_score(
             name=f"{name}.settings",
             legacy_rate_output_scale=legacy_rate_output_scale,
             legacy_hover_thrust=legacy_hover_thrust,
+            legacy_normalized_thrust=legacy_normalized_thrust,
         ),
         usable=usable,
         metrics={
@@ -812,6 +825,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         )
     legacy_rate_output_scale = schema_version == 2
     legacy_hover_thrust = schema_version in (2, 3)
+    legacy_normalized_thrust = schema_version in (2, 3, 4)
     command_interface = _interface(
         value=artifact.get("command_interface"),
         name="command_interface",
@@ -838,6 +852,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
             name=f"candidates[{index}]",
             legacy_rate_output_scale=legacy_rate_output_scale,
             legacy_hover_thrust=legacy_hover_thrust,
+            legacy_normalized_thrust=legacy_normalized_thrust,
         )
         for index, value in enumerate(raw_candidates)
     )
@@ -854,6 +869,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         name="selected_settings",
         legacy_rate_output_scale=legacy_rate_output_scale,
         legacy_hover_thrust=legacy_hover_thrust,
+        legacy_normalized_thrust=legacy_normalized_thrust,
     )
     if parsed_selected_settings != selected_matches[0].settings:
         raise ValueError("selected_settings do not match selected candidate")

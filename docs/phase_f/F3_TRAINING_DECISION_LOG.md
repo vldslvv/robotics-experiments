@@ -3016,3 +3016,40 @@ Attempt 1 used one worker, 39 GPU batches, and 1036.29 s for the useful sweep,
 or 4.92 candidate evaluations/s. GPU utilization averaged 28.49%, reached 40%
 at p95 and 57% at peak, and used 5632 MiB peak memory. The recorded bottleneck
 remains sequential Isaac/PhysX stepping, so worker count stays at one.
+
+### 63. Start schema-5 normalized allocator attempt
+
+Date: 2026-07-30.
+
+Attempt 2 starts `x500-velocity-px4-v5` and artifact schema 5 at the first
+unresolved boundary from the corrected control. The velocity path now produces
+normalized thrust from the acceleration request and
+`hover_thrust_normalized`, sends normalized rate-PID torque directly to
+allocation, reproduces the pinned PX4 v1.17 `CA_METHOD=2`, `MC_AIRMODE=0`
+pseudo-inverse normalization and sequential desaturation, clips motor controls
+to `[0, 1]`, then applies the composed bridge mapping
+`omega = 50 + 475*u` and the existing quadratic rotor and actuator models.
+Schemas 2 through 4 load with a zero normalized-hover sentinel and keep their
+physical-force behavior.
+
+The normalized-hover candidates are
+`[0.54, 0.55, 0.56, 0.57, 0.572, 0.58, 0.59, 0.60]`, bracketing the captured
+0.57077-0.57316 estimator interval. The existing velocity, attitude, rate,
+delay, filter, tilt, and actuator stages remain unchanged. Schema 5 no longer
+fits either the legacy physical hover fraction or physical rate-output scale.
+The probes, seven advisory gates, policy interface, reward, training
+configuration, and plant definition are unchanged.
+
+As a pre-execution boundary check, replaying the captured PX4 normalized thrust
+and torque setpoints through the generated X500 effectiveness matrix and the
+new allocator against 1221 joined `actuator_motors` samples produced normalized
+motor RMSE 0.00512. This is below the 0.01 audit limit and supports the
+allocator signs, normalization, and desaturation rather than using gain fitting
+to hide a plant mismatch. The prior actuator audit independently passed the
+bridge mapping, rotor speed, and collective boundary.
+
+This is the first schema-5 attempt and the first entry in the consecutive
+no-progress streak. It will run capture, actuator audit, the staged sweep, and
+held-out fit from the clean implementation commit with one worker. Any rejected
+result will be routed from the first failed intermediate boundary before a
+further structural or declarative search change is authorized.

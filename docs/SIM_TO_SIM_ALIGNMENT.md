@@ -22,15 +22,18 @@ The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v4` is the current comparison generation and uses alignment
-artifact schema 4. It adds PX4's hover-thrust-scaled collective acceleration
-mapping. Its physical hover fraction is weight divided by the composed plant's
-maximum thrust: the 2.3472 kg X500 and 61.389629 N maximum require approximately
-0.375. Schema-2 and schema-3 artifacts retain the exact physical
-`mass * (acceleration + gravity)` feed-forward used when they were published;
-schema-2 artifacts also retain a unit rate-output conversion. Legacy artifacts
-are not silently promoted to v4 settings. Policies remain tied to the complete
-controller record embedded when they were trained.
+`x500-velocity-px4-v5` is the current comparison generation and uses alignment
+artifact schema 5. It carries PX4-normalized collective and torque through the
+pinned pseudo-inverse allocator and sequential desaturation, then applies the
+composed X500's `omega = 50 + 475*u` motor boundary and quadratic rotor curve.
+The normalized hover-thrust setting is distinct from the legacy physical hover
+fraction. Schema-4 artifacts retain their hover-scaled physical-force path;
+schema-2 and schema-3 artifacts retain the exact physical
+`mass * (acceleration + gravity)` feed-forward used when they were published.
+Schema-2 artifacts also retain a unit rate-output conversion. Legacy artifacts
+load with a zero normalized-hover sentinel and are not silently promoted to
+schema 5. Policies remain tied to the complete controller record embedded when
+they were trained.
 
 ## Controller contract
 
@@ -39,13 +42,12 @@ controller record embedded when they were trained.
 - command delay;
 - velocity P/I/D gains, with D applied to a filtered acceleration estimate;
 - velocity and velocity-derivative filter cutoffs, velocity-integral limits,
-  and the actuator-realized hover-thrust fraction after the shared quadratic
-  rotor curve;
+  normalized PX4 hover thrust, and the legacy physical hover-thrust fraction;
 - attitude P gains and yaw weight;
 - body-rate P/I/D/feed-forward gains, rate-derivative filtering, and
   rate-integral limits;
-- per-axis conversion from normalized rate-controller output to physical body
-  torque in N-m;
+- the legacy per-axis conversion from normalized rate-controller output to
+  physical body torque in N-m;
 - tilt, minimum/maximum collective-thrust fractions, and horizontal-thrust
   margin used by saturation and anti-windup;
 - thruster rise/fall constants and maximum thrust slew.
@@ -64,13 +66,17 @@ feed-forward is transformed into the body frame. The rate PID applies the
 previous integral to the current output, then advances the integral with PX4's
 large-error reduction factor for the next cycle.
 
-Velocity saturation uses conditional integration: an axis does not integrate
-when its error would push farther into a saturated thrust request. Integral
-limits remain active independently. The velocity controller forms desired
-body Z from horizontal acceleration and gravity, converts vertical acceleration
-to collective with the actuator-realized hover-thrust fraction, and divides by
-the body-Z vertical projection, matching PX4's acceleration-control mapping at
-the physical thrust boundary.
+The schema-5 velocity path follows pinned `MPC_ACC_DECOUPLE=1`: horizontal
+acceleration and gravity form desired body Z, vertical acceleration scales the
+normalized hover thrust, and collective is divided by the tilt-limited body-Z
+vertical projection. PX4's minimum thrust, horizontal margin, maximum thrust,
+vertical anti-windup, horizontal tracking anti-windup, and integral update
+ordering are preserved. The rate PID emits normalized torque directly.
+`CA_METHOD=2` selects multirotor sequential desaturation, and pinned
+`MC_AIRMODE=0` prioritizes thrust, roll/pitch, then yaw before clipping motor
+controls to `[0, 1]`. The composed bridge offset, scale, armed zero, and
+quadratic curve turn those controls into physical rotor thrust before the
+existing actuator response model.
 `VehicleState` remains a per-tick kinematic snapshot and does not gain
 acceleration; alignment derives acceleration from timestamped trace velocity.
 
@@ -145,14 +151,16 @@ positive stage. The current generation uses `staged-beam-v2`:
    useful candidate coverage while remaining within measured device memory.
 7. Make two passes through every parameter in the stage.
 
-Stage 1 fits delay, velocity filtering, and velocity P/I/D. Stage 2 fits
-attitude/yaw, rate P/I/D/feed-forward, rate-output torque scale, rate filtering,
-and tilt. Candidate centers come from pinned PX4 v1.17 values and use
+Stage 1 fits delay, normalized hover thrust, velocity filtering, and velocity
+P/I/D. Stage 2 fits attitude/yaw, rate P/I/D/feed-forward, rate filtering, and
+tilt. The legacy physical hover fraction and rate-output torque scale are not
+fit in schema 5. Candidate centers come from pinned PX4 v1.17 values and use
 deterministic 0.5x, 0.75x, 1.0x, 1.25x, and 1.5x values; zero is included for
 delay, integral, derivative, and feed-forward terms where meaningful. The
-torque-scale center comes from regressing logged normalized
+Historical torque-scale diagnostics regress logged normalized
 `vehicle_torque_setpoint` against the physical wrench reconstructed from the
-same ULog's motor outputs and the shared rotor model.
+same ULog's motor outputs and shared rotor model; schema 5 instead retains the
+normalized torque through allocation.
 Pinned `MPC_VEL_LP=0` disables the position controller's velocity low-pass; zero
 therefore means pass-through rather than a zero filter coefficient. Velocity-D
 and rate-D centers use the pinned 5 Hz `MPC_VELD_LP` and 20 Hz

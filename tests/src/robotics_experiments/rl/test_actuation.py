@@ -28,6 +28,7 @@ from robotics_experiments.rl import (
     initial_actuation_controller_state,
     rotor_forces_to_body_wrench,
 )
+from robotics_experiments.rl.actuation import _normalized_controls_to_omega
 
 _MASS_KG = 1.5
 _GRAVITY = 9.81
@@ -57,6 +58,9 @@ def _quad_geometry() -> MixerGeometry:
         rolling_moment_coefficient=_ROLLING_MOMENT * ones,
         min_rotor_velocity=np.zeros(4),
         max_rotor_velocity=_MAX_OMEGA * ones,
+        input_offset=np.zeros(4),
+        input_scaling=_MAX_OMEGA * ones,
+        zero_position_armed=np.zeros(4),
     )
 
 
@@ -93,6 +97,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_fraction=0.0,
+        hover_thrust_normalized=0.0,
         kp_att=(8.0, 8.0, 3.0),
         attitude_yaw_weight=0.4,
         kp_rate=(0.3, 0.3, 0.1),
@@ -178,6 +183,97 @@ def test_velocity_px4_hover_fraction_sets_collective_feed_forward():
     assert np.allclose(torque_body, 0.0, atol=1e-9)
 
 
+def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
+    geometry = replace(
+        _quad_geometry(),
+        input_scaling=np.full(4, 475.0),
+        zero_position_armed=np.full(4, 50.0),
+        max_rotor_velocity=np.full(4, 525.0),
+    )
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_normalized=0.57,
+        kp_vel=(0.0, 0.0, 0.0),
+        ki_vel=(0.0, 0.0, 0.0),
+        kd_vel=(0.0, 0.0, 0.0),
+    )
+    params = build_actuation_params(
+        geometry=geometry,
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+
+    _controller, omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    physical_collective_fraction = float(
+        np.sum(geometry.rotor_constant * np.square(omega)) / params.max_total_thrust
+    )
+
+    assert np.allclose(omega, 50.0 + 475.0 * 0.57)
+    assert physical_collective_fraction == pytest.approx((320.75 / 525.0) ** 2)
+
+
+def test_normalized_allocator_matches_px4_mix_and_sequential_desaturation():
+    settings = replace(_controller_settings(), hover_thrust_normalized=0.57)
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+
+    unsaturated = _normalized_controls_to_omega(
+        params,
+        0.57,
+        np.array([0.1, 0.0, 0.0]),
+    )
+    saturated = _normalized_controls_to_omega(
+        params,
+        0.9,
+        np.array([1.0, 0.0, 0.0]),
+    )
+
+    assert unsaturated / _MAX_OMEGA == pytest.approx(
+        [0.4992893219, 0.6407106781, 0.6407106781, 0.4992893219]
+    )
+    assert saturated / _MAX_OMEGA == pytest.approx([0.0, 1.0, 1.0, 0.0], abs=1e-12)
+
+
+def test_normalized_velocity_anti_windup_blocks_vertical_saturation():
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_normalized=0.57,
+        kp_vel=(0.0, 0.0, 10.0),
+        ki_vel=(0.0, 0.0, 5.0),
+        kd_vel=(0.0, 0.0, 0.0),
+        max_collective_thrust_fraction=0.4,
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+    controller = initial_actuation_controller_state()
+    for _step in range(100):
+        controller, omega = action_to_rotor_omega(
+            params,
+            controller,
+            np.array([0.0, 0.0, 1.0, 0.0]),
+            _level_rest_state(),
+            0.004,
+        )
+
+    assert controller.velocity_integral_enu[2] == pytest.approx(0.0)
+    assert np.all((omega >= 0.0) & (omega <= _MAX_OMEGA))
+
+
 def test_ctbr_hover_action_cancels_weight():
     params = _params("ctbr")
     force_body, torque_body = _realized_wrench(params, hover_action(params), _level_rest_state())
@@ -244,6 +340,40 @@ def test_rate_output_scale_converts_normalized_pid_output_to_physical_torque():
     assert scaled_torque[0] == pytest.approx(2.0 * unit_torque[0])
 
 
+def test_normalized_velocity_rate_pid_ignores_legacy_physical_torque_scale():
+    base = replace(_controller_settings(), hover_thrust_normalized=0.57)
+    action = np.array([0.0, 0.0, 0.0, 0.5])
+    unit_params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=base,
+        mass=_MASS_KG,
+    )
+    scaled_params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(base, rate_output_scale_nm=(20.0, 20.0, 20.0)),
+        mass=_MASS_KG,
+    )
+
+    _controller, unit_omega = action_to_rotor_omega(
+        unit_params,
+        initial_actuation_controller_state(),
+        action,
+        _level_rest_state(),
+        0.004,
+    )
+    _controller, scaled_omega = action_to_rotor_omega(
+        scaled_params,
+        initial_actuation_controller_state(),
+        action,
+        _level_rest_state(),
+        0.004,
+    )
+
+    assert np.allclose(scaled_omega, unit_omega)
+
+
 def test_rate_integral_affects_the_following_control_cycle():
     settings = replace(
         _controller_settings(),
@@ -306,7 +436,15 @@ def test_velocity_integral_does_not_wind_up_against_thrust_saturation():
 
 
 def test_controller_filters_are_sequential_and_fresh_state_resets_them():
-    params = _params("velocity")
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            _controller_settings(),
+            hover_thrust_normalized=0.57,
+        ),
+        mass=_MASS_KG,
+    )
     controller_state, _omega = action_to_rotor_omega(
         params,
         initial_actuation_controller_state(),
@@ -372,8 +510,17 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         initial_flight_controller_state,
     )
 
-    geometry = _quad_geometry()
-    settings = replace(_controller_settings(), hover_thrust_fraction=0.57)
+    geometry = replace(
+        _quad_geometry(),
+        input_scaling=np.full(4, 475.0),
+        zero_position_armed=np.full(4, 50.0),
+        max_rotor_velocity=np.full(4, 525.0),
+    )
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_fraction=0.375,
+        hover_thrust_normalized=0.57,
+    )
     action_cfg = _action_cfg("velocity")
     numpy_params = build_actuation_params(
         geometry=geometry,
@@ -389,6 +536,9 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         rolling_moment_coefficient=geometry.rolling_moment_coefficient,
         min_rotor_velocity=geometry.min_rotor_velocity,
         max_rotor_velocity=geometry.max_rotor_velocity,
+        input_offset=geometry.input_offset,
+        input_scaling=geometry.input_scaling,
+        zero_position_armed=geometry.zero_position_armed,
         action_cfg=action_cfg,
         controller_settings=settings,
         policy_contract=None,
@@ -501,7 +651,11 @@ def test_built_actuation_parameter_arrays_are_read_only_and_non_aliased():
         params.geometry.rolling_moment_coefficient,
         params.geometry.min_rotor_velocity,
         params.geometry.max_rotor_velocity,
+        params.geometry.input_offset,
+        params.geometry.input_scaling,
+        params.geometry.zero_position_armed,
         params.allocation_pinv,
+        params.normalized_allocation_mix,
         params.kp_rate,
         params.ki_rate,
         params.kd_rate,

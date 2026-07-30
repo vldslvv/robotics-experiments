@@ -188,6 +188,9 @@ def _geometry_and_mass(*, airframe_name: str) -> tuple[MixerGeometry, float]:
             rolling_moment_coefficient=np.empty(rotor_count),
             min_rotor_velocity=np.empty(rotor_count),
             max_rotor_velocity=np.empty(rotor_count),
+            input_offset=np.empty(rotor_count),
+            input_scaling=np.empty(rotor_count),
+            zero_position_armed=np.empty(rotor_count),
         ),
         body_mass + moving_pusher_mass,
     )
@@ -287,6 +290,9 @@ def _actuator_boundary_report(
         rolling_moment_coefficient=np.asarray(bridge.rolling_moment_coefficient),
         min_rotor_velocity=np.asarray(bridge.min_rotor_velocity),
         max_rotor_velocity=np.asarray(bridge.max_rotor_velocity),
+        input_offset=np.asarray(bridge.input_offset),
+        input_scaling=np.asarray(bridge.input_scaling),
+        zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     reference = json.loads(reference_path.read_text())
     if reference.get("schema_version") != 3:
@@ -490,6 +496,9 @@ def _report(
         rolling_moment_coefficient=np.asarray(bridge.rolling_moment_coefficient),
         min_rotor_velocity=np.asarray(bridge.min_rotor_velocity),
         max_rotor_velocity=np.asarray(bridge.max_rotor_velocity),
+        input_offset=np.asarray(bridge.input_offset),
+        input_scaling=np.asarray(bridge.input_scaling),
+        zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     controller_settings = load_alignment_artifact(alignment_artifact_path).selected_settings
     params = build_actuation_params(

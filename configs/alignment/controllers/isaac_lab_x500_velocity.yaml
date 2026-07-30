@@ -1,5 +1,5 @@
-alignment_id: x500-velocity-px4-v4
-controller_id: isaac-lab-x500-velocity-v4
+alignment_id: x500-velocity-px4-v5
+controller_id: isaac-lab-x500-velocity-v5
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -26,14 +26,17 @@ settings:
   # Physical collective fraction of the composed X500's maximum thrust. The
   # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
   hover_thrust_fraction: 0.375
+  # PX4's normalized hover-thrust boundary. Schema 5 uses this value before
+  # control allocation; the physical fraction above is legacy-only.
+  hover_thrust_normalized: 0.57
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
-  # PX4 rate PID output is normalized before allocation; this converts it to
-  # the physical body torque consumed by the Lab allocation.
+  # Legacy schemas convert the normalized rate PID output to physical torque.
+  # Schema 5 sends normalized torque directly to the PX4 allocator.
   rate_output_scale_nm: [6.5, 6.5, 1.3]
   rate_derivative_filter_hz: 20.0
   rate_integral_limit_nm: [0.30, 0.30, 0.30]
@@ -60,9 +63,9 @@ parameters:
   - field: velocity_derivative_filter_hz
     stage: 1
     candidates: [2.5, 3.75, 5.0, 6.25, 7.5]
-  - field: hover_thrust_fraction
+  - field: hover_thrust_normalized
     stage: 1
-    candidates: [0.35, 0.36, 0.365, 0.375, 0.385, 0.39, 0.40]
+    candidates: [0.54, 0.55, 0.56, 0.57, 0.572, 0.58, 0.59, 0.60]
   - field: kp_vel
     stage: 1
     candidates:
@@ -146,15 +149,6 @@ parameters:
       - [0.05, 0.05, 0.05]
       - [0.0625, 0.0625, 0.0625]
       - [0.075, 0.075, 0.075]
-  - field: rate_output_scale_nm
-    stage: 2
-    candidates:
-      - [1.0, 1.0, 1.0]
-      - [3.25, 3.25, 0.65]
-      - [4.875, 4.875, 0.975]
-      - [6.5, 6.5, 1.3]
-      - [8.125, 8.125, 1.625]
-      - [9.75, 9.75, 1.95]
   - field: rate_derivative_filter_hz
     stage: 2
     candidates: [10.0, 15.0, 20.0, 25.0, 30.0]

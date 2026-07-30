@@ -411,7 +411,7 @@ def align(
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return AlignmentArtifact(
-        schema_version=4,
+        schema_version=5,
         alignment_id=target.alignment_id,
         run_id=run_id,
         target_controller_id=target.controller_id,

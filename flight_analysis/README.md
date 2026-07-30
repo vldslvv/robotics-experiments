@@ -64,7 +64,7 @@ physics tick, normalized motor RMSE above 0.01, or collective-thrust RMSE above
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --alignment-artifact .build/alignment/x500-velocity-px4-v4/latest \
+  --alignment-artifact .build/alignment/x500-velocity-px4-v5/latest \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 
