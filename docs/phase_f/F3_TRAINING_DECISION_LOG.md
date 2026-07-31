@@ -5018,3 +5018,22 @@ manifest. Attempt 29 should add the evidenced `[1.575, 1.575, 3.0]`
 proportional and `[0.2, 0.2, 2.0]` integral vectors to the declarative search,
 seed the complete successful integration combination as the base setting, and
 run a fresh capture, actuator audit, sweep, fit, and acceptance sequence.
+
+### 112. Seed the integration-passing horizontal P/I combination
+
+Date: 2026-07-31.
+
+Attempt 29 makes no structural controller or plant change. It advances the
+target controller identifier to `isaac-lab-x500-velocity-v31`, adds the two
+complete velocity-gain vectors evidenced by Attempt 28 to the declarative
+stage-1 candidates, and seeds their integration-passing combination as the
+base setting. All remaining base fields come from Attempt 27 candidate 6,172,
+which passed every exact-action gate.
+
+The base horizontal proportional gain rises from 1.35 to 1.575 while its
+integral gain falls from 0.4 to 0.2. The former cleared the four-second hover
+settling limit; the latter removed the goto overshoot and restored the handoff
+range. The fresh staged fit must independently prove that the combination
+still passes all seven exact-action gates. The schema, allocator, plant,
+probes, gates, beam width, worker count, policy interface, reward, and training
+configuration remain unchanged.

@@ -204,6 +204,11 @@ fraction and rate-output torque scale are not fit in schema 5. Candidate
 centers come from pinned PX4 v1.17 values and use
 deterministic 0.5x, 0.75x, 1.0x, 1.25x, and 1.5x values; zero is included for
 delay, integral, derivative, and feed-forward terms where meaningful. The
+horizontal velocity table also includes the integration-evidenced
+`kp=[1.575, 1.575]`, `ki=[0.2, 0.2]` combination while retaining the selected
+vertical gains. It accelerates the large position-return envelope without
+using the four-second downstream gate as a fitting metric; exact-action gates
+still decide whether the combination is acceptable.
 Historical torque-scale diagnostics regress logged normalized
 `vehicle_torque_setpoint` against the physical wrench reconstructed from the
 same ULog's motor outputs and shared rotor model; schema 5 instead retains the
