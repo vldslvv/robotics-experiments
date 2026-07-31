@@ -4073,3 +4073,68 @@ The target controller identifier advances to
 fingerprint. No controller setting, candidate, equation, allocator, plant,
 actuator, probe, gate, worker, policy interface, reward, or training
 configuration changes.
+
+### 84. Attempt 15 validates the boundary correction but loses the retained basin
+
+Date: 2026-07-31.
+
+Attempt 15 completed from clean source commit `a03ea00` as
+`x500-velocity-px4-v5/20260731T080850Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.00451, and collective RMSE peaked at 0.0176 N.
+
+The sweep evaluated 6373 unique candidates, 6369 of them usable, and selected
+candidate 5990 under comparison fingerprint
+`b0c8d121dbba45b3a7525cac967946ebfa521548ac6d4c9bde12274e618c1bbd`.
+
+| Held-out metric | Attempt 15 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 16.005 mm | 5 mm |
+| Residual-speed error | 0.00687 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.08% | 10% |
+| Yaw-rate NRMSE | 4.87% | 10% |
+| Heading error | 2.883 deg | 3 deg |
+| Combined endpoint error | 46.364 mm | 10 mm |
+
+The stop-time correction behaves as intended: the exact 0.10 s trace-grid
+result passes. The fresh fit nevertheless rejects with braking and endpoint
+failures and a largest normalized excess of 3.636, so it is a no-progress
+result against Attempt 14's one failure and 1.000 excess. All 1198 candidates
+that failed only two gates failed the same braking-plus-endpoint pair; no
+candidate failed fewer. The remaining usable candidates comprise 1109 with
+three failures, 615 with four, 2275 with five, and 1172 with six.
+Candidate-wide minima were 3.923 mm braking error, 0.00076 m/s residual speed,
+0.100 s stop-time error, 5.90% velocity NRMSE, 2.54% yaw-rate NRMSE, 1.864
+degrees heading error, and 5.969 mm endpoint error.
+
+The selected settings use 0.024 s command delay, velocity P/I/D
+`[1.35, 1.575, 3]`, `[0.6, 0.6, 3]`, and zero, 5 Hz velocity filtering, a
+3.75 Hz velocity-derivative filter, normalized hover thrust 0.57, attitude P
+`[4, 4, 2.8]`, yaw weight 0.3, rate P/I/D
+`[0.225, 0.225, 0.3]`, `[0.3, 0.3, 0.15]`, and
+`[0.00225, 0.00225, 0]`, symmetric rate feed-forward 0.025, a 15 Hz
+rate-derivative filter, 0.15 rate-integral limits, 45 degrees maximum tilt,
+and a 0.08 s actuator rise time.
+
+Controller replay places the low-speed braking profile within the normalized
+motor limit at 0.00390 RMSE, but its physical collective RMSE is 0.112 N.
+The combined profile reaches 0.02182 normalized motor RMSE, with its largest
+normalized torque residual on yaw, and 0.127 N collective RMSE. The
+reference-side bridge audit passes, so the plant mapping remains excluded as
+the first seam.
+
+The complete Attempt 14 settings are all still represented by declarative
+candidates, but their combination is absent from Attempt 15's evaluated
+candidate set. The generic staged beam pruned an intermediate before that
+cross-stage combination could be reconstructed. Attempt 16 should therefore
+make the exact Attempt 14 one-gate settings the base candidate. This is the
+smallest evidenced way to guarantee evaluation of the retained basin after
+the reset and stop-time corrections; no new candidate or controller equation
+is justified yet.
+
+Attempt 15 used one worker, 41 GPU batches, and 1498.40 s for the useful
+sweep, or 4.25 candidate evaluations/s. GPU utilization averaged 26.28%,
+reached 41% at p95 and 54% at peak, and used 4379 MiB peak memory.
+Sequential Isaac/PhysX stepping remains the measured bottleneck.
