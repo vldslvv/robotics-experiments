@@ -37,6 +37,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import Any, Protocol
 
 import numpy as np
 import torch
@@ -60,6 +61,26 @@ __all__ = [
 _GRAVITY_M_S2 = 9.81
 _EPS = 1e-9
 _SATURATION_EPS = 1e-5
+
+
+class _ResettableThruster(Protocol):
+    tau_inc_s: torch.Tensor
+    tau_dec_s: torch.Tensor
+
+    def reset_idx(self, env_ids: Any, /) -> None: ...
+
+
+def _reset_thruster_preserving_time_constants(
+    *,
+    thruster: _ResettableThruster,
+    env_ids: Any,
+) -> None:
+    """Reset dynamic thrust state without erasing fitted per-environment taus."""
+    tau_inc_s = thruster.tau_inc_s[env_ids].clone()
+    tau_dec_s = thruster.tau_dec_s[env_ids].clone()
+    thruster.reset_idx(env_ids)
+    thruster.tau_inc_s[env_ids] = tau_inc_s
+    thruster.tau_dec_s[env_ids] = tau_dec_s
 
 
 @dataclass(frozen=True)
@@ -960,6 +981,28 @@ def _replace_controller_settings_batch(
         max_collective_thrust_fraction=_scalars("max_collective_thrust_fraction"),
         horizontal_thrust_margin_fraction=_scalars("horizontal_thrust_margin_fraction"),
     )
+
+
+def _initial_rotor_thrust_from_controller_state(
+    *,
+    params: _FlightActuationParams,
+    state: _FlightControllerState,
+    action: torch.Tensor,
+    attitude_wxyz: torch.Tensor,
+    linear_velocity_world: torch.Tensor,
+    angular_velocity_body: torch.Tensor,
+) -> torch.Tensor:
+    """Reconstruct ongoing-flight rotor thrust without advancing controller state."""
+    _next_state, omega = action_to_rotor_omega(
+        params,
+        state,
+        action,
+        attitude_wxyz,
+        linear_velocity_world,
+        angular_velocity_body,
+        params.controller_dt_s,
+    )
+    return params.rotor_constant * omega.square()
 
 
 def initial_flight_controller_state(

@@ -16,6 +16,7 @@ from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     _replace_controller_settings_batch,
+    _reset_thruster_preserving_time_constants,
     action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
@@ -334,4 +335,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
             state=self._controller_state,
             env_ids=env_ids,
         )
-        self._thruster.reset_idx(env_ids)
+        _reset_thruster_preserving_time_constants(
+            thruster=self._thruster,
+            env_ids=env_ids,
+        )

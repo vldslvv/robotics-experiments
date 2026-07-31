@@ -3964,3 +3964,28 @@ configuration remain unchanged.
 Attempt 13 used one worker, 41 GPU batches, and 1494.83 s for the useful
 sweep, or 3.98 candidate evaluations/s. GPU utilization averaged 26.13%,
 reached 40% at p95 and 47% at peak, and used 4569 MiB peak memory.
+
+### 81. Restore the ongoing-flight thruster boundary on profile reset
+
+Date: 2026-07-31.
+
+Attempt 14 makes the one structural correction demonstrated by Attempt 13.
+Profile reset continues to clear dynamic Thruster state, but it now preserves
+the fitted per-environment rise/fall constants across the pinned
+`reset_idx()` call. After the PX4 velocity and rate controller states are
+seeded, the replay reconstructs the neutral-command rotor thrust and uses it
+as the Thruster's current state. The controller state itself is not advanced
+by this priming calculation.
+
+This matches the probe contract: every profile starts while the captured
+vehicle is already armed and hovering, so stopped rotors are not a valid
+initial actuator boundary. It also makes the declared actuator candidates
+independent of the target YAML's construction-time base values. Host tests
+guard preservation of distinct per-environment rise/fall constants and
+nonzero seeded rotor thrust without controller-state advancement.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v15`. Attempt 13's base settings, 32-wide search,
+declarative candidates, controller equations, allocator, physical rotor
+curve, probes, gates, worker count, policy interface, reward, and training
+configuration remain unchanged.

@@ -639,6 +639,101 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
     assert body_ids == [2]
 
 
+def test_thruster_reset_preserves_fitted_time_constants():
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+        _reset_thruster_preserving_time_constants,
+    )
+
+    class Thruster:
+        def __init__(self):
+            self.tau_inc_s = torch.tensor([[0.01], [0.02], [0.04]])
+            self.tau_dec_s = torch.tensor([[0.08], [0.04], [0.02]])
+            self.curr_thrust = torch.ones((3, 1))
+
+        def reset_idx(self, env_ids, /):
+            self.tau_inc_s[env_ids] = -1.0
+            self.tau_dec_s[env_ids] = -1.0
+            self.curr_thrust[env_ids] = 0.0
+
+    thruster = Thruster()
+
+    _reset_thruster_preserving_time_constants(
+        thruster=thruster,
+        env_ids=torch.tensor([0, 2]),
+    )
+
+    assert torch.equal(thruster.tau_inc_s, torch.tensor([[0.01], [0.02], [0.04]]))
+    assert torch.equal(thruster.tau_dec_s, torch.tensor([[0.08], [0.04], [0.02]]))
+    assert torch.equal(thruster.curr_thrust, torch.tensor([[0.0], [1.0], [0.0]]))
+
+
+def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state():
+    torch = pytest.importorskip("torch")
+    from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+        _initial_rotor_thrust_from_controller_state,
+        build_flight_actuation_params,
+        initial_flight_controller_state,
+        seed_flight_controller_state,
+    )
+
+    geometry = replace(
+        _quad_geometry(),
+        input_scaling=np.full(4, 475.0),
+        zero_position_armed=np.full(4, 50.0),
+        max_rotor_velocity=np.full(4, 525.0),
+    )
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_fraction=0.375,
+        hover_thrust_normalized=0.57,
+    )
+    params = build_flight_actuation_params(
+        kind="velocity",
+        positions_body=geometry.positions_body,
+        rot_dir=geometry.rot_dir,
+        rotor_constant=geometry.rotor_constant,
+        rolling_moment_coefficient=geometry.rolling_moment_coefficient,
+        min_rotor_velocity=geometry.min_rotor_velocity,
+        max_rotor_velocity=geometry.max_rotor_velocity,
+        input_offset=geometry.input_offset,
+        input_scaling=geometry.input_scaling,
+        zero_position_armed=geometry.zero_position_armed,
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        policy_contract=None,
+        mass=_MASS_KG,
+        controller_dt_s=0.004,
+        device="cpu",
+    )
+    zero = torch.zeros((1, 3))
+    state = seed_flight_controller_state(
+        state=initial_flight_controller_state(num_envs=1, device="cpu"),
+        params=params,
+        linear_velocity_world=zero,
+        angular_velocity_body=zero,
+        acceleration_setpoint_world=zero,
+        linear_acceleration_world=zero,
+        angular_acceleration_body=zero,
+        rate_integral_body=zero,
+        valid=torch.tensor([True]),
+    )
+    velocity_integral_before = state.velocity_integral_world.clone()
+
+    thrust = _initial_rotor_thrust_from_controller_state(
+        params=params,
+        state=state,
+        action=torch.zeros((1, 4)),
+        attitude_wxyz=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        linear_velocity_world=zero,
+        angular_velocity_body=zero,
+    )
+
+    assert thrust.shape == (1, 4)
+    assert torch.all(thrust > 0.0)
+    assert torch.equal(state.velocity_integral_world, velocity_integral_before)
+
+
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (

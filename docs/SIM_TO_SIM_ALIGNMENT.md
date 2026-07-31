@@ -60,8 +60,12 @@ physics sample and must remain sequentially equivalent. Controller state,
 command-delay buffers, and thruster state are cleared on every environment
 reset and candidate change. Alignment trace schema 4 then restores the PX4
 velocity acceleration/setpoint boundary and body-rate derivative/integral
-boundary after each probe's kinematic reset. Older trace schemas preserve the
-zero-controller-state replay under which they were captured.
+boundary after each probe's kinematic reset. Because every captured profile
+starts in ongoing flight, its replay also primes current rotor thrust from that
+seeded neutral-command controller boundary. Profile reset preserves the
+candidate's rise/fall constants instead of re-sampling the construction-time
+Thruster ranges. Older trace schemas preserve the zero-controller-state replay
+under which they were captured.
 
 The attitude stage uses PX4's reduced-quaternion law: roll and pitch align the
 thrust vector first, yaw error is weighted and recombined, and world-Z yaw-rate
@@ -200,7 +204,8 @@ normalized rotor-speed RMSE 0.01 and collective-thrust RMSE 0.05 N. The
 corrected 250 Hz replay crossed the collective-thrust threshold, so the current
 definition includes an explicit third stage for rise/fall time constants and
 thrust slew. These candidates are applied independently per Lab environment
-after every probe reset; they are not absorbed into the controller stages.
+and preserved across every probe reset; they are not absorbed into the
+controller stages.
 
 ## Metrics, quality, and publication
 

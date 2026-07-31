@@ -229,6 +229,7 @@ def _make_env(
             from isaaclab.utils import math as math_utils
 
             from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+                _initial_rotor_thrust_from_controller_state,
                 seed_flight_controller_state,
             )
 
@@ -266,10 +267,11 @@ def _make_env(
                 env_ids=torch.arange(self.num_envs, device=self.device),
                 root_state=root_state,
             )
+            linear_velocity_world = root_state[:, 7:10]
             self._controller_state = seed_flight_controller_state(
                 state=self._controller_state,  # type: ignore[has-type]  # Isaac base owns state.
                 params=self.actuation_params,
-                linear_velocity_world=root_state[:, 7:10],
+                linear_velocity_world=linear_velocity_world,
                 angular_velocity_body=angular_body,
                 acceleration_setpoint_world=torch.as_tensor(
                     [
@@ -320,6 +322,14 @@ def _make_env(
                     dtype=torch.bool,
                     device=self.device,
                 ),
+            )
+            self._thruster.curr_thrust[:] = _initial_rotor_thrust_from_controller_state(
+                params=self.actuation_params,
+                state=self._controller_state,
+                action=torch.zeros_like(self.actions),
+                attitude_wxyz=quaternion,
+                linear_velocity_world=linear_velocity_world,
+                angular_velocity_body=angular_body,
             )
 
         def body_velocities(self) -> list[tuple[float, float, float]]:
