@@ -20,6 +20,7 @@ _DEFAULT_SENSOR_RATE_HZ = 250.0
 _STANDARD_GRAVITY_MPS2 = 9.80665
 _DRY_AIR_GAS_CONSTANT_J_KG_K = 287.05
 _MAGNETOMETER_NOISE_DENSITY_GA_SQRT_HZ = 0.4e-3
+_DETERMINISTIC_EXCITATION_PERIOD_US = 20_000
 
 
 class _PegasusSensorSuite:
@@ -122,14 +123,18 @@ class _PegasusSensorSuite:
         sample: dict,
         sim_time_us: int,
     ) -> dict:
-        time_s = sim_time_us * 1e-6
         amplitude_ga = (
             _MAGNETOMETER_NOISE_DENSITY_GA_SQRT_HZ
             * math.sqrt(self._update_rate_hz)
             * self._magnetometer_noise_scale
         )
-        phases_rad = 2.0 * math.pi * time_s * np.array([17.0, 23.0, 29.0])
-        phases_rad += np.array([0.0, 2.0 * math.pi / 3.0, 4.0 * math.pi / 3.0])
+        phase_rad = (
+            2.0
+            * math.pi
+            * (sim_time_us % _DETERMINISTIC_EXCITATION_PERIOD_US)
+            / _DETERMINISTIC_EXCITATION_PERIOD_US
+        )
+        phases_rad = phase_rad + np.array([0.0, 2.0 * math.pi / 3.0, 4.0 * math.pi / 3.0])
         magnetic_field = np.asarray(sample["magnetic_field"], dtype=np.float64)
         return {"magnetic_field": magnetic_field + amplitude_ga * np.sin(phases_rad)}
 
@@ -139,8 +144,13 @@ class _PegasusSensorSuite:
         sample: dict,
         sim_time_us: int,
     ) -> dict:
-        time_s = sim_time_us * 1e-6
-        pressure_delta_pa = self._barometer_noise_std_pa * math.sin(2.0 * math.pi * 7.0 * time_s)
+        phase_rad = (
+            2.0
+            * math.pi
+            * (sim_time_us % _DETERMINISTIC_EXCITATION_PERIOD_US)
+            / _DETERMINISTIC_EXCITATION_PERIOD_US
+        )
+        pressure_delta_pa = self._barometer_noise_std_pa * math.sin(phase_rad)
         temperature_k = float(sample["temperature"]) + 273.15
         pressure_pa = float(sample["absolute_pressure"]) * 100.0
         air_density_kg_m3 = pressure_pa / (_DRY_AIR_GAS_CONSTANT_J_KG_K * temperature_k)

@@ -233,6 +233,7 @@ def test_mavlink_port_deterministic_sensor_excitation_is_repeatable(monkeypatch)
         port.start()
         lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
         lockstep_exchange(port, VehicleState.hover_at(sim_time_us=104_000))
+        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=120_000))
         return backend
 
     first = samples_for_seed(seed=1)
@@ -253,6 +254,11 @@ def test_mavlink_port_deterministic_sensor_excitation_is_repeatable(monkeypatch)
         first.mag_updates[1]["magnetic_field"],
     )
     assert first.bar_updates[0]["absolute_pressure"] != first.bar_updates[1]["absolute_pressure"]
+    np.testing.assert_array_equal(
+        first.mag_updates[0]["magnetic_field"],
+        first.mag_updates[2]["magnetic_field"],
+    )
+    assert first.bar_updates[0] == first.bar_updates[2]
 
 
 def test_mavlink_port_rejects_unknown_sensor_excitation_mode(monkeypatch):

@@ -4904,3 +4904,21 @@ phases after such shifts. Attempt 27 should retain enhanced determinism and
 change only the deterministic excitation to a 50 Hz sequence. It will still
 vary across the five 4 ms physics samples in each policy interval, while every
 profile shifted by whole policy ticks receives the same profile-local sequence.
+
+### 108. Phase-lock health excitation to the policy cadence
+
+Date: 2026-07-31.
+
+Attempt 27 changes only the deterministic barometer and magnetometer excitation
+period to 20 ms, or 50 Hz. The pattern is computed from integer simulation
+microseconds, repeats exactly at each 20 ms policy tick, and still presents five
+distinct values across the 250 Hz physics samples. A sensor regression verifies
+both different adjacent physics samples and exact equality one policy interval
+later.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v29`, producing a new comparison fingerprint.
+Enhanced PhysX determinism, excitation amplitudes, controller, allocator,
+composed plant, actuator model, probes, gates, candidates, worker count, policy
+interface, reward, and training configuration remain unchanged. Attempt 27
+will run two capture controls before deciding whether to resume fitting.

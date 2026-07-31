@@ -476,7 +476,9 @@ the IMU and GPS noise/bias terms.
 `px4.sensor_excitation_mode` selects stochastic Pegasus barometer and
 magnetometer samples or deterministic simulation-time excitation at the same
 configured amplitudes. The deterministic mode is intended for repeatable
-controller-boundary captures; normal runtime remains stochastic.
+controller-boundary captures and repeats every 20 ms so a whole-policy-tick
+profile shift preserves the profile-local sample sequence; normal runtime
+remains stochastic.
 `px4.barometer_noise_std_pa` independently controls pressure noise because PX4
 HIL rejects a perfectly constant barometer stream as stale.
 `px4.magnetometer_noise_scale` independently scales magnetic white noise and

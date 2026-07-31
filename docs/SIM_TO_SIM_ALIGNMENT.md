@@ -115,8 +115,10 @@ deterministic barometer pressure and magnetometer excitation. PX4 rejects a perf
 constant pressure stream as stale, while the composed exact magnetic field is
 outside its yaw-initialization innovation gate. Alignment scales the normal
 pressure and magnetic amplitudes to 0.1 and evaluates fixed-frequency signals
-from absolute simulation time, retaining health variation without random
-estimator input. The capture still seeds NumPy from
+from simulation time. The signals repeat every 20 ms policy interval while
+changing across its five 4 ms physics samples, retaining health variation
+without random estimator input or profile-relative phase shifts. The capture
+still seeds NumPy from
 `alignment.capture.sensor_seed` before the bridge hosts are constructed so any
 unexpected stochastic consumer is repeatable. Normal integration runs retain
 the stochastic Pegasus process models. Structural sensor changes require
