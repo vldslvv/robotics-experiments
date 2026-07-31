@@ -4658,3 +4658,27 @@ actuator model, probe suite, gates, candidate ranges, beam width, worker count,
 policy interface, reward, and training configuration remain unchanged.
 Attempt 21 will run two captures first. Another full sweep is justified only if
 the capture succeeds and materially reduces held-out trace variation.
+
+### 97. Attempt 21 requires magnetometer excitation for yaw alignment
+
+Date: 2026-07-31.
+
+The Attempt 21 source commit `79b2266` launched capture
+`x500-velocity-px4-v5/20260731T131601Z` but did not reach the probe routine.
+PX4 received the arm command at 12.132 s and denied it with unresolved system
+health failures until the existing ten-second arm timeout expired. The ULog is
+preserved; this is an infrastructure failure rather than a completed fitting
+attempt.
+
+The ULog localizes the failure. Barometer height fusion remained active and
+GPS checks passed, but every magnetometer observation was rejected. The exact
+Pegasus field's Z innovation test ratio was 2.730, above the PX4 gate, so yaw
+never aligned and GNSS position/velocity fusion never started. The prior
+stochastic magnetometer stream intermittently entered that gate and allowed
+normal estimator initialization.
+
+Attempt 22 should therefore retain seeded magnetometer noise as well as the
+seeded 1 Pa pressure stream, while keeping IMU and GPS stochastic terms
+disabled. This remains the same sensor-boundary isolation: it preserves the two
+HIL excitations demonstrated to be required by PX4 and removes the IMU/GPS
+perturbations most directly coupled to velocity and position estimation.
