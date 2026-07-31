@@ -8,9 +8,9 @@ term-for-term:
 
 - the actuation cascade exported by ``robotics_experiments.rl``
   (numpy single-env oracle: ``ActuationParams`` + ``action_to_rotor_omega``) --
-  this module batches the velocity/ctbr cascade over ``[num_envs]``; schema 5
-  reproduces PX4's normalized allocator and legacy schemas use the physical
-  allocation pseudoinverse;
+  this module batches the velocity/ctbr cascade over ``[num_envs]``; schema 6
+  adds smooth horizontal large-error gain scheduling to schema 5's normalized
+  allocator, while older physical schemas use the allocation pseudoinverse;
 - the per-rotor -> body-wrench reduction exported as
   ``robotics_experiments.rl.rotor_forces_to_body_wrench`` --
   ``_rotor_forces_to_body_wrench`` batches it.
@@ -123,6 +123,9 @@ class _FlightActuationParams:
     hover_thrust_fraction: float | torch.Tensor
     hover_thrust_normalized: float | torch.Tensor
     kp_vel: torch.Tensor
+    horizontal_velocity_error_gain_scale: float | torch.Tensor
+    horizontal_velocity_error_gain_start_mps: float | torch.Tensor
+    horizontal_velocity_error_gain_full_mps: float | torch.Tensor
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_filter_hz: float | torch.Tensor
@@ -509,6 +512,7 @@ def _normalized_thrust_world(
     hover_thrust_normalized: torch.Tensor,
     desired_acceleration: torch.Tensor,
     velocity_error: torch.Tensor,
+    horizontal_proportional_gain: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     gravity = torch.full_like(desired_acceleration[:, 2:3], _GRAVITY_M_S2)
     desired_z = torch.cat([desired_acceleration[:, :2], gravity], dim=-1)
@@ -558,7 +562,7 @@ def _normalized_thrust_world(
     arw_active = desired_acceleration[:, :2].square().sum(
         dim=-1
     ) > produced_acceleration.square().sum(dim=-1)
-    gain = 2.0 / (params.kp_vel[:, 0] if params.kp_vel.ndim == 2 else params.kp_vel[0])
+    gain = 2.0 / horizontal_proportional_gain
     adjusted_horizontal_error = velocity_error[:, :2] - gain.unsqueeze(-1) * (
         desired_acceleration[:, :2] - produced_acceleration
     )
@@ -571,6 +575,29 @@ def _normalized_thrust_world(
         [adjusted_horizontal_error, adjusted_vertical_error.unsqueeze(-1)],
         dim=-1,
     )
+
+
+def _effective_velocity_proportional_gain(
+    params: _FlightActuationParams, velocity_error: torch.Tensor, /
+) -> torch.Tensor:
+    horizontal_error = velocity_error[:, :2].norm(dim=-1)
+    start = _environment_values(
+        params.horizontal_velocity_error_gain_start_mps,
+        horizontal_error,
+    )
+    full = _environment_values(
+        params.horizontal_velocity_error_gain_full_mps,
+        horizontal_error,
+    )
+    transition = torch.clamp((horizontal_error - start) / (full - start), 0.0, 1.0)
+    blend = transition.square() * (3.0 - 2.0 * transition)
+    maximum_scale = _environment_values(
+        params.horizontal_velocity_error_gain_scale,
+        horizontal_error,
+    )
+    scale = 1.0 + (maximum_scale - 1.0) * blend
+    xyz_scale = torch.stack([scale, scale, torch.ones_like(scale)], dim=-1)
+    return params.kp_vel * xyz_scale
 
 
 def _rate_to_omega(
@@ -712,8 +739,9 @@ def _velocity(
         torch.zeros_like(candidate_acceleration),
     )
     velocity_error = velocity_setpoint_world - filtered_velocity
+    effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     desired_acceleration = (
-        params.kp_vel * velocity_error
+        effective_kp_vel * velocity_error
         + controller_state.velocity_integral_world
         - params.kd_vel * acceleration
     )
@@ -732,6 +760,7 @@ def _velocity(
             hover_thrust_normalized=hover_thrust_normalized,
             desired_acceleration=desired_acceleration,
             velocity_error=velocity_error,
+            horizontal_proportional_gain=effective_kp_vel[:, 0],
         )
         velocity_integral = (
             controller_state.velocity_integral_world + params.ki_vel * integration_error * dt_s
@@ -920,6 +949,15 @@ def build_flight_actuation_params(
         ),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_tensor(controller_settings.kp_vel),
+        horizontal_velocity_error_gain_scale=float(
+            controller_settings.horizontal_velocity_error_gain_scale
+        ),
+        horizontal_velocity_error_gain_start_mps=float(
+            controller_settings.horizontal_velocity_error_gain_start_mps
+        ),
+        horizontal_velocity_error_gain_full_mps=float(
+            controller_settings.horizontal_velocity_error_gain_full_mps
+        ),
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
@@ -983,6 +1021,11 @@ def _replace_controller_settings_batch(
         rate_derivative_filter_hz=_scalars("rate_derivative_filter_hz"),
         rate_integral_limit_nm=_vectors("rate_integral_limit_nm"),
         kp_vel=_vectors("kp_vel"),
+        horizontal_velocity_error_gain_scale=_scalars("horizontal_velocity_error_gain_scale"),
+        horizontal_velocity_error_gain_start_mps=_scalars(
+            "horizontal_velocity_error_gain_start_mps"
+        ),
+        horizontal_velocity_error_gain_full_mps=_scalars("horizontal_velocity_error_gain_full_mps"),
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_filter_hz=_scalars("velocity_filter_hz"),
@@ -1113,9 +1156,10 @@ def seed_flight_controller_state(
         raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
     selected = valid.unsqueeze(-1)
     velocity_error = -linear_velocity_world
+    effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = torch.clamp(
         acceleration_setpoint_world
-        - params.kp_vel * velocity_error
+        - effective_kp_vel * velocity_error
         + params.kd_vel * linear_acceleration_world,
         -params.velocity_integral_limit_mps2,
         params.velocity_integral_limit_mps2,

@@ -232,7 +232,7 @@ def _alignment_settings(
                 "must be a non-empty string"
             )
     schema_version = alignment.get("schema_version")
-    if schema_version not in (2, 3, 4, 5):
+    if schema_version not in (2, 3, 4, 5, 6):
         raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
     if type(alignment.get("advisory_quality_passed")) is not bool:
         raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
@@ -282,6 +282,15 @@ def _alignment_settings(
             artifact_dir=artifact_dir,
         )
 
+    def horizontal_schedule(name: str, legacy_value: float) -> float:
+        if schema_version in (2, 3, 4, 5):
+            return legacy_value
+        return _finite_positive(
+            value=settings.get(name),
+            name=f"alignment.settings.{name}",
+            artifact_dir=artifact_dir,
+        )
+
     delay = settings.get("command_delay_s")
     if (
         isinstance(delay, bool)
@@ -296,6 +305,18 @@ def _alignment_settings(
     controller_settings = ControllerSettings(
         command_delay_s=float(delay),
         kp_vel=vector("kp_vel"),
+        horizontal_velocity_error_gain_scale=horizontal_schedule(
+            "horizontal_velocity_error_gain_scale",
+            1.0,
+        ),
+        horizontal_velocity_error_gain_start_mps=horizontal_schedule(
+            "horizontal_velocity_error_gain_start_mps",
+            0.15,
+        ),
+        horizontal_velocity_error_gain_full_mps=horizontal_schedule(
+            "horizontal_velocity_error_gain_full_mps",
+            0.30,
+        ),
         ki_vel=vector("ki_vel"),
         kd_vel=vector("kd_vel"),
         velocity_filter_hz=_finite_nonnegative(
@@ -378,6 +399,19 @@ def _alignment_settings(
         raise ValueError(
             f"policy artifact {artifact_dir} alignment.settings.hover_thrust_normalized "
             "must not exceed 1"
+        )
+    if controller_settings.horizontal_velocity_error_gain_scale < 1.0:
+        raise ValueError(
+            f"policy artifact {artifact_dir} alignment.settings."
+            "horizontal_velocity_error_gain_scale must be at least 1"
+        )
+    if (
+        controller_settings.horizontal_velocity_error_gain_start_mps
+        >= controller_settings.horizontal_velocity_error_gain_full_mps
+    ):
+        raise ValueError(
+            f"policy artifact {artifact_dir} alignment horizontal velocity error "
+            "gain transition must satisfy start < full"
         )
     if not (
         0.0

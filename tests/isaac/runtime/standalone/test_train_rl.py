@@ -28,6 +28,9 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
         velocity_filter_hz=10.0,

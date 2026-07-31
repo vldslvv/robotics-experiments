@@ -29,7 +29,10 @@ from robotics_experiments.rl import (
     rotor_forces_to_body_wrench,
     seed_actuation_controller_state,
 )
-from robotics_experiments.rl.actuation import _normalized_controls_to_omega
+from robotics_experiments.rl.actuation import (
+    _effective_velocity_proportional_gain,
+    _normalized_controls_to_omega,
+)
 
 _MASS_KG = 1.5
 _GRAVITY = 9.81
@@ -92,6 +95,9 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.0,
         kp_vel=(4.0, 4.0, 5.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
         velocity_filter_hz=10.0,
@@ -182,6 +188,29 @@ def test_velocity_px4_hover_fraction_sets_collective_feed_forward():
 
     assert force_body[2] == pytest.approx(0.57 * params.max_total_thrust)
     assert np.allclose(torque_body, 0.0, atol=1e-9)
+
+
+def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_saturating():
+    settings = replace(
+        _controller_settings(),
+        horizontal_velocity_error_gain_scale=2.0,
+        horizontal_velocity_error_gain_start_mps=0.1,
+        horizontal_velocity_error_gain_full_mps=0.3,
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+
+    start = _effective_velocity_proportional_gain(params, np.array([0.1, 0.0, 1.0]))
+    midpoint = _effective_velocity_proportional_gain(params, np.array([0.2, 0.0, 1.0]))
+    full = _effective_velocity_proportional_gain(params, np.array([0.3, 0.0, 1.0]))
+
+    assert start == pytest.approx([4.0, 4.0, 5.0])
+    assert midpoint == pytest.approx([6.0, 6.0, 5.0])
+    assert full == pytest.approx([8.0, 8.0, 5.0])
 
 
 def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
@@ -495,6 +524,9 @@ def test_velocity_integral_does_not_wind_up_against_thrust_saturation():
     settings = replace(
         _controller_settings(),
         ki_vel=(5.0, 5.0, 5.0),
+        horizontal_velocity_error_gain_scale=8.0 / 7.0,
+        horizontal_velocity_error_gain_start_mps=0.1,
+        horizontal_velocity_error_gain_full_mps=0.3,
         max_collective_thrust_fraction=0.4,
         horizontal_thrust_margin_fraction=0.1,
     )
@@ -725,6 +757,9 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
         _controller_settings(),
         hover_thrust_fraction=0.375,
         hover_thrust_normalized=0.57,
+        horizontal_velocity_error_gain_scale=8.0 / 7.0,
+        horizontal_velocity_error_gain_start_mps=0.1,
+        horizontal_velocity_error_gain_full_mps=0.3,
     )
     params = build_flight_actuation_params(
         kind="velocity",
@@ -820,7 +855,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         controller_dt_s=0.004,
         device="cpu",
     )
-    seed_velocity = np.array([0.03, -0.02, 0.01])
+    seed_velocity = np.array([0.18, -0.12, 0.01])
     seed_angular_velocity = np.array([0.01, -0.015, 0.02])
     seed_acceleration_setpoint = np.array([0.04, -0.03, 0.02])
     seed_acceleration = np.array([0.05, -0.04, 0.03])

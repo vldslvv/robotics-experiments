@@ -54,6 +54,9 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         kp_vel=(2.0, 2.0, 3.0),
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
         velocity_filter_hz=10.0,
@@ -207,6 +210,40 @@ def test_schema5_policy_metadata_requires_normalized_hover_thrust(tmp_path: Path
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="hover_thrust_normalized"):
         load_policy_metadata(artifact_dir=tmp_path)
+
+
+def test_schema6_policy_metadata_loads_gain_schedule_and_schema5_is_neutral(
+    tmp_path: Path,
+) -> None:
+    metadata = _metadata()
+    metadata["alignment"]["schema_version"] = 6
+    settings = metadata["alignment"]["settings"]
+    settings["hover_thrust_normalized"] = 0.57
+    settings["horizontal_velocity_error_gain_scale"] = 8.0 / 7.0
+    settings["horizontal_velocity_error_gain_start_mps"] = 0.15
+    settings["horizontal_velocity_error_gain_full_mps"] = 0.30
+    _write_metadata_artifact(tmp_path, metadata)
+
+    loaded = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert loaded.controller_settings.horizontal_velocity_error_gain_scale == pytest.approx(
+        8.0 / 7.0
+    )
+
+    metadata["alignment"]["schema_version"] = 5
+    for name in (
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+    ):
+        settings.pop(name)
+    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
+
+    legacy = load_policy_metadata(artifact_dir=tmp_path)
+
+    assert legacy.controller_settings.horizontal_velocity_error_gain_scale == 1.0
+    assert legacy.controller_settings.horizontal_velocity_error_gain_start_mps == 0.15
+    assert legacy.controller_settings.horizontal_velocity_error_gain_full_mps == 0.30
 
 
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
@@ -566,7 +603,7 @@ def test_current_press_artifact_preflights_when_available() -> None:
         with pytest.raises(ValueError, match="alignment"):
             validate_policy_artifact(artifact_dir=artifact)
         return
-    if metadata["alignment"].get("schema_version") not in (2, 3, 4, 5):
+    if metadata["alignment"].get("schema_version") not in (2, 3, 4, 5, 6):
         with pytest.raises(ValueError, match="alignment schema"):
             validate_policy_artifact(artifact_dir=artifact)
         return

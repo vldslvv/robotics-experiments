@@ -5206,3 +5206,24 @@ Attempt 33 should preserve gain 1.575 in the exact-action envelope and blend
 to 1.8 only for larger horizontal velocity error. This is the previously
 deferred large-error gain schedule, now supported by the first failed
 acceptance boundary.
+
+### 119. Blend horizontal gain only above the exact-action envelope
+
+Date: 2026-07-31.
+
+Attempt 33 introduces comparison generation `x500-velocity-px4-v6` and
+artifact schema 6. It adds a smooth horizontal velocity-error gain schedule
+to the NumPy and Torch controller twins. The selected low-speed gain 1.575 is
+unchanged through 0.15 m/s horizontal error, blends with a cubic smoothstep,
+and reaches the integration-evidenced gain 1.8 at 0.30 m/s. Vertical gain is
+unchanged. The effective gain is shared by acceleration control, profile-state
+seeding, and horizontal tracking anti-windup.
+
+The three new fields are declarative stage-1 parameters. Gain scale candidates
+span 1.0 through 1.285714286, transition starts span 0.10 through 0.20 m/s,
+and full-gain boundaries span 0.25 through 0.40 m/s. Schemas 2 through 5 load
+with scale 1.0 and preserve their original behavior. Attempt 33 seeds all
+remaining base values from exact-action-passing candidate 6,072. Probes,
+advisory limits, the standard integration gate, allocator, plant, policy
+interface, reward, training configuration, beam width, and one-worker runtime
+remain unchanged.

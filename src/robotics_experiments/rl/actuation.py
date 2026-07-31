@@ -142,6 +142,9 @@ class ActuationParams:
     hover_thrust_fraction: float
     hover_thrust_normalized: float
     kp_vel: np.ndarray
+    horizontal_velocity_error_gain_scale: float
+    horizontal_velocity_error_gain_start_mps: float
+    horizontal_velocity_error_gain_full_mps: float
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_filter_hz: float
@@ -457,6 +460,7 @@ def _normalized_thrust_world(
     hover_thrust_normalized: float,
     desired_acceleration: np.ndarray,
     velocity_error: np.ndarray,
+    horizontal_proportional_gain: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     desired_z = _clamp_tilt(
         np.array(
@@ -499,10 +503,30 @@ def _normalized_thrust_world(
     if float(desired_acceleration[:2] @ desired_acceleration[:2]) > float(
         produced_acceleration @ produced_acceleration
     ):
-        adjusted_error[:2] -= (2.0 / params.kp_vel[0]) * (
+        adjusted_error[:2] -= (2.0 / horizontal_proportional_gain) * (
             desired_acceleration[:2] - produced_acceleration
         )
     return limited, adjusted_error
+
+
+def _effective_velocity_proportional_gain(
+    params: ActuationParams, velocity_error: np.ndarray, /
+) -> np.ndarray:
+    horizontal_error = float(np.linalg.norm(velocity_error[:2]))
+    transition = np.clip(
+        (horizontal_error - params.horizontal_velocity_error_gain_start_mps)
+        / (
+            params.horizontal_velocity_error_gain_full_mps
+            - params.horizontal_velocity_error_gain_start_mps
+        ),
+        0.0,
+        1.0,
+    )
+    blend = transition * transition * (3.0 - 2.0 * transition)
+    scale = 1.0 + (params.horizontal_velocity_error_gain_scale - 1.0) * blend
+    gain = np.array(params.kp_vel, copy=True)
+    gain[:2] *= scale
+    return gain
 
 
 def _rate_to_omega(
@@ -615,8 +639,9 @@ def _velocity_action_to_omega(
         filtered_velocity = measured_velocity
         acceleration = np.zeros(3, dtype=np.float64)
     velocity_error = velocity_setpoint_world - filtered_velocity
+    effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     desired_acceleration = (
-        params.kp_vel * velocity_error
+        effective_kp_vel * velocity_error
         + controller_state.velocity_integral_enu
         - params.kd_vel * acceleration
     )
@@ -631,6 +656,7 @@ def _velocity_action_to_omega(
             hover_thrust_normalized=hover_thrust_normalized,
             desired_acceleration=desired_acceleration,
             velocity_error=velocity_error,
+            horizontal_proportional_gain=float(effective_kp_vel[0]),
         )
         velocity_integral = (
             controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
@@ -829,6 +855,15 @@ def build_actuation_params(
         ),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
+        horizontal_velocity_error_gain_scale=float(
+            controller_settings.horizontal_velocity_error_gain_scale
+        ),
+        horizontal_velocity_error_gain_start_mps=float(
+            controller_settings.horizontal_velocity_error_gain_start_mps
+        ),
+        horizontal_velocity_error_gain_full_mps=float(
+            controller_settings.horizontal_velocity_error_gain_full_mps
+        ),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
@@ -917,8 +952,9 @@ def seed_actuation_controller_state(
     ):
         raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
     velocity_error = -velocity
+    effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
-        acceleration_setpoint - params.kp_vel * velocity_error + params.kd_vel * acceleration,
+        acceleration_setpoint - effective_kp_vel * velocity_error + params.kd_vel * acceleration,
         -params.velocity_integral_limit_mps2,
         params.velocity_integral_limit_mps2,
     )

@@ -22,10 +22,14 @@ The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v5` is the current comparison generation and uses alignment
-artifact schema 5. It carries PX4-normalized collective and torque through the
+`x500-velocity-px4-v6` is the current comparison generation and uses alignment
+artifact schema 6. It carries PX4-normalized collective and torque through the
 pinned pseudo-inverse allocator and sequential desaturation, then applies the
 composed X500's `omega = 50 + 475*u` motor boundary and quadratic rotor curve.
+Schema 6 also blends horizontal velocity P gain over an artifact-owned
+large-error interval while preserving the fitted low-speed gain below that
+interval. Schemas 2 through 5 load with a neutral gain multiplier and retain
+their original response.
 The normalized hover-thrust setting is distinct from the legacy physical hover
 fraction. Schema-4 artifacts retain their hover-scaled physical-force path;
 schema-2 and schema-3 artifacts retain the exact physical
@@ -42,7 +46,8 @@ they were trained.
 - command delay;
 - velocity P/I/D gains, with D applied to a filtered acceleration estimate;
 - velocity and velocity-derivative filter cutoffs, velocity-integral limits,
-  normalized PX4 hover thrust, and the legacy physical hover-thrust fraction;
+  normalized PX4 hover thrust, the legacy physical hover-thrust fraction, and
+  the horizontal large-error P-gain scale and transition interval;
 - attitude P gains and yaw weight;
 - body-rate P/I/D/feed-forward gains, rate-derivative filtering, and
   rate-integral limits;
@@ -77,7 +82,7 @@ feed-forward is transformed into the body frame. The rate PID applies the
 previous integral to the current output, then advances the integral with PX4's
 large-error reduction factor for the next cycle.
 
-The schema-5 velocity path follows pinned `MPC_ACC_DECOUPLE=1`: horizontal
+The schema-5-and-newer velocity path follows pinned `MPC_ACC_DECOUPLE=1`: horizontal
 acceleration and gravity form desired body Z, vertical acceleration scales the
 normalized hover thrust, and collective is divided by the tilt-limited body-Z
 vertical projection. PX4's minimum thrust, horizontal margin, maximum thrust,
@@ -86,6 +91,10 @@ ordering are preserved. The attitude-setpoint boundary passes the magnitude of
 that desired thrust vector to the body-Z allocator input; current attitude
 affects the rate setpoint, not normalized collective. The rate PID emits
 normalized torque directly.
+Schema 6 computes horizontal velocity-error magnitude, applies a smoothstep
+blend from the fitted P gain to the configured large-error multiple, and uses
+that same effective gain in acceleration control, controller-state seeding,
+and horizontal tracking anti-windup. Vertical P gain is unchanged.
 `CA_METHOD=2` selects multirotor sequential desaturation, and pinned
 `MC_AIRMODE=0` prioritizes thrust, roll/pitch, then yaw before clipping motor
 controls to `[0, 1]`. The composed bridge offset, scale, armed zero, and
@@ -204,9 +213,10 @@ positive stage. The current generation uses `staged-beam-v2`:
 7. Make two passes through every parameter in the stage.
 
 Stage 1 fits delay, normalized hover thrust, velocity filtering, velocity
-integral limits, and velocity P/I/D. Stage 2 fits attitude/yaw, rate
+integral limits, velocity P/I/D, and the schema-6 horizontal large-error gain
+schedule. Stage 2 fits attitude/yaw, rate
 P/I/D/feed-forward, rate filtering, and tilt. The legacy physical hover
-fraction and rate-output torque scale are not fit in schema 5. Candidate
+fraction and rate-output torque scale are not fit in schema 6. Candidate
 centers come from pinned PX4 v1.17 values and use
 deterministic 0.5x, 0.75x, 1.0x, 1.25x, and 1.5x values; zero is included for
 delay, integral, derivative, and feed-forward terms where meaningful. The

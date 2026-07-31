@@ -35,8 +35,8 @@ __all__: list[str] = []
 
 _TRACE_SCHEMA_VERSION = 5
 _SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
-_ARTIFACT_SCHEMA_VERSION = 5
-_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
+_ARTIFACT_SCHEMA_VERSION = 6
+_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5, 6})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
@@ -93,6 +93,7 @@ def _settings(
     legacy_rate_output_scale: bool = False,
     legacy_hover_thrust: bool = False,
     legacy_normalized_thrust: bool = False,
+    legacy_horizontal_gain_schedule: bool = False,
 ) -> ControllerSettings:
     settings = _object(value=value, name=name)
     if legacy_rate_output_scale and "rate_output_scale_nm" not in settings:
@@ -103,6 +104,10 @@ def _settings(
         settings["hover_thrust_fraction"] = 0.0
     if legacy_normalized_thrust and "hover_thrust_normalized" not in settings:
         settings["hover_thrust_normalized"] = 0.0
+    if legacy_horizontal_gain_schedule:
+        settings["horizontal_velocity_error_gain_scale"] = 1.0
+        settings["horizontal_velocity_error_gain_start_mps"] = 0.15
+        settings["horizontal_velocity_error_gain_full_mps"] = 0.30
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -116,6 +121,21 @@ def _settings(
             nonnegative=True,
         ),
         kp_vel=_vector(value=settings["kp_vel"], name=f"{name}.kp_vel"),
+        horizontal_velocity_error_gain_scale=_finite(
+            value=settings["horizontal_velocity_error_gain_scale"],
+            name=f"{name}.horizontal_velocity_error_gain_scale",
+            positive=True,
+        ),
+        horizontal_velocity_error_gain_start_mps=_finite(
+            value=settings["horizontal_velocity_error_gain_start_mps"],
+            name=f"{name}.horizontal_velocity_error_gain_start_mps",
+            positive=True,
+        ),
+        horizontal_velocity_error_gain_full_mps=_finite(
+            value=settings["horizontal_velocity_error_gain_full_mps"],
+            name=f"{name}.horizontal_velocity_error_gain_full_mps",
+            positive=True,
+        ),
         ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
         velocity_filter_hz=_finite(
@@ -224,6 +244,15 @@ def _settings(
         raise ValueError(f"{name}.hover_thrust_fraction must not exceed 1")
     if parsed.hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.hover_thrust_normalized must not exceed 1")
+    if parsed.horizontal_velocity_error_gain_scale < 1.0:
+        raise ValueError(f"{name}.horizontal_velocity_error_gain_scale must be at least 1")
+    if (
+        parsed.horizontal_velocity_error_gain_start_mps
+        >= parsed.horizontal_velocity_error_gain_full_mps
+    ):
+        raise ValueError(
+            f"{name} horizontal velocity error gain transition must satisfy start < full"
+        )
     if not (
         0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0
     ):
@@ -807,6 +836,7 @@ def _candidate_score(
     legacy_rate_output_scale: bool,
     legacy_hover_thrust: bool,
     legacy_normalized_thrust: bool,
+    legacy_horizontal_gain_schedule: bool,
 ) -> CandidateScore:
     candidate = _object(value=value, name=name)
     metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
@@ -832,6 +862,7 @@ def _candidate_score(
             legacy_rate_output_scale=legacy_rate_output_scale,
             legacy_hover_thrust=legacy_hover_thrust,
             legacy_normalized_thrust=legacy_normalized_thrust,
+            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
         ),
         usable=usable,
         metrics={
@@ -863,6 +894,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     legacy_rate_output_scale = schema_version == 2
     legacy_hover_thrust = schema_version in (2, 3)
     legacy_normalized_thrust = schema_version in (2, 3, 4)
+    legacy_horizontal_gain_schedule = schema_version in (2, 3, 4, 5)
     command_interface = _interface(
         value=artifact.get("command_interface"),
         name="command_interface",
@@ -890,6 +922,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
             legacy_rate_output_scale=legacy_rate_output_scale,
             legacy_hover_thrust=legacy_hover_thrust,
             legacy_normalized_thrust=legacy_normalized_thrust,
+            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
         )
         for index, value in enumerate(raw_candidates)
     )
@@ -907,6 +940,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         legacy_rate_output_scale=legacy_rate_output_scale,
         legacy_hover_thrust=legacy_hover_thrust,
         legacy_normalized_thrust=legacy_normalized_thrust,
+        legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
     )
     if parsed_selected_settings != selected_matches[0].settings:
         raise ValueError("selected_settings do not match selected candidate")

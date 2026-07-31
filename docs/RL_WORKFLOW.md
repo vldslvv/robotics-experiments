@@ -26,16 +26,18 @@ Both tasks use the task-neutral actuation seam from
 body-velocity/yaw-rate cascade (`velocity`) or collective-thrust/body-rate
 control (`ctbr`). NumPy is the pure reference; the batched torch implementation
 is its Lab twin. The allocation geometry and derived arrays are immutable.
-PX4 is bypassed in Lab, but the schema-5 aligned controller is a stateful
+PX4 is bypassed in Lab, but the schema-6 aligned controller is a stateful
 PX4-like velocity, attitude, and rate cascade with filtered acceleration
-feedback, integrators, thrust saturation/anti-windup, and rate
+feedback, integrators, a smooth horizontal large-error gain schedule, thrust
+saturation/anti-windup, and rate
 PID/feed-forward. The velocity and rate controllers emit PX4-normalized thrust
 and torque into the pinned multirotor pseudo-inverse and sequential-desaturation
 allocator. The composed bridge offset, scaling, armed zero, and quadratic rotor
 curve then produce physical per-rotor thrust. Schema-4 artifacts retain their
 hover-scaled physical-force path; schema-2 and schema-3 artifacts retain their
 original physical collective feed-forward, and schema 2 retains its unit
-rate-output scale. Attitude tracking uses PX4's thrust-prioritized
+rate-output scale. Schemas 2 through 5 retain a neutral large-error gain
+multiplier. Attitude tracking uses PX4's thrust-prioritized
 reduced-quaternion law, and zero velocity-filter cutoff has PX4's
 disabled/pass-through meaning. The pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust

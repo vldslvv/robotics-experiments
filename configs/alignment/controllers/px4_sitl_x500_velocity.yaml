@@ -1,5 +1,5 @@
-alignment_id: x500-velocity-px4-v5
-controller_id: px4-sitl-x500-velocity-v5
+alignment_id: x500-velocity-px4-v6
+controller_id: px4-sitl-x500-velocity-v6
 backend: px4-sitl
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -19,6 +19,11 @@ command_interface:
 settings:
   command_delay_s: 0.0
   kp_vel: [1.8, 1.8, 4.0]
+  # PX4 does not use the Lab-only large-error schedule during reference
+  # capture. Neutral values keep the complete schema-6 settings contract.
+  horizontal_velocity_error_gain_scale: 1.0
+  horizontal_velocity_error_gain_start_mps: 0.15
+  horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.

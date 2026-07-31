@@ -59,6 +59,9 @@ def _settings(
     return ControllerSettings(
         command_delay_s=delay,
         kp_vel=kp,
+        horizontal_velocity_error_gain_scale=1.0,
+        horizontal_velocity_error_gain_start_mps=0.15,
+        horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_filter_hz=10.0,
@@ -268,6 +271,12 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
     )
     assert target.backend == "isaac-lab"
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(8.0 / 7.0)
+    assert [parameter.field for parameter in target.parameters[5:8]] == [
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+    ]
     assert [(parameter.field, parameter.stage) for parameter in target.parameters[-3:]] == [
         ("thruster_tau_inc_s", 3),
         ("thruster_tau_dec_s", 3),
@@ -800,6 +809,39 @@ def test_artifact_loader_rejects_nonfinite_settings(tmp_path: Path) -> None:
         load_alignment_artifact(path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("horizontal_velocity_error_gain_scale", 0.9, "must be at least 1"),
+        ("horizontal_velocity_error_gain_start_mps", 0.30, "start < full"),
+    ],
+)
+def test_artifact_loader_rejects_invalid_horizontal_gain_schedule(
+    tmp_path: Path,
+    field: str,
+    value: float,
+    message: str,
+) -> None:
+    known = _settings(kp=(1.0, 1.0, 1.0))
+    artifact = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(
+            backend="px4-sitl",
+            evaluator=_Evaluator(reference_settings=known),
+        ),
+    )
+    run_dir = tmp_path / "run"
+    write_alignment_artifact(artifact=artifact, run_dir=run_dir)
+    path = run_dir / "alignment.json"
+    payload = json.loads(path.read_text())
+    payload["selected_settings"][field] = value
+    payload["candidates"][artifact.selected_candidate_index]["settings"][field] = value
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match=message):
+        load_alignment_artifact(path)
+
+
 def test_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None:
     known = _settings(kp=(1.0, 1.0, 1.0))
     reference = _definition(
@@ -821,7 +863,7 @@ def test_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None
         load_alignment_artifact(path)
 
 
-def test_artifact_schema_v5_and_legacy_controller_mappings(tmp_path: Path) -> None:
+def test_artifact_schema_v6_and_legacy_controller_mappings(tmp_path: Path) -> None:
     known = _settings(kp=(1.0, 1.0, 1.0))
     reference = _definition(
         backend="px4-sitl",
@@ -830,14 +872,33 @@ def test_artifact_schema_v5_and_legacy_controller_mappings(tmp_path: Path) -> No
     target = _definition(backend="isaac-lab", evaluator=_Evaluator())
     run_dir = tmp_path / "run"
     artifact = align(target, reference)
-    assert artifact.schema_version == 5
+    assert artifact.schema_version == 6
     write_alignment_artifact(artifact=artifact, run_dir=run_dir)
     path = run_dir / "alignment.json"
     payload = json.loads(path.read_text())
     loaded = load_alignment_artifact(path)
 
-    assert loaded.schema_version == 5
+    assert loaded.schema_version == 6
     assert loaded.selected_settings.hover_thrust_normalized == pytest.approx(0.57)
+    assert loaded.selected_settings.horizontal_velocity_error_gain_scale == 1.0
+
+    payload["schema_version"] = 5
+    for name in (
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+    ):
+        payload["selected_settings"].pop(name)
+        for candidate in payload["candidates"]:
+            candidate["settings"].pop(name)
+    path.write_text(json.dumps(payload))
+
+    loaded = load_alignment_artifact(path)
+
+    assert loaded.schema_version == 5
+    assert loaded.selected_settings.horizontal_velocity_error_gain_scale == 1.0
+    assert loaded.selected_settings.horizontal_velocity_error_gain_start_mps == 0.15
+    assert loaded.selected_settings.horizontal_velocity_error_gain_full_mps == 0.30
 
     schema5_payload = json.loads(json.dumps(payload))
     payload["schema_version"] = 4
