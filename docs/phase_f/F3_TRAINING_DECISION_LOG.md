@@ -4980,3 +4980,41 @@ tests cover configuration and standalone scene application; the existing
 Isaac Lab config test covers both authored PhysX flags when that dependency is
 available. Controller candidates, probes, gates, worker count, policy
 interface, reward, and training hyperparameters remain unchanged.
+
+### 111. Attempt 28 falsifies the force-iteration seam and isolates horizontal authority
+
+Date: 2026-07-31.
+
+Attempt 28's unchanged-candidate integration control ran from clean source
+commit `2306168`. Applying external rotor forces during every TGS iteration did
+not materially change the failed boundary: candidate 6,172 ended at 0.069 m
+position error with a 0.130 m last-second maximum, compared with Attempt 27's
+0.068 m and 0.129 m. The warning-driven plant correction remains part of the
+shared plant contract, but it does not explain the acceptance failure.
+
+A time-resolved 16-environment replay localized the error to horizontal
+settling. The worst environment began 0.578 m from its target, fell to 0.066 m
+at 2.0 seconds, overshot to 0.131 m at 3.0 seconds, and returned to 0.069 m at
+4.0 seconds. Altitude error stayed small, commanded tilt stayed below
+0.067 rad, and rotor speeds remained finite without saturation. The accepted
+exact-action candidate therefore has sufficient plant authority but too little
+large-error horizontal damping for the four-second position-return envelope.
+
+The stored sweep contained no exact-action-passing candidate above horizontal
+velocity proportional gain 1.35. Candidate 1,382 used gain 1.8 but changed
+multiple later-stage controller and actuator settings and terminated
+out-of-bounds, so it did not isolate the first failed boundary. Holding all
+candidate 6,172 settings fixed and changing only horizontal proportional gain
+to 1.575 passed the hover envelope at 0.098 m last-second maximum, but its
+integral overshoot ended the goto at 0.430 m wall range, below the 0.450 m
+handoff minimum. Lowering only the horizontal integral gain from 0.4 to 0.2
+then passed the complete integration target: hover error was 0.046 m final and
+0.090 m last-second maximum, goto error was 0.024 m final and 0.041 m
+last-second maximum, and the final wall range was 0.456 m.
+
+The probe artifacts and logs are preserved under
+`x500-velocity-px4-v5/20260731T142154Z` and indexed by its relative-path
+manifest. Attempt 29 should add the evidenced `[1.575, 1.575, 3.0]`
+proportional and `[0.2, 0.2, 2.0]` integral vectors to the declarative search,
+seed the complete successful integration combination as the base setting, and
+run a fresh capture, actuator audit, sweep, fit, and acceptance sequence.
