@@ -5469,3 +5469,56 @@ fresh run will measure actual peak memory, useful candidates/s, and total
 candidate count. The accepted v6 publication remains the training artifact
 unless v7 independently passes all seven exact-action gates, finite stability,
 and the direct 16-environment integration target.
+
+Grid-search performance note: the fitter already removes identical
+`ControllerSettings` within an expansion and caches every setting evaluated
+earlier in the same run. A future optimization should add a schema-owned
+*effective controller key* between settings expansion and GPU submission. The
+key would contain only fields active for that schema, converted to the exact
+simulator dtype and canonical form used by the controller. Settings with the
+same effective key would share one simulated trace while retaining separate
+candidate and provenance records for ranking and publication. This is useful
+for legacy sentinel fields, values made identical by controller normalization,
+and values that become identical at the actuator clipping seam.
+
+The implementation should also stop a stage after a complete pass leaves the
+ordered retained effective-key beam unchanged. It must report attempted
+settings, exact-setting cache hits, effective-key aliases, submitted unique
+candidates, skipped fixed-point passes, and estimated GPU batches saved. Tests
+must prove metric and ranking equivalence against the unoptimized sequential
+search, including ties, unusable candidates, schema-4 legacy loading,
+schema-6 clipping, and sequential NumPy/Torch parity. Persistent cross-run trace
+reuse is excluded: a scratch reproduction must continue to produce fresh target
+evidence.
+
+A complementary follow-up should make numeric candidate generation adaptive.
+Run the committed wide grid first, identify intervals whose endpoints or
+interior candidates survive the beam across multiple objectives, then add
+midpoint and quarter-step candidates inside those intervals for a deterministic
+refinement pass. Expand beyond a configured range only when a selected value
+hits the boundary and the matching trace or ULog boundary supports expansion.
+Vector-valued gains should refine axis-wise only when axis-specific residuals
+support it. The generated grid and its parent intervals belong in the run
+manifest so an adaptive run remains reproducible and comparison-fingerprint
+changes remain explicit.
+
+### 127. Retry the expanded search with bounded serialization memory
+
+Date: 2026-07-31.
+
+The first v7 sweep attempt completed all GPU work for 21,058 unique candidates
+and selected candidate 17,880, but the process was killed before publication.
+The legacy writer first expanded every trace dataclass into one aggregate
+mapping and then constructed a second indented JSON string. This consumed all
+91 GiB of RAM and 61 GiB of swap; no `target_candidates.json` was committed, so
+the selected candidate cannot be fitted or accepted from that attempt.
+
+The retry changes serialization only. Candidate traces are emitted one setting
+at a time as compact JSON to a sibling temporary file, flushed and synchronized,
+then atomically renamed. Peak serialization memory is therefore bounded by one
+candidate instead of the entire sweep plus a duplicate JSON string. The search
+definition, candidate order, deterministic ranking, controller and plant
+behavior, fresh-evidence requirement, and every acceptance gate remain
+unchanged. A host regression test verifies the streamed artifact contract. The
+retry receives a new run ID and fresh PX4 capture from the serializer-fix source
+commit; the failed run remains diagnostic evidence only.

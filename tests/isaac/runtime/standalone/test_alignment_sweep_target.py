@@ -1,6 +1,8 @@
 """Host-safe tests for deterministic alignment worker coordination."""
 
 import importlib.util
+import json
+from dataclasses import replace
 from types import ModuleType
 
 import pytest
@@ -65,3 +67,45 @@ def test_worker_merge_rejects_corrupt_protocol(shards, message):
         module._merge_indexed_results(  # noqa: SLF001 - focused protocol test
             result_count=2, shards=shards
         )
+
+
+def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
+    module = _load_script()
+    first = _settings(1)[0]
+    second = replace(first, command_delay_s=first.command_delay_s + 0.001)
+    trace = module.ProbeTrace(
+        profile="fit_x",
+        split="fit",
+        axis="x",
+        time_s=(0.0,),
+        command_velocity_body_flu_mps=((0.0, 0.0, 0.0),),
+        command_yaw_rate_radps=(0.0,),
+        position_enu_m=((0.0, 0.0, 0.0),),
+        attitude_flu_enu_wxyz=((1.0, 0.0, 0.0, 0.0),),
+        velocity_body_flu_mps=((0.0, 0.0, 0.0),),
+        velocity_enu_mps=((0.0, 0.0, 0.0),),
+        angular_velocity_body_flu_radps=((0.0, 0.0, 0.0),),
+        initial_position_enu_m=(0.0, 0.0, 0.0),
+        initial_attitude_flu_enu_wxyz=(1.0, 0.0, 0.0, 0.0),
+        initial_linear_velocity_enu_mps=(0.0, 0.0, 0.0),
+        initial_angular_velocity_body_flu_radps=(0.0, 0.0, 0.0),
+        completed=True,
+    )
+    path = tmp_path / "target_candidates.json"
+
+    module._write_target_candidates(  # noqa: SLF001 - focused serializer test
+        path=path,
+        schema_version=3,
+        controller_id="controller",
+        definition_fingerprint="definition",
+        image="image",
+        candidates={first: (trace,), second: (trace,)},
+        failures={module._settings_fingerprint(second): "failed"},  # noqa: SLF001
+    )
+
+    payload = json.loads(path.read_text())
+    assert payload["schema_version"] == 3
+    assert payload["controller_id"] == "controller"
+    assert len(payload["candidates"]) == 2
+    assert tuple(payload["failures"].values()) == ("failed",)
+    assert not path.with_suffix(".json.tmp").exists()

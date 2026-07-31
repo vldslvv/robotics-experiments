@@ -50,6 +50,60 @@ def _settings_fingerprint(settings: ControllerSettings, /) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _write_target_candidates(
+    *,
+    path: Path,
+    schema_version: int,
+    controller_id: str,
+    definition_fingerprint: str,
+    image: str,
+    candidates: dict[ControllerSettings, tuple[ProbeTrace, ...]],
+    failures: dict[str, str | None],
+) -> None:
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        with temporary_path.open("w") as stream:
+            stream.write('{"schema_version":')
+            json.dump(schema_version, stream, allow_nan=False, separators=(",", ":"))
+            stream.write(',"controller_id":')
+            json.dump(controller_id, stream, allow_nan=False, separators=(",", ":"))
+            stream.write(',"definition_fingerprint":')
+            json.dump(
+                definition_fingerprint,
+                stream,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+            stream.write(',"image":')
+            json.dump(image, stream, allow_nan=False, separators=(",", ":"))
+            stream.write(',"candidates":{')
+            for index, (settings, traces) in enumerate(candidates.items()):
+                if index:
+                    stream.write(",")
+                json.dump(
+                    _settings_fingerprint(settings),
+                    stream,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+                stream.write(":")
+                json.dump(
+                    [asdict(trace) for trace in traces],
+                    stream,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+            stream.write('},"failures":')
+            json.dump(failures, stream, allow_nan=False, separators=(",", ":"))
+            stream.write("}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 def _partition_settings(
     settings: tuple[ControllerSettings, ...],
     worker_count: int,
@@ -894,10 +948,6 @@ def _run(
         raise
     finally:
         evaluator.finish_sampling()
-    candidates = {
-        _settings_fingerprint(settings): [asdict(trace) for trace in traces]
-        for settings, traces in outcome.target_traces.items()
-    }
     failures = {
         _settings_fingerprint(score.settings): score.failure_reason
         for score in outcome.candidate_scores
@@ -907,20 +957,14 @@ def _run(
         f"alignment target search evaluated {len(outcome.candidate_scores)} unique "
         f"candidates; selected {outcome.selected.index}"
     )
-    (run_dir / "target_candidates.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 3,
-                "controller_id": target.controller_id,
-                "definition_fingerprint": target.definition_fingerprint,
-                "image": os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
-                "candidates": candidates,
-                "failures": failures,
-            },
-            indent=2,
-            allow_nan=False,
-        )
-        + "\n"
+    _write_target_candidates(
+        path=run_dir / "target_candidates.json",
+        schema_version=3,
+        controller_id=target.controller_id,
+        definition_fingerprint=target.definition_fingerprint,
+        image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
+        candidates=outcome.target_traces,
+        failures=failures,
     )
 
 
