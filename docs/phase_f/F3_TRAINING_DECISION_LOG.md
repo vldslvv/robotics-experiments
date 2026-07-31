@@ -4165,3 +4165,76 @@ plant, actuator, probe, gate, beam width, worker, policy interface, reward, or
 training configuration changes. Attempt 16 is an evidence-routed retained-
 basin control; its base candidate is guaranteed to be evaluated against the
 fresh reference before any staged replacement is pruned.
+
+### 86. Attempt 16 exposes stale controller-state joins at profile reset
+
+Date: 2026-07-31.
+
+Attempt 16 completed from clean source commit `73e920a` as
+`x500-velocity-px4-v5/20260731T085246Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.00155, and collective RMSE peaked at 0.0141 N.
+
+The sweep evaluated 6680 unique candidates, 6679 of them usable, and selected
+candidate 6390 under comparison fingerprint
+`3c6eb47f4eeb7e35a2c995b3240d52b3192045e23da5b2b00a04c13b108d7930`.
+
+| Held-out metric | Attempt 16 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 21.138 mm | 5 mm |
+| Residual-speed error | 0.00598 m/s | 0.01 m/s |
+| Stop-time error | 0.600 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.39% | 10% |
+| Yaw-rate NRMSE | 4.40% | 10% |
+| Heading error | 2.962 deg | 3 deg |
+| Combined endpoint error | 61.254 mm | 10 mm |
+
+The attempt is rejected with three failures and a largest normalized excess
+of 5.125, so it does not improve the Attempt 14 frontier. Among usable
+candidates, 3123 failed three gates, 2668 failed four, 761 failed five, and
+127 failed six; no candidate failed fewer than three. Candidate-wide minima
+were 6.505 mm braking error, 0.00107 m/s residual speed, 0.060 s stop-time
+error, 6.32% velocity NRMSE, 2.78% yaw-rate NRMSE, 2.236 degrees heading
+error, and 6.781 mm endpoint error.
+
+The retained Attempt 14 settings were evaluated as candidate 0 as intended.
+On this fresh reference they fail braking at 11.447 mm, stop time at 0.700 s,
+and endpoint at 86.110 mm while passing the remaining four gates. This
+excludes staged pruning as the cause of the run-to-run regression.
+
+The selected settings use 0.024 s command delay, velocity P/I/D
+`[1.35, 1.575, 3]`, `[0.625, 0.6, 3]`, and `[0.25, 0.25, 0]`, 2 Hz
+velocity filtering, a 1 Hz velocity-derivative filter, normalized hover
+thrust 0.57, attitude P `[4, 4, 2.8]`, yaw weight 0.3, rate P/I/D
+`[0.1125, 0.1125, 0.15]`, `[0.2, 0.2, 0.1]`, and
+`[0.00375, 0.00375, 0]`, yaw-only feed-forward 0.015, 30 Hz
+rate-derivative filtering, 0.2 rate-integral limits, 56.25 degrees maximum
+tilt, zero actuator time constants, and a 500 N/s actuator rate limit.
+
+Controller replay keeps the braking and combined normalized motor RMSE within
+the 0.01 limit at 0.00319 and 0.00990, but their physical collective RMSE is
+0.0997 N and 0.1128 N. The fresh bridge audit passes, so the plant mapping is
+still internally consistent.
+
+The capture's initial controller-state report identifies the first
+reproducibility seam. It currently holds the latest
+`vehicle_local_position_setpoint` and `rate_ctrl_status` samples at each
+absolute profile start. Their recorded ages are 44-144 ms in this run and
+were 44-184 ms across the recent campaign, far beyond one 4 ms physics tick.
+The ULog topics are recorded at approximately 10 Hz and 5 Hz, respectively.
+Meanwhile, linear and angular acceleration are already interpolated to the
+exact start timestamp. The held setpoint and integral snapshots therefore
+inject a run-dependent controller-state phase error into every otherwise
+identical isolated Lab replay.
+
+Attempt 17 should interpolate the acceleration-setpoint and rate-integral
+vectors to the absolute profile start just like the existing kinematic
+derivatives. It should retain the raw source-age evidence in the report,
+advance the controller-state extraction method and target controller
+identifier, and add a midpoint regression test. No gain or actuator candidate
+is justified while the candidate-wide braking floor remains above its gate.
+
+Attempt 16 used one worker, 41 GPU batches, and 1198.21 s for the useful
+sweep, or 5.57 candidate evaluations/s. GPU utilization averaged 28.80%,
+reached 46% at p95 and 51% at peak, and used 4377 MiB peak memory.
