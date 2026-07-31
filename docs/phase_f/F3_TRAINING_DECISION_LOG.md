@@ -4263,3 +4263,70 @@ advances to `isaac-lab-x500-velocity-v18` for a new comparison fingerprint.
 The retained Attempt 14 base, candidates, controller equations, allocator,
 plant, actuator, probes, gates, beam width, worker count, policy interface,
 reward, and training configuration remain unchanged.
+
+### 88. Attempt 17 restores a one-gate frontier after exact state joining
+
+Date: 2026-07-31.
+
+Attempt 17 completed from clean source commit `809fb44` as
+`x500-velocity-px4-v5/20260731T092906Z`. Its fresh capture completed all 11
+profiles. The reference actuator audit passed: timestamp joins stayed within
+one 4 ms physics tick, normalized motor RMSE peaked at 0.00407, and collective
+RMSE peaked at 0.01391 N.
+
+The staged sweep evaluated 6306 unique usable candidates and selected candidate
+6091 under comparison fingerprint
+`584958d7626a39d466291b402ebc5441ddb77f78f9712c8999a91111a515159f`.
+
+| Held-out metric | Attempt 17 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.172 mm | 5 mm |
+| Residual-speed error | 0.00227 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.47% | 10% |
+| Yaw-rate NRMSE | 4.07% | 10% |
+| Heading error | 2.410 deg | 3 deg |
+| Combined endpoint error | 13.250 mm | 10 mm |
+
+The attempt is rejected with endpoint error as its only failure and a largest
+normalized excess of 0.325. This is material progress over Attempt 14's
+one-gate frontier and largest normalized excess of 1.0. Among all candidates,
+568 failed one gate, 1671 failed two, 1424 failed three, 2060 failed four, 496
+failed five, and 87 failed six. Every one-gate candidate failed endpoint error
+only. Candidate-wide minima were 2.738 mm braking error, 0.000181 m/s residual
+speed, 0.040 s stop-time error, 5.24% velocity NRMSE, 2.78% yaw-rate NRMSE,
+1.844 degrees heading error, and 1.968 mm endpoint error.
+
+The selected settings use zero command delay, velocity P/I/D
+`[1.35, 1.575, 3]`, `[0.3, 0.3, 1.5]`, and `[0.25, 0.25, 0]`, 2 Hz
+velocity filtering, a 1 Hz velocity-derivative filter, normalized hover thrust
+0.572, attitude P `[4, 4, 2.8]`, yaw weight 0.5, rate P/I/D
+`[0.1125, 0.1125, 0.15]`, `[0.3, 0.3, 0.15]`, and zero, symmetric
+rate feed-forward 0.025, 20 Hz rate-derivative filtering, 0.15 rate-integral
+limits, 56.25 degrees maximum tilt, zero rise time, 0.08 s fall time, and an
+effectively unlimited 100000 N/s actuator rate limit.
+
+Controller replay now passes the isolated braking boundary with normalized
+motor RMSE 0.00452 and collective RMSE 0.0214 N. The validation combined-turns
+boundary is the first remaining miss: normalized motor RMSE is 0.01066 and
+collective RMSE is 0.0551 N. Its normalized torque RMSE is
+`[0.00425, 0.00698, 0.00882]`; no sample saturates. The fresh reference audit
+passes, so the residual is in target motor response rather than the composed
+bridge mapping.
+
+The one-gate population supplies matching expansion evidence. All 568 use the
+same selected rate P, I, and feed-forward gains. In contrast, their minimum
+endpoint error improves monotonically with actuator fall time: 36.109 mm at
+zero, 33.072 mm at 0.01 s, 30.242 mm at 0.02 s, 24.657 mm at 0.04 s, and
+13.250 mm at the current 0.08 s ceiling. The selected fall time is therefore
+not merely a range hit; its motor-boundary replay and candidate-wide endpoint
+trend both support extending it. Attempt 18 should retain the complete Attempt
+17 selected settings as its base and add 0.10, 0.12, and 0.16 s fall-time
+candidates. It should leave controller gains and all other contracts unchanged.
+
+Attempt 17 used one worker, 41 GPU batches, and 1496.39 s for the useful
+sweep, or 4.21 candidate evaluations/s. GPU utilization averaged 26.73%,
+reached 41% at p95 and 47% at peak, and used 4377 MiB peak memory. A second
+worker is still not justified because the existing worker already batches all
+candidate work on the GPU and the limiting serial stages do not create
+independent useful batches.
