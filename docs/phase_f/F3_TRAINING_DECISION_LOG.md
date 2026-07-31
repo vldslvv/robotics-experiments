@@ -5447,3 +5447,25 @@ multiple independent clean campaigns to pass both exact-action and integration
 acceptance. The reproduction's capture, audit, replay, fit, GPU telemetry,
 integration comparison, and losslessly compressed candidate traces are retained
 under its checksummed relative-path manifest.
+
+### 126. Expand scratch search around the accepted complete setting
+
+Date: 2026-07-31.
+
+Run `x500-velocity-px4-v7/20260731T212319Z` addresses the reproduction failure
+without reusing runtime evidence. Schema 6, controller and plant behavior,
+probes, advisory gates, integration limits, images, parameter candidates, and
+one-worker execution remain unchanged. The accepted v6 candidate 8,083 setting
+becomes the v7 definition's mandatory base evaluation, ensuring that the fresh
+run measures the known complete combination instead of relying on the staged
+beam to reconstruct it from individual values.
+
+The v7 search widens the retained beam from 32 to 64 and increases passes per
+stage from two to three. These are execution-independent declarative search
+changes: they preserve deterministic ranking while allowing more partial
+combinations to survive and interact in later passes. The anticipated scene
+capacity and memory remain within the prior 24.5 GiB device envelope, but the
+fresh run will measure actual peak memory, useful candidates/s, and total
+candidate count. The accepted v6 publication remains the training artifact
+unless v7 independently passes all seven exact-action gates, finite stability,
+and the direct 16-environment integration target.

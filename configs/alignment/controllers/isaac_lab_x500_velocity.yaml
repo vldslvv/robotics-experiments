@@ -1,4 +1,4 @@
-alignment_id: x500-velocity-px4-v6
+alignment_id: x500-velocity-px4-v7
 controller_id: isaac-lab-x500-velocity-v35
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
@@ -15,48 +15,49 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.024
-  kp_vel: [1.8, 1.35, 6.0]
-  horizontal_velocity_error_gain_scale: 1.071428571
-  horizontal_velocity_error_gain_start_mps: 0.15
-  horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.4, 0.4, 2.0]
-  kd_vel: [0.3, 0.3, 0.0]
+  command_delay_s: 0.060
+  kp_vel: [1.8, 1.8, 4.0]
+  horizontal_velocity_error_gain_scale: 1.285714286
+  horizontal_velocity_error_gain_start_mps: 0.10
+  horizontal_velocity_error_gain_full_mps: 0.25
+  ki_vel: [0.0, 0.4, 2.0]
+  kd_vel: [0.375, 0.3, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 0.0
-  velocity_derivative_filter_hz: 0.75
+  velocity_filter_hz: 10.0
+  velocity_derivative_filter_hz: 7.5
   velocity_integral_limit_mps2: [1.0, 1.0, 2.0]
   # Physical collective fraction of the composed X500's maximum thrust. The
   # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
   hover_thrust_fraction: 0.375
   # PX4's normalized hover-thrust boundary. Schema 5 uses this value before
   # control allocation; the physical fraction above is legacy-only.
-  hover_thrust_normalized: 0.57
+  hover_thrust_normalized: 0.56
   kp_att: [5.0, 5.0, 3.5]
-  attitude_yaw_weight: 0.6
-  kp_rate: [0.1125, 0.1125, 0.15]
+  attitude_yaw_weight: 0.5
+  kp_rate: [0.15, 0.15, 0.20]
   ki_rate: [0.30, 0.30, 0.15]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.025]
   # Legacy schemas convert the normalized rate PID output to physical torque.
   # Schema 5 sends normalized torque directly to the PX4 allocator.
   rate_output_scale_nm: [6.5, 6.5, 1.3]
-  rate_derivative_filter_hz: 10.0
-  rate_integral_limit_nm: [0.15, 0.15, 0.15]
-  max_tilt_cmd_deg: 33.75
+  rate_derivative_filter_hz: 30.0
+  rate_integral_limit_nm: [0.45, 0.45, 0.45]
+  max_tilt_cmd_deg: 22.5
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
   horizontal_thrust_margin_fraction: 0.30
-  thruster_tau_inc_s: 0.08
-  thruster_tau_dec_s: 0.04
-  thruster_max_thrust_rate_nps: 1000.0
+  thruster_tau_inc_s: 0.04
+  thruster_tau_dec_s: 0.02
+  thruster_max_thrust_rate_nps: 500.0
 
 search:
   strategy: staged-beam-v2
-  # Attempt 34 seeds Attempt 33's one-gate candidate 7412 and searches its
-  # evidenced horizontal braking neighborhood.
-  beam_width: 32
-  passes_per_stage: 2
+  # The accepted v6 settings are the mandatory base evaluation. The expanded
+  # beam and third pass search for a combination that retains acceptance across
+  # an independent fresh PX4 capture.
+  beam_width: 64
+  passes_per_stage: 3
 
 parameters:
   - field: command_delay_s

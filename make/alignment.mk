@@ -2,7 +2,7 @@
 # Controller alignment
 ########################################
 
-ALIGNMENT_ID ?= x500-velocity-px4-v6
+ALIGNMENT_ID ?= x500-velocity-px4-v7
 ALIGNMENT_TARGET ?= configs/alignment/controllers/isaac_lab_x500_velocity.yaml
 ALIGNMENT_REFERENCE ?= configs/alignment/controllers/px4_sitl_x500_velocity.yaml
 ALIGNMENT_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)

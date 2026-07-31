@@ -22,8 +22,11 @@ The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v6` is the current comparison generation and uses alignment
-artifact schema 6. It carries PX4-normalized collective and torque through the
+`x500-velocity-px4-v7` is the current comparison generation and uses alignment
+artifact schema 6. Its mandatory base evaluation is the accepted v6 candidate
+8,083 setting, while a 64-setting beam and three passes per stage search for a
+fresh-reference result with equal or better acceptance margins. It carries
+PX4-normalized collective and torque through the
 pinned pseudo-inverse allocator and sequential desaturation, then applies the
 composed X500's `omega = 50 + 475*u` motor boundary and quadratic rotor curve.
 Schema 6 also blends horizontal velocity P gain over an artifact-owned
@@ -207,10 +210,10 @@ positive stage. The current generation uses `staged-beam-v2`:
 4. Replay all uncached settings in the expansion as one GPU batch, then score
    them in their original deterministic order.
 5. Reserve a beam slot for the best candidate on each advisory-gate objective,
-   then fill the remaining slots by the registered deterministic ranking.
-6. Retain at most the declared beam width; the current 32-setting beam doubles
-   useful candidate coverage while remaining within measured device memory.
-7. Make two passes through every parameter in the stage.
+then fill the remaining slots by the registered deterministic ranking.
+6. Retain at most the declared beam width; the current v7 generation uses 64
+settings so more complete parameter combinations survive between stages.
+7. Make three passes through every parameter in the stage.
 
 Stage 1 fits delay, normalized hover thrust, velocity filtering, velocity
 integral limits, velocity P/I/D, and the schema-6 horizontal large-error gain
