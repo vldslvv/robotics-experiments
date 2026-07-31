@@ -1,5 +1,5 @@
 alignment_id: x500-velocity-px4-v5
-controller_id: isaac-lab-x500-velocity-v13
+controller_id: isaac-lab-x500-velocity-v14
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -15,14 +15,14 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.048
-  kp_vel: [1.8, 1.8, 4.0]
-  ki_vel: [0.4, 0.4, 2.0]
-  kd_vel: [0.2, 0.2, 0.0]
+  command_delay_s: 0.0
+  kp_vel: [1.35, 1.35, 3.0]
+  ki_vel: [0.6, 0.6, 3.0]
+  kd_vel: [0.3, 0.2, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
   velocity_filter_hz: 0.0
-  velocity_derivative_filter_hz: 5.0
-  velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
+  velocity_derivative_filter_hz: 1.0
+  velocity_integral_limit_mps2: [3.0, 3.0, 6.0]
   # Physical collective fraction of the composed X500's maximum thrust. The
   # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
   hover_thrust_fraction: 0.375
@@ -30,9 +30,9 @@ settings:
   # control allocation; the physical fraction above is legacy-only.
   hover_thrust_normalized: 0.57
   kp_att: [4.0, 4.0, 2.8]
-  attitude_yaw_weight: 0.4
+  attitude_yaw_weight: 0.5
   kp_rate: [0.15, 0.15, 0.20]
-  ki_rate: [0.20, 0.20, 0.10]
+  ki_rate: [0.30, 0.30, 0.15]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
   # Legacy schemas convert the normalized rate PID output to physical torque.
@@ -40,19 +40,19 @@ settings:
   rate_output_scale_nm: [6.5, 6.5, 1.3]
   rate_derivative_filter_hz: 20.0
   rate_integral_limit_nm: [0.30, 0.30, 0.30]
-  max_tilt_cmd_deg: 45.0
+  max_tilt_cmd_deg: 33.75
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
   horizontal_thrust_margin_fraction: 0.30
-  thruster_tau_inc_s: 0.0
+  thruster_tau_inc_s: 0.02
   thruster_tau_dec_s: 0.0
   thruster_max_thrust_rate_nps: 100000.0
 
 search:
   strategy: staged-beam-v2
-  # Preserve complementary stop, heading, and endpoint champions long enough
-  # for the stage-2 yaw candidates to combine with the stage-1 velocity seam.
-  beam_width: 64
+  # The base settings are the retained Attempt 11 frontier, so its complete
+  # combination is evaluated before staged replacements are pruned.
+  beam_width: 32
   passes_per_stage: 2
 
 parameters:

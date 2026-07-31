@@ -3875,3 +3875,31 @@ Attempt 12 used one worker, 41 GPU batches, and 2025.57 s for the useful
 sweep, or 6.22 candidate evaluations/s. GPU utilization averaged 25.21%,
 reached 48% at p95 and 60% at peak, and used 5409 MiB peak memory.
 Sequential Isaac/PhysX stepping remains the measured bottleneck.
+
+### 79. Seed the staged search from the retained Attempt 11 basin
+
+Date: 2026-07-31.
+
+Attempt 13 restores the 32-wide beam and makes Attempt 11's complete selected
+settings the target definition's base settings. Attempt 12 showed that the
+new yaw-torque and X-integral candidates can pass heading and stop time, but
+its global expansion never evaluated the full Attempt 11 setting combination
+against the fresh reference. The generic staged search builds combinations
+one declared field at a time; a wider beam does not guarantee that a later
+complementary combination survives every earlier ranking stage.
+
+The base now uses zero command delay, velocity P/I/D
+`[1.35, 1.35, 3]`, `[0.6, 0.6, 3]`, and `[0.3, 0.2, 0]`, a 1 Hz
+velocity-derivative filter, velocity-integral limits `[3, 3, 6]`, normalized
+hover thrust 0.57, yaw weight 0.5, rate integral `[0.3, 0.3, 0.15]`,
+33.75 degrees maximum tilt, and a 0.02 s actuator rise time. These are all
+existing declared candidates and reproduce candidate 5417 from Attempt 11;
+the change ensures their complete combination is evaluated as the initial
+candidate rather than reconstructed only if every intermediate survives.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v14`. The isolated Y proportional, isolated X
+integral, and two intermediate yaw-only feed-forward candidates introduced in
+Attempt 12 remain available. No new candidate, controller equation,
+allocator, plant, actuator, probe, gate, worker, policy interface, reward, or
+training change is made.
