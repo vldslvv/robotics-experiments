@@ -57,7 +57,6 @@ class _FakePhysxApi:
         self.time_steps_per_second = _FakeAttr()
         self.solver_type = _FakeAttr()
         self.enhanced_determinism = _FakeAttr()
-        self.external_forces_every_iteration = _FakeAttr()
 
     @classmethod
     def Apply(cls, prim):
@@ -72,9 +71,6 @@ class _FakePhysxApi:
 
     def CreateEnableEnhancedDeterminismAttr(self):
         return self.enhanced_determinism
-
-    def CreateEnableExternalForcesEveryIterationAttr(self):
-        return self.external_forces_every_iteration
 
 
 class _FakeCarbSettings:
@@ -137,7 +133,6 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
             rendering_hz=60.9,
             solver_type="TGS",
             enhanced_determinism=True,
-            external_forces_every_iteration=True,
             gravity=(0.0, 0.0, -9.81),
         ),
     )
@@ -149,7 +144,6 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
     assert physx_api.time_steps_per_second.value == 500
     assert physx_api.solver_type.value == "TGS"
     assert physx_api.enhanced_determinism.value is True
-    assert physx_api.external_forces_every_iteration.value is True
     assert carb_settings.values == {
         "/app/runLoops/main/rateLimitEnabled": True,
         "/app/runLoops/main/rateLimitFrequency": 60,
@@ -167,7 +161,6 @@ def test_apply_settings_rejects_zero_magnitude_gravity(simulation_api):
                 rendering_hz=60.0,
                 solver_type="TGS",
                 enhanced_determinism=False,
-                external_forces_every_iteration=True,
                 gravity=(0.0, 0.0, 0.0),
             ),
         )
@@ -185,7 +178,6 @@ def test_apply_settings_rejects_non_positive_physics_rate(simulation_api, physic
                 rendering_hz=60.0,
                 solver_type="TGS",
                 enhanced_determinism=False,
-                external_forces_every_iteration=True,
                 gravity=(0.0, 0.0, -9.81),
             ),
         )
@@ -203,7 +195,6 @@ def test_apply_settings_rejects_non_positive_render_rate(simulation_api, renderi
                 rendering_hz=rendering_hz,
                 solver_type="TGS",
                 enhanced_determinism=False,
-                external_forces_every_iteration=True,
                 gravity=(0.0, 0.0, -9.81),
             ),
         )

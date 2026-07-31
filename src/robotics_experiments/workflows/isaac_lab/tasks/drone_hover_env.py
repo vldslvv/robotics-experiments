@@ -148,9 +148,6 @@ def make_drone_hover_env_cfg(
             render_interval=decimation,
             physx=PhysxCfg(
                 enable_enhanced_determinism=experiment_config.sim.enhanced_determinism,
-                enable_external_forces_every_iteration=(
-                    experiment_config.sim.external_forces_every_iteration
-                ),
             ),
         ),
         drone_cfg=_make_drone_articulation_cfg(

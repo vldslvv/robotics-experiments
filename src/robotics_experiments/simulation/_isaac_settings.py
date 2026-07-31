@@ -61,7 +61,6 @@ def _apply_physx(
     physics_hz: float,
     solver_type: str,
     enhanced_determinism: bool,
-    external_forces_every_iteration: bool,
 ) -> None:
     """Configure PhysX time stepping and solver type on a physics scene.
 
@@ -72,8 +71,6 @@ def _apply_physx(
         solver_type: PhysX solver identifier (e.g. ``"TGS"`` or ``"PGS"``).
         enhanced_determinism: Whether PhysX uses stronger deterministic
             simulation ordering.
-        external_forces_every_iteration: Whether external forces are reapplied
-            during every TGS position iteration.
 
     Raises:
         ValueError: If ``physics_hz`` is not positive.
@@ -84,7 +81,6 @@ def _apply_physx(
     physx_api.CreateTimeStepsPerSecondAttr().Set(int(physics_hz))
     physx_api.CreateSolverTypeAttr().Set(solver_type)
     physx_api.CreateEnableEnhancedDeterminismAttr().Set(enhanced_determinism)
-    physx_api.CreateEnableExternalForcesEveryIterationAttr().Set(external_forces_every_iteration)
 
 
 def _apply_render_rate(rendering_hz: float) -> None:
@@ -121,7 +117,6 @@ def _apply_isaac_settings(*, stage: Usd.Stage, settings: SimSettings) -> None:
         physics_hz=settings.physics_hz,
         solver_type=settings.solver_type,
         enhanced_determinism=settings.enhanced_determinism,
-        external_forces_every_iteration=settings.external_forces_every_iteration,
     )
     _apply_render_rate(settings.rendering_hz)
 
@@ -129,6 +124,5 @@ def _apply_isaac_settings(*, stage: Usd.Stage, settings: SimSettings) -> None:
         f"[SimSettings] physics={settings.physics_hz}Hz "
         f"rendering={settings.rendering_hz}Hz solver={settings.solver_type} "
         f"enhanced_determinism={settings.enhanced_determinism} "
-        f"external_forces_every_iteration={settings.external_forces_every_iteration} "
         f"gravity={settings.gravity}"
     )

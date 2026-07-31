@@ -5063,3 +5063,22 @@ The useful Lab enhanced-determinism pass-through remains independent and
 should be retained. The evidenced velocity-gain candidates also remain
 unchanged, after which the complete capture and acceptance sequence restarts
 from a new clean source commit.
+
+### 114. Restore one external-wrench application per physics step
+
+Date: 2026-07-31.
+
+Attempt 30 removes `sim.external_forces_every_iteration` and its standalone
+and Lab plumbing. The bridge and Lab physics sinks each already submit one
+complete rotor wrench per physics tick; PhysX's default one-application-per-
+step behavior is therefore the shared plant contract. The alignment
+experiment's enhanced-determinism flag remains passed to both standalone
+PhysX and the Lab `PhysxCfg`.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v32`, producing a new comparison fingerprint. The
+integration-evidenced P/I candidates and base setting remain unchanged. The
+controller, allocator, rotor model, probes, gates, search, policy interface,
+reward, and training configuration also remain unchanged. Attempt 30 must
+first prove that a fresh PX4 capture can take off and pass its actuator audit
+before another target sweep is justified.

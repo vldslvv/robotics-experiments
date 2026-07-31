@@ -125,9 +125,10 @@ the stochastic Pegasus process models. Structural sensor changes require
 replicate captures before another full sweep.
 The alignment experiment also enables PhysX enhanced determinism; normal
 runtime leaves it disabled to avoid its performance cost.
-All flight configurations reapply external rotor forces during every TGS
-position iteration. This is part of the plant contract shared by the PX4
-reference and Isaac Lab target, not a controller tuning parameter.
+Both PX4 reference and Lab target retain PhysX's default one-application-per-
+step external-force behavior. Their respective physics sinks each submit one
+complete rotor wrench per tick; per-TGS-iteration reapplication prevents the
+standalone reference from lifting under saturated thrust.
 Before each recorded profile, the adapter streams a neutral velocity/yaw
 setpoint for at least the configured minimum and then requires a continuous
 stable-speed/rate/tilt window. The first profile therefore starts after PX4 has

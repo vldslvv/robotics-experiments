@@ -105,16 +105,6 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
             f"expected {expected.enhanced_determinism}, "
             f"got {actual_enhanced_determinism}"
         )
-    actual_external_forces_every_iteration = bool(
-        physx_api.GetEnableExternalForcesEveryIterationAttr().Get()
-    )
-    if actual_external_forces_every_iteration != expected.external_forces_every_iteration:
-        raise AssertionError(
-            "PhysX external-force iteration mismatch: "
-            f"expected {expected.external_forces_every_iteration}, "
-            f"got {actual_external_forces_every_iteration}"
-        )
-
     carb_settings = carb.settings.get_settings()
     if not carb_settings.get("/app/runLoops/main/rateLimitEnabled"):
         raise AssertionError("Expected Kit main run-loop rate limit to be enabled")
@@ -130,7 +120,6 @@ def _assert_settings_applied(context: SceneTestContext, original_scene_paths: li
         f"rendering_hz={expected.rendering_hz}, "
         f"solver_type={expected.solver_type}, "
         f"enhanced_determinism={expected.enhanced_determinism}, "
-        f"external_forces_every_iteration={expected.external_forces_every_iteration}, "
         f"gravity={tuple(expected.gravity)}"
     )
 

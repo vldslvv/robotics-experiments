@@ -61,10 +61,11 @@ artifact policy cadence and setpoint rates cannot exceed the driver rate, and
 the driver rate cannot exceed `sim.physics_hz`. Defaults are 50, 50, and 20 Hz
 respectively.
 
-`sim.external_forces_every_iteration` is enabled by default so TGS reapplies
-rotor wrenches during every position iteration and produces accurate velocity
-updates in both standalone Isaac and Isaac Lab. `sim.enhanced_determinism`
-remains disabled by default and is enabled by the alignment experiment.
+`sim.enhanced_determinism` remains disabled by default and is enabled by the
+alignment experiment. Rotor wrenches retain PhysX's default one-application-
+per-step behavior. The bridge and Lab controller each submit one complete
+wrench per physics tick; enabling per-TGS-iteration reapplication prevents the
+standalone X500 from lifting under saturated thrust.
 
 ## Routine behavior
 

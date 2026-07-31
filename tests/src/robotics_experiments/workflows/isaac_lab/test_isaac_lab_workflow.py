@@ -171,7 +171,6 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     assert cfg.policy_config.critic.hidden_dims == (128, 128)
     assert not hasattr(cfg, "physics_rate_hz")
     assert cfg.sim.dt == pytest.approx(1.0 / 250.0)
-    assert cfg.sim.physx.enable_external_forces_every_iteration
     assert not cfg.sim.physx.enable_enhanced_determinism
     assert (
         _episode_step_count(
