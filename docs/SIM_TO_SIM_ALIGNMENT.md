@@ -215,6 +215,11 @@ controller stages.
 2. largest normalized advisory-gate excess;
 3. total normalized advisory-gate excess.
 
+Stop-time events remain defined by the first sample at or below the registered
+speed threshold. Their timestamp difference is quantized to nanoseconds before
+comparison so an exact trace-grid boundary is not rejected by floating-point
+subtraction of two late timestamps.
+
 It then uses the v2 ordering as deterministic tie-breakers:
 
 1. worst held-out braking-distance error;

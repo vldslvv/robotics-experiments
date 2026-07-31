@@ -100,7 +100,7 @@ def _braking_events(
     *,
     reference: ProbeTrace,
     target: ProbeTrace,
-) -> list[tuple[float, float, float, float, float, float]]:
+) -> list[tuple[float, float, float, float, float]]:
     if reference.axis not in ("x", "y", "z"):
         return []
     axis = {"x": 0, "y": 1, "z": 2}[reference.axis]
@@ -125,14 +125,15 @@ def _braking_events(
         target_distance = float(
             np.linalg.norm(target_position[target_stop] - target_position[start])
         )
+        reference_stop_ns = round(float(time[reference_stop]) * 1_000_000_000)
+        target_stop_ns = round(float(time[target_stop]) * 1_000_000_000)
         events.append(
             (
                 reference_distance,
                 target_distance,
                 abs(float(reference_velocity[-1])),
                 abs(float(target_velocity[-1])),
-                float(time[reference_stop] - time[start]),
-                float(time[target_stop] - time[start]),
+                abs(target_stop_ns - reference_stop_ns) / 1_000_000_000,
             )
         )
     return events
@@ -216,12 +217,11 @@ def _split_metrics(
             target_distance,
             reference_residual,
             target_residual,
-            reference_stop_time,
-            target_stop_time,
+            stop_time_error,
         ) in _braking_events(reference=reference, target=target):
             braking_distance_errors.append(abs(target_distance - reference_distance))
             residual_speed_errors.append(abs(target_residual - reference_residual))
-            stop_time_errors.append(abs(target_stop_time - reference_stop_time))
+            stop_time_errors.append(stop_time_error)
     if not squared_errors:
         raise ValueError(f"probe suite contains no {split!r} traces")
     aggregate_rmse = float(np.sqrt(np.mean(np.concatenate(squared_errors, axis=0))))

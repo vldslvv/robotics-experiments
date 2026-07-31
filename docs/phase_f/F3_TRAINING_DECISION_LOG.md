@@ -4052,3 +4052,24 @@ passes.
 Attempt 14 used one worker, 41 GPU batches, and 1494.83 s for the useful
 sweep, or 4.08 candidate evaluations/s. GPU utilization averaged 26.41%,
 reached 40% at p95 and 47% at peak, and used 4377 MiB peak memory.
+
+### 83. Quantize stop-event timestamp differences at the exact gate
+
+Date: 2026-07-31.
+
+Attempt 15 corrects the sole remaining Attempt 14 rejection without changing
+its event definition or 0.10 s limit. Stop indices are still the first samples
+at or below the registered speed threshold. Their trace timestamps are
+converted to integer nanoseconds before subtraction, and the exact elapsed
+difference is converted back to seconds for the existing metric and gate.
+
+This removes cancellation from subtracting two late binary floating-point
+timestamps. In particular, the candidate-wide Attempt 14 floor of
+0.10000000000000009 s represents exactly 0.10 s on the trace grid and should
+not be rejected. A host regression test covers that boundary.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v16` so the corrected definition has a new comparison
+fingerprint. No controller setting, candidate, equation, allocator, plant,
+actuator, probe, gate, worker, policy interface, reward, or training
+configuration changes.

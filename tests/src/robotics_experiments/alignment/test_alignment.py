@@ -30,6 +30,7 @@ from robotics_experiments.alignment._io import (
     write_alignment_artifact,
 )
 from robotics_experiments.alignment._metrics import (
+    _braking_events,
     _feasibility_metric_result,
     metric,
     register_metric,
@@ -581,6 +582,47 @@ def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:
 
     assert result.validation_metrics["braking_distance_error_m"] > 0.0
     assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+
+
+def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
+    source = _response_traces(
+        profiles=_profiles(),
+        settings=_settings(kp=(1.0, 1.0, 1.0)),
+    )[0]
+    time_s = tuple(1_000_000.0 + index * 0.05 for index in range(6))
+    command = ((1.0, 0.0, 0.0),) * 2 + (_ZERO3,) * 4
+    reference_velocity = (
+        (1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.02, 0.0, 0.0),
+        _ZERO3,
+        _ZERO3,
+        _ZERO3,
+    )
+    target_velocity = (
+        (1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.02, 0.0, 0.0),
+        (0.02, 0.0, 0.0),
+        (0.02, 0.0, 0.0),
+        _ZERO3,
+    )
+    positions = tuple((index * 0.05, 0.0, 0.0) for index in range(6))
+    reference = replace(
+        source,
+        time_s=time_s,
+        command_velocity_body_flu_mps=command,
+        velocity_body_flu_mps=reference_velocity,
+        position_enu_m=positions,
+    )
+    target = replace(
+        reference,
+        velocity_body_flu_mps=target_velocity,
+    )
+
+    events = _braking_events(reference=reference, target=target)
+
+    assert events[0][-1] == 0.1
 
 
 def test_v3_metric_prioritizes_gate_feasibility_and_includes_stop_time(
