@@ -4238,3 +4238,28 @@ is justified while the candidate-wide braking floor remains above its gate.
 Attempt 16 used one worker, 41 GPU batches, and 1198.21 s for the useful
 sweep, or 5.57 candidate evaluations/s. GPU utilization averaged 28.80%,
 reached 46% at p95 and 51% at peak, and used 4377 MiB peak memory.
+
+### 87. Interpolate controller-state vectors to the absolute profile start
+
+Date: 2026-07-31.
+
+Attempt 17 corrects the controller-state join demonstrated by Attempt 16.
+Initial acceleration setpoint and rate-integral vectors are now linearly
+interpolated to each profile's recorded absolute simulation start, matching
+the existing linear-acceleration and angular-acceleration treatment. The
+latest prior sample ages remain in the controller-state report as coverage
+evidence; they no longer select a stale held value for Lab initialization.
+
+This is appropriate for the recorded low-rate controller topics: the
+acceleration setpoint is continuous during the neutral command that opens
+every profile, and the rate integral is a slowly evolving controller state.
+A host regression places both source topics around a profile-start midpoint
+and verifies the interpolated ENU/FLU vectors while preserving the raw 4 ms
+prior-sample ages.
+
+The controller-state extraction method advances to
+`px4-ulog-controller-boundary-v2`, and the target controller identifier
+advances to `isaac-lab-x500-velocity-v18` for a new comparison fingerprint.
+The retained Attempt 14 base, candidates, controller equations, allocator,
+plant, actuator, probes, gates, beam width, worker count, policy interface,
+reward, and training configuration remain unchanged.

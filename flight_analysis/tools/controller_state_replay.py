@@ -345,10 +345,10 @@ def _controller_boundary(
     rate_status: dict,
     timestamp_us: int,
 ) -> tuple[dict[str, np.ndarray], dict[str, int]]:
-    def held_index(*, topic: dict) -> tuple[int, int]:
+    def held_age_us(*, topic: dict) -> int:
         time_us = _topic_time_us(topic=topic)
         index = int(_hold_indices(source_t=time_us, query_t=np.array([timestamp_us]))[0])
-        return index, timestamp_us - int(time_us[index])
+        return timestamp_us - int(time_us[index])
 
     def interpolated_vector(*, topic: dict, fields: tuple[str, str, str]) -> np.ndarray:
         return _linear_interpolate(
@@ -359,11 +359,11 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
 
-    setpoint_index, setpoint_age_us = held_index(topic=local_setpoint)
-    rate_index, rate_age_us = held_index(topic=rate_status)
-    acceleration_setpoint_ned = np.array(
-        [local_setpoint[f"acceleration[{axis}]"][setpoint_index] for axis in range(3)],
-        dtype=np.float64,
+    setpoint_age_us = held_age_us(topic=local_setpoint)
+    rate_age_us = held_age_us(topic=rate_status)
+    acceleration_setpoint_ned = interpolated_vector(
+        topic=local_setpoint,
+        fields=("acceleration[0]", "acceleration[1]", "acceleration[2]"),
     )
     linear_acceleration_ned = interpolated_vector(
         topic=local_position,
@@ -377,13 +377,9 @@ def _controller_boundary(
             "xyz_derivative[2]",
         ),
     )
-    rate_integral_frd = np.array(
-        [
-            rate_status["rollspeed_integ"][rate_index],
-            rate_status["pitchspeed_integ"][rate_index],
-            rate_status["yawspeed_integ"][rate_index],
-        ],
-        dtype=np.float64,
+    rate_integral_frd = interpolated_vector(
+        topic=rate_status,
+        fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
     )
     vectors = {
         "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
@@ -449,7 +445,7 @@ def _augment_reference_controller_state(
     temporary_path.replace(reference_path)
     return {
         "schema_version": 1,
-        "method": "px4-ulog-controller-boundary-v1",
+        "method": "px4-ulog-controller-boundary-v2",
         "reference": str(reference_path),
         "profiles": profile_reports,
     }

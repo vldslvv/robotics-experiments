@@ -224,10 +224,10 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
             dataset(
                 "vehicle_local_position_setpoint",
                 {
-                    "timestamp": np.array([100_000]),
-                    "acceleration[0]": np.array([1.0]),
-                    "acceleration[1]": np.array([2.0]),
-                    "acceleration[2]": np.array([3.0]),
+                    "timestamp": np.array([100_000, 108_000]),
+                    "acceleration[0]": np.array([1.0, 3.0]),
+                    "acceleration[1]": np.array([2.0, 4.0]),
+                    "acceleration[2]": np.array([3.0, 5.0]),
                 },
             ),
             dataset(
@@ -251,10 +251,10 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
             dataset(
                 "rate_ctrl_status",
                 {
-                    "timestamp": np.array([100_000]),
-                    "rollspeed_integ": np.array([0.1]),
-                    "pitchspeed_integ": np.array([0.2]),
-                    "yawspeed_integ": np.array([0.3]),
+                    "timestamp": np.array([100_000, 108_000]),
+                    "rollspeed_integ": np.array([0.1, 0.3]),
+                    "pitchspeed_integ": np.array([0.2, 0.4]),
+                    "yawspeed_integ": np.array([0.3, 0.5]),
                 },
             ),
         ]
@@ -267,17 +267,17 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     payload = json.loads(reference.read_text())
     trace = payload["traces"][0]
 
-    assert report["method"] == "px4-ulog-controller-boundary-v1"
+    assert report["method"] == "px4-ulog-controller-boundary-v2"
     assert payload["schema_version"] == 4
     assert trace["initial_controller_state_valid"]
-    assert trace["initial_acceleration_setpoint_enu_mps2"] == [2.0, 1.0, -3.0]
+    assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
         2.0,
         -3.0,
         -4.0,
     ]
-    assert trace["initial_rate_integral_body_flu"] == [0.1, -0.2, -0.3]
+    assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.2, -0.3, -0.4])
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_local_position_setpoint": 4000,
         "rate_ctrl_status": 4000,

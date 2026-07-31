@@ -291,6 +291,13 @@ file-backed evaluator indexes the generated candidate file once and reads one
 candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.
 
+Initial controller-state enrichment linearly interpolates the PX4 acceleration
+setpoint and rate-integral vectors to the trace's absolute profile start,
+matching the linear and angular acceleration treatment. The report retains the
+age of the latest raw source sample so low-rate ULog coverage remains visible
+even though the reconstructed boundary is evaluated at the exact start
+timestamp.
+
 Alignment capture and execution settings live under the top-level Hydra
 `alignment` group. Capture preconditioning is behavior-affecting and is included
 in the experiment fingerprint. Worker count, GPU target, and sample interval
