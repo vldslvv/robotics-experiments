@@ -4415,3 +4415,31 @@ sweep, or 4.11 candidate evaluations/s. GPU utilization averaged 26.59%,
 reached 40% at p95 and 48% at peak, and used 4377 MiB peak memory. The same
 serial orchestration and trace-materialization bottleneck remains; adding a
 worker would not create additional useful GPU batches.
+
+### 91. Retain endpoint margin and soften the derivative braking boundary
+
+Date: 2026-07-31.
+
+Attempt 19 makes Attempt 18 candidate 6137 the target definition's base
+candidate. This guarantees evaluation of its one-gate response with 4.434 mm
+endpoint error before staged pruning. The target controller identifier advances
+to `isaac-lab-x500-velocity-v20`.
+
+The braking diagnostic resolves the sign hidden by the absolute advisory
+metric. In the held-out X braking event, PX4 travels 57.148 mm after command
+reversal while candidate 6137 travels 44.349 mm. The target therefore stops
+12.799 mm too early. All 1186 one-gate candidates use the current 1 Hz
+velocity-derivative filter floor, and their common 0.3 horizontal derivative
+gain is needed by the other passed gates.
+
+Attempt 19 extends only that evidenced filter range with 0.5, 0.625, 0.75, and
+0.875 Hz candidates below 1 Hz. Lowering the cutoff smooths the acceleration
+feedback and reduces the excess target braking action while the retained
+candidate's endpoint margin permits some additional travel. The captured PX4
+hover estimate is higher than the target setting, but increasing hover would
+increase horizontal braking authority and move the signed distance in the
+wrong direction, so no hover expansion is made.
+
+No controller equation, allocator, plant mapping, actuator range, probe, gate,
+beam width, worker count, policy interface, reward, or training configuration
+changes. Attempt 19 remains a schema-5 declarative filter expansion.
