@@ -3706,3 +3706,77 @@ that profile is 0.57153-0.57157, while attempt 10 selected normalized hover
 keeps the candidate table unchanged and tests whether the source-correct
 boundary lets the measured-hover candidate survive the complete staged
 ranking.
+
+### 76. Attempt 11 materially improves the retained schema-5 frontier
+
+Date: 2026-07-31.
+
+Attempt 11 completed from clean source commit `6a0335d` as
+`x500-velocity-px4-v5/20260731T045809Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed every profile: timestamp joins stayed within one 4 ms physics tick,
+normalized motor RMSE peaked at 0.00081, and reconstructed collective RMSE
+peaked at 0.0117 N. The relative manifest preserves the ULog, bridge log,
+reference trace, target candidates, actuator audit, controller-boundary
+replay, and GPU telemetry in the run directory.
+
+The sweep evaluated 5718 unique candidates, 5619 of them usable, and selected
+candidate 5417 under comparison fingerprint
+`7b93f29eca2dfb9b34728f3ec92e3e9dbd5a03bf4dd6b59442bb5eacab43241b`.
+
+| Held-out metric | Attempt 11 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.479 mm | 5 mm |
+| Residual-speed error | 0.00351 m/s | 0.01 m/s |
+| Stop-time error | 0.10000000000000053 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.92% | 10% |
+| Yaw-rate NRMSE | 4.51% | 10% |
+| Heading error | 3.130 deg | 3 deg |
+| Combined endpoint error | 9.956 mm | 10 mm |
+
+The attempt remains rejected with two failed gates. The largest normalized
+excess is 1.043, down 58.6% from attempt 7's retained 2.517 frontier without
+regressing a passed gate, so this is material progress and resets the
+no-progress streak. The stop-time result lies one floating-point
+representation step above the unchanged limit; the heading result exceeds its
+limit by 0.130 degrees. Among usable candidates, 1432 failed two gates, 1057
+failed three, 1071 failed four, 1493 failed five, and 566 failed six.
+Candidate-wide minima were 2.208 mm braking error, 0.00263 m/s residual speed,
+0.040 s stop-time error, 5.49% velocity NRMSE, 3.02% yaw-rate NRMSE, 2.265
+degrees heading error, and 0.334 mm endpoint error.
+
+The selected settings use zero command delay, velocity P/I/D
+`[1.35, 1.35, 3.0]`, `[0.6, 0.6, 3.0]`, and `[0.3, 0.2, 0]`, no velocity
+filter, a 1 Hz velocity-derivative filter, normalized hover thrust 0.57,
+attitude P `[4, 4, 2.8]`, yaw weight 0.5, rate P/I/D
+`[0.15, 0.15, 0.2]`, `[0.3, 0.3, 0.15]`, and
+`[0.003, 0.003, 0]`, zero rate feed-forward, a 20 Hz rate-derivative filter,
+0.3 rate-integral limits, 33.75 degrees maximum tilt, 0.02 s actuator rise,
+and zero actuator fall time.
+
+Automatic controller-state replay keeps low-speed normalized motor RMSE below
+0.01, but the yaw and combined profiles first exceed that limit at the
+normalized torque boundary. Validation yaw and combined normalized motor RMSE
+are 0.0144 and 0.0133; their normalized yaw-torque RMSE is 0.0138 and 0.0122.
+The stability envelope has broader normalized collective, torque, and motor
+error. Physical collective RMSE also remains above 0.05 N despite small
+low-speed normalized collective errors, peaking at 0.400 N in the vertical fit
+profile and 1.933 N in stability. The reference-side bridge audit passes, so
+the first controller-side boundary for the remaining heading gate is
+normalized torque rather than plant mapping.
+
+The source-correct collective change also exposes a narrow complementary
+frontier. A yaw-only rate feed-forward of 0.025 lowers heading to 2.468 degrees
+but moves the endpoint to 10.513 mm, while the selected zero-feed-forward
+candidate passes endpoint at 9.956 mm and misses heading. The next attempt
+should preserve the selected velocity frontier, fit an evidenced intermediate
+yaw-only torque response, and add a matching isolated lateral candidate only
+if needed to recover the 0.513 mm endpoint margin. Gates, probes, controller
+interface, allocator, plant, worker count, policy interface, reward, and
+training remain unchanged.
+
+Attempt 11 used one worker, 41 GPU batches, and 1411.39 s for the useful sweep,
+or 4.05 candidate evaluations/s. GPU utilization averaged 26.81%, reached 41%
+at p95 and 48% at peak, and used 4441 MiB peak memory. Sequential
+Isaac/PhysX stepping remains the measured bottleneck, so worker count stays at
+one.
