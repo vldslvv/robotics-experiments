@@ -46,6 +46,7 @@ _FLU_TO_FRD = np.diag([1.0, -1.0, -1.0])
 _PHYSICS_TICK_US = 4_000
 _MAX_NORMALIZED_MOTOR_RMSE = 0.01
 _MAX_COLLECTIVE_RMSE_N = 0.05
+_MOTOR_SATURATION_EPS = 1e-6
 _BRIDGE_DYNAMICS_PATTERN = re.compile(
     r"PX4 bridge dynamics: .* sim_time_us=(?P<sim_time_us>\d+) "
     r"last_actuator_us=(?P<actuator_time_us>\d+) "
@@ -212,6 +213,71 @@ def _wrench(*, geometry: MixerGeometry, omega: np.ndarray) -> np.ndarray:
 
 def _root_mean_square(*, values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(values))))
+
+
+def _normalized_boundary_metrics(
+    *,
+    target_motor_controls: np.ndarray,
+    px4_motor_controls: np.ndarray,
+    normalized_mix: np.ndarray,
+    px4_collective: np.ndarray,
+    px4_torque_flu: np.ndarray,
+) -> dict:
+    """Recover unsaturated target thrust/torque at the PX4 allocator boundary."""
+    target_controls = np.asarray(target_motor_controls, dtype=np.float64)
+    px4_controls = np.asarray(px4_motor_controls, dtype=np.float64)
+    if target_controls.shape != px4_controls.shape:
+        raise ValueError(
+            "target and PX4 motor controls must have matching shapes, got "
+            f"{target_controls.shape} and {px4_controls.shape}"
+        )
+    mix = np.asarray(normalized_mix, dtype=np.float64)
+    if mix.shape != (target_controls.shape[1], 4):
+        raise ValueError(
+            f"normalized mix has shape {mix.shape}, expected ({target_controls.shape[1]}, 4)"
+        )
+    collective = np.asarray(px4_collective, dtype=np.float64)
+    torque = np.asarray(px4_torque_flu, dtype=np.float64)
+    if collective.shape != (len(target_controls),):
+        raise ValueError(
+            f"PX4 collective has shape {collective.shape}, expected ({len(target_controls)},)"
+        )
+    if torque.shape != (len(target_controls), 3):
+        raise ValueError(
+            f"PX4 torque has shape {torque.shape}, expected ({len(target_controls)}, 3)"
+        )
+
+    saturated = np.any(
+        (target_controls <= _MOTOR_SATURATION_EPS)
+        | (target_controls >= 1.0 - _MOTOR_SATURATION_EPS)
+        | (px4_controls <= _MOTOR_SATURATION_EPS)
+        | (px4_controls >= 1.0 - _MOTOR_SATURATION_EPS),
+        axis=1,
+    )
+    unsaturated = ~saturated
+    recovered = target_controls @ np.linalg.pinv(mix).T
+    target_collective = -recovered[:, 3]
+    target_torque_flu = recovered[:, :3] * np.array([1.0, -1.0, -1.0])
+    return {
+        "normalized_motor_rmse": _root_mean_square(values=target_controls - px4_controls),
+        "unsaturated_sample_count": int(np.count_nonzero(unsaturated)),
+        "saturated_sample_count": int(np.count_nonzero(saturated)),
+        "normalized_collective_rmse": (
+            _root_mean_square(values=target_collective[unsaturated] - collective[unsaturated])
+            if np.any(unsaturated)
+            else None
+        ),
+        "normalized_torque_rmse": (
+            [
+                _root_mean_square(
+                    values=target_torque_flu[unsaturated, axis] - torque[unsaturated, axis]
+                )
+                for axis in range(3)
+            ]
+            if np.any(unsaturated)
+            else None
+        ),
+    }
 
 
 def _topic_time_us(*, topic: dict) -> np.ndarray:
@@ -633,6 +699,7 @@ def _report(
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+    thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     start_timestamp = float(ulog.start_timestamp)
 
@@ -685,6 +752,8 @@ def _report(
 
     px4_omega_rows: list[np.ndarray] = []
     isaac_omega_rows: list[np.ndarray] = []
+    px4_motor_rows: list[np.ndarray] = []
+    isaac_motor_rows: list[np.ndarray] = []
     px4_wrench_rows: list[np.ndarray] = []
     isaac_wrench_rows: list[np.ndarray] = []
     used_t: list[float] = []
@@ -773,6 +842,12 @@ def _report(
         )
         isaac_omega = isaac_omega_grid[replay_sample_index]
         used_t.append(float(time_s))
+        px4_motor_rows.append(controls)
+        isaac_motor_rows.append(
+            (isaac_omega - np.asarray(bridge.zero_position_armed))
+            / np.asarray(bridge.input_scaling)
+            - np.asarray(bridge.input_offset)
+        )
         px4_omega_rows.append(px4_omega)
         isaac_omega_rows.append(isaac_omega)
         px4_wrench_rows.append(_wrench(geometry=geometry, omega=px4_omega))
@@ -783,6 +858,8 @@ def _report(
 
     px4_omega_array = np.stack(px4_omega_rows)
     isaac_omega_array = np.stack(isaac_omega_rows)
+    px4_motor_array = np.stack(px4_motor_rows)
+    isaac_motor_array = np.stack(isaac_motor_rows)
     px4_wrench_array = np.stack(px4_wrench_rows)
     isaac_wrench_array = np.stack(isaac_wrench_rows)
     omega_error = isaac_omega_array - px4_omega_array
@@ -799,6 +876,32 @@ def _report(
         ]
     )
     torque_setpoint_flu *= np.array([1.0, -1.0, -1.0])
+    thrust_index = _nearest_indices(
+        source_t=relative_time(thrust_setpoint),
+        query_t=np.asarray(used_t),
+    )
+    thrust_setpoint_body = np.column_stack(
+        [
+            np.asarray(thrust_setpoint[f"xyz[{index}]"], dtype=np.float64)[thrust_index]
+            for index in range(3)
+        ]
+    )
+    if params.normalized_allocator:
+        boundary_metrics = _normalized_boundary_metrics(
+            target_motor_controls=isaac_motor_array,
+            px4_motor_controls=px4_motor_array,
+            normalized_mix=params.normalized_allocation_mix,
+            px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
+            px4_torque_flu=torque_setpoint_flu,
+        )
+    else:
+        boundary_metrics = {
+            "normalized_motor_rmse": _root_mean_square(values=isaac_motor_array - px4_motor_array),
+            "unsaturated_sample_count": 0,
+            "saturated_sample_count": len(isaac_motor_array),
+            "normalized_collective_rmse": None,
+            "normalized_torque_rmse": None,
+        }
     scale_fits = [
         _linear_scale_with_intercept(
             controller_output=torque_setpoint_flu[:, axis],
@@ -807,8 +910,8 @@ def _report(
         for axis in range(3)
     ]
     return {
-        "schema_version": 3,
-        "method": "px4-ulog-state-replay-v3-250hz",
+        "schema_version": 4,
+        "method": "px4-ulog-state-replay-v4-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
@@ -818,6 +921,7 @@ def _report(
         "controller_state_source_age_us": controller_source_age_us,
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
+            **boundary_metrics,
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),
@@ -834,6 +938,88 @@ def _report(
     }
 
 
+def _profile_windows(*, reference_path: Path) -> list[dict]:
+    reference = json.loads(reference_path.read_text())
+    if reference.get("schema_version") not in (3, 4):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3 or 4")
+    raw_profiles = reference.get("traces")
+    if not isinstance(raw_profiles, list) or not raw_profiles:
+        raise ValueError(f"{reference_path} has no alignment traces")
+    windows = []
+    for raw_profile in raw_profiles:
+        relative_time_s = raw_profile.get("time_s")
+        if not isinstance(relative_time_s, list) or not relative_time_s:
+            raise ValueError(f"alignment profile {raw_profile.get('profile')!r} has no samples")
+        start_s = int(raw_profile["start_sim_time_us"]) / 1_000_000.0
+        windows.append(
+            {
+                "profile": raw_profile["profile"],
+                "split": raw_profile["split"],
+                "axis": raw_profile["axis"],
+                "start_s": start_s,
+                "end_s": start_s + float(relative_time_s[-1]),
+            }
+        )
+    return windows
+
+
+def _profile_replay_report(
+    *,
+    ulog,
+    config_path: Path,
+    alignment_artifact_path: Path,
+    reference_path: Path,
+) -> dict:
+    profiles = []
+    failures = []
+    for window in _profile_windows(reference_path=reference_path):
+        replay = _report(
+            ulog=ulog,
+            config_path=config_path,
+            alignment_artifact_path=alignment_artifact_path,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+        )
+        metrics = replay["metrics"]
+        profile_name = window["profile"]
+        if metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
+            failures.append(
+                f"{profile_name}: normalized motor RMSE "
+                f"{metrics['normalized_motor_rmse']:.6f} exceeds "
+                f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
+        if metrics["collective_thrust_rmse_n"] > _MAX_COLLECTIVE_RMSE_N:
+            failures.append(
+                f"{profile_name}: collective RMSE "
+                f"{metrics['collective_thrust_rmse_n']:.6f} N exceeds "
+                f"{_MAX_COLLECTIVE_RMSE_N:.6f} N"
+            )
+        profiles.append(
+            {
+                **window,
+                "sample_count": replay["sample_count"],
+                "controller_sample_count": replay["controller_sample_count"],
+                "controller_state_source_age_us": replay["controller_state_source_age_us"],
+                "sample_time_s": replay["sample_time_s"],
+                "metrics": metrics,
+            }
+        )
+    return {
+        "schema_version": 4,
+        "method": "px4-ulog-profile-state-replay-v4-250hz",
+        "config": str(config_path),
+        "alignment_artifact": str(alignment_artifact_path),
+        "reference": str(reference_path),
+        "limits": {
+            "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
+            "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
+        },
+        "profiles": profiles,
+        "passed": not failures,
+        "failures": failures,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ulog_positional", nargs="?", type=Path)
@@ -843,6 +1029,7 @@ def main() -> None:
     parser.add_argument("--window", help="relative ULog seconds START,END")
     parser.add_argument("--augment-reference", type=Path)
     parser.add_argument("--audit-reference", type=Path)
+    parser.add_argument("--profile-reference", type=Path)
     parser.add_argument("--bridge-log", type=Path)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
@@ -853,13 +1040,19 @@ def main() -> None:
     if ulog_path is None:
         parser.error("one ULog path is required")
     if args.augment_reference is not None:
-        if args.audit_reference is not None or args.bridge_log is not None:
-            parser.error("--augment-reference cannot be combined with audit options")
+        if (
+            args.audit_reference is not None
+            or args.profile_reference is not None
+            or args.bridge_log is not None
+        ):
+            parser.error("--augment-reference cannot be combined with audit or profile options")
         report = _augment_reference_controller_state(
             ulog=ULog(str(ulog_path)),
             reference_path=args.augment_reference,
         )
     elif args.audit_reference is not None or args.bridge_log is not None:
+        if args.profile_reference is not None:
+            parser.error("--profile-reference cannot be combined with actuator audit options")
         if args.audit_reference is None or args.bridge_log is None:
             parser.error("--audit-reference and --bridge-log must be provided together")
         report = _actuator_boundary_report(
@@ -867,6 +1060,17 @@ def main() -> None:
             config_path=args.config,
             reference_path=args.audit_reference,
             bridge_log_path=args.bridge_log,
+        )
+    elif args.profile_reference is not None:
+        if args.alignment_artifact is None or args.window is not None:
+            parser.error(
+                "--profile-reference requires --alignment-artifact and cannot use --window"
+            )
+        report = _profile_replay_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            alignment_artifact_path=args.alignment_artifact,
+            reference_path=args.profile_reference,
         )
     else:
         if args.alignment_artifact is None or args.window is None:

@@ -645,8 +645,14 @@ def _velocity_action_to_omega(
         -params.velocity_integral_limit_mps2,
         params.velocity_integral_limit_mps2,
     )
-    body_z = rotation[:, 2]
-    collective = max(float(thrust_world @ body_z), 0.0)
+    if params.normalized_allocator:
+        # PX4's attitude-setpoint boundary preserves the desired normalized
+        # thrust magnitude while the attitude loop rotates the vehicle toward
+        # its direction. It does not project thrust onto the current body Z.
+        collective = float(np.linalg.norm(thrust_world))
+    else:
+        body_z = rotation[:, 2]
+        collective = max(float(thrust_world @ body_z), 0.0)
 
     desired_z = _clamp_tilt(thrust_world, params.max_tilt_rad)
     heading_x = np.array([np.cos(yaw), np.sin(yaw), 0.0])

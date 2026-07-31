@@ -70,6 +70,18 @@ alignment-fit:
 	    --run-dir '$(ALIGNMENT_RUN_DIR)' \
 	    --run-id '$(ALIGNMENT_RUN_ID)'
 
+.PHONY: alignment-replay-controller
+alignment-replay-controller:
+	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
+	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
+	@test -f '$(ALIGNMENT_RUN_DIR)/alignment.json'
+	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
+	    --config configs/alignment_px4_x500_velocity.yaml \
+	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
+	    --alignment-artifact '$(ALIGNMENT_RUN_DIR)/alignment.json' \
+	    --profile-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
+	    --json '$(ALIGNMENT_RUN_DIR)/controller_boundary_replay.json'
+
 .PHONY: align-controllers
 align-controllers:
 	@$(MAKE) alignment-capture-reference ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
@@ -15,7 +16,9 @@ from flight_analysis.tools.controller_state_replay import (
     _linear_interpolate,
     _linear_scale_with_intercept,
     _nearest_indices,
+    _normalized_boundary_metrics,
     _profile_topic,
+    _profile_windows,
     _px4_attitude_to_isaac,
 )
 
@@ -76,6 +79,61 @@ def test_rate_output_scale_fit_separates_constant_torque_bias():
     assert rmse < 1e-12
 
 
+def test_normalized_boundary_reconstructs_unsaturated_collective_and_torque():
+    mix = np.array(
+        [
+            [-0.5, 0.5, 1.0, -1.0],
+            [0.5, -0.5, 1.0, -1.0],
+            [0.5, 0.5, -1.0, -1.0],
+            [-0.5, -0.5, -1.0, -1.0],
+        ]
+    )
+    target_boundary = np.array(
+        [
+            [0.02, -0.03, 0.01, -0.57],
+            [-0.01, 0.02, -0.02, -0.55],
+        ]
+    )
+    target_motor = target_boundary @ mix.T
+    px4_motor = np.array(target_motor, copy=True)
+    px4_collective = -target_boundary[:, 3]
+    px4_torque = target_boundary[:, :3] * np.array([1.0, -1.0, -1.0])
+
+    metrics = _normalized_boundary_metrics(
+        target_motor_controls=target_motor,
+        px4_motor_controls=px4_motor,
+        normalized_mix=mix,
+        px4_collective=px4_collective,
+        px4_torque_flu=px4_torque,
+    )
+
+    assert metrics == {
+        "normalized_motor_rmse": 0.0,
+        "unsaturated_sample_count": 2,
+        "saturated_sample_count": 0,
+        "normalized_collective_rmse": pytest.approx(0.0, abs=1e-12),
+        "normalized_torque_rmse": pytest.approx([0.0, 0.0, 0.0], abs=1e-12),
+    }
+
+
+def test_normalized_boundary_excludes_saturated_samples_from_upstream_metrics():
+    mix = np.eye(4)
+    target_motor = np.array([[0.2, 0.3, 0.4, 0.5], [0.0, 0.3, 0.4, 0.5]])
+
+    metrics = _normalized_boundary_metrics(
+        target_motor_controls=target_motor,
+        px4_motor_controls=np.array(target_motor, copy=True),
+        normalized_mix=mix,
+        px4_collective=np.array([-0.5, -0.5]),
+        px4_torque_flu=np.array([[0.2, -0.3, -0.4], [0.0, -0.3, -0.4]]),
+    )
+
+    assert metrics["unsaturated_sample_count"] == 1
+    assert metrics["saturated_sample_count"] == 1
+    assert metrics["normalized_collective_rmse"] == pytest.approx(0.0)
+    assert metrics["normalized_torque_rmse"] == pytest.approx([0.0, 0.0, 0.0])
+
+
 def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
     log = tmp_path / "bridge.log"
     log.write_text(
@@ -109,6 +167,36 @@ def test_profile_topic_uses_absolute_simulation_window():
         "timestamp_us": [100_000, 104_000],
         "values": [[1.0], [2.0]],
     }
+
+
+def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path: Path):
+    reference = tmp_path / "reference.json"
+    reference.write_text(
+        json.dumps(
+            {
+                "schema_version": 4,
+                "traces": [
+                    {
+                        "profile": "validation-combined",
+                        "split": "validation",
+                        "axis": "combined",
+                        "start_sim_time_us": 116_384_000,
+                        "time_s": [0.0, 2.5, 5.7],
+                    }
+                ],
+            }
+        )
+    )
+
+    assert _profile_windows(reference_path=reference) == [
+        {
+            "profile": "validation-combined",
+            "split": "validation",
+            "axis": "combined",
+            "start_s": 116.384,
+            "end_s": 122.084,
+        }
+    ]
 
 
 def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):

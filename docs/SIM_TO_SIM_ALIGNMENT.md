@@ -74,7 +74,10 @@ acceleration and gravity form desired body Z, vertical acceleration scales the
 normalized hover thrust, and collective is divided by the tilt-limited body-Z
 vertical projection. PX4's minimum thrust, horizontal margin, maximum thrust,
 vertical anti-windup, horizontal tracking anti-windup, and integral update
-ordering are preserved. The rate PID emits normalized torque directly.
+ordering are preserved. The attitude-setpoint boundary passes the magnitude of
+that desired thrust vector to the body-Z allocator input; current attitude
+affects the rate setpoint, not normalized collective. The rate PID emits
+normalized torque directly.
 `CA_METHOD=2` selects multirotor sequential desaturation, and pinned
 `MC_AIRMODE=0` prioritizes thrust, roll/pitch, then yaw before clipping motor
 controls to `[0, 1]`. The composed bridge offset, scale, armed zero, and
@@ -258,6 +261,7 @@ make alignment-capture-reference
 make alignment-audit-actuators
 make alignment-sweep-target
 make alignment-fit
+make alignment-replay-controller
 
 make align-controllers
 make test-integration-alignment-target
@@ -268,7 +272,11 @@ copies its finalized `reference.ulg` and `bridge.log` into the same run, and
 writes a relative-path `manifest.json`. The actuator audit writes
 `actuator_audit.json`, the live staged sweep writes `target_candidates.json`
 and `gpu_utilization.json`, and fit reproduces the same deterministic search
-from those cached traces before writing and publishing `alignment.json`. The
+from those cached traces before writing and publishing `alignment.json`.
+Profile replay then writes `controller_boundary_replay.json`, using each
+trace's recorded PX4 start time and duration to report normalized collective,
+torque, motor, rotor-speed, and physical-wrench errors while separating
+saturated samples from upstream allocator attribution. The
 file-backed evaluator indexes the generated candidate file once and reads one
 candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.

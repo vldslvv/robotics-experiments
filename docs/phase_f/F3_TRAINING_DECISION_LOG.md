@@ -3669,3 +3669,40 @@ attempt. The source implementation, hypothesis, capture, ULog, bridge log,
 reference trace, target candidates, actuator audit, GPU telemetry, manifest,
 and rejected fit artifact are preserved. No attempt 11, integration acceptance
 test, actor diagnostic, training run, or machine shutdown was started.
+
+### 75. Correct the schema-5 attitude-to-collective boundary
+
+Date: 2026-07-31.
+
+Attempt 11 corrects one source-confirmed schema-5 controller boundary. PX4
+constructs the desired normalized thrust vector in position control, converts
+its direction into the attitude setpoint, and passes the vector magnitude as
+the body-Z thrust setpoint. The Lab cascade instead projected the desired
+thrust vector onto the current body Z. That made normalized collective depend
+on transient attitude error even though PX4 preserves it while the attitude
+loop rotates toward the desired direction.
+
+The schema-5 NumPy and Torch paths will now send the limited desired thrust
+vector's magnitude to the normalized allocator. Schemas 2 through 4 retain
+their original physical-force projection behavior. The target controller
+identifier advances to `isaac-lab-x500-velocity-v12`; artifact schema 5,
+controller settings, candidates, probes, gates, worker count, policy
+interface, reward, and training configuration remain unchanged.
+
+Controller replay now consumes the recorded absolute start and duration of
+every fit, validation, and stability profile. For unsaturated samples it
+inverts the generated normalized allocator mix and reports collective and
+torque error before reporting motor, rotor-speed, and physical-wrench error.
+Saturated samples remain in output-boundary metrics but cannot be attributed
+upstream through the inverse.
+
+An offline replay of attempt 10 with the corrected controller shows that the
+source correction is necessary but not sufficient by itself. The braking
+profile's physical collective RMSE changes from 0.11080 N to 0.11057 N, while
+its normalized collective RMSE is 0.00163 and normalized motor RMSE is
+0.00274. No braking sample is saturated. The reference hover estimate for
+that profile is 0.57153-0.57157, while attempt 10 selected normalized hover
+0.570 and the unchanged search already contains 0.5715. Attempt 11 therefore
+keeps the candidate table unchanged and tests whether the source-correct
+boundary lets the measured-hover candidate survive the complete staged
+ranking.

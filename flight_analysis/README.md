@@ -60,6 +60,24 @@ The audit fails on incomplete topic coverage, a join error above one 4 ms
 physics tick, normalized motor RMSE above 0.01, or collective-thrust RMSE above
 0.05 N.
 
+After fitting, replay every recorded profile without selecting windows by hand:
+
+```bash
+env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
+  flight_analysis/tools/controller_state_replay.py \
+  --ulog .build/alignment/<alignment-id>/<run-id>/reference.ulg \
+  --config configs/alignment_px4_x500_velocity.yaml \
+  --alignment-artifact .build/alignment/<alignment-id>/<run-id>/alignment.json \
+  --profile-reference .build/alignment/<alignment-id>/<run-id>/reference.json \
+  --json .build/alignment/<alignment-id>/<run-id>/controller_boundary_replay.json
+```
+
+Profile replay inverts unsaturated normalized motor controls through the
+generated allocator mix and reports target-versus-PX4 normalized collective
+and torque before the existing motor, rotor-speed, and physical-wrench
+metrics. Samples at either motor limit remain in output-boundary metrics but
+are excluded from upstream allocator attribution.
+
 ```bash
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \

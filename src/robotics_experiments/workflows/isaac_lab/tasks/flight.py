@@ -721,8 +721,11 @@ def _velocity(
         -params.velocity_integral_limit_mps2,
         params.velocity_integral_limit_mps2,
     )
-    body_z = rotation[:, :, 2]
-    collective = (thrust_world * body_z).sum(dim=-1).clamp_min(0.0)
+    if params.normalized_allocator:
+        collective = thrust_world.norm(dim=-1)
+    else:
+        body_z = rotation[:, :, 2]
+        collective = (thrust_world * body_z).sum(dim=-1).clamp_min(0.0)
 
     desired_z = _clamp_tilt(thrust_world, params.max_tilt_rad)
     heading_x = torch.stack([cos_yaw, sin_yaw, torch.zeros_like(cos_yaw)], dim=-1)

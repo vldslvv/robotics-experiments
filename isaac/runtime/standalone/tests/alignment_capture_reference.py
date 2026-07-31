@@ -375,6 +375,7 @@ def _write_capture(
                     "target_candidates": "target_candidates.json",
                     "gpu_telemetry": "gpu_utilization.json",
                     "alignment_artifact": "alignment.json",
+                    "controller_boundary_replay": "controller_boundary_replay.json",
                 },
             },
             indent=2,

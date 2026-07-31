@@ -220,6 +220,88 @@ def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
     assert physical_collective_fraction == pytest.approx((320.75 / 525.0) ** 2)
 
 
+def test_schema5_collective_preserves_desired_thrust_magnitude_during_attitude_error():
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_normalized=0.57,
+        kp_vel=(0.0, 0.0, 0.0),
+        ki_vel=(0.0, 0.0, 0.0),
+        kd_vel=(0.0, 0.0, 0.0),
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+    tilt_rad = math.radians(8.0)
+    tilted = replace(
+        _level_rest_state(),
+        attitude_flu_enu_wxyz=np.array(
+            [math.cos(tilt_rad / 2.0), math.sin(tilt_rad / 2.0), 0.0, 0.0]
+        ),
+    )
+
+    _level_controller, level_omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    _tilted_controller, tilted_omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        tilted,
+        0.004,
+    )
+
+    assert float(np.mean(tilted_omega)) == pytest.approx(float(np.mean(level_omega)))
+
+
+def test_legacy_collective_retains_current_body_z_projection():
+    settings = replace(
+        _controller_settings(),
+        hover_thrust_fraction=0.57,
+        kp_vel=(0.0, 0.0, 0.0),
+        ki_vel=(0.0, 0.0, 0.0),
+        kd_vel=(0.0, 0.0, 0.0),
+    )
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+    tilt_rad = math.radians(8.0)
+    tilted = replace(
+        _level_rest_state(),
+        attitude_flu_enu_wxyz=np.array(
+            [math.cos(tilt_rad / 2.0), math.sin(tilt_rad / 2.0), 0.0, 0.0]
+        ),
+    )
+
+    _level_controller, level_omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    _tilted_controller, tilted_omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        tilted,
+        0.004,
+    )
+    level_collective = float(np.sum(params.geometry.rotor_constant * np.square(level_omega)))
+    tilted_collective = float(np.sum(params.geometry.rotor_constant * np.square(tilted_omega)))
+
+    assert tilted_collective == pytest.approx(level_collective * math.cos(tilt_rad))
+
+
 def test_normalized_allocator_matches_px4_mix_and_sequential_desaturation():
     settings = replace(_controller_settings(), hover_thrust_normalized=0.57)
     params = build_actuation_params(
