@@ -3811,3 +3811,67 @@ policy interface, reward, or training setting changes. The wider beam is the
 one structural search change for this attempt; the same single worker remains
 appropriate because Attempt 11 measured sequential Isaac/PhysX stepping as
 the bottleneck.
+
+### 78. Attempt 12 crosses stop and heading but loses the endpoint basin
+
+Date: 2026-07-31.
+
+Attempt 12 completed from clean source commit `813187c` as
+`x500-velocity-px4-v5/20260731T054522Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.00101, and collective RMSE peaked at 0.0122 N.
+
+The 64-wide sweep evaluated 12597 unique candidates, 12351 of them usable, and
+selected candidate 12027 under comparison fingerprint
+`65d63f76f21e02e840b87b08d55c8185c1d693b223fd6db16ea5f9529cac4c7a`.
+
+| Held-out metric | Attempt 12 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 6.350 mm | 5 mm |
+| Residual-speed error | 0.00581 m/s | 0.01 m/s |
+| Stop-time error | 0.060 s | 0.10 s |
+| Worst-axis velocity NRMSE | 8.10% | 10% |
+| Yaw-rate NRMSE | 4.65% | 10% |
+| Heading error | 3.000 deg | 3 deg |
+| Combined endpoint error | 47.260 mm | 10 mm |
+
+The attempt is rejected with two failed gates and a largest normalized excess
+of 3.726. It crosses both Attempt 11 failures, stop time and heading, but
+regresses the previously passed braking and endpoint gates. It is therefore a
+no-progress result against Attempt 11's two failures and 1.043 largest excess.
+Among usable candidates, 924 failed two gates, 3520 failed three, 2658 failed
+four, 1961 failed five, 3283 failed six, and 5 failed all seven. Candidate-wide
+minima were 1.855 mm braking error, 0.00035 m/s residual speed, 0.060 s
+stop-time error, 5.73% velocity NRMSE, 3.02% yaw-rate NRMSE, 2.323 degrees
+heading error, and 10.849 mm endpoint error. Unlike Attempt 11, this fresh
+reference produced no evaluated endpoint-passing candidate.
+
+The selected settings use 0.060 s command delay, velocity P/I/D
+`[1.8, 2.25, 6]`, `[0, 0.4, 2]`, and `[0.3, 0.3, 0]`, a 1 Hz
+velocity-derivative filter, normalized hover thrust 0.572, attitude P
+`[4, 4, 2.8]`, yaw weight 0.3, rate P/I/D
+`[0.1125, 0.1125, 0.15]`, `[0.3, 0.3, 0.15]`, and
+`[0.0015, 0.0015, 0]`, yaw-only feed-forward 0.025, a 15 Hz
+rate-derivative filter, 0.45 rate-integral limits, and 0.04 s actuator fall
+time.
+
+Controller replay again places yaw and combined error first at normalized
+torque: validation normalized motor RMSE is 0.0137 and 0.0131, with normalized
+yaw-torque RMSE of 0.0134 and 0.0126. The selected braking and lateral
+profiles pass the normalized motor and physical collective replay limits.
+Vertical collective RMSE remains 0.254 N and the stability envelope has
+broader collective and torque error. The passing fresh reference actuator
+audit continues to exclude the bridge mapping as the first seam.
+
+The global beam expansion is not retained as evidence of a better frontier.
+Attempt 13 should restore the 32-wide search and preserve Attempt 11's
+zero-delay, high-integral braking/endpoint basin explicitly while combining
+the evidenced intermediate yaw-torque and isolated lateral candidates. It
+should not broaden the controller, allocator, plant, actuator, probes, gates,
+worker count, policy interface, reward, or training configuration.
+
+Attempt 12 used one worker, 41 GPU batches, and 2025.57 s for the useful
+sweep, or 6.22 candidate evaluations/s. GPU utilization averaged 25.21%,
+reached 48% at p95 and 60% at peak, and used 5409 MiB peak memory.
+Sequential Isaac/PhysX stepping remains the measured bottleneck.
