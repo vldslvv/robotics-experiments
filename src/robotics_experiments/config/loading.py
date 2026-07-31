@@ -112,6 +112,14 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
                 f"vehicle {label!r} bridge.barometer_noise_std_pa must be "
                 f"finite and non-negative, got {v.bridge.barometer_noise_std_pa!r}"
             )
+        if (
+            not math.isfinite(v.bridge.magnetometer_noise_scale)
+            or v.bridge.magnetometer_noise_scale < 0.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} bridge.magnetometer_noise_scale must be "
+                f"finite and non-negative, got {v.bridge.magnetometer_noise_scale!r}"
+            )
         if len(v.spawn.position_xy) != 2:
             raise ValueError(
                 f"vehicle {label!r} position_xy must have length 2, got {v.spawn.position_xy!r}"

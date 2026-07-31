@@ -119,6 +119,7 @@ def _bridge_components(
         gps_send_rate_hz=cfg.gps_send_rate_hz,
         sensor_noise_enabled=cfg.sensor_noise_enabled,
         barometer_noise_std_pa=cfg.barometer_noise_std_pa,
+        magnetometer_noise_scale=cfg.magnetometer_noise_scale,
         home_lat_deg=cfg.home_lat_deg,
         home_lon_deg=cfg.home_lon_deg,
         home_alt_m=cfg.home_alt_m,
@@ -244,6 +245,7 @@ def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
         f"gps_rate_hz={cfg.gps_send_rate_hz} "
         f"sensor_noise_enabled={cfg.sensor_noise_enabled} "
         f"barometer_noise_std_pa={cfg.barometer_noise_std_pa} "
+        f"magnetometer_noise_scale={cfg.magnetometer_noise_scale} "
         f"debug_log_path={host.params.debug_log_path}"
     )
     bridge = create_px4_bridge(

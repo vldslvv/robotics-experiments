@@ -472,11 +472,14 @@ Rate higher than physics step is wasteful; lower starves PX4's EKF.
 
 Runtime IMU, barometer, and magnetometer data are produced by the vendored
 Pegasus sensor models. The Hydra field `px4.sensor_noise_enabled` controls
-the IMU, GPS, and magnetometer noise/bias terms.
+the IMU and GPS noise/bias terms.
 `px4.barometer_noise_std_pa` independently controls pressure noise because PX4
-HIL rejects a perfectly constant barometer stream as stale. The defaults enable
-all models with 1 Pa barometer noise, so integration tests and normal simulator
-runs exercise noisy sensors; precision tests may set both controls to their
+HIL rejects a perfectly constant barometer stream as stale.
+`px4.magnetometer_noise_scale` independently scales magnetic white noise and
+bias walk because the exact composed field may not enter PX4's yaw-alignment
+innovation gate. The defaults enable all models with 1 Pa pressure noise and
+unit magnetic noise scale, so integration tests and normal simulator runs
+exercise noisy sensors; precision tests may set all three controls to their
 exact values.
 
 #### `HIL_GPS` (msg id 113)

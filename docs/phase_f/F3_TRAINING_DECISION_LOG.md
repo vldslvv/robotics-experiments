@@ -4682,3 +4682,22 @@ seeded 1 Pa pressure stream, while keeping IMU and GPS stochastic terms
 disabled. This remains the same sensor-boundary isolation: it preserves the two
 HIL excitations demonstrated to be required by PX4 and removes the IMU/GPS
 perturbations most directly coupled to velocity and position estimation.
+
+### 98. Retain only the two HIL excitations PX4 requires
+
+Date: 2026-07-31.
+
+Attempt 22 adds an independent magnetometer-noise scale alongside the
+independent barometer amplitude introduced by Attempt 21. Normal runtime keeps
+the Pegasus unit scale. The alignment experiment keeps that seeded unit scale
+and 1 Pa pressure noise while disabling stochastic IMU and GPS terms.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v24`. Configuration validation rejects negative or
+non-finite magnetic noise scales, and bridge tests verify that the alignment
+combination produces exact IMU/GPS values alongside changing barometer and
+magnetometer samples. The controller, allocator, composed plant, actuator
+model, probe suite, gates, candidate ranges, beam width, worker count, policy
+interface, reward, and training configuration remain unchanged. Two successful
+captures with materially reduced trace spread remain the prerequisite for
+another full sweep.

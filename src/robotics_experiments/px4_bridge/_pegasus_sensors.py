@@ -30,6 +30,7 @@ class _PegasusSensorSuite:
         gps_enabled: bool,
         sensor_noise_enabled: bool,
         barometer_noise_std_pa: float,
+        magnetometer_noise_scale: float,
         update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
     ):
         self._home_lat_deg = float(home_lat_deg)
@@ -38,6 +39,7 @@ class _PegasusSensorSuite:
         self._gps_enabled = bool(gps_enabled)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
         self._barometer_noise_std_pa = float(barometer_noise_std_pa)
+        self._magnetometer_noise_scale = float(magnetometer_noise_scale)
         self._update_rate_hz = float(update_rate_hz)
         self._last_sim_time_us: int | None = None
 
@@ -57,7 +59,7 @@ class _PegasusSensorSuite:
             _pegasus_barometer_config(update_rate_hz, self._barometer_noise_std_pa)
         )
         self._magnetometer = Magnetometer(
-            _pegasus_magnetometer_config(update_rate_hz, self._sensor_noise_enabled)
+            _pegasus_magnetometer_config(update_rate_hz, self._magnetometer_noise_scale)
         )
         for sensor in (self._imu, self._gps, self._barometer, self._magnetometer):
             sensor.initialize(
@@ -165,12 +167,13 @@ def _pegasus_barometer_config(update_rate_hz: float, noise_std_pa: float) -> dic
     return config
 
 
-def _pegasus_magnetometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Magnetometer randomness is Gaussian field noise plus random-walk
-        # bias. Zero both terms for exact frame/field tests; the bias
-        # correlation time is a structural constant, not a noise term.
-        config["bias_correlation_time"] = 6.0e2
-        _zero_noise(config, ("noise_density", "random_walk"))
-    return config
+def _pegasus_magnetometer_config(update_rate_hz: float, noise_scale: float) -> dict:
+    # Keep the vendored defaults explicit so an alignment experiment can retain
+    # the excitation PX4 needs for yaw initialization while other sensor noise
+    # is disabled.
+    return {
+        "update_rate": update_rate_hz,
+        "noise_density": 0.4e-3 * noise_scale,
+        "random_walk": 6.4e-6 * noise_scale,
+        "bias_correlation_time": 6.0e2,
+    }

@@ -89,6 +89,8 @@ sensor_noise_enabled: true
 # Pressure noise is separately authored because PX4 rejects a perfectly
 # constant barometer stream as stale. Normal runtime uses the Pegasus default.
 barometer_noise_std_pa: 1.0
+# One retains the Pegasus magnetometer white-noise and bias-walk amplitudes.
+magnetometer_noise_scale: 1.0
 
 home_lat_deg: 47.3977
 home_lon_deg: 8.5456

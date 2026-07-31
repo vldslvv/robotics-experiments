@@ -178,7 +178,7 @@ def test_mavlink_port_pegasus_sensors_can_disable_noise_for_precision(monkeypatc
     assert abs(gps["longitude_gt"]) > 1.0
 
 
-def test_mavlink_port_can_retain_only_barometer_noise(monkeypatch):
+def test_mavlink_port_can_retain_only_baro_and_mag_noise(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     np.random.seed(42)
     port = Px4MavlinkPort(
@@ -186,6 +186,7 @@ def test_mavlink_port_can_retain_only_barometer_noise(monkeypatch):
         gps_send_rate_hz=250.0,
         sensor_noise_enabled=False,
         barometer_noise_std_pa=1.0,
+        magnetometer_noise_scale=1.0,
     )
     backend = port._backend
     backend._connection = _FakeConnection()
@@ -201,7 +202,7 @@ def test_mavlink_port_can_retain_only_barometer_noise(monkeypatch):
             [0.0, 0.0, -9.80665],
             atol=1e-8,
         )
-    np.testing.assert_array_equal(
+    assert not np.array_equal(
         backend.mag_updates[0]["magnetic_field"],
         backend.mag_updates[1]["magnetic_field"],
     )

@@ -11,11 +11,14 @@ vehicles:
     ros: {namespace: /x500_01}
     spawn: {position_xy: [0.0, 0.0]}
     bridge:
-      # Isolate controller/plant alignment from stochastic estimator inputs.
+      # Isolate controller/plant alignment from stochastic IMU/GPS inputs.
       # PX4 still requires nonconstant pressure samples to keep its barometer
-      # instance healthy, so retain only the seeded pressure-noise stream.
+      # instance healthy.
       sensor_noise_enabled: false
       barometer_noise_std_pa: 1.0
+      # PX4's exact-field innovation is outside its initialization gate on this
+      # composed model, so retain the seeded default magnetometer excitation.
+      magnetometer_noise_scale: 1.0
     routine:
       steps:
         - kind: arm

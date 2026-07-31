@@ -140,6 +140,9 @@ class Px4BridgeConfig(_FreezableConfig):
             This is independent so HIL experiments may retain the changing
             pressure stream PX4 requires while disabling other stochastic
             sensor terms.
+        magnetometer_noise_scale: Scale applied to Pegasus magnetometer white
+            noise and bias random walk. One retains the default model; zero
+            makes the field exact independently of other sensors.
         home_lat_deg, home_lon_deg, home_alt_m: Home position used when
             synthesizing GPS from the local ENU pose. Defaults match PX4's
             built-in default (Zurich).
@@ -185,6 +188,7 @@ class Px4BridgeConfig(_FreezableConfig):
     gps_send_rate_hz: float
     sensor_noise_enabled: bool
     barometer_noise_std_pa: float
+    magnetometer_noise_scale: float
     home_lat_deg: float
     home_lon_deg: float
     home_alt_m: float

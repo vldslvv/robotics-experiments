@@ -234,6 +234,7 @@ def _config(**overrides):
         "gps_send_rate_hz": 250.0,
         "sensor_noise_enabled": True,
         "barometer_noise_std_pa": 1.0,
+        "magnetometer_noise_scale": 1.0,
         "home_lat_deg": 47.3977,
         "home_lon_deg": 8.5456,
         "home_alt_m": 488.0,
@@ -415,6 +416,7 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
     assert port_call[1]["num_rotors"] == 2
     assert port_call[1]["sensor_noise_enabled"] is True
     assert port_call[1]["barometer_noise_std_pa"] == 1.0
+    assert port_call[1]["magnetometer_noise_scale"] == 1.0
     assert port_call[1]["lockstep"].physics_rate_hz == 250.0
     assert port_call[1]["lockstep"].lockstep_timeout_s == 1.0
     assert thrust_call[1]["num_rotors"] == 2

@@ -110,14 +110,15 @@ combined probe is a flight-envelope check; it can invalidate a candidate but
 does not enter the low-speed ranking.
 
 PX4 capture uses the normal fleet driver and an injected `PolicyAdapter`.
-The alignment experiment disables stochastic IMU, GPS, and magnetometer terms
-while retaining seeded barometer pressure noise; PX4 rejects a perfectly
-constant pressure stream as stale. It seeds the NumPy sequence from
-`alignment.capture.sensor_seed` before the bridge hosts are constructed.
+The alignment experiment disables stochastic IMU and GPS terms while retaining
+seeded barometer pressure and magnetometer noise. PX4 rejects a perfectly
+constant pressure stream as stale, while the composed exact magnetic field is
+outside its yaw-initialization innovation gate. It seeds the NumPy sequence
+from `alignment.capture.sensor_seed` before the bridge hosts are constructed.
 Normal integration runs retain all unseeded Pegasus process noise. A shared
-seed controls injected samples but does not by itself prove complete
-PX4/PhysX closed-loop reproducibility, so structural noise changes require
-replicate captures before another full sweep.
+seed controls injected samples but does not by itself prove complete PX4/PhysX
+closed-loop reproducibility, so structural noise changes require replicate
+captures before another full sweep.
 Before each recorded profile, the adapter streams a neutral velocity/yaw
 setpoint for at least the configured minimum and then requires a continuous
 stable-speed/rate/tilt window. The first profile therefore starts after PX4 has

@@ -44,9 +44,10 @@ the same canonical configuration fingerprint as the flown routine.
 
 `alignment.capture.sensor_seed` seeds the stochastic Pegasus sensor sequence
 before a PX4 controller-alignment capture starts. The alignment experiment
-disables stochastic IMU, GPS, and magnetometer terms but retains seeded
-barometer pressure noise because PX4 rejects a constant pressure stream as
-stale. The seed controls injected samples; complete closed-loop reproducibility
+disables stochastic IMU and GPS terms but retains seeded barometer and
+magnetometer noise: PX4 rejects a constant pressure stream as stale, and the
+composed exact magnetic field lies outside its yaw-initialization innovation
+gate. The seed controls injected samples; complete closed-loop reproducibility
 must still be verified with replicate captures.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,

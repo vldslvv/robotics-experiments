@@ -130,7 +130,7 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
-def test_alignment_experiment_retains_only_seeded_barometer_noise():
+def test_alignment_experiment_retains_required_seeded_sensor_excitation():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
@@ -138,6 +138,7 @@ def test_alignment_experiment_retains_only_seeded_barometer_noise():
 
     assert not bridge.sensor_noise_enabled
     assert bridge.barometer_noise_std_pa == 1.0
+    assert bridge.magnetometer_noise_scale == 1.0
     assert config.alignment.capture.sensor_seed == 42
 
 
@@ -166,6 +167,29 @@ def test_bridge_rejects_negative_barometer_noise(tmp_path):
     )
 
     with pytest.raises(ValueError, match="barometer_noise_std_pa must be finite and non-negative"):
+        load_config(path)
+
+
+def test_bridge_rejects_negative_magnetometer_noise_scale(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_magnetometer_noise",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace(
+            "magnetometer_noise_scale: 1.0",
+            "magnetometer_noise_scale: -1.0",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="magnetometer_noise_scale must be finite and non-negative",
+    ):
         load_config(path)
 
 
