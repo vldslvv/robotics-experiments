@@ -5370,3 +5370,26 @@ metrics use already-captured signals. A future gate needing new topics, probes,
 controller or plant behavior, images, or environments requires a fresh capture
 and comparison fingerprint seeded from candidate 8,083; the accepted evidence
 bundle remains immutable.
+
+### 124. Reproduce the accepted alignment from fresh evidence
+
+Date: 2026-07-31.
+
+Run `x500-velocity-px4-v6/20260731T201319Z` tests whether the retained accepted
+artifact is transient or whether the committed alignment workflow reproduces
+acceptance from scratch. It retains schema 6, the complete controller and plant
+contracts, all probe definitions, the 8,300-candidate deterministic search,
+one-worker execution, and every advisory and integration limit. It reuses no
+reference trace, ULog, candidate trace, fit result, or selected settings from
+the accepted run; only committed source and configuration are shared.
+
+The baseline remains run `20260731T185547Z`, candidate 8,083, which passes all
+seven exact-action gates and the standard 16-environment integration target.
+The reproduction succeeds only if a fresh capture passes its actuator audit,
+the fresh fit passes all seven exact-action gates with finite completed
+stability traces, and the new artifact itself passes
+`make test-integration-alignment-target`. Candidate identity and individual
+metric improvements are diagnostic comparisons, not added acceptance
+requirements. Publication behavior is not used as proof: the integration gate
+will receive the new run path directly even if `best` continues to resolve to
+the retained baseline.
