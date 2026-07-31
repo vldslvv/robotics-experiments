@@ -4350,3 +4350,68 @@ worst-axis velocity response.
 No controller equation, allocator, plant mapping, probe, gate, beam width,
 worker count, policy interface, reward, or training configuration changes.
 Attempt 18 is an evidence-routed declarative expansion within schema 5.
+
+### 90. Attempt 18 crosses endpoint but exposes the braking-side tradeoff
+
+Date: 2026-07-31.
+
+Attempt 18 completed from clean source commit `04951ac` as
+`x500-velocity-px4-v5/20260731T104305Z`. Its fresh capture completed all 11
+profiles. The reference actuator audit passed: timestamp joins stayed within
+one 4 ms physics tick, normalized motor RMSE peaked at 0.000693, and collective
+RMSE peaked at 0.01204 N.
+
+The sweep evaluated 6144 unique candidates, 6142 of them usable, and selected
+candidate 6143 under comparison fingerprint
+`22aac97a46608682a3e2a0e60998464af655b5a5c4fdd323d586eff65fee99c2`.
+The two unusable candidates failed the existing 35 degree tilt and 2 m lateral
+flight-envelope guards rather than numerical execution.
+
+| Held-out metric | Attempt 18 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 12.799 mm | 5 mm |
+| Residual-speed error | 0.00306 m/s | 0.01 m/s |
+| Stop-time error | 0.100 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.03% | 10% |
+| Yaw-rate NRMSE | 2.86% | 10% |
+| Heading error | 2.327 deg | 3 deg |
+| Combined endpoint error | 9.890 mm | 10 mm |
+
+The attempt is rejected with braking distance as its only failure and a largest
+normalized excess of 1.560. The actuator expansion crossed the endpoint gate,
+but it regressed the braking gate that Attempt 17 passed, so it is not material
+progress under the campaign definition. Among usable candidates, 1186 failed
+one gate, 1161 failed two, 1256 failed three, 1900 failed four, 615 failed
+five, and 24 failed six. Every one-gate candidate failed braking distance only.
+No candidate passed braking; its candidate-wide floor was 6.791 mm.
+Candidate-wide minima for the remaining gates were 0.000169 m/s residual
+speed, 0.100 s stop-time error, 6.39% velocity NRMSE, 2.48% yaw-rate NRMSE,
+1.963 degrees heading error, and 1.081 mm endpoint error.
+
+The selected settings use 0.060 s command delay, velocity P/I/D
+`[1.35, 1.575, 3]`, `[0.4, 0.4, 2]`, and `[0.3, 0.3, 0]`, 5 Hz
+velocity filtering, a 1 Hz velocity-derivative filter, normalized hover thrust
+0.57, attitude P `[5, 5, 3.5]`, yaw weight 0.3, rate P/I/D
+`[0.1875, 0.1875, 0.25]`, `[0.3, 0.3, 0.15]`, and zero, symmetric
+rate feed-forward 0.025, 15 Hz rate-derivative filtering, 0.4 rate-integral
+limits, 67.5 degrees maximum tilt, 0.01 s rise time, 0.10 s fall time, and an
+effectively unlimited actuator rate limit.
+
+The selected replay passes braking normalized motor RMSE at 0.00836 but misses
+physical collective RMSE at 0.1001 N; its normalized X torque RMSE is 0.01139.
+The captured PX4 hover estimate averages 0.57156 over that profile while the
+selected target uses 0.57. This places the first unresolved seam at the
+normalized thrust and horizontal braking boundary, not the bridge's composed
+plant mapping.
+
+Candidate 6137 is a stronger retained basin for the next attempt. It has the
+same 12.799 mm braking failure but 4.434 mm endpoint error, leaving 5.566 mm of
+endpoint margin. It uses 1/1/2 velocity-integral limits, yaw weight 0.6,
+25 Hz rate filtering, 0.45 rate-integral limits, a 500 N/s actuator rate limit,
+and otherwise preserves the selected velocity gains and 0.10 s fall time.
+
+Attempt 18 used one worker, 41 GPU batches, and 1493.55 s for the useful
+sweep, or 4.11 candidate evaluations/s. GPU utilization averaged 26.59%,
+reached 40% at p95 and 48% at peak, and used 4377 MiB peak memory. The same
+serial orchestration and trace-materialization bottleneck remains; adding a
+worker would not create additional useful GPU batches.
