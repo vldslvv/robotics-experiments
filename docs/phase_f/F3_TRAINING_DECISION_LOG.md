@@ -3989,3 +3989,66 @@ The target controller identifier advances to
 declarative candidates, controller equations, allocator, physical rotor
 curve, probes, gates, worker count, policy interface, reward, and training
 configuration remain unchanged.
+
+### 82. Attempt 14 reaches the first one-gate frontier
+
+Date: 2026-07-31.
+
+Attempt 14 completed from clean source commit `1a17650` as
+`x500-velocity-px4-v5/20260731T072630Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.00184, and collective RMSE peaked at 0.0121 N.
+
+The reset correction is directly visible in the stored candidate-0 vertical
+validation trace. Its first velocity samples are +0.00490, +0.00267, +0.00074,
+and -0.00015 m/s, replacing Attempt 13's first-step drop to -0.2261 m/s.
+
+The sweep evaluated 6095 unique candidates, 6093 of them usable, and selected
+candidate 5662 under comparison fingerprint
+`de23489cd9ac85ca582698f8a87fd117e43937963e42c288108e8ce20a453c68`.
+
+| Held-out metric | Attempt 14 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 4.417 mm | 5 mm |
+| Residual-speed error | 0.00394 m/s | 0.01 m/s |
+| Stop-time error | 0.200 s | 0.10 s |
+| Worst-axis velocity NRMSE | 5.66% | 10% |
+| Yaw-rate NRMSE | 5.29% | 10% |
+| Heading error | 2.949 deg | 3 deg |
+| Combined endpoint error | 9.845 mm | 10 mm |
+
+This is the campaign's first one-gate frontier and therefore material
+progress. Among usable candidates, 698 failed one gate, 929 failed two, 931
+failed three, 1649 failed four, 1299 failed five, 586 failed six, and 1 failed
+all seven. Candidate-wide minima were 3.974 mm braking error, 0.00019 m/s
+residual speed, 0.10000000000000009 s stop-time error, 5.32% velocity NRMSE,
+2.58% yaw-rate NRMSE, 1.792 degrees heading error, and 1.854 mm endpoint
+error.
+
+The selected settings use zero command delay, velocity P/I/D
+`[1.35, 1.35, 3]`, `[0.4, 0.6, 2]`, and `[0.25, 0.25, 0]`, 10 Hz velocity
+filtering, a 1 Hz velocity-derivative filter, normalized hover thrust 0.57,
+attitude P `[5, 5, 3.5]`, yaw weight 0.6, rate P/I/D
+`[0.1875, 0.1875, 0.25]`, `[0.2, 0.2, 0.1]`, and
+`[0.00375, 0.00375, 0]`, yaw-only feed-forward 0.025, 20 Hz rate-derivative
+filtering, 0.4 rate-integral limits, 56.25 degrees maximum tilt, and a 0.02 s
+actuator rise time.
+
+The candidate-wide stop-time floor is mathematically the unchanged 0.10 s
+limit, but subtracting two late floating-point timestamps reports
+0.10000000000000009 and rejects it. Attempt 15 should correct only this
+measurement artifact by quantizing the elapsed-time difference to nanosecond
+precision before applying the unchanged gate. This does not loosen the limit
+or change the event definition.
+
+Controller replay continues to place yaw and combined residuals at normalized
+torque, but all seven motion gates except stop time pass and no controller
+candidate expansion is warranted before the numerical boundary is evaluated
+correctly. The physical collective diagnostic remains above 0.05 N despite
+small normalized collective errors; the fresh reference bridge audit still
+passes.
+
+Attempt 14 used one worker, 41 GPU batches, and 1494.83 s for the useful
+sweep, or 4.08 candidate evaluations/s. GPU utilization averaged 26.41%,
+reached 40% at p95 and 47% at peak, and used 4377 MiB peak memory.
