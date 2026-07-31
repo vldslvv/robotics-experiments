@@ -4701,3 +4701,30 @@ model, probe suite, gates, candidate ranges, beam width, worker count, policy
 interface, reward, and training configuration remain unchanged. Two successful
 captures with materially reduced trace spread remain the prerequisite for
 another full sweep.
+
+### 99. Attempt 22 restores capture but not reproducibility
+
+Date: 2026-07-31.
+
+Attempt 22 completed two capture controls from clean source commit `1dd1c3d` as
+`x500-velocity-px4-v5/20260731T132413Z` and
+`x500-velocity-px4-v5/20260731T132715Z`. Both armed, took off, and completed all
+11 profiles. The first capture's actuator audit passed: timestamp joins stayed
+within one 4 ms physics tick, normalized motor RMSE peaked at 0.000327, and
+collective RMSE peaked at 0.01278 N.
+
+The replicate's profile starts were consistently 20 ms earlier, and every
+trace retained identical sample counts and relative-time arrays. Removing IMU
+and GPS noise nevertheless failed to reduce closed-loop spread at the gate
+scale. Maximum absolute relative-position differences were 12.071 mm on the
+held-out braking profile, 4.297 mm lateral, 57.004 mm vertical, 28.619 mm yaw,
+29.265 mm combined, and 21.898 mm on the stability profile. Corresponding
+velocity differences reached 4.544, 2.445, 13.913, 10.765, 10.575, and
+13.385 mm/s.
+
+This is worse overall than the Attempt 20 replicate, so a full target sweep is
+not justified. The remaining full-scale stochastic input is the seeded
+magnetometer model required to avoid PX4's exact-field stuck-data path. Attempt
+23 should reduce only `magnetometer_noise_scale` from 1.0 to 0.1 and rerun the
+two-capture control. The nonzero scale should retain sensor health while
+reducing magnetic estimator perturbation by one order of magnitude.
