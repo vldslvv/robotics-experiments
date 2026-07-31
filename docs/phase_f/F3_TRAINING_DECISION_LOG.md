@@ -5340,3 +5340,33 @@ must run a new 300-iteration Stage 1 scratch training with the accepted schema-6
 record embedded, followed by checkpoint selection, independent Lab evaluation,
 PX4 transfer, and the complete approach mission. No retraining belongs to this
 alignment session.
+
+### 123. Retain only the accepted alignment evidence
+
+Date: 2026-07-31.
+
+Alignment storage now retains only
+`x500-velocity-px4-v6/20260731T185547Z`, with both `best` and `latest`
+resolving to that accepted run. The final capture, sweep, integration, and
+actor-preflight runtime diagnostics were consolidated under its
+`acceptance/` directory and added to the relative-path manifest. A
+`SHA256SUMS` index covers all 21 retained payloads, and both checksum
+verification and Zstandard archive verification pass. The public artifact
+loader confirms schema 6, candidate 8,083, advisory acceptance, clean source
+commit `4e3e005`, and run ID `20260731T185547Z`.
+
+Rejected alignment generations v1 through v5, rejected v6 run
+`20260731T180706Z`, 59 capture workspaces, 43 sweep workspaces, 24 integration
+acceptance workspaces, and the two copied final actor-preflight workspaces were
+deleted. Unrelated training, benchmark, cache, and integration artifacts were
+not touched. Alignment storage decreased by 114,588,796,441 bytes and duplicate
+Docker integration storage decreased by 3,946,965,565 bytes, reclaiming
+118,535,762,006 bytes in total.
+
+The retained 1.6 GiB bundle includes the lossless candidate archive with an
+exact uncompressed size of 8,282,853,039 bytes. It can be rehydrated to
+`target_candidates.json` for offline rescoring when tighter gates or new
+metrics use already-captured signals. A future gate needing new topics, probes,
+controller or plant behavior, images, or environments requires a fresh capture
+and comparison fingerprint seeded from candidate 8,083; the accepted evidence
+bundle remains immutable.

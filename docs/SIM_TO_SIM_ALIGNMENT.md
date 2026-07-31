@@ -330,6 +330,36 @@ file-backed evaluator indexes the generated candidate file once and reads one
 candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.
 
+### Accepted-run retention
+
+The accepted `x500-velocity-px4-v6/20260731T185547Z` run is the retained
+alignment evidence bundle. Its relative-path manifest covers the alignment
+artifact, reference trace and ULog, bridge log, actuator audit, controller
+boundary replay, GPU telemetry, compressed candidate traces, and final capture,
+sweep, integration, and actor-preflight diagnostics. `SHA256SUMS` binds every
+retained payload except the checksum file itself. Verify it from the run
+directory with `sha256sum -c SHA256SUMS` before using the evidence after an
+archive transfer.
+
+The accepted bundle keeps `target_candidates.json.zst` because the complete
+8,300-candidate trace set is expensive to reproduce and supports offline
+rescoring with tighter versions of the current gates or new metrics over the
+signals already captured. The exact uncompressed size is recorded in the
+manifest. The current fit entrypoint expects the uncompressed basename, so
+rehydrate it beside the archive before rescoring:
+
+```console
+zstd -d -k target_candidates.json.zst -o target_candidates.json
+```
+
+This requires at least 8,282,853,039 bytes of temporary free space. Remove only
+the rehydrated JSON after rescoring; the compressed archive remains the retained
+source evidence. A gate requiring an uncaptured topic, a changed probe,
+controller interface, plant contract, image, or environment needs a fresh
+capture and comparison fingerprint. Seed that campaign from candidate 8,083,
+but publish it under a new run or generation and leave the accepted bundle
+immutable.
+
 Initial controller-state enrichment linearly interpolates the PX4 acceleration
 setpoint, rate-integral vectors, and hover-thrust estimate to the trace's
 absolute profile start, matching the linear and angular acceleration treatment.
