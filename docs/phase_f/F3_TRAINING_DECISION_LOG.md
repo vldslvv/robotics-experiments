@@ -4831,3 +4831,30 @@ different NumPy random seeds. The controller, allocator, composed plant,
 actuator model, probe suite, gates, candidates, worker count, policy interface,
 reward, and training configuration remain unchanged. Attempt 25 will run two
 captures before deciding whether a full target sweep is justified.
+
+### 105. Attempt 25 removes random input but not PhysX spread
+
+Date: 2026-07-31.
+
+Attempt 25 completed two capture controls from clean source commit `41a37b3` as
+`x500-velocity-px4-v5/20260731T135947Z` and
+`x500-velocity-px4-v5/20260731T140246Z`. Both deterministic sensor streams
+passed PX4 health checks, both flights completed all 11 profiles, and the first
+capture's actuator audit passed. Timestamp joins stayed within one 4 ms physics
+tick, normalized motor RMSE peaked at 0.000326, and collective RMSE peaked at
+0.01296 N.
+
+Every replicate profile began exactly 40 ms earlier and retained the same
+sample count. After interpolation on the common profile-relative time domain,
+maximum absolute relative-position differences were 7.279 mm on held-out
+braking, 27.832 mm lateral, 95.660 mm vertical, 33.346 mm yaw, 5.735 mm
+combined, and 13.434 mm on stability. Corresponding velocity differences
+reached 7.887, 10.952, 21.094, 11.950, 3.169, and 4.104 mm/s.
+
+Deterministic excitation therefore preserves estimator health and improves
+braking and combined reproducibility, but it does not eliminate closed-loop
+variation. With sensor output deterministic, the first unresolved seam is now
+the GPU PhysX execution used by the PX4 reference capture. Attempt 26 should
+enable PhysX enhanced determinism for the alignment experiment only, preserving
+the same controller, plant, probes, and sensor excitation, then repeat the
+two-capture control before running a full sweep.
