@@ -109,6 +109,7 @@ def test_default_experiment_has_only_global_root_config():
         "alignment",
     }
     assert config.flight_benchmark.airborne_duration_s == 5.0
+    assert config.alignment.capture.sensor_seed == 42
     assert config.alignment.capture.minimum_neutral_s == 3.0
     assert config.alignment.capture.max_linear_speed_mps == 0.02
     assert config.alignment.capture.max_angular_speed_radps == 0.03
@@ -129,12 +130,24 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
-def test_alignment_experiment_disables_stochastic_px4_sensor_models():
+def test_alignment_experiment_retains_seeded_stochastic_px4_sensor_models():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
 
-    assert not config.vehicles["x500_01"].bridge.sensor_noise_enabled
+    assert config.vehicles["x500_01"].bridge.sensor_noise_enabled
+    assert config.alignment.capture.sensor_seed == 42
+
+
+def test_alignment_capture_rejects_seed_outside_numpy_range(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(tmp_path, "invalid_alignment_seed", {})
+    base = path.parent / "base.yaml"
+    base.write_text(base.read_text().replace("sensor_seed: 42", "sensor_seed: -1"))
+
+    with pytest.raises(ValueError, match="32-bit unsigned integer"):
+        load_config(path)
 
 
 def test_press_approach_config_preserves_actor_contract_and_stage_settings():

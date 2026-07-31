@@ -4535,3 +4535,29 @@ A host configuration regression verifies that the dedicated alignment
 experiment disables stochastic PX4 sensor models. Attempt 20 will run a fresh
 capture, actuator audit, unchanged target sweep, and held-out fit from the
 committed source.
+
+### 94. Retain valid HIL noise with a deterministic alignment seed
+
+Date: 2026-07-31.
+
+The noise-free Attempt 20 source commit `4a6804a` did not reach capture. Two
+launches under run IDs `20260731T121830Z` and `20260731T121927Z` both stopped
+before arming at 5.18 s simulation time. The bridge sent fresh IMU,
+magnetometer, barometer, and GPS data every 4 ms through the final tick, but
+PX4 switched barometer instances, declared the constant noise-free pressure
+stream stale, and stopped returning actuator messages. The bridge then raised
+its existing one-second lockstep timeout. These are preserved infrastructure
+failures, not completed fitting attempts.
+
+Attempt 20 therefore retains the default stochastic Pegasus sensor models and
+seeds their shared NumPy sequence from a new
+`alignment.capture.sensor_seed` immediately before the scenario constructs
+bridge hosts. The configured seed is 42. This preserves changing HIL sensor
+values while making the reference estimator perturbations reproducible across
+captures. A host test verifies seeding occurs before scenario startup, and
+configuration validation restricts the seed to NumPy's unsigned 32-bit range.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v22`. The controller, allocator, composed plant,
+actuator model, probe suite, gates, candidate ranges, beam width, worker count,
+policy interface, reward, and training configuration remain unchanged.

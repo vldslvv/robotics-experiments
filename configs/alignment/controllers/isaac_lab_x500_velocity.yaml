@@ -1,5 +1,5 @@
 alignment_id: x500-velocity-px4-v5
-controller_id: isaac-lab-x500-velocity-v21
+controller_id: isaac-lab-x500-velocity-v22
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01

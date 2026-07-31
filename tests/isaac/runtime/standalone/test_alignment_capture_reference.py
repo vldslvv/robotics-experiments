@@ -138,6 +138,26 @@ def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch
     assert failed.failure_reason == "alignment profile 'yaw' did not stabilize within 12.0s"
 
 
+def test_capture_seeds_sensor_noise_before_starting_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    seeds: list[int] = []
+    monkeypatch.setattr(module.np.random, "seed", seeds.append)
+    monkeypatch.setattr(module, "Px4TakeoffScenarioOptions", lambda **kwargs: kwargs)
+    monkeypatch.setattr(module, "run_px4_takeoff_scenario", lambda *_args: None)
+
+    module._run(  # noqa: SLF001 - focused capture initialization test
+        context=SimpleNamespace(config=config),
+        definition=_yaw_definition(),
+        run_dir=tmp_path,
+    )
+
+    assert seeds == [42]
+
+
 def test_capture_rejects_wrong_body_flu_yaw_response_sign(monkeypatch: pytest.MonkeyPatch):
     module = _load_script(monkeypatch)
     samples = tuple(

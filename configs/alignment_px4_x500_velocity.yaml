@@ -10,10 +10,6 @@ vehicles:
     id: 0
     ros: {namespace: /x500_01}
     spawn: {position_xy: [0.0, 0.0]}
-    bridge:
-      # Alignment compares deterministic controller and plant response. Noisy
-      # estimator inputs are a separate sim-to-real diagnostic.
-      sensor_noise_enabled: false
     routine:
       steps:
         - kind: arm

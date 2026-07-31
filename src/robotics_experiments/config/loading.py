@@ -171,6 +171,8 @@ def _validate_rates(experiment: ExperimentConfig) -> None:
 
 def _validate_alignment(experiment: ExperimentConfig) -> None:
     capture = experiment.alignment.capture
+    if not 0 <= capture.sensor_seed <= 2**32 - 1:
+        raise ValueError("alignment.capture.sensor_seed must be a 32-bit unsigned integer")
     positive_capture = {
         "minimum_neutral_s": capture.minimum_neutral_s,
         "stable_hold_s": capture.stable_hold_s,

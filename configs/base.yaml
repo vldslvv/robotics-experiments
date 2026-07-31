@@ -11,6 +11,7 @@ flight_benchmark:
 
 alignment:
   capture:
+    sensor_seed: 42
     minimum_neutral_s: 3.0
     stable_hold_s: 0.5
     timeout_s: 12.0

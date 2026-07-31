@@ -9,6 +9,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from _px4_takeoff_scenario import (
     Px4TakeoffScenarioOptions,
     run_px4_takeoff_scenario,
@@ -386,6 +387,8 @@ def _write_capture(
 
 
 def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir: Path) -> None:
+    np.random.seed(context.config.alignment.capture.sensor_seed)
+
     def post_routine(_context: SceneTestContext, fleet) -> None:
         state = fleet.flying[0].driver.routine_state.last_policy_state
         if not isinstance(state, _ProbeState):

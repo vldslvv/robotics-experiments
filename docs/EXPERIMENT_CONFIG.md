@@ -10,7 +10,8 @@ resolved configuration to downstream consumers.
 
 The root contains only execution-wide configuration:
 
-- `sim`, `switches`, `rl`, `scene`, `driver`, and `flight_benchmark`;
+- `sim`, `switches`, `rl`, `scene`, `driver`, `flight_benchmark`, and
+  `alignment`;
 - `vehicles`, an ordered mapping of complete per-vehicle configs.
 
 `configs/base.yaml` composes the global groups only. Vehicle-specific `spawn`,
@@ -40,6 +41,10 @@ stage mutation.
 `flight_benchmark.airborne_duration_s` is used only by the opt-in full-GUI
 benchmark. Keeping it in the resolved graph makes the capture duration part of
 the same canonical configuration fingerprint as the flown routine.
+
+`alignment.capture.sensor_seed` seeds the stochastic Pegasus sensor sequence
+before a PX4 controller-alignment capture starts. Alignment retains changing
+HIL sensor values while making repeated reference captures reproducible.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and

@@ -26,6 +26,7 @@ class _FlightBenchmarkConfig(_FreezableConfig):
 class _AlignmentCaptureConfig(_FreezableConfig):
     """Behavior-affecting PX4 alignment capture preconditioning."""
 
+    sensor_seed: int
     minimum_neutral_s: float
     stable_hold_s: float
     timeout_s: float
