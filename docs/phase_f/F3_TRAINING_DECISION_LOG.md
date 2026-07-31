@@ -4330,3 +4330,23 @@ reached 41% at p95 and 47% at peak, and used 4377 MiB peak memory. A second
 worker is still not justified because the existing worker already batches all
 candidate work on the GPU and the limiting serial stages do not create
 independent useful batches.
+
+### 89. Retain the corrected frontier and extend actuator fall time
+
+Date: 2026-07-31.
+
+Attempt 18 makes the complete Attempt 17 selected settings the target
+definition's base candidate, guaranteeing that the six-gate frontier is
+evaluated on the next fresh reference before staged pruning. The target
+controller identifier advances to `isaac-lab-x500-velocity-v19`.
+
+The only candidate expansion is the evidenced actuator fall-time range. It adds
+0.10, 0.12, and 0.16 s above the prior 0.08 s ceiling. This follows both the
+monotonic endpoint improvement in the one-gate population and the combined
+motor/collective replay miss. The intermediate values test whether the endpoint
+gate crosses before a slower actuator regresses braking, stop time, or
+worst-axis velocity response.
+
+No controller equation, allocator, plant mapping, probe, gate, beam width,
+worker count, policy interface, reward, or training configuration changes.
+Attempt 18 is an evidence-routed declarative expansion within schema 5.
