@@ -214,6 +214,57 @@ def test_mavlink_port_can_retain_only_baro_and_mag_noise(monkeypatch):
     )
 
 
+def test_mavlink_port_deterministic_sensor_excitation_is_repeatable(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+
+    def samples_for_seed(*, seed):
+        np.random.seed(seed)
+        port = Px4MavlinkPort(
+            num_rotors=4,
+            gps_send_rate_hz=250.0,
+            sensor_noise_enabled=False,
+            sensor_excitation_mode="deterministic",
+            barometer_noise_std_pa=0.1,
+            magnetometer_noise_scale=0.1,
+        )
+        backend = port._backend
+        backend._connection = _FakeConnection()
+        backend._enable_lockstep = False
+        port.start()
+        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
+        lockstep_exchange(port, VehicleState.hover_at(sim_time_us=104_000))
+        return backend
+
+    first = samples_for_seed(seed=1)
+    second = samples_for_seed(seed=999)
+
+    for first_sample, second_sample in zip(
+        first.mag_updates,
+        second.mag_updates,
+        strict=True,
+    ):
+        np.testing.assert_array_equal(
+            first_sample["magnetic_field"],
+            second_sample["magnetic_field"],
+        )
+    assert first.bar_updates == second.bar_updates
+    assert not np.array_equal(
+        first.mag_updates[0]["magnetic_field"],
+        first.mag_updates[1]["magnetic_field"],
+    )
+    assert first.bar_updates[0]["absolute_pressure"] != first.bar_updates[1]["absolute_pressure"]
+
+
+def test_mavlink_port_rejects_unknown_sensor_excitation_mode(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+
+    with pytest.raises(
+        ValueError,
+        match="sensor_excitation_mode must be 'stochastic' or 'deterministic'",
+    ):
+        Px4MavlinkPort(num_rotors=4, sensor_excitation_mode="random")
+
+
 def test_mavlink_port_pegasus_imu_rest_accel_is_frd_when_noise_disabled(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, sensor_noise_enabled=False)

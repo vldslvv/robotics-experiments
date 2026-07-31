@@ -130,16 +130,40 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
-def test_alignment_experiment_retains_required_seeded_sensor_excitation():
+def test_alignment_experiment_uses_deterministic_sensor_excitation():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
     bridge = config.vehicles["x500_01"].bridge
 
     assert not bridge.sensor_noise_enabled
+    assert bridge.sensor_excitation_mode == "deterministic"
     assert bridge.barometer_noise_std_pa == 0.1
     assert bridge.magnetometer_noise_scale == 0.1
     assert config.alignment.capture.sensor_seed == 42
+
+
+def test_bridge_rejects_unknown_sensor_excitation_mode(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_sensor_excitation",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace(
+            "sensor_excitation_mode: stochastic",
+            "sensor_excitation_mode: random",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="sensor_excitation_mode must be 'stochastic' or 'deterministic'",
+    ):
+        load_config(path)
 
 
 def test_alignment_capture_rejects_seed_outside_numpy_range(tmp_path):

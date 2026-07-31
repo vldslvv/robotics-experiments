@@ -139,6 +139,7 @@ class Px4MavlinkPort:
         gps_enabled: bool = True,
         gps_send_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
         sensor_noise_enabled: bool = True,
+        sensor_excitation_mode: str = "stochastic",
         barometer_noise_std_pa: float = math.nan,
         magnetometer_noise_scale: float = math.nan,
         home_lat_deg: float = frames.DEFAULT_HOME_LAT_DEG,
@@ -180,6 +181,9 @@ class Px4MavlinkPort:
         self._gps_enabled = bool(gps_enabled)
         self._gps_period_s = 1.0 / float(gps_send_rate_hz)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
+        self._sensor_excitation_mode = str(sensor_excitation_mode)
+        if self._sensor_excitation_mode not in {"stochastic", "deterministic"}:
+            raise ValueError("sensor_excitation_mode must be 'stochastic' or 'deterministic'")
         self._barometer_noise_std_pa = (
             (1.0 if self._sensor_noise_enabled else 0.0)
             if math.isnan(barometer_noise_std_pa)
@@ -277,6 +281,7 @@ class Px4MavlinkPort:
                 "max_sustained_actuator_lag_us=%s "
                 "physics_rate_hz=%s physics_tick_us=%d sensor_rate_hz=%.3f "
                 "gps_enabled=%s gps_rate_hz=%s sensor_noise_enabled=%s "
+                "sensor_excitation_mode=%s "
                 "barometer_noise_std_pa=%s magnetometer_noise_scale=%s "
                 "debug_log=%s sensor_debug_interval=%d",
                 connection_type,
@@ -295,6 +300,7 @@ class Px4MavlinkPort:
                 self._gps_enabled,
                 gps_send_rate_hz,
                 self._sensor_noise_enabled,
+                self._sensor_excitation_mode,
                 self._barometer_noise_std_pa,
                 self._magnetometer_noise_scale,
                 self.debug_log_path,
@@ -310,6 +316,7 @@ class Px4MavlinkPort:
             home_alt_m=self._home_alt_m,
             gps_enabled=self._gps_enabled,
             sensor_noise_enabled=self._sensor_noise_enabled,
+            sensor_excitation_mode=self._sensor_excitation_mode,
             barometer_noise_std_pa=self._barometer_noise_std_pa,
             magnetometer_noise_scale=self._magnetometer_noise_scale,
             update_rate_hz=self._sensor_rate_hz,

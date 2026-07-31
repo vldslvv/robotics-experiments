@@ -112,6 +112,12 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
                 f"vehicle {label!r} bridge.barometer_noise_std_pa must be "
                 f"finite and non-negative, got {v.bridge.barometer_noise_std_pa!r}"
             )
+        if v.bridge.sensor_excitation_mode not in {"stochastic", "deterministic"}:
+            raise ValueError(
+                f"vehicle {label!r} bridge.sensor_excitation_mode must be "
+                "'stochastic' or 'deterministic', got "
+                f"{v.bridge.sensor_excitation_mode!r}"
+            )
         if (
             not math.isfinite(v.bridge.magnetometer_noise_scale)
             or v.bridge.magnetometer_noise_scale < 0.0

@@ -136,6 +136,10 @@ class Px4BridgeConfig(_FreezableConfig):
         sensor_noise_enabled: When true, Pegasus sensor noise/bias models are
             active. Integration and real simulator runs should keep this true;
             precision tests may disable it through Hydra or direct port config.
+        sensor_excitation_mode: ``stochastic`` uses the Pegasus barometer and
+            magnetometer noise processes. ``deterministic`` replaces those two
+            processes with simulation-time-based excitation while retaining
+            their configured amplitudes.
         barometer_noise_std_pa: Barometer pressure-noise standard deviation.
             This is independent so HIL experiments may retain the changing
             pressure stream PX4 requires while disabling other stochastic
@@ -187,6 +191,7 @@ class Px4BridgeConfig(_FreezableConfig):
     gps_enabled: bool
     gps_send_rate_hz: float
     sensor_noise_enabled: bool
+    sensor_excitation_mode: str
     barometer_noise_std_pa: float
     magnetometer_noise_scale: float
     home_lat_deg: float

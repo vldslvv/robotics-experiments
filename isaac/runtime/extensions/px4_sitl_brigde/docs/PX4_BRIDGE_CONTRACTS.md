@@ -473,6 +473,10 @@ Rate higher than physics step is wasteful; lower starves PX4's EKF.
 Runtime IMU, barometer, and magnetometer data are produced by the vendored
 Pegasus sensor models. The Hydra field `px4.sensor_noise_enabled` controls
 the IMU and GPS noise/bias terms.
+`px4.sensor_excitation_mode` selects stochastic Pegasus barometer and
+magnetometer samples or deterministic simulation-time excitation at the same
+configured amplitudes. The deterministic mode is intended for repeatable
+controller-boundary captures; normal runtime remains stochastic.
 `px4.barometer_noise_std_pa` independently controls pressure noise because PX4
 HIL rejects a perfectly constant barometer stream as stale.
 `px4.magnetometer_noise_scale` independently scales magnetic white noise and

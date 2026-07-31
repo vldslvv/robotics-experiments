@@ -8,6 +8,7 @@ magnetometer) and its config factories from the lockstep MAVLink transport in
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 
 import numpy as np
@@ -16,6 +17,9 @@ import robotics_experiments.px4_bridge.frames as frames
 from robotics_experiments.px4_bridge.vehicle_state import VehicleState
 
 _DEFAULT_SENSOR_RATE_HZ = 250.0
+_STANDARD_GRAVITY_MPS2 = 9.80665
+_DRY_AIR_GAS_CONSTANT_J_KG_K = 287.05
+_MAGNETOMETER_NOISE_DENSITY_GA_SQRT_HZ = 0.4e-3
 
 
 class _PegasusSensorSuite:
@@ -29,6 +33,7 @@ class _PegasusSensorSuite:
         home_alt_m: float,
         gps_enabled: bool,
         sensor_noise_enabled: bool,
+        sensor_excitation_mode: str,
         barometer_noise_std_pa: float,
         magnetometer_noise_scale: float,
         update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
@@ -38,6 +43,7 @@ class _PegasusSensorSuite:
         self._home_alt_m = float(home_alt_m)
         self._gps_enabled = bool(gps_enabled)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
+        self._sensor_excitation_mode = sensor_excitation_mode
         self._barometer_noise_std_pa = float(barometer_noise_std_pa)
         self._magnetometer_noise_scale = float(magnetometer_noise_scale)
         self._update_rate_hz = float(update_rate_hz)
@@ -56,10 +62,24 @@ class _PegasusSensorSuite:
         self._imu = IMU(_pegasus_imu_config(update_rate_hz, self._sensor_noise_enabled))
         self._gps = GPS(_pegasus_gps_config(update_rate_hz, self._sensor_noise_enabled))
         self._barometer = Barometer(
-            _pegasus_barometer_config(update_rate_hz, self._barometer_noise_std_pa)
+            _pegasus_barometer_config(
+                update_rate_hz,
+                (
+                    self._barometer_noise_std_pa
+                    if self._sensor_excitation_mode == "stochastic"
+                    else 0.0
+                ),
+            )
         )
         self._magnetometer = Magnetometer(
-            _pegasus_magnetometer_config(update_rate_hz, self._magnetometer_noise_scale)
+            _pegasus_magnetometer_config(
+                update_rate_hz,
+                (
+                    self._magnetometer_noise_scale
+                    if self._sensor_excitation_mode == "stochastic"
+                    else 0.0
+                ),
+            )
         )
         for sensor in (self._imu, self._gps, self._barometer, self._magnetometer):
             sensor.initialize(
@@ -78,11 +98,57 @@ class _PegasusSensorSuite:
         self._last_sim_time_us = sim_time_us
 
         pegasus_state = self._to_pegasus_state(state)
+        magnetometer = self._magnetometer.update(pegasus_state, dt_s)
+        barometer = self._barometer.update(pegasus_state, dt_s)
+        if self._sensor_excitation_mode == "deterministic":
+            magnetometer = self._deterministic_magnetometer(
+                sample=magnetometer,
+                sim_time_us=sim_time_us,
+            )
+            barometer = self._deterministic_barometer(
+                sample=barometer,
+                sim_time_us=sim_time_us,
+            )
         return {
             "imu": self._imu.update(pegasus_state, dt_s),
-            "mag": self._magnetometer.update(pegasus_state, dt_s),
-            "baro": self._barometer.update(pegasus_state, dt_s),
+            "mag": magnetometer,
+            "baro": barometer,
             "gps": self._gps.update(pegasus_state, dt_s) if self._gps_enabled else None,
+        }
+
+    def _deterministic_magnetometer(
+        self,
+        *,
+        sample: dict,
+        sim_time_us: int,
+    ) -> dict:
+        time_s = sim_time_us * 1e-6
+        amplitude_ga = (
+            _MAGNETOMETER_NOISE_DENSITY_GA_SQRT_HZ
+            * math.sqrt(self._update_rate_hz)
+            * self._magnetometer_noise_scale
+        )
+        phases_rad = 2.0 * math.pi * time_s * np.array([17.0, 23.0, 29.0])
+        phases_rad += np.array([0.0, 2.0 * math.pi / 3.0, 4.0 * math.pi / 3.0])
+        magnetic_field = np.asarray(sample["magnetic_field"], dtype=np.float64)
+        return {"magnetic_field": magnetic_field + amplitude_ga * np.sin(phases_rad)}
+
+    def _deterministic_barometer(
+        self,
+        *,
+        sample: dict,
+        sim_time_us: int,
+    ) -> dict:
+        time_s = sim_time_us * 1e-6
+        pressure_delta_pa = self._barometer_noise_std_pa * math.sin(2.0 * math.pi * 7.0 * time_s)
+        temperature_k = float(sample["temperature"]) + 273.15
+        pressure_pa = float(sample["absolute_pressure"]) * 100.0
+        air_density_kg_m3 = pressure_pa / (_DRY_AIR_GAS_CONSTANT_J_KG_K * temperature_k)
+        return {
+            "absolute_pressure": float(sample["absolute_pressure"]) + pressure_delta_pa * 0.01,
+            "pressure_altitude": float(sample["pressure_altitude"])
+            - pressure_delta_pa / (_STANDARD_GRAVITY_MPS2 * air_density_kg_m3),
+            "temperature": float(sample["temperature"]),
         }
 
     def _to_pegasus_state(self, state: VehicleState):

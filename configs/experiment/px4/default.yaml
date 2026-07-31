@@ -86,6 +86,10 @@ gps_send_rate_hz: 250.0
 # Keep true for integration tests and normal simulator runs; precision unit
 # tests may override this to false.
 sensor_noise_enabled: true
+# Barometer and magnetometer excitation normally uses the Pegasus stochastic
+# models. Alignment captures may select deterministic simulation-time signals
+# to preserve PX4 sensor health without changing between repeated runs.
+sensor_excitation_mode: stochastic
 # Pressure noise is separately authored because PX4 rejects a perfectly
 # constant barometer stream as stale. Normal runtime uses the Pegasus default.
 barometer_noise_std_pa: 1.0

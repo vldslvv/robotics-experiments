@@ -4811,3 +4811,23 @@ should replace only those alignment-specific stochastic samples with small
 deterministic, simulation-time-based excitation. This keeps the required
 sensor variation while removing random estimator input from the reference
 boundary.
+
+### 104. Use simulation time for repeatable PX4 sensor health excitation
+
+Date: 2026-07-31.
+
+Attempt 25 adds one bridge sensor-excitation mode. Normal runtime remains
+`stochastic`. The alignment experiment selects `deterministic`, which evaluates
+small fixed-frequency barometer and three-axis magnetometer signals from
+absolute simulation time. Their amplitudes remain the existing 0.1 Pa and 0.1
+magnetometer scale, pressure and pressure altitude remain physically
+consistent, and the Pegasus IMU/GPS paths remain exact.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v27`, producing a new comparison fingerprint.
+Configuration and direct-port validation reject unknown modes, and the bridge
+sensor regression verifies identical barometer and magnetometer output under
+different NumPy random seeds. The controller, allocator, composed plant,
+actuator model, probe suite, gates, candidates, worker count, policy interface,
+reward, and training configuration remain unchanged. Attempt 25 will run two
+captures before deciding whether a full target sweep is justified.
