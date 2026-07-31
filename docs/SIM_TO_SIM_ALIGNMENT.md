@@ -113,12 +113,13 @@ PX4 capture uses the normal fleet driver and an injected `PolicyAdapter`.
 The alignment experiment disables stochastic IMU and GPS terms while retaining
 seeded barometer pressure and magnetometer noise. PX4 rejects a perfectly
 constant pressure stream as stale, while the composed exact magnetic field is
-outside its yaw-initialization innovation gate. It seeds the NumPy sequence
-from `alignment.capture.sensor_seed` before the bridge hosts are constructed.
-Normal integration runs retain all unseeded Pegasus process noise. A shared
-seed controls injected samples but does not by itself prove complete PX4/PhysX
-closed-loop reproducibility, so structural noise changes require replicate
-captures before another full sweep.
+outside its yaw-initialization innovation gate. Alignment scales the normal
+magnetic noise to 0.1, retaining health variation with less estimator
+perturbation. It seeds the NumPy sequence from `alignment.capture.sensor_seed`
+before the bridge hosts are constructed. Normal integration runs retain all
+unseeded Pegasus process noise. A shared seed controls injected samples but
+does not by itself prove complete PX4/PhysX closed-loop reproducibility, so
+structural noise changes require replicate captures before another full sweep.
 Before each recorded profile, the adapter streams a neutral velocity/yaw
 setpoint for at least the configured minimum and then requires a continuous
 stable-speed/rate/tilt window. The first profile therefore starts after PX4 has

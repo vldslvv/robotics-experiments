@@ -4728,3 +4728,18 @@ magnetometer model required to avoid PX4's exact-field stuck-data path. Attempt
 23 should reduce only `magnetometer_noise_scale` from 1.0 to 0.1 and rerun the
 two-capture control. The nonzero scale should retain sensor health while
 reducing magnetic estimator perturbation by one order of magnitude.
+
+### 100. Reduce magnetic excitation to the health-preserving minimum
+
+Date: 2026-07-31.
+
+Attempt 23 changes only the alignment experiment's
+`magnetometer_noise_scale` from 1.0 to 0.1. Normal runtime remains at unit
+scale. The target controller identifier advances to
+`isaac-lab-x500-velocity-v25`, producing a new comparison fingerprint.
+
+The seeded barometer amplitude, exact alignment IMU/GPS configuration,
+controller, allocator, composed plant, actuator model, probe suite, gates,
+candidate ranges, beam width, worker count, policy interface, reward, and
+training configuration remain unchanged. Attempt 23 will again require two
+successful captures with materially reduced trace spread before a full sweep.
