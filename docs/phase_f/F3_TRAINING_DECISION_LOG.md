@@ -4783,3 +4783,31 @@ allocator, composed plant, actuator model, probe suite, gates, candidate
 ranges, beam width, worker count, policy interface, reward, and training
 configuration remain unchanged. Attempt 24 will require two successful
 captures with materially reduced trace spread before a full sweep.
+
+### 103. Attempt 24 improves braking but not overall reproducibility
+
+Date: 2026-07-31.
+
+Attempt 24 completed two capture controls from clean source commit `a136bfc` as
+`x500-velocity-px4-v5/20260731T134410Z` and
+`x500-velocity-px4-v5/20260731T134724Z`. Both armed, took off, and completed all
+11 profiles. The first capture's actuator audit passed: timestamp joins stayed
+within one 4 ms physics tick, normalized motor RMSE peaked at 0.000544, and
+collective RMSE peaked at 0.01215 N.
+
+The replicate's profile starts were 200-240 ms earlier. After interpolation on
+the common profile-relative time domain, maximum absolute relative-position
+differences were 9.297 mm on the held-out braking profile, 17.182 mm lateral,
+69.894 mm vertical, 31.216 mm yaw, 20.643 mm combined, and 19.431 mm on the
+stability profile. Corresponding velocity differences reached 5.963, 8.070,
+14.977, 11.947, 8.906, and 6.155 mm/s.
+
+Reducing pressure noise improved braking spread relative to Attempt 23, but
+vertical and stability spread regressed and remain larger than the exact-action
+gates. A full target sweep is therefore not justified. Attempts 21-24 show that
+exact barometer or magnetometer samples fail PX4 health checks, while
+stochastic health-preserving samples make repeated captures diverge. Attempt 25
+should replace only those alignment-specific stochastic samples with small
+deterministic, simulation-time-based excitation. This keeps the required
+sensor variation while removing random estimator input from the reference
+boundary.
