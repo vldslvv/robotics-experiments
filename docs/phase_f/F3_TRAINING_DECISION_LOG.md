@@ -3903,3 +3903,64 @@ integral, and two intermediate yaw-only feed-forward candidates introduced in
 Attempt 12 remain available. No new candidate, controller equation,
 allocator, plant, actuator, probe, gate, worker, policy interface, reward, or
 training change is made.
+
+### 80. Attempt 13 exposes a profile-reset actuator-state leak
+
+Date: 2026-07-31.
+
+Attempt 13 completed from clean source commit `849d3d9` as
+`x500-velocity-px4-v5/20260731T063918Z`. Its fresh capture completed all 11
+profiles with valid initial controller state. The reference actuator audit
+passed: timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.00313, and collective RMSE peaked at 0.0118 N.
+
+The sweep evaluated 5943 unique candidates, 5841 of them usable, and selected
+candidate 5459 under comparison fingerprint
+`03e41d2d3a728062ef33bc2ced2b58363d65acb6293491c58ca51d99eb6e189f`.
+
+| Held-out metric | Attempt 13 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 12.171 mm | 5 mm |
+| Residual-speed error | 0.00126 m/s | 0.01 m/s |
+| Stop-time error | 0.260 s | 0.10 s |
+| Worst-axis velocity NRMSE | 20.31% | 10% |
+| Yaw-rate NRMSE | 6.01% | 10% |
+| Heading error | 2.980 deg | 3 deg |
+| Combined endpoint error | 15.484 mm | 10 mm |
+
+The attempt is rejected with four failed gates and a largest normalized excess
+of 1.600. No usable candidate failed fewer than four gates: 3543 failed four,
+1932 failed five, and 366 failed six. Candidate-wide minima were 11.671 mm
+braking error, 0.00027 m/s residual speed, 0.200 s stop-time error, 19.19%
+velocity NRMSE, 3.04% yaw-rate NRMSE, 2.204 degrees heading error, and 9.713
+mm endpoint error. This is a second no-progress result, but it identifies a
+source-confirmed target reset defect rather than exhausting the controller
+frontier.
+
+The exact Attempt 11 settings were evaluated as candidate 0 as intended.
+Their validation vertical RMSE regressed from 0.00745 m/s in Attempt 11 to
+0.04191 m/s in Attempt 13. The stored target trace locates the discontinuity
+at the first sample after profile reset: vertical velocity changes from
++0.0075 to -0.2261 m/s in 20 ms. Under the identical settings in Attempt 11,
+the corresponding first change is -0.0060 to -0.0072 m/s.
+
+The pinned `isaaclab_contrib.actuators.Thruster` explains the run-dependent
+behavior. Every profile calls `reset_idx`, which restores rotor speed from
+`init_thruster_rps` and re-samples rise and fall constants from the ranges
+fixed when the environment was constructed. The replay constructs the
+thruster with zero initial rotor speed. Attempt 11's target base had zero rise
+time, so profile reset silently erased candidate rise times back to zero.
+Attempt 13's base rise time is 0.02 s, so the same reset both preserves that
+construction-time value and starts the ongoing-hover profile from stopped
+rotors, producing the measured impulse.
+
+Attempt 14 must fix this plant/controller replay seam before adding candidates:
+preserve each fitted rise/fall value across profile reset and initialize
+thruster state from the seeded neutral-command controller boundary rather than
+zero rotor speed. The NumPy/Torch controller, allocator, physical rotor curve,
+probes, gates, worker count, policy interface, reward, and training
+configuration remain unchanged.
+
+Attempt 13 used one worker, 41 GPU batches, and 1494.83 s for the useful
+sweep, or 3.98 candidate evaluations/s. GPU utilization averaged 26.13%,
+reached 40% at p95 and 47% at peak, and used 4569 MiB peak memory.
