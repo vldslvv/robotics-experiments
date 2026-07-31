@@ -4561,3 +4561,75 @@ The target controller identifier advances to
 `isaac-lab-x500-velocity-v22`. The controller, allocator, composed plant,
 actuator model, probe suite, gates, candidate ranges, beam width, worker count,
 policy interface, reward, and training configuration remain unchanged.
+
+### 95. Attempt 20 proves a shared seed is insufficient
+
+Date: 2026-07-31.
+
+Attempt 20 completed from clean source commit `f9b2976` as
+`x500-velocity-px4-v5/20260731T122442Z`. Its fresh capture completed all 11
+profiles. The reference actuator audit passed: timestamp joins stayed within
+one 4 ms physics tick, normalized motor RMSE peaked at 0.00112, and collective
+RMSE peaked at 0.01010 N.
+
+The staged sweep evaluated 6505 unique candidates, 6504 of them usable, and
+selected candidate 6454 under comparison fingerprint
+`2306adcff2e907bcf4cfaca968421e1d5feaf21a3b3793e5c8e3c9184b2647ad`.
+
+| Held-out metric | Attempt 20 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 26.063 mm | 5 mm |
+| Residual-speed error | 0.00844 m/s | 0.01 m/s |
+| Stop-time error | 0.540 s | 0.10 s |
+| Worst-axis velocity NRMSE | 33.43% | 10% |
+| Yaw-rate NRMSE | 2.45% | 10% |
+| Heading error | 2.959 deg | 3 deg |
+| Combined endpoint error | 9.359 mm | 10 mm |
+
+The attempt is rejected with braking, stop-time, and worst-axis velocity
+failures and a largest normalized excess of 4.4. Although that excess is lower
+than Attempt 19's 6.866, Attempt 20 regresses the previously passed velocity
+gate and therefore is not material progress under the campaign definition.
+Among usable candidates, 1914 failed three gates, 3553 failed four, 985 failed
+five, and 52 failed six. No candidate failed fewer than three gates.
+Candidate-wide minima were 11.682 mm braking error, 0.000310 m/s residual
+speed, 0.240 s stop-time error, 11.06% velocity NRMSE, 2.38% yaw-rate NRMSE,
+1.816 degrees heading error, and 0.670 mm endpoint error.
+
+Candidate 0 retained the Attempt 18 candidate 6137 settings exactly but failed
+four gates on this reference: 18.942 mm braking error, 1.100 s stop-time
+error, 17.68% velocity NRMSE, and 50.966 mm endpoint error. This again excludes
+the added derivative-filter candidates and staged pruning as the cause.
+
+The selected replay fails before the plant boundary. Its braking profile keeps
+normalized motor RMSE within the 0.01 limit at 0.00452, but collective RMSE is
+0.0930 N. Across the complete replay, normalized motor RMSE reaches 0.05660
+and collective RMSE reaches 1.9004 N on the stability profile. The captured
+bridge audit passes, so these are controller-output differences rather than an
+incorrect bridge affine or rotor-curve reconstruction.
+
+A second capture from the same commit and configured seed, preserved as
+`20260731T122749Z`, received the same initial sensor sequence and used identical
+sample-time arrays. It nevertheless differed from the fitted capture by up to
+11.367 mm of relative position and 5.504 mm/s of velocity on the held-out
+vertical profile, and by 11.367 mm and 4.528 mm/s on the held-out braking
+profile. Later profiles began 0.2 s earlier after the neutral-stability
+predicate crossed on a different tick. The shared NumPy seed therefore
+controls injected random samples but does not make the complete PX4/PhysX
+closed loop reproducible at the exact-action gate scale.
+
+The two runs first select different quantized PX4 motor values while the
+vehicle is still on the ground, then integrate that difference through takeoff
+and the sequential probes. PX4 requires a changing barometer stream to remain
+healthy, but the failed noise-free launches do not establish that every other
+sensor must remain stochastic. Attempt 21 should split the barometer noise
+amplitude from the aggregate sensor-noise switch, disable stochastic IMU, GPS,
+and magnetometer terms only for alignment, and retain the seeded nonzero
+barometer stream. It should rerun two captures before committing another full
+sweep.
+
+Attempt 20 used one worker, 41 GPU batches, and 1525.92 s for the useful
+sweep, or 4.26 candidate evaluations/s. GPU utilization averaged 27.27%,
+reached 42% at p95 and 48% at peak, and used 5244 MiB peak memory. The measured
+serial orchestration and trace-materialization bottleneck still does not
+justify a second worker.
