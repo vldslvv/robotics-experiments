@@ -4877,3 +4877,30 @@ attribute. The deterministic estimator excitation, controller, allocator,
 composed plant, actuator model, probes, gates, candidates, worker count, policy
 interface, reward, and training configuration remain unchanged. Attempt 26
 will again require two captures before a target sweep is justified.
+
+### 107. Attempt 26 improves vertical repeatability but shifts sensor phase
+
+Date: 2026-07-31.
+
+Attempt 26 completed two capture controls from clean source commit `d386104` as
+`x500-velocity-px4-v5/20260731T141045Z` and
+`x500-velocity-px4-v5/20260731T141339Z`. Both completed all 11 profiles with
+PhysX enhanced determinism active. The first capture's actuator audit passed:
+timestamp joins stayed within one 4 ms physics tick, normalized motor RMSE
+peaked at 0.000514, and collective RMSE peaked at 0.01226 N.
+
+Every replicate profile began 380 ms earlier and retained the same sample
+count. Maximum absolute relative-position differences were 7.240 mm on
+held-out braking, 24.851 mm lateral, 33.164 mm vertical, 36.179 mm yaw,
+15.528 mm combined, and 40.116 mm on stability. Corresponding velocity
+differences reached 3.572, 7.268, 8.501, 7.984, 7.492, and 16.079 mm/s; the
+stability angular-rate difference reached 0.154 rad/s.
+
+Enhanced determinism materially improved Attempt 25's 95.660 mm vertical
+spread but did not make the reference fit-ready. The timing shift identifies a
+remaining deterministic input mismatch: profiles start only on the 20 ms
+policy cadence, while the 7/17/23/29 Hz health sinusoids present different
+phases after such shifts. Attempt 27 should retain enhanced determinism and
+change only the deterministic excitation to a 50 Hz sequence. It will still
+vary across the five 4 ms physics samples in each policy interval, while every
+profile shifted by whole policy ticks receives the same profile-local sequence.
