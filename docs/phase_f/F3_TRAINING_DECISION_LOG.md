@@ -4633,3 +4633,28 @@ sweep, or 4.26 candidate evaluations/s. GPU utilization averaged 27.27%,
 reached 42% at p95 and 48% at peak, and used 5244 MiB peak memory. The measured
 serial orchestration and trace-materialization bottleneck still does not
 justify a second worker.
+
+### 96. Isolate required barometer excitation from estimator noise
+
+Date: 2026-07-31.
+
+Attempt 21 separates the barometer pressure-noise amplitude from the aggregate
+Pegasus sensor-noise switch. Normal runtime retains stochastic IMU, GPS,
+magnetometer, and 1 Pa barometer models. The alignment experiment disables the
+IMU, GPS, and magnetometer stochastic terms, retains the seeded 1 Pa pressure
+stream PX4 requires for barometer health, and continues to seed the sequence
+before bridge-host construction.
+
+This is the single structural change evidenced by Attempt 20's replicate. It
+removes estimator perturbations absent from Isaac Lab without repeating the
+constant-pressure failure of the noise-free launches. A configuration
+regression verifies the dedicated alignment override, a bridge sensor test
+verifies exact IMU/GPS/magnetometer values alongside changing pressure, and
+configuration validation rejects negative or non-finite pressure noise.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v23`. The controller, allocator, composed plant,
+actuator model, probe suite, gates, candidate ranges, beam width, worker count,
+policy interface, reward, and training configuration remain unchanged.
+Attempt 21 will run two captures first. Another full sweep is justified only if
+the capture succeeds and materially reduces held-out trace variation.

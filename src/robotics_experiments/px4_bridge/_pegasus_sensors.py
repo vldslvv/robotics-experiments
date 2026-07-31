@@ -29,6 +29,7 @@ class _PegasusSensorSuite:
         home_alt_m: float,
         gps_enabled: bool,
         sensor_noise_enabled: bool,
+        barometer_noise_std_pa: float,
         update_rate_hz: float = _DEFAULT_SENSOR_RATE_HZ,
     ):
         self._home_lat_deg = float(home_lat_deg)
@@ -36,6 +37,7 @@ class _PegasusSensorSuite:
         self._home_alt_m = float(home_alt_m)
         self._gps_enabled = bool(gps_enabled)
         self._sensor_noise_enabled = bool(sensor_noise_enabled)
+        self._barometer_noise_std_pa = float(barometer_noise_std_pa)
         self._update_rate_hz = float(update_rate_hz)
         self._last_sim_time_us: int | None = None
 
@@ -52,7 +54,7 @@ class _PegasusSensorSuite:
         self._imu = IMU(_pegasus_imu_config(update_rate_hz, self._sensor_noise_enabled))
         self._gps = GPS(_pegasus_gps_config(update_rate_hz, self._sensor_noise_enabled))
         self._barometer = Barometer(
-            _pegasus_barometer_config(update_rate_hz, self._sensor_noise_enabled)
+            _pegasus_barometer_config(update_rate_hz, self._barometer_noise_std_pa)
         )
         self._magnetometer = Magnetometer(
             _pegasus_magnetometer_config(update_rate_hz, self._sensor_noise_enabled)
@@ -150,12 +152,16 @@ def _pegasus_gps_config(update_rate_hz: float, noise_enabled: bool) -> dict:
     return config
 
 
-def _pegasus_barometer_config(update_rate_hz: float, noise_enabled: bool) -> dict:
-    config = {"update_rate": update_rate_hz}
-    if not noise_enabled:
-        # Barometer randomness is pressure-domain Gaussian noise plus drift.
-        # The vendored sensor now exposes noise_std_pa so it can be made exact.
-        _zero_noise(config, ("noise_std_pa", "drift_pa_per_sec"))
+def _pegasus_barometer_config(update_rate_hz: float, noise_std_pa: float) -> dict:
+    # Pressure noise is independent from the aggregate sensor-noise switch.
+    # PX4 HIL needs a changing pressure stream even when the other sensor
+    # models are exact. Drift remains disabled unless explicitly supported by
+    # a future project configuration field.
+    config = {
+        "update_rate": update_rate_hz,
+        "noise_std_pa": noise_std_pa,
+        "drift_pa_per_sec": 0.0,
+    }
     return config
 
 

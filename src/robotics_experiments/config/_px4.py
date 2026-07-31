@@ -136,6 +136,10 @@ class Px4BridgeConfig(_FreezableConfig):
         sensor_noise_enabled: When true, Pegasus sensor noise/bias models are
             active. Integration and real simulator runs should keep this true;
             precision tests may disable it through Hydra or direct port config.
+        barometer_noise_std_pa: Barometer pressure-noise standard deviation.
+            This is independent so HIL experiments may retain the changing
+            pressure stream PX4 requires while disabling other stochastic
+            sensor terms.
         home_lat_deg, home_lon_deg, home_alt_m: Home position used when
             synthesizing GPS from the local ENU pose. Defaults match PX4's
             built-in default (Zurich).
@@ -180,6 +184,7 @@ class Px4BridgeConfig(_FreezableConfig):
     gps_enabled: bool
     gps_send_rate_hz: float
     sensor_noise_enabled: bool
+    barometer_noise_std_pa: float
     home_lat_deg: float
     home_lon_deg: float
     home_alt_m: float

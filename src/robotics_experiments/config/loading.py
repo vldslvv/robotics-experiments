@@ -104,6 +104,14 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
                 f"vehicle {label!r} routine.failure_recovery_timeout_s must be "
                 f"finite and positive, got {v.routine.failure_recovery_timeout_s!r}"
             )
+        if (
+            not math.isfinite(v.bridge.barometer_noise_std_pa)
+            or v.bridge.barometer_noise_std_pa < 0.0
+        ):
+            raise ValueError(
+                f"vehicle {label!r} bridge.barometer_noise_std_pa must be "
+                f"finite and non-negative, got {v.bridge.barometer_noise_std_pa!r}"
+            )
         if len(v.spawn.position_xy) != 2:
             raise ValueError(
                 f"vehicle {label!r} position_xy must have length 2, got {v.spawn.position_xy!r}"

@@ -43,8 +43,11 @@ benchmark. Keeping it in the resolved graph makes the capture duration part of
 the same canonical configuration fingerprint as the flown routine.
 
 `alignment.capture.sensor_seed` seeds the stochastic Pegasus sensor sequence
-before a PX4 controller-alignment capture starts. Alignment retains changing
-HIL sensor values while making repeated reference captures reproducible.
+before a PX4 controller-alignment capture starts. The alignment experiment
+disables stochastic IMU, GPS, and magnetometer terms but retains seeded
+barometer pressure noise because PX4 rejects a constant pressure stream as
+stale. The seed controls injected samples; complete closed-loop reproducibility
+must still be verified with replicate captures.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and

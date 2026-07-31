@@ -130,12 +130,14 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
-def test_alignment_experiment_retains_seeded_stochastic_px4_sensor_models():
+def test_alignment_experiment_retains_only_seeded_barometer_noise():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
+    bridge = config.vehicles["x500_01"].bridge
 
-    assert config.vehicles["x500_01"].bridge.sensor_noise_enabled
+    assert not bridge.sensor_noise_enabled
+    assert bridge.barometer_noise_std_pa == 1.0
     assert config.alignment.capture.sensor_seed == 42
 
 
@@ -147,6 +149,23 @@ def test_alignment_capture_rejects_seed_outside_numpy_range(tmp_path):
     base.write_text(base.read_text().replace("sensor_seed: 42", "sensor_seed: -1"))
 
     with pytest.raises(ValueError, match="32-bit unsigned integer"):
+        load_config(path)
+
+
+def test_bridge_rejects_negative_barometer_noise(tmp_path):
+    from robotics_experiments.config import load_config
+
+    path = _write_experiment(
+        tmp_path,
+        "invalid_barometer_noise",
+        {"x500": _vehicle(0, "/x500", 0.0)},
+    )
+    px4 = path.parent / "experiment" / "px4" / "default.yaml"
+    px4.write_text(
+        px4.read_text().replace("barometer_noise_std_pa: 1.0", "barometer_noise_std_pa: -1.0")
+    )
+
+    with pytest.raises(ValueError, match="barometer_noise_std_pa must be finite and non-negative"):
         load_config(path)
 
 

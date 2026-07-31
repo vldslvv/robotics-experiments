@@ -178,6 +178,41 @@ def test_mavlink_port_pegasus_sensors_can_disable_noise_for_precision(monkeypatc
     assert abs(gps["longitude_gt"]) > 1.0
 
 
+def test_mavlink_port_can_retain_only_barometer_noise(monkeypatch):
+    _install_fake_pegasus(monkeypatch)
+    np.random.seed(42)
+    port = Px4MavlinkPort(
+        num_rotors=4,
+        gps_send_rate_hz=250.0,
+        sensor_noise_enabled=False,
+        barometer_noise_std_pa=1.0,
+    )
+    backend = port._backend
+    backend._connection = _FakeConnection()
+    backend._enable_lockstep = False
+
+    port.start()
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=100_000))
+    lockstep_exchange(port, VehicleState.hover_at(sim_time_us=104_000))
+
+    for imu in backend.imu_updates:
+        np.testing.assert_allclose(
+            imu["linear_acceleration"],
+            [0.0, 0.0, -9.80665],
+            atol=1e-8,
+        )
+    np.testing.assert_array_equal(
+        backend.mag_updates[0]["magnetic_field"],
+        backend.mag_updates[1]["magnetic_field"],
+    )
+    assert backend.gps_updates[0]["latitude"] == pytest.approx(
+        backend.gps_updates[0]["latitude_gt"]
+    )
+    assert (
+        backend.bar_updates[0]["absolute_pressure"] != backend.bar_updates[1]["absolute_pressure"]
+    )
+
+
 def test_mavlink_port_pegasus_imu_rest_accel_is_frd_when_noise_disabled(monkeypatch):
     _install_fake_pegasus(monkeypatch)
     port = Px4MavlinkPort(num_rotors=4, sensor_noise_enabled=False)
