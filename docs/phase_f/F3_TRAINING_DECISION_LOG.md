@@ -3780,3 +3780,34 @@ or 4.05 candidate evaluations/s. GPU utilization averaged 26.81%, reached 41%
 at p95 and 48% at peak, and used 4441 MiB peak memory. Sequential
 Isaac/PhysX stepping remains the measured bottleneck, so worker count stays at
 one.
+
+### 77. Retain and combine the complementary Attempt 11 champions
+
+Date: 2026-07-31.
+
+Attempt 12 expands the staged beam from 32 to 64 because Attempt 11 produced
+complementary two-gate champions that did not coexist in the final retained
+settings. Of 5619 usable candidates, 1286 failed only stop time and heading,
+while 144 failed only stop time and endpoint. The selected zero-yaw-feed-
+forward candidate passes endpoint at 9.956 mm and reaches 3.130 degrees
+heading; the yaw-only 0.025 feed-forward champion reaches 2.468 degrees
+heading and 10.513 mm endpoint error. The latter under-travels the final
+negative-Y segment by 8.24 mm. The selected candidate also places stop-time
+error one floating-point representation step above 0.10 s, while the
+candidate-wide floor is 0.04 s.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v13`. Attempt 12 adds exactly four declarative
+candidates: isolated Y proportional gain `[1.35, 1.575, 3.0]`, isolated X
+integral gain `[0.625, 0.6, 3.0]`, and yaw-only rate feed-forward
+`[0, 0, 0.01]` and `[0, 0, 0.015]`. The isolated Y candidate follows the
+measured endpoint residual, the X-integral candidate tests a real stop-event
+crossing without changing the gate, and the two feed-forward candidates fit
+the normalized yaw-torque boundary between the measured heading and endpoint
+champions.
+
+No controller equation, allocator, plant, actuator, probe, gate, worker,
+policy interface, reward, or training setting changes. The wider beam is the
+one structural search change for this attempt; the same single worker remains
+appropriate because Attempt 11 measured sequential Isaac/PhysX stepping as
+the bottleneck.

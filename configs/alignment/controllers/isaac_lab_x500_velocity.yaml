@@ -1,5 +1,5 @@
 alignment_id: x500-velocity-px4-v5
-controller_id: isaac-lab-x500-velocity-v12
+controller_id: isaac-lab-x500-velocity-v13
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -50,7 +50,9 @@ settings:
 
 search:
   strategy: staged-beam-v2
-  beam_width: 32
+  # Preserve complementary stop, heading, and endpoint champions long enough
+  # for the stage-2 yaw candidates to combine with the stage-1 velocity seam.
+  beam_width: 64
   passes_per_stage: 2
 
 parameters:
@@ -71,6 +73,7 @@ parameters:
     candidates:
       - [0.9, 0.9, 2.0]
       - [1.35, 1.35, 3.0]
+      - [1.35, 1.575, 3.0]
       - [1.8, 1.8, 4.0]
       - [2.25, 2.25, 5.0]
       - [2.7, 2.7, 6.0]
@@ -93,6 +96,7 @@ parameters:
       - [0.4, 0.4, 2.0]
       - [0.5, 0.5, 2.5]
       - [0.6, 0.6, 3.0]
+      - [0.625, 0.6, 3.0]
       - [0.0, 0.2, 1.0]
       - [0.0, 0.4, 2.0]
       - [0.0, 0.6, 3.0]
@@ -171,6 +175,8 @@ parameters:
       - [0.0625, 0.0625, 0.0625]
       - [0.075, 0.075, 0.075]
       - [0.0, 0.0, 0.025]
+      - [0.0, 0.0, 0.01]
+      - [0.0, 0.0, 0.015]
   - field: rate_derivative_filter_hz
     stage: 2
     candidates: [10.0, 15.0, 20.0, 25.0, 30.0]
