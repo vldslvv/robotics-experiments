@@ -360,6 +360,24 @@ capture and comparison fingerprint. Seed that campaign from candidate 8,083,
 but publish it under a new run or generation and leave the accepted bundle
 immutable.
 
+The clean reproduction run `20260731T201319Z` demonstrates that the accepted
+bundle is not transient under the current staged search. A fresh capture and
+8,126-candidate sweep did not evaluate candidate 8,083's complete settings,
+missed the braking-distance gate, and failed the downstream handoff gate, while
+the retained artifact passed the same current integration target. Keep
+`20260731T185547Z` as `best`; the rejected reproduction remains `latest` and is
+retained as counterevidence. The accepted artifact can become disposable only
+after the search always evaluates its complete settings as an unconditional
+seed and independent clean campaigns repeatedly reproduce both exact-action and
+integration acceptance.
+
+The resolved experiment fingerprint currently includes the downstream
+`rl.training.alignment_artifact` path. Changing that path alters the comparison
+fingerprint even when the controller definitions, probes, images, plant, and
+alignment execution are unchanged. Do not interpret that fingerprint change as
+controller evidence or allow it to replace the accepted publication without
+checking advisory quality.
+
 Initial controller-state enrichment linearly interpolates the PX4 acceleration
 setpoint, rate-integral vectors, and hover-thrust estimate to the trace's
 absolute profile start, matching the linear and angular acceleration treatment.

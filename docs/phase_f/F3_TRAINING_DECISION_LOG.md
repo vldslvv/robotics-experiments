@@ -5393,3 +5393,57 @@ metric improvements are diagnostic comparisons, not added acceptance
 requirements. Publication behavior is not used as proof: the integration gate
 will receive the new run path directly even if `best` continues to resolve to
 the retained baseline.
+
+### 125. Fresh reproduction does not recover acceptance
+
+Date: 2026-07-31.
+
+Reproduction run `x500-velocity-px4-v6/20260731T201319Z` started from clean
+source commit `9970110` and reused no runtime artifact from the accepted run.
+Its fresh PX4 capture completed all 11 profiles. The actuator audit passed with
+at most one 4 ms timestamp tick of join error, peak normalized motor RMSE
+0.000335, and peak collective-thrust RMSE 0.01334 N.
+
+The one-worker fresh sweep evaluated 8,126 unique candidates, of which 8,106
+were usable, in 47 GPU batches over 1,670.2 seconds. Useful throughput was 4.87
+candidates/s. GPU utilization averaged 29.3%, reached 48% at the 95th
+percentile, and peaked at 83%, with 6,812 MiB peak memory use. Candidate 6,425
+was selected. It passed residual speed at 0.00104 m/s, stop time at 0.10 s,
+worst-axis velocity NRMSE at 5.46%, yaw-rate NRMSE at 4.70%, heading at 2.867
+degrees, and combined endpoint at 9.360 mm. It failed braking distance at
+5.571 mm versus the unchanged 5 mm limit. No candidate passed all seven gates:
+1,672 usable candidates had one failure, 2,877 had two, 2,362 had three, 878
+had four, 293 had five, and 24 had six; 20 candidates were unusable.
+
+The fresh selected settings differ materially from accepted candidate 8,083,
+and the accepted settings fingerprint is absent from the fresh candidate file.
+The staged beam therefore cannot regenerate the accepted combination on demand
+even though every individual value remains declarative. Candidate 6,425's
+controller replay has the same known later-profile diagnostic failures as the
+accepted run; its immediate validation-braking boundary remains within replay
+limits, so that diagnostic does not explain away the motion-gate miss.
+
+Direct integration confirms the rejection. Candidate 6,425 settles hover at
+0.059 m final and 0.098 m last-second maximum error, then goto at 0.033 m final
+and 0.043 m last-second maximum error. Its handoff ends at 0.447 m wall-normal
+range and fails as too close. The retained candidate 8,083 was rerun
+contemporaneously in the same current environment and reproduced its accepted
+result exactly: hover 0.036 m final and 0.075 m last-second maximum, goto 0.006
+m final and last-second maximum, and a ready handoff at 0.483 m.
+
+Controller, reference, target, probe-suite, and image fingerprints are equal
+between the runs. The comparison fingerprint nevertheless changed because the
+resolved experiment fingerprint includes the downstream training artifact
+path, which acceptance commit `eba4ffe` changed from v2 `best` to v6 `best`.
+This behavior-only-irrelevant change initialized the rejected reproduction as
+`best`; publication was restored manually so `best` resolves to accepted run
+`20260731T185547Z` and `latest` resolves to the reproduction.
+
+The result disproves treating the accepted artifact as transient under the
+current workflow. Keep the accepted run. Before reconsidering deletion, make
+its complete settings an unconditional evaluated seed, remove downstream-only
+training selection from the alignment comparison fingerprint, and require
+multiple independent clean campaigns to pass both exact-action and integration
+acceptance. The reproduction's capture, audit, replay, fit, GPU telemetry,
+integration comparison, and losslessly compressed candidate traces are retained
+under its checksummed relative-path manifest.
