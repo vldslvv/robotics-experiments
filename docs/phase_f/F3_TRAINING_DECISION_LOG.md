@@ -5227,3 +5227,47 @@ remaining base values from exact-action-passing candidate 6,072. Probes,
 advisory limits, the standard integration gate, allocator, plant, policy
 interface, reward, training configuration, beam width, and one-worker runtime
 remain unchanged.
+
+### 120. Attempt 33 isolates fresh-reference stop timing
+
+Date: 2026-07-31.
+
+Attempt 33 completed fresh run
+`x500-velocity-px4-v6/20260731T180706Z` from clean source commit `dffc203`.
+The capture completed all 11 profiles and the plant-owned actuator audit
+passed. Timestamp joins stayed within one 4 ms physics tick, normalized motor
+RMSE peaked at 0.000634, and collective-thrust RMSE peaked at 0.01230 N.
+
+The one-worker sweep evaluated 7,625 unique candidates, of which 7,602 were
+usable, in 47 GPU batches over 1,495.1 seconds. Useful GPU-stage throughput was
+5.10 candidates/s. GPU utilization averaged 30.1%, reached 49% at the 95th
+percentile, and peaked at 83%, with 5,833 MiB peak memory use. Candidate 7,412
+was selected. It passed braking at 3.531 mm, residual speed at 0.00422 m/s,
+worst-axis velocity NRMSE at 4.91%, yaw-rate NRMSE at 4.35%, heading at 2.618
+degrees, and combined endpoint at 9.575 mm. It missed only stop time at 0.20 s
+versus the unchanged 0.10 s limit. The failed-gate distribution was 1,218
+candidates with one failure, 2,394 with two, 2,557 with three, 1,068 with
+four, 343 with five, and 22 with six. Every one-failure candidate missed only
+stop time; no candidate passed all seven gates.
+
+The selected validation braking controller boundary is already within the
+replay limits at 0.00191 normalized motor RMSE and 0.00183 N collective RMSE.
+Later vertical, yaw, combined, and stability controller replay boundaries
+remain diagnostic failures, but they are downstream of the immediate motion
+acceptance boundary. Of the 725 stop-time-passing candidates, the closest
+still failed both braking and heading. The best missed braking by 1.401 mm and
+heading by 0.600 degrees.
+
+Trace replay also disproved schedule leakage as the cause of the fresh
+regression. The seeded candidate's largest horizontal velocity error was
+0.111 m/s across every fit and validation profile, below the 0.15 m/s schedule
+onset. The selected controller instead places horizontal derivative gain at
+the searched upper boundary of 0.30 while still stopping one 0.10 s reporting
+interval late. Attempt 34 should seed candidate 7,412 and expand only the
+evidenced horizontal braking neighborhood before considering another
+structural change.
+
+The candidate trace was compressed losslessly from 7,593,801,257 bytes to a
+verified 1.38 GiB Zstandard archive. The capture, audit, controller replay,
+GPU telemetry, fit, and compressed candidates are preserved under the run's
+relative-path manifest.
