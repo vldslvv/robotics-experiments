@@ -56,6 +56,7 @@ class _FakePhysxApi:
     def __init__(self):
         self.time_steps_per_second = _FakeAttr()
         self.solver_type = _FakeAttr()
+        self.enhanced_determinism = _FakeAttr()
 
     @classmethod
     def Apply(cls, prim):
@@ -67,6 +68,9 @@ class _FakePhysxApi:
 
     def CreateSolverTypeAttr(self):
         return self.solver_type
+
+    def CreateEnableEnhancedDeterminismAttr(self):
+        return self.enhanced_determinism
 
 
 class _FakeCarbSettings:
@@ -128,6 +132,7 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
             physics_hz=500.9,
             rendering_hz=60.9,
             solver_type="TGS",
+            enhanced_determinism=True,
             gravity=(0.0, 0.0, -9.81),
         ),
     )
@@ -138,6 +143,7 @@ def test_apply_settings_writes_gravity_physx_and_render_rate(simulation_api):
     physx_api = _FakePhysxApi.last_instance
     assert physx_api.time_steps_per_second.value == 500
     assert physx_api.solver_type.value == "TGS"
+    assert physx_api.enhanced_determinism.value is True
     assert carb_settings.values == {
         "/app/runLoops/main/rateLimitEnabled": True,
         "/app/runLoops/main/rateLimitFrequency": 60,
@@ -154,6 +160,7 @@ def test_apply_settings_rejects_zero_magnitude_gravity(simulation_api):
                 physics_hz=500.0,
                 rendering_hz=60.0,
                 solver_type="TGS",
+                enhanced_determinism=False,
                 gravity=(0.0, 0.0, 0.0),
             ),
         )
@@ -170,6 +177,7 @@ def test_apply_settings_rejects_non_positive_physics_rate(simulation_api, physic
                 physics_hz=physics_hz,
                 rendering_hz=60.0,
                 solver_type="TGS",
+                enhanced_determinism=False,
                 gravity=(0.0, 0.0, -9.81),
             ),
         )
@@ -186,6 +194,7 @@ def test_apply_settings_rejects_non_positive_render_rate(simulation_api, renderi
                 physics_hz=500.0,
                 rendering_hz=rendering_hz,
                 solver_type="TGS",
+                enhanced_determinism=False,
                 gravity=(0.0, 0.0, -9.81),
             ),
         )

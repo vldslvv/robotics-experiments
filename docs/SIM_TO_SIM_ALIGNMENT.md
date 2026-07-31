@@ -121,6 +121,8 @@ estimator input. The capture still seeds NumPy from
 unexpected stochastic consumer is repeatable. Normal integration runs retain
 the stochastic Pegasus process models. Structural sensor changes require
 replicate captures before another full sweep.
+The alignment experiment also enables PhysX enhanced determinism; normal
+runtime leaves it disabled to avoid its performance cost.
 Before each recorded profile, the adapter streams a neutral velocity/yaw
 setpoint for at least the configured minimum and then requires a continuous
 stable-speed/rate/tilt window. The first profile therefore starts after PX4 has

@@ -136,6 +136,7 @@ def test_alignment_experiment_uses_deterministic_sensor_excitation():
     config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
     bridge = config.vehicles["x500_01"].bridge
 
+    assert config.sim.enhanced_determinism
     assert not bridge.sensor_noise_enabled
     assert bridge.sensor_excitation_mode == "deterministic"
     assert bridge.barometer_noise_std_pa == 0.1

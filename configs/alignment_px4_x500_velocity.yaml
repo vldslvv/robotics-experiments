@@ -5,6 +5,9 @@ defaults:
 
 scene: "@isaac/assets/TestScenes/MinimalIntegration.usda"
 
+sim:
+  enhanced_determinism: true
+
 vehicles:
   x500_01:
     id: 0

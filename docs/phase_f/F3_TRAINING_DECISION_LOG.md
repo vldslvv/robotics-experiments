@@ -4858,3 +4858,22 @@ the GPU PhysX execution used by the PX4 reference capture. Attempt 26 should
 enable PhysX enhanced determinism for the alignment experiment only, preserving
 the same controller, plant, probes, and sensor excitation, then repeat the
 two-capture control before running a full sweep.
+
+### 106. Enable enhanced determinism at the reference plant boundary
+
+Date: 2026-07-31.
+
+Attempt 26 adds the PhysX enhanced-determinism scene flag to the canonical
+simulation configuration. Normal experiments retain the default disabled
+state. The alignment experiment enables it before spawning the X500, so
+PhysX uses its stronger deterministic simulation ordering for the entire
+reference flight.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v28`, producing a new comparison fingerprint. Host
+tests verify that the authored flag reaches the PhysX scene API, and the
+standalone simulation-settings integration probe verifies the applied scene
+attribute. The deterministic estimator excitation, controller, allocator,
+composed plant, actuator model, probes, gates, candidates, worker count, policy
+interface, reward, and training configuration remain unchanged. Attempt 26
+will again require two captures before a target sweep is justified.

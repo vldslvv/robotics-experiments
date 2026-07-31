@@ -55,7 +55,13 @@ def _apply_gravity(scene: UsdPhysics.Scene, gravity: tuple) -> None:
     scene.CreateGravityMagnitudeAttr().Set(magnitude)
 
 
-def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -> None:
+def _apply_physx(
+    *,
+    scene: UsdPhysics.Scene,
+    physics_hz: float,
+    solver_type: str,
+    enhanced_determinism: bool,
+) -> None:
     """Configure PhysX time stepping and solver type on a physics scene.
 
     Args:
@@ -63,6 +69,8 @@ def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -
             applied to its prim if not already present.
         physics_hz: PhysX steps per second; truncated to int by PhysX schema.
         solver_type: PhysX solver identifier (e.g. ``"TGS"`` or ``"PGS"``).
+        enhanced_determinism: Whether PhysX uses stronger deterministic
+            simulation ordering.
 
     Raises:
         ValueError: If ``physics_hz`` is not positive.
@@ -72,6 +80,7 @@ def _apply_physx(scene: UsdPhysics.Scene, physics_hz: float, solver_type: str) -
     physx_api = PhysxSchema.PhysxSceneAPI.Apply(scene.GetPrim())
     physx_api.CreateTimeStepsPerSecondAttr().Set(int(physics_hz))
     physx_api.CreateSolverTypeAttr().Set(solver_type)
+    physx_api.CreateEnableEnhancedDeterminismAttr().Set(enhanced_determinism)
 
 
 def _apply_render_rate(rendering_hz: float) -> None:
@@ -103,11 +112,17 @@ def _apply_isaac_settings(*, stage: Usd.Stage, settings: SimSettings) -> None:
     """
     scene = _get_or_create_physics_scene(stage)
     _apply_gravity(scene, settings.gravity)
-    _apply_physx(scene, settings.physics_hz, settings.solver_type)
+    _apply_physx(
+        scene=scene,
+        physics_hz=settings.physics_hz,
+        solver_type=settings.solver_type,
+        enhanced_determinism=settings.enhanced_determinism,
+    )
     _apply_render_rate(settings.rendering_hz)
 
     carb.log_info(
         f"[SimSettings] physics={settings.physics_hz}Hz "
         f"rendering={settings.rendering_hz}Hz solver={settings.solver_type} "
+        f"enhanced_determinism={settings.enhanced_determinism} "
         f"gravity={settings.gravity}"
     )
