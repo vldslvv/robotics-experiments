@@ -4138,3 +4138,30 @@ Attempt 15 used one worker, 41 GPU batches, and 1498.40 s for the useful
 sweep, or 4.25 candidate evaluations/s. GPU utilization averaged 26.28%,
 reached 41% at p95 and 54% at peak, and used 4379 MiB peak memory.
 Sequential Isaac/PhysX stepping remains the measured bottleneck.
+
+### 85. Seed the corrected search from the Attempt 14 one-gate frontier
+
+Date: 2026-07-31.
+
+Attempt 16 makes the complete Attempt 14 selected settings the target
+definition's base candidate. Attempt 15 proved the stop-time correction, but
+its fresh staged search did not evaluate that complete setting combination
+even though every individual value remains declared. The beam pruned an
+intermediate cross-stage combination before reconstruction.
+
+The base now uses zero command delay, velocity P/I/D
+`[1.35, 1.35, 3]`, `[0.4, 0.6, 2]`, and `[0.25, 0.25, 0]`, 10 Hz velocity
+filtering, a 1 Hz velocity-derivative filter, normalized hover thrust 0.57,
+attitude P `[5, 5, 3.5]`, yaw weight 0.6, rate P/I/D
+`[0.1875, 0.1875, 0.25]`, `[0.2, 0.2, 0.1]`, and
+`[0.00375, 0.00375, 0]`, yaw-only feed-forward 0.025, a 20 Hz
+rate-derivative filter, 0.4 rate-integral limits, 56.25 degrees maximum tilt,
+and a 0.02 s actuator rise time. These are exactly candidate 5662 from
+Attempt 14, which passed six gates before stop-time quantization.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v17`. No candidate, controller equation, allocator,
+plant, actuator, probe, gate, beam width, worker, policy interface, reward, or
+training configuration changes. Attempt 16 is an evidence-routed retained-
+basin control; its base candidate is guaranteed to be evaluated against the
+fresh reference before any staged replacement is pruned.
