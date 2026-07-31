@@ -676,10 +676,10 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
     assert body_ids == [2]
 
 
-def test_thruster_reset_preserves_fitted_time_constants():
+def test_airborne_thruster_reset_primes_hover_and_preserves_fitted_time_constants():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-        _reset_thruster_preserving_time_constants,
+        _reset_thruster_for_airborne_state,
     )
 
     class Thruster:
@@ -695,14 +695,15 @@ def test_thruster_reset_preserves_fitted_time_constants():
 
     thruster = Thruster()
 
-    _reset_thruster_preserving_time_constants(
+    _reset_thruster_for_airborne_state(
         thruster=thruster,
         env_ids=torch.tensor([0, 2]),
+        hover_thrust_per_rotor_n=5.75,
     )
 
     assert torch.equal(thruster.tau_inc_s, torch.tensor([[0.01], [0.02], [0.04]]))
     assert torch.equal(thruster.tau_dec_s, torch.tensor([[0.08], [0.04], [0.02]]))
-    assert torch.equal(thruster.curr_thrust, torch.tensor([[0.0], [1.0], [0.0]]))
+    assert torch.equal(thruster.curr_thrust, torch.tensor([[5.75], [1.0], [5.75]]))
 
 
 def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state():

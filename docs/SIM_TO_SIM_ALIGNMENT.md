@@ -57,9 +57,11 @@ velocity integral, previous angular velocity, filtered angular acceleration,
 rate integral, the profile's normalized hover-thrust estimate, and
 initialization state. NumPy is the single-environment
 reference and Torch is the batched Isaac Lab twin. Both advance once per
-physics sample and must remain sequentially equivalent. Controller state,
-command-delay buffers, and thruster state are cleared on every environment
-reset and candidate change. Alignment trace schema 5 then restores the PX4
+physics sample and must remain sequentially equivalent. Controller state and
+command-delay buffers are cleared on every environment reset and candidate
+change. Because the Lab task resets into airborne flight, its actuator state is
+primed to weight-balanced per-rotor thrust instead of an unphysical zero-thrust
+free fall. Alignment trace schema 5 then replaces that neutral boundary with the PX4
 velocity acceleration/setpoint boundary and body-rate derivative/integral
 boundary plus the interpolated hover-thrust estimate after each probe's
 kinematic reset. Because every captured profile

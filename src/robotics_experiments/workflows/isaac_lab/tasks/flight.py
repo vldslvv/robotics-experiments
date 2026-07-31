@@ -66,21 +66,24 @@ _SATURATION_EPS = 1e-5
 class _ResettableThruster(Protocol):
     tau_inc_s: torch.Tensor
     tau_dec_s: torch.Tensor
+    curr_thrust: torch.Tensor
 
     def reset_idx(self, env_ids: Any, /) -> None: ...
 
 
-def _reset_thruster_preserving_time_constants(
+def _reset_thruster_for_airborne_state(
     *,
     thruster: _ResettableThruster,
     env_ids: Any,
+    hover_thrust_per_rotor_n: float,
 ) -> None:
-    """Reset dynamic thrust state without erasing fitted per-environment taus."""
+    """Reset fitted actuator dynamics at a weight-balanced airborne boundary."""
     tau_inc_s = thruster.tau_inc_s[env_ids].clone()
     tau_dec_s = thruster.tau_dec_s[env_ids].clone()
     thruster.reset_idx(env_ids)
     thruster.tau_inc_s[env_ids] = tau_inc_s
     thruster.tau_dec_s[env_ids] = tau_dec_s
+    thruster.curr_thrust[env_ids] = hover_thrust_per_rotor_n
 
 
 @dataclass(frozen=True)

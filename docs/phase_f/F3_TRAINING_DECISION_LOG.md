@@ -5151,3 +5151,26 @@ one structural controller-boundary correction supported by the ULog drift and
 the 0.10495 N validation-braking collective residual. The complete candidate
 set remains unchanged so the next fresh capture measures only the restored
 boundary before any large-error gain scheduling is considered.
+
+### 117. Prime airborne actuator state in Attempt 32
+
+Date: 2026-07-31.
+
+Attempt 31's fresh capture and actuator audit passed, and candidate 6,072 became
+the first candidate to pass all seven exact-action gates. It achieved 4.289 mm
+braking error, 0.00222 m/s residual-speed error, 0.10 s stop-time error, 6.96%
+worst-axis velocity NRMSE, 4.83% yaw-rate NRMSE, 2.892 degrees heading error,
+and 7.301 mm combined endpoint error. The complete integration target rejected
+it immediately because its 80 ms rise time and 250 N/s slew began from zero
+realized thrust. Fast-actuator candidates 6,241 and 6,446 removed the crash but
+settled at 0.104 m versus the 0.100 m hover limit.
+
+The reset diagnostic confirmed a structural boundary mismatch: the Lab task
+spawns every vehicle airborne while clearing the actuator's realized thrust to
+zero. Attempt 32 primes ordinary airborne resets to equal, weight-balanced
+per-rotor thrust while continuing to clear controller and command-delay state.
+Alignment profile replay still overwrites this neutral value with its logged
+ongoing-flight rotor boundary. The controller, allocator, actuator dynamics,
+plant, probes, gates, search ranges, policy interface, reward, and training
+configuration remain unchanged. The target controller identifier advances to
+`isaac-lab-x500-velocity-v34` for the new reset contract.
