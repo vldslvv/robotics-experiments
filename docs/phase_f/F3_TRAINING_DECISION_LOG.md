@@ -5037,3 +5037,29 @@ range. The fresh staged fit must independently prove that the combination
 still passes all seven exact-action gates. The schema, allocator, plant,
 probes, gates, beam width, worker count, policy interface, reward, and training
 configuration remain unchanged.
+
+### 113. Attempt 29 exposes a reference-force regression before fitting
+
+Date: 2026-07-31.
+
+Attempt 29 started the fresh reference capture
+`x500-velocity-px4-v5/20260731T154418Z` from clean source commit `766d861`.
+PX4 armed and entered takeoff, but the vehicle remained on the ground until the
+30-second takeoff timeout. The preserved ULog shows local vertical position
+remaining between -0.0003 m and 0.0064 m while PX4 drove normalized collective
+to 1.0 and motor controls to 0.999-1.0. Landing recovery completed and
+disarmed the vehicle cleanly.
+
+The target-only gain additions cannot affect the standalone PX4 reference.
+The first reference capture since Attempt 28 instead proves that enabling
+PhysX `external_forces_every_iteration` broke the bridge's force-application
+contract. Its target control had already shown no measurable benefit. The
+failed capture, ULog, Isaac log, and PX4 log are preserved under the run's
+relative-path manifest; no target sweep or fit was justified.
+
+Attempt 30 should remove the external-force iteration setting from the shared
+plant contract and restore PhysX's default one-application-per-step behavior.
+The useful Lab enhanced-determinism pass-through remains independent and
+should be retained. The evidenced velocity-gain candidates also remain
+unchanged, after which the complete capture and acceptance sequence restarts
+from a new clean source commit.
