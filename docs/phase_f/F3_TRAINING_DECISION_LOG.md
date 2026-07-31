@@ -4959,3 +4959,24 @@ should enable external forces every solver iteration in both Lab flight
 environments, rerun the unchanged controller through the fast hover gate, and,
 if confirmed, repeat capture, sweep, fit, and acceptance under the corrected
 plant fingerprint.
+
+### 110. Correct the Lab TGS external-force application seam
+
+Date: 2026-07-31.
+
+Attempt 28 authors `sim.external_forces_every_iteration` and enables it by
+default. The standalone Isaac scene writes the corresponding PhysX scene
+attribute, while both Isaac Lab flight environment factories pass it through
+`PhysxCfg`. The existing alignment-only enhanced-determinism flag is also
+passed through the Lab configuration, closing a previously incomplete
+simulation-setting seam.
+
+This is the single structural change required by Attempt 27's first failed
+acceptance boundary and Isaac Lab's runtime warning. It changes force
+integration at the plant boundary rather than absorbing the error into
+controller gains. The target controller identifier advances to
+`isaac-lab-x500-velocity-v30`, producing a new comparison fingerprint. Host
+tests cover configuration and standalone scene application; the existing
+Isaac Lab config test covers both authored PhysX flags when that dependency is
+available. Controller candidates, probes, gates, worker count, policy
+interface, reward, and training hyperparameters remain unchanged.

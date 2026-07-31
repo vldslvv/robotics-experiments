@@ -45,6 +45,10 @@ rather than `rl.action`.
 The project still owns allocation, per-rotor yaw reaction, drag, and the sole
 body-wrench sink because the pusher-equipped articulation is not a pure
 multirotor asset.
+Both Lab flight environments pass the authored PhysX flags through their
+`SimulationCfg`. External rotor forces are reapplied every TGS position
+iteration to avoid noisy velocity updates; alignment may additionally enable
+enhanced determinism.
 
 The shared exact-average cadence derives policy stepping from `sim.physics_hz`
 and `rl.policy_rate_hz`. At 250 Hz physics and 20 Hz policy rate, the scheduler

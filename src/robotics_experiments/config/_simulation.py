@@ -16,6 +16,8 @@ class SimSettings(_FreezableConfig):
         solver_type: PhysX solver identifier (``"TGS"`` or ``"PGS"``).
         enhanced_determinism: Enable PhysX's stronger deterministic simulation
             ordering at a performance cost.
+        external_forces_every_iteration: Reapply external forces during every
+            TGS position iteration for accurate velocity updates.
         gravity: World gravity vector in m/s^2 as ``(gx, gy, gz)``.
     """
 
@@ -23,4 +25,5 @@ class SimSettings(_FreezableConfig):
     rendering_hz: float
     solver_type: str
     enhanced_determinism: bool
+    external_forces_every_iteration: bool
     gravity: Tuple[float, float, float]

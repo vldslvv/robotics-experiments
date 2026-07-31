@@ -14,7 +14,7 @@ from isaaclab.assets import Articulation, ArticulationCfg, RigidObject, RigidObj
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensor, ContactSensorCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import PhysxCfg, SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, UsdFileCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 from isaaclab.utils import math as math_utils
@@ -136,6 +136,12 @@ def make_switch_press_env_cfg(
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
             render_interval=decimation,
+            physx=PhysxCfg(
+                enable_enhanced_determinism=experiment_config.sim.enhanced_determinism,
+                enable_external_forces_every_iteration=(
+                    experiment_config.sim.external_forces_every_iteration
+                ),
+            ),
         ),
         drone_cfg=_make_drone_articulation_cfg(
             usd_path=vehicle.spawn.usd_path,
