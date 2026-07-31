@@ -5174,3 +5174,35 @@ ongoing-flight rotor boundary. The controller, allocator, actuator dynamics,
 plant, probes, gates, search ranges, policy interface, reward, and training
 configuration remain unchanged. The target controller identifier advances to
 `isaac-lab-x500-velocity-v34` for the new reset contract.
+
+### 118. Attempt 32 removes the reset crash and isolates large-error settling
+
+Date: 2026-07-31.
+
+Attempt 31's fresh run `x500-velocity-px4-v5/20260731T165205Z` evaluated
+6,448 unique candidates in 41 one-worker batches over 1,706.5 seconds. Useful
+throughput was 3.78 candidates/s; GPU utilization averaged 30.1%, reached 46%
+at the 95th percentile, and peaked at 64%, with 6,209 MiB peak memory use.
+Candidate 6,072 was selected and 238 candidates passed all seven exact-action
+gates. Its actuator audit joined every boundary at zero timestamp error;
+normalized motor RMSE ranged from 0.000285 to 0.000329 and collective RMSE
+ranged from 0.00866 N to 0.01278 N.
+
+Attempt 32 ran from clean source commit `9d33c60`. Priming the airborne
+actuator to weight-balanced thrust removed candidate 6,072's reset crash. The
+standard 16-environment integration gate then missed only hover settling at
+0.101 m versus the unchanged 0.100 m limit. A time-resolved replay localized
+the maximum to environment 13, which began 0.580 m from its target with
+horizontal error `(-0.353, +0.449)` m. Its vertical error stayed at or below
+0.101 m and had fallen to 0.029 m when total error peaked at 0.102 m; the
+remaining miss is horizontal overshoot rather than thrust or altitude error.
+
+Holding every candidate 6,072 setting fixed and raising only horizontal
+velocity proportional gain from 1.575 to 1.8 passed the same complete
+16-environment target. Hover last-window error fell to 0.080 m, goto
+last-window error was 0.024 m, and final handoff range was 0.463 m. Existing
+constant-1.8 candidates regress exact low-speed braking and endpoint gates, so
+Attempt 33 should preserve gain 1.575 in the exact-action envelope and blend
+to 1.8 only for larger horizontal velocity error. This is the previously
+deferred large-error gain schedule, now supported by the first failed
+acceptance boundary.
