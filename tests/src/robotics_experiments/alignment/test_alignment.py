@@ -301,6 +301,7 @@ def test_legacy_trace_loads_with_zero_controller_boundary() -> None:
         "initial_linear_acceleration_enu_mps2",
         "initial_angular_acceleration_body_flu_radps2",
         "initial_rate_integral_body_flu",
+        "initial_hover_thrust_normalized",
     ):
         raw.pop(field)
 
@@ -311,6 +312,17 @@ def test_legacy_trace_loads_with_zero_controller_boundary() -> None:
     assert trace.initial_linear_acceleration_enu_mps2 == _ZERO3
     assert trace.initial_angular_acceleration_body_flu_radps2 == _ZERO3
     assert trace.initial_rate_integral_body_flu == _ZERO3
+    assert trace.initial_hover_thrust_normalized == 0.0
+
+
+def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
+    raw = json.loads(
+        json.dumps(asdict(_response_traces(profiles=_profiles(), settings=_settings())[0]))
+    )
+    raw["initial_hover_thrust_normalized"] = 1.01
+
+    with pytest.raises(ValueError, match="must not exceed 1"):
+        _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
 
 
 def test_align_recovers_known_delay_and_per_axis_gain_on_validation(

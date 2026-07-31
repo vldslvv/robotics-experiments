@@ -5131,3 +5131,23 @@ The candidate trace was compressed losslessly from 5.9 GiB to a verified
 1.2 GiB Zstandard archive. The capture, audit, replay, integration probes, GPU
 telemetry, fit, and compressed candidates are preserved under the run's
 relative-path manifest.
+
+### 116. Restore the profile-start PX4 hover estimate in Attempt 31
+
+Date: 2026-07-31.
+
+Attempt 31 addresses Attempt 30's first failed controller boundary without
+changing the allocator, plant, probe suite, gates, search ranges, or ordinary
+runtime reset. Alignment trace schema 5 records the normalized PX4
+`hover_thrust_estimate` interpolated at each profile's absolute simulation
+start. The NumPy and Torch controller states restore that value for profile
+replay and use it in the schema-5 acceleration-to-normalized-thrust mapping.
+Ordinary environment resets and trace schemas 2 through 4 retain the
+artifact-authored normalized hover thrust through a concrete zero sentinel.
+
+The target controller identifier advances to
+`isaac-lab-x500-velocity-v33`, producing a new comparison fingerprint. This is
+one structural controller-boundary correction supported by the ULog drift and
+the 0.10495 N validation-braking collective residual. The complete candidate
+set remains unchanged so the next fresh capture measures only the restored
+boundary before any large-error gain scheduling is considered.

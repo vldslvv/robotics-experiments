@@ -317,6 +317,11 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                hover_thrust_normalized=torch.as_tensor(
+                    [trace.get("initial_hover_thrust_normalized", 0.0) for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 valid=torch.as_tensor(
                     [trace.get("initial_controller_state_valid", False) for trace in traces],
                     dtype=torch.bool,

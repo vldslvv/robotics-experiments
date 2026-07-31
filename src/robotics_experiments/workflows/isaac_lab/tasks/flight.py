@@ -145,6 +145,7 @@ class _FlightControllerState:
     previous_angular_velocity_body: torch.Tensor
     angular_acceleration_body: torch.Tensor
     rate_integral_body: torch.Tensor
+    hover_thrust_normalized: torch.Tensor
     initialized: torch.Tensor
 
 
@@ -502,16 +503,14 @@ def _limited_thrust_world(
 def _normalized_thrust_world(
     *,
     params: _FlightActuationParams,
+    hover_thrust_normalized: torch.Tensor,
     desired_acceleration: torch.Tensor,
     velocity_error: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     gravity = torch.full_like(desired_acceleration[:, 2:3], _GRAVITY_M_S2)
     desired_z = torch.cat([desired_acceleration[:, :2], gravity], dim=-1)
     desired_z = _clamp_tilt(desired_z, params.max_tilt_rad)
-    hover = _environment_values(
-        params.hover_thrust_normalized,
-        desired_acceleration[:, 2],
-    )
+    hover = hover_thrust_normalized
     minimum = _environment_values(
         params.min_collective_thrust_fraction,
         desired_acceleration[:, 2],
@@ -626,6 +625,7 @@ def _rate_to_omega(
         previous_angular_velocity_body=angular_velocity_body,
         angular_acceleration_body=angular_acceleration,
         rate_integral_body=rate_integral,
+        hover_thrust_normalized=controller_state.hover_thrust_normalized,
         initialized=torch.ones_like(controller_state.initialized),
     )
     if params.normalized_allocator:
@@ -715,8 +715,18 @@ def _velocity(
         - params.kd_vel * acceleration
     )
     if params.normalized_allocator:
+        authored_hover = _environment_values(
+            params.hover_thrust_normalized,
+            desired_acceleration[:, 2],
+        )
+        hover_thrust_normalized = torch.where(
+            controller_state.hover_thrust_normalized > 0.0,
+            controller_state.hover_thrust_normalized,
+            authored_hover,
+        )
         thrust_world, integration_error = _normalized_thrust_world(
             params=params,
+            hover_thrust_normalized=hover_thrust_normalized,
             desired_acceleration=desired_acceleration,
             velocity_error=velocity_error,
         )
@@ -770,6 +780,9 @@ def _velocity(
         previous_angular_velocity_body=controller_state.previous_angular_velocity_body,
         angular_acceleration_body=controller_state.angular_acceleration_body,
         rate_integral_body=controller_state.rate_integral_body,
+        hover_thrust_normalized=hover_thrust_normalized
+        if params.normalized_allocator
+        else controller_state.hover_thrust_normalized,
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
@@ -1019,6 +1032,11 @@ def initial_flight_controller_state(
         previous_angular_velocity_body=zeros.clone(),
         angular_acceleration_body=zeros.clone(),
         rate_integral_body=zeros.clone(),
+        hover_thrust_normalized=torch.zeros(
+            num_envs,
+            dtype=torch.float32,
+            device=device,
+        ),
         initialized=torch.zeros(num_envs, dtype=torch.bool, device=device),
     )
 
@@ -1037,6 +1055,7 @@ def reset_flight_controller_state(
         "previous_angular_velocity_body",
         "angular_acceleration_body",
         "rate_integral_body",
+        "hover_thrust_normalized",
         "initialized",
     ):
         tensor = getattr(state, name).clone()
@@ -1055,6 +1074,7 @@ def seed_flight_controller_state(
     linear_acceleration_world: torch.Tensor,
     angular_acceleration_body: torch.Tensor,
     rate_integral_body: torch.Tensor,
+    hover_thrust_normalized: torch.Tensor,
     valid: torch.Tensor,
 ) -> _FlightControllerState:
     """Restore per-environment neutral-command PX4 controller boundaries."""
@@ -1076,6 +1096,18 @@ def seed_flight_controller_state(
         raise ValueError(
             f"valid has shape {tuple(valid.shape)}, expected {tuple(state.initialized.shape)}"
         )
+    if hover_thrust_normalized.shape != state.hover_thrust_normalized.shape:
+        raise ValueError(
+            "hover_thrust_normalized has shape "
+            f"{tuple(hover_thrust_normalized.shape)}, expected "
+            f"{tuple(state.hover_thrust_normalized.shape)}"
+        )
+    if (
+        not torch.all(torch.isfinite(hover_thrust_normalized))
+        or torch.any(hover_thrust_normalized < 0.0)
+        or torch.any(hover_thrust_normalized > 1.0)
+    ):
+        raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
     selected = valid.unsqueeze(-1)
     velocity_error = -linear_velocity_world
     velocity_integral = torch.clamp(
@@ -1120,6 +1152,11 @@ def seed_flight_controller_state(
             selected,
             clipped_rate_integral,
             state.rate_integral_body,
+        ),
+        hover_thrust_normalized=torch.where(
+            valid,
+            hover_thrust_normalized,
+            state.hover_thrust_normalized,
         ),
         initialized=state.initialized | valid,
     )

@@ -41,8 +41,10 @@ torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
 This is a diagnostic, not the controller-alignment publication path.
 
 Alignment trace schema 3 records every profile's absolute PX4 simulation start
-time. The same tool uses those boundaries to audit the captured ULog against
-the bridge log without manual windows. It reports thrust and torque setpoints,
+time. Before target replay, the same tool publishes schema 5 by restoring each
+profile's controller acceleration, rate-integral, and normalized hover-thrust
+state at that timestamp. It also uses those boundaries to audit the captured
+ULog against the bridge log without manual windows. It reports thrust and torque setpoints,
 motor controls, bridge-mapped rotor speed, reconstructed wrench, hover-thrust
 estimate, and timestamp errors per fit, validation, and stability profile:
 

@@ -174,7 +174,7 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
     reference.write_text(
         json.dumps(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "traces": [
                     {
                         "profile": "validation-combined",
@@ -257,6 +257,13 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                     "yawspeed_integ": np.array([0.3, 0.5]),
                 },
             ),
+            dataset(
+                "hover_thrust_estimate",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "hover_thrust": np.array([0.57, 0.574]),
+                },
+            ),
         ]
     )
 
@@ -267,8 +274,8 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     payload = json.loads(reference.read_text())
     trace = payload["traces"][0]
 
-    assert report["method"] == "px4-ulog-controller-boundary-v2"
-    assert payload["schema_version"] == 4
+    assert report["method"] == "px4-ulog-controller-boundary-v3"
+    assert payload["schema_version"] == 5
     assert trace["initial_controller_state_valid"]
     assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
@@ -278,7 +285,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
         -4.0,
     ]
     assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.2, -0.3, -0.4])
+    assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_local_position_setpoint": 4000,
         "rate_ctrl_status": 4000,
+        "hover_thrust_estimate": 4000,
     }

@@ -33,8 +33,8 @@ from robotics_experiments.alignment._models import (
 
 __all__: list[str] = []
 
-_TRACE_SCHEMA_VERSION = 4
-_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4})
+_TRACE_SCHEMA_VERSION = 5
+_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
 _ARTIFACT_SCHEMA_VERSION = 5
 _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
@@ -461,6 +461,13 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         for current, next_time in zip(parsed_time, parsed_time[1:], strict=False)
     ):
         raise ValueError(f"{name}.time_s must be strictly increasing")
+    initial_hover_thrust_normalized = _finite(
+        value=trace.get("initial_hover_thrust_normalized", 0.0),
+        name=f"{name}.initial_hover_thrust_normalized",
+        nonnegative=True,
+    )
+    if initial_hover_thrust_normalized > 1.0:
+        raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
     return ProbeTrace(
         profile=_string(value=trace.get("profile"), name=f"{name}.profile"),
         split=_string(value=trace.get("split"), name=f"{name}.split"),
@@ -511,6 +518,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             value=trace.get("initial_controller_state_valid", False),
             name=f"{name}.initial_controller_state_valid",
         ),
+        initial_hover_thrust_normalized=initial_hover_thrust_normalized,
         initial_acceleration_setpoint_enu_mps2=_vector(
             value=trace.get("initial_acceleration_setpoint_enu_mps2", (0.0, 0.0, 0.0)),
             name=f"{name}.initial_acceleration_setpoint_enu_mps2",

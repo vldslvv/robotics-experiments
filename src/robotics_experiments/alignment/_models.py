@@ -114,6 +114,7 @@ class ProbeTrace:
     initial_angular_velocity_body_flu_radps: Vector3
     completed: bool
     initial_controller_state_valid: bool = False
+    initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
     initial_linear_acceleration_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
     initial_angular_acceleration_body_flu_radps2: Vector3 = (0.0, 0.0, 0.0)

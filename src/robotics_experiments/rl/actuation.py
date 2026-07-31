@@ -109,6 +109,7 @@ class ActuationControllerState:
     previous_angular_velocity_body_flu: np.ndarray
     angular_acceleration_body_flu: np.ndarray
     rate_integral_body_flu: np.ndarray
+    hover_thrust_normalized: float
     initialized: bool
 
 
@@ -453,6 +454,7 @@ def _limited_thrust_world(
 def _normalized_thrust_world(
     *,
     params: ActuationParams,
+    hover_thrust_normalized: float,
     desired_acceleration: np.ndarray,
     velocity_error: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -464,7 +466,7 @@ def _normalized_thrust_world(
         params.max_tilt_rad,
     )
     collective = max(
-        params.hover_thrust_normalized
+        hover_thrust_normalized
         * (1.0 + desired_acceleration[2] / GRAVITY_M_S2)
         / max(float(desired_z[2]), _EPS),
         params.min_collective_thrust_fraction,
@@ -493,7 +495,7 @@ def _normalized_thrust_world(
     if horizontal_norm > horizontal_max:
         horizontal = horizontal * (horizontal_max / max(horizontal_norm, _EPS))
     limited = np.array([horizontal[0], horizontal[1], vertical], dtype=np.float64)
-    produced_acceleration = limited[:2] * (GRAVITY_M_S2 / params.hover_thrust_normalized)
+    produced_acceleration = limited[:2] * (GRAVITY_M_S2 / hover_thrust_normalized)
     if float(desired_acceleration[:2] @ desired_acceleration[:2]) > float(
         produced_acceleration @ produced_acceleration
     ):
@@ -557,6 +559,7 @@ def _rate_to_omega(
         previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
         angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
         rate_integral_body_flu=_readonly_copy(rate_integral),
+        hover_thrust_normalized=controller_state.hover_thrust_normalized,
         initialized=True,
     )
     if params.normalized_allocator:
@@ -618,8 +621,14 @@ def _velocity_action_to_omega(
         - params.kd_vel * acceleration
     )
     if params.normalized_allocator:
+        hover_thrust_normalized = (
+            controller_state.hover_thrust_normalized
+            if controller_state.hover_thrust_normalized > 0.0
+            else params.hover_thrust_normalized
+        )
         thrust_world, integration_error = _normalized_thrust_world(
             params=params,
+            hover_thrust_normalized=hover_thrust_normalized,
             desired_acceleration=desired_acceleration,
             velocity_error=velocity_error,
         )
@@ -680,6 +689,9 @@ def _velocity_action_to_omega(
             controller_state.angular_acceleration_body_flu
         ),
         rate_integral_body_flu=_readonly_copy(controller_state.rate_integral_body_flu),
+        hover_thrust_normalized=hover_thrust_normalized
+        if params.normalized_allocator
+        else controller_state.hover_thrust_normalized,
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
@@ -857,6 +869,7 @@ def initial_actuation_controller_state() -> ActuationControllerState:
         previous_angular_velocity_body_flu=_readonly_copy(zero),
         angular_acceleration_body_flu=_readonly_copy(zero),
         rate_integral_body_flu=_readonly_copy(zero),
+        hover_thrust_normalized=0.0,
         initialized=False,
     )
 
@@ -870,6 +883,7 @@ def seed_actuation_controller_state(
     linear_acceleration_enu_mps2: np.ndarray,
     angular_acceleration_body_flu_radps2: np.ndarray,
     rate_integral_body_flu: np.ndarray,
+    hover_thrust_normalized: float,
 ) -> ActuationControllerState:
     """Match a neutral-command PX4 controller boundary for one replay."""
     if params.kind != "velocity":
@@ -896,6 +910,12 @@ def seed_actuation_controller_state(
         "angular_acceleration_body_flu_radps2",
     )
     rate_integral = vector(rate_integral_body_flu, "rate_integral_body_flu")
+    if (
+        not math.isfinite(hover_thrust_normalized)
+        or hover_thrust_normalized < 0.0
+        or hover_thrust_normalized > 1.0
+    ):
+        raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
     velocity_error = -velocity
     velocity_integral = np.clip(
         acceleration_setpoint - params.kp_vel * velocity_error + params.kd_vel * acceleration,
@@ -915,6 +935,7 @@ def seed_actuation_controller_state(
                 params.rate_integral_limit_nm,
             )
         ),
+        hover_thrust_normalized=float(hover_thrust_normalized),
         initialized=True,
     )
 

@@ -343,8 +343,9 @@ def _controller_boundary(
     local_position: dict,
     angular_velocity: dict,
     rate_status: dict,
+    hover: dict,
     timestamp_us: int,
-) -> tuple[dict[str, np.ndarray], dict[str, int]]:
+) -> tuple[dict[str, np.ndarray | float], dict[str, int]]:
     def held_age_us(*, topic: dict) -> int:
         time_us = _topic_time_us(topic=topic)
         index = int(_hold_indices(source_t=time_us, query_t=np.array([timestamp_us]))[0])
@@ -381,19 +382,30 @@ def _controller_boundary(
         topic=rate_status,
         fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
     )
+    hover_thrust_normalized = float(
+        _linear_interpolate(
+            source_t=_topic_time_us(topic=hover).astype(np.float64),
+            values=np.asarray(hover["hover_thrust"], dtype=np.float64),
+            query_t=np.array([timestamp_us], dtype=np.float64),
+        )[0]
+    )
     vectors = {
         "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
         "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
         "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
         "initial_rate_integral_body_flu": _FLU_TO_FRD @ rate_integral_frd,
+        "initial_hover_thrust_normalized": hover_thrust_normalized,
     }
     if not all(np.all(np.isfinite(values)) for values in vectors.values()):
         raise ValueError("initial controller boundary contains non-finite values")
+    if hover_thrust_normalized <= 0.0:
+        raise ValueError("initial hover thrust estimate must be positive")
     return (
         vectors,
         {
             "vehicle_local_position_setpoint": setpoint_age_us,
             "rate_ctrl_status": rate_age_us,
+            "hover_thrust_estimate": held_age_us(topic=hover),
         },
     )
 
@@ -414,6 +426,7 @@ def _augment_reference_controller_state(
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
 
     profile_reports = []
     for raw_profile in raw_profiles:
@@ -423,12 +436,16 @@ def _augment_reference_controller_state(
             local_position=local_position,
             angular_velocity=angular_velocity,
             rate_status=rate_status,
+            hover=hover,
             timestamp_us=start_us,
         )
         raw_profile.update(
             {
                 "initial_controller_state_valid": True,
-                **{name: values.tolist() for name, values in controller_vectors.items()},
+                **{
+                    name: values.tolist() if isinstance(values, np.ndarray) else values
+                    for name, values in controller_vectors.items()
+                },
                 "initial_controller_state_source_age_us": source_age_us,
             }
         )
@@ -439,13 +456,13 @@ def _augment_reference_controller_state(
                 "source_age_us": raw_profile["initial_controller_state_source_age_us"],
             }
         )
-    reference["schema_version"] = 4
+    reference["schema_version"] = 5
     temporary_path = reference_path.with_suffix(".json.tmp")
     temporary_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
     temporary_path.replace(reference_path)
     return {
         "schema_version": 1,
-        "method": "px4-ulog-controller-boundary-v2",
+        "method": "px4-ulog-controller-boundary-v3",
         "reference": str(reference_path),
         "profiles": profile_reports,
     }
@@ -475,8 +492,8 @@ def _actuator_boundary_report(
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") not in (3, 4):
-        raise ValueError(f"{reference_path} must use alignment trace schema 3 or 4")
+    if reference.get("schema_version") not in (3, 4, 5):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -695,6 +712,7 @@ def _report(
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
+    hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
     thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     start_timestamp = float(ulog.start_timestamp)
@@ -759,6 +777,7 @@ def _report(
         local_position=local_position,
         angular_velocity=angular_velocity,
         rate_status=rate_status,
+        hover=hover,
         timestamp_us=round(start_timestamp + start_s * 1e6),
     )
     controller_state = seed_actuation_controller_state(
@@ -771,6 +790,7 @@ def _report(
             "initial_angular_acceleration_body_flu_radps2"
         ],
         rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
+        hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
     )
     isaac_omega_grid = []
 
@@ -906,8 +926,8 @@ def _report(
         for axis in range(3)
     ]
     return {
-        "schema_version": 4,
-        "method": "px4-ulog-state-replay-v4-250hz",
+        "schema_version": 5,
+        "method": "px4-ulog-state-replay-v5-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
@@ -936,8 +956,8 @@ def _report(
 
 def _profile_windows(*, reference_path: Path) -> list[dict]:
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") not in (3, 4):
-        raise ValueError(f"{reference_path} must use alignment trace schema 3 or 4")
+    if reference.get("schema_version") not in (3, 4, 5):
+        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -1001,8 +1021,8 @@ def _profile_replay_report(
             }
         )
     return {
-        "schema_version": 4,
-        "method": "px4-ulog-profile-state-replay-v4-250hz",
+        "schema_version": 5,
+        "method": "px4-ulog-profile-state-replay-v5-250hz",
         "config": str(config_path),
         "alignment_artifact": str(alignment_artifact_path),
         "reference": str(reference_path),

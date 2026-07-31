@@ -54,18 +54,20 @@ they were trained.
 
 The pure controller transition carries filtered velocity, acceleration,
 velocity integral, previous angular velocity, filtered angular acceleration,
-rate integral, and initialization state. NumPy is the single-environment
+rate integral, the profile's normalized hover-thrust estimate, and
+initialization state. NumPy is the single-environment
 reference and Torch is the batched Isaac Lab twin. Both advance once per
 physics sample and must remain sequentially equivalent. Controller state,
 command-delay buffers, and thruster state are cleared on every environment
-reset and candidate change. Alignment trace schema 4 then restores the PX4
+reset and candidate change. Alignment trace schema 5 then restores the PX4
 velocity acceleration/setpoint boundary and body-rate derivative/integral
-boundary after each probe's kinematic reset. Because every captured profile
+boundary plus the interpolated hover-thrust estimate after each probe's
+kinematic reset. Because every captured profile
 starts in ongoing flight, its replay also primes current rotor thrust from that
 seeded neutral-command controller boundary. Profile reset preserves the
 candidate's rise/fall constants instead of re-sampling the construction-time
-Thruster ranges. Older trace schemas preserve the zero-controller-state replay
-under which they were captured.
+Thruster ranges. Older trace schemas use the artifact-authored normalized hover
+thrust and preserve the controller-state replay under which they were captured.
 
 The attitude stage uses PX4's reduced-quaternion law: roll and pitch align the
 thrust vector first, yaw error is weighted and recombined, and world-Z yaw-rate
@@ -140,9 +142,10 @@ simulation start time, exact command timestamps,
 body-FLU velocity commands, yaw-rate commands, position, attitude, body/world
 velocity, angular velocity, completion, and flight-envelope failure. Isaac Lab
 restores the captured initial state and replays the exact command intervals at
-the configured physics cadence. Schema-4 reference traces also record
+the configured physics cadence. Schema-5 reference traces also record
 `vehicle_local_position_setpoint` acceleration, estimated linear and angular
-acceleration, and `rate_ctrl_status` integrals at each absolute profile start.
+acceleration, `rate_ctrl_status` integrals, and `hover_thrust_estimate` at each
+absolute profile start.
 The target derives each candidate's initial velocity integral so its first
 neutral desired-acceleration boundary equals PX4, then restores the logged
 rate boundary in body-FLU. The alignment-only routine ends when the probe
@@ -316,11 +319,11 @@ candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.
 
 Initial controller-state enrichment linearly interpolates the PX4 acceleration
-setpoint and rate-integral vectors to the trace's absolute profile start,
-matching the linear and angular acceleration treatment. The report retains the
-age of the latest raw source sample so low-rate ULog coverage remains visible
-even though the reconstructed boundary is evaluated at the exact start
-timestamp.
+setpoint, rate-integral vectors, and hover-thrust estimate to the trace's
+absolute profile start, matching the linear and angular acceleration treatment.
+The report retains the age of the latest raw source sample so low-rate ULog
+coverage remains visible even though the reconstructed boundary is evaluated
+at the exact start timestamp.
 
 Alignment capture and execution settings live under the top-level Hydra
 `alignment` group. Capture preconditioning is behavior-affecting and is included
