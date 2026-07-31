@@ -4922,3 +4922,40 @@ Enhanced PhysX determinism, excitation amplitudes, controller, allocator,
 composed plant, actuator model, probes, gates, candidates, worker count, policy
 interface, reward, and training configuration remain unchanged. Attempt 27
 will run two capture controls before deciding whether to resume fitting.
+
+### 109. Attempt 27 passes exact action but fails the Lab hover gate
+
+Date: 2026-07-31.
+
+Attempt 27 completed two captures from clean source commit `92ba81d` as
+`x500-velocity-px4-v5/20260731T142154Z` and
+`x500-velocity-px4-v5/20260731T142456Z`. Both completed all profiles. The first
+capture's actuator audit passed with 0.000520 maximum normalized motor RMSE,
+0.01183 N maximum collective RMSE, and timestamp joins within one 4 ms physics
+tick.
+
+Phase locking aligned every held-out and stability profile to the same absolute
+PX4 start time, while fit profiles differed by 40 ms. It improved stability
+relative-position spread to 8.485 mm, but held-out vertical and combined spread
+remained 74.212 mm and 45.635 mm. This rules out profile-relative sensor phase
+as the cause of those remaining differences.
+
+The full one-worker sweep evaluated 6,431 unique candidates in 41 GPU batches
+over 1,469 seconds and selected candidate 6,172. GPU utilization averaged 31%,
+with sequential staged coordination remaining the measured bottleneck. The
+held-out fit passed all seven exact-action limits: 4.325 mm braking error,
+0.00328 m/s residual-speed error, 0.00 s stop-time error, 7.19% worst-axis
+velocity NRMSE, 2.88% yaw-rate NRMSE, 2.458 degree heading error, and 9.141 mm
+combined endpoint error. Stability traces were finite and complete.
+
+Final acceptance nevertheless failed. Two unchanged runs of
+`test-integration-alignment-target` produced the identical hover result:
+0.068 m final error and 0.129 m last-window maximum against the 0.100 m limit.
+Isaac Lab simultaneously warned that external forces were not applied every
+TGS solver iteration and explicitly associated that setting with noisy
+velocity updates. Exact-action boundaries pass while sustained Lab motion
+fails, so this warning identifies the first unresolved plant seam. Attempt 28
+should enable external forces every solver iteration in both Lab flight
+environments, rerun the unchanged controller through the fast hover gate, and,
+if confirmed, repeat capture, sweep, fit, and acceptance under the corrected
+plant fingerprint.
