@@ -137,7 +137,7 @@ def test_alignment_experiment_retains_required_seeded_sensor_excitation():
     bridge = config.vehicles["x500_01"].bridge
 
     assert not bridge.sensor_noise_enabled
-    assert bridge.barometer_noise_std_pa == 1.0
+    assert bridge.barometer_noise_std_pa == 0.1
     assert bridge.magnetometer_noise_scale == 0.1
     assert config.alignment.capture.sensor_seed == 42
 

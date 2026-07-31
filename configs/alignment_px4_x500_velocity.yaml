@@ -15,7 +15,7 @@ vehicles:
       # PX4 still requires nonconstant pressure samples to keep its barometer
       # instance healthy.
       sensor_noise_enabled: false
-      barometer_noise_std_pa: 1.0
+      barometer_noise_std_pa: 0.1
       # PX4's exact-field innovation is outside its initialization gate on this
       # composed model, so retain the seeded default magnetometer excitation.
       magnetometer_noise_scale: 0.1

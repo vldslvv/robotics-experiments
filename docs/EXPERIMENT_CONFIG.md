@@ -47,10 +47,10 @@ before a PX4 controller-alignment capture starts. The alignment experiment
 disables stochastic IMU and GPS terms but retains seeded barometer and
 magnetometer noise: PX4 rejects a constant pressure stream as stale, and the
 composed exact magnetic field lies outside its yaw-initialization innovation
-gate. Alignment uses one tenth of the normal magnetic noise amplitude: enough
-sample variation for PX4 health without the full estimator perturbation. The
-seed controls injected samples; complete closed-loop reproducibility must still
-be verified with replicate captures.
+gate. Alignment uses one tenth of both normal noise amplitudes: enough sample
+variation for PX4 health without the full estimator perturbation. The seed
+controls injected samples; complete closed-loop reproducibility must still be
+verified with replicate captures.
 
 `driver.control_rate_hz` drives the fleet cyclic executive,
 `driver.offboard_setpoint_rate_hz` drives OFFBOARD transmission, and

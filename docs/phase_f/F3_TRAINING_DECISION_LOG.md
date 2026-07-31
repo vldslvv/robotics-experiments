@@ -4768,3 +4768,18 @@ stream. One pascal corresponds to centimeter-scale pressure-altitude
 perturbation, and the exact pressure stream is already proven unhealthy.
 Attempt 24 should retain the nonzero health signal but reduce only
 `barometer_noise_std_pa` from 1.0 to 0.1 before repeating the capture control.
+
+### 102. Reduce pressure excitation to the health-preserving range
+
+Date: 2026-07-31.
+
+Attempt 24 changes only the alignment experiment's
+`barometer_noise_std_pa` from 1.0 to 0.1. Normal runtime remains at 1 Pa. The
+target controller identifier advances to `isaac-lab-x500-velocity-v26`,
+producing a new comparison fingerprint.
+
+The 0.1 magnetic scale, exact alignment IMU/GPS configuration, controller,
+allocator, composed plant, actuator model, probe suite, gates, candidate
+ranges, beam width, worker count, policy interface, reward, and training
+configuration remain unchanged. Attempt 24 will require two successful
+captures with materially reduced trace spread before a full sweep.
