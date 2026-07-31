@@ -5271,3 +5271,24 @@ The candidate trace was compressed losslessly from 7,593,801,257 bytes to a
 verified 1.38 GiB Zstandard archive. The capture, audit, controller replay,
 GPU telemetry, fit, and compressed candidates are preserved under the run's
 relative-path manifest.
+
+### 121. Expand the selected horizontal braking neighborhood
+
+Date: 2026-07-31.
+
+Attempt 34 retains schema 6, comparison generation `x500-velocity-px4-v6`,
+the gain schedule, controller and plant contracts, probes, gates, search
+strategy, and one-worker execution. Its base settings become Attempt 33
+candidate 7,412 so every staged replacement is evaluated locally around the
+one-failure frontier instead of around the now weaker historical seed.
+
+The matching validation trace supports a declarative braking expansion. The
+selected candidate passes the validation braking actuator boundary but stops
+0.10 s late, and its horizontal derivative gain is the existing range maximum
+of 0.30. The `kd_vel` candidates therefore add x-axis values 0.325, 0.35,
+0.375, and 0.40 while preserving y at 0.30. Nearby x-axis proportional values
+1.9, 2.0, and 2.1 and integral values 0.45, 0.50, and 0.60 are also added so
+the beam can preserve braking distance and endpoint position if derivative
+gain alone shifts the discrete stop crossing. All existing candidates remain
+available. No allocator, actuator, policy, reward, training, integration, or
+advisory behavior changes in this attempt.
