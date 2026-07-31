@@ -5292,3 +5292,51 @@ the beam can preserve braking distance and endpoint position if derivative
 gain alone shifts the discrete stop crossing. All existing candidates remain
 available. No allocator, actuator, policy, reward, training, integration, or
 advisory behavior changes in this attempt.
+
+### 122. Accept schema 6 candidate 8,083
+
+Date: 2026-07-31.
+
+Attempt 34 completed fresh run
+`x500-velocity-px4-v6/20260731T185547Z` from clean source commit `4e3e005`.
+The one-worker sweep evaluated 8,300 unique candidates in 47 GPU batches over
+1,742.3 seconds and selected candidate 8,083. Useful throughput was 4.76
+candidates/s. GPU utilization averaged 30.3%, reached 50% at the 95th
+percentile, and peaked at 73%, with 6,316 MiB peak memory use. The measured
+deterministic simulation throughput remains the bottleneck; additional workers
+are not justified by the prior representative benchmark.
+
+Candidate 8,083 passes all seven exact-action limits: braking-distance error
+is 3.192 mm, residual-speed error is 0.00199 m/s, stop-time error is 0.06 s,
+worst-axis velocity NRMSE is 4.38%, yaw-rate NRMSE is 3.89%, heading error is
+2.816 degrees, and combined endpoint error is 7.489 mm. Its stability trace is
+finite, complete, and usable. The plant-owned actuator audit passes all 11
+profiles: timestamp joins are at most one 4 ms physics tick, normalized motor
+RMSE peaks at 0.000494, and collective-thrust RMSE peaks at 0.01275 N.
+
+The unchanged standard 16-environment integration target also passes. Hover
+position error is 0.036 m final and 0.075 m over the last second. Goto error is
+0.006 m final and 0.006 m over the last second. The press handoff finishes
+ready at 0.483 m wall-normal range. This satisfies alignment acceptance, and
+both `latest` and `best` resolve to the accepted run.
+
+Controller-state replay remains a diagnostic rather than an acceptance gate.
+Its validation braking profile is within the replay limits, while vertical
+collective and yaw, combined, and stability motor boundaries still exceed the
+diagnostic limits. Those later discrepancies do not reopen controller tuning
+because identical-action motion and the downstream integration response pass.
+
+The existing actor cannot produce a post-acceptance divergence trace. Every
+available actor embeds legacy alignment schema 1. Lab evaluation rejects it as
+unsupported provenance, and the PX4 transfer path independently rejects it at
+spawn preflight before the first actor evaluation. Observation divergence,
+action divergence, and actor-driven state divergence are therefore unavailable,
+not zero. The accepted identical-action result remains valid.
+
+The candidate trace is preserved as a verified Zstandard archive with an
+uncompressed size of 8,282,853,039 bytes under the run's relative-path
+manifest. Training now resolves `x500-velocity-px4-v6/best`. The next session
+must run a new 300-iteration Stage 1 scratch training with the accepted schema-6
+record embedded, followed by checkpoint selection, independent Lab evaluation,
+PX4 transfer, and the complete approach mission. No retraining belongs to this
+alignment session.

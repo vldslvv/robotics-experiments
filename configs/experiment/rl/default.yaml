@@ -27,7 +27,7 @@ training:
   vehicle_id: 0
   policy_name: hover
   training_mode: scratch
-  alignment_artifact: .build/alignment/x500-velocity-px4-v2/best
+  alignment_artifact: .build/alignment/x500-velocity-px4-v6/best
   max_iterations: 1500
   num_steps_per_env: 24
   save_interval: 200

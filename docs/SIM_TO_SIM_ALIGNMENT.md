@@ -347,13 +347,13 @@ from approximately 3.47 to 1.10 candidates/s because the Isaac/PhysX processes
 contended. Active evaluation still records the 95% utilization target. This
 measured PhysX bottleneck is reported rather than masked with duplicate work.
 
-Training remains pinned to `.build/alignment/x500-velocity-px4-v2/best` while
-v3 is unaccepted. Only after v3 advisory quality and the exact-action diagnosis
-pass is the training default advanced to the accepted v3 artifact and Stage 1
-retrained from scratch for the existing 300 iterations without reward or PPO
-changes. Run checkpoint selection, independent Lab evaluation, the three-range
-physical transfer gate, and the complete approach mission in that order. Stop
-and preserve diagnostics at the first failure.
+Training resolves `.build/alignment/x500-velocity-px4-v6/best`, accepted by
+run `20260731T185547Z`. Stage 1 must be retrained from scratch for the existing
+300 iterations without reward or PPO changes before actor evaluation or PX4
+transfer can represent this controller. Run checkpoint selection, independent
+Lab evaluation, the three-range physical transfer gate, and the complete
+approach mission in that order. Stop and preserve diagnostics at the first
+failure.
 
 An alignment campaign has no fixed attempt cap while a completed attempt makes
 material progress or trace and ULog evidence identifies a new correction to

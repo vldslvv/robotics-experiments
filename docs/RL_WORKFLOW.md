@@ -60,9 +60,9 @@ artifacts own evaluation and deployment cadence and action scaling.
 PX4 SITL is the response reference for the separate, policy-independent
 alignment subsystem. Run `make align-controllers`, then
 `make test-integration-alignment-target`; see
-`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves
-`.build/alignment/x500-velocity-px4-v2/best` by default until v5 alignment is
-accepted, and may select an exact run with `ALIGNMENT_ARTIFACT`. The command
+`docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves the accepted
+`.build/alignment/x500-velocity-px4-v6/best` by default and may select an exact
+run with `ALIGNMENT_ARTIFACT`. The command
 buffer, velocity/rate controller state, and thruster state are cleared on every
 environment reset.
 
