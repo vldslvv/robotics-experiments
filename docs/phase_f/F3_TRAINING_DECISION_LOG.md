@@ -5082,3 +5082,52 @@ controller, allocator, rotor model, probes, gates, search, policy interface,
 reward, and training configuration also remain unchanged. Attempt 30 must
 first prove that a fresh PX4 capture can take off and pass its actuator audit
 before another target sweep is justified.
+
+### 115. Attempt 30 restores flight and isolates the normalized-hover boundary
+
+Date: 2026-07-31.
+
+Attempt 30 completed the fresh capture
+`x500-velocity-px4-v5/20260731T155322Z` from clean source commit `50d0283`.
+The vehicle took off and completed all 11 profiles. The actuator audit passed:
+timestamp joins stayed within one 4 ms physics tick, normalized motor RMSE
+peaked at 0.000337, and collective-thrust RMSE peaked at 0.01212 N. This
+confirms that restoring one external-wrench application per step fixed Attempt
+29's reference regression.
+
+The one-worker sweep evaluated 6,331 usable candidates in 41 GPU batches over
+1,665.7 seconds. Useful throughput was 3.80 candidates/s. GPU utilization
+averaged 28.7%, reached 45% at the 95th percentile, and peaked at 65%, with
+6,176 MiB peak memory use. Candidate 5,749 was selected. It missed only the
+braking-distance gate at 6.808 mm: residual speed was 0.00135 m/s, stop-time
+error was 0.10 s, worst-axis velocity NRMSE was 6.88%, yaw-rate NRMSE was
+3.27%, heading error was 2.971 degrees, and combined endpoint error was
+8.829 mm. The failed-gate distribution was 1,192 candidates with one failure,
+1,521 with two, 2,069 with three, 982 with four, 535 with five, and 32 with six.
+Every individual gate had passing candidates, but no single candidate passed
+all seven.
+
+The integration-evidenced base candidate 0 missed only exact-action braking at
+12.629 mm and passed the complete Lab acceptance target: its hover error was
+0.045 m final and 0.089 m over the last second, goto error was 0.019 m final
+and 0.031 m over the last second, and the final handoff range was 0.461 m.
+Candidate 5,749 also passed that target when only its horizontal proportional
+gain was raised from 1.35 to 1.575, with 0.096 m hover and 0.044 m goto
+last-window maxima. This preserves an evidenced, minimal large-error gain
+schedule for a later attempt; it is not yet the first failed boundary.
+
+Controller-state replay first failed normalized collective. The selected
+controller's validation braking profile had normalized motor RMSE 0.00256 but
+collective RMSE 0.10495 N. Across the capture, PX4's logged hover estimate
+declined from 0.57307 to 0.57075 while the fixed target used 0.57; the roughly
+0.0015 neutral offset predicts the observed 0.10 N collective bias. Yaw and
+combined profiles also expose later normalized-torque discrepancies, but they
+are downstream of this thrust-setpoint failure. Attempt 31 should restore each
+profile's logged initial hover estimate as controller state, retain the
+authored setting for ordinary environment resets and legacy traces, and rerun
+the unchanged candidates before adding large-error gain scheduling.
+
+The candidate trace was compressed losslessly from 5.9 GiB to a verified
+1.2 GiB Zstandard archive. The capture, audit, replay, integration probes, GPU
+telemetry, fit, and compressed candidates are preserved under the run's
+relative-path manifest.
