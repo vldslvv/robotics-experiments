@@ -4511,3 +4511,27 @@ or 4.57 candidate evaluations/s. GPU utilization averaged 26.24%, reached 41%
 at p95 and 48% at peak, and used 4377 MiB peak memory. The measured
 trace-materialization and serial orchestration bottleneck still does not
 justify a second worker.
+
+### 93. Make the alignment reference input deterministic
+
+Date: 2026-07-31.
+
+Attempt 20 disables `vehicles.x500_01.bridge.sensor_noise_enabled` only in
+`configs/alignment_px4_x500_velocity.yaml`. The default remains enabled for
+normal integration and runtime experiments. Controller alignment is intended
+to compare deterministic controller, allocator, actuator, and plant response;
+stochastic estimator divergence remains a downstream PX4-versus-Lab
+diagnostic.
+
+This is the single structural change evidenced by Attempt 19. The target
+controller identifier advances to `isaac-lab-x500-velocity-v21`, and the
+experiment change produces a new comparison fingerprint. The Attempt 18
+candidate 6137 base, all declarative candidates, controller equations,
+allocator, composed plant, actuator model, probe suite, gates, beam width,
+worker count, policy interface, reward, and training configuration remain
+unchanged.
+
+A host configuration regression verifies that the dedicated alignment
+experiment disables stochastic PX4 sensor models. Attempt 20 will run a fresh
+capture, actuator audit, unchanged target sweep, and held-out fit from the
+committed source.

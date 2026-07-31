@@ -129,6 +129,14 @@ def test_default_experiment_has_only_global_root_config():
     assert config.driver.offboard_setpoint_rate_hz == 50.0
 
 
+def test_alignment_experiment_disables_stochastic_px4_sensor_models():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "alignment_px4_x500_velocity.yaml")
+
+    assert not config.vehicles["x500_01"].bridge.sensor_noise_enabled
+
+
 def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     from robotics_experiments.config import load_config
 

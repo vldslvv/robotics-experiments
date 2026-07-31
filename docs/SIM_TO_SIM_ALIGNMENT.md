@@ -110,6 +110,11 @@ combined probe is a flight-envelope check; it can invalidate a candidate but
 does not enter the low-speed ranking.
 
 PX4 capture uses the normal fleet driver and an injected `PolicyAdapter`.
+The alignment experiment disables the stochastic Pegasus sensor models so the
+PX4 controller and deterministic Isaac Lab controller receive reproducible
+state estimates. Normal integration runs retain sensor noise, and noisy
+estimator divergence remains a separate diagnostic rather than a fitted plant
+or controller effect.
 Before each recorded profile, the adapter streams a neutral velocity/yaw
 setpoint for at least the configured minimum and then requires a continuous
 stable-speed/rate/tilt window. The first profile therefore starts after PX4 has
