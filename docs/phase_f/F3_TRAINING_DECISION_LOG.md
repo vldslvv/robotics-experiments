@@ -4743,3 +4743,28 @@ controller, allocator, composed plant, actuator model, probe suite, gates,
 candidate ranges, beam width, worker count, policy interface, reward, and
 training configuration remain unchanged. Attempt 23 will again require two
 successful captures with materially reduced trace spread before a full sweep.
+
+### 101. Attempt 23 improves stability but not held-out reproducibility
+
+Date: 2026-07-31.
+
+Attempt 23 completed two capture controls from clean source commit `5010c4f` as
+`x500-velocity-px4-v5/20260731T133426Z` and
+`x500-velocity-px4-v5/20260731T133724Z`. Both armed, took off, and completed all
+11 profiles. The first capture's actuator audit passed: timestamp joins stayed
+within one 4 ms physics tick, normalized motor RMSE peaked at 0.000338, and
+collective RMSE peaked at 0.01401 N.
+
+The replicate stabilized 0.36-0.40 s later and one braking trace contained one
+additional 20 Hz sample. After interpolation on their common profile-relative
+time domain, maximum absolute relative-position differences were 13.428 mm on
+the held-out braking profile, 30.768 mm lateral, 40.709 mm vertical, 32.719 mm
+yaw, 19.083 mm combined, and 6.047 mm on the stability profile. The stability
+spread materially improved from Attempt 22's 21.898 mm, but the held-out
+profiles did not improve overall, so a full sweep is not justified.
+
+The remaining full-amplitude stochastic input is the seeded 1 Pa barometer
+stream. One pascal corresponds to centimeter-scale pressure-altitude
+perturbation, and the exact pressure stream is already proven unhealthy.
+Attempt 24 should retain the nonzero health signal but reduce only
+`barometer_noise_std_pa` from 1.0 to 0.1 before repeating the capture control.
