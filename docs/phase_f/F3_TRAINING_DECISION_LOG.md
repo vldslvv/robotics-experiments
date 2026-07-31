@@ -4443,3 +4443,71 @@ wrong direction, so no hover expansion is made.
 No controller equation, allocator, plant mapping, actuator range, probe, gate,
 beam width, worker count, policy interface, reward, or training configuration
 changes. Attempt 19 remains a schema-5 declarative filter expansion.
+
+### 92. Attempt 19 exposes stochastic estimator input as the reproducibility seam
+
+Date: 2026-07-31.
+
+Attempt 19 completed from clean source commit `fb67199` as
+`x500-velocity-px4-v5/20260731T112716Z`. Its fresh capture completed all 11
+profiles. The reference actuator audit passed: timestamp joins stayed within
+one 4 ms physics tick, normalized motor RMSE peaked at 0.00119, and collective
+RMSE peaked at 0.03187 N.
+
+The sweep evaluated 6919 candidates, 6918 of them usable, and selected candidate
+6789 under comparison fingerprint
+`9386022ee613433ec70762fda22191266cc7bf634753a0d51a629b476358d6f1`.
+
+| Held-out metric | Attempt 19 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 9.861 mm | 5 mm |
+| Residual-speed error | 0.00374 m/s | 0.01 m/s |
+| Stop-time error | 0.700 s | 0.10 s |
+| Worst-axis velocity NRMSE | 9.88% | 10% |
+| Yaw-rate NRMSE | 3.67% | 10% |
+| Heading error | 2.791 deg | 3 deg |
+| Combined endpoint error | 78.662 mm | 10 mm |
+
+The attempt is rejected with braking, stop-time, and endpoint failures and a
+largest normalized excess of 6.866. This is not material progress. Among usable
+candidates, 2392 failed three gates, 3679 failed four, 723 failed five, and 124
+failed six. No candidate failed fewer than three gates. Candidate-wide minima
+were 5.237 mm braking error, 0.000287 m/s residual speed, 0.140 s stop-time
+error, 7.23% velocity NRMSE, 2.42% yaw-rate NRMSE, 1.845 degrees heading error,
+and 49.756 mm endpoint error.
+
+Candidate 0 retained Attempt 18 candidate 6137 exactly, but on this fresh
+reference it failed four gates: 8.118 mm braking error, 0.400 s stop-time
+error, 11.29% velocity NRMSE, and 94.000 mm endpoint error. This excludes the
+new derivative-filter values and staged pruning as causes of the regression.
+
+The selected profile replay usually keeps normalized motor RMSE below 0.01,
+including 0.00432 on the braking profile, but collective RMSE is 0.10090 N
+there. The stability replay has 0.03499 normalized motor RMSE and 1.32018 N
+collective RMSE. These are consequences of fitting a substantially changed
+reference response rather than evidence for another controller range
+expansion.
+
+Three consecutive captures identify why the closed-loop frontier does not
+reproduce. The PX4 `vehicle_local_position` estimator velocity differs from
+the captured Isaac ground-truth velocity by approximately 0.005-0.010 m/s RMS
+per profile, with maxima up to 0.026 m/s. The signed mean bias changes between
+captures and profiles. This is the same scale as the 0.005 m braking and
+0.010 m endpoint gates once integrated over a five-to-six-second probe.
+Correspondingly, the PX4 combined validation displacement changed by about
+80 mm between Attempts 18 and 19 even though the controller, plant, probes,
+and capture code were unchanged.
+
+The alignment experiment currently inherits
+`px4.sensor_noise_enabled: true`. That stochastic estimator input is absent
+from Isaac Lab, whose aligned controller consumes deterministic simulated
+kinematics. Attempt 20 should disable PX4 sensor noise only in the alignment
+experiment, advancing the experiment and comparison fingerprints. This keeps
+the controller, allocator, composed plant, probe suite, gates, and candidate
+ranges unchanged while making the input boundary being compared reproducible.
+
+Attempt 19 used one worker, 41 GPU batches, and 1514.77 s for the useful sweep,
+or 4.57 candidate evaluations/s. GPU utilization averaged 26.24%, reached 41%
+at p95 and 48% at peak, and used 4377 MiB peak memory. The measured
+trace-materialization and serial orchestration bottleneck still does not
+justify a second worker.
