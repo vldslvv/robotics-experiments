@@ -3601,3 +3601,71 @@ Attempt 9 used one worker, 41 GPU batches, and 1426.14 s for the useful sweep,
 or 4.14 candidate evaluations/s. GPU utilization averaged 28.88%, reached 43%
 at p95 and 53% at peak, and used 8742 MiB peak memory. Sequential Isaac/PhysX
 stepping remains the measured bottleneck, so worker count stays at one.
+
+### 74. Pause after attempt 10 rejects the isolated-axis expansion
+
+Date: 2026-07-30.
+
+Attempt 10 completed from clean source commit `4177a0a` as
+`x500-velocity-px4-v5/20260730T233356Z`. Its fresh capture restored valid
+controller state for all 11 profiles. The actuator audit passed every profile:
+timestamp joins stayed within one 4 ms physics tick, normalized motor RMSE
+peaked at 0.00143, and reconstructed collective RMSE peaked at 0.0131 N. The
+sweep evaluated 6187 unique candidates, 6044 of them usable, and selected
+candidate 6089 under comparison fingerprint
+`be61546aa96c19ae78e34b296fd697dc191ee84034ef8d5b33da689a9957af7b`.
+
+| Held-out metric | Attempt 10 | Limit |
+| --- | ---: | ---: |
+| Braking-distance error | 11.525 mm | 5 mm |
+| Residual-speed error | 0.00991 m/s | 0.01 m/s |
+| Stop-time error | 0.440 s | 0.10 s |
+| Worst-axis velocity NRMSE | 6.95% | 10% |
+| Yaw-rate NRMSE | 4.17% | 10% |
+| Heading error | 3.861 deg | 3 deg |
+| Combined endpoint error | 44.701 mm | 10 mm |
+
+The attempt is rejected with four failed gates and a largest normalized excess
+of 3.470. It does not improve on attempt 7's two failures and 2.517 largest
+excess. Among usable candidates, 2173 failed four gates, 2435 failed five,
+1431 failed six, and 5 failed all seven; no candidate failed fewer than four
+gates. Candidate-wide minima were 7.324 mm braking error, 0.00127 m/s residual
+speed, 0.260 s stop-time error, 6.40% velocity NRMSE, 3.12% yaw-rate NRMSE,
+2.186 degrees heading error, and 3.233 mm endpoint error. The isolated Y
+integral candidate can therefore clear the endpoint gate, but it does not
+combine with a braking or stop-time frontier. The isolated Y proportional
+gain and yaw-only feed-forward likewise do not reduce the minimum failed-gate
+count.
+
+The selected settings use 0.024 s command delay, velocity P/I/D
+`[1.35, 1.35, 3.0]`, `[0.3, 0.3, 1.5]`, and `[0.3, 0.3, 0]`, 2 Hz velocity
+filtering, 1 Hz velocity-derivative filtering, normalized hover thrust 0.57,
+attitude P `[5, 5, 3.5]`, yaw weight 0.6, rate P/I/D
+`[0.15, 0.15, 0.2]`, zero, and `[0.0045, 0.0045, 0]`, zero rate
+feed-forward, 30 Hz rate-derivative filtering, 0.4 rate-integral limits, and
+0.01 s symmetric actuator time constants.
+
+Direct ULog state replay places the first unresolved boundary at controller
+collective output. The selected settings pass normalized motor RMSE for the
+braking and combined validation windows at 0.00248 and 0.00874, but their
+collective RMSE is 0.111 N and 0.0946 N, above the 0.05 N limit. The yaw
+window additionally reaches 0.01157 normalized motor RMSE and 0.105 N
+collective RMSE. The fresh reference-side bridge audit passes, so the composed
+plant offset, scale, and rotor curve remain internally consistent. A resumed
+campaign should inspect the normalized thrust-setpoint and allocator inputs
+for the braking window before adding candidates. The candidate-wide stop-time
+floor of 0.260 s is stronger evidence than a selected parameter touching a
+range boundary. Preserve the passing 3.233 mm endpoint champion when routing
+that investigation.
+
+Attempt 10 used one worker, 41 GPU batches, and 1482.81 s for the useful
+sweep, or 4.17 candidate evaluations/s. GPU utilization averaged 28.83%,
+reached 43% at p95 and 51% at peak, and used 8741 MiB peak memory. Sequential
+Isaac/PhysX stepping remains the measured bottleneck, so the one-worker
+decision remains supported.
+
+The campaign is paused at the user's request after this completed fitting
+attempt. The source implementation, hypothesis, capture, ULog, bridge log,
+reference trace, target candidates, actuator audit, GPU telemetry, manifest,
+and rejected fit artifact are preserved. No attempt 11, integration acceptance
+test, actor diagnostic, training run, or machine shutdown was started.
