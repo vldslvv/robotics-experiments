@@ -291,8 +291,10 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.controller_schema_version == 6
     assert target.base_settings.command_delay_s == pytest.approx(0.0725)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
-    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.0 / 7.0)
-    assert target.base_settings.kd_vel == pytest.approx((0.45, 0.375, 0.0))
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
+    assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.34)
+    assert target.base_settings.ki_vel == pytest.approx((0.35, 0.35, 1.5))
+    assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
     assert target.search.strategy == "staged-beam-v2"
     assert target.search.beam_width == 1
     assert target.search.passes_per_stage == 1
