@@ -5694,3 +5694,17 @@ its mandatory base and adds all-axis feed-forward candidates 0.046, 0.047,
 0.048, and 0.049. Linear neighborhood evidence places the joint strict crossing
 near 0.047. No controller structure, plant, probe, gate, policy, or reward
 behavior changes.
+
+### 133. Target the measured feed-forward crossing
+
+Date: 2026-08-01.
+
+The third scratch attempt makes candidate 5,763 the mandatory base and adds
+four declarative all-axis `kff_rate` values: 0.046, 0.047, 0.048, and 0.049.
+Every other broad candidate range, archive-reseeded search rule, refinement
+level, 128-setting scene capacity, probe, and acceptance gate remains
+unchanged. The candidate is preferred over the slightly closer 5,675 frontier
+because it retains 0.157 mm endpoint margin instead of 0.047 mm while keeping
+nearly identical braking and residual values. The attempt hypothesis is that
+one fine feed-forward value will reduce braking below 3.692 mm before residual
+exceeds 0.002993 m/s, yielding all seven parity limits on a fresh capture.

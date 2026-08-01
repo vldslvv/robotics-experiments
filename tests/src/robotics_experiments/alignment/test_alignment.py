@@ -274,14 +274,16 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.backend == "isaac-lab"
     assert target.alignment_id == "x500-velocity-px4-v7"
     assert target.controller_schema_version == 6
-    assert target.base_settings.command_delay_s == pytest.approx(0.06)
-    assert target.base_settings.kp_vel == pytest.approx((2.0, 1.35, 6.0))
-    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.0 / 7.0)
-    assert target.base_settings.kd_vel == pytest.approx((0.38125, 0.3, 0.0))
+    assert target.base_settings.command_delay_s == pytest.approx(0.057)
+    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(33.0 / 28.0)
+    assert target.base_settings.kd_vel == pytest.approx((0.3, 0.3, 0.0))
     assert target.search.strategy == "coarse-to-fine-beam-v3"
     assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 2
+    kff_rate = next(parameter for parameter in target.parameters if parameter.field == "kff_rate")
+    assert (0.047, 0.047, 0.047) in kff_rate.candidates
     assert [parameter.field for parameter in target.parameters[5:8]] == [
         "horizontal_velocity_error_gain_scale",
         "horizontal_velocity_error_gain_start_mps",

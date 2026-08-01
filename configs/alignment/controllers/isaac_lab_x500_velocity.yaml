@@ -16,29 +16,29 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.060
-  kp_vel: [2.0, 1.35, 6.0]
-  horizontal_velocity_error_gain_scale: 1.285714286
-  horizontal_velocity_error_gain_start_mps: 0.10
-  horizontal_velocity_error_gain_full_mps: 0.25
-  ki_vel: [0.3, 0.4, 2.0]
-  kd_vel: [0.38125, 0.3, 0.0]
+  command_delay_s: 0.057
+  kp_vel: [1.8, 1.8, 4.0]
+  horizontal_velocity_error_gain_scale: 1.17857142875
+  horizontal_velocity_error_gain_start_mps: 0.175
+  horizontal_velocity_error_gain_full_mps: 0.2875
+  ki_vel: [0.0, 0.4, 2.0]
+  kd_vel: [0.3, 0.3, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 0.0
-  velocity_derivative_filter_hz: 0.5
+  velocity_filter_hz: 5.0
+  velocity_derivative_filter_hz: 6.875
   velocity_integral_limit_mps2: [3.0, 3.0, 6.0]
   # Physical collective fraction of the composed X500's maximum thrust. The
   # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
   hover_thrust_fraction: 0.375
   # PX4's normalized hover-thrust boundary. Schema 5 uses this value before
   # control allocation; the physical fraction above is legacy-only.
-  hover_thrust_normalized: 0.595
+  hover_thrust_normalized: 0.5875
   kp_att: [5.0, 5.0, 3.5]
-  attitude_yaw_weight: 0.425
+  attitude_yaw_weight: 0.2
   kp_rate: [0.15, 0.15, 0.20]
   ki_rate: [0.30, 0.30, 0.15]
   kd_rate: [0.0045, 0.0045, 0.0]
-  kff_rate: [0.0, 0.0, 0.025]
+  kff_rate: [0.05, 0.05, 0.05]
   # Legacy schemas convert the normalized rate PID output to physical torque.
   # Schema 5 sends normalized torque directly to the PX4 allocator.
   rate_output_scale_nm: [6.5, 6.5, 1.3]
@@ -192,6 +192,10 @@ parameters:
       - [0.0, 0.0, 0.0]
       - [0.025, 0.025, 0.025]
       - [0.0375, 0.0375, 0.0375]
+      - [0.046, 0.046, 0.046]
+      - [0.047, 0.047, 0.047]
+      - [0.048, 0.048, 0.048]
+      - [0.049, 0.049, 0.049]
       - [0.05, 0.05, 0.05]
       - [0.0625, 0.0625, 0.0625]
       - [0.075, 0.075, 0.075]
