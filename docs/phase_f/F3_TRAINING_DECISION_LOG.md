@@ -5872,3 +5872,43 @@ spending a 13-minute target sweep. When a reference admits a passing basin, the
 target cache is discarded and the complete target sweep is recomputed in that
 same run directory before publication. This preserves final scratch evidence
 while avoiding repeated deterministic GPU work for rejected PX4 captures.
+
+### 139. Accept scratch alignment after reference-state preflight
+
+Date: 2026-08-01.
+
+The proposed cross-reference target cache was tested and rejected before use in
+an accepted artifact. Although controller settings and definitions were
+identical, target profiles initialize from each reference profile's captured
+controller and motion state. Reusing target traces across reference captures
+therefore made every initial setting unusable. Cross-reference caching is not a
+valid optimization for this probe contract.
+
+A semantically valid replacement evaluates the mandatory base once against a
+fresh reference. Run `20260801T114848Z` was rejected after a 20-second,
+one-candidate target sweep: the base missed braking at 6.001 mm, heading at
+3.075 degrees, and endpoint at 15.178 mm. This avoided another full target
+sweep. The next reference, run `20260801T115600Z`, placed the base close enough
+to the passing envelope to justify expansion: 5.222 mm braking, 0.14 s stop
+time, 3.067 degrees heading, and 9.988 mm endpoint error.
+
+The complete target sweep was then recomputed against that same reference. It
+attempted 4,445 settings, eliminated 1,216 exact duplicates, and evaluated
+3,229 unique candidates in 41 batches and 821.4 seconds. Average GPU
+utilization was 26.8%. The actuator audit passed all profiles with 0.000378
+worst normalized motor RMSE, 0.01383 N worst collective RMSE, and at most one
+4 ms physics tick of timestamp join error.
+
+Selected candidate 2,633 passed all seven trace gates: 4.863 mm braking error,
+0.002229 m/s residual speed, 0.10 s stop-time error, 5.345% worst-axis NRMSE,
+3.897% yaw NRMSE, 2.985 degrees heading error, and 9.857 mm endpoint error. The
+authoritative live gate also passed with a 0.094 m hover window, 0.027 m goto
+window, and ready handoff at 0.463 m. This is a complete scratch reproduction
+under the registered acceptance criteria.
+
+No candidate met the additional accepted-v6 parity envelope. The selected
+candidate misses its braking, stop-time, and endpoint parity limits, while all
+3,229 candidates miss at least one parity limit. Candidate 2,274 reaches 0.06 s
+stop time but trades braking to 5.526 mm. The first unresolved tighter boundary
+is therefore the reference-specific braking/stop tradeoff; it does not block
+the official acceptance or downstream policy training.
