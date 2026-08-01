@@ -163,8 +163,10 @@ pre-contact. Reset owns no independent entry-velocity tunables.
 The contact-frame velocity target is dense in all three axes. Its wall-normal
 component is `clip(1.25 * (range - 0.41), -0.04, 0.08)` m/s. Its tangential
 components are twice the lateral and vertical switch errors, radially limited
-to 0.10 m/s. This target teaches braking, small controlled retreat after range
-undershoot, and simultaneous alignment without encoding a task-specific actor.
+to 0.10 m/s. Positive wall-normal motion is held at zero until tangential error
+is within 0.03 m; retreat remains available at any alignment. This target
+teaches align-first approach, braking, and controlled retreat after range
+undershoot without encoding a task-specific actor.
 Collision overrides success and the ordinary flight-failure penalty;
 simultaneous body and pusher collision produces one collision reward penalty.
 The range barrier begins at the upper goal boundary and provides a direct

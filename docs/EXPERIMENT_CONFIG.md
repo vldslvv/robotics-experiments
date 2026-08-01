@@ -114,7 +114,8 @@ finite and non-negative, and the output initialization is
 `rl.press.curriculum_stage` is required and currently accepts only `approach`.
 `handoff` owns the single actor-entry envelope used by both Lab reset and live
 deployment; `goal` owns the stable range/alignment/speed/upright predicate and
-three-axis velocity reference; `reward` owns the ten reward-term parameters,
+three-axis velocity reference, including its positive-motion alignment gate;
+`reward` owns the ten reward-term parameters,
 including the positive lower-range barrier margin; `reset` owns only the
 physical scene; `termination` owns contact
 sensing and flight envelopes; and `evaluation` owns deterministic seeds/count

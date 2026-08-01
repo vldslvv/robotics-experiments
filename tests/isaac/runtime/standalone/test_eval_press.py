@@ -85,6 +85,7 @@ def _goal():
         body_z_alignment_min=0.965926,
         velocity_reference=SimpleNamespace(
             range_center_m=0.41,
+            wall_normal_alignment_gate_m=0.03,
             wall_normal_gain_per_s=1.25,
             wall_normal_min_mps=-0.04,
             wall_normal_max_mps=0.08,
@@ -142,7 +143,7 @@ def test_trajectory_cost_tracks_full_contact_frame_target_velocity() -> None:
     observation = torch.zeros((1, 34))
     observation[:, :3] = torch.tensor([[0.45, 0.03, 0.04]])
     observation[:, 3:7] = torch.tensor([[0.0, 0.0, 0.0, 1.0]])
-    observation[:, 10:13] = torch.tensor([[0.05, 0.06, 0.08]])
+    observation[:, 10:13] = torch.tensor([[0.0, 0.06, 0.08]])
     observation[:, 19] = 1.0
     costs = press_evaluation._trajectory_costs(  # noqa: SLF001
         observation=observation,

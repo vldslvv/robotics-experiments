@@ -40,6 +40,7 @@ goal:
   stable_steps: 5
   velocity_reference:
     range_center_m: 0.41
+    wall_normal_alignment_gate_m: 0.03
     wall_normal_gain_per_s: 1.25
     wall_normal_min_mps: -0.04
     wall_normal_max_mps: 0.08

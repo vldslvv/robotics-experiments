@@ -323,6 +323,7 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "alignment_error_max_m": goal.alignment_error_max_m,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "velocity_reference.wall_normal_alignment_gate_m": (reference.wall_normal_alignment_gate_m),
         "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
         "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
         "velocity_reference.tangential_speed_max_mps": (reference.tangential_speed_max_mps),

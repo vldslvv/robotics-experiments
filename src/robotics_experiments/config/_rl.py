@@ -189,6 +189,7 @@ class PressApproachVelocityReferenceConfig(_FreezableConfig):
     """Dense contact-frame velocity reference for the approach stage."""
 
     range_center_m: float
+    wall_normal_alignment_gate_m: float
     wall_normal_gain_per_s: float
     wall_normal_min_mps: float
     wall_normal_max_mps: float

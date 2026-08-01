@@ -256,6 +256,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.goal.stable_steps == 5
     reference = config.rl.press.goal.velocity_reference
     assert reference.range_center_m == 0.41
+    assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
     assert reference.wall_normal_min_mps == -0.04
     assert reference.wall_normal_max_mps == 0.08

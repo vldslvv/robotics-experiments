@@ -6255,3 +6255,32 @@ contact flags. Checkpoint selection keeps this tracing disabled, so ranking and
 throughput are unchanged. Re-evaluate the selected actor and use the trace to
 distinguish an adverse reset/action sequence from a physical contact/range
 floor before changing the barrier shape or another PPO parameter.
+
+### 154. Gate forward approach on the evidenced alignment boundary
+
+Date: 2026-08-01.
+
+The deterministic trace is preserved at
+`.build/policy-diagnostics/20260801T192642Z.19188-worst-episode.log`. Seeds 101
+and 202 both identify episode 78 at 0.384932 m; seed 303 identifies episode 61
+at 0.384953 m. No traced step reports body or pusher contact, so this is not a
+contact-geometry floor.
+
+For seed 101 episode 78, the actor enters the 0.40-0.42 m range band at 1.05 s
+while lateral/vertical error is still 0.058 m. It first meets the existing
+0.03 m alignment limit at 2.45 s, when range is already 0.39044 m. It reaches
+minimum range at 3.90 s, but normalized wall-normal action remains positive
+until 5.50 s. The actor then retreats and succeeds at 8.85 s. This is a
+repeatable coupled-policy trajectory: forward approach continues while the
+actor spends its authority correcting the large initial tangential error.
+
+Make one structural reference change supported by that trace. Add a positive
+wall-normal alignment gate to the declarative velocity reference, configured
+at the unchanged 0.03 m goal-alignment limit. When tangential error exceeds the
+gate, positive wall-normal target velocity is zero; negative retreat targets
+remain available at every alignment. Tangential alignment behavior, range
+barrier, goal, acceptance limits, controller, observation, action, and PPO
+recipe remain unchanged. Start the next actor-only run from barrier checkpoint
+5, which is collision-free and has the strongest observed minimum range
+(0.38847 m), then test whether align-first behavior recovers success without
+the shared undershoot attractor.

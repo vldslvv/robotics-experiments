@@ -238,6 +238,12 @@ def press_approach_target_velocity(
             reference_cfg.wall_normal_min_mps,
             reference_cfg.wall_normal_max_mps,
         )
+        alignment_error = torch.linalg.vector_norm(relative_switch_pos_m[..., 1:3], dim=-1)
+        wall_normal = torch.where(
+            (alignment_error <= reference_cfg.wall_normal_alignment_gate_m) | (wall_normal <= 0.0),
+            wall_normal,
+            torch.zeros_like(wall_normal),
+        )
         tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
         tangential_norm = torch.linalg.norm(tangential, dim=-1)
         denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
@@ -248,6 +254,12 @@ def press_approach_target_velocity(
         * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
         reference_cfg.wall_normal_min_mps,
         reference_cfg.wall_normal_max_mps,
+    )
+    alignment_error = np.linalg.norm(relative_switch_pos_m[..., 1:3], axis=-1)
+    wall_normal = np.where(
+        (alignment_error <= reference_cfg.wall_normal_alignment_gate_m) | (wall_normal <= 0.0),
+        wall_normal,
+        np.zeros_like(wall_normal),
     )
     tangential = reference_cfg.tangential_gain_per_s * relative_switch_pos_m[..., 1:3]
     tangential_norm = np.linalg.norm(tangential, axis=-1)

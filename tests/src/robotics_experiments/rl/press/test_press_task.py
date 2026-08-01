@@ -34,6 +34,7 @@ _GOAL = PressApproachGoalConfig(
     stable_steps=5,
     velocity_reference=PressApproachVelocityReferenceConfig(
         range_center_m=0.41,
+        wall_normal_alignment_gate_m=0.03,
         wall_normal_gain_per_s=1.25,
         wall_normal_min_mps=-0.04,
         wall_normal_max_mps=0.08,
@@ -189,6 +190,18 @@ def test_wall_normal_velocity_target_is_linear_and_clipped(
         reference_cfg=_GOAL.velocity_reference,
     )
     assert target[0].tolist() == pytest.approx([target_mps, 0.0, 0.0])
+
+
+def test_wall_normal_velocity_waits_for_alignment_but_retreat_remains_available() -> None:
+    values = [[0.45, 0.03, 0.01], [0.39, 0.03, 0.01]]
+    for relative_position in (np.asarray(values), torch.asarray(values)):
+        target = press_approach_target_velocity(
+            relative_switch_pos_m=relative_position,
+            reference_cfg=_GOAL.velocity_reference,
+        )
+        if isinstance(target, torch.Tensor):
+            target = target.cpu().numpy()
+        np.testing.assert_allclose(target[:, 0], [0.0, -0.025], rtol=1.0e-6)
 
 
 def test_tangential_velocity_target_is_radially_limited() -> None:
