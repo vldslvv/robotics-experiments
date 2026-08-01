@@ -5586,3 +5586,47 @@ table. Retained candidates and per-gate champions then generate midpoint and
 quarter-step values for at most two refinement levels. This preserves wide
 coverage while spending fine-grid evaluations only in regions supported by the
 current fresh capture.
+
+### 130. First coarse-to-fine scratch result and routed follow-up
+
+Date: 2026-08-01.
+
+Fresh run `20260801T063532Z` captured all 11 profiles, passed the actuator audit,
+and evaluated 8,565 unique target candidates in 59 physical batches. Candidate
+8,130 passed all seven existing advisory gates with finite stability traces:
+4.389 mm braking error, 0.00214 m/s residual speed, 0.10 s stop-time error,
+5.408% worst-axis NRMSE, 3.482% yaw NRMSE, 2.806 degrees heading error, and
+9.620 mm endpoint error. The artifact records clean source commit `266fa1b`.
+Fit exposed and guarded two streamed-artifact reader defects: the image reader
+assumed a pretty-printed line, and the mmap candidate indexer assumed indented
+map entries. Both readers now accept the compact writer contract without
+materializing the 4.18 GB candidate stream. A fresh-worktree check also exposed
+that `make check` could resolve a transitive Ruff instead of the pinned dev
+tool; every host-gate command now requests the `dev` extra explicitly.
+
+The user-requested parity target is stricter than advisory acceptance: each
+normalized gate use may be at most 0.10 above accepted v6. Candidate 8,130
+missed braking, stop time, worst-axis, and endpoint parity. No evaluated
+candidate met all parity limits. Candidate 7,645 was the closest: it met
+residual, stop-time, worst-axis, yaw, and heading parity, but missed braking and
+endpoint parity with largest normalized excess 0.217. There were 124 candidates
+with exactly two parity misses. Candidate-wide minima independently pass every
+parity target, proving that the range contains the required behavior but the
+sequential beam did not combine it.
+
+The actual workload also corrected the capacity conclusion. Capacity 512
+submitted 30,208 physics slots for 8,565 useful candidates, leaving 21,643
+padded slots (71.6%). Replaying the 58 recorded expansion sizes predicts 11,136
+slots at capacity 128, a 63.1% total-slot reduction and 88.1% padding reduction,
+for 87 batches. The measured capacity benchmark already bounded 128-scene batch
+cost. The next attempt therefore uses capacity 128 and keeps one worker.
+
+The first failed search seam is cross-stage composition. Final selection sees
+the global archive, but each coordinate update retains only candidates expanded
+from the immediately preceding local beam. Braking and endpoint champions can
+therefore be archived before the rate/actuator settings that produce the 0.06 s
+stop are introduced. The next attempt makes one structural change: every
+coarse-to-fine coordinate update reseeds its multi-objective beam from all
+usable archived candidates. Candidate 7,645 becomes the declarative base so the
+closest proven frontier is never lost. No controller, plant, probe, advisory
+gate, policy, or reward behavior changes.
