@@ -5803,3 +5803,39 @@ candidate 1,246's small strict-parity misses in worst-axis NRMSE and endpoint
 error without sacrificing the required hover/goto integration gate. No probe,
 metric, advisory threshold, controller equation, plant behavior, policy, or
 reward changes.
+
+### 137. Narrow the scratch search around the complete acceptance basin
+
+Date: 2026-08-01.
+
+Fresh run `20260801T100929Z` captured all 11 profiles and passed its actuator
+audit with 0.000390 worst normalized motor RMSE and 0.01281 N worst collective
+RMSE. The optimized broad search evaluated 6,716 unique candidates in 71
+batches and 1,346.6 seconds, or 4.99 useful candidates per second. This is a
+28.0% throughput improvement over the original 3.898 candidate/s baseline.
+Average GPU utilization remained limited at 25.4% by sequential controller
+dynamics rather than scene capacity.
+
+The selected trace candidate passed all seven advisory gates but failed the
+live hover gate at 0.124 m. Boundary probes isolated the conflict: lowering the
+velocity derivative filter stabilized hover but caused a 0.135 m goto
+overshoot, while changing delay or gain-schedule scale did not repair that
+endpoint. The run archive contained 111 candidates with the live-stable 1 Hz
+derivative filter that passed every official trace gate.
+
+Candidate 4,257 passed the live gate with a 0.100 m hover window, 0.025 m goto
+window, and a ready 0.464 m handoff. Candidate 5,950 retained the same velocity
+basin, improved the largest strict-parity excess from 27.0% to 24.1%, and also
+passed live with a 0.100 m hover window, 0.026 m goto window, and ready 0.463 m
+handoff. Its trace metrics were 4.582 mm braking error, 0.001485 m/s residual
+speed, 0.06 s stop-time error, 5.322% worst-axis NRMSE, 3.874% yaw NRMSE, 2.985
+degrees heading error, and 6.488 mm endpoint error.
+
+The next scratch attempt makes candidate 5,950 the mandatory base and candidate
+4,257's independently passing rate loop a partial seed. The earlier broad pass
+has completed its purpose, so this attempt searches only measured neighboring
+velocity, attitude, rate, and all-axis feed-forward values, retaining two
+midpoint refinement levels. The all-axis feed-forward range is included because
+the preceding broad campaigns measured it as the braking/residual crossing.
+The hypothesis is that the targeted sweep will preserve complete live
+acceptance while reducing braking toward the accepted-v6 parity envelope.
