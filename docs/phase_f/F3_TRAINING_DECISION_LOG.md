@@ -6157,3 +6157,48 @@ acceptance thresholds, controller, observation, action, reset distribution,
 termination, and other velocity-reference fields remain unchanged. This starts
 a new policy comparison fingerprint and directly tests the first unresolved
 boundary without weakening it.
+
+### 151. Earlier braking does not move the minimum-range boundary
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T162033Z.359548` used clean source commit `6354315`,
+initialized from run `20260801T155548Z.340126` checkpoint 40, and retained the
+accepted alignment run `20260801T142920Z` with controller digest
+`e6365b7807acde5c969e32cede15730e09193e33b33c1d17c6250b28bb1e7b53`.
+The 50-iteration PPO stage completed in 355.6 s and the eleven-checkpoint
+held-out sweep completed in 448.4 s. TensorBoard data is under
+`.build/training/press-approach/20260801T162033Z.359548/logs`; the complete
+console log is
+`.build/overnight/accepted-alignment-early-brake.20260801T162033Z.359548.console.log`.
+
+Selection chose checkpoint 15 with score -0.366612, 99.3% success, 0.7%
+pusher collision, zero other flight failures and timeouts, 0.40967 m mean
+closest range, and 0.38484 m minimum closest range. Independent evaluation of
+the published actor achieved 99.0% success, 1.0% pusher collision, zero other
+flight failures and timeouts, 0.40967 m mean closest range, 0.38486 m minimum
+closest range, and 2.85 s median completion. It therefore passed the success,
+collision, and flight-failure limits but failed the unchanged 0.40 m
+minimum-range gate.
+
+The earlier-braking reference did not move the unresolved boundary. Minimum
+closest range remained within 0.38475-0.38491 m across all eleven checkpoints,
+essentially the same plateau as the preceding run. Later checkpoints also
+increased collisions to as high as 3.3%, so continued optimization with this
+recipe is not justified. The retained artifacts are structurally valid and the
+new comparison fingerprint is
+`4b74a0ec24f08ed43a9d9dde23efc69b812e0856d094f96aa22982881208d040`;
+`latest` and this fingerprint's `best` select checkpoint 15.
+
+Stop here per the user request. The next session should not repeat this
+fine-tuning recipe. The first justified experiment is an explicit declarative
+lower-range barrier in the Stage 1 reward, active before the 0.40 m boundary so
+the command-delay plant receives a direct cost for the observed overshoot.
+Add the barrier through the existing reward config and pure NumPy/Torch task
+transition, cover parity and config validation, then start from the safe
+checkpoint 40 or the new run's checkpoint 15 and repeat held-out selection.
+Keep the goal band and all acceptance thresholds unchanged. If that direct
+boundary signal still leaves the same approximately 0.3848 m floor, inspect
+per-episode action, velocity, range, and contact traces before changing another
+training parameter; the invariant floor would then point to the physical
+contact/range seam rather than PPO optimization.
