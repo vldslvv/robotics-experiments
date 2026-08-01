@@ -6061,3 +6061,20 @@ failed v40 runs remain evidence that tighter future acceptance needs explicit
 reference controller-state initialization or multi-capture robustness. The
 current artifact remains acceptable only after its recomputed seven-gate and
 authoritative live checks both pass.
+
+### 146. Accept candidate 947 as the reproducible compact artifact
+
+Date: 2026-08-01.
+
+Formal run `20260801T142920Z` recomputed the fixed v40 target from clean source
+against the preserved scratch v38 reference. Its only candidate passed all
+seven exact-action gates: 4.803 mm braking error, 0.001846 m/s residual speed,
+0.10 s stop-time error, 5.091% worst-axis velocity NRMSE, 3.736% yaw-rate
+NRMSE, 2.915 degrees heading error, and 5.049 mm combined endpoint error.
+
+The finalized controller-v1 bundle then passed the authoritative live
+integration gate with a 0.096 m hover window, a 0.037 m goto window, and ready
+policy handoff at 0.457 m. This is the accepted alignment artifact for the next
+scratch policy training run. The controller-state replay diagnostic remains
+rejected at the known incomplete PX4 initial-state boundary; that diagnostic
+does not override the current seven exact-action plus live acceptance contract.
