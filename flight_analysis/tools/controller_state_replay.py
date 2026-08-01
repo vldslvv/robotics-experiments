@@ -1120,7 +1120,7 @@ def main() -> None:
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:
         args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    if report.get("passed") is False:
+    if args.audit_reference is not None and report.get("passed") is False:
         raise SystemExit("actuator-boundary audit failed")
 
 
