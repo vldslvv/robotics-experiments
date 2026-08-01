@@ -5968,3 +5968,24 @@ repeats the inexpensive direct preflight against a fresh reference. A passing
 capture establishes deterministic reproduction of the accepted controller;
 continued reference-boundary failures would instead require making reference
 initialization repeatable before further controller search.
+
+### 142. Route repeated reference-boundary rejection to a targeted sweep
+
+Date: 2026-08-01.
+
+Run `20260801T133833Z` repeated the complete fresh capture, actuator audit, and
+one-candidate target evaluation. It produced the same first failed boundary as
+the preceding run: 9.880 mm braking-distance error and 0.64 s stop-time error.
+Residual speed, worst-axis velocity NRMSE, yaw NRMSE, heading, and endpoint
+again passed. The direct target evaluation took 8.6 seconds and the target
+container completed in 19.1 seconds.
+
+Two consecutive current-source captures now agree closely enough that another
+unchanged capture is not useful. The next comparison generation holds the
+live-proven 1.8 horizontal velocity proportional gain, rate loop, allocator,
+and actuator boundary fixed. It searches only delay, the evidenced velocity
+derivative filter, horizontal low-speed gain schedule, velocity derivative
+gain, velocity integral gain, and its limit. Coarse candidates bracket the
+accepted controller and recover one level of midpoint precision. The
+hypothesis is that the current reference's braking/stop boundary can be passed
+without leaving the independently verified live-stable basin.
