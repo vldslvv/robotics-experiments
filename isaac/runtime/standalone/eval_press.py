@@ -68,6 +68,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
             episodes_per_seed=evaluation.episodes_per_seed,
             goal_config=config.rl.press.goal,
             report=_report,
+            trace_worst_episode=True,
         )
     finally:
         env.close()

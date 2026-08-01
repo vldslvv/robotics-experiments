@@ -217,13 +217,15 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
             )
 
     env = FakeEnv()
+    reports: list[str] = []
     result = evaluate_press_approach_policy(
         env=env,
         policy=FakePolicy(),
         seeds=(202,),
         episodes_per_seed=2,
         goal_config=_goal(),
-        report=lambda _message: None,
+        report=reports.append,
+        trace_worst_episode=True,
     )
     assert env.seeds == [202]
     assert result.summary.approach_success_rate == 0.5
@@ -231,6 +233,10 @@ def test_seed_rollout_reseeds_and_enumerates_every_reward() -> None:
     assert result.summary.median_completion_time_s == pytest.approx(0.05)
     assert {reward.name for reward in result.reward_means} == set(reward_names)
     assert {reward.mean for reward in result.reward_means} == {1.0}
+    assert any(
+        "worst trace seed=202 episode=0 closest_range_m=0.410000" in message for message in reports
+    )
+    assert any("worst trace seed=202 episode=0 step=0" in message for message in reports)
 
 
 def _config():

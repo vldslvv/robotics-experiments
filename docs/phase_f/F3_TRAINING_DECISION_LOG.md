@@ -6226,3 +6226,32 @@ later actors' contact behavior. The new reward term must be implemented once in
 the pure NumPy/Torch transition, exposed in training and evaluation reward
 diagnostics, and covered by exact-value, parity, and config-validation tests
 before execution.
+
+### 153. Barrier training improves the mean but leaves one rare undershoot
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T192642Z.19188` used clean source commit `0dad44d`,
+the accepted alignment run `20260801T142920Z`, and collision-free source run
+`20260801T155548Z.340126` checkpoint 40. PPO completed in 357.2 s and the
+eleven-checkpoint held-out sweep completed in 454.5 s. Selection chose
+checkpoint 15 with score -0.327133, 100% success, zero collisions, failures,
+or timeouts, 0.41130 m mean closest range, and 0.38493 m minimum closest range.
+Independent evaluation reproduced all rate metrics and range values. The only
+failed gate remains the unchanged 0.40 m minimum range.
+
+The barrier produced a real but incomplete response. Checkpoint 5 raised
+minimum range to 0.38847 m and mean range to 0.41541 m, but success fell to
+74.3% through timeouts. Checkpoint 10 recovered 90.3% success with 0.38600 m
+minimum range. Checkpoints 15-25 recovered 100% success and zero collision,
+while their minimum range returned to 0.38493-0.38499 m. The selected actor's
+mean barrier contribution was -3.7683 per active step, so simply increasing
+the same penalty is not justified before locating the exceptional trajectory.
+
+Add independent-evaluation diagnostics that retain and report, for each seed's
+closest episode, every active step's range before and after actuation, relative
+alignment, body linear and angular velocity, normalized action, and both
+contact flags. Checkpoint selection keeps this tracing disabled, so ranking and
+throughput are unchanged. Re-evaluate the selected actor and use the trace to
+distinguish an adverse reset/action sequence from a physical contact/range
+floor before changing the barrier shape or another PPO parameter.

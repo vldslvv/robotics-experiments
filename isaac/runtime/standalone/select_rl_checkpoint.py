@@ -139,6 +139,7 @@ def _press_evaluation(
         episodes_per_seed=episodes_per_seed,
         goal_config=goal_config,
         report=_report,
+        trace_worst_episode=False,
     )
     evaluation = _score_press_result(
         candidate=candidate,

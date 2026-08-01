@@ -337,6 +337,10 @@ evaluation fingerprint initializes a new `best`.
 `make eval-press` independently repeats the same workload and gates. With
 `RL_RUN_ID`, it evaluates that published run; otherwise it resolves
 `.build/training/press-approach/latest`.
+The independent evaluator also records the complete active action, body
+velocity, range, and contact trace for each seed's closest episode. These
+diagnostics identify a rare boundary trajectory without adding selection-time
+logging or changing policy ranking.
 
 For a logged training and evaluation run, use:
 
