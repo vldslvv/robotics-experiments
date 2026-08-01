@@ -59,11 +59,12 @@ def test_role_packages_import_without_simulator_dependencies(monkeypatch):
         importlib.import_module("robotics_experiments.px4_bridge")
         alignment = importlib.import_module("robotics_experiments.alignment")
         assert alignment.__all__ == [
-            "AlignmentArtifact",
+            "AlignmentResult",
+            "ControllerArtifact",
             "ControllerDefinition",
             "ControllerSettings",
             "align",
-            "load_alignment_artifact",
+            "load_controller_artifact",
             "load_controller_definition",
         ]
         # The fleet runtime is an Isaac-coupled leaf package; its lazy __init__

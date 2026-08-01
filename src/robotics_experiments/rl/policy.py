@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import AlignmentArtifact, ControllerSettings
+from robotics_experiments.alignment import ControllerArtifact, ControllerSettings
 from robotics_experiments.config import RlActionConfig
 from robotics_experiments.rl._interfaces import INTERFACE_OBSERVATIONS, PolicyInterface
 
@@ -74,9 +74,9 @@ class PolicyMetadata:
 
     contract: PolicyContract
     controller_settings: ControllerSettings
-    alignment_run_id: str
-    alignment_digest: str
-    alignment_comparison_fingerprint: str
+    controller_run_id: str
+    controller_digest: str
+    controller_comparison_fingerprint: str
     values: Mapping[str, Any]
 
 
@@ -136,8 +136,8 @@ def _finite_positive(*, value: Any, name: str, artifact_dir: Path) -> float:
 def policy_metadata(
     *,
     action_cfg: RlActionConfig,
-    alignment_artifact: AlignmentArtifact,
-    alignment_digest: str,
+    controller_artifact: ControllerArtifact,
+    controller_digest: str,
     obs_schema_version: int,
     obs_dim: int,
     policy_rate_hz: float,
@@ -154,18 +154,18 @@ def policy_metadata(
         "action_kind": str(action_cfg.kind),
         "action_dim": int(action_cfg.action_dim),
         "action_scales": {name: float(getattr(action_cfg, name)) for name in _SCALE_FIELDS},
-        "alignment": {
-            "schema_version": alignment_artifact.schema_version,
-            "alignment_id": alignment_artifact.alignment_id,
-            "run_id": alignment_artifact.run_id,
-            "artifact_digest": alignment_digest,
-            "comparison_fingerprint": alignment_artifact.comparison_fingerprint,
-            "target_definition_fingerprint": (alignment_artifact.target_definition_fingerprint),
+        "controller": {
+            "schema_version": controller_artifact.schema_version,
+            "alignment_id": controller_artifact.alignment_id,
+            "run_id": controller_artifact.run_id,
+            "controller_digest": controller_digest,
+            "controller_comparison_fingerprint": controller_artifact.comparison_fingerprint,
+            "target_definition_fingerprint": (controller_artifact.target_definition_fingerprint),
             "reference_definition_fingerprint": (
-                alignment_artifact.reference_definition_fingerprint
+                controller_artifact.reference_definition_fingerprint
             ),
-            "settings": asdict(alignment_artifact.selected_settings),
-            "advisory_quality_passed": alignment_artifact.advisory_quality_passed,
+            "settings": asdict(controller_artifact.selected_settings),
+            "advisory_quality_passed": controller_artifact.advisory_quality_passed,
         },
     }
     if interface is PolicyInterface.PRESS_V1:
@@ -201,45 +201,51 @@ def _read_metadata(*, artifact_dir: Path) -> dict[str, Any]:
     return dict(loaded)
 
 
-def _alignment_settings(
+def _controller_settings(
     *,
     metadata: Mapping[str, Any],
     artifact_dir: Path,
 ) -> tuple[ControllerSettings, str, str, str]:
-    alignment = _metadata_value(
+    controller = _metadata_value(
         metadata=metadata,
-        name="alignment",
+        name="controller",
         artifact_dir=artifact_dir,
     )
-    if not isinstance(alignment, dict):
+    if not isinstance(controller, dict):
         raise ValueError(
-            f"policy artifact {artifact_dir} metadata alignment must be an object; "
-            "legacy policy artifacts without alignment provenance are unsupported"
+            f"policy artifact {artifact_dir} metadata controller must be an object; "
+            "legacy policy artifacts without controller provenance are unsupported"
         )
     required_strings = (
         "alignment_id",
         "run_id",
-        "artifact_digest",
-        "comparison_fingerprint",
+        "controller_digest",
+        "controller_comparison_fingerprint",
         "target_definition_fingerprint",
         "reference_definition_fingerprint",
     )
     for name in required_strings:
-        value = alignment.get(name)
+        value = controller.get(name)
         if not isinstance(value, str) or not value:
             raise ValueError(
-                f"policy artifact {artifact_dir} metadata alignment.{name} "
+                f"policy artifact {artifact_dir} metadata controller.{name} "
                 "must be a non-empty string"
             )
-    schema_version = alignment.get("schema_version")
-    if schema_version not in (2, 3, 4, 5, 6):
-        raise ValueError(f"policy artifact {artifact_dir} has unsupported alignment schema")
-    if type(alignment.get("advisory_quality_passed")) is not bool:
-        raise ValueError(f"policy artifact {artifact_dir} alignment quality status must be boolean")
-    settings = alignment.get("settings")
+    schema_version = controller.get("schema_version")
+    if schema_version != 1:
+        raise ValueError(f"policy artifact {artifact_dir} has unsupported controller schema")
+    if type(controller.get("advisory_quality_passed")) is not bool:
+        raise ValueError(
+            f"policy artifact {artifact_dir} controller quality status must be boolean"
+        )
+    settings = controller.get("settings")
     if not isinstance(settings, dict):
         raise ValueError(
-            f"policy artifact {artifact_dir} metadata alignment.settings must be an object"
+            f"policy artifact {artifact_dir} metadata controller.settings must be an object"
+        )
+    if set(settings) != {item.name for item in fields(ControllerSettings)}:
+        raise ValueError(
+            f"policy artifact {artifact_dir} metadata controller.settings fields mismatch"
         )
 
     def vector(name: str) -> tuple[float, float, float]:
@@ -433,9 +439,9 @@ def _alignment_settings(
         )
     return (
         controller_settings,
-        str(alignment["run_id"]),
-        str(alignment["artifact_digest"]),
-        str(alignment["comparison_fingerprint"]),
+        str(controller["run_id"]),
+        str(controller["controller_digest"]),
+        str(controller["controller_comparison_fingerprint"]),
     )
 
 
@@ -456,10 +462,10 @@ def _finite_nonnegative(*, value: Any, name: str, artifact_dir: Path) -> float:
 def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMetadata:
     (
         controller_settings,
-        alignment_run_id,
-        alignment_digest,
-        alignment_comparison_fingerprint,
-    ) = _alignment_settings(metadata=metadata, artifact_dir=artifact_dir)
+        controller_run_id,
+        controller_digest,
+        controller_comparison_fingerprint,
+    ) = _controller_settings(metadata=metadata, artifact_dir=artifact_dir)
     interface_value = _metadata_value(
         metadata=metadata,
         name="policy_interface",
@@ -562,9 +568,9 @@ def _parse_metadata(*, artifact_dir: Path, metadata: dict[str, Any]) -> PolicyMe
     return PolicyMetadata(
         contract=contract,
         controller_settings=controller_settings,
-        alignment_run_id=alignment_run_id,
-        alignment_digest=alignment_digest,
-        alignment_comparison_fingerprint=alignment_comparison_fingerprint,
+        controller_run_id=controller_run_id,
+        controller_digest=controller_digest,
+        controller_comparison_fingerprint=controller_comparison_fingerprint,
         values=MappingProxyType(metadata),
     )
 

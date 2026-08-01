@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from robotics_experiments.alignment import load_alignment_artifact
+from robotics_experiments.alignment import load_controller_artifact
 from robotics_experiments.config import load_config
 from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
@@ -581,6 +581,18 @@ def _actuator_boundary_report(
                 f"{profile_name}: incomplete topic coverage "
                 f"{missing_topics + ([] if np.any(bridge_selected) else ['bridge'])}"
             )
+        topic_coverage = {
+            name: {
+                "sample_count": len(topic_report["timestamp_us"]),
+                "first_timestamp_us": (
+                    topic_report["timestamp_us"][0] if topic_report["timestamp_us"] else None
+                ),
+                "last_timestamp_us": (
+                    topic_report["timestamp_us"][-1] if topic_report["timestamp_us"] else None
+                ),
+            }
+            for name, topic_report in topic_reports.items()
+        }
         profile_motor_error = (
             bridge_normalized_motor[bridge_selected] - motor_values[motor_index][bridge_selected]
         )
@@ -623,18 +635,24 @@ def _actuator_boundary_report(
                 "axis": raw_profile["axis"],
                 "start_sim_time_us": start_us,
                 "end_sim_time_us": end_us,
-                **topic_reports,
+                "topic_coverage": topic_coverage,
                 "bridge": {
-                    "actuator_timestamp_us": bridge_time_us[bridge_selected].tolist(),
-                    "mapped_rotor_speed_radps": bridge_rotor_speed[bridge_selected].tolist(),
-                    "reconstructed_collective_thrust_n": bridge_collective[
-                        bridge_selected
-                    ].tolist(),
-                    "reconstructed_body_torque_nm": bridge_torque[bridge_selected].tolist(),
-                    "timestamp_join_error_us": {
-                        "actuator_motors": motor_join_error_us[bridge_selected].tolist(),
-                        "dynamics": bridge_dynamics_join_error_us[bridge_selected].tolist(),
-                    },
+                    "sample_count": int(np.count_nonzero(bridge_selected)),
+                    "mean_mapped_rotor_speed_radps": np.mean(
+                        bridge_rotor_speed[bridge_selected], axis=0
+                    ).tolist(),
+                    "mean_reconstructed_collective_thrust_n": float(
+                        np.mean(bridge_collective[bridge_selected])
+                    ),
+                    "mean_reconstructed_body_torque_nm": np.mean(
+                        bridge_torque[bridge_selected], axis=0
+                    ).tolist(),
+                    "saturated_motor_sample_count": int(
+                        np.count_nonzero(
+                            (bridge_normalized_motor[bridge_selected] <= 0.0)
+                            | (bridge_normalized_motor[bridge_selected] >= 1.0)
+                        )
+                    ),
                 },
                 "metrics": {
                     "normalized_motor_rmse": normalized_motor_rmse,
@@ -677,7 +695,7 @@ def _report(
     *,
     ulog,
     config_path: Path,
-    alignment_artifact_path: Path,
+    controller_artifact_path: Path,
     start_s: float,
     end_s: float,
 ) -> dict:
@@ -697,7 +715,7 @@ def _report(
         input_scaling=np.asarray(bridge.input_scaling),
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
-    controller_settings = load_alignment_artifact(alignment_artifact_path).selected_settings
+    controller_settings = load_controller_artifact(controller_artifact_path).selected_settings
     params = build_actuation_params(
         geometry=geometry,
         action_cfg=config.rl.action,
@@ -983,7 +1001,7 @@ def _profile_replay_report(
     *,
     ulog,
     config_path: Path,
-    alignment_artifact_path: Path,
+    controller_artifact_path: Path,
     reference_path: Path,
 ) -> dict:
     profiles = []
@@ -992,7 +1010,7 @@ def _profile_replay_report(
         replay = _report(
             ulog=ulog,
             config_path=config_path,
-            alignment_artifact_path=alignment_artifact_path,
+            controller_artifact_path=controller_artifact_path,
             start_s=window["start_s"],
             end_s=window["end_s"],
         )
@@ -1024,7 +1042,7 @@ def _profile_replay_report(
         "schema_version": 5,
         "method": "px4-ulog-profile-state-replay-v5-250hz",
         "config": str(config_path),
-        "alignment_artifact": str(alignment_artifact_path),
+        "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),
         "limits": {
             "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
@@ -1041,7 +1059,7 @@ def main() -> None:
     parser.add_argument("ulog_positional", nargs="?", type=Path)
     parser.add_argument("--ulog", type=Path)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--alignment-artifact", type=Path)
+    parser.add_argument("--controller-artifact", type=Path)
     parser.add_argument("--window", help="relative ULog seconds START,END")
     parser.add_argument("--augment-reference", type=Path)
     parser.add_argument("--audit-reference", type=Path)
@@ -1078,24 +1096,24 @@ def main() -> None:
             bridge_log_path=args.bridge_log,
         )
     elif args.profile_reference is not None:
-        if args.alignment_artifact is None or args.window is not None:
+        if args.controller_artifact is None or args.window is not None:
             parser.error(
-                "--profile-reference requires --alignment-artifact and cannot use --window"
+                "--profile-reference requires --controller-artifact and cannot use --window"
             )
         report = _profile_replay_report(
             ulog=ULog(str(ulog_path)),
             config_path=args.config,
-            alignment_artifact_path=args.alignment_artifact,
+            controller_artifact_path=args.controller_artifact,
             reference_path=args.profile_reference,
         )
     else:
-        if args.alignment_artifact is None or args.window is None:
-            parser.error("--alignment-artifact and --window are required for controller replay")
+        if args.controller_artifact is None or args.window is None:
+            parser.error("--controller-artifact and --window are required for controller replay")
         start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
         report = _report(
             ulog=ULog(str(ulog_path)),
             config_path=args.config,
-            alignment_artifact_path=args.alignment_artifact,
+            controller_artifact_path=args.controller_artifact,
             start_s=start_s,
             end_s=end_s,
         )

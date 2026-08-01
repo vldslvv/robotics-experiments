@@ -69,7 +69,7 @@ env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py \
   --ulog .build/alignment/<alignment-id>/<run-id>/reference.ulg \
   --config configs/alignment_px4_x500_velocity.yaml \
-  --alignment-artifact .build/alignment/<alignment-id>/<run-id>/alignment.json \
+  --controller-artifact .build/alignment/<alignment-id>/<run-id>/controller.json \
   --profile-reference .build/alignment/<alignment-id>/<run-id>/reference.json \
   --json .build/alignment/<alignment-id>/<run-id>/controller_boundary_replay.json
 ```
@@ -84,7 +84,7 @@ are excluded from upstream allocator attribution.
 env UV_CACHE_DIR=/tmp/uv-cache PYTHONPATH=src uv run --with pyulog python \
   flight_analysis/tools/controller_state_replay.py <flight.ulg> \
   --config configs/policy_press_approach_quad.yaml \
-  --alignment-artifact .build/alignment/x500-velocity-px4-v5/latest \
+  --controller-artifact .build/alignment/x500-velocity-px4-v7/latest \
   --window 28.3,30.7 --json /tmp/controller-state-replay.json
 ```
 

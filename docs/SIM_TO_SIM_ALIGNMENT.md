@@ -13,17 +13,19 @@ Kit, Isaac Lab, or a PX4 container. Its public API is exactly:
 
 - `ControllerDefinition`
 - `ControllerSettings`
-- `AlignmentArtifact`
+- `AlignmentResult`
+- `ControllerArtifact`
 - `load_controller_definition(path)`
-- `load_alignment_artifact(path)`
+- `load_controller_artifact(path)`
 - `align(target, reference)`
 
 The package direction is `config -> alignment -> rl -> workflows`. The concrete
 backends are `isaac-lab` as target and `px4-sitl` as reference. Controller
 definitions live under `configs/alignment/controllers/`.
 
-`x500-velocity-px4-v7` is the current comparison generation and uses alignment
-artifact schema 6. Its mandatory base evaluation is the accepted v6 candidate
+`x500-velocity-px4-v7` is the current comparison generation. Controller
+artifacts use compact schema 1; controller behavior remains schema 6 in the
+controller definition. Its mandatory base evaluation is the accepted v6 candidate
 8,083 setting. A 32-setting coarse-to-fine beam searches the committed wide
 grid once, then performs at most two deterministic midpoint refinements around
 the surviving multi-objective basins. It carries
@@ -302,7 +304,7 @@ Advisory quality requires:
 
 Poor quality remains publishable and visible but warns training. Completed runs
 live under `.build/alignment/<alignment-id>/<run-id>/`; only
-`alignment.json` is the training contract. `latest` always advances. `best`
+`controller.json` is the training contract. `latest` always advances. `best`
 advances only for a better ranking under the same comparison fingerprint, and
 the first completed result in a new generation initializes `best`.
 
@@ -333,32 +335,29 @@ make align-controllers
 make test-integration-alignment-target
 ```
 
-The end-to-end wrapper preserves one run ID. Capture writes `reference.json`,
-copies its finalized `reference.ulg` and `bridge.log` into the same run, and
-writes a relative-path `manifest.json`. The actuator audit writes
-`actuator_audit.json`, the live staged sweep writes `target_candidates.json`
-and `gpu_utilization.json`, and fit reproduces the same deterministic search
-from those cached traces before writing and publishing `alignment.json`.
+The end-to-end wrapper preserves one run ID. Capture and sweep first write
+temporary root-level evidence. Fit writes compact deterministic
+`controller.json` and compressed `selection.json.zst` without publishing.
 Profile replay then writes `controller_boundary_replay.json`, using each
 trace's recorded PX4 start time and duration to report normalized collective,
 torque, motor, rotor-speed, and physical-wrench errors while separating
-saturated samples from upstream allocator attribution. The
+saturated samples from upstream allocator attribution. Finalization moves raw
+evidence under `evidence/`, summary diagnostics under `diagnostics/`, compresses
+target traces, writes the sole hash inventory in `manifest.json`, validates the
+complete bundle, and only then advances publication links. The
 file-backed evaluator indexes the generated candidate file once and reads one
 candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.
 
-### Accepted-run retention
+### Bundle layout and retention
 
-The accepted `x500-velocity-px4-v6/20260731T185547Z` run is the retained
-alignment evidence bundle. Its relative-path manifest covers the alignment
-artifact, reference trace and ULog, bridge log, actuator audit, controller
-boundary replay, GPU telemetry, compressed candidate traces, and final capture,
-sweep, integration, and actor-preflight diagnostics. `SHA256SUMS` binds every
-retained payload except the checksum file itself. Verify it from the run
-directory with `sha256sum -c SHA256SUMS` before using the evidence after an
-archive transfer.
+New bundles contain `controller.json`, `selection.json.zst`, `manifest.json`,
+raw `evidence/`, and summary-only `diagnostics/`. The manifest records role,
+relative path, byte size, SHA-256, compression, and uncompressed size for every
+payload and deliberately does not hash itself. New bundles do not contain
+`SHA256SUMS` or `alignment.json`.
 
-The accepted bundle keeps `target_candidates.json.zst` because the complete
+The accepted bundle keeps `evidence/target_traces.json.zst` because the complete
 8,300-candidate trace set is expensive to reproduce and supports offline
 rescoring with tighter versions of the current gates or new metrics over the
 signals already captured. The exact uncompressed size is recorded in the
@@ -366,7 +365,7 @@ manifest. The current fit entrypoint expects the uncompressed basename, so
 rehydrate it beside the archive before rescoring:
 
 ```console
-zstd -d -k target_candidates.json.zst -o target_candidates.json
+zstd -d -k evidence/target_traces.json.zst -o target_candidates.json
 ```
 
 This requires at least 8,282,853,039 bytes of temporary free space. Remove only
@@ -389,7 +388,7 @@ seed and independent clean campaigns repeatedly reproduce both exact-action and
 integration acceptance.
 
 The resolved experiment fingerprint currently includes the downstream
-`rl.training.alignment_artifact` path. Changing that path alters the comparison
+`rl.training.controller_artifact` path. Changing that path alters the comparison
 fingerprint even when the controller definitions, probes, images, plant, and
 alignment execution are unchanged. Do not interpret that fingerprint change as
 controller evidence or allow it to replace the accepted publication without
@@ -412,8 +411,8 @@ from approximately 3.47 to 1.10 candidates/s because the Isaac/PhysX processes
 contended. Active evaluation still records the 95% utilization target. This
 measured PhysX bottleneck is reported rather than masked with duplicate work.
 
-Training resolves `.build/alignment/x500-velocity-px4-v6/best`, accepted by
-run `20260731T185547Z`. Stage 1 must be retrained from scratch for the existing
+Training resolves `.build/alignment/x500-velocity-px4-v7/best`. Stage 1 must be
+retrained from scratch for the existing
 300 iterations without reward or PPO changes before actor evaluation or PX4
 transfer can represent this controller. Run checkpoint selection, independent
 Lab evaluation, the three-range physical transfer gate, and the complete

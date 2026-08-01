@@ -375,7 +375,7 @@ def _write_capture(
                     "actuator_audit": "actuator_audit.json",
                     "target_candidates": "target_candidates.json",
                     "gpu_telemetry": "gpu_utilization.json",
-                    "alignment_artifact": "alignment.json",
+                    "controller_artifact": "controller.json",
                     "controller_boundary_replay": "controller_boundary_replay.json",
                 },
             },

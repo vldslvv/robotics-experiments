@@ -32,7 +32,7 @@ import torch
 
 from robotics_experiments.alignment import (
     ControllerSettings,
-    load_alignment_artifact,
+    load_controller_artifact,
     load_controller_definition,
 )
 from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
@@ -56,7 +56,7 @@ _SETTLED_WINDOW_S = 1.0
 _EPISODE_MARGIN_S = 1.0
 _DEFAULT_SEED = 7
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
-_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
+_CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
 _TARGET_DEFINITION = "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
 
 # F2 side-channel validation: one switch prim placed this far beyond the goto
@@ -716,13 +716,13 @@ def _validate_press_side_channel(*, start_obs, end_obs, handoff_config) -> None:
 
 def _controller_settings(*, config: ExperimentConfig) -> ControllerSettings:
     repo_root = Path(__file__).resolve().parents[4]
-    explicit = os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
-    authored = explicit or config.rl.training.alignment_artifact
+    explicit = os.environ.get(_CONTROLLER_ARTIFACT_ENV)
+    authored = explicit or config.rl.training.controller_artifact
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
     if explicit or artifact_path.exists():
-        return load_alignment_artifact(artifact_path).selected_settings
+        return load_controller_artifact(artifact_path).selected_settings
     return load_controller_definition(repo_root / _TARGET_DEFINITION).base_settings
 
 

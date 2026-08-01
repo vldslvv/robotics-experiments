@@ -87,11 +87,11 @@ alignment-fit:
 alignment-replay-controller:
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.ulg'
-	@test -f '$(ALIGNMENT_RUN_DIR)/alignment.json'
+	@test -f '$(ALIGNMENT_RUN_DIR)/controller.json'
 	@PYTHONPATH=src uv run --with pyulog python '$(ALIGNMENT_AUDIT_SCRIPT)' \
 	    --config configs/alignment_px4_x500_velocity.yaml \
 	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
-	    --alignment-artifact '$(ALIGNMENT_RUN_DIR)/alignment.json' \
+	    --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
 	    --profile-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
 	    --json '$(ALIGNMENT_RUN_DIR)/controller_boundary_replay.json'
 
@@ -104,10 +104,13 @@ align-controllers:
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-fit ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
+	@$(MAKE) alignment-replay-controller ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
+	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
+	    --run-dir '$(ALIGNMENT_RUN_DIR)' --finalize
 
 .PHONY: test-integration-alignment-target
 test-integration-alignment-target: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
-test-integration-alignment-target: ALIGNMENT_ARTIFACT = .build/alignment/$(ALIGNMENT_ID)/best
+test-integration-alignment-target: CONTROLLER_ARTIFACT = .build/alignment/$(ALIGNMENT_ID)/best
 test-integration-alignment-target: generate-drone-usd
 	@TEST_TARGET='test-integration-alignment-target' \
 	    ISAAC_TEST_LOG='$(ISAAC_PRESS_HOVER_GOTO_TEST_LOG)' \

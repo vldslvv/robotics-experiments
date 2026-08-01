@@ -42,7 +42,7 @@ reduced-quaternion law, and zero velocity-filter cutoff has PX4's
 disabled/pass-through meaning. The pinned Isaac Lab
 `isaaclab_contrib.actuators.Thruster` realizes the resulting per-rotor thrust
 references. Controller gains, filters, integral and thrust limits, command
-delay, tilt, and thruster response come from an immutable alignment artifact
+delay, tilt, and thruster response come from an immutable controller artifact
 rather than `rl.action`.
 The project still owns allocation, per-rotor yaw reaction, drag, and the sole
 body-wrench sink because the pusher-equipped articulation is not a pure
@@ -61,15 +61,15 @@ PX4 SITL is the response reference for the separate, policy-independent
 alignment subsystem. Run `make align-controllers`, then
 `make test-integration-alignment-target`; see
 `docs/SIM_TO_SIM_ALIGNMENT.md`. Training resolves the accepted
-`.build/alignment/x500-velocity-px4-v6/best` by default and may select an exact
-run with `ALIGNMENT_ARTIFACT`. The command
+`.build/alignment/x500-velocity-px4-v7/best` by default and may select an exact
+run with `CONTROLLER_ARTIFACT`. The command
 buffer, velocity/rate controller state, and thruster state are cleared on every
 environment reset.
 
 `rl.action` now contains only normalized action kind, dimension, and scales.
 The selected alignment's complete `ControllerSettings` is supplied explicitly
 to both the NumPy reference and torch twin. Changing the controller requires a
-new alignment artifact and new training; an existing actor is never silently
+new controller artifact and new training; an existing actor is never silently
 upgraded to current `best`.
 
 After Lab evaluation, `make test-integration-press-policy-transfer` runs the
@@ -205,14 +205,14 @@ production default.
 A new run writes checkpoints and `policy_meta.json` below
 `.build/training/<policy-name>/<run-id>/`. Before it constructs the
 environment, training loads
-`rl.training.alignment_artifact` (defaulting to the controller alignment
+`rl.training.controller_artifact` (defaulting to the controller alignment
 namespace's `best` link), validates vehicle, airframe, cadence, interface, and
 action dimension, and stores the alignment digest, run identity, fingerprints,
 quality status, and complete settings in `policy_meta.json`. Normalized action
 scales remain task-owned and may differ from the scale used by the
 policy-independent alignment probe experiment. This happens before PPO begins.
-An explicit `ALIGNMENT_ARTIFACT` or
-`--alignment-artifact` overrides the configured link for reproduction.
+An explicit `CONTROLLER_ARTIFACT` or
+`--controller-artifact` overrides the configured link for reproduction.
 After PPO, `make train-rl` automatically evaluates every saved checkpoint,
 exports the highest-scoring checkpoint, always advances the relative `latest`
 link, and advances `best` only when the score strictly improves within the

@@ -230,7 +230,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert training.alignment_artifact == ".build/alignment/x500-velocity-px4-v6/best"
+    assert training.controller_artifact == ".build/alignment/x500-velocity-px4-v7/best"
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
@@ -393,8 +393,8 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "initial_noise_std must be finite and non-negative",
         ),
         (
-            {"rl": {"training": {"alignment_artifact": "  "}}},
-            "alignment_artifact must be non-empty",
+            {"rl": {"training": {"controller_artifact": "  "}}},
+            "controller_artifact must be non-empty",
         ),
         (
             {"rl": {"training": {"training_mode": "resume"}}},

@@ -85,6 +85,9 @@ auto-disarm are outside the controller target.
 Keep their imports in this order; neither runner may import Kit/Isaac Lab at
 module import time.
 
-`alignment_fit.py` is host-safe and performs no simulator imports. It consumes
-the two diagnostic trace files, writes the canonical `alignment.json`, and
-updates relative `latest`/`best` links.
+`alignment_fit.py` is host-safe and performs no simulator imports. Fit mode
+consumes the two diagnostic trace files and writes `controller.json` plus
+`selection.json.zst` without publishing. Finalize mode validates the complete
+bundle before atomically updating relative `latest`/`best` links. Its explicit
+schema-v6 migration mode verifies the legacy checksum inventory and produces a
+self-contained controller-v1 sibling.

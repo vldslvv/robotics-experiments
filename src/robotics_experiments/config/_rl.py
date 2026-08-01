@@ -271,7 +271,7 @@ class RlTrainingConfig(_FreezableConfig):
             ``latest`` symlink.
         training_mode: Weight-initialization mode (``scratch`` or
             ``actor-only``).
-        alignment_artifact: Controller alignment run directory or publication
+        controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.
         num_steps_per_env: On-policy rollout length per env per iteration.
@@ -294,7 +294,7 @@ class RlTrainingConfig(_FreezableConfig):
     vehicle_id: int
     policy_name: str
     training_mode: str
-    alignment_artifact: str
+    controller_artifact: str
     max_iterations: int
     num_steps_per_env: int
     save_interval: int

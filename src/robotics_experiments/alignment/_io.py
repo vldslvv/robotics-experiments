@@ -12,13 +12,13 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
 
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
-    AlignmentArtifact,
     CandidateScore,
     CommandInterface,
     ControllerDefinition,
@@ -35,8 +35,7 @@ __all__: list[str] = []
 
 _TRACE_SCHEMA_VERSION = 5
 _SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
-_ARTIFACT_SCHEMA_VERSION = 6
-_SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5, 6})
+_SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS = frozenset({6})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2", "coarse-to-fine-beam-v3"})
@@ -890,7 +889,7 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     )
 
 
-def _artifact_payload(artifact: AlignmentArtifact, /) -> dict[str, Any]:
+def _artifact_payload(artifact: object, /) -> dict[str, Any]:
     def plain(value: Any, /) -> Any:
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
             return {
@@ -953,7 +952,7 @@ def _candidate_score(
     )
 
 
-def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
+def _load_v6_alignment_for_migration(path: str | Path, /) -> SimpleNamespace:
     """Load a run directory, link, or alignment JSON and reject malformed provenance."""
     artifact_path = Path(path)
     if artifact_path.is_dir():
@@ -964,7 +963,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         raise ValueError(f"cannot load alignment artifact {artifact_path}: {exc}") from exc
     artifact = _object(value=loaded, name=str(artifact_path))
     schema_version = artifact.get("schema_version")
-    if schema_version not in _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS:
+    if schema_version not in _SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS:
         raise ValueError(
             f"alignment artifact {artifact_path} has unsupported "
             f"schema_version={schema_version!r}"
@@ -1046,7 +1045,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
         value=artifact.get("validation_metrics"),
         name="validation_metrics",
     )
-    result = AlignmentArtifact(
+    result = SimpleNamespace(
         schema_version=schema_version,
         alignment_id=_string(value=artifact.get("alignment_id"), name="alignment_id"),
         run_id=_string(value=artifact.get("run_id"), name="run_id"),
@@ -1119,7 +1118,7 @@ def load_alignment_artifact(path: str | Path, /) -> AlignmentArtifact:
     return result
 
 
-def write_alignment_artifact(*, artifact: AlignmentArtifact, run_dir: Path) -> Path:
+def _write_legacy_alignment_artifact(*, artifact: object, run_dir: Path) -> Path:
     """Write the canonical immutable run result."""
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "alignment.json"
@@ -1137,14 +1136,14 @@ def _replace_relative_symlink(*, link: Path, target: Path) -> None:
     os.replace(temporary, link)
 
 
-def publish_alignment(*, artifact: AlignmentArtifact, run_dir: Path) -> None:
+def _publish_legacy_alignment(*, artifact: SimpleNamespace, run_dir: Path) -> None:
     """Advance ``latest`` and the comparable-generation ``best`` links atomically."""
     root = run_dir.parent
     _replace_relative_symlink(link=root / "latest", target=run_dir)
     best_link = root / "best"
     replace_best = True
     if best_link.exists():
-        best = load_alignment_artifact(best_link)
+        best = _load_v6_alignment_for_migration(best_link)
         if best.comparison_fingerprint == artifact.comparison_fingerprint:
             replace_best = (
                 artifact.selected_ranking_values,

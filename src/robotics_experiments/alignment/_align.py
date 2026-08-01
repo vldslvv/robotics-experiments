@@ -16,8 +16,9 @@ import numpy as np
 
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
-    AlignmentArtifact,
+    AlignmentResult,
     CandidateScore,
+    ControllerArtifact,
     ControllerDefinition,
     ControllerSettings,
     MetricResult,
@@ -280,7 +281,11 @@ def _staged_beam_search(
                 index=index,
                 settings=settings,
                 usable=True,
-                metrics=result.metrics,
+                metrics={
+                    **result.fit_metrics,
+                    **result.validation_metrics,
+                    **result.metrics,
+                },
                 ranking_values=result.ranking_values,
                 failure_reason=None,
             )
@@ -683,7 +688,7 @@ def align(
     target: ControllerDefinition,
     reference: ControllerDefinition,
     /,
-) -> AlignmentArtifact:
+) -> AlignmentResult:
     """Run deterministic staged beam search and publish its held-out selection."""
     _validate_pair(target, reference)
     reference_traces = reference.evaluator.evaluate(
@@ -746,6 +751,7 @@ def align(
     probe_suite_fingerprint = _fingerprint([asdict(profile) for profile in target.probes])
     comparison_fingerprint = _fingerprint(
         {
+            "controller_artifact_schema": 1,
             "target_definition": target.definition_fingerprint,
             "reference_definition": reference.definition_fingerprint,
             "probe_suite": probe_suite_fingerprint,
@@ -757,8 +763,8 @@ def align(
         }
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return AlignmentArtifact(
-        schema_version=target.controller_schema_version,
+    controller = ControllerArtifact(
+        schema_version=1,
         alignment_id=target.alignment_id,
         run_id=run_id,
         target_controller_id=target.controller_id,
@@ -775,18 +781,20 @@ def align(
         command_rate_hz=target.command_rate_hz,
         command_interface=target.command_interface,
         probe_suite_fingerprint=probe_suite_fingerprint,
-        selection_metric=target.selection_metric,
         selected_settings=selected.settings,
-        declared_parameters=target.parameters,
-        candidates=outcome.candidate_scores,
-        selected_candidate_index=selected.index,
-        selected_ranking_values=selected.ranking_values,
-        fit_metrics=selected_result.fit_metrics,
-        validation_metrics=selected_result.validation_metrics,
+        settings_fingerprint=_fingerprint(asdict(selected.settings)),
         advisory_quality_passed=not quality_reasons,
         advisory_quality_reasons=tuple(quality_reasons),
         source_commit=source_commit,
         source_dirty=source_dirty,
         target_image=target.image,
         reference_image=reference.image,
+    )
+    return AlignmentResult(
+        controller=controller,
+        selection_metric=target.selection_metric,
+        base_settings=target.base_settings,
+        declared_parameters=target.parameters,
+        candidates=outcome.candidate_scores,
+        selected_candidate_index=selected.index,
     )

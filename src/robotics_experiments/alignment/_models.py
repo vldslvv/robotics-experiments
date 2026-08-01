@@ -182,8 +182,8 @@ class CandidateScore:
 
 
 @dataclass(frozen=True)
-class AlignmentArtifact:
-    """Immutable selected controller settings plus complete comparison provenance."""
+class ControllerArtifact:
+    """Compact immutable controller contract consumed by training and runtime."""
 
     schema_version: int
     alignment_id: str
@@ -202,14 +202,8 @@ class AlignmentArtifact:
     command_rate_hz: float
     command_interface: CommandInterface
     probe_suite_fingerprint: str
-    selection_metric: str
     selected_settings: ControllerSettings
-    declared_parameters: tuple[ParameterSpec, ...]
-    candidates: tuple[CandidateScore, ...]
-    selected_candidate_index: int
-    selected_ranking_values: tuple[float, ...]
-    fit_metrics: Mapping[str, float]
-    validation_metrics: Mapping[str, float]
+    settings_fingerprint: str
     advisory_quality_passed: bool
     advisory_quality_reasons: tuple[str, ...]
     source_commit: str
@@ -217,13 +211,17 @@ class AlignmentArtifact:
     target_image: str
     reference_image: str
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "fit_metrics", MappingProxyType(dict(self.fit_metrics)))
-        object.__setattr__(
-            self,
-            "validation_metrics",
-            MappingProxyType(dict(self.validation_metrics)),
-        )
+
+@dataclass(frozen=True)
+class AlignmentResult:
+    """Selected controller contract plus the in-memory search decision."""
+
+    controller: ControllerArtifact
+    selection_metric: str
+    base_settings: ControllerSettings
+    declared_parameters: tuple[ParameterSpec, ...]
+    candidates: tuple[CandidateScore, ...]
+    selected_candidate_index: int
 
 
 @dataclass(frozen=True)

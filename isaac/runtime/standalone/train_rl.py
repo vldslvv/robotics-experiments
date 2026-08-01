@@ -29,7 +29,8 @@ import torch
 
 import robotics_experiments.rl as rl
 import robotics_experiments.rl.training.rsl_rl as training
-from robotics_experiments.alignment import AlignmentArtifact, load_alignment_artifact
+from robotics_experiments.alignment import ControllerArtifact, load_controller_artifact
+from robotics_experiments.alignment._artifact import resolve_controller_path
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import METADATA_FILENAME
 from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
@@ -39,7 +40,7 @@ _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CHECKPOINT_NAME_PATTERN = re.compile(r"model_(\d+)\.pt")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
-_ALIGNMENT_ARTIFACT_ENV = "ALIGNMENT_ARTIFACT"
+_CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
 
 
 def _report(message: str) -> None:
@@ -150,13 +151,13 @@ def _artifact_metadata(
     env_cfg,
     source_metadata: dict[str, str | bool],
     artifact_run_id: str,
-    alignment_artifact: AlignmentArtifact,
-    alignment_digest: str,
+    controller_artifact: ControllerArtifact,
+    controller_digest: str,
 ):
     metadata = rl.policy_metadata(
         action_cfg=config.rl.action,
-        alignment_artifact=alignment_artifact,
-        alignment_digest=alignment_digest,
+        controller_artifact=controller_artifact,
+        controller_digest=controller_digest,
         obs_schema_version=int(env_cfg.observation_schema_version),
         obs_dim=int(env_cfg.observation_space),
         policy_rate_hz=config.rl.policy_rate_hz,
@@ -234,21 +235,21 @@ def _initialization_provenance(
     )
 
 
-def _load_training_alignment(
+def _load_training_controller(
     *,
     args: argparse.Namespace,
     config: ExperimentConfig,
     repo_root: Path,
-) -> tuple[AlignmentArtifact, str]:
+) -> tuple[ControllerArtifact, str]:
     authored = (
-        args.alignment_artifact
-        or os.environ.get(_ALIGNMENT_ARTIFACT_ENV)
-        or config.rl.training.alignment_artifact
+        args.controller_artifact
+        or os.environ.get(_CONTROLLER_ARTIFACT_ENV)
+        or config.rl.training.controller_artifact
     )
     artifact_path = Path(authored)
     if not artifact_path.is_absolute():
         artifact_path = repo_root / artifact_path
-    artifact = load_alignment_artifact(artifact_path)
+    artifact = load_controller_artifact(artifact_path)
     vehicle_id = config.rl.training.vehicle_id
     try:
         vehicle_label, vehicle = next(
@@ -271,12 +272,12 @@ def _load_training_alignment(
     if action.kind != "velocity" or action.action_dim != artifact.command_interface.dimension:
         mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
     if mismatches:
-        raise ValueError("alignment artifact is incompatible: " + "; ".join(mismatches))
-    alignment_path = artifact_path / "alignment.json" if artifact_path.is_dir() else artifact_path
-    digest = hashlib.sha256(alignment_path.read_bytes()).hexdigest()
+        raise ValueError("controller artifact is incompatible: " + "; ".join(mismatches))
+    controller_path = resolve_controller_path(artifact_path)
+    digest = hashlib.sha256(controller_path.read_bytes()).hexdigest()
     if not artifact.advisory_quality_passed:
         _report(
-            "WARNING: consuming advisory-quality-failed alignment "
+            "WARNING: consuming advisory-quality-failed controller "
             f"{artifact.alignment_id}/{artifact.run_id}: "
             + "; ".join(artifact.advisory_quality_reasons)
         )
@@ -330,8 +331,8 @@ def _run_new_training(
     training_root: Path,
     repo_root: Path,
     device: str,
-    alignment_artifact: AlignmentArtifact,
-    alignment_digest: str,
+    controller_artifact: ControllerArtifact,
+    controller_digest: str,
 ) -> None:
     training_cfg = config.rl.training
     initialization_checkpoint = args.initialize_checkpoint
@@ -366,7 +367,7 @@ def _run_new_training(
         seed=seed,
         num_envs=args.num_envs,
         experiment_config=config,
-        controller_settings=alignment_artifact.selected_settings,
+        controller_settings=controller_artifact.selected_settings,
     )
     try:
         if source_contract is not None:
@@ -380,8 +381,8 @@ def _run_new_training(
             env_cfg=env_cfg,
             source_metadata=_git_source_metadata(repo_root=repo_root),
             artifact_run_id=run_dir.name,
-            alignment_artifact=alignment_artifact,
-            alignment_digest=alignment_digest,
+            controller_artifact=controller_artifact,
+            controller_digest=controller_digest,
         )
         output_initialization = env_cfg.policy_config.actor.output_initialization
         metadata["training_mode"] = training_cfg.training_mode
@@ -488,7 +489,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         training_mode=training_cfg.training_mode,
         initialization_checkpoint=args.initialize_checkpoint,
     )
-    alignment_artifact, alignment_digest = _load_training_alignment(
+    controller_artifact, controller_digest = _load_training_controller(
         args=args,
         config=config,
         repo_root=repo_root,
@@ -502,8 +503,8 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
         training_root=training_root,
         repo_root=repo_root,
         device=device,
-        alignment_artifact=alignment_artifact,
-        alignment_digest=alignment_digest,
+        controller_artifact=controller_artifact,
+        controller_digest=controller_digest,
     )
 
 
@@ -529,10 +530,10 @@ def main() -> None:
         help="export an existing run checkpoint without additional training",
     )
     parser.add_argument(
-        "--alignment-artifact",
+        "--controller-artifact",
         type=Path,
         default=None,
-        help="override rl.training.alignment_artifact for training",
+        help="override rl.training.controller_artifact for training",
     )
     checkpoint_group.add_argument(
         "--initialize-checkpoint",

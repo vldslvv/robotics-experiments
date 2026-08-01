@@ -37,7 +37,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_fraction=0.5,
-        hover_thrust_normalized=0.0,
+        hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
@@ -57,9 +57,9 @@ def _controller_settings() -> ControllerSettings:
     )
 
 
-def _alignment_artifact():
+def _controller_artifact():
     return SimpleNamespace(
-        schema_version=2,
+        schema_version=1,
         alignment_id="test-alignment",
         run_id="alignment-run",
         comparison_fingerprint="comparison",
@@ -70,14 +70,14 @@ def _alignment_artifact():
     )
 
 
-def _alignment_metadata() -> dict:
+def _controller_metadata() -> dict:
     settings = _controller_settings()
     return {
-        "schema_version": 2,
+        "schema_version": 1,
         "alignment_id": "test-alignment",
         "run_id": "alignment-run",
-        "artifact_digest": "digest",
-        "comparison_fingerprint": "comparison",
+        "controller_digest": "digest",
+        "controller_comparison_fingerprint": "comparison",
         "target_definition_fingerprint": "target",
         "reference_definition_fingerprint": "reference",
         "settings": json.loads(json.dumps(asdict(settings))),
@@ -111,7 +111,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
     train_rl = _load_train_rl_module()
     artifact_path = tmp_path / ".build" / "alignment" / "test" / "best"
     artifact_path.mkdir(parents=True)
-    (artifact_path / "alignment.json").write_text("{}")
+    (artifact_path / "controller.json").write_text("{}")
     artifact = SimpleNamespace(
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
@@ -124,7 +124,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
         ),
         advisory_quality_passed=True,
     )
-    monkeypatch.setattr(train_rl, "load_alignment_artifact", lambda _path: artifact)
+    monkeypatch.setattr(train_rl, "load_controller_artifact", lambda _path: artifact)
     config = SimpleNamespace(
         vehicles={
             "x500_01": SimpleNamespace(
@@ -142,13 +142,13 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
             ),
             training=SimpleNamespace(
                 vehicle_id=0,
-                alignment_artifact=".build/alignment/test/best",
+                controller_artifact=".build/alignment/test/best",
             ),
         ),
     )
 
-    loaded, digest = train_rl._load_training_alignment(  # noqa: SLF001
-        args=SimpleNamespace(alignment_artifact=None),
+    loaded, digest = train_rl._load_training_controller(  # noqa: SLF001
+        args=SimpleNamespace(controller_artifact=None),
         config=config,
         repo_root=tmp_path,
     )
@@ -190,8 +190,8 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         env_cfg=env_cfg,
         source_metadata={"source_commit": "abc123", "source_dirty": False},
         artifact_run_id="run-1",
-        alignment_artifact=_alignment_artifact(),
-        alignment_digest="digest",
+        controller_artifact=_controller_artifact(),
+        controller_digest="digest",
     )
 
     assert metadata["obs_schema_version"] == 1
@@ -268,7 +268,7 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
         },
         "source_commit": "captured",
         "source_dirty": False,
-        "alignment": _alignment_metadata(),
+        "controller": _controller_metadata(),
     }
     train_rl._write_artifact_metadata(  # noqa: SLF001
         run_dir=tmp_path,
@@ -311,7 +311,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         training_mode="scratch",
         seed=7,
         max_iterations=2,
-        alignment_artifact=".build/alignment/test/best",
+        controller_artifact=".build/alignment/test/best",
     )
     config = SimpleNamespace(
         rl=SimpleNamespace(
@@ -343,8 +343,8 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     monkeypatch.setattr(train_rl, "_build_env", lambda **_kwargs: (env, env_cfg))
     monkeypatch.setattr(
         train_rl,
-        "_load_training_alignment",
-        lambda **_kwargs: (_alignment_artifact(), "digest"),
+        "_load_training_controller",
+        lambda **_kwargs: (_controller_artifact(), "digest"),
     )
     monkeypatch.setattr(
         train_rl,
@@ -381,7 +381,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         num_envs=None,
         export_checkpoint=None,
         initialize_checkpoint=None,
-        alignment_artifact=None,
+        controller_artifact=None,
     )
 
     train_rl._run(args=args, config=config)  # noqa: SLF001
@@ -389,7 +389,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["policy_rate_hz"] == 17.0
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
-    assert before_ppo["alignment"]["artifact_digest"] == "digest"
+    assert before_ppo["controller"]["controller_digest"] == "digest"
     assert before_ppo["training_mode"] == "scratch"
     assert before_ppo["initialization"] == {"method": "scratch-neutral-output"}
     assert initialization_calls == [{"runner": runner, "method": "scratch-neutral-output"}]
@@ -587,7 +587,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         },
         "source_commit": "source-commit",
         "source_dirty": False,
-        "alignment": _alignment_metadata(),
+        "controller": _controller_metadata(),
     }
     train_rl._write_artifact_metadata(run_dir=run_dir, metadata=metadata)  # noqa: SLF001
 

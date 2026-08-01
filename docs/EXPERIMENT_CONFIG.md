@@ -126,9 +126,9 @@ stages fail during `load_config`.
 `rl.training` owns the explicit `scratch` / `actor-only` training mode, PPO
 optimization, rollout, checkpoint cadence, task selection, artifact namespace,
 seed settings, and
-`alignment_artifact`. The latter defaults to
+`controller_artifact`. The latter defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
-constructed. `ALIGNMENT_ARTIFACT` or the training CLI override selects an exact
+constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
 run for reproduction.
 
 `rl.action` is task-neutral and contains only normalized action kind,
