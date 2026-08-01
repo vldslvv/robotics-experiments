@@ -349,6 +349,13 @@ file-backed evaluator indexes the generated candidate file once and reads one
 candidate trace set at a time. It does not retain the complete diagnostic file
 or parsed target traces after their metrics are recorded.
 
+Finalization compresses the potentially multi-gigabyte target trace archive at
+zstd level 8 with a 128 MiB long-distance window and all available compression
+threads. The archive is evidence, not an artifact identity input, and is still
+verified and checksummed before publication. The much smaller deterministic
+selection record stays at zstd level 19 on one thread so identical selections
+remain byte-for-byte identical.
+
 ### Bundle layout and retention
 
 New bundles contain `controller.json`, `selection.json.zst`, `manifest.json`,

@@ -72,12 +72,26 @@ def _zstd(*, arguments: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
         raise RuntimeError(f"zstd failed: {detail}") from exc
 
 
-def _compress_file(*, source: Path, destination: Path) -> None:
+def _compress_file(
+    *,
+    source: Path,
+    destination: Path,
+    compression_arguments: Sequence[str] = ("-19", "-T1"),
+) -> None:
     if destination.exists():
         raise FileExistsError(f"alignment result already exists: {destination}")
     temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
     try:
-        _zstd(arguments=("-q", "-f", "-19", "-T1", str(source), "-o", str(temporary)))
+        _zstd(
+            arguments=(
+                "-q",
+                "-f",
+                *compression_arguments,
+                str(source),
+                "-o",
+                str(temporary),
+            )
+        )
         if _zstd(arguments=("-q", "-t", str(temporary))).returncode:
             raise RuntimeError(
                 f"compressed alignment payload verification failed for {destination}"
@@ -430,7 +444,11 @@ def finalize_alignment_bundle(
         shutil.copy2(target_source, target_destination)
         _zstd(arguments=("-q", "-t", str(target_destination)))
     else:
-        _compress_file(source=target_source, destination=target_destination)
+        _compress_file(
+            source=target_source,
+            destination=target_destination,
+            compression_arguments=("-8", "--long=27", "-T0"),
+        )
     target_source.unlink()
     role_by_path = {
         "controller.json": "controller",

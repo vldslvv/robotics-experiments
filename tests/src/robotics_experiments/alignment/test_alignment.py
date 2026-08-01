@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import robotics_experiments.alignment._artifact as artifact_module
 from robotics_experiments.alignment import (
     ControllerDefinition,
     ControllerSettings,
@@ -1223,7 +1224,10 @@ def test_selection_serialization_is_deterministic(tmp_path: Path) -> None:
     assert first_selection.read_bytes() == second_selection.read_bytes()
 
 
-def test_bundle_finalization_compresses_and_inventories_every_payload(tmp_path: Path) -> None:
+def test_bundle_finalization_compresses_and_inventories_every_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     known = _settings(kp=(1.0, 1.0, 1.0))
     result = align(
         _definition(backend="isaac-lab", evaluator=_Evaluator()),
@@ -1246,6 +1250,25 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(tmp_path: 
     }.items():
         (run_dir / name).write_text(payload)
 
+    compress_file = _compress_file
+    compression_arguments_seen: list[tuple[str, ...]] = []
+
+    def record_compression(
+        *,
+        source: Path,
+        destination: Path,
+        compression_arguments: tuple[str, ...] = ("-19", "-T1"),
+    ) -> None:
+        compression_arguments_list = tuple(compression_arguments)
+        compression_arguments_seen.append(compression_arguments_list)
+        compress_file(
+            source=source,
+            destination=destination,
+            compression_arguments=compression_arguments_list,
+        )
+
+    monkeypatch.setattr(artifact_module, "_compress_file", record_compression)
+
     manifest_path = finalize_alignment_bundle(run_dir=run_dir)
 
     validate_alignment_bundle(run_dir)
@@ -1256,6 +1279,7 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(tmp_path: 
     assert "evidence/target_traces.json.zst" in paths
     assert "diagnostics/stages/search_realization.json" in paths
     assert not (run_dir / "target_candidates.json").exists()
+    assert compression_arguments_seen == [("-8", "--long=27", "-T0")]
 
     (run_dir / "diagnostics" / "untracked.log").write_text("untracked")
     with pytest.raises(ValueError, match="inventory every payload"):

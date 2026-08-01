@@ -6078,3 +6078,15 @@ policy handoff at 0.457 m. This is the accepted alignment artifact for the next
 scratch policy training run. The controller-state replay diagnostic remains
 rejected at the known incomplete PX4 initial-state boundary; that diagnostic
 does not override the current seven exact-action plus live acceptance contract.
+
+### 147. Parallelize retained trace compression
+
+Date: 2026-08-01.
+
+The compact-bundle finalizer previously compressed every payload with zstd
+level 19 on one thread. On the 4.67 GB raw trace archive from run
+`20260801T091126Z`, representative alternatives showed that level 8 with a
+128 MiB long-distance window and all compression workers finished in 9.56 s
+and produced a 1.35 GB archive. Level 15 took 111.52 s and reduced that result
+by only about 2.4%. Target evidence now uses the measured level-8 policy while
+the small deterministic selection record retains level 19 on one thread.
