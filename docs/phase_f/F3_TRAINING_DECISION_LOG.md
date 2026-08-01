@@ -6129,3 +6129,31 @@ the last checkpoint remains the run's strongest result. Continue the same
 actor-only recipe from checkpoint 49. Do not change reward, controller,
 observation, action, or PPO parameters; the next run tests whether the measured
 safe completion slope reaches acceptance before contact behavior appears.
+
+### 150. Route the range plateau through an earlier-braking reference
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T155548Z.340126` continued the unchanged low-rate
+recipe from run `20260801T153849Z.333079` checkpoint 49. Held-out checkpoint
+35 ranked first at 99.0% success, 1.0% pusher collision, zero other flight
+failures and timeouts, and score -0.398393. Independent evaluation reproduced
+those rates with 0.40885 m mean closest range and 0.38480 m minimum closest
+range. It passed the success, collision, and flight-failure limits exactly but
+failed the 0.40 m minimum-range gate.
+
+The minimum closest range stayed between 0.38307 and 0.38493 m across all
+eleven checkpoints while success rose from 71.7% to as high as 99.0%. This is
+a persistent braking boundary, not evidence for another identical low-rate
+continuation. Checkpoint 40 is the strongest collision-free source: 97.7%
+success, zero collisions and other flight failures, 2.3% timeout, and
+0.38489 m minimum closest range.
+
+Continue actor-only from checkpoint 40 with the same PPO settings and reward
+weights, but route the velocity-tracking objective through a slower,
+earlier-braking wall-normal reference. Move its neutral range from 0.410 m to
+0.415 m and cap forward speed at 0.04 m/s instead of 0.08 m/s. The goal band,
+acceptance thresholds, controller, observation, action, reset distribution,
+termination, and other velocity-reference fields remain unchanged. This starts
+a new policy comparison fingerprint and directly tests the first unresolved
+boundary without weakening it.

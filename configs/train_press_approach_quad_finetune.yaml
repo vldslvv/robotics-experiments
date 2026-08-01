@@ -2,13 +2,20 @@ defaults:
   - train_press_approach_quad
   - _self_
 
-# Actor-only continuation keeps the former low-rate, low-noise Stage 1
-# fine-tuning recipe separate from scratch training.
+# Actor-only continuation keeps the low-rate, low-noise Stage 1 fine-tuning
+# recipe separate from scratch training. Its slower wall-normal reference
+# teaches the actor to brake before the lower acceptance boundary under the
+# aligned plant's command delay; the goal band and acceptance limits remain
+# unchanged.
 rl:
   press:
     policy:
       actor:
         initial_noise_std: 0.01
+    goal:
+      velocity_reference:
+        range_center_m: 0.415
+        wall_normal_max_mps: 0.04
   training:
     training_mode: actor-only
     max_iterations: 50

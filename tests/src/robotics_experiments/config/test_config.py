@@ -276,7 +276,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
 
 
-def test_press_approach_finetune_config_preserves_low_noise_actor_only_recipe():
+def test_press_approach_finetune_config_uses_early_braking_actor_only_recipe():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
@@ -288,6 +288,11 @@ def test_press_approach_finetune_config_preserves_low_noise_actor_only_recipe():
     assert config.rl.training.save_interval == 5
     assert config.rl.training.schedule == "fixed"
     assert config.rl.press.policy.actor.initial_noise_std == 0.01
+    reference = config.rl.press.goal.velocity_reference
+    assert reference.range_center_m == 0.415
+    assert reference.wall_normal_max_mps == 0.04
+    assert config.rl.press.goal.range_min_m == 0.40
+    assert config.rl.press.goal.range_max_m == 0.42
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
