@@ -5747,3 +5747,39 @@ accepted v6, the one-percent candidate 5,554 frontier, and advisory winner
 8,039 from the preceding fresh capture. The existing base remains candidate
 5,763. This is a search-robustness change only; controller, plant, probe,
 metric, gate, policy, and reward behavior remain unchanged.
+
+### 135. Multi-start search crosses parity but fails live hover
+
+Date: 2026-08-01.
+
+Fresh run `20260801T091126Z` captured all 11 profiles, passed the actuator
+audit, and evaluated 9,558 unique candidates in 97 batches and 2,067.6 seconds.
+Useful throughput was approximately 4.62 candidates per second, 18.5% above
+the old 3.898 baseline. The sweep retained the 128-setting scene and averaged
+25.5% GPU utilization. Selected candidate 9,048 passed all seven trace gates,
+but missed the additional v6-parity limits for residual speed by 1.03% and
+stop time by 0.03 seconds.
+
+Multi-start coverage did solve the scratch-search composition problem: 57
+evaluated candidates passed every trace gate and every v6-parity limit. The
+strongest under the registered ranking was candidate 2,919, with 2.244 mm
+braking error, 0.00270 m/s residual speed, 0.06 s stop-time error, 5.140%
+worst-axis NRMSE, 3.579% yaw NRMSE, 2.810 degrees heading error, and 8.478 mm
+endpoint error. This is the first scratch run to reproduce the full strict
+trace envelope.
+
+The required live hover/goto acceptance did not pass. Candidate 9,048 reached
+0.122 m maximum hover error in the final one-second window, and parity
+candidate 2,919 reached 0.126 m, above the 0.100 m limit. The only all-gates
+candidate retaining a 10 Hz velocity filter, candidate 1,246, improved the
+window to 0.117 m but still failed. Accepted v6 passed unchanged in the same
+environment at 0.075 m, proving that the failure is controller-specific rather
+than an environment regression.
+
+A boundary probe combined candidate 1,246 with v6 actuator dynamics
+(`tau_inc=0.04`, `tau_dec=0.02`, and 500 N/s). It passed the complete live gate:
+0.068 m hover-window error, 0.033 m goto-window error, and a ready press
+handoff. In contrast, applying those dynamics and the v6 filters to the more
+aggressive parity candidate 2,919 worsened hover to 0.137 m. The next search is
+therefore routed to the measured integration-stable velocity/actuator basin,
+not to another unrestricted trace-only optimum.
