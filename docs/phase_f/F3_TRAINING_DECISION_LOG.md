@@ -5989,3 +5989,30 @@ gain, velocity integral gain, and its limit. Coarse candidates bracket the
 accepted controller and recover one level of midpoint precision. The
 hypothesis is that the current reference's braking/stop boundary can be passed
 without leaving the independently verified live-stable basin.
+
+### 143. Pass offline and narrowly reject the metric-optimal targeted result
+
+Date: 2026-08-01.
+
+Run `20260801T134626Z` evaluated 1,398 unique candidates in 15 persistent GPU
+batches. Target execution took 314.6 seconds and the container completed in
+325.2 seconds, approximately 56% faster than the preceding 735.5-second wide
+sweep. Average GPU utilization remained 25.8%; sequential controller dynamics
+remain the measured bottleneck.
+
+Selected candidate 1,188 passed all seven offline gates: 4.180 mm braking
+error, 0.001846 m/s residual speed, 0.10 s stop-time error, 5.558% worst-axis
+NRMSE, 3.589% yaw NRMSE, 2.833 degrees heading error, and 6.904 mm endpoint
+error. Its authoritative live check narrowly failed hover at 0.101 m against
+the 0.100 m limit, improving the wide winner's repeatable 0.104 m result but
+not reaching acceptance.
+
+The archive contains 356 all-gate offline passes. Candidate 911 is the passing
+setting nearest the previously live-accepted controller: it changes only delay,
+horizontal low-speed gain scale, horizontal velocity derivative gain, and its
+filter. Its offline result is 4.804 mm braking, 0.001846 m/s residual speed,
+0.04 s stop-time error, 5.583% worst-axis NRMSE, 3.735% yaw NRMSE, 2.914 degrees
+heading error, and 2.813 mm endpoint error. The next direct reproduction uses
+candidate 911 as its declarative base. This keeps the proportional, integral,
+rate, allocator, and actuator boundaries at the controller that held the live
+hover gate with 6 mm margin.
