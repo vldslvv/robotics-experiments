@@ -1063,7 +1063,8 @@ def _run(
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
     maximum_expansion = max(
-        target.search.beam_width * len(parameter.candidates) for parameter in target.parameters
+        (target.search.beam_width * len(parameter.candidates) for parameter in target.parameters),
+        default=1,
     )
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
     candidate_capacity = min(

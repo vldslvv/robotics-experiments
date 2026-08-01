@@ -5944,3 +5944,27 @@ candidate against a fresh capture. Wide and targeted sweeps remain the
 discovery workflow after a controller, plant, probe, metric, or gate change;
 once the complete boundary is established, reproduction should verify it
 directly rather than repeatedly rediscover it through lossy beam pruning.
+
+### 141. Reject the first direct reproduction at the reference boundary
+
+Date: 2026-08-01.
+
+Fresh run `20260801T133001Z` completed all reference profiles and passed the
+actuator audit. The direct target preflight exposed and then guarded a
+zero-parameter execution edge case: worker sizing now treats the declarative
+base as a one-candidate expansion. After that correction, the target phase
+evaluated exactly one candidate in one GPU batch over 8.5 seconds, with 19.6
+seconds total container time and 41.8% average GPU utilization.
+
+The known controller passed five gates but was rejected at the fresh reference
+boundary. Braking-distance error was 9.700 mm and stop-time error was 0.64 s;
+residual speed, worst-axis velocity NRMSE, yaw NRMSE, heading, and endpoint all
+passed. This is consistent with the measured capture-to-capture stop-state
+variation: the same controller passed every offline and live gate on run
+`20260801T115600Z`, while another fresh reference rejected it before expansion.
+
+No structural or gain change is supported by this result. The next attempt
+repeats the inexpensive direct preflight against a fresh reference. A passing
+capture establishes deterministic reproduction of the accepted controller;
+continued reference-boundary failures would instead require making reference
+initialization repeatable before further controller search.
