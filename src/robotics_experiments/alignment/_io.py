@@ -41,9 +41,9 @@ _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
 _SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2", "coarse-to-fine-beam-v3"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
-_CANDIDATE_ENTRY = re.compile(rb'(?m)^    "([0-9a-f]{64})": ')
-_CANDIDATES_MARKER = b'  "candidates": {'
-_FAILURES_MARKER = b'  "failures": {'
+_CANDIDATE_ENTRY = re.compile(rb'"([0-9a-f]{64})"\s*:\s*')
+_CANDIDATES_KEY = b'"candidates"'
+_FAILURES_KEY = b'"failures"'
 
 
 def _canonical_json(value: Any, /) -> str:
@@ -598,6 +598,49 @@ def _json_value_bounds(*, payload: mmap.mmap, start: int, end: int) -> tuple[int
     return start, end
 
 
+def _mapping_content_start(*, payload: mmap.mmap, key: bytes, start: int = 0) -> tuple[int, int]:
+    key_start = payload.find(key, start)
+    if key_start < 0:
+        raise ValueError(f"candidate diagnostics omit {key.decode()}")
+    separator = payload.find(b":", key_start + len(key))
+    if separator < 0:
+        raise ValueError(f"candidate diagnostics have malformed {key.decode()}")
+    content_start = separator + 1
+    while content_start < len(payload) and payload[content_start] in b" \t\r\n":
+        content_start += 1
+    if content_start == len(payload) or payload[content_start] != ord("{"):
+        raise ValueError(f"candidate diagnostics {key.decode()} must be a mapping")
+    return key_start, content_start + 1
+
+
+def _mapping_end_before_key(*, payload: mmap.mmap, key_start: int) -> int:
+    cursor = key_start
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord(","):
+        raise ValueError("candidate diagnostics mappings must be adjacent object members")
+    cursor -= 1
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics candidate mapping is not closed")
+    return cursor - 1
+
+
+def _final_mapping_end(*, payload: mmap.mmap) -> int:
+    cursor = len(payload)
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics root object is not closed")
+    cursor -= 1
+    while cursor and payload[cursor - 1] in b" \t\r\n":
+        cursor -= 1
+    if not cursor or payload[cursor - 1] != ord("}"):
+        raise ValueError("candidate diagnostics failure mapping is not closed")
+    return cursor - 1
+
+
 def _index_candidate_diagnostics(
     *,
     path: Path,
@@ -605,28 +648,29 @@ def _index_candidate_diagnostics(
     try:
         with path.open("rb") as diagnostics:
             with mmap.mmap(diagnostics.fileno(), 0, access=mmap.ACCESS_READ) as payload:
-                candidates_start = payload.find(_CANDIDATES_MARKER)
-                failures_start = payload.find(_FAILURES_MARKER, candidates_start)
-                if candidates_start < 0 or failures_start < 0:
-                    raise ValueError("candidate diagnostics must use the generated JSON layout")
-                candidates_end = payload.rfind(b"\n  },", candidates_start, failures_start)
-                failures_content_start = failures_start + len(_FAILURES_MARKER)
-                failures_end = (
-                    failures_content_start
-                    if payload[failures_content_start] == ord("}")
-                    else payload.rfind(b"\n  }\n}", failures_start)
+                candidates_key_start, candidates_content_start = _mapping_content_start(
+                    payload=payload,
+                    key=_CANDIDATES_KEY,
                 )
-                if candidates_end < 0 or failures_end < 0:
-                    raise ValueError("candidate diagnostics must use the generated JSON layout")
+                failures_key_start, failures_content_start = _mapping_content_start(
+                    payload=payload,
+                    key=_FAILURES_KEY,
+                    start=candidates_content_start,
+                )
+                candidates_end = _mapping_end_before_key(
+                    payload=payload,
+                    key_start=failures_key_start,
+                )
+                failures_end = _final_mapping_end(payload=payload)
                 header = json.loads(
-                    payload[:candidates_start] + b'  "candidates": {},\n  "failures": {}\n}'
+                    payload[:candidates_key_start] + b'"candidates":{},"failures":{}}'
                 )
                 metadata = _object(value=header, name=str(path))
 
                 candidate_matches = tuple(
                     _CANDIDATE_ENTRY.finditer(
                         payload,
-                        candidates_start + len(_CANDIDATES_MARKER),
+                        candidates_content_start,
                         candidates_end,
                     )
                 )
@@ -649,7 +693,7 @@ def _index_candidate_diagnostics(
                 failure_matches = tuple(
                     _CANDIDATE_ENTRY.finditer(
                         payload,
-                        failures_start + len(_FAILURES_MARKER),
+                        failures_content_start,
                         failures_end,
                     )
                 )

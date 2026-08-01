@@ -557,9 +557,11 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
     )
 
 
+@pytest.mark.parametrize("indent", [None, 2])
 def test_file_evaluator_indexes_candidate_diagnostics_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    indent: int | None,
 ) -> None:
     settings = _settings()
     definition = _definition(
@@ -592,7 +594,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
                 },
                 "failures": {},
             },
-            indent=2,
+            indent=indent,
         )
     )
     original_index = _index_candidate_diagnostics
