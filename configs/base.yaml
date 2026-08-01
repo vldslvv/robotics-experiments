@@ -22,7 +22,7 @@ alignment:
     worker_count: 1
     # Candidate settings per fixed Isaac scene. Larger beam expansions are
     # chunked through this persistent scene instead of inflating every batch.
-    candidate_capacity: 256
+    candidate_capacity: 512
     candidate_capacity_benchmark: [128, 256, 384, 512]
     gpu_target_percent: 95.0
     gpu_sample_interval_s: 0.5

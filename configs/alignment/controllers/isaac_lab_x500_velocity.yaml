@@ -54,9 +54,9 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam-v3
-  # The accepted v6 settings are the mandatory base evaluation. The expanded
-  # beam and third pass search for a combination that retains acceptance across
-  # an independent fresh PX4 capture.
+  # The accepted v6 settings are the mandatory base evaluation. One broad pass
+  # finds useful intervals; two midpoint levels recover targeted precision only
+  # around retained settings and per-gate champions.
   beam_width: 32
   passes_per_stage: 1
   refinement_levels: 2
@@ -65,16 +65,16 @@ search:
 parameters:
   - field: command_delay_s
     stage: 1
-    candidates: [0.0, 0.024, 0.036, 0.048, 0.060, 0.072, 0.084, 0.096]
+    candidates: [0.0, 0.024, 0.048, 0.072, 0.096]
   - field: velocity_filter_hz
     stage: 1
-    candidates: [0.0, 0.5, 1.0, 2.0, 5.0, 10.0]
+    candidates: [0.0, 1.0, 5.0, 10.0]
   - field: velocity_derivative_filter_hz
     stage: 1
-    candidates: [0.5, 0.625, 0.75, 0.875, 1.0, 2.5, 3.75, 5.0, 6.25, 7.5]
+    candidates: [0.5, 1.0, 2.5, 5.0, 7.5]
   - field: hover_thrust_normalized
     stage: 1
-    candidates: [0.54, 0.55, 0.56, 0.57, 0.5715, 0.572, 0.58, 0.59, 0.60]
+    candidates: [0.54, 0.56, 0.58, 0.60]
   - field: kp_vel
     stage: 1
     candidates:
@@ -100,10 +100,10 @@ parameters:
       - [1.8, 2.25, 4.0]
   - field: horizontal_velocity_error_gain_scale
     stage: 1
-    candidates: [1.0, 1.071428571, 1.142857143, 1.214285714, 1.285714286]
+    candidates: [1.0, 1.142857143, 1.285714286]
   - field: horizontal_velocity_error_gain_start_mps
     stage: 1
-    candidates: [0.10, 0.125, 0.15, 0.175, 0.20]
+    candidates: [0.10, 0.15, 0.20]
   - field: horizontal_velocity_error_gain_full_mps
     stage: 1
     candidates: [0.25, 0.30, 0.35, 0.40]
@@ -136,16 +136,9 @@ parameters:
     stage: 1
     candidates:
       - [0.0, 0.0, 0.0]
-      - [0.1, 0.1, 0.0]
-      - [0.15, 0.15, 0.0]
       - [0.2, 0.2, 0.0]
-      - [0.25, 0.25, 0.0]
       - [0.3, 0.3, 0.0]
       - [0.3, 0.0, 0.0]
-      - [0.3, 0.1, 0.0]
-      - [0.3, 0.2, 0.0]
-      - [0.325, 0.3, 0.0]
-      - [0.35, 0.3, 0.0]
       - [0.375, 0.3, 0.0]
       - [0.4, 0.3, 0.0]
   - field: kp_att

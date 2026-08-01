@@ -5561,3 +5561,28 @@ telemetry, generated intervals, and parent values. The optimization goal is at
 least 20% higher useful throughput than completed v7 and at least 40% less
 padded physics work; missing either goal authorizes only profiler-supported
 follow-up work.
+
+### 129. Select the measured capacity and commit the broad grid
+
+Date: 2026-08-01.
+
+The identical 512-candidate capacity benchmark completed at 128, 256, 384, and
+512 settings per scene. Measured useful throughput was 5.409, 6.382, 5.431, and
+6.741 candidates per second respectively. Capacity 384 submitted 768 physics
+slots and lost its apparent batching advantage to 256 padded settings. Capacity
+512 submitted no padding, used 4,594 MiB peak GPU memory, and exceeded capacity
+256 by 5.6%, just outside the rule that prefers the smaller scene within five
+percent. The committed capacity is therefore 512. Its useful throughput is
+73.8% above the completed v7 baseline of 3.878 candidates per second; low 15.1%
+average GPU utilization remains a measured simulator dependency bottleneck and
+is not addressed with semantically redundant work.
+
+The first v7 pass is now a true large-step sweep rather than the earlier mixture
+of coarse and micro-step points. Delay, velocity filters, normalized hover,
+large-error schedule, and derivative-gain tables retain their evidenced range
+but remove intermediate values that the adaptive search can regenerate. The
+accepted settings remain a mandatory candidate even when absent from a coarse
+table. Retained candidates and per-gate champions then generate midpoint and
+quarter-step values for at most two refinement levels. This preserves wide
+coverage while spending fine-grid evaluations only in regions supported by the
+current fresh capture.
