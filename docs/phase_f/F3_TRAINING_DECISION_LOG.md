@@ -5630,3 +5630,27 @@ coarse-to-fine coordinate update reseeds its multi-objective beam from all
 usable archived candidates. Candidate 7,645 becomes the declarative base so the
 closest proven frontier is never lost. No controller, plant, probe, advisory
 gate, policy, or reward behavior changes.
+
+### 131. Configure global archive reseeding at measured capacity
+
+Date: 2026-08-01.
+
+The second scratch attempt applies the single structural change routed by run
+`20260801T063532Z`: after each coordinate expansion, the retained
+multi-objective beam is selected from every usable score in the run-local
+archive. A host regression constructs a search where two objective champions
+temporarily fill the beam, a later candidate satisfies both objectives, and the
+freed slot must restore an archived ranking candidate before a subsequent
+coordinate can form the optimum. This guards the cross-stage composition seam
+without changing scoring or candidate evaluation.
+
+Candidate 7,645 from the first scratch run is the mandatory base setting. It
+already satisfies five of seven strict parity limits and preserves the 0.06 s
+stop-time result. The broad declarative tables and two evidence-driven midpoint
+levels remain unchanged, so the run can still rediscover other frontiers.
+Fixed scene capacity changes from 512 to 128 based on the recorded expansion
+sizes: projected submitted slots fall from 30,208 to 11,136 and padding from
+21,643 to 2,571. One persistent worker remains the measured throughput choice.
+The hypothesis is that archive composition will combine the independently
+passing braking and endpoint regions with the retained stop-time frontier while
+the smaller scene removes most unproductive physics work.

@@ -498,12 +498,15 @@ def _staged_beam_search(
                 ),
             ]
         )
-        usable = [score for score in evaluate_many(expanded) if score.usable]
+        evaluated = evaluate_many(expanded)
+        usable = [score for score in evaluated if score.usable]
         if not usable:
             raise RuntimeError(
                 f"every alignment candidate was unusable while fitting "
                 f"stage {parameter.stage} field {parameter.field!r}"
             )
+        if target.search.strategy == "coarse-to-fine-beam-v3":
+            usable = [score for score in scores_by_settings.values() if score.usable]
         retained = retain(usable)
 
     evaluate(target.base_settings)

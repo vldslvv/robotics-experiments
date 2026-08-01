@@ -275,9 +275,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.alignment_id == "x500-velocity-px4-v7"
     assert target.controller_schema_version == 6
     assert target.base_settings.command_delay_s == pytest.approx(0.06)
-    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
+    assert target.base_settings.kp_vel == pytest.approx((2.0, 1.35, 6.0))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.0 / 7.0)
-    assert target.base_settings.kd_vel == pytest.approx((0.375, 0.3, 0.0))
+    assert target.base_settings.kd_vel == pytest.approx((0.38125, 0.3, 0.0))
     assert target.search.strategy == "coarse-to-fine-beam-v3"
     assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
@@ -555,6 +555,63 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
         record["field"] == "command_delay_s" and record["candidate"] == pytest.approx(0.25)
         for record in outcome.generated_refinements
     )
+
+
+def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
+    class ArchiveEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            del definition, reference_traces
+            results = []
+            for value in settings:
+                delay = value.command_delay_s
+                velocity_filter = value.velocity_filter_hz
+                tilt = value.max_tilt_cmd_deg
+                if delay == 1.0 and tilt == 40.0:
+                    ranking, beam = 0.0, (0.0, 0.0)
+                elif delay == 1.0:
+                    ranking, beam = 1.0, (5.0, 5.0)
+                elif delay == 2.0 and velocity_filter == 20.0:
+                    ranking, beam = 9.0, (0.0, 0.0)
+                elif delay == 2.0:
+                    ranking, beam = 10.0, (0.0, 10.0)
+                elif delay == 3.0:
+                    ranking, beam = 10.0, (10.0, 0.0)
+                else:
+                    ranking, beam = 20.0, (20.0, 20.0)
+                results.append(
+                    MetricResult(
+                        metrics={"velocity_rmse_mps": ranking},
+                        ranking_values=(ranking,),
+                        fit_metrics={"velocity_rmse_mps": ranking},
+                        validation_metrics={"worst_axis_velocity_nrmse": ranking},
+                        beam_values=beam,
+                    )
+                )
+            return tuple(results)
+
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=ArchiveEvaluator(),
+            parameters=(
+                ParameterSpec("command_delay_s", 1, (1.0, 2.0, 3.0)),
+                ParameterSpec("velocity_filter_hz", 1, (10.0, 20.0)),
+                ParameterSpec("max_tilt_cmd_deg", 1, (30.0, 40.0)),
+            ),
+        ),
+        search=SearchSpec(
+            strategy="coarse-to-fine-beam-v3",
+            beam_width=2,
+            passes_per_stage=1,
+        ),
+    )
+
+    outcome = _staged_beam_search(target=target, reference_traces=())
+
+    assert outcome.selected.settings.command_delay_s == 1.0
+    assert outcome.selected.settings.max_tilt_cmd_deg == 40.0
 
 
 @pytest.mark.parametrize("indent", [None, 2])
