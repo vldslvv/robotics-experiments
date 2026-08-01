@@ -5654,3 +5654,43 @@ sizes: projected submitted slots fall from 30,208 to 11,136 and padding from
 The hypothesis is that archive composition will combine the independently
 passing braking and endpoint regions with the retained stop-time frontier while
 the smaller scene removes most unproductive physics work.
+
+### 132. Archive reseeding reaches a one-percent parity frontier
+
+Date: 2026-08-01.
+
+Fresh run `20260801T074503Z` captured all 11 profiles and passed the actuator
+audit with no failures. The worst normalized motor RMSE was 0.000347 and the
+worst reconstructed collective RMSE was 0.01343 N. The sweep evaluated 8,282
+unique candidates in 88 batches and 1,670.9 seconds. It submitted 11,264
+physics slots with 2,982 padded slots, versus 30,208 and 21,643 respectively in
+the prior 512-capacity run. Useful throughput increased from 3.898 to 4.957
+candidates per second, a 27.2% improvement. Average GPU utilization increased
+to 25.7% with 4,005 MiB peak memory; the deterministic simulator dependency
+remains the measured limit below the 95% target.
+
+Selected candidate 8,039 passed all seven advisory gates. It recorded 1.977 mm
+braking error, 0.00420 m/s residual speed, 0.06 s stop-time error, 2.745%
+worst-axis NRMSE, 3.546% yaw NRMSE, 2.808 degrees heading error, and 9.993 mm
+endpoint error. The controller-boundary replay remained a diagnostic failure,
+as it does for accepted v6, while the authoritative capture-time actuator audit
+passed. No controller or plant seam is routed from that diagnostic alone.
+
+No candidate met all seven stricter v6-parity limits, but the archive-reseeded
+search made material progress. Forty-four candidates missed only one parity
+gate. Candidate 5,554 missed residual speed by 1.27% at 0.0030306 m/s while
+meeting braking by 0.0018 mm and retaining 0.04 s stop time and 8.057 mm
+endpoint error. This reduces the closest frontier from two failures and 21.7%
+maximum excess to one failure and 1.27% maximum excess.
+
+The first unresolved boundary is the braking/residual tradeoff at the rate
+feed-forward coordinate. For candidate 5,554, changing all-axis `kff_rate` from
+0.0375 to 0.05 moved residual from 0.003031 to 0.002914 m/s while braking moved
+from 3.690 to 4.032 mm. Candidates 5,675 and 5,763 at 0.05 already passed
+residual and missed braking by only 1.97% and 2.14%. The coarse-to-fine
+refinements generated only yaw-only feed-forward midpoints because those were
+the retained gate-champion intervals. The next attempt uses candidate 5,763 as
+its mandatory base and adds all-axis feed-forward candidates 0.046, 0.047,
+0.048, and 0.049. Linear neighborhood evidence places the joint strict crossing
+near 0.047. No controller structure, plant, probe, gate, policy, or reward
+behavior changes.
