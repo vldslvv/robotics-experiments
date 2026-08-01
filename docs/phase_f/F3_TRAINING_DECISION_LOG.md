@@ -5912,3 +5912,35 @@ candidate misses its braking, stop-time, and endpoint parity limits, while all
 stop time but trades braking to 5.526 mm. The first unresolved tighter boundary
 is therefore the reference-specific braking/stop tradeoff; it does not block
 the official acceptance or downstream policy training.
+
+### 140. Separate wide discovery from deterministic reproduction
+
+Date: 2026-08-01.
+
+Fresh controller-artifact run `20260801T125100Z` measured the reworked search
+and publication pipeline. It evaluated 3,098 unique candidates in 41 persistent
+GPU batches over 735.5 seconds, averaging 27.7% GPU utilization and 4.21 useful
+candidates per second. This improved useful throughput over the preceding
+scratch sweep's 3.93 candidates per second. Exact and effective candidate
+deduplication, compact streaming, persistent workers, and coarse-to-fine beam
+search are retained; sequential controller dynamics remain the measured GPU
+bottleneck.
+
+Selected candidate 3,057 passed all seven offline gates with 4.039 mm braking
+error, 0.003309 m/s residual speed, 0.06 s stop-time error, 5.019% worst-axis
+NRMSE, 3.991% yaw NRMSE, 2.942 degrees heading error, and 3.725 mm endpoint
+error. It narrowly and deterministically failed the authoritative live hover
+gate at 0.104 m against the 0.100 m limit. Another offline-passing candidate,
+219, failed live hover at 0.109 m. Beam pruning had retained only horizontal
+velocity gain 1.7 among the 2,519 candidates that passed every offline gate,
+so ranking another archived candidate cannot recover the established live
+basin.
+
+The controller from scratch-accepted run `20260801T115600Z` remains the
+complete boundary result: all seven offline gates pass, and live acceptance is
+0.094 m hover, 0.027 m goto, with ready handoff at 0.463 m. The next comparison
+generation makes those exact settings the declarative base and evaluates one
+candidate against a fresh capture. Wide and targeted sweeps remain the
+discovery workflow after a controller, plant, probe, metric, or gate change;
+once the complete boundary is established, reproduction should verify it
+directly rather than repeatedly rediscover it through lossy beam pruning.
