@@ -5839,3 +5839,36 @@ midpoint refinement levels. The all-axis feed-forward range is included because
 the preceding broad campaigns measured it as the braking/residual crossing.
 The hypothesis is that the targeted sweep will preserve complete live
 acceptance while reducing braking toward the accepted-v6 parity envelope.
+
+### 138. Reject a targeted run at the fresh reference boundary
+
+Date: 2026-08-01.
+
+Fresh run `20260801T112831Z` completed all 11 reference profiles and its
+actuator audit, then evaluated 3,042 unique candidates in 40 GPU batches. The
+search attempted 4,258 settings, removed 1,216 exact duplicates, and skipped a
+fixed-point pass. Sweep time was 788.2 seconds, 41.5% shorter than the preceding
+1,346.6-second broad sweep. Average GPU utilization increased from 25.4% to
+27.0%; deterministic controller dynamics remained the measured bottleneck.
+
+No candidate passed every advisory gate. Candidate 2,777 was selected with one
+failure: its 9.712 mm braking-distance error exceeded the 5 mm limit. Across
+the archive, 1,274 candidates failed one gate, 1,313 failed two, 383 failed
+three, and 72 failed four. The minimum braking error was 7.174 mm and carried a
+0.20 s stop-time error, so no unevaluated ranking choice could satisfy the
+registered limits.
+
+This is a reference-capture regression rather than evidence to expand the
+live-stable controller. The identical mandatory base moved from 4.582 mm
+braking and 0.06 s stop-time error on `20260801T100929Z` to 8.525 mm and 0.20 s
+on this capture. The selected candidate's other six metrics passed. Reopening
+controller ranges would route a plant/reference change into gains and would
+also discard the independently verified live basin.
+
+The next attempt introduces no controller change. A fresh reference is first
+scored against the definition-identical target archive as a diagnostic cache
+preflight. If no candidate passes, another reference is captured without
+spending a 13-minute target sweep. When a reference admits a passing basin, the
+target cache is discarded and the complete target sweep is recomputed in that
+same run directory before publication. This preserves final scratch evidence
+while avoiding repeated deterministic GPU work for rejected PX4 captures.
