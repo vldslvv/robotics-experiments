@@ -6110,3 +6110,22 @@ Checkpoint 230 is the strongest evidenced refinement source: it achieved
 existing 50-iteration fixed `1e-6`, 0.01-noise, zero-entropy recipe. This tests
 whether low-rate optimization can convert safe timeouts into completion without
 starting from the terminal actor's collision behavior.
+
+### 149. Continue the collision-free low-rate policy frontier
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T153849Z.333079` initialized from scratch checkpoint
+230 and completed the existing 50-iteration fixed `1e-6` recipe. Held-out
+success increased steadily while collision remained absent. Selection chose
+checkpoint 49 at 80.0% success, zero collisions and flight failures, 20.0%
+timeout, and score -0.986676. Independent evaluation reproduced those rates
+with 0.408 m mean closest range and 0.384 m minimum closest range. It therefore
+passed the collision and flight-failure gates but rejected success and range
+undershoot.
+
+This is material progress from the 37.0%-success collision-free source, and
+the last checkpoint remains the run's strongest result. Continue the same
+actor-only recipe from checkpoint 49. Do not change reward, controller,
+observation, action, or PPO parameters; the next run tests whether the measured
+safe completion slope reaches acceptance before contact behavior appears.
