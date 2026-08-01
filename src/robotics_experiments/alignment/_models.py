@@ -96,6 +96,7 @@ class SearchSpec:
     passes_per_stage: int
     refinement_levels: int = 0
     min_refinement_survivors: int = 2
+    initial_settings: tuple[ControllerSettings, ...] = ()
 
 
 @dataclass(frozen=True)

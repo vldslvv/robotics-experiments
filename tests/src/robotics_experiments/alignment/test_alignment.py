@@ -282,6 +282,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 2
+    assert len(target.search.initial_settings) == 3
+    assert target.search.initial_settings[1].command_delay_s == pytest.approx(0.06)
+    assert target.search.initial_settings[1].thruster_max_thrust_rate_nps == 500.0
     kff_rate = next(parameter for parameter in target.parameters if parameter.field == "kff_rate")
     assert (0.047, 0.047, 0.047) in kff_rate.candidates
     assert [parameter.field for parameter in target.parameters[5:8]] == [
@@ -614,6 +617,35 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
 
     assert outcome.selected.settings.command_delay_s == 1.0
     assert outcome.selected.settings.max_tilt_cmd_deg == 40.0
+
+
+def test_coarse_to_fine_search_expands_each_initial_setting() -> None:
+    base = _settings(delay=0.0)
+    seed = replace(base, command_delay_s=0.1, velocity_filter_hz=20.0)
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_BatchEvaluator(),
+            parameters=(ParameterSpec("max_tilt_cmd_deg", 1, (40.0,)),),
+        ),
+        base_settings=base,
+        search=SearchSpec(
+            strategy="coarse-to-fine-beam-v3",
+            beam_width=8,
+            passes_per_stage=1,
+            initial_settings=(seed,),
+        ),
+    )
+    reference_traces = _response_traces(profiles=target.probes, settings=base)
+
+    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+
+    assert any(
+        score.settings.command_delay_s == 0.1
+        and score.settings.velocity_filter_hz == 20.0
+        and score.settings.max_tilt_cmd_deg == 40.0
+        for score in outcome.candidate_scores
+    )
 
 
 @pytest.mark.parametrize("indent", [None, 2])

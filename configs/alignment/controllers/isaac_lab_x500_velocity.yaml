@@ -61,6 +61,43 @@ search:
   passes_per_stage: 1
   refinement_levels: 2
   min_refinement_survivors: 2
+  # Complete proven basins remain eligible on every fresh PX4 capture. Each
+  # entry is a partial override of the mandatory base settings above.
+  initial_settings:
+    # One-percent strict-parity frontier from run 20260801T074503Z.
+    - horizontal_velocity_error_gain_scale: 1.0714285715
+      horizontal_velocity_error_gain_full_mps: 0.4
+      velocity_filter_hz: 8.75
+      velocity_derivative_filter_hz: 3.75
+      hover_thrust_normalized: 0.58375
+      attitude_yaw_weight: 0.425
+      kff_rate: [0.0375, 0.0375, 0.0375]
+    # Accepted v6 frontier.
+    - command_delay_s: 0.06
+      horizontal_velocity_error_gain_scale: 1.285714286
+      horizontal_velocity_error_gain_start_mps: 0.1
+      horizontal_velocity_error_gain_full_mps: 0.25
+      kd_vel: [0.375, 0.3, 0.0]
+      velocity_filter_hz: 10.0
+      velocity_derivative_filter_hz: 7.5
+      velocity_integral_limit_mps2: [1.0, 1.0, 2.0]
+      hover_thrust_normalized: 0.56
+      attitude_yaw_weight: 0.5
+      kd_rate: [0.003, 0.003, 0.0]
+      kff_rate: [0.0, 0.0, 0.025]
+      rate_derivative_filter_hz: 30.0
+      rate_integral_limit_nm: [0.45, 0.45, 0.45]
+      thruster_tau_inc_s: 0.04
+      thruster_tau_dec_s: 0.02
+      thruster_max_thrust_rate_nps: 500.0
+    # Advisory winner from run 20260801T074503Z.
+    - ki_vel: [0.075, 0.4, 2.0]
+      attitude_yaw_weight: 0.40625
+      kff_rate: [0.0, 0.0, 0.025]
+      rate_derivative_filter_hz: 25.0
+      rate_integral_limit_nm: [0.3, 0.3, 0.3]
+      max_tilt_cmd_deg: 56.25
+      thruster_tau_inc_s: 0.0075
 
 parameters:
   - field: command_delay_s

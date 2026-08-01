@@ -428,7 +428,7 @@ def _boolean(*, value: Any, name: str) -> bool:
     return value
 
 
-def _search(*, value: Any) -> SearchSpec:
+def _search(*, value: Any, base_settings: ControllerSettings) -> SearchSpec:
     search = _object(value=value, name="search")
     strategy = _string(value=search.get("strategy"), name="search.strategy")
     if strategy not in _SEARCH_STRATEGIES:
@@ -439,6 +439,21 @@ def _search(*, value: Any) -> SearchSpec:
     )
     if strategy != "coarse-to-fine-beam-v3" and refinement_levels:
         raise ValueError("search.refinement_levels requires strategy='coarse-to-fine-beam-v3'")
+    raw_initial_settings = search.get("initial_settings", [])
+    if not isinstance(raw_initial_settings, list):
+        raise ValueError("search.initial_settings must be a list")
+    initial_settings = []
+    for index, value in enumerate(raw_initial_settings):
+        name = f"search.initial_settings[{index}]"
+        overrides = _object(value=value, name=name)
+        extra = overrides.keys() - _SETTINGS_FIELDS
+        if extra:
+            raise ValueError(f"{name} has unknown fields {sorted(extra)!r}")
+        merged = asdict(base_settings)
+        merged.update(overrides)
+        initial_settings.append(_settings(value=merged, name=name))
+    if strategy != "coarse-to-fine-beam-v3" and initial_settings:
+        raise ValueError("search.initial_settings requires strategy='coarse-to-fine-beam-v3'")
     return SearchSpec(
         strategy=strategy,
         beam_width=_positive_integer(
@@ -454,6 +469,7 @@ def _search(*, value: Any) -> SearchSpec:
             value=search.get("min_refinement_survivors", 2),
             name="search.min_refinement_survivors",
         ),
+        initial_settings=tuple(initial_settings),
     )
 
 
@@ -862,7 +878,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             value=definition.get("parameters", []),
             base_settings=base_settings,
         ),
-        search=_search(value=definition.get("search")),
+        search=_search(
+            value=definition.get("search"),
+            base_settings=base_settings,
+        ),
         selection_metric=selection_metric,
         publication_metrics=publication_metrics,
         evaluator=_TraceFileEvaluator(backend=backend),

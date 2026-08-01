@@ -207,17 +207,20 @@ inputs only. They must never be included in fit or validation samples.
 The target definition declares each `ParameterSpec` in fixed order with a
 positive stage. The current generation uses `coarse-to-fine-beam-v3`:
 
-1. Start from the complete base setting.
-2. For the current parameter, expand every retained setting with every declared
-   candidate.
+1. Start from the complete base setting plus each declarative partial initial
+   setting. Partial settings are validated as complete base overrides, and all
+   initial values join the refinement grids.
+2. For the current parameter, expand every retained initial or beam setting
+   with every declared candidate.
 3. Deduplicate exact settings, alias schema-equivalent float32 controller keys,
    and cache every evaluation within the run.
 4. Replay uncached settings through bounded, ordered GPU chunks, score them in
    the worker, and retain their original deterministic candidate order.
 5. Reserve a beam slot for the best candidate on each advisory-gate objective,
-then fill the remaining slots by the registered deterministic ranking.
-6. Retain at most 32 settings for exploration while keeping a global archive
-   of every usable candidate, including the protected accepted seed.
+   then fill the remaining slots by the registered deterministic ranking.
+6. Reselect at most 32 exploration settings from the global usable archive
+   after every coordinate. This can restore a proven initial or archived basin
+   when improved objective champions free a beam slot.
 7. After the wide pass, add midpoints only beside retained values or gate
    champions. Repeat once for quarter-step resolution and stop early when the
    effective beam reaches a fixed point.

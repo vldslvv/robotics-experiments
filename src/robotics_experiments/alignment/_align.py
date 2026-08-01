@@ -410,7 +410,10 @@ def _staged_beam_search(
     def evaluate(settings: ControllerSettings, /) -> CandidateScore:
         return evaluate_many((settings,))[0]
 
-    retained = (target.base_settings,)
+    initial_settings = _deduplicate_settings(
+        [target.base_settings, *target.search.initial_settings]
+    )
+    retained = initial_settings
 
     def retain(
         scores: list[CandidateScore],
@@ -509,10 +512,18 @@ def _staged_beam_search(
             usable = [score for score in scores_by_settings.values() if score.usable]
         retained = retain(usable)
 
-    evaluate(target.base_settings)
+    initial_usable = [score for score in evaluate_many(initial_settings) if score.usable]
+    if not initial_usable:
+        raise RuntimeError("every initial alignment setting was unusable")
+    retained = tuple(score.settings for score in initial_usable)
     grids = {
         parameter.field: tuple(
-            dict.fromkeys((*parameter.candidates, getattr(target.base_settings, parameter.field)))
+            dict.fromkeys(
+                (
+                    *parameter.candidates,
+                    *(getattr(settings, parameter.field) for settings in initial_settings),
+                )
+            )
         )
         for parameter in target.parameters
     }
