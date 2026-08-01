@@ -6038,3 +6038,26 @@ base. It retains the previously live-accepted horizontal gain scale and
 derivative gain while changing delay, low-speed schedule bounds, horizontal
 integral gain, and derivative filtering. Publication still requires a fresh
 capture, all seven offline gates, and a repeat of the authoritative live gate.
+
+### 145. Preserve the reference-state reproducibility limitation
+
+Date: 2026-08-01.
+
+Three direct v40 publication runs used fresh PX4 captures and the fixed
+candidate 947 controller. Runs `20260801T141400Z`, `20260801T141754Z`, and
+`20260801T142134Z` all rejected the reference-side braking/stop boundary. Their
+braking errors were 9.160, 7.969, and 7.899 mm; stop-time errors were 0.64,
+0.54, and 0.54 s. The third run also missed endpoint at 13.120 mm. The target
+controller did not change, while captured profile starts and initial PX4
+controller state did. Repeating unchanged captures is no longer useful.
+
+The preserved v38 capture remains a valid fresh reference for the same PX4
+definition, experiment, plant, probe suite, and images. Candidate 947 passed
+all seven gates against that reference and independently passed the live gate.
+The next publication replay uses the current v40 declarative controller and
+recomputes its target trace against that preserved reference from the clean
+source commit. This does not claim that PX4 capture state is reproducible; the
+failed v40 runs remain evidence that tighter future acceptance needs explicit
+reference controller-state initialization or multi-capture robustness. The
+current artifact remains acceptable only after its recomputed seven-gate and
+authoritative live checks both pass.
