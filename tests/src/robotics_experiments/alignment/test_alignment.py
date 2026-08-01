@@ -293,12 +293,21 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
     assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
-    assert target.search.strategy == "staged-beam-v2"
-    assert target.search.beam_width == 1
+    assert target.search.strategy == "coarse-to-fine-beam-v3"
+    assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
-    assert target.search.refinement_levels == 0
+    assert target.search.refinement_levels == 1
     assert target.search.initial_settings == ()
-    assert target.parameters == ()
+    assert [parameter.field for parameter in target.parameters] == [
+        "command_delay_s",
+        "velocity_derivative_filter_hz",
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
+        "kd_vel",
+        "ki_vel",
+        "velocity_integral_limit_mps2",
+    ]
     extended = replace(
         target,
         parameters=(
