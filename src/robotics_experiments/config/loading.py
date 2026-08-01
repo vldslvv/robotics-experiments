@@ -338,6 +338,11 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
             "rl.press.handoff.switch_range_min_m must exceed rl.press.goal.range_max_m"
         )
 
+    if (
+        not math.isfinite(press.reward.range_barrier_margin_m)
+        or press.reward.range_barrier_margin_m <= 0.0
+    ):
+        raise ValueError("rl.press.reward.range_barrier_margin_m must be finite and positive")
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)

@@ -70,9 +70,10 @@ class PressApproachInput(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The nine signed per-step Stage 1 reward contributions."""
+    """The ten signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
+    range_barrier: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
     upright_error: ArrayT
@@ -87,6 +88,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         """Sum every named reward contribution."""
         return (
             self.range_progress
+            + self.range_barrier
             + self.alignment_error
             + self.velocity_tracking
             + self.upright_error
@@ -341,6 +343,17 @@ def step_press_approach(
     rewards = PressApproachRewardTerms(
         range_progress=(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
+        ),
+        range_barrier=(
+            -reward_cfg.range_barrier_weight
+            * _square(
+                _clip(
+                    (goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m - current_range)
+                    / reward_cfg.range_barrier_margin_m,
+                    0.0,
+                    float("inf"),
+                )
+            )
         ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
         velocity_tracking=(

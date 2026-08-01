@@ -247,6 +247,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
     assert reward.range_progress_weight == 50.0
+    assert reward.range_barrier_margin_m == 0.02
+    assert reward.range_barrier_weight == 10.0
     assert reward.velocity_tracking_weight == 100.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0
@@ -456,6 +458,10 @@ def test_task_policy_validation(tmp_path, override, match):
         (
             {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},
             "finite and non-negative",
+        ),
+        (
+            {"rl": {"press": {"reward": {"range_barrier_margin_m": 0.0}}}},
+            "range_barrier_margin_m must be finite and positive",
         ),
         (
             {

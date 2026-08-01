@@ -147,9 +147,10 @@ and lateral speed limits, initial angular velocity is sampled inside the shared
 0.05 rad/s ball, attitude is upright, previous action is zero, and mode is
 pre-contact. Reset owns no independent entry-velocity tunables.
 
-`PressApproachRewardTerms` has exactly nine signed contributions:
+`PressApproachRewardTerms` has exactly ten signed contributions:
 
 - `range_progress = 50 * (previous_range - current_range)`.
+- `range_barrier = -10 * max(0, (0.42 - range) / 0.02)^2`.
 - `alignment_error = -50 * ||relative_yz||^2`.
 - `velocity_tracking = -100 * ||measured_velocity - target_velocity||^2`.
 - `upright_error = -5 * (1 - clamped_body_z_alignment)^2`.
@@ -166,6 +167,8 @@ to 0.10 m/s. This target teaches braking, small controlled retreat after range
 undershoot, and simultaneous alignment without encoding a task-specific actor.
 Collision overrides success and the ordinary flight-failure penalty;
 simultaneous body and pusher collision produces one collision reward penalty.
+The range barrier begins at the upper goal boundary and provides a direct
+braking signal before the unchanged 0.40 m lower acceptance boundary.
 `PressApproachTerminationFlags` still retains both collision sources for
 diagnostics. `Reward/` TensorBoard scalars enumerate every contribution plus
 `total`. `Press/` reports completed episodes, success, combined collision,

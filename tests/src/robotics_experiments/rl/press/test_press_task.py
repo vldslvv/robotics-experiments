@@ -43,6 +43,8 @@ _GOAL = PressApproachGoalConfig(
 )
 _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
+    range_barrier_margin_m=0.02,
+    range_barrier_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
     upright_error_weight=5.0,
@@ -108,9 +110,10 @@ def _step(*, state=None, sample=None):
     )
 
 
-def test_reward_record_has_exactly_nine_signed_terms() -> None:
+def test_reward_record_has_exactly_ten_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
+        "range_barrier",
         "alignment_error",
         "velocity_tracking",
         "upright_error",
@@ -147,6 +150,18 @@ def test_range_progress_is_signed() -> None:
     farther = _step(sample=_sample(range_m=0.52, closing_speed_mps=0.08))
     assert closer.rewards.range_progress[0] == pytest.approx(1.0)
     assert farther.rewards.range_progress[0] == pytest.approx(-1.0)
+
+
+@pytest.mark.parametrize(
+    ("range_m", "expected"),
+    [(0.43, 0.0), (0.42, 0.0), (0.415, -0.625), (0.41, -2.5), (0.40, -10.0)],
+)
+def test_range_barrier_penalizes_approach_to_lower_boundary(
+    range_m: float,
+    expected: float,
+) -> None:
+    result = _step(sample=_sample(range_m=range_m))
+    assert result.rewards.range_barrier[0] == pytest.approx(expected)
 
 
 def test_alignment_and_upright_errors_are_quadratic() -> None:

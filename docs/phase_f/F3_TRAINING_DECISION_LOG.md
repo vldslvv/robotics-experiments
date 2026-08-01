@@ -6202,3 +6202,27 @@ boundary signal still leaves the same approximately 0.3848 m floor, inspect
 per-episode action, velocity, range, and contact traces before changing another
 training parameter; the invariant floor would then point to the physical
 contact/range seam rather than PPO optimization.
+
+### 152. Add a direct pre-boundary range signal
+
+Date: 2026-08-01.
+
+The velocity-reference experiment left the minimum range unchanged because the
+Stage 1 reward still has no term that directly penalizes crossing the lower
+range boundary. Add a normalized quadratic `range_barrier` contribution. It is
+zero at and above `goal.range_min_m + range_barrier_margin_m`, and below that
+point applies
+`-range_barrier_weight * ((threshold - range) / margin)^2`. Configure the
+margin as 0.02 m and the weight as 10.0, so the signal begins at the current
+0.42 m upper goal boundary and grows before the unchanged 0.40 m acceptance
+boundary.
+
+Keep the accepted controller, observation, action, goal, termination,
+acceptance thresholds, earlier-braking velocity reference, and PPO recipe
+unchanged. Continue actor-only from collision-free run
+`20260801T155548Z.340126` checkpoint 40. This source already has 97.7% held-out
+success and no collision under the pre-barrier evaluator, while avoiding the
+later actors' contact behavior. The new reward term must be implemented once in
+the pure NumPy/Torch transition, exposed in training and evaluation reward
+diagnostics, and covered by exact-value, parity, and config-validation tests
+before execution.

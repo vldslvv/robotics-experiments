@@ -57,6 +57,7 @@ _PAD_PRIM_PATH = "/World/envs/env_.*/Drone/pusher/pad"
 _SWITCH_ASSET_ROT_WXYZ = (SQRT_HALF, 0.0, 0.0, -SQRT_HALF)
 _TRAINING_REWARD_TERMS = (
     "range_progress",
+    "range_barrier",
     "alignment_error",
     "velocity_tracking",
     "upright_error",

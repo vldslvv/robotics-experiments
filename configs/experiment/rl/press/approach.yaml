@@ -50,6 +50,11 @@ goal:
 # documented sign to each contribution.
 reward:
   range_progress_weight: 50.0
+  # Penalize the normalized squared distance below the upper goal boundary.
+  # This supplies a direct pre-boundary braking signal while leaving the goal
+  # and acceptance range unchanged.
+  range_barrier_margin_m: 0.02
+  range_barrier_weight: 10.0
   alignment_error_weight: 50.0
   velocity_tracking_weight: 100.0
   upright_error_weight: 5.0
