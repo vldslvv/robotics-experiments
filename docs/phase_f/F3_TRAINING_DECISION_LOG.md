@@ -6016,3 +6016,25 @@ heading error, and 2.813 mm endpoint error. The next direct reproduction uses
 candidate 911 as its declarative base. This keeps the proportional, integral,
 rate, allocator, and actuator boundaries at the controller that held the live
 hover gate with 6 mm margin.
+
+### 144. Reject candidate 911 and accept candidate 947 live
+
+Date: 2026-08-01.
+
+Fresh direct run `20260801T140323Z` rejected candidate 911 with 5.670 mm
+braking error, 0.26 s stop-time error, and 19.912 mm endpoint error. Its live
+diagnostic also rejected hover at 0.102 m. The candidate therefore neither
+reproduces across current references nor preserves the live margin.
+
+Candidate 947 from the completed v38 archive was then evaluated live without a
+new grid sweep. It had already passed all seven offline gates on fresh run
+`20260801T134626Z`: 4.809 mm braking error, 0.001846 m/s residual speed, 0.10 s
+stop-time error, 5.091% worst-axis NRMSE, 3.736% yaw NRMSE, 2.915 degrees
+heading error, and 4.825 mm endpoint error. Its live diagnostic passed with a
+0.096 m hover window, 0.037 m goto window, and ready handoff at 0.457 m.
+
+The next controller definition uses candidate 947 as the fixed declarative
+base. It retains the previously live-accepted horizontal gain scale and
+derivative gain while changing delay, low-speed schedule bounds, horizontal
+integral gain, and derivative filtering. Publication still requires a fresh
+capture, all seven offline gates, and a repeat of the authoritative live gate.
