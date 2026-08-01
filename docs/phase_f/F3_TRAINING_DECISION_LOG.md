@@ -5708,3 +5708,42 @@ because it retains 0.157 mm endpoint margin instead of 0.047 mm while keeping
 nearly identical braking and residual values. The attempt hypothesis is that
 one fine feed-forward value will reduce braking below 3.692 mm before residual
 exceeds 0.002993 m/s, yielding all seven parity limits on a fresh capture.
+
+### 134. Reject single-frontier targeting after cross-capture regression
+
+Date: 2026-08-01.
+
+Fresh run `20260801T082722Z` captured all 11 profiles and passed the actuator
+audit with no failures. The worst normalized motor RMSE was 0.000341 and the
+worst collective RMSE was 0.01236 N. It evaluated 7,837 candidates in 80
+batches and 1,707.2 seconds, submitting 10,240 physics slots with 2,403 padded
+slots. Throughput was 4.591 candidates per second, still 17.8% above the old
+3.898 baseline but below the preceding run because this base generated more
+small refinement tails. GPU utilization averaged 25.2% with 4,005 MiB peak
+memory.
+
+Selected candidate 7,825 passed all seven advisory gates, including 2.218 mm
+braking, 0.00241 m/s residual speed, 0.10 s stop-time error, 8.024% worst-axis
+NRMSE, 3.684% yaw NRMSE, 2.896 degrees heading error, and 6.578 mm endpoint
+error. No candidate met strict parity. Every usable candidate missed at least
+two strict gates; the closest missed braking and worst-axis by 42.2% and 37.5%.
+The controller-boundary replay remained diagnostic-only and failed in the same
+known vertical, yaw, combined, and stability regions as accepted v6.
+
+The feed-forward crossing did not reproduce because a single mandatory base
+changed which complete frontiers reached later coordinates. More importantly,
+the identical candidate 5,763 settings changed from 3.771 mm braking, 0.04 s
+stop-time error, and 2.820% worst-axis NRMSE on run `20260801T074503Z` to 8.117
+mm, 0.50 s, and 5.550% on the new PX4 capture. The validation approach-brake
+reference also changed from 106 samples over 5.24 s to 105 samples over 5.20 s,
+while other profile initial velocities shifted within the existing stability
+limit. The search must therefore cover multiple complete proven basins on each
+fresh capture rather than replace one mandatory base with the latest frontier.
+
+The next structural change adds declarative partial seed settings to
+`coarse-to-fine-beam-v3`. The base plus each seed is evaluated and expanded at
+the first coordinate, and seed values join the refinement grids. Seeds cover
+accepted v6, the one-percent candidate 5,554 frontier, and advisory winner
+8,039 from the preceding fresh capture. The existing base remains candidate
+5,763. This is a search-robustness change only; controller, plant, probe,
+metric, gate, policy, and reward behavior remain unchanged.
