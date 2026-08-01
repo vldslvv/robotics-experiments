@@ -1,5 +1,6 @@
 alignment_id: x500-velocity-px4-v7
 controller_id: isaac-lab-x500-velocity-v35
+controller_schema_version: 6
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -52,12 +53,14 @@ settings:
   thruster_max_thrust_rate_nps: 500.0
 
 search:
-  strategy: staged-beam-v2
+  strategy: coarse-to-fine-beam-v3
   # The accepted v6 settings are the mandatory base evaluation. The expanded
   # beam and third pass search for a combination that retains acceptance across
   # an independent fresh PX4 capture.
-  beam_width: 64
-  passes_per_stage: 3
+  beam_width: 32
+  passes_per_stage: 1
+  refinement_levels: 2
+  min_refinement_survivors: 2
 
 parameters:
   - field: command_delay_s

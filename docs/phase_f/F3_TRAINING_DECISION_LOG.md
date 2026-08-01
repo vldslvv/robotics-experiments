@@ -5522,3 +5522,42 @@ behavior, fresh-evidence requirement, and every acceptance gate remain
 unchanged. A host regression test verifies the streamed artifact contract. The
 retry receives a new run ID and fresh PX4 capture from the serializer-fix source
 commit; the failed run remains diagnostic evidence only.
+
+### 128. Replace maximum-scene repetition with bounded coarse-to-fine search
+
+Date: 2026-08-01.
+
+The completed v7 sweep established a new performance baseline: 21,058 unique
+candidates required 65 useful GPU batches and approximately 90.5 minutes while
+averaging 24.2% GPU utilization. Widening the beam to 64 and repeating every
+stage three times increased coverage, but it also sized one fixed Isaac scene
+for the largest expansion and padded every smaller expansion to that maximum.
+The earlier three-worker and replicated-scene measurements remain rejected
+because they reduced useful candidates per second.
+
+The next implementation separates fixed scene capacity from beam width and
+chunks large expansions through one persistent worker. It benchmarks 128, 256,
+384, and 512 candidate settings on one identical workload, selects the highest
+useful throughput, and prefers the smaller scene when results are within five
+percent. Candidate scoring moves into the worker and traces stream to run-local
+spools so multiprocessing IPC and coordinator memory contain only compact
+metrics.
+
+Search becomes `coarse-to-fine-beam-v3`: one committed wide pass with a
+32-setting multi-objective beam, followed by at most two midpoint refinements
+beside retained values and gate champions. The second level supplies
+quarter-step resolution only where the first refinement survives. Exact and
+schema-effective caches remain run-local, stages stop at an unchanged
+effective beam, and final selection uses the global evaluated archive so the
+accepted base seed cannot be discarded. Vector candidates refine automatically
+only across one-axis intervals. Range expansion remains evidence-routed and
+declarative.
+
+Before a new accepted run, host tests must prove deterministic selection and
+metric equivalence for batching, aliases, fixed points, failures, and ties. The
+capacity benchmark and the first fresh sweep will report submitted candidates,
+padded slots, batches saved, trace-spool overhead, useful throughput, GPU
+telemetry, generated intervals, and parent values. The optimization goal is at
+least 20% higher useful throughput than completed v7 and at least 40% less
+padded physics work; missing either goal authorizes only profiler-supported
+follow-up work.

@@ -94,6 +94,8 @@ class SearchSpec:
     strategy: str
     beam_width: int
     passes_per_stage: int
+    refinement_levels: int = 0
+    min_refinement_survivors: int = 2
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,7 @@ class ControllerDefinition:
 
     alignment_id: str
     controller_id: str
+    controller_schema_version: int
     backend: str
     experiment_config: str
     vehicle: str

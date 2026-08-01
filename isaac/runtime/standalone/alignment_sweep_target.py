@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 import multiprocessing
 import os
 import queue
+import re
 import statistics
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -23,9 +26,12 @@ import torch
 from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.alignment._align import _staged_beam_search
 from robotics_experiments.alignment._io import _trace
+from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
+    CandidateScore,
     ControllerDefinition,
     ControllerSettings,
+    MetricResult,
     ProbeTrace,
 )
 from robotics_experiments.config import ExperimentConfig, load_config
@@ -33,7 +39,9 @@ from robotics_experiments.config import ExperimentConfig, load_config
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _TARGET_ENV = "ALIGNMENT_TARGET"
 _RUN_DIR_ENV = "ROBOTICS_ALIGNMENT_RUN_DIR"
+_CAPACITY_BENCHMARK_ENV = "ALIGNMENT_CAPACITY_BENCHMARK"
 _DEFAULT_TARGET = "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
+_SPOOL_ENTRY = re.compile(rb'^\{"fingerprint":"([0-9a-f]{64})","traces":')
 
 
 def _report(message: str) -> None:
@@ -104,6 +112,88 @@ def _write_target_candidates(
         raise
 
 
+def _write_spooled_trace(
+    *,
+    stream,
+    settings: ControllerSettings,
+    traces: list[dict[str, Any]],
+) -> None:
+    stream.write('{"fingerprint":')
+    json.dump(_settings_fingerprint(settings), stream, separators=(",", ":"))
+    stream.write(',"traces":')
+    json.dump(traces, stream, allow_nan=False, separators=(",", ":"))
+    stream.write("}\n")
+
+
+def _merge_target_candidate_spools(
+    *,
+    path: Path,
+    controller_id: str,
+    definition_fingerprint: str,
+    image: str,
+    scores: tuple[CandidateScore, ...],
+    trace_sources: Mapping[ControllerSettings, ControllerSettings],
+    spool_paths: tuple[Path, ...],
+) -> None:
+    offsets: dict[str, tuple[Path, int, int, int]] = {}
+    for spool_path in spool_paths:
+        with spool_path.open("rb") as spool:
+            while True:
+                start = spool.tell()
+                line = spool.readline()
+                if not line:
+                    break
+                match = _SPOOL_ENTRY.match(line)
+                if match is None or not line.endswith(b"}\n"):
+                    raise RuntimeError(f"malformed alignment trace spool {spool_path}")
+                key = match.group(1).decode()
+                if key in offsets:
+                    raise RuntimeError(f"duplicate alignment trace spool key {key}")
+                offsets[key] = (spool_path, start, len(line), match.end())
+
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    temporary_path.unlink(missing_ok=True)
+    try:
+        with temporary_path.open("w", encoding="utf-8") as stream:
+            stream.write('{"schema_version":3,"controller_id":')
+            json.dump(controller_id, stream, separators=(",", ":"))
+            stream.write(',"definition_fingerprint":')
+            json.dump(definition_fingerprint, stream, separators=(",", ":"))
+            stream.write(',"image":')
+            json.dump(image, stream, separators=(",", ":"))
+            stream.write(',"candidates":{')
+            first = True
+            failures = {}
+            for score in scores:
+                key = _settings_fingerprint(score.settings)
+                if not score.usable:
+                    failures[key] = score.failure_reason
+                    continue
+                source_key = _settings_fingerprint(trace_sources[score.settings])
+                try:
+                    spool_path, start, length, value_start = offsets[source_key]
+                except KeyError as exc:
+                    raise RuntimeError(f"alignment trace spool omitted key {source_key}") from exc
+                with spool_path.open("rb") as spool:
+                    spool.seek(start)
+                    line = spool.read(length)
+                if not first:
+                    stream.write(",")
+                first = False
+                json.dump(key, stream, separators=(",", ":"))
+                stream.write(":")
+                stream.write(line[value_start:-2].decode())
+            stream.write('},"failures":')
+            json.dump(failures, stream, allow_nan=False, separators=(",", ":"))
+            stream.write("}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 def _partition_settings(
     settings: tuple[ControllerSettings, ...],
     worker_count: int,
@@ -120,12 +210,22 @@ def _partition_settings(
     return tuple(shards)
 
 
+def _chunk_settings(
+    settings: tuple[ControllerSettings, ...],
+    capacity: int,
+    /,
+) -> tuple[tuple[ControllerSettings, ...], ...]:
+    return tuple(
+        settings[offset : offset + capacity] for offset in range(0, len(settings), capacity)
+    )
+
+
 def _merge_indexed_results(
     *,
     result_count: int,
-    shards: list[tuple[tuple[int, list[dict[str, Any]] | str], ...]],
-) -> tuple[list[dict[str, Any]] | str, ...]:
-    merged: list[list[dict[str, Any]] | str | None] = [None] * result_count
+    shards: list[tuple[tuple[int, MetricResult | str], ...]],
+) -> tuple[MetricResult | str, ...]:
+    merged: list[MetricResult | str | None] = [None] * result_count
     for shard in shards:
         for index, result in shard:
             if merged[index] is not None:
@@ -195,9 +295,13 @@ class _GpuSampler:
         self,
         *,
         worker_count: int,
+        candidate_capacity: int,
         evaluations: int,
         batches: int,
+        candidate_slots: int,
         elapsed_s: float,
+        search_statistics: Mapping[str, int],
+        generated_refinements: int,
     ) -> None:
         self._active.clear()
         self._stop.set()
@@ -209,6 +313,7 @@ class _GpuSampler:
         payload = {
             "schema_version": 1,
             "worker_count": worker_count,
+            "candidate_capacity": candidate_capacity,
             "target_utilization_percent": self._target_percent,
             "sample_interval_s": self._interval_s,
             "sample_count": len(self._samples),
@@ -222,6 +327,10 @@ class _GpuSampler:
                 max(sample[2] for sample in self._samples) if self._samples else None
             ),
             "candidate_evaluations": evaluations,
+            "candidate_slots": candidate_slots,
+            "padded_candidate_slots": candidate_slots - evaluations,
+            "search": dict(search_statistics),
+            "generated_refinements": generated_refinements,
             "gpu_batches": batches,
             "elapsed_s": elapsed_s,
             "candidates_per_second": evaluations / elapsed_s if elapsed_s > 0.0 else 0.0,
@@ -662,6 +771,7 @@ def _worker_main(
     target_path: str,
     reference_traces: list[dict[str, Any]],
     candidate_capacity: int,
+    spool_dir: str,
     task_queue,
     result_queue,
 ) -> None:
@@ -674,39 +784,59 @@ def _worker_main(
         simulation_app = app_launcher.app
         config = load_config(config_path)
         target = load_controller_definition(target_path)
+        parsed_reference = tuple(
+            _trace(value=trace, name=f"reference[{index}]")
+            for index, trace in enumerate(reference_traces)
+        )
+        score_metric = metric(name=target.selection_metric)
         env = _make_env(
             config=config,
             num_envs=candidate_capacity * len(reference_traces),
             settings=target.base_settings,
         )
-        result_queue.put(("ready", worker_index, None))
-        while True:
-            task = task_queue.get()
-            if task is None:
-                break
-            batch_id, indexed_settings = task
-            settings = tuple(setting for _index, setting in indexed_settings)
-            raw = _candidate_trace_batch(
-                env=env,
-                config=config,
-                settings=settings,
-                candidate_capacity=candidate_capacity,
-                reference_traces=reference_traces,
-                vehicle_label=target.vehicle,
-            )
-            result_queue.put(
-                (
-                    "result",
-                    worker_index,
-                    (
-                        batch_id,
-                        tuple(
-                            (index, result)
-                            for (index, _setting), result in zip(indexed_settings, raw, strict=True)
-                        ),
-                    ),
+        spool_path = Path(spool_dir) / f"worker-{worker_index}.jsonl"
+        with spool_path.open("x", encoding="utf-8") as spool:
+            result_queue.put(("ready", worker_index, None))
+            while True:
+                task = task_queue.get()
+                if task is None:
+                    break
+                batch_id, indexed_settings = task
+                settings = tuple(setting for _index, setting in indexed_settings)
+                raw = _candidate_trace_batch(
+                    env=env,
+                    config=config,
+                    settings=settings,
+                    candidate_capacity=candidate_capacity,
+                    reference_traces=reference_traces,
+                    vehicle_label=target.vehicle,
                 )
-            )
+                scored = []
+                for (index, setting), result in zip(indexed_settings, raw, strict=True):
+                    if isinstance(result, str):
+                        scored.append((index, result))
+                        continue
+                    try:
+                        parsed = tuple(
+                            _trace(
+                                value=trace,
+                                name=f"worker[{worker_index}][{index}][{trace_index}]",
+                            )
+                            for trace_index, trace in enumerate(result)
+                        )
+                        score = score_metric(parsed_reference, parsed)
+                        _write_spooled_trace(stream=spool, settings=setting, traces=result)
+                        scored.append((index, score))
+                    except Exception as exc:  # noqa: BLE001 - candidate-local scoring failure
+                        scored.append((index, str(exc)))
+                spool.flush()
+                result_queue.put(
+                    (
+                        "result",
+                        worker_index,
+                        (batch_id, tuple(scored)),
+                    )
+                )
     except BaseException as exc:
         result_queue.put(("error", worker_index, f"{type(exc).__name__}: {exc}"))
     finally:
@@ -725,9 +855,13 @@ class _WorkerPool:
         reference_traces: list[dict[str, Any]],
         worker_count: int,
         candidate_capacity: int,
+        spool_dir: Path,
     ) -> None:
         context = multiprocessing.get_context("spawn")
         self.worker_count = worker_count
+        self.candidate_capacity = candidate_capacity
+        self.physical_batches = 0
+        self.candidate_slots = 0
         self._result_queue = context.Queue()
         self._task_queues = [context.Queue() for _index in range(worker_count)]
         self._processes = [
@@ -739,6 +873,7 @@ class _WorkerPool:
                     "target_path": str(target_path),
                     "reference_traces": reference_traces,
                     "candidate_capacity": candidate_capacity,
+                    "spool_dir": str(spool_dir),
                     "task_queue": self._task_queues[index],
                     "result_queue": self._result_queue,
                 },
@@ -754,6 +889,9 @@ class _WorkerPool:
             self.terminate()
             raise
         self._batch_id = 0
+        self.spool_paths = tuple(
+            spool_dir / f"worker-{index}.jsonl" for index in range(worker_count)
+        )
 
     def _receive(self):
         while True:
@@ -782,10 +920,25 @@ class _WorkerPool:
         self,
         settings: tuple[ControllerSettings, ...],
         /,
-    ) -> tuple[list[dict[str, Any]] | str, ...]:
+    ) -> tuple[MetricResult | str, ...]:
+        maximum_round = self.worker_count * self.candidate_capacity
+        merged_results: list[MetricResult | str] = []
+        for chunk in _chunk_settings(settings, maximum_round):
+            merged_results.extend(self._evaluate_round(chunk))
+        return tuple(merged_results)
+
+    def _evaluate_round(
+        self,
+        settings: tuple[ControllerSettings, ...],
+        /,
+    ) -> tuple[MetricResult | str, ...]:
         indexed_shards = _partition_settings(settings, self.worker_count)
+        if any(len(shard) > self.candidate_capacity for shard in indexed_shards):
+            raise RuntimeError("alignment worker shard exceeds fixed candidate capacity")
         batch_id = self._batch_id
         self._batch_id += 1
+        self.physical_batches += 1
+        self.candidate_slots += len(indexed_shards) * self.candidate_capacity
         for worker_index, shard in enumerate(indexed_shards):
             self._task_queues[worker_index].put((batch_id, shard))
         results: list[tuple[tuple[int, list[dict[str, Any]] | str], ...]] = []
@@ -825,6 +978,8 @@ class _WorkerPool:
 
 
 class _LiveEvaluator:
+    _retain_traces = False
+
     def __init__(
         self,
         *,
@@ -834,15 +989,23 @@ class _LiveEvaluator:
         self._pool = pool
         self._sampler = sampler
         self._evaluations = 0
-        self._batches = 0
         self._started_s = time.monotonic()
 
-    def finish_sampling(self) -> None:
+    def finish_sampling(
+        self,
+        *,
+        search_statistics: Mapping[str, int],
+        generated_refinements: int,
+    ) -> None:
         self._sampler.finish(
             worker_count=self._pool.worker_count,
+            candidate_capacity=self._pool.candidate_capacity,
             evaluations=self._evaluations,
-            batches=self._batches,
+            batches=self._pool.physical_batches,
+            candidate_slots=self._pool.candidate_slots,
             elapsed_s=time.monotonic() - self._started_s,
+            search_statistics=search_statistics,
+            generated_refinements=generated_refinements,
         )
 
     def evaluate(
@@ -852,14 +1015,8 @@ class _LiveEvaluator:
         settings: ControllerSettings,
         reference_traces: tuple[ProbeTrace, ...] | None,
     ) -> tuple[ProbeTrace, ...]:
-        result = self.evaluate_batch(
-            definition=definition,
-            settings=(settings,),
-            reference_traces=reference_traces,
-        )[0]
-        if isinstance(result, str):
-            raise RuntimeError(result)
-        return result
+        del definition, settings, reference_traces
+        raise RuntimeError("live alignment evaluation requires scored batching")
 
     def evaluate_batch(
         self,
@@ -868,9 +1025,18 @@ class _LiveEvaluator:
         settings: tuple[ControllerSettings, ...],
         reference_traces: tuple[ProbeTrace, ...] | None,
     ) -> tuple[tuple[ProbeTrace, ...] | str, ...]:
+        del definition, settings, reference_traces
+        raise RuntimeError("live alignment evaluation requires scored batching")
+
+    def evaluate_scored_batch(
+        self,
+        *,
+        definition: ControllerDefinition,
+        settings: tuple[ControllerSettings, ...],
+        reference_traces: tuple[ProbeTrace, ...] | None,
+    ) -> tuple[MetricResult | str, ...]:
         del definition, reference_traces
         self._evaluations += len(settings)
-        self._batches += 1
         self._sampler.set_active(True)
         try:
             raw_results = self._pool.evaluate(settings)
@@ -879,23 +1045,9 @@ class _LiveEvaluator:
         elapsed_s = time.monotonic() - self._started_s
         _report(
             f"alignment target evaluated {self._evaluations} candidates in "
-            f"{self._batches} GPU batches ({elapsed_s:.1f}s)"
+            f"{self._pool.physical_batches} GPU batches ({elapsed_s:.1f}s)"
         )
-        parsed: list[tuple[ProbeTrace, ...] | str] = []
-        for candidate_index, raw_result in enumerate(raw_results):
-            if isinstance(raw_result, str):
-                parsed.append(raw_result)
-                continue
-            parsed.append(
-                tuple(
-                    _trace(
-                        value=raw_trace,
-                        name=f"live_target[{candidate_index}][{trace_index}]",
-                    )
-                    for trace_index, raw_trace in enumerate(raw_result)
-                )
-            )
-        return tuple(parsed)
+        return raw_results
 
 
 def _run(
@@ -914,7 +1066,12 @@ def _run(
         target.search.beam_width * len(parameter.candidates) for parameter in target.parameters
     )
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
-    candidate_capacity = math.ceil(maximum_expansion / worker_count)
+    candidate_capacity = min(
+        config.alignment.execution.candidate_capacity,
+        math.ceil(maximum_expansion / worker_count),
+    )
+    spool_dir = run_dir / ".target-trace-spool"
+    spool_dir.mkdir(parents=False, exist_ok=False)
     sampler = _GpuSampler(
         run_dir=run_dir,
         target_percent=config.alignment.execution.gpu_target_percent,
@@ -926,9 +1083,11 @@ def _run(
         reference_traces=reference_traces,
         worker_count=worker_count,
         candidate_capacity=candidate_capacity,
+        spool_dir=spool_dir,
     )
     sampler.start()
     evaluator = _LiveEvaluator(pool=pool, sampler=sampler)
+    outcome = None
     try:
         live_target = replace(
             target,
@@ -947,35 +1106,164 @@ def _run(
         pool.terminate()
         raise
     finally:
-        evaluator.finish_sampling()
-    failures = {
-        _settings_fingerprint(score.settings): score.failure_reason
-        for score in outcome.candidate_scores
-        if not score.usable
-    }
+        evaluator.finish_sampling(
+            search_statistics={} if outcome is None else outcome.statistics,
+            generated_refinements=(0 if outcome is None else len(outcome.generated_refinements)),
+        )
+    if outcome is None:
+        raise RuntimeError("alignment search completed without an outcome")
     _report(
         f"alignment target search evaluated {len(outcome.candidate_scores)} unique "
         f"candidates; selected {outcome.selected.index}"
     )
-    _write_target_candidates(
+    (run_dir / "search_realization.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "statistics": dict(outcome.statistics),
+                "generated_refinements": list(outcome.generated_refinements),
+            },
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n"
+    )
+    _merge_target_candidate_spools(
         path=run_dir / "target_candidates.json",
-        schema_version=3,
         controller_id=target.controller_id,
         definition_fingerprint=target.definition_fingerprint,
         image=os.environ.get("ISAAC_BENCHMARK_IMAGE", target.image),
-        candidates=outcome.target_traces,
-        failures=failures,
+        scores=outcome.candidate_scores,
+        trace_sources=outcome.trace_sources,
+        spool_paths=pool.spool_paths,
+    )
+    for spool_path in pool.spool_paths:
+        spool_path.unlink()
+    spool_dir.rmdir()
+
+
+def _benchmark_settings(
+    *,
+    target: ControllerDefinition,
+    count: int,
+) -> tuple[ControllerSettings, ...]:
+    settings = (target.base_settings,)
+    for parameter in target.parameters:
+        settings = tuple(
+            dict.fromkeys(
+                replace(setting, **{parameter.field: candidate})
+                for setting, candidate in itertools.product(settings, parameter.candidates)
+            )
+        )
+        if len(settings) >= count:
+            return settings[:count]
+    if len(settings) < count:
+        raise ValueError(f"alignment definition produces only {len(settings)} benchmark settings")
+    return settings[:count]
+
+
+def _run_capacity_benchmark(
+    *,
+    config: ExperimentConfig,
+    target_path: Path,
+    run_dir: Path,
+) -> None:
+    target = load_controller_definition(target_path)
+    reference_path = run_dir / "reference.json"
+    payload = json.loads(reference_path.read_text())
+    raw_reference = payload.get("traces")
+    if not isinstance(raw_reference, list):
+        raise ValueError(f"{reference_path} has no traces list")
+    reference = tuple(
+        _trace(value=trace, name=f"reference[{index}]") for index, trace in enumerate(raw_reference)
+    )
+    capacities = tuple(config.alignment.execution.candidate_capacity_benchmark)
+    settings = _benchmark_settings(target=target, count=max(capacities))
+    benchmark_dir = run_dir / ".capacity-benchmark"
+    benchmark_dir.mkdir(parents=False, exist_ok=False)
+    results = []
+    for capacity in capacities:
+        capacity_dir = benchmark_dir / str(capacity)
+        capacity_dir.mkdir()
+        spool_dir = capacity_dir / "spool"
+        spool_dir.mkdir()
+        initialization_started = time.monotonic()
+        pool = _WorkerPool(
+            config_path=os.environ[_CONFIG_PATH_ENV],
+            target_path=target_path,
+            reference_traces=raw_reference,
+            worker_count=1,
+            candidate_capacity=capacity,
+            spool_dir=spool_dir,
+        )
+        initialization_s = time.monotonic() - initialization_started
+        sampler = _GpuSampler(
+            run_dir=capacity_dir,
+            target_percent=config.alignment.execution.gpu_target_percent,
+            interval_s=config.alignment.execution.gpu_sample_interval_s,
+        )
+        sampler.start()
+        evaluator = _LiveEvaluator(pool=pool, sampler=sampler)
+        try:
+            evaluations = evaluator.evaluate_scored_batch(
+                definition=target,
+                settings=settings,
+                reference_traces=reference,
+            )
+            pool.close()
+        except BaseException:
+            pool.terminate()
+            raise
+        finally:
+            evaluator.finish_sampling(search_statistics={}, generated_refinements=0)
+        telemetry = json.loads((capacity_dir / "gpu_utilization.json").read_text())
+        results.append(
+            {
+                "candidate_capacity": capacity,
+                "initialization_s": initialization_s,
+                "usable_candidates": sum(
+                    isinstance(evaluation, MetricResult) for evaluation in evaluations
+                ),
+                **telemetry,
+            }
+        )
+        for spool_path in pool.spool_paths:
+            spool_path.unlink()
+        spool_dir.rmdir()
+    best_rate = max(float(result["candidates_per_second"]) for result in results)
+    recommended = min(
+        int(result["candidate_capacity"])
+        for result in results
+        if float(result["candidates_per_second"]) >= 0.95 * best_rate
+    )
+    (run_dir / "candidate_capacity_benchmark.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "candidate_count": len(settings),
+                "results": results,
+                "recommended_candidate_capacity": recommended,
+                "selection_rule": "highest throughput; lower capacity within five percent",
+            },
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n"
     )
 
 
 def main() -> None:
     try:
         config = load_config(os.environ[_CONFIG_PATH_ENV])
-        _run(
-            config=config,
-            target_path=Path(os.environ.get(_TARGET_ENV, _DEFAULT_TARGET)),
-            run_dir=Path(os.environ[_RUN_DIR_ENV]),
-        )
+        arguments = {
+            "config": config,
+            "target_path": Path(os.environ.get(_TARGET_ENV, _DEFAULT_TARGET)),
+            "run_dir": Path(os.environ[_RUN_DIR_ENV]),
+        }
+        if os.environ.get(_CAPACITY_BENCHMARK_ENV) == "1":
+            _run_capacity_benchmark(**arguments)
+        else:
+            _run(**arguments)
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise

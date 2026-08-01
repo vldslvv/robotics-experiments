@@ -57,17 +57,21 @@ command is sign-converted only at the PX4 NED wire boundary.
 number of persistent workers, and each worker constructs `AppLauncher` before
 importing `isaaclab` and builds one hover environment per local
 candidate/probe pair. Scene capacity is derived from the largest beam expansion
-divided across workers. Each expansion replays all uncached candidates
-concurrently with per-environment gains, filters, integrals, and
-sub-physics-step command delays; smaller local shards are padded to keep each
-fixed scene occupied. Each batch starts with fresh controller, delay, and
+divided across workers but capped by the Hydra execution setting. Oversized
+expansions are replayed in ordered chunks, so a wide search no longer inflates
+every smaller batch to its maximum. Each batch uses per-environment gains,
+filters, integrals, and sub-physics-step command delays and starts with fresh
+controller, delay, and
 actuator state, restores every recorded PX4 initial state, then restores the
 schema-4 per-profile PX4 controller boundary before advancing timestamp events
 at each trace's captured physics-step intervals. Legacy traces retain the
 zero-controller-state replay.
-The coordinator merges results by original candidate index, and worker count
-does not change scores or the comparison fingerprint. Active evaluation writes
-GPU utilization and throughput beside the run artifacts. Worker sharding stays
+Each worker scores traces and streams them to a run-local shard. The
+coordinator receives compact metric results, merges evidence by original
+candidate index, and does not accumulate the full trace population in memory.
+Worker count and scene capacity do not change scores or the comparison
+fingerprint. Active evaluation writes GPU utilization, padding, cache, and
+throughput beside the run artifacts. Worker sharding stays
 configurable, but the measured default is one process because three processes
 saturate the GPU while materially reducing candidate throughput through
 PhysX contention.

@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
@@ -18,7 +21,9 @@ from robotics_experiments.alignment._models import (
     ControllerDefinition,
     ControllerSettings,
     MetricResult,
+    ParameterSpec,
     ProbeTrace,
+    SettingValue,
 )
 from robotics_experiments.config import load_config
 
@@ -50,7 +55,91 @@ class _SearchOutcome:
     candidate_scores: tuple[CandidateScore, ...]
     metric_results: Mapping[int, MetricResult]
     target_traces: Mapping[ControllerSettings, tuple[ProbeTrace, ...]]
+    trace_sources: Mapping[ControllerSettings, ControllerSettings]
     selected: CandidateScore
+    statistics: Mapping[str, int]
+    generated_refinements: tuple[Mapping[str, Any], ...]
+
+
+_SCHEMA_INACTIVE_FIELDS = {
+    2: frozenset(
+        {
+            "hover_thrust_fraction",
+            "hover_thrust_normalized",
+            "horizontal_velocity_error_gain_scale",
+            "horizontal_velocity_error_gain_start_mps",
+            "horizontal_velocity_error_gain_full_mps",
+        }
+    ),
+    3: frozenset(
+        {
+            "hover_thrust_fraction",
+            "hover_thrust_normalized",
+            "horizontal_velocity_error_gain_scale",
+            "horizontal_velocity_error_gain_start_mps",
+            "horizontal_velocity_error_gain_full_mps",
+        }
+    ),
+    4: frozenset(
+        {
+            "hover_thrust_normalized",
+            "horizontal_velocity_error_gain_scale",
+            "horizontal_velocity_error_gain_start_mps",
+            "horizontal_velocity_error_gain_full_mps",
+        }
+    ),
+    5: frozenset(
+        {
+            "hover_thrust_fraction",
+            "rate_output_scale_nm",
+            "horizontal_velocity_error_gain_scale",
+            "horizontal_velocity_error_gain_start_mps",
+            "horizontal_velocity_error_gain_full_mps",
+        }
+    ),
+    6: frozenset({"hover_thrust_fraction", "rate_output_scale_nm"}),
+}
+
+
+def _effective_controller_key(
+    settings: ControllerSettings,
+    schema_version: int,
+    /,
+) -> tuple[tuple[str, float | tuple[float, ...]], ...]:
+    """Return the exact float32 controller values active for one schema."""
+    try:
+        inactive = _SCHEMA_INACTIVE_FIELDS[schema_version]
+    except KeyError as exc:
+        raise ValueError(f"unsupported controller schema {schema_version}") from exc
+    key = []
+    for item in fields(settings):
+        if item.name in inactive:
+            continue
+        value = getattr(settings, item.name)
+        if isinstance(value, tuple):
+            canonical: float | tuple[float, ...] = tuple(float(np.float32(part)) for part in value)
+        else:
+            canonical = float(np.float32(value))
+        key.append((item.name, canonical))
+    return tuple(key)
+
+
+def _midpoint(left: SettingValue, right: SettingValue, /) -> SettingValue | None:
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        differing = [
+            index
+            for index, values in enumerate(zip(left, right, strict=True))
+            if values[0] != values[1]
+        ]
+        if len(differing) != 1:
+            return None
+        index = differing[0]
+        result = list(left)
+        result[index] = (left[index] + right[index]) / 2.0
+        return result[0], result[1], result[2]
+    if isinstance(left, tuple) or isinstance(right, tuple):
+        return None
+    return (left + right) / 2.0
 
 
 def _deduplicate_settings(
@@ -58,6 +147,80 @@ def _deduplicate_settings(
     /,
 ) -> tuple[ControllerSettings, ...]:
     return tuple(dict.fromkeys(settings))
+
+
+def _refinement_candidates(
+    *,
+    parameter_field: str,
+    grid: tuple[SettingValue, ...],
+    retained: tuple[ControllerSettings, ...],
+    champions: tuple[ControllerSettings, ...],
+    min_survivors: int,
+) -> tuple[tuple[SettingValue, ...], tuple[Mapping[str, Any], ...]]:
+    retained_values = tuple(getattr(settings, parameter_field) for settings in retained)
+    counts = Counter(retained_values)
+    champion_values = {getattr(settings, parameter_field) for settings in champions}
+    supported = {
+        value
+        for value, count in counts.items()
+        if count >= min_survivors or value in champion_values
+    }
+    candidates: list[SettingValue] = []
+    records: list[Mapping[str, Any]] = []
+
+    def add(*, left: SettingValue, right: SettingValue, reason: str) -> None:
+        candidate = _midpoint(left, right)
+        if candidate is None or candidate in grid or candidate in candidates:
+            return
+        candidates.append(candidate)
+        records.append(
+            {
+                "field": parameter_field,
+                "left": left,
+                "right": right,
+                "candidate": candidate,
+                "reason": reason,
+            }
+        )
+
+    if grid and not isinstance(grid[0], tuple):
+        ordered = tuple(sorted(float(value) for value in grid if not isinstance(value, tuple)))
+        for scalar_value in sorted(
+            float(item) for item in supported if not isinstance(item, tuple)
+        ):
+            if scalar_value not in ordered:
+                continue
+            index = ordered.index(scalar_value)
+            reason = "gate champion" if scalar_value in champion_values else "retained basin"
+            if index:
+                add(left=ordered[index - 1], right=scalar_value, reason=reason)
+            if index + 1 < len(ordered):
+                add(left=scalar_value, right=ordered[index + 1], reason=reason)
+    else:
+        ordered_vectors = tuple(value for value in grid if isinstance(value, tuple))
+        for vector_value in (item for item in supported if isinstance(item, tuple)):
+            reason = "gate champion" if vector_value in champion_values else "retained basin"
+            for axis in range(3):
+                axis_neighbors = sorted(
+                    (
+                        item
+                        for item in ordered_vectors
+                        if all(
+                            item[other] == vector_value[other]
+                            for other in range(3)
+                            if other != axis
+                        )
+                    ),
+                    key=lambda item: item[axis],
+                )
+                if vector_value not in axis_neighbors:
+                    continue
+                index = axis_neighbors.index(vector_value)
+                if index:
+                    add(left=axis_neighbors[index - 1], right=vector_value, reason=reason)
+                if index + 1 < len(axis_neighbors):
+                    add(left=vector_value, right=axis_neighbors[index + 1], reason=reason)
+    return tuple(candidates), tuple(records)
 
 
 def _staged_beam_search(
@@ -70,20 +233,38 @@ def _staged_beam_search(
     scores_by_settings: dict[ControllerSettings, CandidateScore] = {}
     results_by_index: dict[int, MetricResult] = {}
     traces_by_settings: dict[ControllerSettings, tuple[ProbeTrace, ...]] = {}
+    trace_sources: dict[ControllerSettings, ControllerSettings] = {}
+    settings_by_effective_key: dict[
+        tuple[tuple[str, float | tuple[float, ...]], ...], ControllerSettings
+    ] = {}
+    statistics = {
+        "attempted_settings": 0,
+        "exact_cache_hits": 0,
+        "effective_key_aliases": 0,
+        "submitted_unique_candidates": 0,
+        "skipped_fixed_point_passes": 0,
+    }
+    generated_refinements: list[Mapping[str, Any]] = []
+    next_index = 0
 
     def record(
         *,
         settings: ControllerSettings,
         index: int,
         target_traces: tuple[ProbeTrace, ...] | None,
+        metric_result: MetricResult | None,
         failure_reason: str | None,
     ) -> CandidateScore:
         try:
             if failure_reason is not None:
                 raise RuntimeError(failure_reason)
-            if target_traces is None:
+            if target_traces is None and metric_result is None:
                 raise RuntimeError("backend returned no target traces")
-            result = score_metric(reference_traces, target_traces)
+            result = (
+                metric_result
+                if metric_result is not None
+                else score_metric(reference_traces, target_traces)
+            )
             if not _finite_metric_result(result=result):
                 raise ValueError("registered metric returned a non-finite value")
             available_metrics = (
@@ -105,7 +286,9 @@ def _staged_beam_search(
             )
             results_by_index[index] = result
             if getattr(target.evaluator, "_retain_traces", True):
+                assert target_traces is not None
                 traces_by_settings[settings] = target_traces
+            trace_sources[settings] = settings
         except Exception as exc:  # noqa: BLE001 - a backend failure invalidates one candidate
             score = CandidateScore(
                 index=index,
@@ -118,18 +301,72 @@ def _staged_beam_search(
         scores_by_settings[settings] = score
         return score
 
+    def record_alias(
+        *,
+        settings: ControllerSettings,
+        index: int,
+        source_settings: ControllerSettings,
+    ) -> CandidateScore:
+        source = scores_by_settings[source_settings]
+        score = CandidateScore(
+            index=index,
+            settings=settings,
+            usable=source.usable,
+            metrics=source.metrics,
+            ranking_values=source.ranking_values,
+            failure_reason=source.failure_reason,
+        )
+        scores_by_settings[settings] = score
+        if source.usable:
+            results_by_index[index] = results_by_index[source.index]
+            trace_sources[settings] = trace_sources[source_settings]
+            if source_settings in traces_by_settings:
+                traces_by_settings[settings] = traces_by_settings[source_settings]
+        return score
+
     def evaluate_many(
         settings: tuple[ControllerSettings, ...],
         /,
     ) -> list[CandidateScore]:
-        pending = tuple(value for value in settings if value not in scores_by_settings)
+        nonlocal next_index
+        statistics["attempted_settings"] += len(settings)
+        statistics["exact_cache_hits"] += sum(value in scores_by_settings for value in settings)
+        pending: list[tuple[ControllerSettings, int]] = []
+        aliases: list[tuple[ControllerSettings, int, ControllerSettings]] = []
+        reserved_by_key: dict[
+            tuple[tuple[str, float | tuple[float, ...]], ...], ControllerSettings
+        ] = {}
+        for value in settings:
+            if value in scores_by_settings:
+                continue
+            index = next_index
+            next_index += 1
+            key = _effective_controller_key(value, target.controller_schema_version)
+            source = settings_by_effective_key.get(key) or reserved_by_key.get(key)
+            if source is None:
+                pending.append((value, index))
+                reserved_by_key[key] = value
+            else:
+                aliases.append((value, index, source))
+                statistics["effective_key_aliases"] += 1
         if pending:
-            start_index = len(scores_by_settings)
+            pending_settings = tuple(value for value, _index in pending)
+            statistics["submitted_unique_candidates"] += len(pending_settings)
+            score_evaluate = getattr(target.evaluator, "evaluate_scored_batch", None)
             batch_evaluate = getattr(target.evaluator, "evaluate_batch", None)
-            if batch_evaluate is None:
-                evaluations: tuple[tuple[ProbeTrace, ...] | str, ...] = tuple()
+            if score_evaluate is not None:
+                try:
+                    evaluations = score_evaluate(
+                        definition=target,
+                        settings=pending_settings,
+                        reference_traces=reference_traces,
+                    )
+                except Exception as exc:  # noqa: BLE001 - a batch failure invalidates candidates
+                    evaluations = tuple(str(exc) for _value in pending_settings)
+            elif batch_evaluate is None:
+                evaluations = tuple()
                 serial_results: list[tuple[ProbeTrace, ...] | str] = []
-                for value in pending:
+                for value in pending_settings:
                     try:
                         serial_results.append(
                             target.evaluator.evaluate(
@@ -145,28 +382,35 @@ def _staged_beam_search(
                 try:
                     evaluations = batch_evaluate(
                         definition=target,
-                        settings=pending,
+                        settings=pending_settings,
                         reference_traces=reference_traces,
                     )
                 except Exception as exc:  # noqa: BLE001 - a batch failure invalidates its candidates
-                    evaluations = tuple(str(exc) for _value in pending)
-                if len(evaluations) != len(pending):
+                    evaluations = tuple(str(exc) for _value in pending_settings)
+                if len(evaluations) != len(pending_settings):
                     failure = (
                         "backend batch returned "
-                        f"{len(evaluations)} results for {len(pending)} candidates"
+                        f"{len(evaluations)} results for {len(pending_settings)} candidates"
                     )
-                    evaluations = tuple(failure for _value in pending)
-            for offset, (value, evaluation) in enumerate(zip(pending, evaluations, strict=True)):
+                    evaluations = tuple(failure for _value in pending_settings)
+            for (value, index), evaluation in zip(pending, evaluations, strict=True):
                 record(
                     settings=value,
-                    index=start_index + offset,
-                    target_traces=None if isinstance(evaluation, str) else evaluation,
+                    index=index,
+                    target_traces=(evaluation if isinstance(evaluation, tuple) else None),
+                    metric_result=(evaluation if isinstance(evaluation, MetricResult) else None),
                     failure_reason=evaluation if isinstance(evaluation, str) else None,
                 )
+                key = _effective_controller_key(value, target.controller_schema_version)
+                settings_by_effective_key[key] = value
+        for value, index, source in aliases:
+            record_alias(settings=value, index=index, source_settings=source)
         return [scores_by_settings[value] for value in settings]
 
     def evaluate(settings: ControllerSettings, /) -> CandidateScore:
         return evaluate_many((settings,))[0]
+
+    retained = (target.base_settings,)
 
     def retain(
         scores: list[CandidateScore],
@@ -206,31 +450,116 @@ def _staged_beam_search(
                 break
         return tuple(score.settings for score in retained_scores)
 
-    retained = (target.base_settings,)
+    def objective_champions(
+        scores: list[CandidateScore],
+        /,
+    ) -> tuple[ControllerSettings, ...]:
+        ordered = sorted(scores, key=lambda score: (score.ranking_values, score.index))
+        objective_count = max(
+            (len(results_by_index[score.index].beam_values) for score in ordered),
+            default=0,
+        )
+        champions = []
+        for objective_index in range(objective_count):
+            eligible = [
+                score
+                for score in ordered
+                if len(results_by_index[score.index].beam_values) > objective_index
+            ]
+            champion = min(
+                eligible,
+                key=lambda score: (
+                    results_by_index[score.index].beam_values[objective_index],
+                    score.ranking_values,
+                    score.index,
+                ),
+            )
+            if champion.settings not in champions:
+                champions.append(champion.settings)
+        return tuple(champions)
+
+    def effective_beam(
+        settings: tuple[ControllerSettings, ...],
+        /,
+    ) -> tuple[tuple[tuple[str, float | tuple[float, ...]], ...], ...]:
+        return tuple(
+            _effective_controller_key(value, target.controller_schema_version) for value in settings
+        )
+
+    def sweep_parameter(*, parameter: ParameterSpec, candidates: tuple[SettingValue, ...]) -> None:
+        nonlocal retained
+        expanded = _deduplicate_settings(
+            [
+                *retained,
+                *(
+                    replace(settings, **{parameter.field: candidate})
+                    for settings in retained
+                    for candidate in candidates
+                ),
+            ]
+        )
+        usable = [score for score in evaluate_many(expanded) if score.usable]
+        if not usable:
+            raise RuntimeError(
+                f"every alignment candidate was unusable while fitting "
+                f"stage {parameter.stage} field {parameter.field!r}"
+            )
+        retained = retain(usable)
+
     evaluate(target.base_settings)
+    grids = {
+        parameter.field: tuple(
+            dict.fromkeys((*parameter.candidates, getattr(target.base_settings, parameter.field)))
+        )
+        for parameter in target.parameters
+    }
     stages = tuple(sorted({parameter.stage for parameter in target.parameters}))
     for stage in stages:
         stage_parameters = tuple(
             parameter for parameter in target.parameters if parameter.stage == stage
         )
-        for _pass in range(target.search.passes_per_stage):
+        for pass_index in range(target.search.passes_per_stage):
+            before = effective_beam(retained)
             for parameter in stage_parameters:
-                expanded = _deduplicate_settings(
-                    [
-                        replace(settings, **{parameter.field: candidate})
-                        for settings in retained
-                        for candidate in parameter.candidates
-                    ]
+                sweep_parameter(parameter=parameter, candidates=parameter.candidates)
+            if effective_beam(retained) == before:
+                statistics["skipped_fixed_point_passes"] += (
+                    target.search.passes_per_stage - pass_index - 1
                 )
-                usable = evaluate_many(expanded)
-                usable = [score for score in usable if score.usable]
-                if not usable:
-                    raise RuntimeError(
-                        f"every alignment candidate was unusable while fitting "
-                        f"stage {stage} field {parameter.field!r}"
-                    )
-                retained = retain(usable)
-    final_scores = evaluate_many(retained)
+                break
+        if target.search.strategy != "coarse-to-fine-beam-v3":
+            continue
+        for level in range(1, target.search.refinement_levels + 1):
+            before = effective_beam(retained)
+            all_usable = [score for score in scores_by_settings.values() if score.usable]
+            champions = objective_champions(all_usable)
+            generated_any = False
+            for parameter in stage_parameters:
+                candidates, records = _refinement_candidates(
+                    parameter_field=parameter.field,
+                    grid=grids[parameter.field],
+                    retained=retained,
+                    champions=champions,
+                    min_survivors=target.search.min_refinement_survivors,
+                )
+                if not candidates:
+                    continue
+                generated_any = True
+                generated_refinements.extend(
+                    {**record, "stage": stage, "level": level} for record in records
+                )
+                grids[parameter.field] = tuple(
+                    dict.fromkeys((*grids[parameter.field], *candidates))
+                )
+                sweep_parameter(parameter=parameter, candidates=candidates)
+            if not generated_any or effective_beam(retained) == before:
+                statistics["skipped_fixed_point_passes"] += target.search.refinement_levels - level
+                break
+    final_scores = (
+        list(scores_by_settings.values())
+        if target.search.strategy == "coarse-to-fine-beam-v3"
+        else evaluate_many(retained)
+    )
     final_usable = [score for score in final_scores if score.usable]
     if not final_usable:
         raise RuntimeError("every alignment candidate was unusable; no artifact was published")
@@ -243,7 +572,10 @@ def _staged_beam_search(
         candidate_scores=candidates,
         metric_results=results_by_index,
         target_traces=traces_by_settings,
+        trace_sources=trace_sources,
         selected=selected,
+        statistics=statistics,
+        generated_refinements=tuple(generated_refinements),
     )
 
 
@@ -255,6 +587,7 @@ def _validate_pair(
     mismatches = []
     for name in (
         "alignment_id",
+        "controller_schema_version",
         "experiment_config",
         "vehicle",
         "airframe",
@@ -411,7 +744,7 @@ def align(
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return AlignmentArtifact(
-        schema_version=6,
+        schema_version=target.controller_schema_version,
         alignment_id=target.alignment_id,
         run_id=run_id,
         target_controller_id=target.controller_id,

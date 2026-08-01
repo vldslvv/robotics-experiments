@@ -39,7 +39,7 @@ _ARTIFACT_SCHEMA_VERSION = 6
 _SUPPORTED_ARTIFACT_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5, 6})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
 _INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
-_SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2"})
+_SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2", "coarse-to-fine-beam-v3"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 _CANDIDATE_ENTRY = re.compile(rb'(?m)^    "([0-9a-f]{64})": ')
 _CANDIDATES_MARKER = b'  "candidates": {'
@@ -433,6 +433,12 @@ def _search(*, value: Any) -> SearchSpec:
     strategy = _string(value=search.get("strategy"), name="search.strategy")
     if strategy not in _SEARCH_STRATEGIES:
         raise ValueError(f"unsupported search.strategy={strategy!r}")
+    refinement_levels = _nonnegative_integer(
+        value=search.get("refinement_levels", 0),
+        name="search.refinement_levels",
+    )
+    if strategy != "coarse-to-fine-beam-v3" and refinement_levels:
+        raise ValueError("search.refinement_levels requires strategy='coarse-to-fine-beam-v3'")
     return SearchSpec(
         strategy=strategy,
         beam_width=_positive_integer(
@@ -442,6 +448,11 @@ def _search(*, value: Any) -> SearchSpec:
         passes_per_stage=_positive_integer(
             value=search.get("passes_per_stage"),
             name="search.passes_per_stage",
+        ),
+        refinement_levels=refinement_levels,
+        min_refinement_survivors=_positive_integer(
+            value=search.get("min_refinement_survivors", 2),
+            name="search.min_refinement_survivors",
         ),
     )
 
@@ -781,6 +792,10 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     return ControllerDefinition(
         alignment_id=_string(value=definition.get("alignment_id"), name="alignment_id"),
         controller_id=_string(value=definition.get("controller_id"), name="controller_id"),
+        controller_schema_version=_positive_integer(
+            value=definition.get("controller_schema_version"),
+            name="controller_schema_version",
+        ),
         backend=backend,
         experiment_config=_string(
             value=definition.get("experiment_config"),

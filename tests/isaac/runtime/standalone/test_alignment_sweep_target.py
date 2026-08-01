@@ -39,6 +39,14 @@ def test_worker_shards_are_balanced_contiguous_and_deterministic():
     ]
 
 
+def test_candidate_expansions_are_chunked_to_fixed_scene_capacity():
+    module = _load_script()
+
+    chunks = module._chunk_settings(_settings(10), 4)  # noqa: SLF001 - focused helper test
+
+    assert [len(chunk) for chunk in chunks] == [4, 4, 2]
+
+
 def test_worker_results_merge_in_candidate_order():
     module = _load_script()
 
@@ -109,3 +117,49 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
     assert len(payload["candidates"]) == 2
     assert tuple(payload["failures"].values()) == ("failed",)
     assert not path.with_suffix(".json.tmp").exists()
+
+
+def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path):
+    module = _load_script()
+    first = _settings(1)[0]
+    alias = replace(first, hover_thrust_fraction=0.4)
+    failed = replace(first, command_delay_s=first.command_delay_s + 0.001)
+    trace = {
+        "profile": "fit_x",
+        "split": "fit",
+        "axis": "x",
+        "time_s": [0.0],
+    }
+    spool_path = tmp_path / "worker-0.jsonl"
+    with spool_path.open("w") as spool:
+        module._write_spooled_trace(  # noqa: SLF001 - focused spool contract test
+            stream=spool,
+            settings=first,
+            traces=[trace],
+        )
+    scores = (
+        module.CandidateScore(0, first, True, {"score": 0.0}, (0.0,), None),
+        module.CandidateScore(1, alias, True, {"score": 0.0}, (0.0,), None),
+        module.CandidateScore(2, failed, False, {}, (), "failed"),
+    )
+    path = tmp_path / "target_candidates.json"
+
+    module._merge_target_candidate_spools(  # noqa: SLF001 - focused spool contract test
+        path=path,
+        controller_id="controller",
+        definition_fingerprint="definition",
+        image="image",
+        scores=scores,
+        trace_sources={first: first, alias: first},
+        spool_paths=(spool_path,),
+    )
+
+    payload = json.loads(path.read_text())
+    assert list(payload["candidates"]) == [
+        module._settings_fingerprint(first),  # noqa: SLF001
+        module._settings_fingerprint(alias),  # noqa: SLF001
+    ]
+    assert list(payload["candidates"].values()) == [[trace], [trace]]
+    assert payload["failures"] == {
+        module._settings_fingerprint(failed): "failed"  # noqa: SLF001
+    }

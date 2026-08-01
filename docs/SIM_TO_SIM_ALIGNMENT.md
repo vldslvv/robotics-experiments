@@ -24,8 +24,9 @@ definitions live under `configs/alignment/controllers/`.
 
 `x500-velocity-px4-v7` is the current comparison generation and uses alignment
 artifact schema 6. Its mandatory base evaluation is the accepted v6 candidate
-8,083 setting, while a 64-setting beam and three passes per stage search for a
-fresh-reference result with equal or better acceptance margins. It carries
+8,083 setting. A 32-setting coarse-to-fine beam searches the committed wide
+grid once, then performs at most two deterministic midpoint refinements around
+the surviving multi-objective basins. It carries
 PX4-normalized collective and torque through the
 pinned pseudo-inverse allocator and sequential desaturation, then applies the
 composed X500's `omega = 50 + 475*u` motor boundary and quadratic rotor curve.
@@ -166,15 +167,18 @@ rate boundary in body-FLU. The alignment-only routine ends when the probe
 adapter completes and teardown stops the ephemeral simulator; landing and
 auto-disarm are outside the policy-execution controller target and cannot
 invalidate an otherwise complete capture. The target runner assigns one Lab
-environment to every local candidate/probe pair. It evaluates one complete
-beam expansion concurrently across its workers, padding smaller local shards
-to the per-worker capacity so each fixed Isaac scene remains occupied. The
-alignment capacity is derived independently of the training `rl.num_envs`. Every
+environment to every local candidate/probe pair. A configured candidate
+capacity bounds its fixed scene; larger expansions are split into ordered
+chunks and only the final chunk is padded. Alignment capacity is independent
+of the beam and training `rl.num_envs`. Every
 environment has independent gains, filters, integrals, command delay, and
 controller state. The deterministic coordinator partitions each expansion
 across persistent spawned Isaac workers, merges results by original candidate
-index, and records active-batch GPU utilization and throughput in
-`gpu_utilization.json`. Each worker pads only its own fixed-capacity scene.
+index. Workers score candidates against the parsed reference and stream target
+traces to run-local shards, so the coordinator transports compact metrics and
+does not retain the full trace population in RAM. GPU utilization, padding,
+cache, refinement, and throughput telemetry is recorded in
+`gpu_utilization.json`.
 Worker loss is an infrastructure failure; a candidate flight-envelope breach
 remains an ordinary unusable candidate. Worker count and GPU telemetry settings
 change throughput only, not candidate order, ranking, initial state, commands,
@@ -201,19 +205,25 @@ inputs only. They must never be included in fit or validation samples.
 ## Deterministic staged search
 
 The target definition declares each `ParameterSpec` in fixed order with a
-positive stage. The current generation uses `staged-beam-v2`:
+positive stage. The current generation uses `coarse-to-fine-beam-v3`:
 
 1. Start from the complete base setting.
 2. For the current parameter, expand every retained setting with every declared
    candidate.
-3. Deduplicate settings and cache every evaluation.
-4. Replay all uncached settings in the expansion as one GPU batch, then score
-   them in their original deterministic order.
+3. Deduplicate exact settings, alias schema-equivalent float32 controller keys,
+   and cache every evaluation within the run.
+4. Replay uncached settings through bounded, ordered GPU chunks, score them in
+   the worker, and retain their original deterministic candidate order.
 5. Reserve a beam slot for the best candidate on each advisory-gate objective,
 then fill the remaining slots by the registered deterministic ranking.
-6. Retain at most the declared beam width; the current v7 generation uses 64
-settings so more complete parameter combinations survive between stages.
-7. Make three passes through every parameter in the stage.
+6. Retain at most 32 settings for exploration while keeping a global archive
+   of every usable candidate, including the protected accepted seed.
+7. After the wide pass, add midpoints only beside retained values or gate
+   champions. Repeat once for quarter-step resolution and stop early when the
+   effective beam reaches a fixed point.
+8. Select globally from the complete evaluated archive, not only the final
+   exploration beam. Vector refinement is automatic only between candidates
+   that differ on one axis.
 
 Stage 1 fits delay, normalized hover thrust, velocity filtering, velocity
 integral limits, velocity P/I/D, and the schema-6 horizontal large-error gain
@@ -311,6 +321,7 @@ fitting. A verified mismatch there is fixed in the plant contract.
 ```console
 make alignment-capture-reference
 make alignment-audit-actuators
+make alignment-benchmark-capacity
 make alignment-sweep-target
 make alignment-fit
 make alignment-replay-controller
@@ -390,7 +401,7 @@ at the exact start timestamp.
 
 Alignment capture and execution settings live under the top-level Hydra
 `alignment` group. Capture preconditioning is behavior-affecting and is included
-in the experiment fingerprint. Worker count, GPU target, and sample interval
+in the experiment fingerprint. Worker count, candidate capacity, GPU target, and sample interval
 are execution-only and deliberately excluded. The coordinator supports
 persistent worker sharding, but the measured default is one worker: three
 workers reached 95.49% average GPU utilization while reducing useful throughput

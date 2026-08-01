@@ -9,6 +9,7 @@ ALIGNMENT_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 ALIGNMENT_RUN_ID := $(ALIGNMENT_RUN_ID)
 ALIGNMENT_RUN_DIR = .build/alignment/$(ALIGNMENT_ID)/$(ALIGNMENT_RUN_ID)
 ALIGNMENT_RUN_DIR_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_RUN_DIR)
+ALIGNMENT_CAPACITY_BENCHMARK ?= 0
 ALIGNMENT_TARGET_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_TARGET)
 ALIGNMENT_REFERENCE_CONTAINER = $(ISAAC_PROJECT_DIR)/$(ALIGNMENT_REFERENCE)
 ALIGNMENT_CAPTURE_SCRIPT = $(ISAAC_PROJECT_DIR)/isaac/runtime/standalone/tests/alignment_capture_reference.py
@@ -56,6 +57,18 @@ alignment-sweep-target: generate-drone-usd
 	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
 	@TEST_TARGET='alignment-sweep-target' \
 	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/alignment_sweep_target.log' \
+	    ISAAC_TEST_SCRIPT='$(ALIGNMENT_SWEEP_SCRIPT)' \
+	    $(ISAAC_INTEGRATION_COMMON_ENV) \
+	    bash "$(ISAAC_INTEGRATION_RUNNER)"
+
+.PHONY: alignment-benchmark-capacity
+alignment-benchmark-capacity: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
+alignment-benchmark-capacity: HYDRA_CONFIG = configs/alignment_px4_x500_velocity.yaml
+alignment-benchmark-capacity: ALIGNMENT_CAPACITY_BENCHMARK = 1
+alignment-benchmark-capacity: generate-drone-usd
+	@test -f '$(ALIGNMENT_RUN_DIR)/reference.json'
+	@TEST_TARGET='alignment-benchmark-capacity' \
+	    ISAAC_TEST_LOG='/isaac-sim/.nvidia-omniverse/logs/alignment_benchmark_capacity.log' \
 	    ISAAC_TEST_SCRIPT='$(ALIGNMENT_SWEEP_SCRIPT)' \
 	    $(ISAAC_INTEGRATION_COMMON_ENV) \
 	    bash "$(ISAAC_INTEGRATION_RUNNER)"

@@ -238,6 +238,7 @@ def _definition(
     return ControllerDefinition(
         alignment_id="synthetic",
         controller_id=f"{backend}-controller",
+        controller_schema_version=6,
         backend=backend,
         experiment_config=str(experiment),
         vehicle="x500_01",
@@ -272,12 +273,15 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     )
     assert target.backend == "isaac-lab"
     assert target.alignment_id == "x500-velocity-px4-v7"
+    assert target.controller_schema_version == 6
     assert target.base_settings.command_delay_s == pytest.approx(0.06)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.0 / 7.0)
     assert target.base_settings.kd_vel == pytest.approx((0.375, 0.3, 0.0))
-    assert target.search.beam_width == 64
-    assert target.search.passes_per_stage == 3
+    assert target.search.strategy == "coarse-to-fine-beam-v3"
+    assert target.search.beam_width == 32
+    assert target.search.passes_per_stage == 1
+    assert target.search.refinement_levels == 2
     assert [parameter.field for parameter in target.parameters[5:8]] == [
         "horizontal_velocity_error_gain_scale",
         "horizontal_velocity_error_gain_start_mps",
@@ -498,6 +502,59 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     ]
     assert batched.selected_settings == serial.selected_settings
     assert max(batch_evaluator.batch_sizes) > 1
+
+
+def test_effective_key_aliases_schema_inactive_settings_and_stops_fixed_point() -> None:
+    evaluator = _BatchEvaluator()
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=evaluator,
+            parameters=(ParameterSpec("hover_thrust_fraction", 1, (0.4, 0.6)),),
+        ),
+        search=SearchSpec(
+            strategy="staged-beam-v2",
+            beam_width=8,
+            passes_per_stage=3,
+        ),
+    )
+    reference_traces = _response_traces(profiles=target.probes, settings=target.base_settings)
+
+    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+
+    assert len(outcome.candidate_scores) == 3
+    assert outcome.statistics["submitted_unique_candidates"] == 1
+    assert outcome.statistics["effective_key_aliases"] == 2
+    assert outcome.statistics["skipped_fixed_point_passes"] == 1
+    assert evaluator.batch_sizes == [1]
+
+
+def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
+    known = _settings(delay=0.25)
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_BatchEvaluator(),
+            parameters=(ParameterSpec("command_delay_s", 1, (0.0, 1.0)),),
+        ),
+        base_settings=_settings(delay=0.5),
+        search=SearchSpec(
+            strategy="coarse-to-fine-beam-v3",
+            beam_width=2,
+            passes_per_stage=1,
+            refinement_levels=1,
+            min_refinement_survivors=1,
+        ),
+    )
+    reference_traces = _response_traces(profiles=target.probes, settings=known)
+
+    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+
+    assert outcome.selected.settings.command_delay_s == pytest.approx(0.25)
+    assert any(
+        record["field"] == "command_delay_s" and record["candidate"] == pytest.approx(0.25)
+        for record in outcome.generated_refinements
+    )
 
 
 def test_file_evaluator_indexes_candidate_diagnostics_once(

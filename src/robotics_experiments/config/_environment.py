@@ -40,6 +40,8 @@ class _AlignmentExecutionConfig(_FreezableConfig):
     """Alignment throughput settings that do not affect comparison behavior."""
 
     worker_count: int
+    candidate_capacity: int
+    candidate_capacity_benchmark: list[int]
     gpu_target_percent: float
     gpu_sample_interval_s: float
 

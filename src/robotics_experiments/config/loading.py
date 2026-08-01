@@ -213,6 +213,18 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
     execution = experiment.alignment.execution
     if execution.worker_count <= 0:
         raise ValueError("alignment.execution.worker_count must be positive")
+    if execution.candidate_capacity <= 0:
+        raise ValueError("alignment.execution.candidate_capacity must be positive")
+    if (
+        not execution.candidate_capacity_benchmark
+        or any(value <= 0 for value in execution.candidate_capacity_benchmark)
+        or len(set(execution.candidate_capacity_benchmark))
+        != len(execution.candidate_capacity_benchmark)
+    ):
+        raise ValueError(
+            "alignment.execution.candidate_capacity_benchmark must contain "
+            "unique positive values"
+        )
     if (
         not math.isfinite(execution.gpu_target_percent)
         or not 0.0 < execution.gpu_target_percent <= 100.0
