@@ -1,5 +1,5 @@
 alignment_id: x500-velocity-px4-v7
-controller_id: isaac-lab-x500-velocity-v35
+controller_id: isaac-lab-x500-velocity-v36
 controller_schema_version: 6
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
@@ -16,25 +16,25 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.057
-  kp_vel: [1.8, 1.8, 4.0]
+  command_delay_s: 0.048
+  kp_vel: [1.8, 1.35, 6.0]
   horizontal_velocity_error_gain_scale: 1.17857142875
   horizontal_velocity_error_gain_start_mps: 0.175
   horizontal_velocity_error_gain_full_mps: 0.2875
-  ki_vel: [0.0, 0.4, 2.0]
+  ki_vel: [0.3, 0.3, 1.5]
   kd_vel: [0.3, 0.3, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 5.0
-  velocity_derivative_filter_hz: 6.875
+  velocity_filter_hz: 10.0
+  velocity_derivative_filter_hz: 1.0
   velocity_integral_limit_mps2: [3.0, 3.0, 6.0]
   # Physical collective fraction of the composed X500's maximum thrust. The
   # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
   hover_thrust_fraction: 0.375
   # PX4's normalized hover-thrust boundary. Schema 5 uses this value before
   # control allocation; the physical fraction above is legacy-only.
-  hover_thrust_normalized: 0.5875
+  hover_thrust_normalized: 0.58
   kp_att: [5.0, 5.0, 3.5]
-  attitude_yaw_weight: 0.2
+  attitude_yaw_weight: 0.40625
   kp_rate: [0.15, 0.15, 0.20]
   ki_rate: [0.30, 0.30, 0.15]
   kd_rate: [0.0045, 0.0045, 0.0]
@@ -42,15 +42,15 @@ settings:
   # Legacy schemas convert the normalized rate PID output to physical torque.
   # Schema 5 sends normalized torque directly to the PX4 allocator.
   rate_output_scale_nm: [6.5, 6.5, 1.3]
-  rate_derivative_filter_hz: 21.25
-  rate_integral_limit_nm: [0.15, 0.15, 0.15]
-  max_tilt_cmd_deg: 22.5
+  rate_derivative_filter_hz: 25.0
+  rate_integral_limit_nm: [0.3, 0.3, 0.3]
+  max_tilt_cmd_deg: 56.25
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
   horizontal_thrust_margin_fraction: 0.30
-  thruster_tau_inc_s: 0.01
-  thruster_tau_dec_s: 0.0
-  thruster_max_thrust_rate_nps: 100000.0
+  thruster_tau_inc_s: 0.04
+  thruster_tau_dec_s: 0.02
+  thruster_max_thrust_rate_nps: 500.0
 
 search:
   strategy: coarse-to-fine-beam-v3
@@ -61,22 +61,16 @@ search:
   passes_per_stage: 1
   refinement_levels: 2
   min_refinement_survivors: 2
-  # Complete proven basins remain eligible on every fresh PX4 capture. Each
-  # entry is a partial override of the mandatory base settings above.
+  # The mandatory base is the measured live-acceptance frontier. Accepted v6
+  # remains an independent seed so the trace search covers both stable basins.
   initial_settings:
-    # One-percent strict-parity frontier from run 20260801T074503Z.
-    - horizontal_velocity_error_gain_scale: 1.0714285715
-      horizontal_velocity_error_gain_full_mps: 0.4
-      velocity_filter_hz: 8.75
-      velocity_derivative_filter_hz: 3.75
-      hover_thrust_normalized: 0.58375
-      attitude_yaw_weight: 0.425
-      kff_rate: [0.0375, 0.0375, 0.0375]
     # Accepted v6 frontier.
     - command_delay_s: 0.06
+      kp_vel: [1.8, 1.8, 4.0]
       horizontal_velocity_error_gain_scale: 1.285714286
       horizontal_velocity_error_gain_start_mps: 0.1
       horizontal_velocity_error_gain_full_mps: 0.25
+      ki_vel: [0.0, 0.4, 2.0]
       kd_vel: [0.375, 0.3, 0.0]
       velocity_filter_hz: 10.0
       velocity_derivative_filter_hz: 7.5
@@ -90,14 +84,6 @@ search:
       thruster_tau_inc_s: 0.04
       thruster_tau_dec_s: 0.02
       thruster_max_thrust_rate_nps: 500.0
-    # Advisory winner from run 20260801T074503Z.
-    - ki_vel: [0.075, 0.4, 2.0]
-      attitude_yaw_weight: 0.40625
-      kff_rate: [0.0, 0.0, 0.025]
-      rate_derivative_filter_hz: 25.0
-      rate_integral_limit_nm: [0.3, 0.3, 0.3]
-      max_tilt_cmd_deg: 56.25
-      thruster_tau_inc_s: 0.0075
 
 parameters:
   - field: command_delay_s
@@ -105,7 +91,7 @@ parameters:
     candidates: [0.0, 0.024, 0.048, 0.072, 0.096]
   - field: velocity_filter_hz
     stage: 1
-    candidates: [0.0, 1.0, 5.0, 10.0]
+    candidates: [10.0]
   - field: velocity_derivative_filter_hz
     stage: 1
     candidates: [0.5, 1.0, 2.5, 5.0, 7.5]
@@ -120,16 +106,12 @@ parameters:
       - [1.35, 1.575, 3.0]
       - [1.575, 1.575, 3.0]
       - [1.8, 1.8, 4.0]
-      - [2.25, 2.25, 5.0]
-      - [2.7, 2.7, 6.0]
-      # Axis-separated candidates cover independently evidenced horizontal and
-      # vertical bandwidth regions.
+      # The live gate passed at 1.8 forward gain and failed at the trace-only
+      # 2.05 frontier. Intermediate points retain measured headroom.
       - [1.8, 1.35, 6.0]
       - [1.9, 1.35, 6.0]
       - [2.0, 1.35, 6.0]
-      - [2.1, 1.35, 6.0]
       - [1.8, 2.25, 6.0]
-      - [1.8, 2.7, 6.0]
       - [1.575, 1.8, 3.0]
       - [1.575, 2.25, 3.0]
       - [1.8, 1.8, 3.0]
@@ -152,17 +134,8 @@ parameters:
       - [0.2, 0.2, 2.0]
       - [0.3, 0.3, 1.5]
       - [0.4, 0.4, 2.0]
-      - [0.45, 0.4, 2.0]
-      - [0.5, 0.4, 2.0]
-      - [0.6, 0.4, 2.0]
-      - [0.5, 0.5, 2.5]
-      - [0.6, 0.6, 3.0]
-      - [0.625, 0.6, 3.0]
       - [0.0, 0.2, 1.0]
       - [0.0, 0.4, 2.0]
-      - [0.0, 0.6, 3.0]
-      - [0.4, 0.5, 2.0]
-      - [0.4, 0.6, 2.0]
   - field: velocity_integral_limit_mps2
     stage: 1
     candidates:
@@ -247,13 +220,13 @@ parameters:
     candidates: [22.5, 33.75, 45.0, 56.25, 67.5]
   - field: thruster_tau_inc_s
     stage: 3
-    candidates: [0.0, 0.01, 0.02, 0.04, 0.08]
+    candidates: [0.04]
   - field: thruster_tau_dec_s
     stage: 3
-    candidates: [0.0, 0.01, 0.02, 0.04, 0.08, 0.10, 0.12, 0.16]
+    candidates: [0.02]
   - field: thruster_max_thrust_rate_nps
     stage: 3
-    candidates: [100.0, 250.0, 500.0, 1000.0, 100000.0]
+    candidates: [500.0]
 
 selection_metric: policy-execution-controller-quality-v3
 publication_metrics:

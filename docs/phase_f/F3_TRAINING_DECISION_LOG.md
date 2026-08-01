@@ -5783,3 +5783,23 @@ handoff. In contrast, applying those dynamics and the v6 filters to the more
 aggressive parity candidate 2,919 worsened hover to 0.137 m. The next search is
 therefore routed to the measured integration-stable velocity/actuator basin,
 not to another unrestricted trace-only optimum.
+
+### 136. Preserve the measured live-stability basin
+
+Date: 2026-08-01.
+
+The next scratch attempt makes the passing candidate-1,246 boundary probe its
+mandatory base and keeps accepted v6 as the second complete stable seed. The
+10 Hz velocity filter and accepted actuator rise, fall, and slew values are
+fixed declaratively because the live gate, rather than a selected trace range
+boundary, supplied the evidence for them. Forward velocity proportional gain
+is bounded at 2.0 between the passing 1.8 value and the failing 2.05 frontier;
+velocity integral candidates remain at or below the passing 0.4 range.
+
+The broad delay, derivative filter, normalized hover, error schedule,
+attitude, rate, tilt, and two-level refinement stages remain active. The
+hypothesis is that fine refinement within this live-stable basin will remove
+candidate 1,246's small strict-parity misses in worst-axis NRMSE and endpoint
+error without sacrificing the required hover/goto integration gate. No probe,
+metric, advisory threshold, controller equation, plant behavior, policy, or
+reward changes.
