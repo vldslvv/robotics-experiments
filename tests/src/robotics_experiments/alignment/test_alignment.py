@@ -289,25 +289,16 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.backend == "isaac-lab"
     assert target.alignment_id == "x500-velocity-px4-v7"
     assert target.controller_schema_version == 6
-    assert target.base_settings.command_delay_s == pytest.approx(0.075)
+    assert target.base_settings.command_delay_s == pytest.approx(0.0725)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
-    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
-    assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
-    assert target.search.strategy == "coarse-to-fine-beam-v3"
-    assert target.search.beam_width == 32
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.0 / 7.0)
+    assert target.base_settings.kd_vel == pytest.approx((0.45, 0.375, 0.0))
+    assert target.search.strategy == "staged-beam-v2"
+    assert target.search.beam_width == 1
     assert target.search.passes_per_stage == 1
-    assert target.search.refinement_levels == 1
+    assert target.search.refinement_levels == 0
     assert target.search.initial_settings == ()
-    assert [parameter.field for parameter in target.parameters] == [
-        "command_delay_s",
-        "velocity_derivative_filter_hz",
-        "horizontal_velocity_error_gain_scale",
-        "horizontal_velocity_error_gain_start_mps",
-        "horizontal_velocity_error_gain_full_mps",
-        "kd_vel",
-        "ki_vel",
-        "velocity_integral_limit_mps2",
-    ]
+    assert target.parameters == ()
     extended = replace(
         target,
         parameters=(
