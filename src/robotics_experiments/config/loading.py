@@ -360,9 +360,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
-    if evaluation.selection_metric != "held-out-press-task-quality-v2":
+    if evaluation.selection_metric != "held-out-press-task-quality-v3":
         raise ValueError(
-            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v2'"
+            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v3'"
         )
     for name in (
         "collision_penalty",

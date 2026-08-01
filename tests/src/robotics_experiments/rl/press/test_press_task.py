@@ -275,6 +275,7 @@ def test_unstable_step_resets_success_counter() -> None:
     [
         (_sample(upright=0.7), "crash"),
         (_sample(altitude_m=0.1), "altitude"),
+        (_sample(range_m=0.399), "range_undershoot"),
         (_sample(lateral_m=0.4), "relative_envelope"),
     ],
 )

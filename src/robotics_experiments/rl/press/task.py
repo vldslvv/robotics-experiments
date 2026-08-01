@@ -109,6 +109,7 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
     pusher_collision: ArrayT
     crash: ArrayT
     altitude: ArrayT
+    range_undershoot: ArrayT
     relative_envelope: ArrayT
     time_out: ArrayT
     terminated: ArrayT
@@ -116,7 +117,7 @@ class PressApproachTerminationFlags(Generic[ArrayT]):
     @property
     def flight_failure(self) -> ArrayT:
         """Return raw flight-envelope failures, including collision-coincident ones."""
-        return self.crash | self.altitude | self.relative_envelope
+        return self.crash | self.altitude | self.range_undershoot | self.relative_envelope
 
     @property
     def collision(self) -> ArrayT:
@@ -329,12 +330,13 @@ def step_press_approach(
 
     crash = sample.body_z_world_z < termination_cfg.crash_tilt_cos
     altitude = sample.altitude_m < termination_cfg.min_altitude_m
+    range_undershoot = current_range < goal_cfg.range_min_m
     relative_envelope = (
         (abs(current_range) > termination_cfg.max_wall_normal_distance_m)
         | (abs(sample.relative_switch_pos_m[..., 1]) > termination_cfg.max_lateral_error_m)
         | (abs(sample.relative_switch_pos_m[..., 2]) > termination_cfg.max_vertical_error_m)
     )
-    flight_failure = crash | altitude | relative_envelope
+    flight_failure = crash | altitude | range_undershoot | relative_envelope
     collision = sample.body_collision_flag | sample.pusher_collision_flag
     ordinary_flight_failure = flight_failure & ~collision
     failure = collision | ordinary_flight_failure
@@ -347,6 +349,7 @@ def step_press_approach(
         pusher_collision=sample.pusher_collision_flag,
         crash=crash,
         altitude=altitude,
+        range_undershoot=range_undershoot,
         relative_envelope=relative_envelope,
         time_out=time_out,
         terminated=terminated,

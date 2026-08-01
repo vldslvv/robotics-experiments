@@ -137,8 +137,8 @@ Success requires five consecutive 20 Hz policy samples satisfying all of:
 - Body-Z/world-Z alignment at least 0.965926.
 - No pusher collision during the policy interval.
 
-Body collision, pusher collision, crash, altitude, or relative-envelope failure
-terminates the episode.
+Body collision, pusher collision, crash, altitude, range below the unchanged
+0.40 m acceptance boundary, or relative-envelope failure terminates the episode.
 Timeout is a truncation and is mutually exclusive with terminal success or
 failure. Reset samples range from 0.45 through 0.50 m and samples lateral and
 vertical offsets uniformly inside the shared 0.08 m radial bound. Initial
@@ -177,8 +177,10 @@ diagnostics. `Reward/` TensorBoard scalars enumerate every contribution plus
 body-collision, pusher-collision, other-flight-failure, and timeout percentages.
 
 The actor action drives training physics directly. No deterministic
-near-wall governor changes the forward command in training or deployment.
-Collision reward and termination must therefore produce the learned braking
+near-wall governor changes the forward command in training or deployment. A
+range undershoot terminates training and evaluation instead of allowing the
+actor to retreat and claim success after violating the exact-action range gate.
+The reward and terminal boundary must therefore produce the learned braking
 behavior; a flat zero-collision run from the initial checkpoint is not evidence
 of learning unless the unguided actor already satisfies the independent gates.
 
@@ -309,7 +311,7 @@ final checkpoint, on 100 deterministic episodes for each seed 101, 202, and
   upright, action-change, and completion-time costs.
 - Every reward-term mean.
 
-`held-out-press-task-quality-v2` subtracts configured collision, other-flight-
+`held-out-press-task-quality-v3` subtracts configured collision, other-flight-
 failure, timeout, and non-success penalties plus the six normalized continuous
 costs. Higher scores are better; PPO return is never a selection input. The
 95% success, 1% collision, 0.40 m minimum-range, finite completed trace, and

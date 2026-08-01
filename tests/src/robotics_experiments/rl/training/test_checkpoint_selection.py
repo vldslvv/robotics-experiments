@@ -336,7 +336,7 @@ def test_press_selection_evaluates_every_candidate_with_one_environment(
             episodes_per_seed=100,
             success_rate_min=0.95,
             collision_rate_max=0.01,
-            selection_metric="held-out-press-task-quality-v2",
+            selection_metric="held-out-press-task-quality-v3",
         ),
         goal_config=SimpleNamespace(range_min_m=0.40),
         device="cuda:0",
@@ -369,7 +369,7 @@ def test_approach_report_records_stage_and_v2_thresholds() -> None:
         result=_result(success=0.1, collision=0.2),
     )
     selection = CheckpointSelection(
-        selection_method="held-out-press-task-quality-v2",
+        selection_method="held-out-press-task-quality-v3",
         evaluations=(evaluation,),
         selected=candidate,
     )
@@ -440,7 +440,7 @@ def test_publication_records_evaluation_and_advances_latest(
         reward_means=(RewardMean("success", 0.125),),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality-v3",
         (evaluation,),
         evaluation.candidate,
     )
@@ -497,7 +497,7 @@ def test_export_failure_preserves_previous_latest(monkeypatch, tmp_path: Path) -
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("export failed")),
     )
     selection = CheckpointSelection(
-        "held-out-press-task-quality-v2",
+        "held-out-press-task-quality-v3",
         (),
         CheckpointCandidate(50, checkpoint),
     )

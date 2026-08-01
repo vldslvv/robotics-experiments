@@ -6284,3 +6284,35 @@ recipe remain unchanged. Start the next actor-only run from barrier checkpoint
 5, which is collision-free and has the strongest observed minimum range
 (0.38847 m), then test whether align-first behavior recovers success without
 the shared undershoot attractor.
+
+### 155. Make the exact range boundary terminal during learning
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T195816Z.42280` used clean source commit `29bdc15`,
+the accepted alignment run `20260801T142920Z`, and barrier-run checkpoint 5.
+PPO completed in 352.9 s and the eleven-checkpoint held-out sweep completed in
+447.4 s. Selection chose checkpoint 45 with score -0.322697, 100% success,
+zero collisions, other flight failures, or timeouts, 0.41211 m mean closest
+range, and 0.38490 m minimum closest range. Independent evaluation reproduced
+all rate metrics, a 0.41211 m mean, and a 0.38490 m minimum. The only failed
+acceptance gate remains range undershoot.
+
+The full sweep did not contain an acceptable range frontier. Checkpoint 0 had
+the strongest minimum at 0.38834 m but only 77.3% success; checkpoint 5 reached
+94.3% success at 0.38582 m; checkpoints 20, 30, and 45 reached 100% success but
+returned to 0.38490-0.38498 m. All candidates remained collision-free. The
+align-first target therefore improved safe completion behavior but did not
+move the repeatable inertial crossing.
+
+The worst-episode trace shows why the soft objectives permit this result. The
+actor enters the range band while still misaligned, continues forward as its
+wall-normal action decays, crosses 0.40 m, then retreats and claims success.
+The evaluator rejects that trajectory, but the training transition currently
+does not: it applies the barrier and still grants the terminal success reward
+after recovery. Make the unchanged 0.40 m lower goal boundary terminal as a
+range-undershoot flight/task failure. This directly aligns the training episode
+with the existing exact acceptance gate without adding an action governor or
+changing the goal. Continue from checkpoint 0, which is the strongest observed
+range source under the align-first evaluator, and use the existing 50-iteration
+actor-only recipe plus the complete held-out sweep.

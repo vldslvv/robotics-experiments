@@ -273,7 +273,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
-    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v2"
+    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v3"
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
