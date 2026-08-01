@@ -6090,3 +6090,23 @@ level 19 on one thread. On the 4.67 GB raw trace archive from run
 and produced a 1.35 GB archive. Level 15 took 111.52 s and reduced that result
 by only about 2.4%. Target evidence now uses the measured level-8 policy while
 the small deterministic selection record retains level 19 on one thread.
+
+### 148. Route accepted-alignment policy refinement from the safe checkpoint
+
+Date: 2026-08-01.
+
+Scratch policy run `20260801T144259Z.322562` trained for 300 iterations from
+the accepted `20260801T142920Z` controller artifact. PPO completed in 1,901 s.
+Held-out selection chose terminal checkpoint 299 by the configured metric at
+71.3% success, 17.0% pusher collision, zero body collisions and flight
+failures, and 11.7% timeout. Independent evaluation reproduced 71.3% success,
+16.3% pusher collision, 12.3% timeout, and 0.384 m minimum range, rejecting
+the success, collision, and range-undershoot advisory gates.
+
+The checkpoint series alternated between safe timeouts and aggressive contact.
+Checkpoint 230 is the strongest evidenced refinement source: it achieved
+37.0% success with zero collisions and flight failures, 63.0% timeout, and a
+0.380 m minimum range. Continue actor-only from that checkpoint with the
+existing 50-iteration fixed `1e-6`, 0.01-noise, zero-entropy recipe. This tests
+whether low-rate optimization can convert safe timeouts into completion without
+starting from the terminal actor's collision behavior.
