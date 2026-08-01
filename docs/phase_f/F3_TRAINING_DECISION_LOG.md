@@ -6316,3 +6316,44 @@ with the existing exact acceptance gate without adding an action governor or
 changing the goal. Continue from checkpoint 0, which is the strongest observed
 range source under the align-first evaluator, and use the existing 50-iteration
 actor-only recipe plus the complete held-out sweep.
+
+### 156. Hard-boundary learning closes most of the range gap
+
+Date: 2026-08-01.
+
+Actor-only run `20260801T201859Z.57470` used clean source commit `baf2620`,
+the accepted alignment run `20260801T142920Z`, and align-first run
+`20260801T195816Z.42280` checkpoint 0. PPO completed in 334.0 s and the
+eleven-checkpoint held-out sweep completed in 203.3 s. The selection record is
+`.build/training/press-approach/20260801T201859Z.57470/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range.20260801T201859Z.57470.console.log`.
+The new comparison fingerprint is
+`731a40b13af3e221bf58141c8b2386607d749985411abb94163a29962225f244`.
+
+Selection chose terminal checkpoint 49 with score -0.948470, 85.0% success,
+15.0% range-undershoot flight failure, zero collision and timeout, 0.41099 m
+mean closest range, and 0.39875 m minimum closest range. Independent evaluation
+reproduced 85.7% success, 14.3% undershoot failure, zero collision and timeout,
+0.41101 m mean closest range, and 0.39885 m minimum closest range. It therefore
+still fails success, minimum-range, and flight-failure acceptance gates.
+
+This is material boundary progress. Relative to the preceding selected actor,
+the minimum rose from 0.38490 m to 0.39885 m, reducing the 0.40 m undershoot gap
+by about 92%. Within this run, undershoot failure fell from 22.3% at checkpoint
+5 to 15.0% at checkpoint 49 while timeout stayed at zero; checkpoints 40, 45,
+and 49 achieved 84.7%, 84.7%, and 85.0% success respectively. The slope remains
+positive, so no structural or parameter change is yet supported.
+
+Stop at this intermediate frontier. To resume, keep source commit `baf2620`,
+the current `configs/train_press_approach_quad_finetune.yaml`, accepted
+controller artifact
+`.build/alignment/x500-velocity-px4-v7/20260801T142920Z`, and initialize from
+`.build/training/press-approach/20260801T201859Z.57470/logs/model_49.pt`. Run the
+same 50-iteration actor-only continuation and complete held-out sweep. Continue
+unchanged while undershoot failure materially decreases; if it plateaus across
+a complete continuation, inspect the retained worst-episode trace before
+changing the barrier, failure weight, learning rate, or action interface. Do
+not run PX4 transfer, the press routine, or aggregate integration suites until
+independent policy acceptance passes all gates.
