@@ -19,16 +19,20 @@ from robotics_experiments.alignment._io import (
 
 
 def _diagnostic_image(path: Path, /) -> str:
-    with path.open() as diagnostics:
-        for line in diagnostics:
-            stripped = line.strip()
-            if stripped.startswith('"image":'):
-                value = json.loads("{" + stripped.rstrip(",") + "}").get("image")
-                if isinstance(value, str) and value:
-                    return value
-                break
-            if stripped.startswith('"candidates":') or stripped.startswith('"traces":'):
-                break
+    with path.open(encoding="utf-8") as diagnostics:
+        header = diagnostics.read(64 * 1024)
+    image_key = header.find('"image"')
+    data_boundary = min(
+        (index for key in ('"candidates"', '"traces"') if (index := header.find(key)) >= 0),
+        default=len(header),
+    )
+    if 0 <= image_key < data_boundary:
+        separator = header.find(":", image_key + len('"image"'))
+        if 0 <= separator < data_boundary:
+            payload = header[separator + 1 : data_boundary].lstrip()
+            value, _end = json.JSONDecoder().raw_decode(payload)
+            if isinstance(value, str) and value:
+                return value
     raise ValueError(f"{path} has no image header")
 
 

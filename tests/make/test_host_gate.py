@@ -16,11 +16,11 @@ def test_make_check_runs_complete_non_mutating_host_gate() -> None:
 
     commands = [
         "uv lock --check",
-        "uv run ruff check",
-        "uv run ruff format --check",
-        "uv run mypy src tests",
+        "uv run --extra dev ruff check",
+        "uv run --extra dev ruff format --check",
+        "uv run --extra dev mypy src tests",
         "uv run --extra dev vulture --config pyproject.toml",
-        "uv run pytest",
+        "uv run --extra dev pytest",
     ]
     positions = [result.stdout.index(command) for command in commands]
     assert positions == sorted(positions)
