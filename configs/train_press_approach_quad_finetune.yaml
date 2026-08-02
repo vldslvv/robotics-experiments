@@ -12,6 +12,11 @@ rl:
     policy:
       actor:
         initial_noise_std: 0.01
+    reward:
+      # The terminal undershoot trace is the only remaining failure mode. Give
+      # it greater weight than a successful terminal transition while keeping
+      # the exact boundary and evaluation contract unchanged.
+      flight_failure_weight: 300.0
     goal:
       velocity_reference:
         range_center_m: 0.415

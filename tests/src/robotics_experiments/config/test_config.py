@@ -291,6 +291,7 @@ def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
     assert config.rl.training.save_interval == 5
     assert config.rl.training.schedule == "fixed"
     assert config.rl.press.policy.actor.initial_noise_std == 0.01
+    assert config.rl.press.reward.flight_failure_weight == 300.0
     reference = config.rl.press.goal.velocity_reference
     assert reference.range_center_m == 0.415
     assert reference.wall_normal_max_mps == 0.04

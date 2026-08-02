@@ -237,9 +237,11 @@ compatible `actor.*` tensors into a fresh run. Critic, optimizer, exploration
 standard deviation, and iteration counter remain fresh. The separate
 `configs/train_press_approach_quad_finetune.yaml` currently uses a 15-iteration,
 fixed `3e-5`, 0.01-noise, zero-entropy pilot recipe, saving four checkpoints for
-the unchanged held-out selection. Its wall-normal velocity reference is capped
-at 0.04 m/s and centered at 0.415 m so actor-only refinement teaches earlier
-braking without changing the 0.40-0.42 m goal band or its acceptance limits:
+the unchanged held-out selection. It raises the terminal flight-failure weight
+to 300 so the evidenced range-undershoot transition outweighs success. Its
+wall-normal velocity reference is capped at 0.04 m/s and centered at 0.415 m so
+actor-only refinement teaches earlier braking without changing the 0.40-0.42 m
+goal band or its acceptance limits:
 
 ```console
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \

@@ -6797,3 +6797,21 @@ should increase the terminal flight-failure cost while leaving the barrier,
 task, reset distribution, accepted controller, evaluation gates, and selected
 source actor unchanged. This directly strengthens the only reward event that
 distinguishes the failing trace from the 299 accepted episodes.
+
+### 175. Strengthen the evidenced terminal-undershoot signal
+
+Date: 2026-08-02.
+
+The next attempt changes only the actor-only training reward's generic terminal
+flight-failure weight from 100 to 300. In the current traces every such failure
+is a range undershoot; collisions, timeouts, altitude, attitude, and relative-
+envelope failures are zero. This makes the single rejected terminal transition
+cost twice the configured success reward rather than two thirds of it, while
+leaving the exact 0.400 m termination and acceptance boundaries unchanged.
+
+Start again from the stronger pre-annealing source
+`.build/training/press-approach/20260802T070403Z.137124/logs/model_5.pt`. Retain
+the fixed `3e-5` rate, 15 iterations, checkpoints 0/5/10/14, 0.01 noise, zero
+entropy, reset distribution, range barrier, velocity reference, controller,
+and held-out seeds. This isolates whether the terminal value signal can move
+the hard reset corner that ordinary rate annealing could not.
