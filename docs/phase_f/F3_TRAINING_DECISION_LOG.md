@@ -7032,3 +7032,26 @@ source and prevents the evidenced unsafe drift. Keep every other phase-2
 parameter unchanged. This reduces continuation training from 150 to 11
 iterations and selection from 16 candidates to two. Rerun seed 42 from the same
 phase-1 source, then repeat the complete two-phase procedure with seed 43.
+
+### 184. Short seed-42 safety phase independently passes
+
+Date: 2026-08-02.
+
+Run `20260802T090751Z.245990` used clean source commit `7d71182`, seed 42, and
+the same phase-1 checkpoint 270 as decision 183. Eleven continuation iterations
+completed in 91.8 s and the two-checkpoint held-out sweep completed in 92.4 s,
+compared with 910.9 s and 338.2 s for the overlong phase. The selection record
+is
+`.build/training/press-approach/20260802T090751Z.245990/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-safety-seed42-phase2-short.20260802T090751Z.245990.console.log`.
+
+Selection reproduced checkpoint 280 exactly: score -0.361449, 99.33% success,
+zero collisions, zero other flight failures, 0.67% timeout, 0.41745 m mean
+closest range, and 0.40164 m minimum closest range. Independent evaluation
+passed with the same rates, 0.41745 m mean closest range, and 0.40166 m minimum
+closest range. Every completed trace was finite.
+
+The complete seed-42 scratch-to-safety pipeline now passes without actor-only
+initialization. Preserve this run as the first reproducibility proof and execute
+the unchanged two-phase schedule from random weights with seed 43.
