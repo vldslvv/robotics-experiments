@@ -6386,3 +6386,39 @@ unchanged 50-iteration actor-only recipe from
 changing learning rate or reward. If the next complete sweep does not reduce
 undershoot failure by at least 20% or pass another gate, treat it as the first
 plateau result and begin the planned evidence-routed learning-rate experiment.
+
+### 158. The unchanged continuation reaches its first plateau
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T055051Z.19062` used clean source commit `4c4d59b`,
+the accepted alignment run `20260801T142920Z`, and continuation run
+`20260802T054109Z.14219` checkpoint 45. PPO completed in 322.3 s and the
+eleven-checkpoint held-out sweep completed in 143.0 s. The selection record is
+`.build/training/press-approach/20260802T055051Z.19062/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-cont3.20260802T055051Z.19062.console.log`.
+
+Selection chose terminal checkpoint 49 with score -0.791107, 88.7% success,
+11.3% range-undershoot flight failure, zero collision and timeout, 0.41058 m
+mean closest range, and 0.39870 m minimum closest range. Independent evaluation
+reported 88.3% success, 11.7% undershoot failure, zero collision and timeout,
+0.41057 m mean closest range, and 0.39875 m minimum closest range. It still
+fails success, minimum-range, and flight-failure gates.
+
+This is not material progress from the 89.0% success and 11.0% failure source
+frontier. No candidate passed another gate or reduced the largest normalized
+excess by 20%: the complete sweep ranged from 87.0% through 88.7% success.
+The retained worst trace continues to show positive forward action and about
+0.03 m/s forward velocity while crossing the unchanged 0.40 m boundary, so the
+first unresolved seam remains learned braking rather than collision, timeout,
+or controller response.
+
+Count this as the first plateau attempt. Keep the reward, observation, action,
+termination, controller, goal, and reset distribution fixed, and test the
+planned learning-rate intervention from the stronger source
+`.build/training/press-approach/20260802T054109Z.14219/logs/model_45.pt`.
+Use short actor-only pilots at `3e-6`, `1e-5`, and `3e-5`, rank every saved
+checkpoint with the unchanged held-out seeds, and continue the strongest safe
+rate only when it materially improves the 89.0% / 11.0% frontier.
