@@ -317,7 +317,7 @@ def test_press_approach_safety_config_resumes_full_state_with_targeted_recipe():
     assert config.rl.training.entropy_coef == 0.0
     assert config.rl.training.save_interval == 1
     assert config.rl.training.schedule == "fixed"
-    assert config.rl.press.training_reset.hard_case_fraction == 0.3
+    assert config.rl.press.training_reset.hard_case_fraction == 0.25
     assert config.rl.press.reward.flight_failure_weight == 300.0
     assert config.rl.press.reward.velocity_tracking_weight == 300.0
 

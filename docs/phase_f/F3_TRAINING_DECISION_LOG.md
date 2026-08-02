@@ -7320,3 +7320,30 @@ seed-43 checkpoint 120. If it passes independently, the same shortened
 two-phase configuration is reproduced across both proof seeds. If it crosses
 into timeout, use the two accepted reset fractions as evidence for an explicit
 validation-routed safety bracket rather than another ad hoc continuation.
+
+### 194. Refine the cross-seed reset bracket at 25%
+
+Date: 2026-08-02.
+
+Seed-43 continuation `20260802T121208Z.382078` used clean source commit
+`7f2475c`, restored the complete fixed-rate checkpoint-120 state, and used the
+seed-42-proven 30% hard-case mixture. Training completed in 92.2 s and the
+source plus 11 fine checkpoints were evaluated in 456.7 s. The selection record
+is
+`.build/training/press-approach/20260802T121208Z.382078/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-short-seed43-phase2-hard30.20260802T121208Z.382078.console.log`.
+
+The first updates shifted sharply into timeout, then recovered. Checkpoint 130
+was selected with score -0.697556, 89.0% success, zero collisions, zero other
+flight failures, 11.0% timeout, and 0.40190 m minimum closest range. Independent
+evaluation reproduced every aggregate metric and the safe range, so only the
+approach-success gate failed. The 30% stream fixes undershoot but overbrakes
+seed 43.
+
+The cross-seed response is now bracketed: seed 43 passes at 20% and overbrakes
+at 30%, while seed 42 leaves four undershoots at 20% and passes at 30%. Change
+only `hard_case_fraction` to the 25% midpoint and test seed 43 first. If it
+passes independently, rerun the same configuration from the seed-42 source to
+establish one static two-phase recipe. Preserve the full-state checkpoint,
+fixed rate, horizon, every-update sweep, evaluation distribution, and gates.
