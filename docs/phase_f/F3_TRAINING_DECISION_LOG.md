@@ -6441,3 +6441,27 @@ zero-timeout frontier. The rate is safe only if collision and timeout remain
 zero; it is material only if undershoot falls by at least 20% or another gate
 passes. Continue to the `1e-5` and `3e-5` probes regardless of this first result
 unless one candidate already passes every independent acceptance gate.
+
+### 160. The conservative rate does not move the frontier
+
+Date: 2026-08-02.
+
+Actor-only pilot `20260802T060526Z.35210` used clean source commit `8688078`,
+the accepted alignment run `20260801T142920Z`, and continuation run
+`20260802T054109Z.14219` checkpoint 45. PPO completed in 116.1 s and the
+four-checkpoint held-out sweep completed in 58.7 s. The selection record is
+`.build/training/press-approach/20260802T060526Z.35210/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr3e6.20260802T060526Z.35210.console.log`.
+
+Selection chose checkpoint 14 with score -0.804497, 88.3% success, 11.7%
+range-undershoot flight failure, zero collision and timeout, 0.41066 m mean
+closest range, and 0.39873 m minimum closest range. Independent evaluation
+reported 87.7% success, 12.3% undershoot failure, zero collision and timeout,
+0.41066 m mean closest range, and 0.39864 m minimum closest range.
+
+The `3e-6` rate is safe but does not improve the 89.0% / 11.0% source frontier.
+All four held-out candidates remained within 88.0-88.3% success, so extending
+this rate is unsupported. Advance to the planned central `1e-5` pilot from the
+same source actor and keep every non-rate variable unchanged.
