@@ -18,8 +18,10 @@ rl:
         wall_normal_max_mps: 0.04
   training:
     training_mode: actor-only
-    max_iterations: 50
+    # Short rate pilots retain the unchanged held-out selection contract while
+    # testing four checkpoints before a full continuation is authorized.
+    max_iterations: 15
     save_interval: 5
-    learning_rate: 1.0e-6
+    learning_rate: 3.0e-6
     schedule: fixed
     entropy_coef: 0.0

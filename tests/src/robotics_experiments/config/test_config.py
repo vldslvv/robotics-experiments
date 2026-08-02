@@ -279,14 +279,14 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
 
 
-def test_press_approach_finetune_config_uses_early_braking_actor_only_recipe():
+def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
     from robotics_experiments.config import load_config
 
     config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
 
     assert config.rl.training.training_mode == "actor-only"
-    assert config.rl.training.max_iterations == 50
-    assert config.rl.training.learning_rate == 1.0e-6
+    assert config.rl.training.max_iterations == 15
+    assert config.rl.training.learning_rate == 3.0e-6
     assert config.rl.training.entropy_coef == 0.0
     assert config.rl.training.save_interval == 5
     assert config.rl.training.schedule == "fixed"

@@ -235,11 +235,11 @@ records this initialization method before PPO begins.
 `training_mode: actor-only` requires `--initialize-checkpoint` and copies only
 compatible `actor.*` tensors into a fresh run. Critic, optimizer, exploration
 standard deviation, and iteration counter remain fresh. The separate
-`configs/train_press_approach_quad_finetune.yaml` uses a 50-iteration, fixed
-`1e-6`, 0.01-noise, zero-entropy recipe. Its wall-normal velocity reference is
-capped at 0.04 m/s and centered at 0.415 m so actor-only refinement teaches
-earlier braking without changing the 0.40-0.42 m goal band or its acceptance
-limits:
+`configs/train_press_approach_quad_finetune.yaml` currently uses a 15-iteration,
+fixed `3e-6`, 0.01-noise, zero-entropy pilot recipe, saving four checkpoints for
+the unchanged held-out selection. Its wall-normal velocity reference is capped
+at 0.04 m/s and centered at 0.415 m so actor-only refinement teaches earlier
+braking without changing the 0.40-0.42 m goal band or its acceptance limits:
 
 ```console
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \

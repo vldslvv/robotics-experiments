@@ -6422,3 +6422,22 @@ planned learning-rate intervention from the stronger source
 Use short actor-only pilots at `3e-6`, `1e-5`, and `3e-5`, rank every saved
 checkpoint with the unchanged held-out seeds, and continue the strongest safe
 rate only when it materially improves the 89.0% / 11.0% frontier.
+
+### 159. Probe the conservative side of the learning-rate expansion
+
+Date: 2026-08-02.
+
+Start the evidence-routed learning-rate campaign at `3e-6`, three times the
+plateaued rate but still below the planned central `1e-5` candidate. Use 15
+actor-only iterations and save at iterations 0, 5, 10, and 14. This keeps the
+accepted controller, source actor, reward, environment, reset distribution,
+fixed schedule, noise, entropy, and complete held-out and independent
+evaluation contracts unchanged while reducing pilot cost.
+
+Initialize from the strongest accepted-boundary source,
+`.build/training/press-approach/20260802T054109Z.14219/logs/model_45.pt`.
+Compare every pilot against its 89.0% success, 11.0% undershoot, zero-collision,
+zero-timeout frontier. The rate is safe only if collision and timeout remain
+zero; it is material only if undershoot falls by at least 20% or another gate
+passes. Continue to the `1e-5` and `3e-5` probes regardless of this first result
+unless one candidate already passes every independent acceptance gate.
