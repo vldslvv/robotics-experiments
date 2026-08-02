@@ -6357,3 +6357,32 @@ a complete continuation, inspect the retained worst-episode trace before
 changing the barrier, failure weight, learning rate, or action interface. Do
 not run PX4 transfer, the press routine, or aggregate integration suites until
 independent policy acceptance passes all gates.
+
+### 157. Continue the improving hard-boundary frontier
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T054109Z.14219` used clean source commit `2304a0e`,
+the accepted alignment run `20260801T142920Z`, and hard-boundary run
+`20260801T201859Z.57470` checkpoint 49. PPO completed in 325.0 s and the
+eleven-checkpoint held-out sweep completed in 149.7 s. The selection record is
+`.build/training/press-approach/20260802T054109Z.14219/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-cont2.20260802T054109Z.14219.console.log`.
+
+Selection chose checkpoint 45 with score -0.777479, 89.0% success, 11.0%
+range-undershoot flight failure, zero collision and timeout, 0.41098 m mean
+closest range, and 0.39881 m minimum closest range. Independent evaluation
+reproduced every rate metric and range value. It still fails the success,
+minimum-range, and flight-failure gates.
+
+This is material progress from the preceding independent frontier: undershoot
+failure fell from 14.3% to 11.0%, a 23% relative reduction, while success rose
+from 85.7% to 89.0% and collision and timeout remained zero. The selected
+checkpoint is also the run's strongest rate and score frontier. Continue the
+unchanged 50-iteration actor-only recipe from
+`.build/training/press-approach/20260802T054109Z.14219/logs/model_45.pt` before
+changing learning rate or reward. If the next complete sweep does not reduce
+undershoot failure by at least 20% or pass another gate, treat it as the first
+plateau result and begin the planned evidence-routed learning-rate experiment.
