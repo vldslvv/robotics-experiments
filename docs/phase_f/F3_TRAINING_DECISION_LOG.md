@@ -7174,3 +7174,37 @@ to 0.1. Keep full-state resume, rate, entropy, horizon, every-update saves,
 reward, controller, evaluation distribution, and gates unchanged. This retains
 targeted exposure while preventing it from dominating the learned full-reset
 behavior.
+
+### 189. Bracket the remaining undershoot with a 20% hard-case stream
+
+Date: 2026-08-02.
+
+Seed-43 continuation `20260802T105747Z.321141` used clean source commit
+`d747f0e`, the same checkpoint-120 full state, and a 10% hard-case training
+mixture. Training completed in 93.1 s and the source plus 11 fine checkpoints
+were evaluated in 432.2 s. The selection record is
+`.build/training/press-approach/20260802T105747Z.321141/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-seed43-phase2-hard10.20260802T105747Z.321141.console.log`.
+
+Selection chose checkpoint 126 with score -0.424835, 98.33% success, zero
+collisions, 1.67% other flight failure, zero timeout, 0.41624 m mean closest
+range, and 0.39976 m minimum closest range. It passed the approach-success gate
+and reduced the source's 15.67% flight-failure rate by almost 90%. Later
+checkpoints retained 97.33%-98.0% success but increased failure to 2.0%-2.67%.
+Independent evaluation did not start because Isaac Sim segfaulted during Kit
+startup; the crash dump and log are preserved under the run's evaluation
+integration directory and are not a policy result.
+
+An audit confirms that the environment seam is correct: training passes
+`use_training_reset_distribution=True`, while selection and independent
+evaluation retain its false default and therefore use the full handoff reset
+distribution. The small source-metric variation across launches is runtime
+nondeterminism, not reset-mixture leakage.
+
+The remaining boundary is five undershoots in 300 episodes. A 50% hard-case
+stream eliminated undershoots but overbraked, while 10% retained high success
+with too little correction. Test the bracket midpoint by changing only the
+training hard-case fraction from 0.1 to 0.2. Retain fixed `3e-5`, full-state
+resume, 11 updates, every-update checkpoints, reward, controller, full-reset
+evaluation, and all acceptance gates.
