@@ -7406,3 +7406,19 @@ evidence-routed response. Keep both actor traces as diagnostics for a future
 policy-domain-randomization or PX4-response curriculum campaign. Restore the
 deployment descriptors to `latest`, republish the accepted scratch run as
 `latest`, and complete the unchanged host and aggregate integration suites.
+
+The standard selector re-evaluated every checkpoint in the accepted scratch
+run and again selected checkpoint 127 with the exact score -0.348033, 100%
+success, and zero collision, flight-failure, and timeout rates. `latest` now
+resolves to `20260802T115850Z.371375`; `best` correctly remains the higher-score
+actor-only reference `20260802T074001Z.193711`. The selector artifacts are under
+`.build/docker/integration/select-rl-checkpoint.20260802T130514Z.421981`.
+
+The final host gate passed 740 tests with one intentional skip, and every
+pre-commit hook passed. The aggregate Docker suite then passed all eight
+targets: Isaac settings, drone articulation, press hover/goto, press contact
+chain, PX4 takeoff, two-airframe PX4 navigation, intentional takeoff
+instability detection, and two-X500 PX4 takeoff. Its run began with cache
+artifacts under
+`.build/docker/integration/test-integration-warm-isaac-cache.20260802T131307Z.422751`;
+each target's sibling run directory preserves its complete logs.
