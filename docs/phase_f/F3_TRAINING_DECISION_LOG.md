@@ -7293,3 +7293,30 @@ midpoint between the current 20% stream and that upper bracket: change only
 `hard_case_fraction` to 0.3 and restart from the original shortened-phase
 checkpoint 120. Preserve full-state resume, the fixed rate, horizon,
 every-update sweep, full-reset evaluation distribution, and all gates.
+
+### 193. Seed 42 passes the targeted 30% safety phase
+
+Date: 2026-08-02.
+
+Seed-42 continuation `20260802T115850Z.371375` used clean source commit
+`41c54b5`, restored the complete shortened-phase checkpoint-120 state, and used
+the targeted 30% hard-case mixture. Training completed in 91.6 s and the source
+plus 11 fine checkpoints were evaluated in 449.6 s. The selection record is
+`.build/training/press-approach/20260802T115850Z.371375/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-short-seed42-phase2-hard30.20260802T115850Z.371375.console.log`.
+
+Checkpoint 127 was selected with score -0.348033 and passed every held-out
+gate: 100% success, zero body or pusher collisions, zero other flight failures,
+zero timeout, 0.41687 m mean closest range, and 0.40027 m minimum closest range.
+Independent evaluation reproduced every aggregate metric and minimum range and
+reported finite completed traces. The complete shortened seed-42 scratch to
+full-state-safety procedure is accepted.
+
+The same fixed-rate phase 1 produced an accepted seed-43 result with 20% hard
+cases, but a static production procedure must not depend on a manually chosen
+seed-specific reset fraction. Run the unchanged 30% recipe from the fixed-rate
+seed-43 checkpoint 120. If it passes independently, the same shortened
+two-phase configuration is reproduced across both proof seeds. If it crosses
+into timeout, use the two accepted reset fractions as evidence for an explicit
+validation-routed safety bracket rather than another ad hoc continuation.
