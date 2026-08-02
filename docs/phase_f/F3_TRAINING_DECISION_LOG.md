@@ -6719,3 +6719,31 @@ regressed, so continue from selected checkpoint
 Retain the same short fixed `1e-4` recipe for the final evidenced boundary; no
 structural change is justified while the remaining failure count is still
 falling materially.
+
+### 172. The one-episode boundary improves but the failure count plateaus
+
+Date: 2026-08-02.
+
+Actor-only continuation `20260802T070403Z.137124` used clean source commit
+`8a60ff3`, the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T065757Z.126755` checkpoint 0. PPO completed in 117.1 s and the
+four-checkpoint held-out sweep completed in 52.8 s. The selection record is
+`.build/training/press-approach/20260802T070403Z.137124/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4-cont7.20260802T070403Z.137124.console.log`.
+
+Selection chose checkpoint 5 with score -0.288816. Held-out and independent
+evaluation both reported 99.7% success, 0.3% range-undershoot flight failure,
+zero collision and timeout, 0.41117 m mean closest range, and 0.39934 m minimum
+closest range. The unresolved boundary remains one deterministic episode.
+
+The failure count did not improve, but the remaining minimum-range gap shrank
+from 0.00189 m to 0.00066 m, about 65%, while the score improved and all passed
+gates remained passed. Later checkpoints regressed. This is the first
+failure-count plateau at the one-episode seam, so continuing with the same
+`1e-4` step is no longer the best supported action. Continue from
+`.build/training/press-approach/20260802T070403Z.137124/logs/model_5.pt` with a
+fixed `3e-5` learning rate. Keep the 15-iteration horizon, noise, entropy,
+task, controller, and held-out contract unchanged so the next attempt isolates
+the annealed actor update.
