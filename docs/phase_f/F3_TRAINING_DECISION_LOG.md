@@ -7055,3 +7055,34 @@ closest range. Every completed trace was finite.
 The complete seed-42 scratch-to-safety pipeline now passes without actor-only
 initialization. Preserve this run as the first reproducibility proof and execute
 the unchanged two-phase schedule from random weights with seed 43.
+
+### 185. Bound the scratch learning rate after seed-43 adaptive collapse
+
+Date: 2026-08-02.
+
+Scratch run `20260802T091501Z.256432` used clean source commit `ee8d687`, seed
+43, and the same phase-1 procedure that produced the seed-42 resume frontier.
+Training completed 300 iterations in 1765.1 s. The 11-checkpoint held-out sweep
+selected checkpoint 120 with score -3.589610, 4.33% success, zero collisions,
+zero other flight failures, 95.67% timeout, 0.43745 m mean closest range, and
+0.40541 m minimum closest range. Independent evaluation reproduced those
+rates and rejected only the approach-success gate. The selection record is
+`.build/training/press-approach/20260802T091501Z.256432/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-safety-seed43-phase1.20260802T091501Z.256432.console.log`.
+
+The first failed training boundary is the adaptive learning-rate schedule. At
+iteration 138 the rate was `3.844336e-4`; at iteration 139 it reached
+`1.297463e-3`, about 13 times the configured nominal rate. Value loss rose from
+about 1,273 at iteration 139 to 1,100,328 at iteration 141, exactly when flight
+failure began increasing. Every evaluated checkpoint from 150 onward had 100%
+other flight failure. The selected checkpoint is too early and too weak for the
+11-iteration safety continuation, so do not spend a phase-2 attempt on it.
+
+Change only the phase-1 schedule from adaptive to fixed while retaining its
+nominal `1e-4` rate, 300-iteration horizon, reward, reset distribution,
+environment count, PPO epochs, minibatches, entropy, checkpoints, controller,
+selection, and independent gates. Rerun seed 43 from random weights. If it
+produces a credible resume frontier, apply the unchanged short safety phase;
+then rerun seeds 42 and 43 through the uniform fixed-rate procedure before
+declaring scratch reproducibility.

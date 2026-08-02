@@ -240,7 +240,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.learning_rate == 1.0e-4
     assert training.entropy_coef == 0.0001
     assert training.save_interval == 30
-    assert training.schedule == "adaptive"
+    assert training.schedule == "fixed"
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)

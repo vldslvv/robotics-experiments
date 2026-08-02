@@ -30,7 +30,9 @@ rl:
     # the resumed safety phase uses a finer interval around the frontier.
     save_interval: 30
     learning_rate: 1.0e-4
-    schedule: adaptive
+    # Fixed rate prevents the adaptive scheduler from amplifying seed-specific
+    # KL transients into an unsafe policy collapse.
+    schedule: fixed
     gamma: 0.995
     lam: 0.95
     entropy_coef: 0.0001
