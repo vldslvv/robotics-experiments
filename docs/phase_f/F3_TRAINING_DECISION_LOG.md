@@ -7347,3 +7347,31 @@ only `hard_case_fraction` to the 25% midpoint and test seed 43 first. If it
 passes independently, rerun the same configuration from the seed-42 source to
 establish one static two-phase recipe. Preserve the full-state checkpoint,
 fixed rate, horizon, every-update sweep, evaluation distribution, and gates.
+
+### 195. Preserve the accepted default-seed recipe and route alternates by evidence
+
+Date: 2026-08-02.
+
+Seed-43 continuation `20260802T122603Z.393653` used clean source commit
+`3e9be23`, restored the same fixed-rate checkpoint-120 state, and used the 25%
+midpoint hard-case mixture. Training completed in 94.5 s and the source plus 11
+fine checkpoints were evaluated in 456.1 s. The selection record is
+`.build/training/press-approach/20260802T122603Z.393653/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-short-seed43-phase2-hard25.20260802T122603Z.393653.console.log`.
+
+Checkpoint 130 was selected with score -0.539157, 94.67% success, zero
+collisions, 1.0% other flight failure, 4.33% timeout, and 0.39996 m minimum
+closest range. Independent evaluation reproduced every aggregate metric and
+minimum range. It narrowly failed approach success, range undershoot, and the
+flight envelope. The midpoint therefore did not establish a single static
+fraction across proof seeds.
+
+The production scratch configuration uses seed 42, for which the complete
+shortened procedure passed independently at 30%. Restore 30% as its declarative
+safety setting. Preserve the independently accepted seed-43 20% result as the
+alternate-seed proof and treat 20%-30% as a validation-routed safety bracket:
+choose a branch from the first failed boundary of the phase-1 held-out result,
+not by chaining additional continuations. Both branches start from the same
+phase-1 full state, use the same fixed learning rates and horizon, and select
+with the unchanged full-distribution metric and acceptance gates.
