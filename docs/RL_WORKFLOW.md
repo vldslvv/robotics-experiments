@@ -273,11 +273,15 @@ Scratch press training uses a reproducible coarse-to-fine schedule. The first
 121-iteration run uses the fixed `1e-4` scratch recipe and coarse 30-iteration
 checkpoints. The safety phase resumes the selected checkpoint for 11 runner
 iterations with fixed `3e-5`, zero entropy, every-update checkpoints, and a
-20% hard-case reset mixture. The minority hard-case stream corrects undershoot
-without overwhelming full-distribution approach behavior. The fine checkpoint grid resolves the narrow
-transition from range undershoot to safe completion or timeout. This horizon retains the accepted early safety
-frontier without continuing into the evidenced faster but unsafe drift. Both
-phases share terminal-failure and dense
+30% hard-case reset mixture for the production seed-42 recipe. The independently
+accepted seed-43 proof uses 20%; validation routes alternate seeds within this
+20%-30% bracket from the phase-1 failure boundary instead of chaining
+continuations. The minority hard-case stream corrects undershoot without
+overwhelming full-distribution approach behavior. The fine checkpoint grid
+resolves the narrow transition from range undershoot to safe completion or
+timeout. This horizon retains the accepted early safety frontier without
+continuing into the evidenced faster but unsafe drift. Both phases share
+terminal-failure and dense
 velocity-tracking weights of 300 and the earlier-braking reference. The second
 phase is full-state continuation, not actor-only fine-tuning:
 

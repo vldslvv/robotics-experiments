@@ -7375,3 +7375,34 @@ choose a branch from the first failed boundary of the phase-1 held-out result,
 not by chaining additional continuations. Both branches start from the same
 phase-1 full state, use the same fixed learning rates and horizon, and select
 with the unchanged full-distribution metric and acceptance gates.
+
+### 196. Preserve the PX4 actor-transfer divergence as a downstream diagnostic
+
+Date: 2026-08-02.
+
+The first policy-transfer invocation did not exercise the accepted seed-42
+scratch run: `RL_RUN_ID` selects train/evaluation runs but does not override a
+routine descriptor, and the descriptor's `latest` link had advanced to rejected
+seed-43 exploration `20260802T122603Z.393653`. Replaying the recorded actor
+observation reproduced that run's action exactly. The trace is preserved under
+`.build/docker/integration/test-integration-press-policy-transfer.20260802T124135Z.405610`.
+
+The transfer gate was then run with its descriptors temporarily pinned to the
+accepted scratch run `20260802T115850Z.371375`. The actor entered at 0.4502 m,
+continued issuing a small positive forward command as the range fell, and made
+pusher contact at 0.3531 m. The trace is preserved under
+`.build/docker/integration/test-integration-press-policy-transfer.20260802T125450Z.409124`.
+This is a real Lab-to-PX4 actor-response divergence; it does not invalidate the
+policy's independently reproduced Lab acceptance or the controller's
+identical-action alignment acceptance.
+
+For boundary isolation, the higher-scoring actor-only reference
+`20260802T074001Z.193711` was also pinned explicitly. It avoided contact but
+overbraked, retreated, and timed out after 20 s; its closest range was 0.4201 m.
+That trace is preserved under
+`.build/docker/integration/test-integration-press-policy-transfer.20260802T125736Z.411289`.
+The opposing failures show that further controller fitting is not an
+evidence-routed response. Keep both actor traces as diagnostics for a future
+policy-domain-randomization or PX4-response curriculum campaign. Restore the
+deployment descriptors to `latest`, republish the accepted scratch run as
+`latest`, and complete the unchanged host and aggregate integration suites.
