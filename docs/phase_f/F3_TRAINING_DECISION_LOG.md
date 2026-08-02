@@ -6764,3 +6764,36 @@ Retain 15 iterations, checkpoints 0/5/10/14, 0.01 initial action noise, zero
 entropy, actor-only initialization, the accepted alignment artifact, and every
 goal and acceptance threshold. Accept only if independent evaluation also
 reports zero other-flight-failure and minimum closest range at least 0.400 m.
+
+### 174. Rate annealing preserves but does not clear the final boundary
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T071225Z.150237` used clean source commit `0d76b69`,
+the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T070403Z.137124` checkpoint 5. PPO completed in 116.5 s and the
+four-checkpoint held-out sweep completed in 53.6 s. The selection record is
+`.build/training/press-approach/20260802T071225Z.150237/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr3e5-final.20260802T071225Z.150237.console.log`.
+
+All four checkpoints retained 99.7% success, 0.3% range-undershoot flight
+failure, and zero collision and timeout. Selection chose checkpoint 0 with
+score -0.289198, 0.41109 m mean closest range, and 0.39918 m minimum closest
+range. Independent evaluation reproduced every rate, a 0.41109 m mean, and a
+0.39918 m minimum. The annealed updates did not clear the one-episode boundary;
+later checkpoints also lowered mean range and did not improve score.
+
+The retained independent trace isolates seed 202 episode 78. It starts at
+0.45064 m range with 0.0603 m tangential error, reaches 0.40141 m at 1.20 s,
+then crosses to 0.39918 m on the next 50 ms action step. Forward speed is still
+about 0.043 m/s at the crossing. There is no contact, timeout, attitude, or
+controller failure. The remaining error is therefore a learned terminal-
+undershoot boundary in a hard reset corner, not an optimizer-step instability.
+
+Do not extend the ineffective `3e-5` schedule unchanged. The next experiment
+should increase the terminal flight-failure cost while leaving the barrier,
+task, reset distribution, accepted controller, evaluation gates, and selected
+source actor unchanged. This directly strengthens the only reward event that
+distinguishes the failing trace from the 299 accepted episodes.
