@@ -7119,3 +7119,29 @@ hard-case resets, and the existing controller and acceptance contract. If it
 passes independently, shorten the production phase-1 horizon to 121 iterations
 so future scratch runs do not spend 179 iterations beyond the evidenced useful
 frontier, then repeat the uniform fixed-rate procedure for both proof seeds.
+
+### 187. Refine the safety search between undershoot and timeout
+
+Date: 2026-08-02.
+
+Seed-43 continuation `20260802T103454Z.293633` used clean source commit
+`26b70c8` and restored the complete checkpoint-120 state from run
+`20260802T095440Z.273293`. Eleven updates completed in 92.8 s and the
+two-checkpoint held-out sweep completed in 94.2 s. The selection record is
+`.build/training/press-approach/20260802T103454Z.293633/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-seed43-phase2-short.20260802T103454Z.293633.console.log`.
+
+The source checkpoint remained selected with score -0.966380, 84.67% success,
+13.0% other flight failure, and 2.33% timeout. Independent evaluation
+reproduced those rates. Checkpoint 130 eliminated every flight failure but
+overcorrected to 76.33% success and 23.67% timeout, with score -1.098952. Both
+had zero collisions. The safety phase therefore crossed from undershoot to
+timeout within the 10-update checkpoint gap; its hypothesis remains useful but
+the coarse save interval concealed the best intermediate policy.
+
+Keep the same source, 11-update horizon, fixed `3e-5` rate, full-state resume,
+zero entropy, reset mixture, controller, and gates. Change only the safety
+phase save interval from 10 to one, producing a targeted fine sweep over every
+intermediate update. This is the precision stage after the broad phase-1 grid;
+it adds evaluation work only in the evidenced promising region.

@@ -11,10 +11,10 @@ rl:
       hard_case_fraction: 0.5
   training:
     training_mode: resume
-    # Eleven runner iterations reproduce the accepted model_280 frontier from
-    # a model_270 source without continuing into the evidenced unsafe drift.
+    # Eleven runner iterations bound the safety search; every update is saved
+    # so selection can resolve the narrow safe/timeout transition.
     max_iterations: 11
-    save_interval: 10
+    save_interval: 1
     learning_rate: 3.0e-5
     schedule: fixed
     entropy_coef: 0.0
