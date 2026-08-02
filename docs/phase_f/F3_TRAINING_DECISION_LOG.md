@@ -6504,3 +6504,18 @@ from 11.0% to 9.7% is about 12%, below the 20% material-progress threshold.
 Later checkpoints regressed to 89.0%, 89.0%, and 89.3% success, so a long
 uninterrupted `1e-5` continuation is not yet supported. Complete the planned
 `3e-5` probe from the same source actor before choosing a rate and duration.
+
+### 163. Probe the upper learning-rate candidate
+
+Date: 2026-08-02.
+
+Raise only the fixed actor-only learning rate from `1e-5` to `3e-5` for the
+final planned 15-iteration/four-checkpoint pilot. Retain the same source actor,
+accepted controller, reward, environment, reset distribution, noise, entropy,
+held-out ranking, and independent evaluation. This tests whether a larger
+single-step policy update can turn the early 1e-5 signal into material boundary
+progress without introducing collision, timeout, or instability.
+
+Reject the rate if safety regresses. Otherwise rank it against the 90.3% / 9.7%
+central-rate checkpoint and the 89.0% / 11.0% source frontier, then choose the
+next full continuation from the complete three-rate evidence.
