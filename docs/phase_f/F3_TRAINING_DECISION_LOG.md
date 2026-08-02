@@ -6465,3 +6465,18 @@ The `3e-6` rate is safe but does not improve the 89.0% / 11.0% source frontier.
 All four held-out candidates remained within 88.0-88.3% success, so extending
 this rate is unsupported. Advance to the planned central `1e-5` pilot from the
 same source actor and keep every non-rate variable unchanged.
+
+### 161. Probe the central learning-rate candidate
+
+Date: 2026-08-02.
+
+Raise only the fixed actor-only learning rate from `3e-6` to `1e-5`. Keep the
+same 15-iteration/four-checkpoint pilot, strongest source actor, accepted
+controller, reward, environment, reset distribution, noise, entropy, held-out
+ranking, and independent evaluation. This is the central candidate from the
+planned rate expansion and supplies roughly three times the update scale of the
+safe but ineffective first pilot.
+
+Require zero collision and timeout before treating the rate as safe. Compare
+against both the 89.0% / 11.0% source frontier and the 3e-6 result; proceed to
+the `3e-5` probe unless this run independently passes every gate.
