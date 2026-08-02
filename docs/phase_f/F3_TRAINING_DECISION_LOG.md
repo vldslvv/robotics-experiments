@@ -6921,3 +6921,37 @@ Use the stronger pre-mixture source
 Retain 50% hard-case sampling, terminal weight 300, fixed `3e-5` rate, 15
 iterations, four checkpoints, zero entropy, 0.01 noise, the accepted
 controller, and unchanged full-distribution selection and independent gates.
+
+### 180. Dense hard-case tracking passes every policy acceptance gate
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T074001Z.193711` used clean source commit `37fbaba`,
+the accepted alignment run `20260801T142920Z`, and terminal-cost run
+`20260802T072038Z.163899` checkpoint 10. PPO completed in 116.4 s and the
+four-checkpoint full-distribution held-out sweep completed in 48.1 s. The
+selection record is
+`.build/training/press-approach/20260802T074001Z.193711/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-case-velocity300.20260802T074001Z.193711.console.log`.
+
+Selection chose terminal checkpoint 14 with score -0.268278. It passed all 300
+held-out episodes with zero body or pusher collisions, zero other flight
+failures, zero timeouts, finite completed traces, 0.41040 m mean closest range,
+and 0.40062 m minimum closest range. Independent evaluation reproduced 100%
+success and every zero-rate metric, with 0.41037 m mean closest range and
+0.40059 m minimum closest range. The previously failing seed-202 episode 78
+now retains 0.00059 m exact-boundary margin.
+
+This independently satisfies the complete policy acceptance contract. The
+successful fine-tuning recipe is the combination of 50% hard-case reset
+sampling, terminal flight-failure weight 300, dense velocity-tracking weight
+300, fixed `3e-5` actor learning rate, 0.01 action noise, and zero entropy. It
+does not change the original selection or independent reset workload.
+
+Proceed to the scratch-pipeline rework. A scratch run is not considered
+reproducible until seeds 42 and 43 both reach independent acceptance without
+actor-only initialization. Carry the successful dense target and hard-case
+phase into that pipeline, preserve optimizer/critic state across phases, and
+retain this accepted actor as the safety/reference artifact meanwhile.
