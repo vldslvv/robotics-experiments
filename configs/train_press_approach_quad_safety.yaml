@@ -11,7 +11,9 @@ rl:
       hard_case_fraction: 0.5
   training:
     training_mode: resume
-    max_iterations: 150
+    # Eleven runner iterations reproduce the accepted model_280 frontier from
+    # a model_270 source without continuing into the evidenced unsafe drift.
+    max_iterations: 11
     save_interval: 10
     learning_rate: 3.0e-5
     schedule: fixed

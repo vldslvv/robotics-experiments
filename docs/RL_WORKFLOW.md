@@ -269,9 +269,11 @@ controller digest, or held-out comparison fingerprint.
 
 Scratch press training uses a reproducible coarse-to-fine schedule. The first
 300-iteration run uses the adaptive `1e-4` scratch recipe and coarse 30-iteration
-checkpoints. The safety phase resumes the selected checkpoint for 150
+checkpoints. The safety phase resumes the selected checkpoint for 11 runner
 iterations with fixed `3e-5`, zero entropy, 10-iteration checkpoints, and the
-50% hard-case reset mixture. Both phases share terminal-failure and dense
+50% hard-case reset mixture. This horizon retains the accepted early safety
+frontier without continuing into the evidenced faster but unsafe drift. Both
+phases share terminal-failure and dense
 velocity-tracking weights of 300 and the earlier-braking reference. The second
 phase is full-state continuation, not actor-only fine-tuning:
 

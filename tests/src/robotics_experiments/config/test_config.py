@@ -312,7 +312,7 @@ def test_press_approach_safety_config_resumes_full_state_with_targeted_recipe():
     config = load_config(_ROOT / "train_press_approach_quad_safety.yaml")
 
     assert config.rl.training.training_mode == "resume"
-    assert config.rl.training.max_iterations == 150
+    assert config.rl.training.max_iterations == 11
     assert config.rl.training.learning_rate == 3.0e-5
     assert config.rl.training.entropy_coef == 0.0
     assert config.rl.training.save_interval == 10

@@ -7006,3 +7006,29 @@ flight-envelope gates, but it establishes a strong full-state resume frontier.
 Proceed with the unchanged phase-2 hypothesis: restore checkpoint 270's actor,
 critic, optimizer, exploration state, and iteration; apply fixed `3e-5`, zero
 entropy, and the 50% hard-case reset mixture for 150 additional iterations.
+
+### 183. Bound the safety phase at its accepted early frontier
+
+Date: 2026-08-02.
+
+Seed-42 continuation `20260802T084258Z.232585` restored the complete checkpoint
+270 state from run `20260802T080129Z.215767`. It completed 150 runner iterations
+in 910.9 s and evaluated 16 checkpoints in 338.2 s. The selection record is
+`.build/training/press-approach/20260802T084258Z.232585/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-safety-seed42-phase2.20260802T084258Z.232585.console.log`.
+
+Checkpoint 280 passed every held-out gate: 99.33% success, zero collisions,
+zero other flight failures, 0.67% timeout, 0.41745 m mean closest range, 0.40164
+m minimum closest range, and score -0.361449. Continued optimization increased
+speed but crossed the exact boundary. The unchanged task-quality selector chose
+checkpoint 390 with score -0.275116, 99.67% success, one flight failure in 300
+episodes, and 0.39792 m minimum range. Independent evaluation reproduced that
+single seed-202 failure and rejected range undershoot and flight envelope.
+
+Do not change the advisory-gate selection contract. Instead, bound phase 2 to
+11 runner iterations, which reproduces the model-280 frontier from a model-270
+source and prevents the evidenced unsafe drift. Keep every other phase-2
+parameter unchanged. This reduces continuation training from 150 to 11
+iterations and selection from 16 candidates to two. Rerun seed 42 from the same
+phase-1 source, then repeat the complete two-phase procedure with seed 43.
