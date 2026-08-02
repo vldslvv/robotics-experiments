@@ -6872,3 +6872,35 @@ retain the fixed `3e-5` rate, terminal weight 300, 15 iterations, four saved
 checkpoints, accepted controller, and exact acceptance gates. Material progress
 requires the held-out and independent failing corner to clear without a
 regression elsewhere in the full distribution.
+
+### 178. Hard-case exposure reveals underweighted velocity tracking
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T073234Z.180684` used clean source commit `49e85af`,
+the accepted alignment run `20260801T142920Z`, and terminal-cost run
+`20260802T072038Z.163899` checkpoint 10. PPO completed in 117.2 s and the
+four-checkpoint full-distribution held-out sweep completed in 48.6 s. The
+selection record is
+`.build/training/press-approach/20260802T073234Z.180684/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-case-reset.20260802T073234Z.180684.console.log`.
+
+All checkpoints retained one undershoot and zero collisions or timeouts.
+Selection chose checkpoint 5 with score -0.287472, 99.7% success, 0.3%
+range-undershoot flight failure, 0.41054 m mean closest range, and 0.39813 m
+minimum closest range. Independent evaluation reproduced every metric.
+
+The targeted exposure did not improve the boundary. In the failing trace the
+configured wall-normal target is zero because tangential error exceeds 0.03 m,
+but normalized forward action increased from about 0.0208 to 0.0227 at reset
+and physical forward speed remained about 0.042 m/s at the crossing. The
+sampler is reaching the intended state; the actor is underweighting its dense
+zero-forward velocity target there.
+
+Retain the hard-case mixture and terminal weight, return to the stronger
+pre-mixture checkpoint
+`.build/training/press-approach/20260802T072038Z.163899/logs/model_10.pt`, and
+increase only velocity-tracking weight from 100 to 300. Keep rate, horizon,
+controller, selection, independent evaluation, and acceptance gates unchanged.
