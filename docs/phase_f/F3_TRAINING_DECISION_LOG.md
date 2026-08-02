@@ -6519,3 +6519,30 @@ progress without introducing collision, timeout, or instability.
 Reject the rate if safety regresses. Otherwise rank it against the 90.3% / 9.7%
 central-rate checkpoint and the 89.0% / 11.0% source frontier, then choose the
 next full continuation from the complete three-rate evidence.
+
+### 164. The upper rate is safe, stable, and best at its boundary
+
+Date: 2026-08-02.
+
+Actor-only pilot `20260802T061947Z.61536` used clean source commit `b9914b6`,
+the accepted alignment run `20260801T142920Z`, and continuation run
+`20260802T054109Z.14219` checkpoint 45. PPO completed in 115.8 s and the
+four-checkpoint held-out sweep completed in 57.8 s. The selection record is
+`.build/training/press-approach/20260802T061947Z.61536/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr3e5.20260802T061947Z.61536.console.log`.
+
+Selection chose checkpoint 14 with score -0.687859, 91.0% success, 9.0%
+range-undershoot flight failure, zero collision and timeout, 0.41061 m mean
+closest range, and 0.39833 m minimum closest range. Independent evaluation
+reproduced every rate metric, reported the same mean range, and a 0.39833 m
+minimum.
+
+The `3e-5` pilot is the strongest and most consistent rate tested: held-out
+success was 90.3% at checkpoints 0, 5, and 10 before reaching 91.0% at the
+terminal checkpoint. It reduces source failure by about 18%, narrowly below
+the 20% material threshold, but does so without a safety regression and with
+the best result at the tested rate and duration boundary. The monotonic coarse
+rate response (`3e-6` worse, `1e-5` 90.3%, `3e-5` 91.0%) supports one wider
+`1e-4` pilot from the same source before selecting a targeted continuation.
