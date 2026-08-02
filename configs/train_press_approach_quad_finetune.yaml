@@ -17,6 +17,7 @@ rl:
       # it greater weight than a successful terminal transition while keeping
       # the exact boundary and evaluation contract unchanged.
       flight_failure_weight: 300.0
+      velocity_tracking_weight: 300.0
     training_reset:
       hard_case_fraction: 0.5
     goal:

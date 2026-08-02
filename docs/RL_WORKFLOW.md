@@ -238,7 +238,9 @@ standard deviation, and iteration counter remain fresh. The separate
 `configs/train_press_approach_quad_finetune.yaml` currently uses a 15-iteration,
 fixed `3e-5`, 0.01-noise, zero-entropy pilot recipe, saving four checkpoints for
 the unchanged held-out selection. It raises the terminal flight-failure weight
-to 300 so the evidenced range-undershoot transition outweighs success. Its
+to 300 so the evidenced range-undershoot transition outweighs success, and
+raises velocity-tracking weight to 300 so oversampled misaligned entries learn
+the configured zero-forward target. Its
 wall-normal velocity reference is capped at 0.04 m/s and centered at 0.415 m so
 actor-only refinement teaches earlier braking without changing the 0.40-0.42 m
 goal band or its acceptance limits. Its training resets mix 50% full handoff

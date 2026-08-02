@@ -6904,3 +6904,20 @@ pre-mixture checkpoint
 `.build/training/press-approach/20260802T072038Z.163899/logs/model_10.pt`, and
 increase only velocity-tracking weight from 100 to 300. Keep rate, horizon,
 controller, selection, independent evaluation, and acceptance gates unchanged.
+
+### 179. Strengthen the dense zero-forward target at hard resets
+
+Date: 2026-08-02.
+
+The next attempt changes only the fine-tuning velocity-tracking reward weight
+from 100 to 300. The failing reset begins with 0.060 m tangential error, so the
+existing align-first reference already requests exactly zero forward velocity.
+The observed actor instead commands roughly 0.04-0.05 m/s forward physical
+speed through the boundary. Tripling this dense cost addresses every active
+step of the evidenced miss rather than relying on its single terminal sample.
+
+Use the stronger pre-mixture source
+`.build/training/press-approach/20260802T072038Z.163899/logs/model_10.pt`.
+Retain 50% hard-case sampling, terminal weight 300, fixed `3e-5` rate, 15
+iterations, four checkpoints, zero entropy, 0.01 noise, the accepted
+controller, and unchanged full-distribution selection and independent gates.
