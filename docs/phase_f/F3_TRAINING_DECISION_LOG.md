@@ -6546,3 +6546,19 @@ the 20% material threshold, but does so without a safety regression and with
 the best result at the tested rate and duration boundary. The monotonic coarse
 rate response (`3e-6` worse, `1e-5` 90.3%, `3e-5` 91.0%) supports one wider
 `1e-4` pilot from the same source before selecting a targeted continuation.
+
+### 165. Expand the coarse rate sweep once
+
+Date: 2026-08-02.
+
+Test fixed `1e-4` as a final wide-step pilot because success improved
+monotonically across the completed rate sweep and the `3e-5` terminal
+checkpoint was its best result. Keep the 15-iteration/four-checkpoint design,
+same source actor, accepted controller, reward, environment, reset distribution,
+noise, entropy, held-out ranking, and independent evaluation unchanged.
+
+This rate matches the scratch recipe's initial magnitude but remains actor-only
+with the low-noise fine-tuning contract. Reject it immediately for any collision
+or timeout regression. If safe, use its complete checkpoint curve to decide
+whether the targeted continuation should use `3e-5`, `1e-4`, or an intermediate
+rate; do not infer a target from a rate boundary alone.

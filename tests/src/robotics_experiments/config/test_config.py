@@ -286,7 +286,7 @@ def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
 
     assert config.rl.training.training_mode == "actor-only"
     assert config.rl.training.max_iterations == 15
-    assert config.rl.training.learning_rate == 3.0e-5
+    assert config.rl.training.learning_rate == 1.0e-4
     assert config.rl.training.entropy_coef == 0.0
     assert config.rl.training.save_interval == 5
     assert config.rl.training.schedule == "fixed"
