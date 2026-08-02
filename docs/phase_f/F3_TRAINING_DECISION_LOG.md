@@ -7208,3 +7208,32 @@ with too little correction. Test the bracket midpoint by changing only the
 training hard-case fraction from 0.1 to 0.2. Retain fixed `3e-5`, full-state
 resume, 11 updates, every-update checkpoints, reward, controller, full-reset
 evaluation, and all acceptance gates.
+
+### 190. Seed 43 passes with a 20% safety mixture
+
+Date: 2026-08-02.
+
+Seed-43 continuation `20260802T111103Z.332104` used clean source commit
+`2a7cff2`, the fixed-rate checkpoint-120 full state, and a 20% hard-case
+training mixture. Training completed in 93.3 s and the source plus 11 fine
+checkpoints were evaluated in 456.1 s. The selection record is
+`.build/training/press-approach/20260802T111103Z.332104/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-seed43-phase2-hard20.20260802T111103Z.332104.console.log`.
+
+The response was non-monotonic: intermediate checkpoints overbraked, but
+checkpoint 130 recovered to score -0.508296 and passed every held-out gate with
+95.33% success, zero body or pusher collisions, zero other flight failures,
+4.67% timeout, 0.41752 m mean closest range, and 0.40065 m minimum closest
+range. Independent evaluation reproduced every rate, reported 0.41753 m mean
+closest range and 0.40064 m minimum closest range, and passed with finite
+traces. The complete seed-43 scratch-to-full-state-safety procedure is accepted.
+
+The phase-1 checkpoint used by this proof is iteration 120. The fixed-rate run
+showed no later useful candidate and entered unsafe drift by checkpoint 150.
+Shorten phase 1 from 300 to 121 runner iterations, which preserves checkpoints
+0, 30, 60, 90, and 120 while eliminating 179 known-unhelpful updates and six
+known-unhelpful held-out candidates. This reduces measured phase-1 training
+from about 29.5 minutes to about 12 minutes and its broad sweep from 11 to five
+candidates. Keep every other phase-1 parameter unchanged and run the complete
+shortened procedure from random weights with seed 42.

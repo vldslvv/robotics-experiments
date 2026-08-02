@@ -202,12 +202,12 @@ namespace. The actor and critic remain independent `[256, 256, 128]` MLPs with
 ELU activation; the actor still maps 34 values to four action means.
 `rl.training` owns the explicit training mode, PPO settings, rollout length,
 checkpoints, seed, task ID, vehicle ID, and policy namespace. Scratch training
-uses 32,768 parallel environments, 300 iterations, 32 steps per environment,
+uses 32,768 parallel environments, 121 iterations, 32 steps per environment,
 fixed `1e-4` learning rate, `0.0001` entropy coefficient, five epochs, eight
 minibatches, and checkpoints every 30 iterations. The fixed schedule prevents
 seed-specific KL transients from raising the rate above its validated bound.
 This is approximately
-315 million transitions and about 35 minutes of PPO on the measured GPU. A
+127 million transitions and about 12 minutes of PPO on the measured GPU. A
 49,152-environment run remains an explicit capacity probe rather than the
 production default.
 
@@ -270,7 +270,7 @@ restoration. Resume rejects a different policy interface, action contract,
 controller digest, or held-out comparison fingerprint.
 
 Scratch press training uses a reproducible coarse-to-fine schedule. The first
-300-iteration run uses the fixed `1e-4` scratch recipe and coarse 30-iteration
+121-iteration run uses the fixed `1e-4` scratch recipe and coarse 30-iteration
 checkpoints. The safety phase resumes the selected checkpoint for 11 runner
 iterations with fixed `3e-5`, zero entropy, every-update checkpoints, and a
 20% hard-case reset mixture. The minority hard-case stream corrects undershoot

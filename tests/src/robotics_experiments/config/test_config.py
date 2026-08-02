@@ -236,7 +236,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.policy_name == "press-approach"
     assert training.training_mode == "scratch"
     assert config.rl.press.curriculum_stage == "approach"
-    assert training.max_iterations == 300
+    assert training.max_iterations == 121
     assert training.learning_rate == 1.0e-4
     assert training.entropy_coef == 0.0001
     assert training.save_interval == 30

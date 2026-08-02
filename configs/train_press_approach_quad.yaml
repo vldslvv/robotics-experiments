@@ -24,7 +24,9 @@ rl:
     vehicle_id: 0
     policy_name: press-approach
     training_mode: scratch
-    max_iterations: 300
+    # The selected fixed-rate frontier is checkpoint 120; stop immediately
+    # after preserving it instead of entering the evidenced unsafe drift.
+    max_iterations: 121
     num_steps_per_env: 32
     # Coarse checkpoints bound selection cost during the broad scratch phase;
     # the resumed safety phase uses a finer interval around the frontier.
