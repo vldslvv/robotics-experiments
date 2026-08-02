@@ -6562,3 +6562,30 @@ with the low-noise fine-tuning contract. Reject it immediately for any collision
 or timeout regression. If safe, use its complete checkpoint curve to decide
 whether the targeted continuation should use `3e-5`, `1e-4`, or an intermediate
 rate; do not infer a target from a rate boundary alone.
+
+### 166. The wide-step rate reaches the near-acceptance frontier
+
+Date: 2026-08-02.
+
+Actor-only pilot `20260802T062700Z.74595` used clean source commit `f4dc361`,
+the accepted alignment run `20260801T142920Z`, and continuation run
+`20260802T054109Z.14219` checkpoint 45. PPO completed in 115.9 s and the
+four-checkpoint held-out sweep completed in 57.8 s. The selection record is
+`.build/training/press-approach/20260802T062700Z.74595/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4.20260802T062700Z.74595.console.log`.
+
+Selection chose checkpoint 14 with score -0.552542, 94.0% success, 6.0%
+range-undershoot flight failure, zero collision and timeout, 0.41059 m mean
+closest range, and 0.39818 m minimum closest range. Independent evaluation
+reproduced every rate and range metric.
+
+This is material progress: undershoot fell from the 11.0% source frontier to
+6.0%, a 45% relative reduction, and success rose five points without regressing
+a passed safety gate. The full curve was 90.7%, 91.0%, 92.7%, and 94.0%
+success, so progress remains positive at the terminal checkpoint. Continue the
+same fixed `1e-4`, low-noise, zero-entropy actor-only recipe from
+`.build/training/press-approach/20260802T062700Z.74595/logs/model_14.pt`.
+Do not change the rate, reward, reset distribution, or action interface while
+this evidenced slope remains positive.
