@@ -6616,3 +6616,29 @@ continue unchanged from
 `.build/training/press-approach/20260802T063314Z.84969/logs/model_14.pt`.
 Change neither the learning rate nor task contract while this material failure
 reduction continues.
+
+### 168. The next continuation makes smaller material progress
+
+Date: 2026-08-02.
+
+Actor-only continuation `20260802T063942Z.95483` used clean source commit
+`e71593e`, the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T063314Z.84969` checkpoint 14. PPO completed in 117.2 s and the
+four-checkpoint held-out sweep completed in 50.1 s. The selection record is
+`.build/training/press-approach/20260802T063942Z.95483/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4-cont3.20260802T063942Z.95483.console.log`.
+
+Selection chose checkpoint 5 with score -0.393207, 97.7% success, 2.3%
+range-undershoot flight failure, zero collision and timeout, 0.41065 m mean
+closest range, and 0.39834 m minimum closest range. Independent evaluation
+reproduced every metric.
+
+Undershoot failure fell by about 22% from the preceding 3.0% frontier, which is
+material, while every previously passed gate remained passed. Checkpoints 10
+and 14 regressed to 96.7% and 97.0% success, so continue from the selected
+checkpoint rather than the terminal actor:
+`.build/training/press-approach/20260802T063942Z.95483/logs/model_5.pt`.
+Retain the fixed `1e-4` recipe for another short continuation; the unresolved
+boundary remains seven undershoot episodes in the unchanged 300-episode suite.
