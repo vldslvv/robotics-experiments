@@ -6980,3 +6980,29 @@ Prove the complete schedule independently with training seeds 42 and 43. Each
 seed must pass the unchanged 300-episode independent acceptance suite; one
 passing seed is not sufficient. Neither phase may use actor-only
 initialization.
+
+### 182. Seed-42 scratch phase finds a useful but unsafe resume frontier
+
+Date: 2026-08-02.
+
+Scratch run `20260802T080129Z.215767` used clean source commit `14108ca`, seed
+42, the accepted alignment publication, and the phase-1 recipe from decision
+181. Training completed 300 iterations in 1765.1 s at approximately 180k-183k
+frames/s. The 30-iteration save interval reduced held-out selection to 11
+checkpoints, which completed in 444.7 s. The selection record is
+`.build/training/press-approach/20260802T080129Z.215767/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the console log is
+`.build/overnight/scratch-safety-seed42-phase1.20260802T080129Z.215767.console.log`.
+
+Selection chose checkpoint 270 with score -0.970154. Held-out and independent
+evaluation both reported 83.67% success, zero collisions, 9.0% other flight
+failure, 7.33% timeout, 0.41432 m mean closest range, and 0.39973 m minimum
+closest range. The final checkpoint was materially worse: 45.33% success,
+54.67% other flight failure, zero timeout, and score -2.615146. Coarse
+checkpoint selection therefore prevented an unsafe final-state handoff.
+
+This phase is rejected by approach-success, range-undershoot, and
+flight-envelope gates, but it establishes a strong full-state resume frontier.
+Proceed with the unchanged phase-2 hypothesis: restore checkpoint 270's actor,
+critic, optimizer, exploration state, and iteration; apply fixed `3e-5`, zero
+entropy, and the 50% hard-case reset mixture for 150 additional iterations.
