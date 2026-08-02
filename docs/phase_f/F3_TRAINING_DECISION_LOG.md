@@ -6480,3 +6480,27 @@ safe but ineffective first pilot.
 Require zero collision and timeout before treating the rate as safe. Compare
 against both the 89.0% / 11.0% source frontier and the 3e-6 result; proceed to
 the `3e-5` probe unless this run independently passes every gate.
+
+### 162. The central rate gives an early but sub-material improvement
+
+Date: 2026-08-02.
+
+Actor-only pilot `20260802T061234Z.48131` used clean source commit `f15d7ce`,
+the accepted alignment run `20260801T142920Z`, and continuation run
+`20260802T054109Z.14219` checkpoint 45. PPO completed in 115.5 s and the
+four-checkpoint held-out sweep completed in 58.7 s. The selection record is
+`.build/training/press-approach/20260802T061234Z.48131/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e5.20260802T061234Z.48131.console.log`.
+
+Selection chose checkpoint 0 with score -0.719377, 90.3% success, 9.7%
+range-undershoot flight failure, zero collision and timeout, 0.41108 m mean
+closest range, and 0.39861 m minimum closest range. Independent evaluation
+reproduced every rate metric and the mean range, with a 0.39861 m minimum.
+
+This is the strongest rate pilot so far and is safe, but the failure reduction
+from 11.0% to 9.7% is about 12%, below the 20% material-progress threshold.
+Later checkpoints regressed to 89.0%, 89.0%, and 89.3% success, so a long
+uninterrupted `1e-5` continuation is not yet supported. Complete the planned
+`3e-5` probe from the same source actor before choosing a rate and duration.
