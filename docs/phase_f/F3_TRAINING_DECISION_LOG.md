@@ -7086,3 +7086,36 @@ selection, and independent gates. Rerun seed 43 from random weights. If it
 produces a credible resume frontier, apply the unchanged short safety phase;
 then rerun seeds 42 and 43 through the uniform fixed-rate procedure before
 declaring scratch reproducibility.
+
+### 186. Fixed-rate seed 43 restores a credible safety-phase frontier
+
+Date: 2026-08-02.
+
+Scratch run `20260802T095440Z.273293` used clean source commit `953232b`, seed
+43, and the fixed-rate phase-1 hypothesis from decision 185. Training completed
+300 iterations in 1769.5 s at approximately 180k-184k frames/s. The
+11-checkpoint held-out sweep completed in 389.8 s. The selection record is
+`.build/training/press-approach/20260802T095440Z.273293/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-seed43-phase1.20260802T095440Z.273293.console.log`.
+
+Selection chose checkpoint 120 with score -0.989523, 84.67% success, zero
+collisions, 15.33% other flight failure, zero timeout, 0.41324 m mean closest
+range, and 0.39960 m minimum closest range. Independent evaluation reproduced
+every rate and the same minimum. Relative to the adaptive seed-43 frontier,
+success improved from 4.33% to 84.67% and timeouts fell from 95.67% to zero.
+
+The fixed schedule removed the rate surge but did not make `1e-4` stable for an
+unbounded phase. Between checkpoints 120 and 150, value loss rose from a few
+thousand to about 76,000 and the checkpoint-150 policy reached 100% flight
+failure despite the rate remaining fixed. Later checkpoints alternated between
+unsafe, inactive, and collision-prone behavior; candidate-wide selection
+correctly retained the pre-instability frontier.
+
+Checkpoint 120 is comparable in capability to the seed-42 source that passed
+after the short safety phase: 84.67% versus 83.67% success. Apply the unchanged
+11-iteration full-state continuation with fixed `3e-5`, zero entropy, 50%
+hard-case resets, and the existing controller and acceptance contract. If it
+passes independently, shorten the production phase-1 horizon to 121 iterations
+so future scratch runs do not spend 179 iterations beyond the evidenced useful
+frontier, then repeat the uniform fixed-rate procedure for both proof seeds.
