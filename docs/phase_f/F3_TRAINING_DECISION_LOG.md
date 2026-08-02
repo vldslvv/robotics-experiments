@@ -7237,3 +7237,30 @@ known-unhelpful held-out candidates. This reduces measured phase-1 training
 from about 29.5 minutes to about 12 minutes and its broad sweep from 11 to five
 candidates. Keep every other phase-1 parameter unchanged and run the complete
 shortened procedure from random weights with seed 42.
+
+### 191. Shortened seed-42 phase 1 improves the scratch frontier
+
+Date: 2026-08-02.
+
+Seed-42 scratch run `20260802T112447Z.343543` used clean source commit
+`6a42993` and the shortened fixed-rate production configuration. Training from
+random weights completed 121 runner iterations in 725.4 s, compared with about
+29.5 minutes for the earlier 300-iteration run. The five-checkpoint sweep took
+209.2 s. Its selection record is
+`.build/training/press-approach/20260802T112447Z.343543/checkpoint_selection.json`
+and its console log is
+`.build/overnight/scratch-fixed-short-seed42-phase1.20260802T112447Z.343543.console.log`.
+
+Checkpoint 120 was selected with score -0.718060, 91.0% success, zero body or
+pusher collisions, 9.0% other flight failure, zero timeout, 0.41449 m mean
+closest range, and 0.39952 m minimum closest range. Independent evaluation
+reproduced every aggregate metric. The checkpoint correctly failed the
+approach-success, range-undershoot, and flight-envelope gates, so it is not a
+publishable final policy. It is nevertheless a stronger phase-1 source than
+the accepted seed-43 procedure's checkpoint 120, which had 84.67% success and
+15.33% flight failure before its safety phase.
+
+Continue from the selected checkpoint with the unchanged full-state safety
+phase: fixed `3e-5` rate, zero entropy, 11 updates, every-update checkpoints,
+and a 20% hard-case training stream. Keep the full-reset held-out and
+independent evaluation distribution and all acceptance gates unchanged.
