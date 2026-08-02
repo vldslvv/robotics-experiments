@@ -6747,3 +6747,20 @@ failure-count plateau at the one-episode seam, so continuing with the same
 fixed `3e-5` learning rate. Keep the 15-iteration horizon, noise, entropy,
 task, controller, and held-out contract unchanged so the next attempt isolates
 the annealed actor update.
+
+### 173. Anneal the final actor-boundary update
+
+Date: 2026-08-02.
+
+The next attempt starts from
+`.build/training/press-approach/20260802T070403Z.137124/logs/model_5.pt` and
+changes only the fixed actor learning rate from `1e-4` to `3e-5`. The selected
+source misses the exact range boundary by only 0.00066 m in one of 300
+deterministic episodes, while the larger-rate checkpoints after iteration 5
+regress. A 70% rate reduction is therefore an evidence-routed annealing step,
+not a new task or evaluation contract.
+
+Retain 15 iterations, checkpoints 0/5/10/14, 0.01 initial action noise, zero
+entropy, actor-only initialization, the accepted alignment artifact, and every
+goal and acceptance threshold. Accept only if independent evaluation also
+reports zero other-flight-failure and minimum closest range at least 0.400 m.

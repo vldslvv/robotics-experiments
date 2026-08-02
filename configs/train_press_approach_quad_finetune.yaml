@@ -22,6 +22,6 @@ rl:
     # testing four checkpoints before a full continuation is authorized.
     max_iterations: 15
     save_interval: 5
-    learning_rate: 1.0e-4
+    learning_rate: 3.0e-5
     schedule: fixed
     entropy_coef: 0.0
