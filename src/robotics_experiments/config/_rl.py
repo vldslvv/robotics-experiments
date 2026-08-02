@@ -284,8 +284,8 @@ class RlTrainingConfig(_FreezableConfig):
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
-        training_mode: Weight-initialization mode (``scratch`` or
-            ``actor-only``).
+        training_mode: Weight-initialization mode (``scratch``, ``actor-only``,
+            or full-state ``resume``).
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
         max_iterations: Training iterations for a full run.

@@ -237,8 +237,8 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
     if not experiment.rl.training.controller_artifact.strip():
         raise ValueError("rl.training.controller_artifact must be non-empty")
-    if experiment.rl.training.training_mode not in {"scratch", "actor-only"}:
-        raise ValueError("rl.training.training_mode must be either 'scratch' or 'actor-only'")
+    if experiment.rl.training.training_mode not in {"scratch", "actor-only", "resume"}:
+        raise ValueError("rl.training.training_mode must be 'scratch', 'actor-only', or 'resume'")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,

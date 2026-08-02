@@ -239,7 +239,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.max_iterations == 300
     assert training.learning_rate == 1.0e-4
     assert training.entropy_coef == 0.0001
-    assert training.save_interval == 10
+    assert training.save_interval == 30
     assert training.schedule == "adaptive"
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
@@ -249,17 +249,17 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reward.range_progress_weight == 50.0
     assert reward.range_barrier_margin_m == 0.02
     assert reward.range_barrier_weight == 10.0
-    assert reward.velocity_tracking_weight == 100.0
+    assert reward.velocity_tracking_weight == 300.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0
-    assert reward.flight_failure_weight == 100.0
+    assert reward.flight_failure_weight == 300.0
     assert config.rl.press.goal.stable_steps == 5
     reference = config.rl.press.goal.velocity_reference
-    assert reference.range_center_m == 0.41
+    assert reference.range_center_m == 0.415
     assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
     assert reference.wall_normal_min_mps == -0.04
-    assert reference.wall_normal_max_mps == 0.08
+    assert reference.wall_normal_max_mps == 0.04
     assert reference.tangential_gain_per_s == 2.0
     assert reference.tangential_speed_max_mps == 0.10
     assert config.rl.press.handoff.switch_range_min_m == 0.45
@@ -304,6 +304,22 @@ def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
     assert reference.wall_normal_max_mps == 0.04
     assert config.rl.press.goal.range_min_m == 0.40
     assert config.rl.press.goal.range_max_m == 0.42
+
+
+def test_press_approach_safety_config_resumes_full_state_with_targeted_recipe():
+    from robotics_experiments.config import load_config
+
+    config = load_config(_ROOT / "train_press_approach_quad_safety.yaml")
+
+    assert config.rl.training.training_mode == "resume"
+    assert config.rl.training.max_iterations == 150
+    assert config.rl.training.learning_rate == 3.0e-5
+    assert config.rl.training.entropy_coef == 0.0
+    assert config.rl.training.save_interval == 10
+    assert config.rl.training.schedule == "fixed"
+    assert config.rl.press.training_reset.hard_case_fraction == 0.5
+    assert config.rl.press.reward.flight_failure_weight == 300.0
+    assert config.rl.press.reward.velocity_tracking_weight == 300.0
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
@@ -413,7 +429,7 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "controller_artifact must be non-empty",
         ),
         (
-            {"rl": {"training": {"training_mode": "resume"}}},
+            {"rl": {"training": {"training_mode": "unknown"}}},
             "training_mode",
         ),
         (

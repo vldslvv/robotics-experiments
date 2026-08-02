@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.selection import (
     CandidateEvaluation,
     CheckpointCandidate,
@@ -115,7 +116,6 @@ def test_checkpoint_enumeration_is_numeric(tmp_path: Path) -> None:
 
 
 def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None:
-    selector = _load_selector_module()
     from robotics_experiments.config import load_config
     from robotics_experiments.rl import PolicyContract, PolicyInterface
 
@@ -134,16 +134,16 @@ def test_comparison_fingerprint_excludes_candidate_owned_action_scales() -> None
         curriculum_stage="approach",
     )
 
-    fingerprint = selector._comparison_fingerprint(  # noqa: SLF001
+    fingerprint = _press_comparison_fingerprint(
         config=config,
         contract=contract,
     )
 
-    assert fingerprint == selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint == _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, max_body_velocity_mps=3.0),
     )
-    assert fingerprint != selector._comparison_fingerprint(  # noqa: SLF001
+    assert fingerprint != _press_comparison_fingerprint(
         config=config,
         contract=replace(contract, obs_dim=35),
     )

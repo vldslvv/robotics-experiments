@@ -6955,3 +6955,28 @@ reproducible until seeds 42 and 43 both reach independent acceptance without
 actor-only initialization. Carry the successful dense target and hard-case
 phase into that pipeline, preserve optimizer/critic state across phases, and
 retain this accepted actor as the safety/reference artifact meanwhile.
+
+### 181. Replace ad hoc fine-tuning with staged full-state scratch training
+
+Date: 2026-08-02.
+
+The reproducible pipeline must preserve critic, optimizer moments, learned
+exploration standard deviation, and iteration state across its safety phase.
+Add `training_mode: resume` and `--resume-checkpoint`, with strict policy
+interface, action contract, controller digest, and comparison-fingerprint
+validation. The resumed phase applies its own configured schedule and learning
+rate after restoring optimizer state; this is the deliberate coarse-to-fine
+transition.
+
+Move the independently proven task recipe into scratch training: earlier
+braking at 0.415 m with a 0.04 m/s forward cap, terminal failure weight 300,
+and velocity-tracking weight 300. Phase 1 remains 300 iterations from random
+weights with adaptive `1e-4`, entropy `1e-4`, and the full reset distribution.
+Save every 30 iterations to reduce broad-sweep evaluation cost. Phase 2 resumes
+the selected checkpoint for 150 iterations with fixed `3e-5`, zero entropy,
+50% hard-case resets, and finer 10-iteration checkpoints.
+
+Prove the complete schedule independently with training seeds 42 and 43. Each
+seed must pass the unchanged 300-episode independent acceptance suite; one
+passing seed is not sufficient. Neither phase may use actor-only
+initialization.

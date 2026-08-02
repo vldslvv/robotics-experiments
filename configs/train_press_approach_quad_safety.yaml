@@ -1,0 +1,18 @@
+defaults:
+  - train_press_approach_quad
+  - _self_
+
+# Phase 2 resumes the complete scratch PPO state and concentrates updates near
+# the independently evidenced range boundary. Evaluation remains on the full
+# handoff distribution inherited from the base experiment.
+rl:
+  press:
+    training_reset:
+      hard_case_fraction: 0.5
+  training:
+    training_mode: resume
+    max_iterations: 150
+    save_interval: 10
+    learning_rate: 3.0e-5
+    schedule: fixed
+    entropy_coef: 0.0

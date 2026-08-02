@@ -260,6 +260,27 @@ dimensions and actor tensor layout must match. Initialization provenance
 records method, source policy, source stage, source run, iteration, path, and
 source commit.
 
+`training_mode: resume` requires `--resume-checkpoint`. It restores actor,
+critic, learned exploration standard deviation, optimizer moments, and the
+runner iteration from the selected source checkpoint. The resumed phase owns
+its configured schedule and learning rate, which are applied after optimizer
+restoration. Resume rejects a different policy interface, action contract,
+controller digest, or held-out comparison fingerprint.
+
+Scratch press training uses a reproducible coarse-to-fine schedule. The first
+300-iteration run uses the adaptive `1e-4` scratch recipe and coarse 30-iteration
+checkpoints. The safety phase resumes the selected checkpoint for 150
+iterations with fixed `3e-5`, zero entropy, 10-iteration checkpoints, and the
+50% hard-case reset mixture. Both phases share terminal-failure and dense
+velocity-tracking weights of 300 and the earlier-braking reference. The second
+phase is full-state continuation, not actor-only fine-tuning:
+
+```console
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_safety.yaml \
+  RL_RUN_ID=<phase-2-run> \
+  TRAIN_ARGS='--resume-checkpoint /isaac-sim/proj/.build/training/press-approach/<phase-1-run>/logs/model_<iteration>.pt'
+```
+
 Manual export remains restricted to the configured namespace that owns the
 checkpoint:
 

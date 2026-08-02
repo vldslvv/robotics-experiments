@@ -11,6 +11,14 @@ rl:
   episode_length_s: 10.0
   action:
     max_body_velocity_mps: 2.0
+  press:
+    goal:
+      velocity_reference:
+        range_center_m: 0.415
+        wall_normal_max_mps: 0.04
+    reward:
+      flight_failure_weight: 300.0
+      velocity_tracking_weight: 300.0
   training:
     task_id: Isaac-Switch-Press-Direct-v0
     vehicle_id: 0
@@ -18,7 +26,9 @@ rl:
     training_mode: scratch
     max_iterations: 300
     num_steps_per_env: 32
-    save_interval: 10
+    # Coarse checkpoints bound selection cost during the broad scratch phase;
+    # the resumed safety phase uses a finer interval around the frontier.
+    save_interval: 30
     learning_rate: 1.0e-4
     schedule: adaptive
     gamma: 0.995

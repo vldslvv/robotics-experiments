@@ -33,6 +33,7 @@ from robotics_experiments.alignment import ControllerArtifact, load_controller_a
 from robotics_experiments.alignment._artifact import resolve_controller_path
 from robotics_experiments.config import ExperimentConfig, load_config
 from robotics_experiments.rl import METADATA_FILENAME
+from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.workflows.isaac_lab import make_isaac_lab_env
 
 _POLICY_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
@@ -193,16 +194,18 @@ def _stored_artifact_metadata(*, run_dir: Path) -> tuple[dict, rl.PolicyMetadata
     return metadata, loaded
 
 
-def _initialization_provenance(
+def _checkpoint_provenance(
     *,
     checkpoint_path: Path,
     training_root: Path,
     repo_root: Path,
-) -> tuple[dict[str, str | int | None], object]:
+    method: str,
+    option_name: str,
+) -> tuple[dict[str, str | int | None], rl.PolicyMetadata]:
     checkpoint_path = checkpoint_path.resolve()
     if not checkpoint_path.is_file() or checkpoint_path.parent.name != "logs":
         raise ValueError(
-            "--initialize-checkpoint must name an existing "
+            f"{option_name} must name an existing "
             ".build/training/<source-policy>/<run>/logs checkpoint"
         )
     run_dir = checkpoint_path.parent.parent
@@ -220,12 +223,12 @@ def _initialization_provenance(
     _validate_policy_name(source_policy)
     match = _CHECKPOINT_NAME_PATTERN.fullmatch(checkpoint_path.name)
     if match is None:
-        raise ValueError("--initialize-checkpoint must name a numeric model_<iteration>.pt")
+        raise ValueError(f"{option_name} must name a numeric model_<iteration>.pt")
     source_metadata, source_policy_metadata = _stored_artifact_metadata(run_dir=run_dir)
     relative_checkpoint = checkpoint_path.resolve().relative_to(repo_root.resolve())
     return (
         {
-            "method": "actor-only",
+            "method": method,
             "source_policy": source_policy,
             "source_stage": source_metadata.get("curriculum_stage"),
             "source_run": source_run,
@@ -233,7 +236,7 @@ def _initialization_provenance(
             "checkpoint_path": str(relative_checkpoint),
             "source_commit": str(source_metadata["source_commit"]),
         },
-        source_policy_metadata.contract,
+        source_policy_metadata,
     )
 
 
@@ -304,21 +307,61 @@ def _validate_initialization_contract(
         )
 
 
+def _validate_resume_contract(
+    *,
+    source_metadata: rl.PolicyMetadata,
+    config: ExperimentConfig,
+    env_cfg,
+    controller_digest: str,
+) -> None:
+    action = config.rl.action
+    expected = rl.PolicyContract(
+        policy_interface=rl.PolicyInterface(str(env_cfg.policy_interface)),
+        obs_schema_version=int(env_cfg.observation_schema_version),
+        obs_dim=int(env_cfg.observation_space),
+        policy_rate_hz=float(config.rl.policy_rate_hz),
+        action_kind=str(action.kind),
+        action_dim=int(action.action_dim),
+        max_body_velocity_mps=float(action.max_body_velocity_mps),
+        max_yaw_rate_radps=float(action.max_yaw_rate_radps),
+        max_body_rate_radps=float(action.max_body_rate_radps),
+        hover_thrust_fraction=float(action.hover_thrust_fraction),
+        curriculum_stage=(
+            config.rl.press.curriculum_stage
+            if str(env_cfg.policy_interface) == rl.PolicyInterface.PRESS_V1.value
+            else None
+        ),
+    )
+    if source_metadata.contract != expected:
+        raise ValueError("resume checkpoint policy interface or action contract is incompatible")
+    if source_metadata.controller_digest != controller_digest:
+        raise ValueError("resume checkpoint controller digest is incompatible")
+    evaluation = source_metadata.values.get("checkpoint_evaluation")
+    if not isinstance(evaluation, dict):
+        raise ValueError("resume checkpoint run has no completed selection fingerprint")
+    source_fingerprint = evaluation.get("comparison_fingerprint")
+    expected_fingerprint = _press_comparison_fingerprint(config=config, contract=expected)
+    if source_fingerprint != expected_fingerprint:
+        raise ValueError("resume checkpoint comparison fingerprint is incompatible")
+
+
 def _validate_training_mode(
     *,
     training_mode: str,
     initialization_checkpoint: Path | None,
+    resume_checkpoint: Path | None,
 ) -> None:
     if training_mode == "scratch":
-        if initialization_checkpoint is not None:
-            raise ValueError(
-                "scratch training forbids --initialize-checkpoint; use the "
-                "actor-only training mode"
-            )
+        if initialization_checkpoint is not None or resume_checkpoint is not None:
+            raise ValueError("scratch training forbids checkpoint initialization")
         return
     if training_mode == "actor-only":
-        if initialization_checkpoint is None:
+        if initialization_checkpoint is None or resume_checkpoint is not None:
             raise ValueError("actor-only training requires --initialize-checkpoint")
+        return
+    if training_mode == "resume":
+        if resume_checkpoint is None or initialization_checkpoint is not None:
+            raise ValueError("resume training requires --resume-checkpoint")
         return
     raise ValueError(f"unsupported rl.training.training_mode={training_mode!r}")
 
@@ -338,24 +381,36 @@ def _run_new_training(
 ) -> None:
     training_cfg = config.rl.training
     initialization_checkpoint = args.initialize_checkpoint
+    resume_checkpoint = args.resume_checkpoint
     _validate_training_mode(
         training_mode=training_cfg.training_mode,
         initialization_checkpoint=initialization_checkpoint,
+        resume_checkpoint=resume_checkpoint,
     )
     initialization = None
-    source_contract = None
+    source_metadata = None
     if initialization_checkpoint is not None:
-        initialization, source_contract = _initialization_provenance(
+        initialization, source_metadata = _checkpoint_provenance(
             checkpoint_path=initialization_checkpoint,
             training_root=training_root,
             repo_root=repo_root,
+            method="actor-only",
+            option_name="--initialize-checkpoint",
+        )
+    elif resume_checkpoint is not None:
+        initialization, source_metadata = _checkpoint_provenance(
+            checkpoint_path=resume_checkpoint,
+            training_root=training_root,
+            repo_root=repo_root,
+            method="resume",
+            option_name="--resume-checkpoint",
         )
     run_dir = _make_run_dir(out_root, os.environ.get(_RUN_ID_ENV))
     initialization_report = (
-        ", actor_init=scratch-neutral-output"
+        ", start=scratch-neutral-output"
         if initialization is None
         else (
-            f", actor_init={initialization['source_run']}/"
+            f", {initialization['method']}={initialization['source_run']}/"
             f"model_{initialization['checkpoint_iteration']}.pt"
         )
     )
@@ -373,11 +428,20 @@ def _run_new_training(
         use_training_reset_distribution=True,
     )
     try:
-        if source_contract is not None:
+        if initialization_checkpoint is not None:
+            assert source_metadata is not None
             _validate_initialization_contract(
-                source_contract=source_contract,
+                source_contract=source_metadata.contract,
                 env_cfg=env_cfg,
                 action_dim=int(config.rl.action.action_dim),
+            )
+        elif resume_checkpoint is not None:
+            assert source_metadata is not None
+            _validate_resume_contract(
+                source_metadata=source_metadata,
+                config=config,
+                env_cfg=env_cfg,
+                controller_digest=controller_digest,
             )
         metadata = _artifact_metadata(
             config=config,
@@ -400,16 +464,25 @@ def _run_new_training(
             log_dir=str(run_dir / "logs"),
             device=device,
         )
-        if initialization_checkpoint is None:
+        if training_cfg.training_mode == "scratch":
             training.initialize_actor_output(
                 runner=runner,
                 method=output_initialization,
             )
-        else:
+        elif training_cfg.training_mode == "actor-only":
+            assert initialization_checkpoint is not None
             training.initialize_actor_from_checkpoint(
                 runner=runner,
                 checkpoint_path=initialization_checkpoint,
                 device=device,
+            )
+        else:
+            assert resume_checkpoint is not None
+            training.resume_training_from_checkpoint(
+                runner=runner,
+                checkpoint_path=resume_checkpoint,
+                device=device,
+                learning_rate=float(training_cfg.learning_rate),
             )
         result = training.train(runner, iterations)
     finally:
@@ -491,6 +564,7 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig) -> None:
     _validate_training_mode(
         training_mode=training_cfg.training_mode,
         initialization_checkpoint=args.initialize_checkpoint,
+        resume_checkpoint=args.resume_checkpoint,
     )
     controller_artifact, controller_digest = _load_training_controller(
         args=args,
@@ -543,6 +617,12 @@ def main() -> None:
         type=Path,
         default=None,
         help="start a fresh run initialized from only an existing checkpoint's actor weights",
+    )
+    checkpoint_group.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        default=None,
+        help="resume complete PPO state from an existing run checkpoint",
     )
     args, _unknown = parser.parse_known_args()
     if args.max_iterations is not None and args.max_iterations < 1:

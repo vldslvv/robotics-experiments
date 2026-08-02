@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -381,6 +381,7 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         num_envs=None,
         export_checkpoint=None,
         initialize_checkpoint=None,
+        resume_checkpoint=None,
         controller_artifact=None,
     )
 
@@ -411,6 +412,30 @@ def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
     )
 
     assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
+
+
+def test_resume_restores_optimizer_state_and_applies_phase_learning_rate(tmp_path: Path) -> None:
+    from robotics_experiments.rl.training import rsl_rl
+
+    calls = []
+    optimizer = SimpleNamespace(param_groups=[{"lr": 1.0e-4}, {"lr": 1.0e-4}])
+    algorithm = SimpleNamespace(optimizer=optimizer, learning_rate=1.0e-4)
+    runner = SimpleNamespace(
+        alg=algorithm,
+        load=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    checkpoint = tmp_path / "model_299.pt"
+
+    rsl_rl.resume_training_from_checkpoint(
+        runner=runner,
+        checkpoint_path=checkpoint,
+        device="cuda:0",
+        learning_rate=3.0e-5,
+    )
+
+    assert calls == [((str(checkpoint),), {"load_optimizer": True, "map_location": "cuda:0"})]
+    assert algorithm.learning_rate == 3.0e-5
+    assert [group["lr"] for group in optimizer.param_groups] == [3.0e-5, 3.0e-5]
 
 
 def test_actor_only_initialization_preserves_fresh_training_state(tmp_path: Path) -> None:
@@ -503,16 +528,19 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
 
 
 @pytest.mark.parametrize(
-    ("training_mode", "checkpoint", "match"),
+    ("training_mode", "initialization_checkpoint", "resume_checkpoint", "match"),
     [
-        ("scratch", Path("model_1.pt"), "scratch training forbids"),
-        ("actor-only", None, "actor-only training requires"),
-        ("resume", None, "unsupported"),
+        ("scratch", Path("model_1.pt"), None, "scratch training forbids"),
+        ("scratch", None, Path("model_1.pt"), "scratch training forbids"),
+        ("actor-only", None, None, "actor-only training requires"),
+        ("resume", None, None, "resume training requires"),
+        ("unknown", None, None, "unsupported"),
     ],
 )
 def test_training_mode_validates_checkpoint_contract(
     training_mode: str,
-    checkpoint: Path | None,
+    initialization_checkpoint: Path | None,
+    resume_checkpoint: Path | None,
     match: str,
 ) -> None:
     train_rl = _load_train_rl_module()
@@ -520,7 +548,8 @@ def test_training_mode_validates_checkpoint_contract(
     with pytest.raises(ValueError, match=match):
         train_rl._validate_training_mode(  # noqa: SLF001
             training_mode=training_mode,
-            initialization_checkpoint=checkpoint,
+            initialization_checkpoint=initialization_checkpoint,
+            resume_checkpoint=resume_checkpoint,
         )
 
 
@@ -530,11 +559,93 @@ def test_valid_training_modes_accept_their_checkpoint_contract() -> None:
     train_rl._validate_training_mode(  # noqa: SLF001
         training_mode="scratch",
         initialization_checkpoint=None,
+        resume_checkpoint=None,
     )
     train_rl._validate_training_mode(  # noqa: SLF001
         training_mode="actor-only",
         initialization_checkpoint=Path("model_1.pt"),
+        resume_checkpoint=None,
     )
+    train_rl._validate_training_mode(  # noqa: SLF001
+        training_mode="resume",
+        initialization_checkpoint=None,
+        resume_checkpoint=Path("model_1.pt"),
+    )
+
+
+def test_resume_requires_matching_interface_controller_and_selection_fingerprint() -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl import PolicyContract, PolicyInterface
+    from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad_safety.yaml")
+    action = config.rl.action
+    contract = PolicyContract(
+        policy_interface=PolicyInterface.PRESS_V1,
+        obs_schema_version=1,
+        obs_dim=34,
+        policy_rate_hz=config.rl.policy_rate_hz,
+        action_kind=action.kind,
+        action_dim=action.action_dim,
+        max_body_velocity_mps=action.max_body_velocity_mps,
+        max_yaw_rate_radps=action.max_yaw_rate_radps,
+        max_body_rate_radps=action.max_body_rate_radps,
+        hover_thrust_fraction=action.hover_thrust_fraction,
+        curriculum_stage="approach",
+    )
+    fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
+    env_cfg = SimpleNamespace(
+        policy_interface="press-v1",
+        observation_schema_version=1,
+        observation_space=34,
+    )
+
+    source = SimpleNamespace(
+        contract=contract,
+        controller_digest="controller",
+        values={"checkpoint_evaluation": {"comparison_fingerprint": fingerprint}},
+    )
+    train_rl._validate_resume_contract(  # noqa: SLF001
+        source_metadata=source,
+        config=config,
+        env_cfg=env_cfg,
+        controller_digest="controller",
+    )
+
+    with pytest.raises(ValueError, match="policy interface"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=replace(contract, obs_dim=35),
+                controller_digest="controller",
+                values=source.values,
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
+    with pytest.raises(ValueError, match="controller digest"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=contract,
+                controller_digest="different",
+                values=source.values,
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
+    with pytest.raises(ValueError, match="comparison fingerprint"):
+        train_rl._validate_resume_contract(  # noqa: SLF001
+            source_metadata=SimpleNamespace(
+                contract=contract,
+                controller_digest="controller",
+                values={"checkpoint_evaluation": {"comparison_fingerprint": "different"}},
+            ),
+            config=config,
+            env_cfg=env_cfg,
+            controller_digest="controller",
+        )
 
 
 def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: Path) -> None:
@@ -571,7 +682,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
     checkpoint = run_dir / "logs" / "model_50.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.touch()
-    metadata = {
+    source_record = {
         "policy_interface": "press-v1",
         "curriculum_stage": "approach",
         "obs_schema_version": 1,
@@ -589,12 +700,17 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         "source_dirty": False,
         "controller": _controller_metadata(),
     }
-    train_rl._write_artifact_metadata(run_dir=run_dir, metadata=metadata)  # noqa: SLF001
+    train_rl._write_artifact_metadata(  # noqa: SLF001
+        run_dir=run_dir,
+        metadata=source_record,
+    )
 
-    provenance, contract = train_rl._initialization_provenance(  # noqa: SLF001
+    provenance, loaded_metadata = train_rl._checkpoint_provenance(  # noqa: SLF001
         checkpoint_path=checkpoint,
         training_root=training_root,
         repo_root=tmp_path,
+        method="actor-only",
+        option_name="--initialize-checkpoint",
     )
 
     assert provenance == {
@@ -606,7 +722,7 @@ def test_cross_namespace_initialization_records_complete_source_provenance(
         "checkpoint_path": (".build/training/press-source/source-run/logs/model_50.pt"),
         "source_commit": "source-commit",
     }
-    assert contract.obs_dim == 34
+    assert loaded_metadata.contract.obs_dim == 34
     json.dumps({"initialization": provenance}, allow_nan=False)
 
 
