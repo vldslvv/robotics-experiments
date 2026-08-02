@@ -6642,3 +6642,28 @@ checkpoint rather than the terminal actor:
 `.build/training/press-approach/20260802T063942Z.95483/logs/model_5.pt`.
 Retain the fixed `1e-4` recipe for another short continuation; the unresolved
 boundary remains seven undershoot episodes in the unchanged 300-episode suite.
+
+### 169. Five deterministic undershoot episodes remain
+
+Date: 2026-08-02.
+
+Actor-only continuation `20260802T064551Z.105998` used clean source commit
+`ad180f5`, the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T063942Z.95483` checkpoint 5. PPO completed in 117.3 s and the
+four-checkpoint held-out sweep completed in 49.8 s. The selection record is
+`.build/training/press-approach/20260802T064551Z.105998/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4-cont4.20260802T064551Z.105998.console.log`.
+
+Selection chose checkpoint 10 with score -0.359737, 98.3% success, 1.7%
+range-undershoot flight failure, zero collision and timeout, 0.41045 m mean
+closest range, and 0.39854 m minimum closest range. Independent evaluation
+reproduced every rate metric, with a 0.41049 m mean and 0.39836 m minimum.
+
+The deterministic undershoot count fell from seven to five episodes, a 29%
+relative reduction, while all passed gates remained passed. Checkpoint 14
+regressed to ten failures, so continue from the selected checkpoint
+`.build/training/press-approach/20260802T064551Z.105998/logs/model_10.pt`.
+Retain the same 15-iteration fixed `1e-4` recipe because it continues to make
+material progress at the exact unresolved boundary.
