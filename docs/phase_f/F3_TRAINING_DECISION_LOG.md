@@ -6589,3 +6589,30 @@ same fixed `1e-4`, low-noise, zero-entropy actor-only recipe from
 `.build/training/press-approach/20260802T062700Z.74595/logs/model_14.pt`.
 Do not change the rate, reward, reset distribution, or action interface while
 this evidenced slope remains positive.
+
+### 167. The same-rate continuation passes success and halves undershoot
+
+Date: 2026-08-02.
+
+Actor-only continuation `20260802T063314Z.84969` used clean source commit
+`edf71ab`, the accepted alignment run `20260801T142920Z`, and wide-step pilot
+`20260802T062700Z.74595` checkpoint 14. PPO completed in 116.1 s and the
+four-checkpoint held-out sweep completed in 52.0 s. The selection record is
+`.build/training/press-approach/20260802T063314Z.84969/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4-cont2.20260802T063314Z.84969.console.log`.
+
+Selection chose checkpoint 14 with score -0.422140, 97.0% success, 3.0%
+range-undershoot flight failure, zero collision and timeout, 0.41063 m mean
+closest range, and 0.39828 m minimum closest range. Independent evaluation
+reproduced every rate metric, with a 0.41065 m mean and 0.39814 m minimum.
+
+The 95% success gate now passes, and undershoot failure fell another 50% from
+6.0% to 3.0% without regressing collision or timeout. Exact minimum range and
+zero other-flight-failure remain the only failed gates. The full held-out curve
+ended at its strongest point (95.0%, 94.7%, 95.3%, then 97.0% success), so
+continue unchanged from
+`.build/training/press-approach/20260802T063314Z.84969/logs/model_14.pt`.
+Change neither the learning rate nor task contract while this material failure
+reduction continues.
