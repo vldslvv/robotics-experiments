@@ -7264,3 +7264,32 @@ Continue from the selected checkpoint with the unchanged full-state safety
 phase: fixed `3e-5` rate, zero entropy, 11 updates, every-update checkpoints,
 and a 20% hard-case training stream. Keep the full-reset held-out and
 independent evaluation distribution and all acceptance gates unchanged.
+
+### 192. Target the seed-42 residual between the safe reset brackets
+
+Date: 2026-08-02.
+
+Seed-42 continuation `20260802T114443Z.358023` used clean source commit
+`527fb2d`, restored the complete shortened-phase checkpoint-120 state, and used
+the seed-43-proven 20% hard-case mixture. Training completed in 92.1 s and the
+source plus 11 fine checkpoints were evaluated in 429.8 s. The selection record
+is
+`.build/training/press-approach/20260802T114443Z.358023/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-short-seed42-phase2-hard20.20260802T114443Z.358023.console.log`.
+
+The source re-evaluated at 92.33% success and 7.67% other flight failure. The
+updates first regressed, then recovered. Checkpoint 130 was selected with score
+-0.395756, 98.67% success, zero collisions, 1.33% other flight failure, zero
+timeout, and 0.39989 m minimum closest range. Independent evaluation reproduced
+all rates and reported the same 0.39989 m minimum. It therefore missed the
+range and flight-envelope gates by four undershoots in 300 episodes. This is an
+83% reduction in failures without regressing a passed collision or timeout
+gate, so the attempt made material progress.
+
+The earlier 50% seed-42 safety run eliminated every undershoot, while 50%
+caused an immediate distribution-shift regression for seed 43. Use the targeted
+midpoint between the current 20% stream and that upper bracket: change only
+`hard_case_fraction` to 0.3 and restart from the original shortened-phase
+checkpoint 120. Preserve full-state resume, the fixed rate, horizon,
+every-update sweep, full-reset evaluation distribution, and all gates.

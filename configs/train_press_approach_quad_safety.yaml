@@ -10,7 +10,7 @@ rl:
     training_reset:
       # A minority hard-case stream corrects undershoot without overwhelming
       # the full-distribution approach behavior learned during scratch.
-      hard_case_fraction: 0.2
+      hard_case_fraction: 0.3
   training:
     training_mode: resume
     # Eleven runner iterations bound the safety search; every update is saved
