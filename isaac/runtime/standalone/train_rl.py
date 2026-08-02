@@ -134,6 +134,7 @@ def _build_env(
     experiment_config: ExperimentConfig,
     controller_settings,
     policy_contract=None,
+    use_training_reset_distribution=False,
 ):
     return make_isaac_lab_env(
         task_id=task_id,
@@ -142,6 +143,7 @@ def _build_env(
         seed=seed,
         num_envs=num_envs,
         policy_contract=policy_contract,
+        use_training_reset_distribution=use_training_reset_distribution,
     )
 
 
@@ -368,6 +370,7 @@ def _run_new_training(
         num_envs=args.num_envs,
         experiment_config=config,
         controller_settings=controller_artifact.selected_settings,
+        use_training_reset_distribution=True,
     )
     try:
         if source_contract is not None:

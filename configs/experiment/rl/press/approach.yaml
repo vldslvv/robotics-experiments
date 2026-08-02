@@ -77,6 +77,16 @@ reset:
   switch_height_m: 1.0
   wall_half_extents_m: [0.05, 1.0, 1.0]
 
+# Training can mix the full handoff envelope with an area-uniform annulus near
+# an evidenced difficult boundary. Selection and evaluation always retain the
+# full handoff distribution.
+training_reset:
+  hard_case_fraction: 0.0
+  range_min_m: 0.45
+  range_max_m: 0.47
+  tangential_error_min_m: 0.06
+  tangential_error_max_m: 0.08
+
 termination:
   crash_tilt_cos: 0.819152
   min_altitude_m: 0.25

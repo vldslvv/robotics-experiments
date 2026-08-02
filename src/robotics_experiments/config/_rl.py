@@ -11,6 +11,7 @@ __all__ = [
     "PressApproachGoalConfig",
     "PressApproachRewardConfig",
     "PressApproachTerminationConfig",
+    "PressApproachTrainingResetConfig",
     "PressApproachVelocityReferenceConfig",
     "PressHandoffConfig",
     "PressResetConfig",
@@ -226,6 +227,17 @@ class PressResetConfig(_FreezableConfig):
 
 
 @dataclass
+class PressApproachTrainingResetConfig(_FreezableConfig):
+    """Training-only mixture that concentrates samples near a hard boundary."""
+
+    hard_case_fraction: float
+    range_min_m: float
+    range_max_m: float
+    tangential_error_min_m: float
+    tangential_error_max_m: float
+
+
+@dataclass
 class PressApproachTerminationConfig(_FreezableConfig):
     """Contact and flight-envelope failure conditions for approach."""
 
@@ -326,6 +338,7 @@ class PressTaskConfig(_FreezableConfig):
         goal: Stable approach target and dense velocity reference.
         reward: Approach-stage reward weights.
         reset: Physical scene and initial-state ranges.
+        training_reset: Training-only hard-case reset mixture.
         termination: Contact and flight-envelope failure conditions.
         evaluation: Deterministic approach workload and acceptance targets.
     """
@@ -336,6 +349,7 @@ class PressTaskConfig(_FreezableConfig):
     goal: PressApproachGoalConfig
     reward: PressApproachRewardConfig
     reset: PressResetConfig
+    training_reset: PressApproachTrainingResetConfig
     termination: PressApproachTerminationConfig
     evaluation: PressApproachEvaluationConfig
 

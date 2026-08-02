@@ -42,6 +42,7 @@ from robotics_experiments.workflows.isaac_lab.tasks._flight_env import (
 )
 from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
     _press_entry_state_from_unit_samples,
+    _press_training_entry_state_from_unit_samples,
 )
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
@@ -82,6 +83,7 @@ class SwitchPressEnvCfg(DirectRLEnvCfg):
     observation_space: int = cast(int, MISSING)
     policy_interface: str = cast(str, MISSING)
     policy_config: RlPolicyConfig = cast(RlPolicyConfig, MISSING)
+    use_training_reset_distribution: bool = cast(bool, MISSING)
     state_space = 0
     sim: SimulationCfg = cast(SimulationCfg, MISSING)
     drone_cfg: ArticulationCfg = cast(ArticulationCfg, MISSING)
@@ -96,6 +98,7 @@ def make_switch_press_env_cfg(
     *,
     experiment_config: ExperimentConfig,
     policy_contract: PolicyContract | None = None,
+    use_training_reset_distribution: bool = False,
 ) -> SwitchPressEnvCfg:
     """Build the press task from one immutable resolved experiment config."""
     vehicle = _training_vehicle(experiment_config)
@@ -133,6 +136,7 @@ def make_switch_press_env_cfg(
         observation_space=PRESS_OBSERVATION_DIM,
         policy_interface="press-v1",
         policy_config=rl.press.policy,
+        use_training_reset_distribution=use_training_reset_distribution,
         state_space=0,
         sim=SimulationCfg(
             dt=1.0 / experiment_config.sim.physics_hz,
@@ -478,12 +482,21 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         switch_position = self.switch.data.default_root_state[env_ids, :3]
         switch_position = switch_position + self.scene.env_origins[env_ids]
         count = len(env_ids)
-        wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
-            _press_entry_state_from_unit_samples(
-                unit_samples=torch.rand((count, 9), device=self.device),
-                gate=handoff_gate,
+        if self.cfg.use_training_reset_distribution:
+            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
+                _press_training_entry_state_from_unit_samples(
+                    unit_samples=torch.rand((count, 10), device=self.device),
+                    gate=handoff_gate,
+                    training_reset=self._experiment_config.rl.press.training_reset,
+                )
             )
-        )
+        else:
+            wall_normal, lateral_vertical, linear_velocity_contact, angular_velocity = (
+                _press_entry_state_from_unit_samples(
+                    unit_samples=torch.rand((count, 9), device=self.device),
+                    gate=handoff_gate,
+                )
+            )
         root_state = self.drone.data.default_root_state[env_ids].clone()
         root_state[:, :3] = switch_position - torch.cat(
             (wall_normal[:, None], lateral_vertical),

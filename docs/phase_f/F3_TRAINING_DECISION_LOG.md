@@ -6848,3 +6848,27 @@ range and 0.06-0.08 m tangential error. Keep checkpoint selection and
 independent evaluation on the original full handoff distribution so acceptance
 remains comparable. Continue from checkpoint 10 and retain the current reward,
 rate, controller, and acceptance contract.
+
+### 177. Concentrate training on the last failing reset corner
+
+Date: 2026-08-02.
+
+Add a declarative training-only reset mixture to the press task. Half of
+training resets retain the full handoff envelope. The other half sample range
+uniformly from 0.45-0.47 m and tangential error area-uniformly from the
+0.06-0.08 m annulus, matching the independently retained failure without
+collapsing the task onto one deterministic episode. Linear and angular
+velocity sampling remains unchanged.
+
+The environment activates this mixture only for `train_rl.py`. Checkpoint
+selection, `eval_press.py`, policy transfer, and runtime construction retain
+the original full handoff distribution, so neither the comparison fingerprint
+nor acceptance workload changes. Cover the sampler, configuration bounds, and
+training/evaluation mode seam with host tests.
+
+Start from
+`.build/training/press-approach/20260802T072038Z.163899/logs/model_10.pt` and
+retain the fixed `3e-5` rate, terminal weight 300, 15 iterations, four saved
+checkpoints, accepted controller, and exact acceptance gates. Material progress
+requires the held-out and independent failing corner to clear without a
+regression elsewhere in the full distribution.

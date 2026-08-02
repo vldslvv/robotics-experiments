@@ -300,6 +300,30 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.handoff.{name} must be between 0 and 1")
 
+    training_reset = press.training_reset
+    if not math.isfinite(training_reset.hard_case_fraction) or not (
+        0.0 <= training_reset.hard_case_fraction <= 1.0
+    ):
+        raise ValueError("rl.press.training_reset.hard_case_fraction must be between 0 and 1")
+    if not (
+        handoff.switch_range_min_m
+        <= training_reset.range_min_m
+        < training_reset.range_max_m
+        <= handoff.switch_range_max_m
+    ):
+        raise ValueError(
+            "rl.press.training_reset range bounds must be ordered inside the handoff range"
+        )
+    if not (
+        0.0
+        <= training_reset.tangential_error_min_m
+        < training_reset.tangential_error_max_m
+        <= handoff.lateral_align_max_m
+    ):
+        raise ValueError(
+            "rl.press.training_reset tangential bounds must be ordered inside the handoff disk"
+        )
+
     goal = press.goal
     if not 0.0 < goal.range_min_m <= goal.range_max_m:
         raise ValueError("rl.press.goal range bounds must be positive and ordered")

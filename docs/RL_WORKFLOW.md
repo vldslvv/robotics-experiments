@@ -241,7 +241,10 @@ the unchanged held-out selection. It raises the terminal flight-failure weight
 to 300 so the evidenced range-undershoot transition outweighs success. Its
 wall-normal velocity reference is capped at 0.04 m/s and centered at 0.415 m so
 actor-only refinement teaches earlier braking without changing the 0.40-0.42 m
-goal band or its acceptance limits:
+goal band or its acceptance limits. Its training resets mix 50% full handoff
+samples with 50% samples in the evidenced 0.45-0.47 m range and 0.06-0.08 m
+tangential-error annulus. Checkpoint selection and independent evaluation
+always use the unchanged full handoff distribution:
 
 ```console
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad_finetune.yaml \

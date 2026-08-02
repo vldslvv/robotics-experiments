@@ -384,6 +384,7 @@ def test_config_eagerly_imports_hydra() -> None:
         "PressApproachGoalConfig",
         "PressApproachRewardConfig",
         "PressApproachTerminationConfig",
+        "PressApproachTrainingResetConfig",
         "PressApproachVelocityReferenceConfig",
         "PressResetConfig",
         "Px4BridgeConfig",

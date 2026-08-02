@@ -271,6 +271,11 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.handoff.body_z_alignment_min == 0.965926
     assert not hasattr(config.rl.press.reset, "initial_linear_velocity_max_mps")
     assert not hasattr(config.rl.press.reset, "initial_angular_velocity_max_radps")
+    assert config.rl.press.training_reset.hard_case_fraction == 0.0
+    assert config.rl.press.training_reset.range_min_m == 0.45
+    assert config.rl.press.training_reset.range_max_m == 0.47
+    assert config.rl.press.training_reset.tangential_error_min_m == 0.06
+    assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
     assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v3"
@@ -292,6 +297,7 @@ def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
     assert config.rl.training.schedule == "fixed"
     assert config.rl.press.policy.actor.initial_noise_std == 0.01
     assert config.rl.press.reward.flight_failure_weight == 300.0
+    assert config.rl.press.training_reset.hard_case_fraction == 0.5
     reference = config.rl.press.goal.velocity_reference
     assert reference.range_center_m == 0.415
     assert reference.wall_normal_max_mps == 0.04
@@ -456,6 +462,26 @@ def test_task_policy_validation(tmp_path, override, match):
         (
             {"rl": {"press": {"handoff": {"switch_range_min_m": 0.40}}}},
             "switch_range_min_m",
+        ),
+        (
+            {"rl": {"press": {"training_reset": {"hard_case_fraction": 1.1}}}},
+            "hard_case_fraction",
+        ),
+        (
+            {"rl": {"press": {"training_reset": {"range_min_m": 0.48}}}},
+            "range bounds",
+        ),
+        (
+            {
+                "rl": {
+                    "press": {
+                        "training_reset": {
+                            "tangential_error_min_m": 0.081,
+                        }
+                    }
+                }
+            },
+            "tangential bounds",
         ),
         (
             {"rl": {"press": {"reward": {"action_delta_weight": -0.1}}}},

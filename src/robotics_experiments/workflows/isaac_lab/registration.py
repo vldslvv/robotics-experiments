@@ -100,6 +100,7 @@ def make_isaac_lab_env(
     seed: int | None = None,
     num_envs: int | None = None,
     policy_contract: PolicyContract | None = None,
+    use_training_reset_distribution: bool = False,
 ) -> tuple[gym.Env, object]:
     """Build a task, optionally interpreting actions through an artifact contract."""
     if not register_isaac_lab_tasks():
@@ -119,10 +120,13 @@ def make_isaac_lab_env(
         )
     module_name, factory_name = registration.cfg_factory.split(":", maxsplit=1)
     factory = getattr(importlib.import_module(module_name), factory_name)
-    env_cfg = factory(
-        experiment_config=experiment_config,
-        policy_contract=policy_contract,
-    )
+    factory_kwargs = {
+        "experiment_config": experiment_config,
+        "policy_contract": policy_contract,
+    }
+    if task_id == SWITCH_PRESS_TASK_ID:
+        factory_kwargs["use_training_reset_distribution"] = use_training_reset_distribution
+    env_cfg = factory(**factory_kwargs)
     if seed is not None and hasattr(env_cfg, "seed"):
         env_cfg.seed = seed
     if num_envs is not None:

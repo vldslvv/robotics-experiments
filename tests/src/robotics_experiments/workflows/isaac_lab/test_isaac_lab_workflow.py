@@ -142,6 +142,7 @@ def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeyp
     assert env == "environment"
     assert returned_cfg is env_cfg
     assert calls["factory"]["policy_contract"] is contract
+    assert not calls["factory"]["use_training_reset_distribution"]
     assert calls["gym"][1]["policy_contract"] is contract
     assert calls["gym"][1]["controller_settings"] == "aligned-controller"
     assert env_cfg.scene.num_envs == 8
