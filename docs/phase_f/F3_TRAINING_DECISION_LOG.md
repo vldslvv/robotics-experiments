@@ -6815,3 +6815,36 @@ the fixed `3e-5` rate, 15 iterations, checkpoints 0/5/10/14, 0.01 noise, zero
 entropy, reset distribution, range barrier, velocity reference, controller,
 and held-out seeds. This isolates whether the terminal value signal can move
 the hard reset corner that ordinary rate annealing could not.
+
+### 176. Terminal weighting improves typical margin but not the hard corner
+
+Date: 2026-08-02.
+
+Actor-only run `20260802T072038Z.163899` used clean source commit `d186c90`,
+the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T070403Z.137124` checkpoint 5. PPO completed in 118.7 s and the
+four-checkpoint held-out sweep completed in 49.2 s. The selection record is
+`.build/training/press-approach/20260802T072038Z.163899/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-terminal300.20260802T072038Z.163899.console.log`.
+
+Selection chose checkpoint 10 with score -0.287495, 99.7% success, 0.3%
+range-undershoot flight failure, zero collision and timeout, 0.41074 m mean
+closest range, and 0.39921 m minimum closest range. Independent evaluation
+reproduced every rate and range metric. Checkpoint 5 briefly regressed to two
+undershoots; checkpoints 0, 10, and 14 retained one.
+
+The stronger terminal signal changed the actor but did not clear seed 202
+episode 78. It improved the seed-101 worst-case margin from 0.00065 m to
+0.00483 m, while the unresolved trace still starts near the minimum handoff
+range with about 0.060 m tangential error and crosses the boundary one control
+step late. Optimizer scale and terminal cost have now both been isolated
+without resolving this reset corner.
+
+Route the next attempt through training-only hard-case reset sampling. Mix the
+unchanged full handoff distribution with samples concentrated at 0.45-0.47 m
+range and 0.06-0.08 m tangential error. Keep checkpoint selection and
+independent evaluation on the original full handoff distribution so acceptance
+remains comparable. Continue from checkpoint 10 and retain the current reward,
+rate, controller, and acceptance contract.
