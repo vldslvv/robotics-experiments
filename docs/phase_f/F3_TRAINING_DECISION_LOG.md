@@ -7145,3 +7145,32 @@ zero entropy, reset mixture, controller, and gates. Change only the safety
 phase save interval from 10 to one, producing a targeted fine sweep over every
 intermediate update. This is the precision stage after the broad phase-1 grid;
 it adds evaluation work only in the evidenced promising region.
+
+### 188. Reduce the safety-phase distribution shift
+
+Date: 2026-08-02.
+
+Fine-sweep run `20260802T104216Z.304461` used clean source commit `e23409c`,
+seed 43, and the same full-state checkpoint-120 source as decision 187.
+Training completed in 93.9 s and the 11-new-checkpoint plus source sweep
+completed in 453.8 s. The selection record is
+`.build/training/press-approach/20260802T104216Z.304461/checkpoint_selection.json`
+and the console log is
+`.build/overnight/scratch-fixed-seed43-phase2-fine.20260802T104216Z.304461.console.log`.
+
+The unchanged source remained selected at score -0.966380 with 84.67% success,
+13.0% other flight failure, and 2.33% timeout; independent evaluation
+reproduced those metrics. The first update fell immediately to 43.67% success,
+10.33% flight failure, and 46.0% timeout. Intermediate checkpoints reached a
+30% success low point and then recovered monotonically to 76.0% success, zero
+flight failure, and 24.0% timeout at iteration 130. No hidden checkpoint passed
+or improved on the source.
+
+The first-update discontinuity rules out checkpoint resolution as the active
+boundary. The safety phase changes both learning conditions and reset mix, but
+the same fixed `3e-5` rate was stable in accepted actor-only work while half of
+this phase's rollouts are hard cases. Reduce only `hard_case_fraction` from 0.5
+to 0.1. Keep full-state resume, rate, entropy, horizon, every-update saves,
+reward, controller, evaluation distribution, and gates unchanged. This retains
+targeted exposure while preventing it from dominating the learned full-reset
+behavior.
