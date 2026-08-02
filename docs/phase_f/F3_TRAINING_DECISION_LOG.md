@@ -6667,3 +6667,28 @@ regressed to ten failures, so continue from the selected checkpoint
 `.build/training/press-approach/20260802T064551Z.105998/logs/model_10.pt`.
 Retain the same 15-iteration fixed `1e-4` recipe because it continues to make
 material progress at the exact unresolved boundary.
+
+### 170. Four deterministic undershoot episodes remain
+
+Date: 2026-08-02.
+
+Actor-only continuation `20260802T065155Z.116387` used clean source commit
+`ff1c083`, the accepted alignment run `20260801T142920Z`, and continuation
+`20260802T064551Z.105998` checkpoint 10. PPO completed in 115.8 s and the
+four-checkpoint held-out sweep completed in 48.1 s. The selection record is
+`.build/training/press-approach/20260802T065155Z.116387/checkpoint_selection.json`,
+TensorBoard data is under the sibling `logs/` directory, and the full console
+log is
+`.build/overnight/accepted-alignment-hard-range-lr1e4-cont5.20260802T065155Z.116387.console.log`.
+
+Selection chose checkpoint 0 with score -0.344647, 98.7% success, 1.3%
+range-undershoot flight failure, zero collision and timeout, 0.41055 m mean
+closest range, and 0.39831 m minimum closest range. Independent evaluation
+reproduced every metric.
+
+The deterministic undershoot count fell from five to four episodes, exactly a
+20% reduction, while all passed gates remained passed. Later checkpoints
+regressed, so continue from selected checkpoint
+`.build/training/press-approach/20260802T065155Z.116387/logs/model_0.pt`.
+Retain the fixed `1e-4` recipe for another short attempt; this result remains
+material even though the useful update occurred in the first iteration.
