@@ -9209,3 +9209,43 @@ controller field into the fitter. Commit and run the complete scratch campaign
 again; acceptance still requires the new run to pass capture, audit, all eight
 motion gates, replay, live integration, finalization, and publication in one
 unchanged invocation.
+
+### 271. Scratch alignment passes the complete acceptance sequence
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T195530Z` completed in one
+unchanged `make align-controllers` invocation from clean source commit
+`a2bd70e`. It captured a new 132.6-second PX4 probe flight, augmented every
+profile with its absolute simulation start time, and passed the actuator audit
+with 0.014199 N maximum collective RMSE, 0.000330 maximum normalized motor
+RMSE, and zero timestamp-join error.
+
+The target search evaluated 877 unique candidates in 12 GPU batches and 233.3
+seconds. It achieved 3.759 useful candidates per second with 27.5% average,
+45.0% p95, and 49.0% peak GPU utilization; the single-worker PhysX workload
+remains the measured utilization bottleneck. The regularized feasible pool
+contained 319 candidates. Candidate 789 selected 0.01125 Hz estimator-bias
+decay, observation bias `[0.0025, -0.0100, -0.0039]` m/s, and the declared
+`[0.35, 0.35, 4.0]` m/s2 integral cap.
+
+All eight exact-action gates passed: braking error was 3.342 mm, residual-speed
+error was 2.858 mm/s, stop-time error was 0.10 s, worst-axis velocity NRMSE was
+4.326%, vertical policy-envelope NRMSE was 1.431%, yaw-rate NRMSE was 3.060%,
+heading error was 2.575 degrees, and combined endpoint error was 9.261 mm.
+Every stability trace completed. Controller-boundary replay passed with
+0.044703 N maximum core collective RMSE, 0.007995 maximum core motor RMSE,
+0.008739 maximum physical-state motor RMSE, and zero timestamp error.
+
+The run-local live gate passed before publication: hover last-window error was
+0.090 m, goto last-window error was 0.029 m, and final handoff range was 0.455
+m with the handoff gate ready. Finalization preserved the ULog, bridge log,
+reference traces, compressed target traces, selection record, audit, replay,
+search realization, and GPU telemetry under one relative-path manifest.
+`latest` and comparable `best` both advanced to this run only after acceptance.
+
+This demonstrates that alignment can be produced from scratch with all current
+acceptance gates passing in one run, without checkpoint initialization,
+fine-tuning, post-capture edits, or manual candidate promotion. Stop at the
+controller boundary as requested; policy training remains a separate future
+step that consumes this accepted schema-1 controller artifact.
