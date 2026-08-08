@@ -7,7 +7,8 @@ functions, the batched twin of two pure, host-tested references it must match
 term-for-term:
 
 - the actuation cascade exported by ``robotics_experiments.controller``
-  (numpy single-env oracle: ``ActuationParams`` + ``action_to_rotor_omega``) --
+  (numpy single-env oracle: ``ActuationParams`` plus command ingestion and
+  ``controller_command_to_rotor_omega``) --
   this module batches the normalized velocity/ctbr cascade over ``[num_envs]``;
 - the per-rotor -> body-wrench reduction exported as
   ``robotics_experiments.controller.rotor_forces_to_body_wrench`` --
@@ -45,9 +46,9 @@ from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.rl import PolicyContract
 
 __all__ = [
-    "action_to_rotor_omega",
     "apply_body_wrench",
     "build_flight_actuation_params",
+    "controller_command_to_rotor_omega",
     "initial_flight_controller_state",
     "reset_flight_controller_state",
     "rotor_omega_to_body_wrench",
@@ -625,13 +626,13 @@ def _rate_to_omega(
 def _ctbr(
     params: _FlightActuationParams,
     controller_state: _FlightControllerState,
-    action: torch.Tensor,
+    command: torch.Tensor,
     angular_velocity_body: torch.Tensor,
     dt_s: float,
     /,
 ) -> tuple[_FlightControllerState, torch.Tensor]:
-    collective = torch.clamp(params.hover_thrust_normalized * (1.0 + action[:, 0]), 0.0, 1.0)
-    body_rate_setpoint = action[:, 1:4] * params.max_body_rate_radps
+    collective = command[:, 0]
+    body_rate_setpoint = command[:, 1:4]
     return _rate_to_omega(
         params,
         controller_state,
@@ -645,7 +646,7 @@ def _ctbr(
 def _velocity(
     params: _FlightActuationParams,
     controller_state: _FlightControllerState,
-    action: torch.Tensor,
+    command: torch.Tensor,
     attitude_wxyz: torch.Tensor,
     linear_velocity_world: torch.Tensor,
     angular_velocity_body: torch.Tensor,
@@ -662,15 +663,7 @@ def _velocity(
     yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])  # [B]
     cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
 
-    velocity_command_body = action[:, :3] * params.max_body_velocity_mps
-    velocity_setpoint_world = torch.stack(
-        [
-            cos_yaw * velocity_command_body[:, 0] - sin_yaw * velocity_command_body[:, 1],
-            sin_yaw * velocity_command_body[:, 0] + cos_yaw * velocity_command_body[:, 1],
-            velocity_command_body[:, 2],
-        ],
-        dim=-1,
-    )
+    velocity_setpoint_world = command[:, :3]
     velocity_alpha = _low_pass_alpha(
         cutoff_hz=params.velocity_filter_hz,
         dt_s=outer_loop_period_s,
@@ -760,7 +753,7 @@ def _velocity(
         desired_rotation=desired_rotation,
         proportional_gain=params.kp_att,
         yaw_weight=params.attitude_yaw_weight,
-        yaw_rate_radps=action[:, 3] * params.max_yaw_rate_radps,
+        yaw_rate_radps=command[:, 3],
     )
     outer_successor = _FlightControllerState(
         filtered_velocity_world=torch.where(
@@ -1039,10 +1032,11 @@ def _initial_rotor_thrust_from_controller_state(
     angular_velocity_body: torch.Tensor,
 ) -> torch.Tensor:
     """Reconstruct ongoing-flight rotor thrust without advancing controller state."""
-    _next_state, omega = action_to_rotor_omega(
+    command = _normalized_action_to_controller_command(params, action, attitude_wxyz)
+    _next_state, omega = controller_command_to_rotor_omega(
         params,
         state,
-        action,
+        command,
         attitude_wxyz,
         linear_velocity_world,
         angular_velocity_body,
@@ -1245,10 +1239,39 @@ def seed_flight_controller_state(
     )
 
 
-def action_to_rotor_omega(
+def _normalized_action_to_controller_command(
+    params: _FlightActuationParams,
+    action: torch.Tensor,
+    attitude_wxyz: torch.Tensor,
+    /,
+) -> torch.Tensor:
+    """Convert normalized actions once at their command-arrival boundary."""
+    if params.kind == "ctbr":
+        authored_hover = _environment_values(params.hover_thrust_normalized, action[:, 0])
+        collective = torch.clamp(authored_hover * (1.0 + action[:, 0]), 0.0, 1.0)
+        return torch.cat(
+            (collective.unsqueeze(-1), action[:, 1:4] * params.max_body_rate_radps),
+            dim=-1,
+        )
+    rotation = _matrix_from_quat_wxyz(attitude_wxyz)
+    yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
+    cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
+    velocity_body = action[:, :3] * params.max_body_velocity_mps
+    return torch.stack(
+        [
+            cos_yaw * velocity_body[:, 0] - sin_yaw * velocity_body[:, 1],
+            sin_yaw * velocity_body[:, 0] + cos_yaw * velocity_body[:, 1],
+            velocity_body[:, 2],
+            action[:, 3] * params.max_yaw_rate_radps,
+        ],
+        dim=-1,
+    )
+
+
+def controller_command_to_rotor_omega(
     params: _FlightActuationParams,
     controller_state: _FlightControllerState,
-    action: torch.Tensor,
+    command: torch.Tensor,
     attitude_wxyz: torch.Tensor,
     linear_velocity_world: torch.Tensor,
     angular_velocity_body: torch.Tensor,
@@ -1260,14 +1283,14 @@ def action_to_rotor_omega(
         return _ctbr(
             params,
             controller_state,
-            action,
+            command,
             angular_velocity_body,
             dt_s,
         )
     return _velocity(
         params,
         controller_state,
-        action,
+        command,
         attitude_wxyz,
         linear_velocity_world,
         angular_velocity_body,

@@ -1,10 +1,10 @@
 """Compare PX4 and Isaac velocity-controller outputs at matched replay states.
 
 The PX4 ULog is the controller oracle. At each logged motor sample in the
-selected window, this tool reconstructs the normalized body-FLU velocity action
-from PX4's world-NED trajectory setpoint, converts the logged estimator state to
-the Isaac controller's ENU/FLU convention, and evaluates the host numpy
-actuation reference. Both outputs are reduced to the same physical boundary:
+selected window, this tool reads PX4's held world-NED trajectory command,
+converts the logged estimator state to the Isaac controller's ENU/FLU
+convention, and evaluates the host numpy actuation reference. Both outputs are
+reduced to the same physical boundary:
 per-rotor angular velocity and the resulting body wrench.
 """
 
@@ -24,9 +24,10 @@ from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
     MixerGeometry,
-    action_to_rotor_omega,
     build_actuation_params,
+    controller_command_to_rotor_omega,
     load_controller_artifact,
+    normalized_action_to_controller_command,
     seed_actuation_controller_state,
     update_hover_thrust_estimate,
 )
@@ -1052,26 +1053,7 @@ def _report(
         ):
             raise ValueError("selected replay window contains non-finite controller inputs")
         quaternion_flu_enu = quaternion
-        _w, qx, qy, qz = quaternion_flu_enu
-        yaw = math.atan2(
-            2.0 * (_w * qz + qx * qy),
-            1.0 - 2.0 * (qy * qy + qz * qz),
-        )
         velocity_setpoint_enu = _NED_TO_ENU @ velocity_setpoint_ned
-        heading = np.array(
-            [
-                [math.cos(yaw), -math.sin(yaw), 0.0],
-                [math.sin(yaw), math.cos(yaw), 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        if replay_actions is None:
-            action = np.zeros(4)
-            action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
-            action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
-        else:
-            action = replay_action
-        action = np.clip(action, -1.0, 1.0)
 
         state = ActuationState(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
@@ -1083,10 +1065,19 @@ def _report(
             controller_state=controller_state,
             hover_thrust_normalized=float(hover_thrust_normalized),
         )
-        controller_state, isaac_omega = action_to_rotor_omega(
+        command = (
+            np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
+            if replay_actions is None
+            else normalized_action_to_controller_command(
+                params,
+                np.clip(replay_action, -1.0, 1.0),
+                quaternion_flu_enu,
+            )
+        )
+        controller_state, isaac_omega = controller_command_to_rotor_omega(
             params,
             controller_state,
-            action,
+            command,
             state,
             controller_dt_s,
         )

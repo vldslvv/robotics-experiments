@@ -42,6 +42,13 @@ these estimator states, the held outer-loop setpoints, and the acceleration
 setpoint needed for PX4's thrust-preserving hover-estimate integrator
 correction. Sequential NumPy/Torch parity is a host-test requirement.
 
+The body-FLU policy action is ingested only at its 20 Hz arrival boundary. That
+boundary uses the arrival attitude to produce a world-ENU velocity setpoint,
+then holds the world command while the 125 Hz velocity loop and 250 Hz rate,
+allocator, actuator, and physics loops advance. This mirrors PX4's
+`MAV_FRAME_BODY_NED` receiver; body-to-world conversion is not repeated from
+the changing attitude during the held interval.
+
 ## Search
 
 Controller definitions live in `configs/alignment/controllers/`. Every tunable

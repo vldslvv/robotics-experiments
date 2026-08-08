@@ -15,11 +15,12 @@ from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import ExperimentConfig
 from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+    _normalized_action_to_controller_command,
     _replace_controller_settings_batch,
     _reset_thruster_for_airborne_state,
-    action_to_rotor_omega,
     apply_body_wrench,
     build_flight_actuation_params,
+    controller_command_to_rotor_omega,
     initial_flight_controller_state,
     reset_flight_controller_state,
     rotor_thrust_to_body_wrench,
@@ -64,6 +65,12 @@ class _FlightDirectRLEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._applied_actions = self.actions.clone()
+        self._controller_command = self.actions.clone()
+        self._action_arrival_pending = torch.zeros(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
         self._command_delay_steps: torch.Tensor
         self._command_delay_index: int
         self._command_delay_buffer: torch.Tensor
@@ -192,9 +199,14 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
+        self._action_arrival_pending.fill_(True)
 
     def _apply_action(self) -> None:
         self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
+        self._command_delay_arrival_buffer[self._command_delay_index].copy_(
+            self._action_arrival_pending
+        )
+        self._action_arrival_pending.zero_()
         delayed_indices = (
             self._command_delay_index - self._command_delay_steps
         ) % self._command_delay_buffer.shape[0]
@@ -203,6 +215,20 @@ class _FlightDirectRLEnv(DirectRLEnv):
             delayed_indices,
             environment_indices,
         ].clone()
+        arrivals = self._command_delay_arrival_buffer[
+            delayed_indices,
+            environment_indices,
+        ]
+        candidate_command = _normalized_action_to_controller_command(
+            self.actuation_params,
+            self._applied_actions,
+            self.drone.data.root_quat_w,
+        )
+        self._controller_command = torch.where(
+            arrivals.unsqueeze(-1),
+            candidate_command,
+            self._controller_command,
+        )
         self._command_delay_index = (
             self._command_delay_index + 1
         ) % self._command_delay_buffer.shape[0]
@@ -210,10 +236,10 @@ class _FlightDirectRLEnv(DirectRLEnv):
             self._pusher_extension_target,
             joint_ids=[self._pusher_joint_id],
         )
-        self._controller_state, omega = action_to_rotor_omega(
+        self._controller_state, omega = controller_command_to_rotor_omega(
             self.actuation_params,
             self._controller_state,
-            self._applied_actions,
+            self._controller_command,
             self.drone.data.root_quat_w,
             self.drone.data.root_lin_vel_w,
             self.drone.data.root_ang_vel_b,
@@ -259,6 +285,11 @@ class _FlightDirectRLEnv(DirectRLEnv):
             dtype=self.actions.dtype,
             device=self.device,
         )
+        self._command_delay_arrival_buffer = torch.zeros(
+            self._command_delay_buffer.shape[:2],
+            dtype=torch.bool,
+            device=self.device,
+        )
 
     def _set_controller_settings_batch(
         self,
@@ -286,6 +317,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
             )
         )
         self._applied_actions.zero_()
+        self._controller_command.zero_()
+        self._action_arrival_pending.zero_()
         self._controller_state = initial_flight_controller_state(
             num_envs=self.num_envs,
             device=self.device,
@@ -330,7 +363,10 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.drone.write_joint_state_to_sim(joint_position, joint_velocity, env_ids=env_ids)
         self.actions[env_ids] = 0.0
         self._applied_actions[env_ids] = 0.0
+        self._controller_command[env_ids] = 0.0
+        self._action_arrival_pending[env_ids] = False
         self._command_delay_buffer[:, env_ids] = 0.0
+        self._command_delay_arrival_buffer[:, env_ids] = False
         self._controller_state = reset_flight_controller_state(
             state=self._controller_state,
             env_ids=env_ids,

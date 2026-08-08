@@ -8434,3 +8434,29 @@ scale further: the complete range leaves endpoint almost unchanged. Replay
 consumes captured world-frame controller state while target motion starts from
 the declared body-frame action, so inspect that command-ingestion boundary
 before changing another fitted parameter.
+
+### 244. Match command arrival and measured estimator persistence
+
+Date: 2026-08-08.
+
+Pinned PX4 source converts each `MAV_FRAME_BODY_NED` velocity into local NED
+once in `handle_message_set_position_target_local_ned`, using the attitude at
+message receipt, and publishes that world-frame trajectory setpoint. The Lab
+target instead reused the held 20 Hz body action and converted it with the
+latest yaw at every 125 Hz outer-loop update. Split command ingestion from the
+controller step: transform after the configured delay only when a policy action
+arrives, then hold the world command across the faster loops. Preserve the
+125 Hz velocity and 250 Hz rate, allocator, actuator, and physics cadences.
+
+ULog comparison exposes the larger endpoint term. In the rejected fresh
+combined profile, the lateral physical-to-estimator residual started at 29.76
+mm/s and ended at 32.74 mm/s. The fitted 0.0125 Hz target model decayed the same
+seed to 18.96 mm/s, with 7.74 mm/s lateral RMSE and 5.85 mm/s mean error. The
+held-command conversion accounts for about 1.00 mm of integrated setpoint
+difference, so it is necessary but insufficient by itself.
+
+Fix lateral observation scale at the prior 1.0425 motion/replay pass and search
+estimator-bias decay at `[0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]` Hz with
+midpoint refinement. Keep every gain, steady bias, downstream controller,
+plant, probe, and gate unchanged. Reuse the latest fresh reference first; a
+motion and replay pass must then reproduce through a new clean capture.

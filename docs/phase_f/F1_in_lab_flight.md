@@ -10,10 +10,10 @@ Depends on: nothing. Blocks: F2b, F3.
 Action-level decision: resolved in ADR 0013. `rl.action.kind=velocity` is the
 default; `ctbr` is implemented as the switchable alternative.
 Post-F1 refactor: the Protocol/class seam described in Steps 4-5 was replaced by
-frozen params dataclasses + pure functions (`build_actuation_params` /
-`action_to_rotor_omega` exported by `robotics_experiments.rl` and implemented in
-`rl/actuation.py`, mirrored in `flight.py`); same
-math and gates.
+frozen params dataclasses + pure functions in `robotics_experiments.controller`:
+normalized action ingestion produces a held physical controller command, and
+`controller_command_to_rotor_omega` advances it. The Torch implementation in
+`flight.py` mirrors the NumPy reference with the same math and gates.
 Post-F1 follow-up (F2b): the Step-5 placeholder reward/termination/reset module
 constants move into config (`rl.hover`, task-as-config) and the
 observation's angular velocity switches to body frame in F2b Steps 1-2, so the
@@ -102,12 +102,14 @@ behind a pluggable seam so the inner-loop modeling choice is a config switch.
 
 ## Step 4 -- Implement the pluggable actuation seam
 
-- Action: in `rl/actuation.py` (pure), define the seam that maps a
-  normalized action to per-rotor angular-velocity references, independent of
-  torch. The landed contract is frozen `ActuationParams` / `ActuationState`
-  plus `build_actuation_params(...)` / `action_to_rotor_omega(...)`, with pure
-  branches keyed by action `kind`. It implements the velocity cascade and CTBR
-  rate loop using the airframe mixer geometry for allocation.
+- Action: in `controller/actuation.py` (pure), define the seam that ingests a
+  normalized action into a held physical command and maps that command to
+  per-rotor angular-velocity references, independent of Torch. The landed
+  contract is frozen `ActuationParams` / `ActuationState` plus
+  `build_actuation_params(...)`, `normalized_action_to_controller_command(...)`,
+  and `controller_command_to_rotor_omega(...)`, with pure branches keyed by
+  action `kind`. It implements the velocity cascade and CTBR rate loop using
+  the airframe mixer geometry for allocation.
   - The rotor mix inverts the same allocation the thrust model realizes, so
     feeding its output through `PegasusQuadraticThrustModel.commands_to_dynamics`
     reproduces the commanded wrench.

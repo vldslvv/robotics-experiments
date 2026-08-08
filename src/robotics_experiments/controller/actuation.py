@@ -1,4 +1,4 @@
-"""Pure normalized command -> per-rotor angular-velocity controller.
+"""Pure controller command -> per-rotor angular-velocity controller.
 
 numpy + stdlib only. State lives in frozen params dataclasses and behavior in
 pure top-level functions (``f(params, inputs) -> outputs``), so the actuation
@@ -13,10 +13,11 @@ bridge-owned affine motor mapping and quadratic rotor curve.
 
 Two action levels (``kind``) are provided:
 
-- ``velocity`` -- action ``[vx, vy, vz, yaw_rate]`` (normalized): a cascaded
-  geometric controller tracks a yaw-frame body velocity + yaw-rate command.
-- ``ctbr`` -- action ``[thrust, wx, wy, wz]`` (normalized): collective thrust +
-  body-rate setpoint closed by the inner rate loop shared with ``velocity``.
+- ``velocity`` -- a world-ENU velocity + yaw-rate command produced when the
+  normalized body-frame action arrives; the cascaded geometric controller
+  holds that command while its faster loops run.
+- ``ctbr`` -- normalized collective thrust + body-rate setpoint closed by the
+  inner rate loop shared with ``velocity``.
 """
 
 from __future__ import annotations
@@ -41,10 +42,11 @@ __all__ = [
     "ActuationParams",
     "ActuationState",
     "MixerGeometry",
-    "action_to_rotor_omega",
     "build_actuation_params",
+    "controller_command_to_rotor_omega",
     "hover_action",
     "initial_actuation_controller_state",
+    "normalized_action_to_controller_command",
     "rotor_forces_to_body_wrench",
     "seed_actuation_controller_state",
     "update_hover_thrust_estimate",
@@ -537,15 +539,15 @@ def _rate_to_omega(
     return successor, omega
 
 
-def _velocity_action_to_omega(
+def _velocity_command_to_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
-    action: np.ndarray,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
 ) -> tuple[ActuationControllerState, np.ndarray]:
-    """Cascaded geometric velocity controller (action ``[vx, vy, vz, yaw_rate]``).
+    """Cascaded geometric velocity controller over one held physical command.
 
     Yaw-frame velocity + yaw-rate command -> world acceleration -> desired thrust
     vector (gravity-compensated) -> collective thrust + desired tilt -> geometric
@@ -566,11 +568,7 @@ def _velocity_action_to_omega(
     outer_dt_s = outer_loop_period_s
     rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
-    heading = np.array(
-        [[np.cos(yaw), -np.sin(yaw), 0.0], [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]]
-    )
-
-    velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
+    velocity_setpoint_world = command[:3]
     physical_velocity = (
         params.velocity_observation_scale
         * np.asarray(
@@ -646,7 +644,7 @@ def _velocity_action_to_omega(
         desired_rotation=desired_rotation,
         proportional_gain=params.kp_att,
         yaw_weight=params.attitude_yaw_weight,
-        yaw_rate_radps=float(action[3] * params.max_yaw_rate_radps),
+        yaw_rate_radps=float(command[3]),
     )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
@@ -683,23 +681,22 @@ def _ctbr_collective(params: ActuationParams, thrust_command: float) -> float:
     return float(np.clip(params.hover_thrust_normalized * (1.0 + thrust_command), 0.0, 1.0))
 
 
-def _ctbr_action_to_omega(
+def _ctbr_command_to_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
-    action: np.ndarray,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
 ) -> tuple[ActuationControllerState, np.ndarray]:
-    """Collective-thrust + body-rate (CTBR) model (action ``[thrust, wx, wy, wz]``).
+    """Collective-thrust + body-rate (CTBR) model over a physical command.
 
     The inner rate loop of the ``velocity`` cascade; the attitude/velocity outer
-    loops are the policy's job. ``action[0]`` maps to collective thrust centered
-    on aligned normalized hover thrust (``action[0] = 0`` -> hover),
-    ``action[1:]`` to the body-rate setpoint.
+    loops are the policy's job. Command conversion maps the normalized action to
+    hover-centered collective thrust and physical body rates at ingestion.
     """
-    collective = _ctbr_collective(params, float(action[0]))
-    body_rate_setpoint = action[1:4] * params.max_body_rate_radps
+    collective = float(command[0])
+    body_rate_setpoint = command[1:4]
     return _rate_to_omega(
         params,
         controller_state,
@@ -984,10 +981,50 @@ def update_hover_thrust_estimate(
     )
 
 
-def action_to_rotor_omega(
+def normalized_action_to_controller_command(
+    params: ActuationParams,
+    action: np.ndarray,
+    attitude_flu_enu_wxyz: np.ndarray,
+    /,
+) -> np.ndarray:
+    """Convert one normalized policy action at its arrival boundary.
+
+    Velocity actions become ``[vx_enu, vy_enu, vz_enu, yaw_rate]`` in physical
+    units using the arrival attitude. CTBR actions become
+    ``[collective, roll_rate, pitch_rate, yaw_rate]``. The returned command is
+    held unchanged while the faster controller and physics loops advance.
+    """
+    action = np.asarray(action, dtype=np.float64)
+    if params.kind == "ctbr":
+        return _readonly_copy(
+            np.concatenate(
+                (
+                    [_ctbr_collective(params, float(action[0]))],
+                    action[1:4] * params.max_body_rate_radps,
+                )
+            )
+        )
+    rotation = _rotation_from_wxyz(attitude_flu_enu_wxyz)
+    yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    velocity_body = action[:3] * params.max_body_velocity_mps
+    return _readonly_copy(
+        np.array(
+            [
+                cos_yaw * velocity_body[0] - sin_yaw * velocity_body[1],
+                sin_yaw * velocity_body[0] + cos_yaw * velocity_body[1],
+                velocity_body[2],
+                action[3] * params.max_yaw_rate_radps,
+            ]
+        )
+    )
+
+
+def controller_command_to_rotor_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
-    action: np.ndarray,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
@@ -995,19 +1032,19 @@ def action_to_rotor_omega(
     """Advance the controller and return clipped per-rotor velocity references."""
     if not math.isfinite(dt_s) or dt_s <= 0.0:
         raise ValueError("controller dt_s must be finite and positive")
-    action = np.asarray(action, dtype=np.float64)
+    command = np.asarray(command, dtype=np.float64)
     if params.kind == "ctbr":
-        return _ctbr_action_to_omega(
+        return _ctbr_command_to_omega(
             params,
             controller_state,
-            action,
+            command,
             state,
             dt_s,
         )
-    return _velocity_action_to_omega(
+    return _velocity_command_to_omega(
         params,
         controller_state,
-        action,
+        command,
         state,
         dt_s,
     )
