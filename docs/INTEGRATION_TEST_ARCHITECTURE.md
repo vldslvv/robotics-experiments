@@ -63,8 +63,8 @@ sweep, fit/publication, and the alignment target-envelope gate.
   `make train-rl`, so it is deliberately not part of
   `test-integration-all`; see `docs/RL_WORKFLOW.md` for the policy artifact
   contract and routine config. Policy metadata includes the active policy
-  rate and alignment provenance; every legacy artifact without the alignment
-  record must be retrained.
+  rate and controller provenance; any artifact outside the strict v1 contract
+  must be retrained.
 - `make test-integration-press-approach-routine` runs the Stage 1 deployment
   flight from `configs/policy_press_approach_quad.yaml`: takeoff, settle at a
   safe staging point about 0.59 m from the switch at a requested 0.5 m/s, make
@@ -73,7 +73,7 @@ sweep, fit/publication, and the alignment target-envelope gate.
   land, and disarm. It requires stable contact-free approach completion and no
   lamp transition. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact
-  declaring `policy_interface: press-v1` and `curriculum_stage: approach`.
+  declaring `policy_interface: press-approach` and `curriculum_stage: approach`.
   Advisory selection failure does not block `latest` publication, but this
   integration target remains an independent workflow gate.
 - `make test-integration-alignment-target` runs the analytic hover/goto

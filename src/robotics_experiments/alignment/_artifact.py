@@ -14,10 +14,7 @@ from typing import Any
 
 from robotics_experiments.alignment._io import (
     _canonical_json,
-    _fingerprint,
     _finite,
-    _interface,
-    _load_v6_alignment_for_migration,
     _object,
     _parameters,
     _settings,
@@ -30,6 +27,7 @@ from robotics_experiments.alignment._models import (
     ControllerArtifact,
     ControllerSettings,
 )
+from robotics_experiments.controller import load_controller_artifact
 
 __all__: list[str] = []
 
@@ -123,6 +121,19 @@ def _read_zstd_json(*, path: Path, name: str) -> dict[str, Any]:
     return _object(value=loaded, name=str(path))
 
 
+def _require_passed_diagnostic(*, path: Path, name: str) -> None:
+    try:
+        payload = _object(value=json.loads(path.read_text()), name=name)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot load {name} {path}: {exc}") from exc
+    if payload.get("schema_version") != 1 or type(payload.get("passed")) is not bool:
+        raise ValueError(f"{name} must be a schema-1 pass/fail report")
+    if not payload["passed"]:
+        failures = payload.get("failures")
+        detail = "; ".join(failures) if isinstance(failures, list) else "reported failure"
+        raise ValueError(f"{name} failed: {detail}")
+
+
 def _zstd_uncompressed_size(path: Path, /) -> int:
     listing = _zstd(arguments=("-l", "-v", str(path))).stdout.decode()
     for line in listing.splitlines():
@@ -131,108 +142,6 @@ def _zstd_uncompressed_size(path: Path, /) -> int:
             value = detail.rsplit("(", maxsplit=1)[1].split(" B)", maxsplit=1)[0]
             return int(value.replace(",", ""))
     raise RuntimeError(f"zstd did not report the uncompressed size for {path}")
-
-
-def resolve_controller_path(path: str | Path, /) -> Path:
-    """Resolve a controller file, run directory, or publication link."""
-
-    artifact_path = Path(path)
-    if artifact_path.name == "alignment.json":
-        raise ValueError("legacy alignment.json artifacts are unsupported")
-    if artifact_path.is_dir():
-        artifact_path = artifact_path / "controller.json"
-    return artifact_path
-
-
-def _controller_from_payload(*, artifact: dict[str, Any], name: str) -> ControllerArtifact:
-    expected = {item.name for item in fields(ControllerArtifact)}
-    missing = expected - artifact.keys()
-    extra = artifact.keys() - expected
-    if missing or extra:
-        raise ValueError(
-            f"{name} fields mismatch: missing={sorted(missing)!r}, extra={sorted(extra)!r}"
-        )
-    if artifact["schema_version"] != _CONTROLLER_SCHEMA_VERSION:
-        raise ValueError(f"{name} has unsupported schema_version={artifact['schema_version']!r}")
-    target_backend = _string(value=artifact["target_backend"], name="target_backend")
-    reference_backend = _string(value=artifact["reference_backend"], name="reference_backend")
-    if target_backend != "isaac-lab" or reference_backend != "px4-sitl":
-        raise ValueError(
-            "controller artifact has unsupported target/reference backend contract "
-            f"{target_backend!r}/{reference_backend!r}"
-        )
-    settings = _settings(value=artifact["selected_settings"], name="selected_settings")
-    settings_fingerprint = _string(
-        value=artifact["settings_fingerprint"], name="settings_fingerprint"
-    )
-    if settings_fingerprint != _fingerprint(asdict(settings)):
-        raise ValueError("controller artifact settings_fingerprint does not match settings")
-    quality = artifact["advisory_quality_passed"]
-    dirty = artifact["source_dirty"]
-    if type(quality) is not bool or type(dirty) is not bool:
-        raise ValueError("controller artifact quality and dirty provenance must be booleans")
-    reasons = artifact["advisory_quality_reasons"]
-    if not isinstance(reasons, list) or not all(isinstance(item, str) for item in reasons):
-        raise ValueError("advisory_quality_reasons must be a string list")
-    return ControllerArtifact(
-        schema_version=1,
-        alignment_id=_string(value=artifact["alignment_id"], name="alignment_id"),
-        run_id=_string(value=artifact["run_id"], name="run_id"),
-        target_controller_id=_string(
-            value=artifact["target_controller_id"], name="target_controller_id"
-        ),
-        reference_controller_id=_string(
-            value=artifact["reference_controller_id"], name="reference_controller_id"
-        ),
-        target_backend=target_backend,
-        reference_backend=reference_backend,
-        target_definition_fingerprint=_string(
-            value=artifact["target_definition_fingerprint"],
-            name="target_definition_fingerprint",
-        ),
-        reference_definition_fingerprint=_string(
-            value=artifact["reference_definition_fingerprint"],
-            name="reference_definition_fingerprint",
-        ),
-        comparison_fingerprint=_string(
-            value=artifact["comparison_fingerprint"], name="comparison_fingerprint"
-        ),
-        experiment_config=_string(value=artifact["experiment_config"], name="experiment_config"),
-        experiment_fingerprint=_string(
-            value=artifact["experiment_fingerprint"], name="experiment_fingerprint"
-        ),
-        vehicle=_string(value=artifact["vehicle"], name="vehicle"),
-        airframe=_string(value=artifact["airframe"], name="airframe"),
-        command_rate_hz=_finite(
-            value=artifact["command_rate_hz"], name="command_rate_hz", positive=True
-        ),
-        command_interface=_interface(value=artifact["command_interface"], name="command_interface"),
-        probe_suite_fingerprint=_string(
-            value=artifact["probe_suite_fingerprint"], name="probe_suite_fingerprint"
-        ),
-        selected_settings=settings,
-        settings_fingerprint=settings_fingerprint,
-        advisory_quality_passed=quality,
-        advisory_quality_reasons=tuple(reasons),
-        source_commit=_string(value=artifact["source_commit"], name="source_commit"),
-        source_dirty=dirty,
-        target_image=_string(value=artifact["target_image"], name="target_image"),
-        reference_image=_string(value=artifact["reference_image"], name="reference_image"),
-    )
-
-
-def load_controller_artifact(path: str | Path, /) -> ControllerArtifact:
-    """Load and strictly validate the compact training controller contract."""
-
-    artifact_path = resolve_controller_path(path)
-    try:
-        loaded = json.loads(artifact_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load controller artifact {artifact_path}: {exc}") from exc
-    return _controller_from_payload(
-        artifact=_object(value=loaded, name=str(artifact_path)),
-        name="controller artifact",
-    )
 
 
 def _selection_payload(result: AlignmentResult, /) -> dict[str, Any]:
@@ -401,12 +310,23 @@ def finalize_alignment_bundle(
     *,
     run_dir: Path,
     compressed_target_source: bool = False,
-    migration_provenance: Mapping[str, Any] | None = None,
 ) -> Path:
     """Reorganize, compress, inventory, and validate one completed run."""
 
     controller = load_controller_artifact(run_dir)
     load_selection(run_dir=run_dir, controller=controller)
+    if not controller.advisory_quality_passed:
+        raise ValueError(
+            "controller quality gates failed: " + "; ".join(controller.advisory_quality_reasons)
+        )
+    _require_passed_diagnostic(
+        path=run_dir / "actuator_audit.json",
+        name="actuator audit",
+    )
+    _require_passed_diagnostic(
+        path=run_dir / "controller_boundary_replay.json",
+        name="controller boundary replay",
+    )
     evidence = run_dir / "evidence"
     diagnostics = run_dir / "diagnostics"
     stages = diagnostics / "stages"
@@ -488,8 +408,6 @@ def finalize_alignment_bundle(
             for relative, role in role_by_path.items()
         ],
     }
-    if migration_provenance is not None:
-        manifest["migration"] = dict(migration_provenance)
     manifest_path = run_dir / "manifest.json"
     _write_new_text(path=manifest_path, payload=_canonical_json(manifest) + "\n")
     validate_alignment_bundle(run_dir)
@@ -507,10 +425,6 @@ def validate_alignment_bundle(run_dir: Path, /) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot load alignment manifest {manifest_path}: {exc}") from exc
     expected_manifest = {"schema_version", "alignment_id", "run_id", "files"}
-    if "migration" in manifest:
-        expected_manifest.add("migration")
-        if not isinstance(manifest["migration"], dict):
-            raise ValueError("alignment manifest migration provenance must be a mapping")
     if set(manifest) != expected_manifest:
         raise ValueError("alignment manifest fields mismatch")
     if manifest["schema_version"] != _MANIFEST_SCHEMA_VERSION:
@@ -574,6 +488,8 @@ def publish_controller(*, run_dir: Path) -> None:
 
     validate_alignment_bundle(run_dir)
     controller = load_controller_artifact(run_dir)
+    if not controller.advisory_quality_passed:
+        raise ValueError("cannot publish a controller that failed its quality gates")
     result = load_selection(run_dir=run_dir, controller=controller)
     ranking = result.candidates[result.selected_candidate_index].ranking_values
     root = run_dir.parent
@@ -590,156 +506,3 @@ def publish_controller(*, run_dir: Path) -> None:
     if replace_best:
         _replace_relative_symlink(link=best_link, target=run_dir)
     _replace_relative_symlink(link=root / "latest", target=run_dir)
-
-
-def _summary_actuator_audit(source: Path, destination: Path, /) -> None:
-    payload = _object(value=json.loads(source.read_text()), name=str(source))
-    profiles = payload.get("profiles")
-    if not isinstance(profiles, list):
-        raise ValueError("legacy actuator audit profiles must be a list")
-    summary_profiles = []
-    for raw_profile in profiles:
-        profile = _object(value=raw_profile, name="legacy actuator audit profile")
-        topics = {}
-        for topic_name in (
-            "vehicle_thrust_setpoint",
-            "vehicle_torque_setpoint",
-            "actuator_motors",
-            "hover_thrust_estimate",
-        ):
-            topic = _object(value=profile[topic_name], name=topic_name)
-            timestamps = topic.get("timestamp_us")
-            if not isinstance(timestamps, list):
-                raise ValueError(f"legacy actuator audit {topic_name} timestamps must be a list")
-            topics[topic_name] = {
-                "sample_count": len(timestamps),
-                "first_timestamp_us": timestamps[0] if timestamps else None,
-                "last_timestamp_us": timestamps[-1] if timestamps else None,
-            }
-        bridge = _object(value=profile["bridge"], name="legacy actuator audit bridge")
-        actuator_timestamps = bridge.get("actuator_timestamp_us")
-        if not isinstance(actuator_timestamps, list):
-            raise ValueError("legacy actuator audit bridge timestamps must be a list")
-        summary_profiles.append(
-            {
-                "profile": profile["profile"],
-                "split": profile["split"],
-                "axis": profile["axis"],
-                "start_sim_time_us": profile["start_sim_time_us"],
-                "end_sim_time_us": profile["end_sim_time_us"],
-                "topic_coverage": topics,
-                "bridge": {"sample_count": len(actuator_timestamps)},
-                "metrics": profile["metrics"],
-            }
-        )
-    summary = {
-        key: payload[key]
-        for key in (
-            "schema_version",
-            "method",
-            "config",
-            "reference",
-            "bridge_log",
-            "airframe",
-            "composed_mass_kg",
-            "limits",
-            "passed",
-            "failures",
-        )
-    }
-    summary["profiles"] = summary_profiles
-    destination.write_text(_canonical_json(summary) + "\n")
-
-
-def migrate_v6_alignment(*, source_dir: Path, run_dir: Path, run_id: str) -> None:
-    """Build and publish a self-contained controller-v1 sibling from schema v6."""
-
-    if run_dir.exists():
-        raise FileExistsError(f"migration destination already exists: {run_dir}")
-    checksum_path = source_dir / "SHA256SUMS"
-    if not checksum_path.is_file():
-        raise FileNotFoundError(f"migration source is missing {checksum_path.name}")
-    for line in checksum_path.read_text().splitlines():
-        digest, relative = line.split(maxsplit=1)
-        source = source_dir / relative.lstrip("* ")
-        if not source.is_file() or _sha256(source) != digest:
-            raise ValueError(f"legacy checksum mismatch for {relative}")
-    legacy_path = source_dir / "alignment.json"
-    legacy = _load_v6_alignment_for_migration(legacy_path)
-    comparison_fingerprint = _fingerprint(
-        {
-            "controller_artifact_schema": 1,
-            "legacy_comparison_fingerprint": legacy.comparison_fingerprint,
-        }
-    )
-    controller = ControllerArtifact(
-        schema_version=1,
-        alignment_id=legacy.alignment_id,
-        run_id=run_id,
-        target_controller_id=legacy.target_controller_id,
-        reference_controller_id=legacy.reference_controller_id,
-        target_backend=legacy.target_backend,
-        reference_backend=legacy.reference_backend,
-        target_definition_fingerprint=legacy.target_definition_fingerprint,
-        reference_definition_fingerprint=legacy.reference_definition_fingerprint,
-        comparison_fingerprint=comparison_fingerprint,
-        experiment_config=legacy.experiment_config,
-        experiment_fingerprint=legacy.experiment_fingerprint,
-        vehicle=legacy.vehicle,
-        airframe=legacy.airframe,
-        command_rate_hz=legacy.command_rate_hz,
-        command_interface=legacy.command_interface,
-        probe_suite_fingerprint=legacy.probe_suite_fingerprint,
-        selected_settings=legacy.selected_settings,
-        settings_fingerprint=_fingerprint(asdict(legacy.selected_settings)),
-        advisory_quality_passed=legacy.advisory_quality_passed,
-        advisory_quality_reasons=legacy.advisory_quality_reasons,
-        source_commit=legacy.source_commit,
-        source_dirty=legacy.source_dirty,
-        target_image=legacy.target_image,
-        reference_image=legacy.reference_image,
-    )
-    result = AlignmentResult(
-        controller=controller,
-        selection_metric=legacy.selection_metric,
-        base_settings=legacy.candidates[0].settings,
-        declared_parameters=legacy.declared_parameters,
-        candidates=legacy.candidates,
-        selected_candidate_index=legacy.selected_candidate_index,
-    )
-    run_dir.mkdir(parents=True)
-    try:
-        write_alignment_result(result=result, run_dir=run_dir)
-        for name in (
-            "reference.json",
-            "reference.ulg",
-            "bridge.log",
-            "controller_boundary_replay.json",
-            "gpu_utilization.json",
-            "target_candidates.json.zst",
-        ):
-            shutil.copy2(source_dir / name, run_dir / name)
-        _summary_actuator_audit(
-            source_dir / "actuator_audit.json",
-            run_dir / "actuator_audit.json",
-        )
-        acceptance = source_dir / "acceptance"
-        if acceptance.is_dir():
-            shutil.copytree(acceptance, run_dir / "diagnostics" / "acceptance")
-        provenance = {
-            "source_alignment_id": legacy.alignment_id,
-            "source_run_id": legacy.run_id,
-            "source_schema_version": legacy.schema_version,
-            "source_artifact_sha256": _sha256(legacy_path),
-            "source_checksum_file_sha256": _sha256(checksum_path),
-            "legacy_comparison_fingerprint": legacy.comparison_fingerprint,
-        }
-        finalize_alignment_bundle(
-            run_dir=run_dir,
-            compressed_target_source=True,
-            migration_provenance=provenance,
-        )
-        publish_controller(run_dir=run_dir)
-    except Exception:
-        shutil.rmtree(run_dir)
-        raise

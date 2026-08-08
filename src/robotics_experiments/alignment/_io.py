@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
 import math
 import mmap
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import yaml
 
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
-    CandidateScore,
     CommandInterface,
     ControllerDefinition,
     ControllerSettings,
@@ -33,12 +30,11 @@ from robotics_experiments.alignment._models import (
 
 __all__: list[str] = []
 
-_TRACE_SCHEMA_VERSION = 5
-_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({2, 3, 4, 5})
-_SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS = frozenset({6})
+_TRACE_SCHEMA_VERSION = 1
+_SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({_TRACE_SCHEMA_VERSION})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
-_INTERFACE_KIND = "body-flu-velocity-yaw-rate-v1"
-_SEARCH_STRATEGIES = frozenset({"staged-beam-v1", "staged-beam-v2", "coarse-to-fine-beam-v3"})
+_INTERFACE_KIND = "body-flu-velocity-yaw-rate"
+_SEARCH_STRATEGIES = frozenset({"coarse-to-fine-beam"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 _CANDIDATE_ENTRY = re.compile(rb'"([0-9a-f]{64})"\s*:\s*')
 _CANDIDATES_KEY = b'"candidates"'
@@ -89,24 +85,8 @@ def _settings(
     *,
     value: Any,
     name: str,
-    legacy_rate_output_scale: bool = False,
-    legacy_hover_thrust: bool = False,
-    legacy_normalized_thrust: bool = False,
-    legacy_horizontal_gain_schedule: bool = False,
 ) -> ControllerSettings:
     settings = _object(value=value, name=name)
-    if legacy_rate_output_scale and "rate_output_scale_nm" not in settings:
-        settings["rate_output_scale_nm"] = [1.0, 1.0, 1.0]
-    if legacy_hover_thrust and "hover_thrust_fraction" not in settings:
-        # Zero is an internal legacy sentinel for the exact physical
-        # mass*(acceleration+gravity) feed-forward used by schema 2 and 3.
-        settings["hover_thrust_fraction"] = 0.0
-    if legacy_normalized_thrust and "hover_thrust_normalized" not in settings:
-        settings["hover_thrust_normalized"] = 0.0
-    if legacy_horizontal_gain_schedule:
-        settings["horizontal_velocity_error_gain_scale"] = 1.0
-        settings["horizontal_velocity_error_gain_start_mps"] = 0.15
-        settings["horizontal_velocity_error_gain_full_mps"] = 0.30
     missing = _SETTINGS_FIELDS - settings.keys()
     extra = settings.keys() - _SETTINGS_FIELDS
     if missing or extra:
@@ -151,17 +131,10 @@ def _settings(
             value=settings["velocity_integral_limit_mps2"],
             name=f"{name}.velocity_integral_limit_mps2",
         ),
-        hover_thrust_fraction=_finite(
-            value=settings["hover_thrust_fraction"],
-            name=f"{name}.hover_thrust_fraction",
-            nonnegative=legacy_hover_thrust,
-            positive=not legacy_hover_thrust,
-        ),
         hover_thrust_normalized=_finite(
             value=settings["hover_thrust_normalized"],
             name=f"{name}.hover_thrust_normalized",
-            nonnegative=legacy_normalized_thrust,
-            positive=not legacy_normalized_thrust,
+            positive=True,
         ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
         attitude_yaw_weight=_finite(
@@ -173,18 +146,14 @@ def _settings(
         ki_rate=_vector(value=settings["ki_rate"], name=f"{name}.ki_rate"),
         kd_rate=_vector(value=settings["kd_rate"], name=f"{name}.kd_rate"),
         kff_rate=_vector(value=settings["kff_rate"], name=f"{name}.kff_rate"),
-        rate_output_scale_nm=_vector(
-            value=settings["rate_output_scale_nm"],
-            name=f"{name}.rate_output_scale_nm",
-        ),
         rate_derivative_filter_hz=_finite(
             value=settings["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",
             positive=True,
         ),
-        rate_integral_limit_nm=_vector(
-            value=settings["rate_integral_limit_nm"],
-            name=f"{name}.rate_integral_limit_nm",
+        rate_integral_limit=_vector(
+            value=settings["rate_integral_limit"],
+            name=f"{name}.rate_integral_limit",
         ),
         max_tilt_cmd_deg=_finite(
             value=settings["max_tilt_cmd_deg"],
@@ -232,15 +201,12 @@ def _settings(
         "ki_rate",
         "kd_rate",
         "kff_rate",
-        "rate_output_scale_nm",
-        "rate_integral_limit_nm",
+        "rate_integral_limit",
     ):
         if any(value < 0.0 for value in getattr(parsed, field_name)):
             raise ValueError(f"{name}.{field_name} values must be non-negative")
     if not 0.0 <= parsed.attitude_yaw_weight <= 1.0:
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
-    if parsed.hover_thrust_fraction > 1.0:
-        raise ValueError(f"{name}.hover_thrust_fraction must not exceed 1")
     if parsed.hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.hover_thrust_normalized must not exceed 1")
     if parsed.horizontal_velocity_error_gain_scale < 1.0:
@@ -415,6 +381,13 @@ def _positive_integer(*, value: Any, name: str) -> int:
     return value
 
 
+def _controller_schema_version(*, value: Any) -> int:
+    version = _positive_integer(value=value, name="controller_schema_version")
+    if version != 1:
+        raise ValueError("controller_schema_version must be 1")
+    return version
+
+
 def _nonnegative_integer(*, value: Any, name: str) -> int:
     if type(value) is not int or value < 0:
         raise ValueError(f"{name} must be a non-negative integer")
@@ -436,8 +409,6 @@ def _search(*, value: Any, base_settings: ControllerSettings) -> SearchSpec:
         value=search.get("refinement_levels", 0),
         name="search.refinement_levels",
     )
-    if strategy != "coarse-to-fine-beam-v3" and refinement_levels:
-        raise ValueError("search.refinement_levels requires strategy='coarse-to-fine-beam-v3'")
     raw_initial_settings = search.get("initial_settings", [])
     if not isinstance(raw_initial_settings, list):
         raise ValueError("search.initial_settings must be a list")
@@ -451,8 +422,6 @@ def _search(*, value: Any, base_settings: ControllerSettings) -> SearchSpec:
         merged = asdict(base_settings)
         merged.update(overrides)
         initial_settings.append(_settings(value=merged, name=name))
-    if strategy != "coarse-to-fine-beam-v3" and initial_settings:
-        raise ValueError("search.initial_settings requires strategy='coarse-to-fine-beam-v3'")
     return SearchSpec(
         strategy=strategy,
         beam_width=_positive_integer(
@@ -474,20 +443,26 @@ def _search(*, value: Any, base_settings: ControllerSettings) -> SearchSpec:
 
 def _trace(*, value: Any, name: str) -> ProbeTrace:
     trace = _object(value=value, name=name)
-    failure_reason = trace.get("failure_reason")
+    expected = {item.name for item in fields(ProbeTrace)}
+    if set(trace) != expected:
+        raise ValueError(
+            f"{name} fields mismatch: missing={sorted(expected - trace.keys())!r}, "
+            f"extra={sorted(trace.keys() - expected)!r}"
+        )
+    failure_reason = trace["failure_reason"]
     if failure_reason is not None and not isinstance(failure_reason, str):
         raise ValueError(f"{name}.failure_reason must be a string or null")
-    completed = trace.get("completed")
+    completed = trace["completed"]
     if type(completed) is not bool:
         raise ValueError(f"{name}.completed must be boolean")
-    time = trace.get("time_s")
-    commands = trace.get("command_velocity_body_flu_mps")
-    yaw_commands = trace.get("command_yaw_rate_radps")
-    positions = trace.get("position_enu_m")
-    attitudes = trace.get("attitude_flu_enu_wxyz")
-    velocities = trace.get("velocity_body_flu_mps")
-    world_velocities = trace.get("velocity_enu_mps")
-    angular_velocities = trace.get("angular_velocity_body_flu_radps")
+    time = trace["time_s"]
+    commands = trace["command_velocity_body_flu_mps"]
+    yaw_commands = trace["command_yaw_rate_radps"]
+    positions = trace["position_enu_m"]
+    attitudes = trace["attitude_flu_enu_wxyz"]
+    velocities = trace["velocity_body_flu_mps"]
+    world_velocities = trace["velocity_enu_mps"]
+    angular_velocities = trace["angular_velocity_body_flu_radps"]
     if (
         not isinstance(time, list)
         or not isinstance(commands, list)
@@ -517,16 +492,16 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     ):
         raise ValueError(f"{name}.time_s must be strictly increasing")
     initial_hover_thrust_normalized = _finite(
-        value=trace.get("initial_hover_thrust_normalized", 0.0),
+        value=trace["initial_hover_thrust_normalized"],
         name=f"{name}.initial_hover_thrust_normalized",
         nonnegative=True,
     )
     if initial_hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
     return ProbeTrace(
-        profile=_string(value=trace.get("profile"), name=f"{name}.profile"),
-        split=_string(value=trace.get("split"), name=f"{name}.split"),
-        axis=_string(value=trace.get("axis"), name=f"{name}.axis"),
+        profile=_string(value=trace["profile"], name=f"{name}.profile"),
+        split=_string(value=trace["split"], name=f"{name}.split"),
+        axis=_string(value=trace["axis"], name=f"{name}.axis"),
         time_s=parsed_time,
         command_velocity_body_flu_mps=tuple(
             _vector(value=item, name=f"{name}.command_velocity_body_flu_mps") for item in commands
@@ -552,49 +527,46 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             for item in angular_velocities
         ),
         initial_position_enu_m=_vector(
-            value=trace.get("initial_position_enu_m"),
+            value=trace["initial_position_enu_m"],
             name=f"{name}.initial_position_enu_m",
         ),
         initial_attitude_flu_enu_wxyz=_vector(
-            value=trace.get("initial_attitude_flu_enu_wxyz"),
+            value=trace["initial_attitude_flu_enu_wxyz"],
             name=f"{name}.initial_attitude_flu_enu_wxyz",
             length=4,
         ),
         initial_linear_velocity_enu_mps=_vector(
-            value=trace.get("initial_linear_velocity_enu_mps"),
+            value=trace["initial_linear_velocity_enu_mps"],
             name=f"{name}.initial_linear_velocity_enu_mps",
         ),
         initial_angular_velocity_body_flu_radps=_vector(
-            value=trace.get("initial_angular_velocity_body_flu_radps"),
+            value=trace["initial_angular_velocity_body_flu_radps"],
             name=f"{name}.initial_angular_velocity_body_flu_radps",
         ),
         completed=completed,
         initial_controller_state_valid=_boolean(
-            value=trace.get("initial_controller_state_valid", False),
+            value=trace["initial_controller_state_valid"],
             name=f"{name}.initial_controller_state_valid",
         ),
         initial_hover_thrust_normalized=initial_hover_thrust_normalized,
         initial_acceleration_setpoint_enu_mps2=_vector(
-            value=trace.get("initial_acceleration_setpoint_enu_mps2", (0.0, 0.0, 0.0)),
+            value=trace["initial_acceleration_setpoint_enu_mps2"],
             name=f"{name}.initial_acceleration_setpoint_enu_mps2",
         ),
         initial_linear_acceleration_enu_mps2=_vector(
-            value=trace.get("initial_linear_acceleration_enu_mps2", (0.0, 0.0, 0.0)),
+            value=trace["initial_linear_acceleration_enu_mps2"],
             name=f"{name}.initial_linear_acceleration_enu_mps2",
         ),
         initial_angular_acceleration_body_flu_radps2=_vector(
-            value=trace.get(
-                "initial_angular_acceleration_body_flu_radps2",
-                (0.0, 0.0, 0.0),
-            ),
+            value=trace["initial_angular_acceleration_body_flu_radps2"],
             name=f"{name}.initial_angular_acceleration_body_flu_radps2",
         ),
         initial_rate_integral_body_flu=_vector(
-            value=trace.get("initial_rate_integral_body_flu", (0.0, 0.0, 0.0)),
+            value=trace["initial_rate_integral_body_flu"],
             name=f"{name}.initial_rate_integral_body_flu",
         ),
         start_sim_time_us=_nonnegative_integer(
-            value=trace.get("start_sim_time_us", 0),
+            value=trace["start_sim_time_us"],
             name=f"{name}.start_sim_time_us",
         ),
         failure_reason=failure_reason,
@@ -851,9 +823,8 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
     return ControllerDefinition(
         alignment_id=_string(value=definition.get("alignment_id"), name="alignment_id"),
         controller_id=_string(value=definition.get("controller_id"), name="controller_id"),
-        controller_schema_version=_positive_integer(
-            value=definition.get("controller_schema_version"),
-            name="controller_schema_version",
+        controller_schema_version=_controller_schema_version(
+            value=definition.get("controller_schema_version")
         ),
         backend=backend,
         experiment_config=_string(
@@ -887,270 +858,3 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
         definition_fingerprint=fingerprint,
         image=_string(value=definition.get("image"), name="image"),
     )
-
-
-def _artifact_payload(artifact: object, /) -> dict[str, Any]:
-    def plain(value: Any, /) -> Any:
-        if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            return {
-                item.name: plain(getattr(value, item.name)) for item in dataclasses.fields(value)
-            }
-        if isinstance(value, Mapping):
-            return {str(key): plain(item) for key, item in value.items()}
-        if isinstance(value, tuple):
-            return [plain(item) for item in value]
-        return value
-
-    payload = plain(artifact)
-    assert isinstance(payload, dict)
-    return payload
-
-
-def _candidate_score(
-    *,
-    value: Any,
-    name: str,
-    legacy_rate_output_scale: bool,
-    legacy_hover_thrust: bool,
-    legacy_normalized_thrust: bool,
-    legacy_horizontal_gain_schedule: bool,
-) -> CandidateScore:
-    candidate = _object(value=value, name=name)
-    metrics = _object(value=candidate.get("metrics"), name=f"{name}.metrics")
-    ranking = candidate.get("ranking_values")
-    usable = candidate.get("usable")
-    if type(usable) is not bool:
-        raise ValueError(f"{name}.usable must be boolean")
-    if not isinstance(ranking, list) or (usable and not ranking):
-        raise ValueError(
-            f"{name}.ranking_values must be a list and non-empty for usable candidates"
-        )
-    failure_reason = candidate.get("failure_reason")
-    if failure_reason is not None and not isinstance(failure_reason, str):
-        raise ValueError(f"{name}.failure_reason must be string or null")
-    index = candidate.get("index")
-    if type(index) is not int or index < 0:
-        raise ValueError(f"{name}.index must be a non-negative integer")
-    return CandidateScore(
-        index=index,
-        settings=_settings(
-            value=candidate.get("settings"),
-            name=f"{name}.settings",
-            legacy_rate_output_scale=legacy_rate_output_scale,
-            legacy_hover_thrust=legacy_hover_thrust,
-            legacy_normalized_thrust=legacy_normalized_thrust,
-            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
-        ),
-        usable=usable,
-        metrics={
-            key: _finite(value=item, name=f"{name}.metrics.{key}") for key, item in metrics.items()
-        },
-        ranking_values=tuple(
-            _finite(value=item, name=f"{name}.ranking_values") for item in ranking
-        ),
-        failure_reason=failure_reason,
-    )
-
-
-def _load_v6_alignment_for_migration(path: str | Path, /) -> SimpleNamespace:
-    """Load a run directory, link, or alignment JSON and reject malformed provenance."""
-    artifact_path = Path(path)
-    if artifact_path.is_dir():
-        artifact_path = artifact_path / "alignment.json"
-    try:
-        loaded = json.loads(artifact_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot load alignment artifact {artifact_path}: {exc}") from exc
-    artifact = _object(value=loaded, name=str(artifact_path))
-    schema_version = artifact.get("schema_version")
-    if schema_version not in _SUPPORTED_LEGACY_ARTIFACT_SCHEMA_VERSIONS:
-        raise ValueError(
-            f"alignment artifact {artifact_path} has unsupported "
-            f"schema_version={schema_version!r}"
-        )
-    legacy_rate_output_scale = schema_version == 2
-    legacy_hover_thrust = schema_version in (2, 3)
-    legacy_normalized_thrust = schema_version in (2, 3, 4)
-    legacy_horizontal_gain_schedule = schema_version in (2, 3, 4, 5)
-    command_interface = _interface(
-        value=artifact.get("command_interface"),
-        name="command_interface",
-    )
-    target_backend = _string(
-        value=artifact.get("target_backend"),
-        name="target_backend",
-    )
-    reference_backend = _string(
-        value=artifact.get("reference_backend"),
-        name="reference_backend",
-    )
-    if target_backend != "isaac-lab" or reference_backend != "px4-sitl":
-        raise ValueError(
-            "alignment artifact has unsupported target/reference backend contract "
-            f"{target_backend!r}/{reference_backend!r}"
-        )
-    raw_candidates = artifact.get("candidates")
-    if not isinstance(raw_candidates, list) or not raw_candidates:
-        raise ValueError("alignment artifact candidates must be a non-empty list")
-    candidates = tuple(
-        _candidate_score(
-            value=value,
-            name=f"candidates[{index}]",
-            legacy_rate_output_scale=legacy_rate_output_scale,
-            legacy_hover_thrust=legacy_hover_thrust,
-            legacy_normalized_thrust=legacy_normalized_thrust,
-            legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
-        )
-        for index, value in enumerate(raw_candidates)
-    )
-    if tuple(candidate.index for candidate in candidates) != tuple(range(len(candidates))):
-        raise ValueError("alignment artifact candidate indices must be ordered and contiguous")
-    selected_index = artifact.get("selected_candidate_index")
-    if type(selected_index) is not int or selected_index < 0:
-        raise ValueError("selected_candidate_index must be a non-negative integer")
-    selected_matches = [candidate for candidate in candidates if candidate.index == selected_index]
-    if len(selected_matches) != 1 or not selected_matches[0].usable:
-        raise ValueError("selected_candidate_index must identify one usable candidate")
-    parsed_selected_settings = _settings(
-        value=artifact.get("selected_settings"),
-        name="selected_settings",
-        legacy_rate_output_scale=legacy_rate_output_scale,
-        legacy_hover_thrust=legacy_hover_thrust,
-        legacy_normalized_thrust=legacy_normalized_thrust,
-        legacy_horizontal_gain_schedule=legacy_horizontal_gain_schedule,
-    )
-    if parsed_selected_settings != selected_matches[0].settings:
-        raise ValueError("selected_settings do not match selected candidate")
-    declared = _parameters(
-        value=artifact.get("declared_parameters"),
-        base_settings=parsed_selected_settings,
-    )
-    metric_name = _string(value=artifact.get("selection_metric"), name="selection_metric")
-    metric(name=metric_name)
-    quality = artifact.get("advisory_quality_passed")
-    dirty = artifact.get("source_dirty")
-    if type(quality) is not bool or type(dirty) is not bool:
-        raise ValueError("alignment artifact quality and dirty provenance must be booleans")
-    reasons = artifact.get("advisory_quality_reasons")
-    ranking = artifact.get("selected_ranking_values")
-    if not isinstance(reasons, list) or not all(isinstance(item, str) for item in reasons):
-        raise ValueError("advisory_quality_reasons must be a string list")
-    if not isinstance(ranking, list) or not ranking:
-        raise ValueError("selected_ranking_values must be a non-empty list")
-    parsed_ranking = tuple(_finite(value=item, name="selected_ranking_values") for item in ranking)
-    if parsed_ranking != selected_matches[0].ranking_values:
-        raise ValueError("selected_ranking_values do not match selected candidate")
-    fit_metrics = _object(value=artifact.get("fit_metrics"), name="fit_metrics")
-    validation_metrics = _object(
-        value=artifact.get("validation_metrics"),
-        name="validation_metrics",
-    )
-    result = SimpleNamespace(
-        schema_version=schema_version,
-        alignment_id=_string(value=artifact.get("alignment_id"), name="alignment_id"),
-        run_id=_string(value=artifact.get("run_id"), name="run_id"),
-        target_controller_id=_string(
-            value=artifact.get("target_controller_id"),
-            name="target_controller_id",
-        ),
-        reference_controller_id=_string(
-            value=artifact.get("reference_controller_id"),
-            name="reference_controller_id",
-        ),
-        target_backend=target_backend,
-        reference_backend=reference_backend,
-        target_definition_fingerprint=_string(
-            value=artifact.get("target_definition_fingerprint"),
-            name="target_definition_fingerprint",
-        ),
-        reference_definition_fingerprint=_string(
-            value=artifact.get("reference_definition_fingerprint"),
-            name="reference_definition_fingerprint",
-        ),
-        comparison_fingerprint=_string(
-            value=artifact.get("comparison_fingerprint"),
-            name="comparison_fingerprint",
-        ),
-        experiment_config=_string(
-            value=artifact.get("experiment_config"),
-            name="experiment_config",
-        ),
-        experiment_fingerprint=_string(
-            value=artifact.get("experiment_fingerprint"),
-            name="experiment_fingerprint",
-        ),
-        vehicle=_string(value=artifact.get("vehicle"), name="vehicle"),
-        airframe=_string(value=artifact.get("airframe"), name="airframe"),
-        command_rate_hz=_finite(
-            value=artifact.get("command_rate_hz"),
-            name="command_rate_hz",
-            positive=True,
-        ),
-        command_interface=command_interface,
-        probe_suite_fingerprint=_string(
-            value=artifact.get("probe_suite_fingerprint"),
-            name="probe_suite_fingerprint",
-        ),
-        selection_metric=metric_name,
-        selected_settings=parsed_selected_settings,
-        declared_parameters=declared,
-        candidates=candidates,
-        selected_candidate_index=selected_index,
-        selected_ranking_values=parsed_ranking,
-        fit_metrics={
-            key: _finite(value=value, name=f"fit_metrics.{key}")
-            for key, value in fit_metrics.items()
-        },
-        validation_metrics={
-            key: _finite(value=value, name=f"validation_metrics.{key}")
-            for key, value in validation_metrics.items()
-        },
-        advisory_quality_passed=quality,
-        advisory_quality_reasons=tuple(reasons),
-        source_commit=_string(value=artifact.get("source_commit"), name="source_commit"),
-        source_dirty=dirty,
-        target_image=_string(value=artifact.get("target_image"), name="target_image"),
-        reference_image=_string(
-            value=artifact.get("reference_image"),
-            name="reference_image",
-        ),
-    )
-    return result
-
-
-def _write_legacy_alignment_artifact(*, artifact: object, run_dir: Path) -> Path:
-    """Write the canonical immutable run result."""
-    run_dir.mkdir(parents=True, exist_ok=True)
-    path = run_dir / "alignment.json"
-    if path.exists():
-        raise FileExistsError(f"alignment result already exists: {path}")
-    path.write_text(json.dumps(_artifact_payload(artifact), indent=2, allow_nan=False) + "\n")
-    return path
-
-
-def _replace_relative_symlink(*, link: Path, target: Path) -> None:
-    relative_target = os.path.relpath(target, start=link.parent)
-    temporary = link.with_name(f".{link.name}.{os.getpid()}.tmp")
-    temporary.unlink(missing_ok=True)
-    temporary.symlink_to(relative_target, target_is_directory=True)
-    os.replace(temporary, link)
-
-
-def _publish_legacy_alignment(*, artifact: SimpleNamespace, run_dir: Path) -> None:
-    """Advance ``latest`` and the comparable-generation ``best`` links atomically."""
-    root = run_dir.parent
-    _replace_relative_symlink(link=root / "latest", target=run_dir)
-    best_link = root / "best"
-    replace_best = True
-    if best_link.exists():
-        best = _load_v6_alignment_for_migration(best_link)
-        if best.comparison_fingerprint == artifact.comparison_fingerprint:
-            replace_best = (
-                artifact.selected_ranking_values,
-                artifact.run_id,
-            ) < (
-                best.selected_ranking_values,
-                best.run_id,
-            )
-    if replace_best:
-        _replace_relative_symlink(link=best_link, target=run_dir)

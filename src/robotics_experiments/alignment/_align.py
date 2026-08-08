@@ -62,60 +62,13 @@ class _SearchOutcome:
     generated_refinements: tuple[Mapping[str, Any], ...]
 
 
-_SCHEMA_INACTIVE_FIELDS = {
-    2: frozenset(
-        {
-            "hover_thrust_fraction",
-            "hover_thrust_normalized",
-            "horizontal_velocity_error_gain_scale",
-            "horizontal_velocity_error_gain_start_mps",
-            "horizontal_velocity_error_gain_full_mps",
-        }
-    ),
-    3: frozenset(
-        {
-            "hover_thrust_fraction",
-            "hover_thrust_normalized",
-            "horizontal_velocity_error_gain_scale",
-            "horizontal_velocity_error_gain_start_mps",
-            "horizontal_velocity_error_gain_full_mps",
-        }
-    ),
-    4: frozenset(
-        {
-            "hover_thrust_normalized",
-            "horizontal_velocity_error_gain_scale",
-            "horizontal_velocity_error_gain_start_mps",
-            "horizontal_velocity_error_gain_full_mps",
-        }
-    ),
-    5: frozenset(
-        {
-            "hover_thrust_fraction",
-            "rate_output_scale_nm",
-            "horizontal_velocity_error_gain_scale",
-            "horizontal_velocity_error_gain_start_mps",
-            "horizontal_velocity_error_gain_full_mps",
-        }
-    ),
-    6: frozenset({"hover_thrust_fraction", "rate_output_scale_nm"}),
-}
-
-
 def _effective_controller_key(
     settings: ControllerSettings,
-    schema_version: int,
     /,
 ) -> tuple[tuple[str, float | tuple[float, ...]], ...]:
-    """Return the exact float32 controller values active for one schema."""
-    try:
-        inactive = _SCHEMA_INACTIVE_FIELDS[schema_version]
-    except KeyError as exc:
-        raise ValueError(f"unsupported controller schema {schema_version}") from exc
+    """Return the exact float32 values active in the controller-v1 contract."""
     key = []
     for item in fields(settings):
-        if item.name in inactive:
-            continue
         value = getattr(settings, item.name)
         if isinstance(value, tuple):
             canonical: float | tuple[float, ...] = tuple(float(np.float32(part)) for part in value)
@@ -346,7 +299,7 @@ def _staged_beam_search(
                 continue
             index = next_index
             next_index += 1
-            key = _effective_controller_key(value, target.controller_schema_version)
+            key = _effective_controller_key(value)
             source = settings_by_effective_key.get(key) or reserved_by_key.get(key)
             if source is None:
                 pending.append((value, index))
@@ -406,7 +359,7 @@ def _staged_beam_search(
                     metric_result=(evaluation if isinstance(evaluation, MetricResult) else None),
                     failure_reason=evaluation if isinstance(evaluation, str) else None,
                 )
-                key = _effective_controller_key(value, target.controller_schema_version)
+                key = _effective_controller_key(value)
                 settings_by_effective_key[key] = value
         for value, index, source in aliases:
             record_alias(settings=value, index=index, source_settings=source)
@@ -425,8 +378,6 @@ def _staged_beam_search(
         /,
     ) -> tuple[ControllerSettings, ...]:
         ordered = sorted(scores, key=lambda score: (score.ranking_values, score.index))
-        if target.search.strategy == "staged-beam-v1":
-            return tuple(score.settings for score in ordered[: target.search.beam_width])
         retained_scores: list[CandidateScore] = []
         beam_width = target.search.beam_width
         objective_count = max(
@@ -490,9 +441,7 @@ def _staged_beam_search(
         settings: tuple[ControllerSettings, ...],
         /,
     ) -> tuple[tuple[tuple[str, float | tuple[float, ...]], ...], ...]:
-        return tuple(
-            _effective_controller_key(value, target.controller_schema_version) for value in settings
-        )
+        return tuple(_effective_controller_key(value) for value in settings)
 
     def sweep_parameter(*, parameter: ParameterSpec, candidates: tuple[SettingValue, ...]) -> None:
         nonlocal retained
@@ -513,8 +462,7 @@ def _staged_beam_search(
                 f"every alignment candidate was unusable while fitting "
                 f"stage {parameter.stage} field {parameter.field!r}"
             )
-        if target.search.strategy == "coarse-to-fine-beam-v3":
-            usable = [score for score in scores_by_settings.values() if score.usable]
+        usable = [score for score in scores_by_settings.values() if score.usable]
         retained = retain(usable)
 
     initial_usable = [score for score in evaluate_many(initial_settings) if score.usable]
@@ -546,8 +494,6 @@ def _staged_beam_search(
                     target.search.passes_per_stage - pass_index - 1
                 )
                 break
-        if target.search.strategy != "coarse-to-fine-beam-v3":
-            continue
         for level in range(1, target.search.refinement_levels + 1):
             before = effective_beam(retained)
             all_usable = [score for score in scores_by_settings.values() if score.usable]
@@ -574,11 +520,7 @@ def _staged_beam_search(
             if not generated_any or effective_beam(retained) == before:
                 statistics["skipped_fixed_point_passes"] += target.search.refinement_levels - level
                 break
-    final_scores = (
-        list(scores_by_settings.values())
-        if target.search.strategy == "coarse-to-fine-beam-v3"
-        else evaluate_many(retained)
-    )
+    final_scores = list(scores_by_settings.values())
     final_usable = [score for score in final_scores if score.usable]
     if not final_usable:
         raise RuntimeError("every alignment candidate was unusable; no artifact was published")
@@ -720,6 +662,11 @@ def align(
             0.10,
             "worst-axis velocity NRMSE exceeds 10%",
         ),
+        (
+            "vertical_policy_envelope_nrmse",
+            0.10,
+            "vertical policy-envelope velocity NRMSE exceeds 10%",
+        ),
         ("yaw_rate_nrmse", 0.10, "yaw-rate NRMSE exceeds 10%"),
         ("heading_error_deg", 3.0, "heading error exceeds 3 degrees"),
         (
@@ -728,10 +675,7 @@ def align(
             "combined-path endpoint error exceeds 10 mm",
         ),
     )
-    if target.selection_metric not in (
-        "policy-execution-controller-quality-v2",
-        "policy-execution-controller-quality-v3",
-    ):
+    if target.selection_metric != "controller-quality":
         quality_thresholds = (
             (
                 "worst_axis_velocity_nrmse",
@@ -764,6 +708,7 @@ def align(
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     controller = ControllerArtifact(
+        artifact_kind="robotics-experiments-controller",
         schema_version=1,
         alignment_id=target.alignment_id,
         run_id=run_id,

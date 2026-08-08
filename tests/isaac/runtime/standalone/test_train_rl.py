@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from robotics_experiments.alignment import ControllerSettings
+from robotics_experiments.config import RlTrainingPhaseConfig
+from robotics_experiments.controller import CommandInterface, ControllerArtifact, ControllerSettings
 from tests.support.paths import REPO_ROOT
 
 
@@ -36,7 +38,6 @@ def _controller_settings() -> ControllerSettings:
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
-        hover_thrust_fraction=0.5,
         hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
@@ -44,9 +45,8 @@ def _controller_settings() -> ControllerSettings:
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
-        rate_output_scale_nm=(1.0, 1.0, 1.0),
         rate_derivative_filter_hz=30.0,
-        rate_integral_limit_nm=(0.3, 0.3, 0.2),
+        rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
         max_collective_thrust_fraction=1.0,
@@ -57,31 +57,55 @@ def _controller_settings() -> ControllerSettings:
     )
 
 
-def _controller_artifact():
-    return SimpleNamespace(
+def _controller_artifact() -> ControllerArtifact:
+    settings = _controller_settings()
+    return ControllerArtifact(
+        artifact_kind="robotics-experiments-controller",
         schema_version=1,
         alignment_id="test-alignment",
         run_id="alignment-run",
+        target_controller_id="target",
+        reference_controller_id="reference",
+        target_backend="isaac-lab",
+        reference_backend="px4-sitl",
         comparison_fingerprint="comparison",
         target_definition_fingerprint="target",
         reference_definition_fingerprint="reference",
-        selected_settings=_controller_settings(),
+        experiment_config="configs/test.yaml",
+        experiment_fingerprint="experiment",
+        vehicle="x500_01",
+        airframe="holybro_x500_v2.usda",
+        command_rate_hz=20.0,
+        command_interface=CommandInterface(
+            kind="body-flu-velocity-yaw-rate",
+            dimension=4,
+            frame="body-flu",
+            linear_scale_mps=3.0,
+            yaw_rate_scale_radps=1.5,
+        ),
+        probe_suite_fingerprint="probes",
+        selected_settings=settings,
+        settings_fingerprint=hashlib.sha256(
+            json.dumps(
+                asdict(settings),
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
         advisory_quality_passed=True,
+        advisory_quality_reasons=(),
+        source_commit="abc123",
+        source_dirty=False,
+        target_image="target-image",
+        reference_image="reference-image",
     )
 
 
 def _controller_metadata() -> dict:
-    settings = _controller_settings()
     return {
-        "schema_version": 1,
-        "alignment_id": "test-alignment",
-        "run_id": "alignment-run",
-        "controller_digest": "digest",
-        "controller_comparison_fingerprint": "comparison",
-        "target_definition_fingerprint": "target",
-        "reference_definition_fingerprint": "reference",
-        "settings": json.loads(json.dumps(asdict(settings))),
-        "advisory_quality_passed": True,
+        "artifact": asdict(_controller_artifact()),
+        "digest": "digest",
     }
 
 
@@ -117,7 +141,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
         command_interface=SimpleNamespace(
-            kind="body-flu-velocity-yaw-rate-v1",
+            kind="body-flu-velocity-yaw-rate",
             dimension=4,
             linear_scale_mps=3.0,
             yaw_rate_scale_radps=1.5,
@@ -176,13 +200,12 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
         max_body_velocity_mps=3.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        hover_thrust_fraction=0.4,
     )
     config = SimpleNamespace(rl=SimpleNamespace(action=action, policy_rate_hz=20.0))
     env_cfg = SimpleNamespace(
         observation_schema_version=1,
         observation_space=13,
-        policy_interface="hover-v1",
+        policy_interface="hover",
     )
 
     metadata = train_rl._artifact_metadata(  # noqa: SLF001
@@ -196,7 +219,7 @@ def test_hover_artifact_metadata_remains_task_owned_and_unchanged() -> None:
 
     assert metadata["obs_schema_version"] == 1
     assert metadata["obs_dim"] == 13
-    assert metadata["policy_interface"] == "hover-v1"
+    assert metadata["policy_interface"] == "hover"
     assert metadata["policy_rate_hz"] == 20.0
     assert metadata["source_commit"] == "abc123"
     assert metadata["source_dirty"] is False
@@ -253,7 +276,9 @@ def test_checkpoint_export_rejects_checkpoint_outside_policy_root(tmp_path: Path
 def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     metadata = {
-        "policy_interface": "press-v1",
+        "artifact_kind": "robotics-experiments-policy",
+        "schema_version": 1,
+        "policy_interface": "press-approach",
         "curriculum_stage": "approach",
         "obs_schema_version": 1,
         "obs_dim": 34,
@@ -264,7 +289,6 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
             "max_body_velocity_mps": 0.5,
             "max_yaw_rate_radps": 1.5,
             "max_body_rate_radps": 6.0,
-            "hover_thrust_fraction": 0.4,
         },
         "source_commit": "captured",
         "source_dirty": False,
@@ -279,7 +303,7 @@ def test_checkpoint_export_reuses_contract_captured_at_training_start(tmp_path: 
         run_dir=tmp_path
     )
 
-    assert stored == metadata
+    assert stored == json.loads(json.dumps(metadata))
     assert policy_metadata.contract.policy_rate_hz == 17.0
     assert policy_metadata.contract.max_body_velocity_mps == 0.5
     assert policy_metadata.controller_settings == _controller_settings()
@@ -303,14 +327,21 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         max_body_velocity_mps=0.75,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        hover_thrust_fraction=0.4,
     )
     training_cfg = SimpleNamespace(
         task_id="press-task",
         policy_name="press-approach",
-        training_mode="scratch",
         seed=7,
-        max_iterations=2,
+        phases=(
+            RlTrainingPhaseConfig(
+                iterations=2,
+                save_interval=1,
+                learning_rate=1.0e-4,
+                schedule="fixed",
+                entropy_coef=0.0,
+                hard_case_fraction=0.3,
+            ),
+        ),
         controller_artifact=".build/alignment/test/best",
     )
     config = SimpleNamespace(
@@ -326,11 +357,15 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
             ),
         )
     )
-    env = SimpleNamespace(close=lambda: None)
+    hard_case_fractions = []
+    env = SimpleNamespace(
+        close=lambda: None,
+        set_training_hard_case_fraction=lambda value: hard_case_fractions.append(value),
+    )
     env_cfg = SimpleNamespace(
         observation_schema_version=1,
         observation_space=34,
-        policy_interface="press-v1",
+        policy_interface="press-approach",
         policy_config=SimpleNamespace(
             actor=SimpleNamespace(output_initialization="scratch-neutral-output")
         ),
@@ -367,8 +402,8 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     )
     monkeypatch.setattr(
         training,
-        "train",
-        lambda *_args: SimpleNamespace(iterations=2),
+        "train_phase",
+        lambda **_kwargs: SimpleNamespace(iterations=2),
     )
     monkeypatch.setattr(
         training,
@@ -380,8 +415,6 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
         max_iterations=None,
         num_envs=None,
         export_checkpoint=None,
-        initialize_checkpoint=None,
-        resume_checkpoint=None,
         controller_artifact=None,
     )
 
@@ -390,10 +423,11 @@ def test_training_persists_contract_before_ppo_without_exporting_or_publishing(
     assert before_ppo["policy_rate_hz"] == 17.0
     assert before_ppo["action_scales"]["max_body_velocity_mps"] == 0.75
     assert before_ppo["artifact_run_id"]
-    assert before_ppo["controller"]["controller_digest"] == "digest"
-    assert before_ppo["training_mode"] == "scratch"
+    assert before_ppo["controller"]["digest"] == "digest"
+    assert before_ppo["training_phases"][0]["hard_case_fraction"] == 0.3
     assert before_ppo["initialization"] == {"method": "scratch-neutral-output"}
     assert initialization_calls == [{"runner": runner, "method": "scratch-neutral-output"}]
+    assert hard_case_fractions == [0.3]
     assert export_calls == []
     assert not (tmp_path / ".build" / "training" / "press-approach" / "latest").exists()
 
@@ -414,88 +448,44 @@ def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
     assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
 
 
-def test_resume_restores_optimizer_state_and_applies_phase_learning_rate(tmp_path: Path) -> None:
-    from robotics_experiments.rl.training import rsl_rl
-
-    calls = []
-    optimizer = SimpleNamespace(param_groups=[{"lr": 1.0e-4}, {"lr": 1.0e-4}])
-    algorithm = SimpleNamespace(optimizer=optimizer, learning_rate=1.0e-4)
-    runner = SimpleNamespace(
-        alg=algorithm,
-        load=lambda *args, **kwargs: calls.append((args, kwargs)),
-    )
-    checkpoint = tmp_path / "model_299.pt"
-
-    rsl_rl.resume_training_from_checkpoint(
-        runner=runner,
-        checkpoint_path=checkpoint,
-        device="cuda:0",
-        learning_rate=3.0e-5,
-    )
-
-    assert calls == [((str(checkpoint),), {"load_optimizer": True, "map_location": "cuda:0"})]
-    assert algorithm.learning_rate == 3.0e-5
-    assert [group["lr"] for group in optimizer.param_groups] == [3.0e-5, 3.0e-5]
-
-
-def test_actor_only_initialization_preserves_fresh_training_state(tmp_path: Path) -> None:
+def test_training_phase_updates_schedule_without_replacing_optimizer() -> None:
     torch = pytest.importorskip("torch")
     from robotics_experiments.rl.training import rsl_rl
 
-    actor = torch.nn.Sequential(
-        torch.nn.Linear(3, 4),
-        torch.nn.ELU(),
-        torch.nn.Linear(4, 2),
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.Adam([parameter], lr=1.0e-4)
+    algorithm = SimpleNamespace(
+        optimizer=optimizer,
+        learning_rate=1.0e-4,
+        entropy_coef=0.001,
+        schedule="fixed",
     )
-    critic = torch.nn.Sequential(
-        torch.nn.Linear(3, 4),
-        torch.nn.ELU(),
-        torch.nn.Linear(4, 1),
-    )
-    std = torch.nn.Parameter(torch.full((2,), 0.2))
-    policy = SimpleNamespace(actor=actor, critic=critic, std=std)
-    optimizer = torch.optim.Adam([*actor.parameters(), *critic.parameters(), std])
+    learn_calls = []
     runner = SimpleNamespace(
-        alg=SimpleNamespace(policy=policy, optimizer=optimizer),
-        current_learning_iteration=0,
+        alg=algorithm,
+        save_interval=30,
+        log_dir="logs",
+        learn=lambda **kwargs: learn_calls.append(kwargs),
     )
-    critic_before = {
-        name: value.detach().clone() for name, value in policy.critic.state_dict().items()
-    }
-    std_before = policy.std.detach().clone()
-    optimizer_before = optimizer.state_dict()
-    actor_state = {
-        f"actor.{name}": torch.full_like(value, 0.75)
-        for name, value in policy.actor.state_dict().items()
-    }
-    checkpoint = tmp_path / "model_50.pt"
-    torch.save(
-        {
-            "model_state_dict": actor_state
-            | {
-                f"critic.{name}": torch.full_like(value, 9.0)
-                for name, value in policy.critic.state_dict().items()
-            }
-            | {"std": torch.full_like(policy.std, 9.0)},
-            "optimizer_state_dict": {"source": "must not load"},
-            "iter": 50,
-        },
-        checkpoint,
+    phase = RlTrainingPhaseConfig(
+        iterations=11,
+        save_interval=1,
+        learning_rate=3.0e-5,
+        schedule="fixed",
+        entropy_coef=0.0,
+        hard_case_fraction=0.3,
     )
 
-    rsl_rl.initialize_actor_from_checkpoint(
-        runner=runner,
-        checkpoint_path=checkpoint,
-        device="cpu",
-    )
+    original_optimizer = runner.alg.optimizer
+    result = rsl_rl.train_phase(runner=runner, phase=phase, first_phase=False)
 
-    for value in policy.actor.state_dict().values():
-        assert torch.all(value == 0.75)
-    for name, value in policy.critic.state_dict().items():
-        assert torch.equal(value, critic_before[name])
-    assert torch.equal(policy.std, std_before)
-    assert optimizer.state_dict() == optimizer_before
-    assert runner.current_learning_iteration == 0
+    assert runner.alg.optimizer is original_optimizer
+    assert runner.alg.optimizer.param_groups[0]["lr"] == 3.0e-5
+    assert runner.alg.learning_rate == 3.0e-5
+    assert runner.alg.entropy_coef == 0.0
+    assert runner.save_interval == 1
+    assert learn_calls == [{"num_learning_iterations": 11, "init_at_random_ep_len": False}]
+    assert result.iterations == 11
 
 
 def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> None:
@@ -527,239 +517,13 @@ def test_scratch_neutral_output_initialization_is_near_zero_and_unbiased() -> No
     assert float(action_mean.abs().max()) < 0.01
 
 
-@pytest.mark.parametrize(
-    ("training_mode", "initialization_checkpoint", "resume_checkpoint", "match"),
-    [
-        ("scratch", Path("model_1.pt"), None, "scratch training forbids"),
-        ("scratch", None, Path("model_1.pt"), "scratch training forbids"),
-        ("actor-only", None, None, "actor-only training requires"),
-        ("resume", None, None, "resume training requires"),
-        ("unknown", None, None, "unsupported"),
-    ],
-)
-def test_training_mode_validates_checkpoint_contract(
-    training_mode: str,
-    initialization_checkpoint: Path | None,
-    resume_checkpoint: Path | None,
-    match: str,
-) -> None:
-    train_rl = _load_train_rl_module()
-
-    with pytest.raises(ValueError, match=match):
-        train_rl._validate_training_mode(  # noqa: SLF001
-            training_mode=training_mode,
-            initialization_checkpoint=initialization_checkpoint,
-            resume_checkpoint=resume_checkpoint,
-        )
-
-
-def test_valid_training_modes_accept_their_checkpoint_contract() -> None:
-    train_rl = _load_train_rl_module()
-
-    train_rl._validate_training_mode(  # noqa: SLF001
-        training_mode="scratch",
-        initialization_checkpoint=None,
-        resume_checkpoint=None,
-    )
-    train_rl._validate_training_mode(  # noqa: SLF001
-        training_mode="actor-only",
-        initialization_checkpoint=Path("model_1.pt"),
-        resume_checkpoint=None,
-    )
-    train_rl._validate_training_mode(  # noqa: SLF001
-        training_mode="resume",
-        initialization_checkpoint=None,
-        resume_checkpoint=Path("model_1.pt"),
-    )
-
-
-def test_resume_requires_matching_interface_controller_and_selection_fingerprint() -> None:
-    train_rl = _load_train_rl_module()
-    from robotics_experiments.config import load_config
-    from robotics_experiments.rl import PolicyContract, PolicyInterface
-    from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
-
-    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad_safety.yaml")
-    action = config.rl.action
-    contract = PolicyContract(
-        policy_interface=PolicyInterface.PRESS_V1,
-        obs_schema_version=1,
-        obs_dim=34,
-        policy_rate_hz=config.rl.policy_rate_hz,
-        action_kind=action.kind,
-        action_dim=action.action_dim,
-        max_body_velocity_mps=action.max_body_velocity_mps,
-        max_yaw_rate_radps=action.max_yaw_rate_radps,
-        max_body_rate_radps=action.max_body_rate_radps,
-        hover_thrust_fraction=action.hover_thrust_fraction,
-        curriculum_stage="approach",
-    )
-    fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
-    env_cfg = SimpleNamespace(
-        policy_interface="press-v1",
-        observation_schema_version=1,
-        observation_space=34,
-    )
-
-    source = SimpleNamespace(
-        contract=contract,
-        controller_digest="controller",
-        values={"checkpoint_evaluation": {"comparison_fingerprint": fingerprint}},
-    )
-    train_rl._validate_resume_contract(  # noqa: SLF001
-        source_metadata=source,
-        config=config,
-        env_cfg=env_cfg,
-        controller_digest="controller",
-    )
-
-    with pytest.raises(ValueError, match="policy interface"):
-        train_rl._validate_resume_contract(  # noqa: SLF001
-            source_metadata=SimpleNamespace(
-                contract=replace(contract, obs_dim=35),
-                controller_digest="controller",
-                values=source.values,
-            ),
-            config=config,
-            env_cfg=env_cfg,
-            controller_digest="controller",
-        )
-    with pytest.raises(ValueError, match="controller digest"):
-        train_rl._validate_resume_contract(  # noqa: SLF001
-            source_metadata=SimpleNamespace(
-                contract=contract,
-                controller_digest="different",
-                values=source.values,
-            ),
-            config=config,
-            env_cfg=env_cfg,
-            controller_digest="controller",
-        )
-    with pytest.raises(ValueError, match="comparison fingerprint"):
-        train_rl._validate_resume_contract(  # noqa: SLF001
-            source_metadata=SimpleNamespace(
-                contract=contract,
-                controller_digest="controller",
-                values={"checkpoint_evaluation": {"comparison_fingerprint": "different"}},
-            ),
-            config=config,
-            env_cfg=env_cfg,
-            controller_digest="controller",
-        )
-
-
-def test_actor_only_initialization_rejects_incompatible_architecture(tmp_path: Path) -> None:
-    torch = pytest.importorskip("torch")
-    from robotics_experiments.rl.training import rsl_rl
-
-    actor = torch.nn.Sequential(torch.nn.Linear(3, 2))
-    runner = SimpleNamespace(alg=SimpleNamespace(policy=SimpleNamespace(actor=actor)))
-    checkpoint = tmp_path / "model_50.pt"
-    torch.save(
-        {
-            "model_state_dict": {
-                "actor.0.weight": torch.zeros((2, 4)),
-                "actor.0.bias": torch.zeros(2),
-            }
-        },
-        checkpoint,
-    )
-
-    with pytest.raises(ValueError, match="dimensions or actor architecture"):
-        rsl_rl.initialize_actor_from_checkpoint(
-            runner=runner,
-            checkpoint_path=checkpoint,
-            device="cpu",
-        )
-
-
-def test_cross_namespace_initialization_records_complete_source_provenance(
-    tmp_path: Path,
-) -> None:
-    train_rl = _load_train_rl_module()
-    training_root = tmp_path / ".build" / "training"
-    run_dir = training_root / "press-source" / "source-run"
-    checkpoint = run_dir / "logs" / "model_50.pt"
-    checkpoint.parent.mkdir(parents=True)
-    checkpoint.touch()
-    source_record = {
-        "policy_interface": "press-v1",
-        "curriculum_stage": "approach",
-        "obs_schema_version": 1,
-        "obs_dim": 34,
-        "policy_rate_hz": 20.0,
-        "action_kind": "velocity",
-        "action_dim": 4,
-        "action_scales": {
-            "max_body_velocity_mps": 2.0,
-            "max_yaw_rate_radps": 1.5,
-            "max_body_rate_radps": 6.0,
-            "hover_thrust_fraction": 0.4,
-        },
-        "source_commit": "source-commit",
-        "source_dirty": False,
-        "controller": _controller_metadata(),
-    }
-    train_rl._write_artifact_metadata(  # noqa: SLF001
-        run_dir=run_dir,
-        metadata=source_record,
-    )
-
-    provenance, loaded_metadata = train_rl._checkpoint_provenance(  # noqa: SLF001
-        checkpoint_path=checkpoint,
-        training_root=training_root,
-        repo_root=tmp_path,
-        method="actor-only",
-        option_name="--initialize-checkpoint",
-    )
-
-    assert provenance == {
-        "method": "actor-only",
-        "source_policy": "press-source",
-        "source_stage": "approach",
-        "source_run": "source-run",
-        "checkpoint_iteration": 50,
-        "checkpoint_path": (".build/training/press-source/source-run/logs/model_50.pt"),
-        "source_commit": "source-commit",
-    }
-    assert loaded_metadata.contract.obs_dim == 34
-    json.dumps({"initialization": provenance}, allow_nan=False)
-
-
-@pytest.mark.parametrize(
-    ("source_obs_dim", "source_action_dim", "match"),
-    [
-        (13, 4, "observation dimension"),
-        (34, 3, "action dimension"),
-    ],
-)
-def test_actor_initialization_rejects_incompatible_contract_dimensions(
-    source_obs_dim: int,
-    source_action_dim: int,
-    match: str,
-) -> None:
-    train_rl = _load_train_rl_module()
-    source_contract = SimpleNamespace(obs_dim=source_obs_dim, action_dim=source_action_dim)
-
-    with pytest.raises(ValueError, match=match):
-        train_rl._validate_initialization_contract(  # noqa: SLF001
-            source_contract=source_contract,
-            env_cfg=SimpleNamespace(observation_space=34),
-            action_dim=4,
-        )
-
-
 def test_training_adapter_uses_yaml_owned_schedule() -> None:
     from robotics_experiments.rl.training import rsl_rl
 
     training_cfg = SimpleNamespace(
         num_steps_per_env=32,
-        save_interval=25,
-        learning_rate=1.0e-4,
-        schedule="fixed",
         gamma=0.995,
         lam=0.95,
-        entropy_coef=0.001,
         clip_param=0.2,
         value_loss_coef=1.0,
         num_learning_epochs=5,
@@ -779,6 +543,12 @@ def test_training_adapter_uses_yaml_owned_schedule() -> None:
 
     runner_cfg = rsl_rl._train_cfg(  # noqa: SLF001 - adapter mapping contract.
         training_config=training_cfg,
+        phase=SimpleNamespace(
+            save_interval=25,
+            learning_rate=1.0e-4,
+            schedule="fixed",
+            entropy_coef=0.001,
+        ),
         policy_config=policy_cfg,
     )
 

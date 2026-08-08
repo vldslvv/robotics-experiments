@@ -125,10 +125,11 @@ cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
 bounds, negative or non-finite reward weights, invalid rates, and unknown
 stages fail during `load_config`.
 
-`rl.training` owns the explicit `scratch` / `actor-only` training mode, PPO
-optimization, rollout, checkpoint cadence, task selection, artifact namespace,
-seed settings, and
-`controller_artifact`. The latter defaults to
+`rl.training` owns the ordered phases in one scratch PPO optimizer lineage,
+rollout settings, task selection, artifact namespace, seed, and
+`controller_artifact`. Each phase owns its iteration count, checkpoint cadence,
+learning rate, schedule, entropy, and difficult-reset fraction. Checkpoint
+initialization and resume are unsupported. The controller artifact defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
 run for reproduction.
@@ -136,7 +137,7 @@ run for reproduction.
 `rl.action` is task-neutral and contains only normalized action kind,
 dimension, and scales. Controller gains, command delay, maximum tilt, and
 thruster response are not Hydra RL tunables; they are complete
-`ControllerSettings` loaded from alignment and embedded in policy metadata.
+`ControllerSettings` loaded from the controller artifact and embedded in policy metadata.
 New runs capture both the task contract and alignment provenance before PPO,
 then automatically evaluate every checkpoint and publish the chosen actor.
 `rl.press.evaluation` owns the held-out metric name, penalties, continuous

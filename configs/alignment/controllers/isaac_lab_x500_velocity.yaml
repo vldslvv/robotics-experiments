@@ -1,6 +1,6 @@
-alignment_id: x500-velocity-px4-v7
-controller_id: isaac-lab-x500-velocity-v40
-controller_schema_version: 6
+alignment_id: x500-px4-v1
+controller_id: isaac-lab-x500-v1
+controller_schema_version: 1
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -9,7 +9,7 @@ image: vv-isaac-lab-custom
 command_rate_hz: 20.0
 
 command_interface:
-  kind: body-flu-velocity-yaw-rate-v1
+  kind: body-flu-velocity-yaw-rate
   dimension: 4
   frame: body-flu
   linear_scale_mps: 3.0
@@ -27,11 +27,7 @@ settings:
   velocity_filter_hz: 10.0
   velocity_derivative_filter_hz: 1.5
   velocity_integral_limit_mps2: [2.5, 2.5, 5.0]
-  # Physical collective fraction of the composed X500's maximum thrust. The
-  # 2.3472 kg vehicle requires approximately 0.375 at standard gravity.
-  hover_thrust_fraction: 0.375
-  # PX4's normalized hover-thrust boundary. Schema 5 uses this value before
-  # control allocation; the physical fraction above is legacy-only.
+  # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.59125
   kp_att: [5.0, 5.0, 3.5]
   attitude_yaw_weight: 0.37578125
@@ -39,11 +35,8 @@ settings:
   ki_rate: [0.30, 0.30, 0.15]
   kd_rate: [0.00225, 0.00225, 0.0]
   kff_rate: [0.0, 0.0, 0.025]
-  # Legacy schemas convert the normalized rate PID output to physical torque.
-  # Schema 5 sends normalized torque directly to the PX4 allocator.
-  rate_output_scale_nm: [6.5, 6.5, 1.3]
   rate_derivative_filter_hz: 22.5
-  rate_integral_limit_nm: [0.45, 0.45, 0.45]
+  rate_integral_limit: [0.45, 0.45, 0.45]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
@@ -53,19 +46,122 @@ settings:
   thruster_max_thrust_rate_nps: 500.0
 
 search:
-  strategy: staged-beam-v2
-  # Candidate 947 passes every offline gate and the authoritative live gate.
-  # Reproduction verifies this fixed boundary directly.
-  beam_width: 1
+  strategy: coarse-to-fine-beam
+  # Evaluate broad, physically meaningful steps once, then generate midpoint
+  # candidates only around retained candidates and per-gate champions.
+  beam_width: 32
   passes_per_stage: 1
+  refinement_levels: 2
+  min_refinement_survivors: 2
 
-parameters: []
+parameters:
+  - field: command_delay_s
+    stage: 1
+    candidates: [0.0, 0.03, 0.06, 0.09]
+  - field: velocity_filter_hz
+    stage: 1
+    candidates: [0.0, 5.0, 10.0]
+  - field: velocity_derivative_filter_hz
+    stage: 1
+    candidates: [0.5, 2.5, 7.5]
+  - field: hover_thrust_normalized
+    stage: 1
+    candidates: [0.54, 0.56, 0.58, 0.60]
+  - field: kp_vel
+    stage: 1
+    candidates:
+      - [1.2, 1.2, 3.0]
+      - [1.8, 1.8, 4.0]
+      - [2.4, 2.4, 6.0]
+      - [1.8, 1.8, 8.0]
+  - field: horizontal_velocity_error_gain_scale
+    stage: 1
+    candidates: [1.0, 1.15, 1.30]
+  - field: horizontal_velocity_error_gain_start_mps
+    stage: 1
+    candidates: [0.10, 0.15, 0.20]
+  - field: horizontal_velocity_error_gain_full_mps
+    stage: 1
+    candidates: [0.25, 0.35, 0.45]
+  - field: ki_vel
+    stage: 1
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.3, 0.3, 1.5]
+      - [0.6, 0.6, 3.0]
+  - field: kd_vel
+    stage: 1
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.3, 0.3, 0.0]
+      - [0.6, 0.6, 0.1]
+  - field: velocity_integral_limit_mps2
+    stage: 1
+    candidates:
+      - [1.0, 1.0, 2.0]
+      - [2.5, 2.5, 5.0]
+      - [4.0, 4.0, 8.0]
+  - field: kp_att
+    stage: 2
+    candidates:
+      - [3.0, 3.0, 2.1]
+      - [5.0, 5.0, 3.5]
+      - [7.0, 7.0, 4.9]
+  - field: attitude_yaw_weight
+    stage: 2
+    candidates: [0.25, 0.40, 0.55]
+  - field: kp_rate
+    stage: 2
+    candidates:
+      - [0.075, 0.075, 0.10]
+      - [0.15, 0.15, 0.20]
+      - [0.30, 0.30, 0.40]
+  - field: ki_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.15, 0.15, 0.075]
+      - [0.30, 0.30, 0.15]
+  - field: kd_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.00225, 0.00225, 0.0]
+      - [0.0045, 0.0045, 0.0]
+  - field: kff_rate
+    stage: 2
+    candidates:
+      - [0.0, 0.0, 0.0]
+      - [0.0, 0.0, 0.025]
+      - [0.05, 0.05, 0.05]
+  - field: rate_derivative_filter_hz
+    stage: 2
+    candidates: [10.0, 22.5, 35.0]
+  - field: rate_integral_limit
+    stage: 2
+    candidates:
+      - [0.15, 0.15, 0.15]
+      - [0.45, 0.45, 0.45]
+      - [0.75, 0.75, 0.75]
+  - field: max_tilt_cmd_deg
+    stage: 2
+    candidates: [22.5, 45.0, 67.5]
+  - field: thruster_tau_inc_s
+    stage: 3
+    candidates: [0.0, 0.02, 0.04, 0.08]
+  - field: thruster_tau_dec_s
+    stage: 3
+    candidates: [0.0, 0.02, 0.04, 0.08]
+  - field: thruster_max_thrust_rate_nps
+    stage: 3
+    candidates: [100.0, 500.0, 1000.0, 100000.0]
 
-selection_metric: policy-execution-controller-quality-v3
+selection_metric: controller-quality
 publication_metrics:
   - velocity_rmse_mps
   - acceleration_rmse_mps2
   - worst_axis_velocity_nrmse
+  - vertical_policy_envelope_nrmse
   - braking_distance_error_m
   - residual_speed_error_mps
   - stop_time_error_s
@@ -148,6 +244,16 @@ probes:
       - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
       - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
       - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-vertical-policy-envelope
+    split: validation
+    axis: z
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.40], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
       - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
   - name: validation-yaw-ramp-reversal
     split: validation

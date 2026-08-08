@@ -30,12 +30,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from robotics_experiments.alignment import (
-    ControllerSettings,
-    load_controller_artifact,
-    load_controller_definition,
-)
+from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.config import ExperimentConfig, RlActionConfig, load_config
+from robotics_experiments.controller import ControllerSettings, load_controller_artifact
 
 if TYPE_CHECKING:
     from robotics_experiments.workflows.isaac_lab import (
@@ -223,12 +220,10 @@ def _make_env(
 def _ctbr_hover_action(
     env: DroneHoverEnv, action_cfg: RlActionConfig
 ) -> tuple[torch.Tensor, float]:
-    mass = float(env.drone.root_physx_view.get_masses()[0].sum().item())
-    max_total_thrust = float(env.actuation_params.max_total_thrust)
-    hover_fraction = mass * 9.81 / max_total_thrust
     action = torch.zeros((env.num_envs, env.cfg.action_space), device=env.device)
-    action[:, 0] = hover_fraction / float(action_cfg.hover_thrust_fraction) - 1.0
-    return action, hover_fraction
+    if action_cfg.kind != "ctbr":
+        raise ValueError("CTBR sanity requires the ctbr action contract")
+    return action, float(env.actuation_params.hover_thrust_normalized)
 
 
 def _run_ctbr_sanity(

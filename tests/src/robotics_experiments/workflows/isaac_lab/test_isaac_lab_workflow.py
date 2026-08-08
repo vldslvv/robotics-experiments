@@ -48,8 +48,8 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "register_isaac_lab_tasks",
         "summarize_press_approach_episodes",
     ]
-    assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v0"
-    assert module.SWITCH_PRESS_TASK_ID == "Isaac-Switch-Press-Direct-v0"
+    assert module.DRONE_HOVER_TASK_ID == "Isaac-Drone-Hover-Direct-v1"
+    assert module.SWITCH_PRESS_TASK_ID == "Isaac-Switch-Press-Direct-v1"
     assert module.register_isaac_lab_tasks() is False
 
 
@@ -109,7 +109,7 @@ def test_registration_uses_expected_gymnasium_entry_points(monkeypatch):
 
 def test_evaluation_contract_is_forwarded_to_task_config_and_environment(monkeypatch):
     registration = importlib.import_module("robotics_experiments.workflows.isaac_lab.registration")
-    contract = types.SimpleNamespace(policy_interface="press-v1")
+    contract = types.SimpleNamespace(policy_interface="press-approach")
     calls = {}
     env_cfg = types.SimpleNamespace(scene=types.SimpleNamespace(num_envs=1))
     factory_module = types.SimpleNamespace(

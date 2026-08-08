@@ -19,18 +19,18 @@ from pathlib import Path
 
 import numpy as np
 
-from robotics_experiments.alignment import load_controller_artifact
 from robotics_experiments.config import load_config
-from robotics_experiments.drone._airframe import (
-    compute_body_mass_properties,
-    load_builder_config,
-)
-from robotics_experiments.rl import (
+from robotics_experiments.controller import (
     ActuationState,
     MixerGeometry,
     action_to_rotor_omega,
     build_actuation_params,
+    load_controller_artifact,
     seed_actuation_controller_state,
+)
+from robotics_experiments.drone._airframe import (
+    compute_body_mass_properties,
+    load_builder_config,
 )
 
 __all__ = ["main"]
@@ -416,8 +416,8 @@ def _augment_reference_controller_state(
     reference_path: Path,
 ) -> dict:
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") != 3:
-        raise ValueError(f"{reference_path} must use alignment trace schema 3")
+    if reference.get("schema_version") != 1:
+        raise ValueError(f"{reference_path} must use alignment trace schema 1")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -456,13 +456,12 @@ def _augment_reference_controller_state(
                 "source_age_us": raw_profile["initial_controller_state_source_age_us"],
             }
         )
-    reference["schema_version"] = 5
     temporary_path = reference_path.with_suffix(".json.tmp")
     temporary_path.write_text(json.dumps(reference, indent=2, allow_nan=False) + "\n")
     temporary_path.replace(reference_path)
     return {
         "schema_version": 1,
-        "method": "px4-ulog-controller-boundary-v3",
+        "method": "px4-ulog-controller-boundary-v1",
         "reference": str(reference_path),
         "profiles": profile_reports,
     }
@@ -492,8 +491,8 @@ def _actuator_boundary_report(
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") not in (3, 4, 5):
-        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
+    if reference.get("schema_version") != 1:
+        raise ValueError(f"{reference_path} must use alignment trace schema 1")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -920,22 +919,13 @@ def _report(
             for index in range(3)
         ]
     )
-    if params.normalized_allocator:
-        boundary_metrics = _normalized_boundary_metrics(
-            target_motor_controls=isaac_motor_array,
-            px4_motor_controls=px4_motor_array,
-            normalized_mix=params.normalized_allocation_mix,
-            px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
-            px4_torque_flu=torque_setpoint_flu,
-        )
-    else:
-        boundary_metrics = {
-            "normalized_motor_rmse": _root_mean_square(values=isaac_motor_array - px4_motor_array),
-            "unsaturated_sample_count": 0,
-            "saturated_sample_count": len(isaac_motor_array),
-            "normalized_collective_rmse": None,
-            "normalized_torque_rmse": None,
-        }
+    boundary_metrics = _normalized_boundary_metrics(
+        target_motor_controls=isaac_motor_array,
+        px4_motor_controls=px4_motor_array,
+        normalized_mix=params.normalized_allocation_mix,
+        px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
+        px4_torque_flu=torque_setpoint_flu,
+    )
     scale_fits = [
         _linear_scale_with_intercept(
             controller_output=torque_setpoint_flu[:, axis],
@@ -944,8 +934,8 @@ def _report(
         for axis in range(3)
     ]
     return {
-        "schema_version": 5,
-        "method": "px4-ulog-state-replay-v5-250hz",
+        "schema_version": 1,
+        "method": "px4-ulog-state-replay-v1-250hz",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
@@ -963,9 +953,9 @@ def _report(
             "body_torque_rmse_nm": [
                 _root_mean_square(values=wrench_error[:, index]) for index in range(1, 4)
             ],
-            "rate_output_scale_nm_estimate": [fit[0] for fit in scale_fits],
-            "rate_output_scale_intercept_nm": [fit[1] for fit in scale_fits],
-            "rate_output_scale_fit_rmse_nm": [fit[2] for fit in scale_fits],
+            "torque_effectiveness_scale": [fit[0] for fit in scale_fits],
+            "torque_effectiveness_intercept_nm": [fit[1] for fit in scale_fits],
+            "torque_effectiveness_fit_rmse_nm": [fit[2] for fit in scale_fits],
             "px4_mean_collective_thrust_n": float(np.mean(px4_wrench_array[:, 0])),
             "isaac_mean_collective_thrust_n": float(np.mean(isaac_wrench_array[:, 0])),
         },
@@ -974,8 +964,8 @@ def _report(
 
 def _profile_windows(*, reference_path: Path) -> list[dict]:
     reference = json.loads(reference_path.read_text())
-    if reference.get("schema_version") not in (3, 4, 5):
-        raise ValueError(f"{reference_path} must use alignment trace schema 3, 4, or 5")
+    if reference.get("schema_version") != 1:
+        raise ValueError(f"{reference_path} must use alignment trace schema 1")
     raw_profiles = reference.get("traces")
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
@@ -1039,8 +1029,8 @@ def _profile_replay_report(
             }
         )
     return {
-        "schema_version": 5,
-        "method": "px4-ulog-profile-state-replay-v5-250hz",
+        "schema_version": 1,
+        "method": "px4-ulog-profile-state-replay-v1-250hz",
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),

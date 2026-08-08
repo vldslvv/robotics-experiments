@@ -174,7 +174,7 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
     reference.write_text(
         json.dumps(
             {
-                "schema_version": 5,
+                "schema_version": 1,
                 "traces": [
                     {
                         "profile": "validation-combined",
@@ -204,7 +204,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     reference.write_text(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 1,
                 "traces": [
                     {
                         "profile": "validation",
@@ -274,8 +274,8 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     payload = json.loads(reference.read_text())
     trace = payload["traces"][0]
 
-    assert report["method"] == "px4-ulog-controller-boundary-v3"
-    assert payload["schema_version"] == 5
+    assert report["method"] == "px4-ulog-controller-boundary-v1"
+    assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
     assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]

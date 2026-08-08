@@ -20,6 +20,7 @@ __all__ = [
     "RlPolicyActorConfig",
     "RlPolicyConfig",
     "RlPolicyCriticConfig",
+    "RlTrainingPhaseConfig",
     "RlTrainingConfig",
 ]
 
@@ -62,9 +63,6 @@ class RlActionConfig(_FreezableConfig):
             ``velocity`` action.
         max_body_rate_radps: Body-rate command scale (rad/s) for a normalized
             ``ctbr`` action.
-        hover_thrust_fraction: Collective thrust at hover as a fraction of the
-            summed per-rotor static max thrust; centers the ``ctbr`` collective
-            command and the ``velocity`` thrust feed-forward.
     """
 
     kind: str
@@ -72,7 +70,6 @@ class RlActionConfig(_FreezableConfig):
     max_body_velocity_mps: float
     max_yaw_rate_radps: float
     max_body_rate_radps: float
-    hover_thrust_fraction: float
 
 
 @dataclass
@@ -105,7 +102,7 @@ class HoverTaskConfig(_FreezableConfig):
     """The hover task definition: reward weights, termination, and reset ranges.
 
     The task half of the ``task definition -> policy`` contract for the hover
-    task (`Isaac-Drone-Hover-Direct-v0`): authoring these values IS defining the
+    task (`Isaac-Drone-Hover-Direct-v1`): authoring these values IS defining the
     task; the env module carries no task-tuning literals.
 
     Attributes:
@@ -271,6 +268,18 @@ class PressApproachEvaluationConfig(_FreezableConfig):
 
 
 @dataclass
+class RlTrainingPhaseConfig(_FreezableConfig):
+    """One phase in a single scratch PPO optimizer lineage."""
+
+    iterations: int
+    save_interval: int
+    learning_rate: float
+    schedule: str
+    entropy_coef: float
+    hard_case_fraction: float
+
+
+@dataclass
 class RlTrainingConfig(_FreezableConfig):
     """PPO training hyperparameters + task selection for ``make train-rl``.
 
@@ -278,24 +287,17 @@ class RlTrainingConfig(_FreezableConfig):
     lives in Python.
 
     Attributes:
-        task_id: Gymnasium task id the entrypoint trains
-            (``Isaac-Drone-Hover-Direct-v0`` for the F2b pipeline; F3 points it
-            at the press task).
+        task_id: Gymnasium task id the entrypoint trains.
         policy_name: Required artifact namespace under ``.build/training``;
             selection publishes accepted artifacts to that namespace's
             ``latest`` symlink.
-        training_mode: Weight-initialization mode (``scratch``, ``actor-only``,
-            or full-state ``resume``).
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
-        max_iterations: Training iterations for a full run.
+        phases: Ordered curriculum phases executed by one fresh runner. No
+            checkpoint initialization or resume path is supported.
         num_steps_per_env: On-policy rollout length per env per iteration.
-        save_interval: Checkpoint save interval, iterations.
-        learning_rate: PPO learning rate.
-        schedule: PPO learning-rate schedule (``adaptive`` or ``fixed``).
         gamma: Discount factor.
         lam: GAE lambda.
-        entropy_coef: Entropy bonus coefficient.
         clip_param: PPO clip parameter.
         value_loss_coef: Value-loss coefficient.
         num_learning_epochs: PPO epochs per iteration.
@@ -308,16 +310,11 @@ class RlTrainingConfig(_FreezableConfig):
     task_id: str
     vehicle_id: int
     policy_name: str
-    training_mode: str
     controller_artifact: str
-    max_iterations: int
+    phases: List[RlTrainingPhaseConfig]
     num_steps_per_env: int
-    save_interval: int
-    learning_rate: float
-    schedule: str
     gamma: float
     lam: float
-    entropy_coef: float
     clip_param: float
     value_loss_coef: float
     num_learning_epochs: int

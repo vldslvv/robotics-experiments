@@ -79,6 +79,7 @@ def test_press_training_reset_mixes_full_envelope_with_area_uniform_annulus() ->
             unit_samples=unit_samples,
             gate=_GATE,
             training_reset=_TRAINING_RESET,
+            hard_case_fraction=0.5,
         )
     )
 
@@ -98,4 +99,5 @@ def test_press_training_reset_rejects_wrong_sample_width() -> None:
             unit_samples=torch.zeros((1, 9)),
             gate=_GATE,
             training_reset=_TRAINING_RESET,
+            hard_case_fraction=0.5,
         )

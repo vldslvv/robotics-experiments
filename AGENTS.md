@@ -70,9 +70,13 @@ Read area docs on demand when a task touches that area:
 Place new code in the directory matching its purpose; each entry below is both
 the current contents and the intended home for that kind of code.
 - `src/robotics_experiments/` -> Core Python package for reusable experiment logic.
-- `src/robotics_experiments/alignment/` -> Host-safe controller definitions,
-  generic candidate fitting/ranking, immutable alignment artifacts, and
-  publication. Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
+- `src/robotics_experiments/controller/` -> Host-safe controller settings,
+  strict controller artifacts, and the normalized NumPy actuation reference.
+  Shared by alignment and RL; no Isaac, Kit, PX4-container, alignment, or RL
+  dependency.
+- `src/robotics_experiments/alignment/` -> Host-safe probe definitions, generic
+  candidate fitting/ranking, alignment evidence, and controller publication.
+  Upstream of RL; no Isaac, Kit, PX4-container, or RL dependency.
 - `src/robotics_experiments/runtime/` -> Host-agnostic fleet runtime: frozen
   `FleetState` lifecycle transitions (the one runtime pipeline) and the PX4
   `BridgeHost` /
@@ -141,8 +145,8 @@ the current contents and the intended home for that kind of code.
   for Isaac Sim / Isaac Lab modules that are unavailable outside the Isaac Sim
   Docker environment; keep those workarounds in Isaac-only lazy leaf modules so
   core imports still work on the host.
-- Package layering runs `config -> alignment -> rl -> workflows` for controller
-  alignment and learning, alongside `config -> domain (drone / environment /
+- Package layering runs `config -> controller -> {alignment, rl} -> workflows`
+  for controller alignment and learning, alongside `config -> domain (drone / environment /
   simulation / px4_bridge) -> Isaac extensions`; `import robotics_experiments`
   (plus its subpackages) must succeed with Isaac absent. A domain leaf module that is
   wholly Isaac-only (every function operates on a live USD stage) may keep
@@ -212,24 +216,34 @@ the current contents and the intended home for that kind of code.
   scales remain task-owned and need not equal the alignment probe experiment's
   normalized command scales.
   Controller/actuator internals come from
-  `robotics_experiments.alignment.ControllerSettings`. Training must load and
-  validate an alignment artifact before building Isaac Lab, embed its complete
+  `robotics_experiments.controller.ControllerSettings`. Training must load and
+  validate a quality-passing schema-1 controller artifact before building Isaac
+  Lab, embed its complete
   settings/digest/fingerprints before PPO, and selection/evaluation must reuse
   that embedded record. Policy artifacts without alignment provenance are
-  unsupported. `make train-rl` automatically evaluates every checkpoint and
+  unsupported. Controller and policy artifacts are strict v1 contracts; older
+  schemas and compatibility migrations are unsupported. A training invocation
+  always starts one new runner and optimizer. Ordered Hydra phases may change
+  the learning schedule and reset mixture inside that single scratch lineage;
+  checkpoint initialization, resume, and post-run fine-tuning are unsupported.
+  `make train-rl` automatically evaluates every checkpoint and
   publishes the selected run: `latest` always advances, while `best` advances
   only for a strictly higher held-out score within the same comparison
   fingerprint. Press acceptance gates are advisory publication diagnostics;
   the task-owned held-out metric and weights live in Hydra.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
+  `src/robotics_experiments/controller/`,
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make
-  targets, or training alignment provenance. Existing `ControllerSettings`
+  targets, or training alignment provenance. `ControllerSettings`
   fields are added to a fit only through declarative `ParameterSpec` candidates.
   Search and replacement stay generic. Selection metrics are stable registered
   names; changing a metric/schema, definition, probe suite, environment, image,
   or controller interface starts a new comparison fingerprint. Structurally
-  valid poor-quality results remain consumable and report advisory failure.
-  `latest` always advances and `best` compares only within one fingerprint.
+  valid poor-quality results remain diagnostic evidence but cannot finalize,
+  publish, or enter policy training. Finalization also requires passing actuator
+  audit and per-profile controller-boundary replay. `latest` and `best` advance
+  only after those acceptance checks; `best` compares only within one
+  fingerprint.
 - When launching an RL training run for the user, provide a run-scoped
   monitoring path (TensorBoard by default) and report the local URL and log
   directory. Keep monitoring available while the run is active unless the user

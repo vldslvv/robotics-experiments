@@ -349,7 +349,7 @@ def _write_capture(
     (run_dir / "reference.json").write_text(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 1,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": os.environ.get(

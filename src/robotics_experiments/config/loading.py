@@ -235,10 +235,25 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
 
 
 def _validate_rl_policies(experiment: ExperimentConfig) -> None:
-    if not experiment.rl.training.controller_artifact.strip():
+    training = experiment.rl.training
+    if not training.controller_artifact.strip():
         raise ValueError("rl.training.controller_artifact must be non-empty")
-    if experiment.rl.training.training_mode not in {"scratch", "actor-only", "resume"}:
-        raise ValueError("rl.training.training_mode must be 'scratch', 'actor-only', or 'resume'")
+    if not training.phases:
+        raise ValueError("rl.training.phases must contain at least one phase")
+    for index, phase in enumerate(training.phases):
+        path = f"rl.training.phases[{index}]"
+        if phase.iterations <= 0 or phase.save_interval <= 0:
+            raise ValueError(f"{path} iterations and save_interval must be positive")
+        if not math.isfinite(phase.learning_rate) or phase.learning_rate <= 0.0:
+            raise ValueError(f"{path}.learning_rate must be finite and positive")
+        if phase.schedule not in {"fixed", "adaptive"}:
+            raise ValueError(f"{path}.schedule must be 'fixed' or 'adaptive'")
+        if not math.isfinite(phase.entropy_coef) or phase.entropy_coef < 0.0:
+            raise ValueError(f"{path}.entropy_coef must be finite and non-negative")
+        if not math.isfinite(phase.hard_case_fraction) or not (
+            0.0 <= phase.hard_case_fraction <= 1.0
+        ):
+            raise ValueError(f"{path}.hard_case_fraction must be between 0 and 1")
     policies = {
         "rl.hover.policy": experiment.rl.hover.policy,
         "rl.press.policy": experiment.rl.press.policy,
@@ -384,9 +399,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
     }.items():
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"rl.press.evaluation.{name} must be between 0 and 1")
-    if evaluation.selection_metric != "held-out-press-task-quality-v3":
+    if evaluation.selection_metric != "held-out-press-task-quality":
         raise ValueError(
-            "rl.press.evaluation.selection_metric must be " "'held-out-press-task-quality-v3'"
+            "rl.press.evaluation.selection_metric must be 'held-out-press-task-quality'"
         )
     for name in (
         "collision_penalty",

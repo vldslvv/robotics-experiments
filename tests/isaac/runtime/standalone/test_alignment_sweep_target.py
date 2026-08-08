@@ -122,7 +122,7 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
 def test_worker_spools_merge_in_candidate_order_with_effective_aliases(tmp_path):
     module = _load_script()
     first = _settings(1)[0]
-    alias = replace(first, hover_thrust_fraction=0.4)
+    alias = replace(first, hover_thrust_normalized=0.5912500001)
     failed = replace(first, command_delay_s=first.command_delay_s + 0.001)
     trace = {
         "profile": "fit_x",

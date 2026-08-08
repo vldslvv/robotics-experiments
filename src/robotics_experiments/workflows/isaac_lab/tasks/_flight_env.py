@@ -12,8 +12,8 @@ from isaaclab_contrib.actuators import Thruster, ThrusterCfg
 from isaaclab_contrib.utils.types import MultiRotorActions
 
 from robotics_experiments._cadence import _CadenceState, _next_interval_steps
-from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import ExperimentConfig
+from robotics_experiments.controller import ControllerSettings
 from robotics_experiments.workflows.isaac_lab.tasks.flight import (
     _replace_controller_settings_batch,
     _reset_thruster_for_airborne_state,

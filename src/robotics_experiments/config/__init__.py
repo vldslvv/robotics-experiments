@@ -24,6 +24,7 @@ from robotics_experiments.config._rl import (
     RlPolicyConfig,
     RlPolicyCriticConfig,
     RlTrainingConfig,
+    RlTrainingPhaseConfig,
 )
 from robotics_experiments.config._scene import BoundingBox, DroneSpawnConfig, LightSwitchConfig
 from robotics_experiments.config._simulation import SimSettings
@@ -48,6 +49,7 @@ __all__ = [
     "RlPolicyActorConfig",
     "RlPolicyConfig",
     "RlPolicyCriticConfig",
+    "RlTrainingPhaseConfig",
     "RlTrainingConfig",
     "RoutineStepConfig",
     "SimSettings",

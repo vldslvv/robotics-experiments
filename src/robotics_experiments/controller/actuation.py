@@ -1,16 +1,15 @@
-"""Pure RL-action -> per-rotor angular-velocity actuation functions (core path).
+"""Pure normalized command -> per-rotor angular-velocity controller.
 
 numpy + stdlib only. State lives in frozen params dataclasses and behavior in
 pure top-level functions (``f(params, inputs) -> outputs``), so the actuation
 stage composes into a plain function pipeline. This is the single-env
 reference/spec implementation and the unit-test oracle; it is exported through
-``robotics_experiments.rl``. The Isaac Lab package exposes the batched torch
+``robotics_experiments.controller``. The Isaac Lab package exposes the batched torch
 twin's external diagnostic entry point as
 ``robotics_experiments.workflows.isaac_lab.compute_lab_rotor_omega``; it must
-match this module term-for-term. Schema 5 reproduces PX4's normalized
+match this module term-for-term. The allocator reproduces PX4's normalized
 pseudo-inverse allocation and sequential desaturation before applying the
-bridge-owned affine motor mapping. Legacy schemas retain the direct physical
-wrench pseudoinverse. Both paths then use the bridge's quadratic rotor curve.
+bridge-owned affine motor mapping and quadratic rotor curve.
 
 Two action levels (``kind``) are provided:
 
@@ -27,8 +26,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from robotics_experiments.alignment import ControllerSettings
 from robotics_experiments.config import RlActionConfig
+from robotics_experiments.controller._models import ControllerSettings
 from robotics_experiments.px4_bridge import (
     GRAVITY_M_S2,
     normalize_quat_wxyz,
@@ -51,7 +50,6 @@ __all__ = [
 ]
 
 _EPS = 1e-9
-_SATURATION_EPS = 1e-5
 
 
 def _readonly_copy(values: np.ndarray) -> np.ndarray:
@@ -127,19 +125,14 @@ class ActuationParams:
     action_dim: int
     mass: float
     geometry: MixerGeometry
-    allocation_pinv: np.ndarray
     normalized_allocation_mix: np.ndarray
-    normalized_allocator: bool
-    max_total_thrust: float
     kp_rate: np.ndarray
     ki_rate: np.ndarray
     kd_rate: np.ndarray
     kff_rate: np.ndarray
-    rate_output_scale_nm: np.ndarray
     rate_derivative_filter_hz: float
-    rate_integral_limit_nm: np.ndarray
+    rate_integral_limit: np.ndarray
     max_body_rate_radps: float
-    hover_thrust_fraction: float
     hover_thrust_normalized: float
     kp_vel: np.ndarray
     horizontal_velocity_error_gain_scale: float
@@ -162,20 +155,6 @@ class ActuationParams:
 
 def _num_rotors(geometry: MixerGeometry) -> int:
     return int(geometry.rotor_constant.shape[0])
-
-
-def _allocation_matrix(geometry: MixerGeometry) -> np.ndarray:
-    """Return the ``(4, N)`` map from per-rotor thrust to ``[Fz, tx, ty, tz]``.
-
-    Rows: collective thrust (sum), roll torque ``sum(y_i * f_i)``, pitch
-    torque ``-sum(x_i * f_i)``, yaw torque
-    ``sum((c_i / k_i) * rot_dir_i * f_i)`` -- the linear-in-thrust form of the
-    thrust model's yaw reaction (``omega_i^2 = f_i / k_i``).
-    """
-    x = geometry.positions_body[:, 0]
-    y = geometry.positions_body[:, 1]
-    yaw = (geometry.rolling_moment_coefficient / geometry.rotor_constant) * geometry.rot_dir
-    return np.stack([np.ones(_num_rotors(geometry)), y, -x, yaw], axis=0)
 
 
 def _normalized_allocation_mix(geometry: MixerGeometry) -> np.ndarray:
@@ -208,11 +187,6 @@ def _normalized_allocation_mix(geometry: MixerGeometry) -> np.ndarray:
         mix[:, 3] /= float(np.mean(thrust_values[nonzero_thrust]))
     mix[np.abs(mix) < 1e-3] = 0.0
     return mix
-
-
-def _max_total_thrust(geometry: MixerGeometry) -> float:
-    """Summed per-rotor static max thrust at ``max_rotor_velocity`` (N)."""
-    return float(np.sum(geometry.rotor_constant * np.square(geometry.max_rotor_velocity)))
 
 
 def _rotation_from_wxyz(q_wxyz: np.ndarray) -> np.ndarray:
@@ -315,30 +289,6 @@ def _clamp_tilt(thrust_world: np.ndarray, max_tilt_rad: float) -> np.ndarray:
     return np.cos(max_tilt_rad) * up + np.sin(max_tilt_rad) * horizontal
 
 
-def _wrench_to_omega(
-    params: ActuationParams,
-    collective_thrust: float,
-    body_torque: np.ndarray,
-) -> np.ndarray:
-    """Invert the allocation: desired wrench -> clipped per-rotor omega.
-
-    Solves ``A f = [collective, tau_x, tau_y, tau_z]`` via the precomputed
-    pseudoinverse (exact for a square quad, least-squares for a redundant hexa),
-    clips ``f >= 0``, then ``omega_i = sqrt(f_i / k_i)`` clipped to
-    ``[min, max]``. Feeding the result through the thrust model reproduces the
-    commanded wrench (up to the clips).
-    """
-    geometry = params.geometry
-    wrench = np.array(
-        [collective_thrust, body_torque[0], body_torque[1], body_torque[2]],
-        dtype=np.float64,
-    )
-    thrust = params.allocation_pinv @ wrench
-    thrust = np.clip(thrust, 0.0, None)
-    omega = np.sqrt(thrust / geometry.rotor_constant)
-    return np.clip(omega, geometry.min_rotor_velocity, geometry.max_rotor_velocity)
-
-
 def _desaturation_gain(
     actuator_sp: np.ndarray,
     desaturation_vector: np.ndarray,
@@ -415,43 +365,6 @@ def _low_pass_alpha(*, cutoff_hz: float, dt_s: float) -> float:
         return 1.0
     scaled = 2.0 * np.pi * cutoff_hz * dt_s
     return float(scaled / (1.0 + scaled))
-
-
-def _limited_thrust_world(
-    *,
-    params: ActuationParams,
-    desired_acceleration: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    gravity = np.array([0.0, 0.0, GRAVITY_M_S2])
-    if params.hover_thrust_fraction > 0.0:
-        desired_z = np.array(
-            [desired_acceleration[0], desired_acceleration[1], GRAVITY_M_S2],
-            dtype=np.float64,
-        )
-        desired_z /= max(float(np.linalg.norm(desired_z)), _EPS)
-        collective_fraction = (
-            params.hover_thrust_fraction
-            * (1.0 + desired_acceleration[2] / GRAVITY_M_S2)
-            / max(float(desired_z[2]), _EPS)
-        )
-        requested = desired_z * collective_fraction * params.max_total_thrust
-    else:
-        requested = params.mass * (desired_acceleration + gravity)
-    maximum = params.max_total_thrust * params.max_collective_thrust_fraction
-    minimum = params.max_total_thrust * params.min_collective_thrust_fraction
-    vertical = float(np.clip(requested[2], minimum, maximum))
-    radial_limit = np.sqrt(max(maximum * maximum - vertical * vertical, 0.0))
-    margin_limit = params.max_total_thrust * (
-        params.max_collective_thrust_fraction - params.horizontal_thrust_margin_fraction
-    )
-    horizontal_limit = min(radial_limit, margin_limit)
-    horizontal = requested[:2]
-    norm = float(np.linalg.norm(horizontal))
-    if norm > horizontal_limit:
-        horizontal = horizontal * (horizontal_limit / max(norm, _EPS))
-    limited = np.array([horizontal[0], horizontal[1], vertical], dtype=np.float64)
-    achieved_acceleration = limited / params.mass - gravity
-    return limited, achieved_acceleration
 
 
 def _normalized_thrust_world(
@@ -561,11 +474,6 @@ def _rate_to_omega(
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
     )
-    body_torque = (
-        normalized_torque
-        if params.normalized_allocator
-        else params.rate_output_scale_nm * normalized_torque
-    )
     integral_factor = np.maximum(
         0.0,
         1.0 - np.square(rate_error / np.radians(400.0)),
@@ -573,8 +481,8 @@ def _rate_to_omega(
     rate_integral = np.clip(
         controller_state.rate_integral_body_flu
         + integral_factor * params.ki_rate * rate_error * dt_s,
-        -params.rate_integral_limit_nm,
-        params.rate_integral_limit_nm,
+        -params.rate_integral_limit,
+        params.rate_integral_limit,
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
@@ -586,14 +494,11 @@ def _rate_to_omega(
         hover_thrust_normalized=controller_state.hover_thrust_normalized,
         initialized=True,
     )
-    if params.normalized_allocator:
-        omega = _normalized_controls_to_omega(
-            params,
-            collective_thrust,
-            body_torque,
-        )
-    else:
-        omega = _wrench_to_omega(params, collective_thrust, body_torque)
+    omega = _normalized_controls_to_omega(
+        params,
+        collective_thrust,
+        normalized_torque,
+    )
     return successor, omega
 
 
@@ -645,49 +550,29 @@ def _velocity_action_to_omega(
         + controller_state.velocity_integral_enu
         - params.kd_vel * acceleration
     )
-    if params.normalized_allocator:
-        hover_thrust_normalized = (
-            controller_state.hover_thrust_normalized
-            if controller_state.hover_thrust_normalized > 0.0
-            else params.hover_thrust_normalized
-        )
-        thrust_world, integration_error = _normalized_thrust_world(
-            params=params,
-            hover_thrust_normalized=hover_thrust_normalized,
-            desired_acceleration=desired_acceleration,
-            velocity_error=velocity_error,
-            horizontal_proportional_gain=float(effective_kp_vel[0]),
-        )
-        velocity_integral = (
-            controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
-        )
-    else:
-        thrust_world, achieved_acceleration = _limited_thrust_world(
-            params=params,
-            desired_acceleration=desired_acceleration,
-        )
-        saturation_error = achieved_acceleration - desired_acceleration
-        may_integrate = (np.abs(saturation_error) < _SATURATION_EPS) | (
-            velocity_error * saturation_error >= 0.0
-        )
-        velocity_integral = np.where(
-            may_integrate,
-            controller_state.velocity_integral_enu + params.ki_vel * velocity_error * dt_s,
-            controller_state.velocity_integral_enu,
-        )
+    hover_thrust_normalized = (
+        controller_state.hover_thrust_normalized
+        if controller_state.hover_thrust_normalized > 0.0
+        else params.hover_thrust_normalized
+    )
+    thrust_world, integration_error = _normalized_thrust_world(
+        params=params,
+        hover_thrust_normalized=hover_thrust_normalized,
+        desired_acceleration=desired_acceleration,
+        velocity_error=velocity_error,
+        horizontal_proportional_gain=float(effective_kp_vel[0]),
+    )
+    velocity_integral = (
+        controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
+    )
     velocity_integral = np.clip(
         velocity_integral,
         -params.velocity_integral_limit_mps2,
         params.velocity_integral_limit_mps2,
     )
-    if params.normalized_allocator:
-        # PX4's attitude-setpoint boundary preserves the desired normalized
-        # thrust magnitude while the attitude loop rotates the vehicle toward
-        # its direction. It does not project thrust onto the current body Z.
-        collective = float(np.linalg.norm(thrust_world))
-    else:
-        body_z = rotation[:, 2]
-        collective = max(float(thrust_world @ body_z), 0.0)
+    # PX4's attitude-setpoint boundary preserves the desired normalized thrust
+    # magnitude while the attitude loop rotates toward its direction.
+    collective = float(np.linalg.norm(thrust_world))
 
     desired_z = _clamp_tilt(thrust_world, params.max_tilt_rad)
     heading_x = np.array([np.cos(yaw), np.sin(yaw), 0.0])
@@ -715,9 +600,7 @@ def _velocity_action_to_omega(
             controller_state.angular_acceleration_body_flu
         ),
         rate_integral_body_flu=_readonly_copy(controller_state.rate_integral_body_flu),
-        hover_thrust_normalized=hover_thrust_normalized
-        if params.normalized_allocator
-        else controller_state.hover_thrust_normalized,
+        hover_thrust_normalized=hover_thrust_normalized,
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
@@ -731,9 +614,8 @@ def _velocity_action_to_omega(
 
 
 def _ctbr_collective(params: ActuationParams, thrust_command: float) -> float:
-    """Map a normalized thrust command to collective thrust (N), hover-centered."""
-    fraction = np.clip(params.hover_thrust_fraction * (1.0 + thrust_command), 0.0, 1.0)
-    return float(fraction * params.max_total_thrust)
+    """Map a normalized thrust command to normalized hover-centered collective."""
+    return float(np.clip(params.hover_thrust_normalized * (1.0 + thrust_command), 0.0, 1.0))
 
 
 def _ctbr_action_to_omega(
@@ -748,7 +630,7 @@ def _ctbr_action_to_omega(
 
     The inner rate loop of the ``velocity`` cascade; the attitude/velocity outer
     loops are the policy's job. ``action[0]`` maps to collective thrust centered
-    on ``hover_thrust_fraction`` (``action[0] = 0`` -> hover fraction),
+    on aligned normalized hover thrust (``action[0] = 0`` -> hover),
     ``action[1:]`` to the body-rate setpoint.
     """
     collective = _ctbr_collective(params, float(action[0]))
@@ -815,6 +697,8 @@ def build_actuation_params(
         raise ValueError(
             f"unsupported rl.action.kind={kind!r}; implemented levels are 'velocity' and 'ctbr'"
         )
+    if not 0.0 < controller_settings.hover_thrust_normalized <= 1.0:
+        raise ValueError("controller hover_thrust_normalized must be in (0, 1]")
     frozen_geometry = MixerGeometry(
         positions_body=_readonly_copy(geometry.positions_body),
         rot_dir=_readonly_copy(geometry.rot_dir),
@@ -826,8 +710,6 @@ def build_actuation_params(
         input_scaling=_readonly_copy(geometry.input_scaling),
         zero_position_armed=_readonly_copy(geometry.zero_position_armed),
     )
-    allocation_pinv = np.linalg.pinv(_allocation_matrix(frozen_geometry))
-    allocation_pinv.setflags(write=False)
     normalized_allocation_mix = _normalized_allocation_mix(frozen_geometry)
     normalized_allocation_mix.setflags(write=False)
     return ActuationParams(
@@ -835,24 +717,14 @@ def build_actuation_params(
         action_dim=4,
         mass=float(mass),
         geometry=frozen_geometry,
-        allocation_pinv=allocation_pinv,
         normalized_allocation_mix=normalized_allocation_mix,
-        normalized_allocator=kind == "velocity"
-        and controller_settings.hover_thrust_normalized > 0.0,
-        max_total_thrust=_max_total_thrust(frozen_geometry),
         kp_rate=_readonly_copy(controller_settings.kp_rate),
         ki_rate=_readonly_copy(controller_settings.ki_rate),
         kd_rate=_readonly_copy(controller_settings.kd_rate),
         kff_rate=_readonly_copy(controller_settings.kff_rate),
-        rate_output_scale_nm=_readonly_copy(controller_settings.rate_output_scale_nm),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
-        rate_integral_limit_nm=_readonly_copy(controller_settings.rate_integral_limit_nm),
+        rate_integral_limit=_readonly_copy(controller_settings.rate_integral_limit),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
-        hover_thrust_fraction=float(
-            controller_settings.hover_thrust_fraction
-            if kind == "velocity"
-            else action_cfg.hover_thrust_fraction
-        ),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
@@ -886,11 +758,6 @@ def build_actuation_params(
 
 def hover_action(params: ActuationParams) -> np.ndarray:
     """A normalized action that holds a level hover (weight-canceling)."""
-    if params.kind == "ctbr":
-        hover_collective = params.mass * GRAVITY_M_S2
-        hover_fraction_target = hover_collective / params.max_total_thrust
-        thrust_command = hover_fraction_target / params.hover_thrust_fraction - 1.0
-        return np.array([thrust_command, 0.0, 0.0, 0.0], dtype=np.float64)
     return np.zeros(params.action_dim, dtype=np.float64)
 
 
@@ -947,10 +814,10 @@ def seed_actuation_controller_state(
     rate_integral = vector(rate_integral_body_flu, "rate_integral_body_flu")
     if (
         not math.isfinite(hover_thrust_normalized)
-        or hover_thrust_normalized < 0.0
+        or hover_thrust_normalized <= 0.0
         or hover_thrust_normalized > 1.0
     ):
-        raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
+        raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
     velocity_error = -velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
@@ -967,8 +834,8 @@ def seed_actuation_controller_state(
         rate_integral_body_flu=_readonly_copy(
             np.clip(
                 rate_integral,
-                -params.rate_integral_limit_nm,
-                params.rate_integral_limit_nm,
+                -params.rate_integral_limit,
+                params.rate_integral_limit,
             )
         ),
         hover_thrust_normalized=float(hover_thrust_normalized),

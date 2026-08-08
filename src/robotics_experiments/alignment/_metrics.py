@@ -11,9 +11,7 @@ from robotics_experiments.alignment._models import MetricFunction, MetricResult,
 
 __all__: list[str] = []
 
-_V1_METRIC = "worst-axis-validation-velocity-nrmse-v1"
-_V2_METRIC = "policy-execution-controller-quality-v2"
-_V3_METRIC = "policy-execution-controller-quality-v3"
+_CONTROLLER_QUALITY_METRIC = "controller-quality"
 _STOP_SPEED_MPS = 0.01
 _METRICS: dict[str, MetricFunction] = {}
 _QUALITY_LIMITS = (
@@ -21,6 +19,7 @@ _QUALITY_LIMITS = (
     ("residual_speed_error_mps", 0.01),
     ("stop_time_error_s", 0.10),
     ("worst_axis_velocity_nrmse", 0.10),
+    ("vertical_policy_envelope_nrmse", 0.10),
     ("yaw_rate_nrmse", 0.10),
     ("heading_error_deg", 3.0),
     ("combined_endpoint_error_m", 0.01),
@@ -161,6 +160,8 @@ def _split_metrics(
     stop_time_errors: list[float] = []
     overshoots: list[float] = []
     settling_errors: list[float] = []
+    vertical_policy_errors: list[np.ndarray] = []
+    vertical_policy_references: list[np.ndarray] = []
     for name, reference in reference_by_name.items():
         if reference.split != split:
             continue
@@ -187,6 +188,9 @@ def _split_metrics(
             overshoots.append(max(target_peak - reference_peak, 0.0))
             tail = max(1, len(reference_velocity) // 10)
             settling_errors.append(float(np.sqrt(np.mean(np.square(error[-tail:, axis_index])))))
+            if reference.profile == "validation-vertical-policy-envelope":
+                vertical_policy_errors.append(np.square(error[:, axis_index]))
+                vertical_policy_references.append(reference_velocity[:, axis_index])
         reference_rate = np.asarray(
             reference.angular_velocity_body_flu_radps,
             dtype=np.float64,
@@ -251,6 +255,15 @@ def _split_metrics(
     metrics["worst_axis_velocity_nrmse"] = max(
         metrics[f"{axis}_velocity_nrmse"] for axis in ("x", "y", "z")
     )
+    if split == "validation":
+        if not vertical_policy_errors:
+            raise ValueError("probe suite has no validation vertical policy-envelope trace")
+        vertical_rmse = float(np.sqrt(np.mean(np.concatenate(vertical_policy_errors))))
+        vertical_values = np.concatenate(vertical_policy_references)
+        vertical_scale = max(float(np.max(vertical_values) - np.min(vertical_values)), 1e-9)
+        metrics["vertical_policy_envelope_nrmse"] = vertical_rmse / vertical_scale
+    else:
+        metrics["vertical_policy_envelope_nrmse"] = 0.0
     if yaw_errors:
         yaw_rmse = float(np.sqrt(np.mean(np.concatenate(yaw_errors))))
         yaw_values = np.concatenate(yaw_references)
@@ -384,6 +397,4 @@ def _finite_metric_result(*, result: MetricResult) -> bool:
     return all(math.isfinite(value) for value in values)
 
 
-register_metric(name=_V1_METRIC, metric=_worst_axis_velocity_nrmse)
-register_metric(name=_V2_METRIC, metric=_metric_result)
-register_metric(name=_V3_METRIC, metric=_feasibility_metric_result)
+register_metric(name=_CONTROLLER_QUALITY_METRIC, metric=_feasibility_metric_result)

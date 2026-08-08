@@ -1,4 +1,4 @@
-"""Fit, finalize, or migrate one controller-alignment bundle."""
+"""Fit or finalize one controller-alignment bundle."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from robotics_experiments.alignment import (
 )
 from robotics_experiments.alignment._artifact import (
     finalize_alignment_bundle,
-    migrate_v6_alignment,
     publish_controller,
     write_alignment_result,
 )
@@ -45,23 +44,7 @@ def main() -> None:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--finalize", action="store_true")
-    parser.add_argument("--migrate-v6-source", type=Path)
     args = parser.parse_args()
-    if args.migrate_v6_source is not None:
-        if (
-            args.run_id is None
-            or args.finalize
-            or args.target is not None
-            or args.reference is not None
-        ):
-            parser.error("migration requires --run-id and forbids fit/finalize options")
-        migrate_v6_alignment(
-            source_dir=args.migrate_v6_source,
-            run_dir=args.run_dir,
-            run_id=args.run_id,
-        )
-        print(f"migrated controller bundle {args.run_dir}")
-        return
     if args.finalize:
         finalize_alignment_bundle(run_dir=args.run_dir)
         publish_controller(run_dir=args.run_dir)

@@ -230,17 +230,16 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
-    assert training.controller_artifact == ".build/alignment/x500-velocity-px4-v7/best"
+    assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
-    assert training.training_mode == "scratch"
     assert config.rl.press.curriculum_stage == "approach"
-    assert training.max_iterations == 121
-    assert training.learning_rate == 1.0e-4
-    assert training.entropy_coef == 0.0001
-    assert training.save_interval == 30
-    assert training.schedule == "fixed"
+    assert tuple(phase.iterations for phase in training.phases) == (121, 11)
+    assert tuple(phase.learning_rate for phase in training.phases) == (1.0e-4, 3.0e-5)
+    assert tuple(phase.entropy_coef for phase in training.phases) == (0.0001, 0.0)
+    assert tuple(phase.save_interval for phase in training.phases) == (30, 1)
+    assert tuple(phase.hard_case_fraction for phase in training.phases) == (0.0, 0.3)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
@@ -278,48 +277,10 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
-    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality-v3"
+    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality"
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
-
-
-def test_press_approach_finetune_config_uses_rate_pilot_actor_only_recipe():
-    from robotics_experiments.config import load_config
-
-    config = load_config(_ROOT / "train_press_approach_quad_finetune.yaml")
-
-    assert config.rl.training.training_mode == "actor-only"
-    assert config.rl.training.max_iterations == 15
-    assert config.rl.training.learning_rate == 3.0e-5
-    assert config.rl.training.entropy_coef == 0.0
-    assert config.rl.training.save_interval == 5
-    assert config.rl.training.schedule == "fixed"
-    assert config.rl.press.policy.actor.initial_noise_std == 0.01
-    assert config.rl.press.reward.flight_failure_weight == 300.0
-    assert config.rl.press.reward.velocity_tracking_weight == 300.0
-    assert config.rl.press.training_reset.hard_case_fraction == 0.5
-    reference = config.rl.press.goal.velocity_reference
-    assert reference.range_center_m == 0.415
-    assert reference.wall_normal_max_mps == 0.04
-    assert config.rl.press.goal.range_min_m == 0.40
-    assert config.rl.press.goal.range_max_m == 0.42
-
-
-def test_press_approach_safety_config_resumes_full_state_with_targeted_recipe():
-    from robotics_experiments.config import load_config
-
-    config = load_config(_ROOT / "train_press_approach_quad_safety.yaml")
-
-    assert config.rl.training.training_mode == "resume"
-    assert config.rl.training.max_iterations == 11
-    assert config.rl.training.learning_rate == 3.0e-5
-    assert config.rl.training.entropy_coef == 0.0
-    assert config.rl.training.save_interval == 1
-    assert config.rl.training.schedule == "fixed"
-    assert config.rl.press.training_reset.hard_case_fraction == 0.3
-    assert config.rl.press.reward.flight_failure_weight == 300.0
-    assert config.rl.press.reward.velocity_tracking_weight == 300.0
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():
@@ -429,8 +390,23 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
             "controller_artifact must be non-empty",
         ),
         (
-            {"rl": {"training": {"training_mode": "unknown"}}},
-            "training_mode",
+            {
+                "rl": {
+                    "training": {
+                        "phases": [
+                            {
+                                "iterations": 1,
+                                "save_interval": 1,
+                                "learning_rate": 1.0e-4,
+                                "schedule": "unknown",
+                                "entropy_coef": 0.0,
+                                "hard_case_fraction": 0.0,
+                            }
+                        ]
+                    }
+                }
+            },
+            "schedule",
         ),
         (
             {"rl": {"press": {"policy": {"actor": {"output_initialization": "task-controller"}}}}},

@@ -68,6 +68,7 @@ def _press_training_entry_state_from_unit_samples(
     unit_samples: torch.Tensor,
     gate: HandoffGate,
     training_reset: PressApproachTrainingResetConfig,
+    hard_case_fraction: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Mix the full handoff envelope with the configured hard-case annulus."""
     if unit_samples.ndim != 2 or unit_samples.shape[1] != 10:
@@ -91,7 +92,7 @@ def _press_training_entry_state_from_unit_samples(
         (radius * torch.cos(angle), radius * torch.sin(angle)),
         dim=-1,
     )
-    hard_case = unit_samples[:, 9] < training_reset.hard_case_fraction
+    hard_case = unit_samples[:, 9] < hard_case_fraction
     return (
         torch.where(hard_case, hard_wall_normal, wall_normal),
         torch.where(hard_case[:, None], hard_lateral_vertical, lateral_vertical),

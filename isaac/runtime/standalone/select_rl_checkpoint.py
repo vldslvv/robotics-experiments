@@ -46,7 +46,7 @@ from robotics_experiments.workflows.isaac_lab import (
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _REPORT_FILENAME = "checkpoint_selection.json"
-_REPORT_SCHEMA_VERSION = 7
+_REPORT_SCHEMA_VERSION = 1
 
 
 class _ActorCritic(Protocol):
@@ -276,7 +276,7 @@ def _selection_report(
             "collision_rate_max": float(evaluation_config.collision_rate_max),
             "min_closest_range_m": goal_range_min_m,
         }
-        if policy_interface == "press-v1"
+        if policy_interface == "press-approach"
         else None
     )
     evaluated = {evaluation.candidate.iteration: evaluation for evaluation in selection.evaluations}
@@ -340,7 +340,7 @@ def _select_candidates(
 ) -> CheckpointSelection:
     scorer = None
     selection_method = "final-no-scorer"
-    if policy_interface == "press-v1":
+    if policy_interface == "press-approach":
 
         def score_press(
             scorer_candidates: tuple[CheckpointCandidate, ...],
@@ -450,7 +450,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
     contract = policy_metadata.contract
     comparison_fingerprint = _press_comparison_fingerprint(config=config, contract=contract)
     if (
-        contract.policy_interface is PolicyInterface.PRESS_V1
+        contract.policy_interface is PolicyInterface.PRESS_APPROACH
         and contract.curriculum_stage != config.rl.press.curriculum_stage
     ):
         raise ValueError(
@@ -459,7 +459,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         )
     candidates = enumerate_checkpoints(logs_dir=run_dir / "logs")
     evaluation = config.rl.press.evaluation
-    is_press = contract.policy_interface is PolicyInterface.PRESS_V1
+    is_press = contract.policy_interface is PolicyInterface.PRESS_APPROACH
     seeds = tuple(int(seed) for seed in evaluation.seeds) if is_press else ()
     env_seed = seeds[0] if seeds else int(training_config.seed)
     num_envs = evaluation.episodes_per_seed if is_press else 1
@@ -486,6 +486,7 @@ def _run(*, config: ExperimentConfig, run_id: str) -> CheckpointSelection:
         runner = training.build_runner(
             env=env,
             training_config=training_config,
+            phase=training_config.phases[0],
             policy_config=env_cfg.policy_config,
             log_dir=str(run_dir / "selection"),
             device=device,

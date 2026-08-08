@@ -17,7 +17,7 @@ from robotics_experiments.rl import (
 
 def _contract(*, action_kind: str) -> PolicyContract:
     return PolicyContract(
-        policy_interface=PolicyInterface.HOVER_V1,
+        policy_interface=PolicyInterface.HOVER,
         obs_schema_version=1,
         obs_dim=13,
         policy_rate_hz=20.0,
@@ -26,7 +26,7 @@ def _contract(*, action_kind: str) -> PolicyContract:
         max_body_velocity_mps=3.0,
         max_yaw_rate_radps=1.5,
         max_body_rate_radps=6.0,
-        hover_thrust_fraction=0.4,
+        hover_thrust_normalized=0.57,
     )
 
 
@@ -48,7 +48,7 @@ def test_ctbr_action_maps_thrust_and_body_rates():
         _contract(action_kind="ctbr"),
     )
 
-    assert setpoint.thrust == pytest.approx(0.4 * 1.2)
+    assert setpoint.thrust == pytest.approx(0.57 * 1.2)
     assert setpoint.roll_rate_radps == pytest.approx(0.6)  # +x FLU == +x FRD
     assert setpoint.pitch_rate_radps == pytest.approx(0.6)  # +y FLU -> -y FRD
     assert setpoint.yaw_rate_radps == pytest.approx(-1.8)  # +z FLU -> -z FRD

@@ -134,7 +134,7 @@ def make_switch_press_env_cfg(
         action_space=action_dim,
         observation_schema_version=OBSERVATION_SCHEMA_VERSION,
         observation_space=PRESS_OBSERVATION_DIM,
-        policy_interface="press-v1",
+        policy_interface="press-approach",
         policy_config=rl.press.policy,
         use_training_reset_distribution=use_training_reset_distribution,
         state_space=0,
@@ -236,6 +236,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             action=self.actions,
         )
         self._task_result: PressApproachResult[torch.Tensor] | None = None
+        self._training_hard_case_fraction = float(
+            self._experiment_config.rl.press.training_reset.hard_case_fraction
+        )
         self._physics_substep_index = 0
         self._body_collision_latch = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -243,6 +246,12 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
+
+    def set_training_hard_case_fraction(self, fraction: float, /) -> None:
+        """Change the reset mixture at an in-run curriculum boundary."""
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("training hard-case fraction must be between 0 and 1")
+        self._training_hard_case_fraction = float(fraction)
         self._collision_episode_count = torch.zeros((), device=self.device)
         self._body_collision_episode_count = torch.zeros((), device=self.device)
         self._pusher_collision_episode_count = torch.zeros((), device=self.device)
@@ -488,6 +497,7 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                     unit_samples=torch.rand((count, 10), device=self.device),
                     gate=handoff_gate,
                     training_reset=self._experiment_config.rl.press.training_reset,
+                    hard_case_fraction=self._training_hard_case_fraction,
                 )
             )
         else:

@@ -1,4 +1,4 @@
-"""Stable press-policy comparison fingerprint shared by selection and resume."""
+"""Stable press-policy comparison fingerprint shared by training and selection."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _press_comparison_fingerprint(
     config: ExperimentConfig,
     contract: PolicyContract,
 ) -> str | None:
-    if contract.policy_interface is not PolicyInterface.PRESS_V1:
+    if contract.policy_interface is not PolicyInterface.PRESS_APPROACH:
         return None
     vehicle_label, vehicle = next(
         (label, item)

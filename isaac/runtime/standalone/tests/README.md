@@ -11,7 +11,7 @@ own test module when it has real standalone coverage to add, for example
 
 `test_press_hover_goto.py` is the exception to the `_runtime.py` pattern: it is
 the F1 in-Lab actuation gate and exercises the Isaac Lab `DirectRLEnv` surface
-(`Isaac-Drone-Hover-Direct-v0`), not the single-env `IsaacArticulationIO`, so it
+(`Isaac-Drone-Hover-Direct-v1`), not the single-env `IsaacArticulationIO`, so it
 launches its own `AppLauncher` and builds the env directly. It drives the env's
 `velocity` action with an analytic outer position controller (no RL) and asserts
 every parallel env holds a hover (< 0.1 m) then tracks a 2 m goto (< 0.2 m) for
@@ -128,7 +128,7 @@ completion.
 `make test-integration-press-approach-routine` runs the artifact-dependent
 Stage 1 mission in `configs/policy_press_approach_quad.yaml`: takeoff, navigate
 to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
-move into the 0.48 m handoff range at 0.08 m/s, execute the `press-v1` /
+move into the 0.48 m handoff range at 0.08 m/s, execute the `press-approach` /
 `approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
 and disarm. The strict hook requires stable contact-free completion and no lamp
 transition. Run it only after selection

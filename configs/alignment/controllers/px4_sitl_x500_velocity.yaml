@@ -1,6 +1,6 @@
-alignment_id: x500-velocity-px4-v7
-controller_id: px4-sitl-x500-velocity-v6
-controller_schema_version: 6
+alignment_id: x500-px4-v1
+controller_id: px4-sitl-x500-v1
+controller_schema_version: 1
 backend: px4-sitl
 experiment_config: configs/alignment_px4_x500_velocity.yaml
 vehicle: x500_01
@@ -9,7 +9,7 @@ image: vv-px4-sitl
 command_rate_hz: 20.0
 
 command_interface:
-  kind: body-flu-velocity-yaw-rate-v1
+  kind: body-flu-velocity-yaw-rate
   dimension: 4
   frame: body-flu
   linear_scale_mps: 3.0
@@ -20,8 +20,7 @@ command_interface:
 settings:
   command_delay_s: 0.0
   kp_vel: [1.8, 1.8, 4.0]
-  # PX4 does not use the Lab-only large-error schedule during reference
-  # capture. Neutral values keep the complete schema-6 settings contract.
+  # PX4 does not use the Lab-only large-error schedule during reference capture.
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
@@ -31,9 +30,7 @@ settings:
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
-  # Physical collective fraction of the composed X500's maximum thrust.
-  hover_thrust_fraction: 0.375
-  # Seed for the normalized PX4 thrust boundary used by the schema-5 target.
+  # Seed for the normalized PX4 thrust boundary.
   hover_thrust_normalized: 0.57
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
@@ -41,10 +38,8 @@ settings:
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
-  # Legacy-only physical torque scale; inactive in the schema-5 target.
-  rate_output_scale_nm: [6.5, 6.5, 1.3]
   rate_derivative_filter_hz: 20.0
-  rate_integral_limit_nm: [0.30, 0.30, 0.30]
+  rate_integral_limit: [0.30, 0.30, 0.30]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
@@ -54,18 +49,19 @@ settings:
   thruster_max_thrust_rate_nps: 100000.0
 
 search:
-  strategy: staged-beam-v2
+  strategy: coarse-to-fine-beam
   beam_width: 32
   passes_per_stage: 2
   refinement_levels: 0
   min_refinement_survivors: 2
 
 parameters: []
-selection_metric: policy-execution-controller-quality-v3
+selection_metric: controller-quality
 publication_metrics:
   - velocity_rmse_mps
   - acceleration_rmse_mps2
   - worst_axis_velocity_nrmse
+  - vertical_policy_envelope_nrmse
   - braking_distance_error_m
   - residual_speed_error_mps
   - stop_time_error_s
@@ -149,6 +145,16 @@ probes:
       - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
       - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
       - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: validation-vertical-policy-envelope
+    split: validation
+    axis: z
+    commands:
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.40], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
+      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+      - {velocity_body_flu_mps: [0.0, 0.0, -0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
       - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
   - name: validation-yaw-ramp-reversal
     split: validation

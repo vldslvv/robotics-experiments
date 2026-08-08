@@ -140,7 +140,7 @@ def make_drone_hover_env_cfg(
         action_space=action_dim,
         observation_schema_version=HOVER_OBSERVATION_SCHEMA_VERSION,
         observation_space=HOVER_OBSERVATION_DIM,
-        policy_interface="hover-v1",
+        policy_interface="hover",
         policy_config=experiment_config.rl.hover.policy,
         state_space=0,
         sim=SimulationCfg(

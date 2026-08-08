@@ -14,9 +14,7 @@ import pytest
 import robotics_experiments.alignment._artifact as artifact_module
 from robotics_experiments.alignment import (
     ControllerDefinition,
-    ControllerSettings,
     align,
-    load_controller_artifact,
     load_controller_definition,
 )
 from robotics_experiments.alignment._align import (
@@ -25,9 +23,9 @@ from robotics_experiments.alignment._align import (
 )
 from robotics_experiments.alignment._artifact import (
     _compress_file,
+    _require_passed_diagnostic,
     finalize_alignment_bundle,
     load_selection,
-    migrate_v6_alignment,
     validate_alignment_bundle,
     write_alignment_result,
 )
@@ -35,15 +33,6 @@ from robotics_experiments.alignment._io import (
     _index_candidate_diagnostics,
     _trace,
     _TraceFileEvaluator,
-)
-from robotics_experiments.alignment._io import (
-    _load_v6_alignment_for_migration as load_alignment_artifact,
-)
-from robotics_experiments.alignment._io import (
-    _publish_legacy_alignment as publish_alignment,
-)
-from robotics_experiments.alignment._io import (
-    _write_legacy_alignment_artifact as write_alignment_artifact,
 )
 from robotics_experiments.alignment._metrics import (
     _braking_events,
@@ -60,6 +49,7 @@ from robotics_experiments.alignment._models import (
     ProbeTrace,
     SearchSpec,
 )
+from robotics_experiments.controller import ControllerSettings, load_controller_artifact
 from tests.support.paths import REPO_ROOT
 
 _ZERO3 = (0.0, 0.0, 0.0)
@@ -83,7 +73,6 @@ def _settings(
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
-        hover_thrust_fraction=0.5,
         hover_thrust_normalized=0.57,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
@@ -91,9 +80,8 @@ def _settings(
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.01, 0.01, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
-        rate_output_scale_nm=(1.0, 1.0, 1.0),
         rate_derivative_filter_hz=30.0,
-        rate_integral_limit_nm=(0.3, 0.3, 0.2),
+        rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
         max_collective_thrust_fraction=1.0,
@@ -114,7 +102,11 @@ def _profiles() -> tuple[ProbeProfile, ...]:
             negative[axis_index] = -amplitude * 0.5
             profiles.append(
                 ProbeProfile(
-                    name=f"{split}-{axis}",
+                    name=(
+                        "validation-vertical-policy-envelope"
+                        if split == "validation" and axis == "z"
+                        else f"{split}-{axis}"
+                    ),
                     split=split,
                     axis=axis,
                     commands=(
@@ -248,20 +240,20 @@ def _definition(
     backend: str,
     evaluator: _Evaluator,
     parameters: tuple[ParameterSpec, ...] = (),
-    metric_name: str = "worst-axis-validation-velocity-nrmse-v1",
+    metric_name: str = "controller-quality",
 ) -> ControllerDefinition:
     experiment = REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml"
     return ControllerDefinition(
         alignment_id="synthetic",
         controller_id=f"{backend}-controller",
-        controller_schema_version=6,
+        controller_schema_version=1,
         backend=backend,
         experiment_config=str(experiment),
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
         command_interface=CommandInterface(
-            kind="body-flu-velocity-yaw-rate-v1",
+            kind="body-flu-velocity-yaw-rate",
             dimension=4,
             frame="body-flu",
             linear_scale_mps=3.0,
@@ -271,7 +263,7 @@ def _definition(
         probes=_profiles(),
         parameters=parameters,
         search=SearchSpec(
-            strategy="staged-beam-v1",
+            strategy="coarse-to-fine-beam",
             beam_width=8,
             passes_per_stage=2,
         ),
@@ -288,20 +280,20 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
     )
     assert target.backend == "isaac-lab"
-    assert target.alignment_id == "x500-velocity-px4-v7"
-    assert target.controller_schema_version == 6
+    assert target.alignment_id == "x500-px4-v1"
+    assert target.controller_schema_version == 1
     assert target.base_settings.command_delay_s == pytest.approx(0.0725)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.34)
     assert target.base_settings.ki_vel == pytest.approx((0.35, 0.35, 1.5))
     assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
-    assert target.search.strategy == "staged-beam-v2"
-    assert target.search.beam_width == 1
+    assert target.search.strategy == "coarse-to-fine-beam"
+    assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
-    assert target.search.refinement_levels == 0
+    assert target.search.refinement_levels == 2
     assert target.search.initial_settings == ()
-    assert target.parameters == ()
+    assert target.parameters
     extended = replace(
         target,
         parameters=(
@@ -313,7 +305,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert extended.parameters[-1].candidates == (20.0, 30.0)
 
 
-def test_legacy_trace_loads_with_zero_controller_boundary() -> None:
+def test_trace_requires_complete_controller_boundary() -> None:
     raw = json.loads(
         json.dumps(
             asdict(
@@ -334,14 +326,8 @@ def test_legacy_trace_loads_with_zero_controller_boundary() -> None:
     ):
         raw.pop(field)
 
-    trace = _trace(value=raw, name="legacy")  # noqa: SLF001 - legacy trace contract
-
-    assert not trace.initial_controller_state_valid
-    assert trace.initial_acceleration_setpoint_enu_mps2 == _ZERO3
-    assert trace.initial_linear_acceleration_enu_mps2 == _ZERO3
-    assert trace.initial_angular_acceleration_body_flu_radps2 == _ZERO3
-    assert trace.initial_rate_integral_body_flu == _ZERO3
-    assert trace.initial_hover_thrust_normalized == 0.0
+    with pytest.raises(ValueError, match="fields"):
+        _trace(value=raw, name="trace")  # noqa: SLF001 - trace contract
 
 
 def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
@@ -419,7 +405,7 @@ def test_staged_beam_search_is_deterministic() -> None:
     assert first.controller.selected_settings == second.controller.selected_settings
 
 
-def test_staged_beam_v2_retains_per_objective_champions() -> None:
+def test_beam_retains_per_objective_champions() -> None:
     name = "test-diverse-beam-v1"
 
     def diverse_metric(reference, target, /):
@@ -450,7 +436,7 @@ def test_staged_beam_v2_retains_per_objective_champions() -> None:
             metric_name=name,
         ),
         search=SearchSpec(
-            strategy="staged-beam-v2",
+            strategy="coarse-to-fine-beam",
             beam_width=2,
             passes_per_stage=1,
         ),
@@ -515,16 +501,22 @@ def test_staged_beam_search_batches_without_changing_deterministic_order() -> No
     assert max(batch_evaluator.batch_sizes) > 1
 
 
-def test_effective_key_aliases_schema_inactive_settings_and_stops_fixed_point() -> None:
+def test_effective_key_aliases_float32_equivalent_settings_and_stops_fixed_point() -> None:
     evaluator = _BatchEvaluator()
     target = replace(
         _definition(
             backend="isaac-lab",
             evaluator=evaluator,
-            parameters=(ParameterSpec("hover_thrust_fraction", 1, (0.4, 0.6)),),
+            parameters=(
+                ParameterSpec(
+                    "hover_thrust_normalized",
+                    1,
+                    (0.5700000001, 0.5700000002),
+                ),
+            ),
         ),
         search=SearchSpec(
-            strategy="staged-beam-v2",
+            strategy="coarse-to-fine-beam",
             beam_width=8,
             passes_per_stage=3,
         ),
@@ -676,7 +668,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
     path.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 1,
                 "controller_id": definition.controller_id,
                 "definition_fingerprint": definition.definition_fingerprint,
                 "image": definition.image,
@@ -727,7 +719,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
     assert index_count == 1
 
 
-def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:
+def test_controller_quality_reports_braking_distance_and_residual_speed_error() -> None:
     settings = _settings(kp=(1.0, 1.0, 1.0))
     reference = _response_traces(profiles=_profiles(), settings=settings)
     trace_index = next(
@@ -758,7 +750,7 @@ def test_v2_metric_reports_braking_distance_and_residual_speed_error() -> None:
     )
     target = (*reference[:trace_index], modified, *reference[trace_index + 1 :])
 
-    result = metric(name="policy-execution-controller-quality-v2")(
+    result = metric(name="controller-quality")(
         reference,
         target,
     )
@@ -808,7 +800,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     assert events[0][-1] == 0.1
 
 
-def test_v3_metric_prioritizes_gate_feasibility_and_includes_stop_time(
+def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     validation = {
@@ -816,6 +808,7 @@ def test_v3_metric_prioritizes_gate_feasibility_and_includes_stop_time(
         "residual_speed_error_mps": 0.009,
         "stop_time_error_s": 0.20,
         "worst_axis_velocity_nrmse": 0.09,
+        "vertical_policy_envelope_nrmse": 0.09,
         "yaw_rate_nrmse": 0.09,
         "heading_error_deg": 2.0,
         "combined_endpoint_error_m": 0.009,
@@ -874,52 +867,6 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
     assert align(target, reference).controller.selected_settings.kp_vel == (3.0, 1.0, 1.0)
 
 
-def _obsolete_artifact_publication_tracks_latest_best_and_comparable_generation(
-    tmp_path: Path,
-) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=known),
-    )
-    target = _definition(
-        backend="isaac-lab",
-        evaluator=_Evaluator(),
-        parameters=(ParameterSpec("kp_vel", 1, ((1.0, 1.0, 1.0),)),),
-    )
-    root = tmp_path / "alignment" / "synthetic"
-    first = replace(align(target, reference), run_id="first")
-    first_dir = root / "first"
-    write_alignment_artifact(artifact=first, run_dir=first_dir)
-    publish_alignment(artifact=first, run_dir=first_dir)
-
-    worse = replace(
-        first,
-        run_id="second",
-        candidates=(replace(first.candidates[0], ranking_values=(1.0, 1.0, 1.0)),),
-        selected_ranking_values=(1.0, 1.0, 1.0),
-    )
-    second_dir = root / "second"
-    write_alignment_artifact(artifact=worse, run_dir=second_dir)
-    publish_alignment(artifact=worse, run_dir=second_dir)
-    assert (root / "latest").resolve() == second_dir
-    assert (root / "best").resolve() == first_dir
-
-    incompatible = replace(
-        worse,
-        run_id="third",
-        comparison_fingerprint="new-generation",
-        advisory_quality_passed=False,
-        advisory_quality_reasons=("quality is advisory",),
-    )
-    third_dir = root / "third"
-    write_alignment_artifact(artifact=incompatible, run_dir=third_dir)
-    publish_alignment(artifact=incompatible, run_dir=third_dir)
-    loaded = load_alignment_artifact(root / "best")
-    assert loaded.run_id == "third"
-    assert not loaded.advisory_quality_passed
-
-
 def test_experiment_fingerprint_includes_capture_but_excludes_execution(
     tmp_path: Path,
 ) -> None:
@@ -947,197 +894,6 @@ def test_experiment_fingerprint_includes_capture_but_excludes_execution(
 
     assert fingerprints[0] == fingerprints[1]
     assert fingerprints[0] != fingerprints[2]
-
-
-def _obsolete_artifact_loader_rejects_nonfinite_settings(tmp_path: Path) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=known),
-    )
-    target = _definition(
-        backend="isaac-lab",
-        evaluator=_Evaluator(),
-        parameters=(ParameterSpec("kp_vel", 1, ((1.0, 1.0, 1.0),)),),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_artifact(artifact=align(target, reference), run_dir=run_dir)
-    path = run_dir / "alignment.json"
-    payload = json.loads(path.read_text())
-    payload["selected_settings"]["command_delay_s"] = float("nan")
-    payload["candidates"][0]["settings"]["command_delay_s"] = float("nan")
-    path.write_text(json.dumps(payload))
-    with pytest.raises(ValueError, match="finite"):
-        load_alignment_artifact(path)
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("horizontal_velocity_error_gain_scale", 0.9, "must be at least 1"),
-        ("horizontal_velocity_error_gain_start_mps", 0.30, "start < full"),
-    ],
-)
-def _obsolete_artifact_loader_rejects_invalid_horizontal_gain_schedule(
-    tmp_path: Path,
-    field: str,
-    value: float,
-    message: str,
-) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    artifact = align(
-        _definition(backend="isaac-lab", evaluator=_Evaluator()),
-        _definition(
-            backend="px4-sitl",
-            evaluator=_Evaluator(reference_settings=known),
-        ),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_artifact(artifact=artifact, run_dir=run_dir)
-    path = run_dir / "alignment.json"
-    payload = json.loads(path.read_text())
-    payload["selected_settings"][field] = value
-    payload["candidates"][artifact.selected_candidate_index]["settings"][field] = value
-    path.write_text(json.dumps(payload))
-
-    with pytest.raises(ValueError, match=message):
-        load_alignment_artifact(path)
-
-
-def _obsolete_artifact_loader_rejects_v1_without_upgrading_it(tmp_path: Path) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=known),
-    )
-    target = _definition(
-        backend="isaac-lab",
-        evaluator=_Evaluator(),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_artifact(artifact=align(target, reference), run_dir=run_dir)
-    path = run_dir / "alignment.json"
-    payload = json.loads(path.read_text())
-    payload["schema_version"] = 1
-    path.write_text(json.dumps(payload))
-
-    with pytest.raises(ValueError, match="unsupported schema_version=1"):
-        load_alignment_artifact(path)
-
-
-def _obsolete_artifact_schema_v6_and_legacy_controller_mappings(tmp_path: Path) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=known),
-    )
-    target = _definition(backend="isaac-lab", evaluator=_Evaluator())
-    run_dir = tmp_path / "run"
-    artifact = align(target, reference)
-    assert artifact.schema_version == 6
-    write_alignment_artifact(artifact=artifact, run_dir=run_dir)
-    path = run_dir / "alignment.json"
-    payload = json.loads(path.read_text())
-    loaded = load_alignment_artifact(path)
-
-    assert loaded.schema_version == 6
-    assert loaded.selected_settings.hover_thrust_normalized == pytest.approx(0.57)
-    assert loaded.selected_settings.horizontal_velocity_error_gain_scale == 1.0
-
-    payload["schema_version"] = 5
-    for name in (
-        "horizontal_velocity_error_gain_scale",
-        "horizontal_velocity_error_gain_start_mps",
-        "horizontal_velocity_error_gain_full_mps",
-    ):
-        payload["selected_settings"].pop(name)
-        for candidate in payload["candidates"]:
-            candidate["settings"].pop(name)
-    path.write_text(json.dumps(payload))
-
-    loaded = load_alignment_artifact(path)
-
-    assert loaded.schema_version == 5
-    assert loaded.selected_settings.horizontal_velocity_error_gain_scale == 1.0
-    assert loaded.selected_settings.horizontal_velocity_error_gain_start_mps == 0.15
-    assert loaded.selected_settings.horizontal_velocity_error_gain_full_mps == 0.30
-
-    schema5_payload = json.loads(json.dumps(payload))
-    payload["schema_version"] = 4
-    payload["selected_settings"].pop("hover_thrust_normalized")
-    for candidate in payload["candidates"]:
-        candidate["settings"].pop("hover_thrust_normalized")
-    path.write_text(json.dumps(payload))
-
-    loaded = load_alignment_artifact(path)
-
-    assert loaded.schema_version == 4
-    assert loaded.selected_settings.hover_thrust_normalized == 0.0
-
-    schema4_payload = json.loads(json.dumps(payload))
-    payload["schema_version"] = 3
-    payload["selected_settings"].pop("hover_thrust_fraction")
-    for candidate in payload["candidates"]:
-        candidate["settings"].pop("hover_thrust_fraction")
-    path.write_text(json.dumps(payload))
-
-    loaded = load_alignment_artifact(path)
-
-    assert loaded.schema_version == 3
-    assert loaded.selected_settings.hover_thrust_fraction == 0.0
-
-    payload = schema4_payload
-    payload["schema_version"] = 2
-    payload["selected_settings"].pop("rate_output_scale_nm")
-    payload["selected_settings"].pop("hover_thrust_fraction")
-    for candidate in payload["candidates"]:
-        candidate["settings"].pop("rate_output_scale_nm")
-        candidate["settings"].pop("hover_thrust_fraction")
-    path.write_text(json.dumps(payload))
-
-    loaded = load_alignment_artifact(path)
-
-    assert loaded.schema_version == 2
-    assert loaded.selected_settings.rate_output_scale_nm == (1.0, 1.0, 1.0)
-    assert loaded.selected_settings.hover_thrust_fraction == 0.0
-    assert loaded.selected_settings.hover_thrust_normalized == 0.0
-
-    payload = schema5_payload
-    payload["selected_settings"]["hover_thrust_normalized"] = 0.0
-    for candidate in payload["candidates"]:
-        candidate["settings"]["hover_thrust_normalized"] = 0.0
-    path.write_text(json.dumps(payload))
-
-    with pytest.raises(ValueError, match="hover_thrust_normalized must be positive"):
-        load_alignment_artifact(path)
-
-
-def _obsolete_artifact_loader_rejects_unsupported_backend_and_ranking_mismatch(
-    tmp_path: Path,
-) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    reference = _definition(
-        backend="px4-sitl",
-        evaluator=_Evaluator(reference_settings=known),
-    )
-    target = _definition(
-        backend="isaac-lab",
-        evaluator=_Evaluator(),
-    )
-    run_dir = tmp_path / "run"
-    write_alignment_artifact(artifact=align(target, reference), run_dir=run_dir)
-    path = run_dir / "alignment.json"
-    payload = json.loads(path.read_text())
-    payload["target_backend"] = "real-flight"
-    path.write_text(json.dumps(payload))
-    with pytest.raises(ValueError, match="unsupported target/reference backend"):
-        load_alignment_artifact(path)
-
-    payload["target_backend"] = "isaac-lab"
-    payload["selected_ranking_values"][0] += 1.0
-    path.write_text(json.dumps(payload))
-    with pytest.raises(ValueError, match="do not match selected candidate"):
-        load_alignment_artifact(path)
 
 
 def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path) -> None:
@@ -1200,7 +956,7 @@ def test_controller_loader_is_strict_and_rejects_legacy(tmp_path: Path) -> None:
 
     legacy = tmp_path / "alignment.json"
     legacy.write_text("{}")
-    with pytest.raises(ValueError, match="legacy alignment.json"):
+    with pytest.raises(ValueError, match="fields mismatch"):
         load_controller_artifact(legacy)
 
 
@@ -1236,6 +992,14 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
             evaluator=_Evaluator(reference_settings=known),
         ),
     )
+    result = replace(
+        result,
+        controller=replace(
+            result.controller,
+            advisory_quality_passed=True,
+            advisory_quality_reasons=(),
+        ),
+    )
     run_dir = tmp_path / "run"
     write_alignment_result(result=result, run_dir=run_dir)
     for name, payload in {
@@ -1243,8 +1007,8 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
         "reference.ulg": "ulog",
         "bridge.log": "bridge",
         "target_candidates.json": "{}\n",
-        "actuator_audit.json": "{}\n",
-        "controller_boundary_replay.json": "{}\n",
+        "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
+        "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
         "gpu_utilization.json": "{}\n",
         "search_realization.json": "{}\n",
     }.items():
@@ -1286,109 +1050,17 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
         validate_alignment_bundle(run_dir)
 
 
-def test_v6_migration_verifies_source_and_preserves_selection(tmp_path: Path) -> None:
-    known = _settings(kp=(1.0, 1.0, 1.0))
-    result = align(
-        _definition(backend="isaac-lab", evaluator=_Evaluator()),
-        _definition(
-            backend="px4-sitl",
-            evaluator=_Evaluator(reference_settings=known),
-        ),
-    )
-    source = tmp_path / "legacy" / "old"
-    source.mkdir(parents=True)
-    controller = result.controller
-    legacy = {
-        **asdict(controller),
-        "schema_version": 6,
-        "selection_metric": result.selection_metric,
-        "declared_parameters": [asdict(parameter) for parameter in result.declared_parameters],
-        "candidates": [
+def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:
+    report = tmp_path / "diagnostic.json"
+    report.write_text(
+        json.dumps(
             {
-                "index": candidate.index,
-                "settings": asdict(candidate.settings),
-                "usable": candidate.usable,
-                "metrics": dict(candidate.metrics),
-                "ranking_values": list(candidate.ranking_values),
-                "failure_reason": candidate.failure_reason,
+                "schema_version": 1,
+                "passed": False,
+                "failures": ["vertical collective mismatch"],
             }
-            for candidate in result.candidates
-        ],
-        "selected_candidate_index": result.selected_candidate_index,
-        "selected_ranking_values": list(
-            result.candidates[result.selected_candidate_index].ranking_values
-        ),
-        "fit_metrics": {},
-        "validation_metrics": {},
-    }
-    legacy.pop("settings_fingerprint")
-    (source / "alignment.json").write_text(json.dumps(legacy))
-    for name, payload in {
-        "reference.json": "{}\n",
-        "reference.ulg": "ulog",
-        "bridge.log": "bridge",
-        "controller_boundary_replay.json": "{}\n",
-        "gpu_utilization.json": "{}\n",
-        "manifest.json": "{}\n",
-    }.items():
-        (source / name).write_text(payload)
-    audit = {
-        "schema_version": 1,
-        "method": "audit",
-        "config": "config",
-        "reference": "reference.json",
-        "bridge_log": "bridge.log",
-        "airframe": "x500",
-        "composed_mass_kg": 2.0,
-        "limits": {},
-        "passed": True,
-        "failures": [],
-        "profiles": [
-            {
-                "profile": "fit-x",
-                "split": "fit",
-                "axis": "x",
-                "start_sim_time_us": 1,
-                "end_sim_time_us": 2,
-                **{
-                    topic: {"timestamp_us": [1, 2], "values": [[0.0], [0.0]]}
-                    for topic in (
-                        "vehicle_thrust_setpoint",
-                        "vehicle_torque_setpoint",
-                        "actuator_motors",
-                        "hover_thrust_estimate",
-                    )
-                },
-                "bridge": {"actuator_timestamp_us": [1, 2]},
-                "metrics": {"normalized_motor_rmse": 0.0},
-            }
-        ],
-    }
-    (source / "actuator_audit.json").write_text(json.dumps(audit))
-    target = source / "target_candidates.json"
-    target.write_text("{}\n")
-    _compress_file(source=target, destination=source / "target_candidates.json.zst")
-    target.unlink()
-    checksummed = sorted(path for path in source.iterdir() if path.name != "SHA256SUMS")
-    (source / "SHA256SUMS").write_text(
-        "".join(
-            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-            for path in checksummed
         )
     )
-    source_digest = hashlib.sha256((source / "alignment.json").read_bytes()).hexdigest()
-    destination = source.parent / "migrated"
 
-    migrate_v6_alignment(source_dir=source, run_dir=destination, run_id="migrated")
-
-    assert hashlib.sha256((source / "alignment.json").read_bytes()).hexdigest() == source_digest
-    assert not (destination / "alignment.json").exists()
-    migrated_controller = load_controller_artifact(destination)
-    migrated = load_selection(run_dir=destination, controller=migrated_controller)
-    assert migrated.candidates == result.candidates
-    assert migrated_controller.comparison_fingerprint != controller.comparison_fingerprint
-    manifest = json.loads((destination / "manifest.json").read_text())
-    assert manifest["migration"]["legacy_comparison_fingerprint"] == (
-        controller.comparison_fingerprint
-    )
-    assert (destination.parent / "latest").resolve() == destination
+    with pytest.raises(ValueError, match="vertical collective mismatch"):
+        _require_passed_diagnostic(path=report, name="controller boundary replay")

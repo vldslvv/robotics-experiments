@@ -155,7 +155,7 @@ def _merge_target_candidate_spools(
     temporary_path.unlink(missing_ok=True)
     try:
         with temporary_path.open("w", encoding="utf-8") as stream:
-            stream.write('{"schema_version":3,"controller_id":')
+            stream.write('{"schema_version":1,"controller_id":')
             json.dump(controller_id, stream, separators=(",", ":"))
             stream.write(',"definition_fingerprint":')
             json.dump(definition_fingerprint, stream, separators=(",", ":"))

@@ -63,9 +63,8 @@ every smaller batch to its maximum. Each batch uses per-environment gains,
 filters, integrals, and sub-physics-step command delays and starts with fresh
 controller, delay, and
 actuator state, restores every recorded PX4 initial state, then restores the
-schema-4 per-profile PX4 controller boundary before advancing timestamp events
-at each trace's captured physics-step intervals. Legacy traces retain the
-zero-controller-state replay.
+schema-1 per-profile PX4 controller boundary before advancing timestamp events
+at each trace's captured physics-step intervals.
 Each worker scores traces and streams them to a run-local shard. The
 coordinator receives compact metric results, merges evidence by original
 candidate index, and does not accumulate the full trace population in memory.
@@ -75,11 +74,9 @@ throughput beside the run artifacts. Worker sharding stays
 configurable, but the measured default is one process because three processes
 saturate the GPU while materially reducing candidate throughput through
 PhysX contention.
-V2 traces retain position, attitude, body/world velocity, angular velocity, and
-yaw-rate commands in addition to the initial state and cadence. V3 adds the
-absolute PX4 simulation start time. After the ULog is collected, V4 adds the
-velocity acceleration/setpoint and body-rate derivative/integral state at that
-absolute boundary. The PX4 alignment routine ends when its probe policy
+Schema-1 traces retain position, attitude, body/world velocity, angular
+velocity, yaw-rate commands, absolute PX4 simulation start time, and the
+velocity/rate controller boundary at that timestamp. The PX4 alignment routine ends when its probe policy
 completes; teardown stops the ephemeral simulator because landing and
 auto-disarm are outside the controller target.
 Keep their imports in this order; neither runner may import Kit/Isaac Lab at
@@ -88,6 +85,5 @@ module import time.
 `alignment_fit.py` is host-safe and performs no simulator imports. Fit mode
 consumes the two diagnostic trace files and writes `controller.json` plus
 `selection.json.zst` without publishing. Finalize mode validates the complete
-bundle before atomically updating relative `latest`/`best` links. Its explicit
-schema-v6 migration mode verifies the legacy checksum inventory and produces a
-self-contained controller-v1 sibling.
+bundle, including hard quality and boundary diagnostics, before atomically
+updating relative `latest`/`best` links. No migration mode is supported.
