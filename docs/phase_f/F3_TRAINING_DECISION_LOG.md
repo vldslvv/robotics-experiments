@@ -7680,3 +7680,24 @@ defaults. This is an evidence-routed horizontal response correction: it does
 not absorb the vertical or actuator contract into unrelated gains. Reuse the
 fresh Attempt 203 reference for the targeted diagnostic, then perform a new
 clean capture only after the narrowed basin is identified.
+
+### 205. Narrow the lateral gain basin before a fresh capture
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T114747Z-diagnostic` reused Attempt 203's
+fresh PX4 reference and evaluated 203 unique candidates in seven GPU batches.
+The sweep completed in 123.3 s at 31.6% average sampled GPU utilization,
+demonstrating the intended coarse-to-fine efficiency improvement over the
+2,007-candidate broad attempt.
+
+Candidate 94 reduced the endpoint error from 19.135 mm to 12.318 mm with
+`kp_vel.y=1.15` and `ki_vel.y=0.10`. It passed the other seven motion gates.
+The closest joint boundary lies between `kp_vel.y=1.05` and `1.10`: lowering
+the gain moves endpoint error toward 10 mm but puts worst-axis response,
+braking, and stop time just outside their limits. The retained population thus
+supports lateral derivative damping, rather than a wider proportional or
+actuator sweep, as the next parameter. Search `kd_vel.y` around the pinned PX4
+value while retaining a narrow P/I neighborhood, then run a fresh capture once
+the joint basin is demonstrated.

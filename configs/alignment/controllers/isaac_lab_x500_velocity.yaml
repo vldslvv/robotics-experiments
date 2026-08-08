@@ -18,11 +18,11 @@ command_interface:
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
-  kp_vel: [1.8, 1.8, 4.20]
+  kp_vel: [1.8, 1.10, 4.20]
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.4, 0.4, 2.1]
+  ki_vel: [0.4, 0.10, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 1.02, 1.0]
   velocity_estimator_bias_decay_hz: 0.02
@@ -61,25 +61,29 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # The fresh Attempt 203 population passes every gate except combined-path
-  # endpoint error when the actuator rate remains valid. Its endpoint residual
-  # is accumulated lateral over-response, so fit only the horizontal gains
-  # while preserving the already-audited vertical and estimator boundary.
+  # The preserved Attempt 203 diagnostic narrows lateral P/I response to this
+  # basin. Fit derivative damping here to close its remaining endpoint/braking
+  # tradeoff while preserving the audited vertical and estimator boundary.
   - field: kp_vel
     stage: 1
     candidates:
-      - [1.8, 1.0, 4.2]
-      - [1.8, 1.2, 4.2]
-      - [1.8, 1.4, 4.2]
-      - [1.8, 1.6, 4.2]
-      - [1.8, 1.8, 4.2]
+      - [1.8, 1.05, 4.2]
+      - [1.8, 1.10, 4.2]
+      - [1.8, 1.15, 4.2]
   - field: ki_vel
     stage: 1
     candidates:
+      - [0.4, 0.05, 2.1]
       - [0.4, 0.10, 2.1]
-      - [0.4, 0.20, 2.1]
-      - [0.4, 0.30, 2.1]
-      - [0.4, 0.40, 2.1]
+      - [0.4, 0.15, 2.1]
+  - field: kd_vel
+    stage: 1
+    candidates:
+      - [0.2, 0.15, 0.0]
+      - [0.2, 0.20, 0.0]
+      - [0.2, 0.25, 0.0]
+      - [0.2, 0.30, 0.0]
+      - [0.2, 0.40, 0.0]
 
 selection_metric: controller-quality
 publication_metrics:
