@@ -8323,3 +8323,21 @@ Search only Y observation scale from 1.08 through 1.15, with X/Z fixed at 0.98
 and 1.0. Keep the `[0.006, -0.030, 0.0]` m/s steady bias, controller gains,
 filters, cadence, allocator, actuator, plant, probes, and gates fixed. Replay a
 motion pass immediately; do not expand scale without a matching gate trend.
+
+### 238. Lower lateral scale leaves a 0.046 mm/s residual excess
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T143000Z-diagnostic-lateral-scale`
+evaluated 18 unique candidates in four GPU batches and 53.4 seconds. The scale
+change recovered both intended gates. At the lower 1.08 boundary, endpoint
+error was 7.68 mm and braking error was 3.08 mm. Residual-speed error was
+0.010046 m/s, exceeding its limit by only 0.000046 m/s; every other motion gate
+passed.
+
+The selected boundary candidate's controller replay passed every profile with
+zero timestamp error and 0.00900 maximum physical-state normalized motor RMSE,
+substantially improving replay margin. Residual speed improves toward lower
+scale across the focused range. Preserve all diagnostic artifacts and expand
+only that boundary far enough to measure the predicted crossing near 1.07.
