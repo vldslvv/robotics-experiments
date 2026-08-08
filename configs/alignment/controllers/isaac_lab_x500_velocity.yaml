@@ -24,15 +24,15 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [1.0, 1.0, 1.0]
-  velocity_estimator_bias_decay_hz: 0.01
+  velocity_observation_scale: [0.98, 1.02, 1.0]
+  velocity_estimator_bias_decay_hz: 0.02
   # Target-side observation filtering models the PX4 estimator boundary between
   # captured physical velocity and vehicle_local_position.
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
-  hover_thrust_normalized: 0.59125
+  hover_thrust_normalized: 0.54
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -61,35 +61,25 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  - field: velocity_estimator_bias_decay_hz
-    stage: 1
-    candidates: [0.005, 0.01, 0.015, 0.02]
-  - field: angular_velocity_filter_hz
-    stage: 1
-    candidates: [10.0, 12.5, 15.0]
-  - field: hover_thrust_normalized
-    stage: 1
-    candidates: [0.54, 0.56, 0.58, 0.60]
-  - field: velocity_observation_scale
+  # The fresh Attempt 203 population passes every gate except combined-path
+  # endpoint error when the actuator rate remains valid. Its endpoint residual
+  # is accumulated lateral over-response, so fit only the horizontal gains
+  # while preserving the already-audited vertical and estimator boundary.
+  - field: kp_vel
     stage: 1
     candidates:
-      - [1.0, 1.0, 1.0]
-      - [1.02, 0.98, 1.0]
-      - [1.01, 0.98, 1.01]
-      - [0.98, 1.02, 1.0]
-      - [1.04, 0.96, 1.02]
-  - field: max_tilt_cmd_deg
-    stage: 2
-    candidates: [22.5, 45.0, 67.5]
-  - field: thruster_tau_inc_s
-    stage: 3
-    candidates: [0.0, 0.02, 0.04, 0.08]
-  - field: thruster_tau_dec_s
-    stage: 3
-    candidates: [0.0, 0.02, 0.04, 0.08]
-  - field: thruster_max_thrust_rate_nps
-    stage: 3
-    candidates: [100.0, 500.0, 1000.0, 100000.0]
+      - [1.8, 1.0, 4.2]
+      - [1.8, 1.2, 4.2]
+      - [1.8, 1.4, 4.2]
+      - [1.8, 1.6, 4.2]
+      - [1.8, 1.8, 4.2]
+  - field: ki_vel
+    stage: 1
+    candidates:
+      - [0.4, 0.10, 2.1]
+      - [0.4, 0.20, 2.1]
+      - [0.4, 0.30, 2.1]
+      - [0.4, 0.40, 2.1]
 
 selection_metric: controller-quality
 publication_metrics:

@@ -7650,3 +7650,33 @@ collective errors to 0.04445 N while preserving 0.00719 core and 0.00770
 physical-state motor RMSE. The next fresh attempt fixes this boundary-validated
 gain and searches only the evidenced estimator ranges; the motion selector can
 no longer choose a controller already disproved by the mandatory replay.
+
+### 204. Attempt 203 isolates lateral closed-loop over-response
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T120000Z` used clean source
+commit `a47c5d3`, evaluated 2,007 unique candidates in 28 GPU batches, and
+selected candidate 1,989. Search elapsed time was 581.2 s. Average sampled GPU
+utilization was 26.3%, again identifying sequential Isaac/PhysX stepping as
+the throughput limit. The actuator audit passed with zero timestamp error,
+normalized motor RMSE below 0.00032, and collective RMSE below 0.0121 N.
+
+The selected candidate passed braking, residual-speed, stop-time, worst-axis,
+vertical-motion, yaw-rate, and heading gates. It failed the combined-path
+endpoint gate at 19.135 mm and the controller replay's vertical-policy
+collective boundary at 0.07810 N. The retained population makes the conflict
+reproducible: 23 candidates pass the endpoint limit only by reducing actuator
+thrust slew to 100 N/s, but those candidates then fail vertical response,
+worst-axis response, and heading. At actuator-valid rates, the endpoint error
+remains 19-21 mm and is dominated by 18.4 mm of accumulated lateral
+over-travel. The prior successful replay and this run both show that a higher
+actuator slew rate preserves the vertical collective boundary.
+
+The next diagnostic fixes the previously audited estimator boundary, vertical
+gain, hover setting, actuator time constants, and a 500 N/s thrust slew rate.
+It fits only lateral proportional and integral velocity gains below their PX4
+defaults. This is an evidence-routed horizontal response correction: it does
+not absorb the vertical or actuator contract into unrelated gains. Reuse the
+fresh Attempt 203 reference for the targeted diagnostic, then perform a new
+clean capture only after the narrowed basin is identified.
