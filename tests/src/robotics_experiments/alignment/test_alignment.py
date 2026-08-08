@@ -302,7 +302,11 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 2
     assert target.search.initial_settings == ()
-    assert target.parameters
+    assert tuple(parameter.field for parameter in target.parameters) == (
+        "velocity_estimator_bias_decay_hz",
+        "velocity_observation_bias_mps",
+    )
+    assert target.parameters[-1].candidates[4] == pytest.approx((0.006, -0.030, -0.0039))
     extended = replace(
         target,
         parameters=(

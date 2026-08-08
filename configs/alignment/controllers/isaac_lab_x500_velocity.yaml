@@ -66,18 +66,18 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # The fresh vertical reversal crosses the 0.01 m/s stopped boundary 0.16 s
-  # before PX4. Search the narrow Z proportional-gain interval between the
-  # pinned PX4 value and the replay-validated target value.
-  - field: kp_vel
+  # During the fresh vertical stop, PX4's estimate followed physical Z velocity
+  # with a -0.00389 m/s intercept. Fit that evidenced estimator seam while
+  # retaining the replay-validated Z proportional gain.
+  - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [1.8, 1.8, 4.00]
-      - [1.8, 1.8, 4.05]
-      - [1.8, 1.8, 4.10]
-      - [1.8, 1.8, 4.15]
-      - [1.8, 1.8, 4.175]
-      - [1.8, 1.8, 4.20]
+      - [0.006, -0.030, 0.0]
+      - [0.006, -0.030, -0.0025]
+      - [0.006, -0.030, -0.0030]
+      - [0.006, -0.030, -0.0035]
+      - [0.006, -0.030, -0.0039]
+      - [0.006, -0.030, -0.0045]
 
 selection_metric: controller-quality
 publication_metrics:

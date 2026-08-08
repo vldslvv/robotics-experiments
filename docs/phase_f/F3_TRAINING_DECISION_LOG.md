@@ -8601,3 +8601,34 @@ candidate must retain the high-amplitude vertical and stability collective
 replay limits; do not absorb a replay regression into another gain or plant
 parameter. Reuse the fresh capture first and repeat a clean fresh capture only
 after motion and replay pass together.
+
+### 251. Route the vertical stop through the measured estimator seam
+
+Date: 2026-08-08.
+
+The 240-candidate diagnostic
+`.build/alignment/x500-px4-v1/20260808T155600Z-diagnostic-vertical-stop`
+found 129 motion-passing candidates. Candidate 47, with `kp_vel.z=4.175` and
+0.010625 Hz estimator-bias decay, passed every motion gate, including 0.1 s
+stop-time error. Its dedicated replay
+`.build/alignment/x500-px4-v1/20260808T160100Z-diagnostic-replay-kp4175`
+rejected only vertical-policy collective RMSE at 0.057419 N against 0.050000 N.
+The stability collective passed at 0.041978 N and maximum physical-state motor
+RMSE passed at 0.008504. Conversely, the replay-valid `kp_vel.z=4.20` retained
+the 0.16 s stop-time error. Refined gain candidates therefore expose opposing
+boundaries rather than a jointly valid gain.
+
+Join the paired ULog and physical trace at the recorded 90.944 s vertical-ramp
+start. Over the 2.5-3.0 s stopping interval, PX4's local-position estimate is
+`1.02705 * physical_velocity_z - 0.003886 m/s`, with 0.003182 m/s RMSE. At
+2.90 s the physical speed is 0.007506 m/s while PX4 sees 0.003511 m/s. The
+target currently feeds the unadjusted physical Z velocity, so the first stopped
+sample is expected to arrive too early even when the controller gain matches
+the replay boundary.
+
+Restore the replay-valid `kp_vel.z=4.20` base and replace the gain fit with one
+declarative Z observation-bias range from 0.0 through -0.0045 m/s, explicitly
+including the measured -0.0039 m/s intercept. Keep X/Y observation corrections,
+the low-decay search, plant, probes, and gates unchanged. Reuse the fresh
+capture first, and require both motion and complete controller replay to pass
+before starting another fresh end-to-end attempt.
