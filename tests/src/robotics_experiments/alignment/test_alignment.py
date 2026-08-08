@@ -291,7 +291,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.alignment_id == "x500-px4-v1"
     assert target.controller_schema_version == 1
     assert target.base_settings.command_delay_s == pytest.approx(0.0)
-    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.25))
+    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.20))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
     assert target.base_settings.ki_vel == pytest.approx((0.4, 0.4, 2.1))

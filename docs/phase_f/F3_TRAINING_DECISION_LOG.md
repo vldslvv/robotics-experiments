@@ -7617,3 +7617,36 @@ through declarative coarse-to-fine ranges. The core controller replay bypasses
 the target-only adapters because it already consumes PX4 estimates; the
 physical-state replay retains them and must pass normalized motor RMSE. The
 actuator audit and core replay retain the 0.05 N collective gate.
+
+### 203. Attempt 202 passes motion and isolates one boundary calibration
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T114500Z` used clean source
+commit `433e2fd`, evaluated 1,999 unique candidates in 27 GPU batches, and
+selected candidate 1,974. Search elapsed time was 506.9 s at 3.94 useful
+candidates/s. Average sampled GPU utilization was 27.2%, so sequential
+Isaac/PhysX stepping remains the measured throughput limit.
+
+The actuator audit passed with zero timestamp error, normalized motor RMSE
+below 0.00032, and collective RMSE below 0.0123 N. Candidate 1,974 passed every
+motion gate: braking distance 1.546 mm, residual speed 0.00248 m/s, stop time
+0.06 s, worst-axis NRMSE 0.02858, vertical-envelope NRMSE 0.01451, yaw-rate
+NRMSE 0.04739, heading error 2.665 degrees, and endpoint error 9.645 mm.
+
+Finalization rejected the selected controller at the stability boundary. Its
+core collective RMSE was 0.05389 N and its physical-state normalized motor
+RMSE was 0.01460. Selection had preferred the weakest newly searched estimator
+settings, 0.0025 Hz velocity-bias decay and 3.75 Hz angular-rate filtering,
+which motion alone cannot distinguish from the valid boundary.
+
+The preserved population contains 889 motion-passing candidates. Replaying
+representatives at 0.005-0.02 Hz bias decay and 10-15 Hz angular filtering
+reduced physical-state motor RMSE below 0.01. Candidate 148, with 8.537 mm
+endpoint error, reached 0.00769 physical-state motor RMSE at 0.02 Hz and 15 Hz.
+A focused vertical-gain replay then found the joint collective optimum:
+`kp_vel.z=4.20` reduced the maximum of the vertical-policy and stability core
+collective errors to 0.04445 N while preserving 0.00719 core and 0.00770
+physical-state motor RMSE. The next fresh attempt fixes this boundary-validated
+gain and searches only the evidenced estimator ranges; the motion selector can
+no longer choose a controller already disproved by the mandatory replay.
