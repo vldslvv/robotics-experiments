@@ -24,10 +24,10 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.98, 1.16, 1.0]
-  velocity_estimator_bias_decay_hz: 0.0275
-  # Target-side observation filtering models the PX4 estimator boundary between
-  # captured physical velocity and vehicle_local_position.
+  velocity_observation_scale: [0.98, 1.15, 1.0]
+  velocity_estimator_bias_decay_hz: 0.01
+  # Target-side observation filtering models the measured 16-32 ms PX4
+  # estimator lag between captured physical velocity and vehicle_local_position.
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
@@ -61,21 +61,11 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # The target-only response improves monotonically through the prior 1.02
-  # upper boundary. Expand only that evidenced axis while retaining the
-  # replay-passing decay and angular-rate filter.
-  - field: velocity_observation_scale
+  # Test the measured estimator-lag boundary at the strongest scale/decay
+  # frontier before paying for a three-dimensional refinement.
+  - field: velocity_filter_hz
     stage: 1
-    candidates:
-      - [0.98, 1.12, 1.0]
-      - [0.98, 1.14, 1.0]
-      - [0.98, 1.15, 1.0]
-      - [0.98, 1.16, 1.0]
-      - [0.98, 1.17, 1.0]
-      - [0.98, 1.18, 1.0]
-  - field: velocity_estimator_bias_decay_hz
-    stage: 1
-    candidates: [0.005, 0.01, 0.015, 0.02, 0.0275, 0.035, 0.04]
+    candidates: [2.5, 4.0, 5.0, 6.25, 7.5, 10.0, 12.5, 15.0, 20.0]
 
 selection_metric: controller-quality
 publication_metrics:

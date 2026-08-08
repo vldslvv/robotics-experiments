@@ -7961,3 +7961,15 @@ scale and intercept. This supports a target-side velocity observation filter
 with a time constant in that measured range. Add only that existing estimator
 field to the focused scale/decay basin; leave the pinned PX4
 position-controller filter and all downstream controller values unchanged.
+
+### 219. Measure the velocity-filter direction before joint refinement
+
+Date: 2026-08-08.
+
+Use candidate 37's scale 1.15 and decay 0.01 Hz as the fixed one-failure base.
+The observed 16-32 ms velocity lag corresponds to a first-order cutoff on the
+order of 5-10 Hz. Sweep target-side observation cutoffs 2.5-20 Hz, including
+the disabled base, before combining it with scale and decay. This wide single-
+coordinate control costs only a few GPU batches and establishes whether lag
+moves the lateral braking and endpoint gates toward or away from a joint
+crossing. It does not change the pinned disabled `MPC_VEL_LP` controller field.
