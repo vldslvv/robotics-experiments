@@ -27,7 +27,7 @@ settings:
   velocity_observation_scale: [0.98, 1.15, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
   velocity_observation_bias_mps: [0.006, -0.030, 0.0]
-  velocity_estimator_bias_decay_hz: 0.01
+  velocity_estimator_bias_decay_hz: 0.005
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
@@ -61,12 +61,17 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # Follow the observed closed-loop X direction while retaining extra Y replay
-  # margin below the previously measured motor boundary.
-  - field: velocity_observation_bias_mps
+  # Retain each fresh profile's captured estimator offset for the measured
+  # transient duration without consuming more steady-bias margin.
+  - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates:
-      - [0.006, -0.030, 0.0]
+      - 0.0
+      - 0.0025
+      - 0.005
+      - 0.01
+      - 0.02
+      - 0.04
 
 selection_metric: controller-quality
 publication_metrics:

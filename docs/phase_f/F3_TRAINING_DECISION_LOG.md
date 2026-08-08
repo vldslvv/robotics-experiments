@@ -8271,3 +8271,20 @@ velocity, vertical policy-envelope, stop-time, yaw-rate, and heading gates all
 passed. Preserve the complete fresh ULog, bridge log, reference, actuator
 audit, target trace, selection, telemetry, controller artifact, and replay.
 Do not publish the rejected controller.
+
+### 235. Fit capture-seeded estimator persistence before more steady bias
+
+Date: 2026-08-08.
+
+The fresh run's braking error needs correction while steady Y bias has only
+0.00053 m/s of residual-speed margin. The controller already seeds every
+profile from that capture's PX4 estimator state, but the 0.01 Hz model removes
+about 31% of this offset over a six-second probe. This can expose run-to-run
+initial-estimator differences that a fixed steady bias cannot represent.
+
+Keep the provisional `[0.006, -0.030, 0.0]` m/s steady offset and search only
+estimator-bias decay at 0, 0.0025, 0.005, 0.01, 0.02, and 0.04 Hz. The disabled
+value is a persistent captured offset; the range brackets the previously
+evidenced 0.005-0.04 Hz transient. Keep estimator scale, controller gains,
+filters, cadence, allocator, actuator, plant, probes, and gates fixed. Reuse
+the latest fresh reference for this direction test and replay any motion pass.
