@@ -8374,3 +8374,26 @@ maximum core collective RMSE, and 0.00871 maximum physical-state normalized
 motor RMSE. Preserve all artifacts. Keep the coarse 1.04-1.08 scale range and
 midpoint refinement in the scratch procedure, then repeat the complete fresh
 capture through finalization before publishing.
+
+### 241. Fresh scale search exposes target-seed phase inconsistency
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T150000Z` completed the full
+capture, actuator audit, 15-candidate target sweep, fit, and controller replay
+from clean commit `cbb54e6`. Actuator and controller-boundary audits passed;
+maximum physical-state normalized motor RMSE was 0.00815.
+
+Every scale candidate passed braking, residual-speed, stop-time, worst-axis,
+vertical-policy, yaw-rate, and heading gates but failed endpoint. Candidate 1
+at Y scale 1.04 recorded 23.23 mm endpoint error, 2.99 mm braking error, and
+8.27 mm/s residual-speed error. Scale changed endpoint by less than 0.6 mm
+across the entire range, so expansion is unsupported. Preserve all artifacts
+and do not publish the rejected controller.
+
+Inspection found that the controller replay applies the already-verified
+one-physics-tick profile-boundary phase, but the Torch target-profile seed
+still sets zero accrued outer-loop time. The target therefore delays its first
+125 Hz velocity update by one 4 ms tick and reconstructs initial rotor thrust
+from the wrong controller phase. Correct this shared seed contract before any
+further parameter search.
