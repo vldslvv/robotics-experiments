@@ -561,6 +561,40 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
     )
 
 
+def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> None:
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_BatchEvaluator(),
+            parameters=(
+                ParameterSpec(
+                    "horizontal_velocity_error_gain_start_mps",
+                    1,
+                    (0.2, 0.4),
+                ),
+            ),
+        ),
+        base_settings=replace(
+            _settings(),
+            horizontal_velocity_error_gain_start_mps=0.1,
+            horizontal_velocity_error_gain_full_mps=0.3,
+        ),
+    )
+    reference_traces = _response_traces(
+        profiles=target.probes,
+        settings=target.base_settings,
+    )
+
+    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+
+    assert outcome.statistics["rejected_invalid_settings"] >= 1
+    assert all(
+        candidate.settings.horizontal_velocity_error_gain_start_mps
+        < candidate.settings.horizontal_velocity_error_gain_full_mps
+        for candidate in outcome.candidate_scores
+    )
+
+
 def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
     class ArchiveEvaluator(_Evaluator):
         _retain_traces = False

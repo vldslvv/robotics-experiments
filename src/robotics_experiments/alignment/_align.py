@@ -16,6 +16,7 @@ import numpy as np
 
 import robotics_experiments.alignment._metrics as metrics_module
 import robotics_experiments.controller.actuation as controller_actuation
+from robotics_experiments.alignment._io import _settings as _validated_settings
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
     AlignmentResult,
@@ -205,6 +206,7 @@ def _staged_beam_search(
         "effective_key_aliases": 0,
         "submitted_unique_candidates": 0,
         "skipped_fixed_point_passes": 0,
+        "rejected_invalid_settings": 0,
     }
     generated_refinements: list[Mapping[str, Any]] = []
     next_index = 0
@@ -453,14 +455,23 @@ def _staged_beam_search(
 
     def sweep_parameter(*, parameter: ParameterSpec, candidates: tuple[SettingValue, ...]) -> None:
         nonlocal retained
+        replacements = []
+        for settings in retained:
+            for candidate in candidates:
+                proposed = replace(settings, **{parameter.field: candidate})
+                try:
+                    replacements.append(
+                        _validated_settings(
+                            value=asdict(proposed),
+                            name=f"candidate.{parameter.field}",
+                        )
+                    )
+                except ValueError:
+                    statistics["rejected_invalid_settings"] += 1
         expanded = _deduplicate_settings(
             [
                 *retained,
-                *(
-                    replace(settings, **{parameter.field: candidate})
-                    for settings in retained
-                    for candidate in candidates
-                ),
+                *replacements,
             ]
         )
         evaluated = evaluate_many(expanded)

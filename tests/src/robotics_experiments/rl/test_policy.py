@@ -216,40 +216,6 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
         load_policy_metadata(artifact_dir=tmp_path)
 
 
-def _obsolete_schema6_policy_metadata_loads_gain_schedule_and_schema5_is_neutral(
-    tmp_path: Path,
-) -> None:
-    metadata = _metadata()
-    metadata["alignment"]["schema_version"] = 6
-    settings = metadata["alignment"]["settings"]
-    settings["hover_thrust_normalized"] = 0.57
-    settings["horizontal_velocity_error_gain_scale"] = 8.0 / 7.0
-    settings["horizontal_velocity_error_gain_start_mps"] = 0.15
-    settings["horizontal_velocity_error_gain_full_mps"] = 0.30
-    _write_metadata_artifact(tmp_path, metadata)
-
-    loaded = load_policy_metadata(artifact_dir=tmp_path)
-
-    assert loaded.controller_settings.horizontal_velocity_error_gain_scale == pytest.approx(
-        8.0 / 7.0
-    )
-
-    metadata["alignment"]["schema_version"] = 5
-    for name in (
-        "horizontal_velocity_error_gain_scale",
-        "horizontal_velocity_error_gain_start_mps",
-        "horizontal_velocity_error_gain_full_mps",
-    ):
-        settings.pop(name)
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
-
-    legacy = load_policy_metadata(artifact_dir=tmp_path)
-
-    assert legacy.controller_settings.horizontal_velocity_error_gain_scale == 1.0
-    assert legacy.controller_settings.horizontal_velocity_error_gain_start_mps == 0.15
-    assert legacy.controller_settings.horizontal_velocity_error_gain_full_mps == 0.30
-
-
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:
     from robotics_experiments.commanding import VelocitySetpoint
     from robotics_experiments.px4_bridge import VehicleState
