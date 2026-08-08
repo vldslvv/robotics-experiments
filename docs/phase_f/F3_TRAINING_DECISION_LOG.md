@@ -8806,3 +8806,33 @@ from +0.006 through +0.037 m/s with automatic midpoint refinement. This single
 declarative stage covers both observed fresh basins at substantially lower cost
 than the 18-vector planar grid. Run a clean fresh capture, audit, fit, exact-tick
 replay, and finalization without any intervening tuning.
+
+### 258. Fresh X-span run isolates a Y endpoint residual
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T170027Z` completed capture,
+actuator audit, a 274-candidate seven-batch search, held-out fit, and complete
+controller replay from clean source commit `df5df1a`. The search took 118.3
+seconds, averaged 31.8% GPU utilization, and evaluated 2.316 useful candidates
+per second. Capture actuator reconstruction passed, and the selected candidate's
+complete replay passed with 0.044720 N maximum core collective RMSE, 0.008140
+maximum core normalized motor RMSE, 0.008967 maximum physical-state normalized
+motor RMSE, and zero timestamp-join error.
+
+No motion candidate passed all eight gates. Candidate 135 selected 0.0075 Hz
+estimator-bias decay and observation bias `[0.0235, -0.030, -0.0039]` m/s. It
+passed braking at 3.195 mm, residual speed at 5.397 mm/s, stop time at 0.10 s,
+worst-axis NRMSE at 4.494%, vertical policy-envelope NRMSE at 1.464%, yaw-rate
+NRMSE at 3.057%, and heading at 2.584 degrees. Combined endpoint error was the
+only rejection at 19.550 mm, so finalization correctly refused publication.
+
+The validation combined endpoint delta was `(1.947, 19.451, 0.258)` mm in
+world ENU. The stop-time-valid frontier therefore leaves X and Z inside the
+endpoint budget individually and is dominated by Y. The prior planar sweep
+measured that each +0.001 m/s change in Y observation bias removes roughly
+0.6 mm of this positive Y residual; making Y more negative increased it. Fit a
+coarse Y crossing from -0.030 through +0.010 m/s on this preserved fresh
+reference with X fixed near the current 0.0235 m/s crossing and Z fixed at the
+measured -0.0039 m/s intercept. Keep the decay stage, controller, plant, probes,
+replay, and gates unchanged.
