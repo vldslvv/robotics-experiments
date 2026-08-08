@@ -8413,3 +8413,24 @@ Add NumPy and Torch regression assertions for the accrued seed phase and retain
 sequential parity coverage. Reuse the latest fresh reference with the unchanged
 1.04-1.08 scale candidates to measure the structural correction before paying
 for another capture.
+
+### 243. Shared seed phase preserves the endpoint rejection
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T150000Z-diagnostic-shared-seed-phase`
+evaluated 16 unique candidates in four GPU batches and 54.3 seconds. Average
+GPU utilization was 34.5%. The selected refined Y observation scale of 1.0425
+passed braking at 2.69 mm, residual speed at 8.45 mm/s, stop time at 0.1 s,
+worst-axis velocity NRMSE at 5.274%, vertical policy-envelope NRMSE at 1.348%,
+yaw-rate NRMSE at 3.093%, and heading at 2.537 degrees. Its combined-path
+endpoint error remained rejected at 23.24 mm.
+
+Controller replay passed every profile with zero timestamp error and 0.00816
+maximum physical-state normalized motor RMSE. Retain the shared seed fix
+because it removes a genuine local phase exception, but do not search lateral
+scale further: the complete range leaves endpoint almost unchanged. Replay
+consumes captured world-frame controller state while target motion starts from
+the declared body-frame action, so inspect that command-ingestion boundary
+before changing another fitted parameter.
