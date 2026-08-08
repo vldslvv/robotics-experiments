@@ -8836,3 +8836,30 @@ coarse Y crossing from -0.030 through +0.010 m/s on this preserved fresh
 reference with X fixed near the current 0.0235 m/s crossing and Z fixed at the
 measured -0.0039 m/s intercept. Keep the decay stage, controller, plant, probes,
 replay, and gates unchanged.
+
+### 259. The fresh Y endpoint crossing passes motion and replay
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T171443Z-diagnostic-y-endpoint`
+reused the Entry 258 fresh capture from clean source commit `84c50b2`. It
+evaluated 206 unique candidates in seven GPU batches and 114.2 seconds,
+averaged 33.4% GPU utilization, and reached 1.803 useful candidates per second.
+
+Candidate 92 selected 0.0125 Hz estimator-bias decay and observation bias
+`[0.0235, -0.005, -0.0039]` m/s. All eight motion gates passed: braking was
+3.111 mm, residual speed was 6.505 mm/s, stop-time error was 0.10 s, worst-axis
+velocity NRMSE was 6.710%, vertical policy-envelope NRMSE was 1.458%, yaw-rate
+NRMSE was 3.057%, heading error was 2.583 degrees, and endpoint error was 8.891
+mm. Its endpoint delta was `(-7.128, 4.902, 2.051)` mm in world ENU. Complete
+controller replay also passed, with 0.044720 N maximum core collective RMSE,
+0.008140 maximum core normalized motor RMSE, 0.008867 maximum physical-state
+normalized motor RMSE, and zero timestamp-join error.
+
+This confirms the final fresh boundary but remains diagnostic because it reused
+the reference. The last two fresh captures required different X/Y crossings:
+approximately `[0.035, -0.030]` and `[0.024, -0.005]` m/s. Replace the narrow
+one-axis vectors with a coarse Cartesian X/Y grid covering both basins, retain
+automatic midpoint refinement and fixed measured Z bias, then run one clean
+capture, audit, fit, replay, and finalization without intervening tuning.
