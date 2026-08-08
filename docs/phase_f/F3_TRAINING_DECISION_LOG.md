@@ -8531,3 +8531,30 @@ the controller and actuator at 250 Hz. Apply the same refresh schedule in
 physical-state replay. Keep all fitted ranges, controller gains, plant values,
 probes, and gates unchanged, then rerun target fitting before another fresh
 capture.
+
+### 248. Corrected phases pass motion and replay on the fresh reference
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T154424Z-diagnostic-stream-phase`
+reused the complete fresh capture from Entry 246 and ran from clean source
+commit `7f3d548`. It evaluated 17 unique candidates in four GPU batches and
+56.18 seconds. Average GPU utilization was 38.61%, and useful throughput
+improved from 0.285 to 0.303 candidates per second. Candidate 15 again selected
+0.010625 Hz estimator-bias decay.
+
+All eight motion gates passed: endpoint error was 9.499 mm, braking error was
+3.077 mm, residual-speed error was 6.520 mm/s, stop-time error was 0.1 s,
+worst-axis velocity NRMSE was 4.506%, vertical policy-envelope NRMSE was 1.455%,
+yaw-rate NRMSE was 3.057%, and heading error was 2.584 degrees. The complete
+controller replay also passed. Maximum core collective RMSE was 0.04546 N,
+the high-amplitude vertical profile improved from 0.10518 N to 0.04499 N, and
+maximum physical-state normalized motor RMSE was 0.00885 with zero timestamp
+join error.
+
+This is a complete diagnostic pass with a new comparison fingerprint, but it
+reuses a prior capture. Preserve its reference, target candidates, selection,
+controller, telemetry, and replay. Run one clean fresh capture, actuator audit,
+coarse-to-fine sweep, held-out fit, controller replay, and finalization without
+changing the settings or search range.
