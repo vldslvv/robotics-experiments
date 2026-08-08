@@ -8355,3 +8355,22 @@ controller, allocator, actuator, plant, probe, and gate value fixed.
 The prior scale slope places residual acceptance near 1.07. Stop expanding if
 endpoint, braking, or replay regresses; otherwise replay the selected complete
 motion pass and advance to a fresh end-to-end reproduction.
+
+### 240. The compact scale expansion passes motion and replay
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T143000Z-diagnostic-lateral-scale-low`
+evaluated 16 unique candidates in four GPU batches and 53.5 seconds. Candidate
+15 at refined Y scale 1.0425 passed all eight motion gates. Endpoint error was
+7.34 mm, braking error was 2.83 mm, residual-speed error was 9.61 mm/s,
+stop-time error was 0.1 s, worst-axis velocity NRMSE was 4.095%, vertical
+policy-envelope NRMSE was 1.371%, yaw-rate NRMSE was 3.063%, and heading error
+was 2.550 degrees.
+
+Controller replay passed every profile with zero timestamp error, 0.03932 N
+maximum core collective RMSE, and 0.00871 maximum physical-state normalized
+motor RMSE. Preserve all artifacts. Keep the coarse 1.04-1.08 scale range and
+midpoint refinement in the scratch procedure, then repeat the complete fresh
+capture through finalization before publishing.
