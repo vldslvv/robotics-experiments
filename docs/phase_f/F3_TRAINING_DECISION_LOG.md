@@ -8751,3 +8751,29 @@ change. Reuse the Entry 253 fresh reference, select on all eight unchanged
 motion gates, and run the now exact-tick complete replay immediately. Do not
 expand a range unless the matching endpoint component and replay boundary
 support it.
+
+### 256. Refine the positive-X endpoint crossing
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T164458Z-diagnostic-planar-endpoint`
+reused the Entry 253 fresh capture from clean source commit `e61209a`. It
+evaluated 707 unique candidates in 11 GPU batches and 224.3 seconds, averaged
+28.6% GPU utilization, and reached 3.152 useful candidates per second.
+
+Candidate 141 selected 0.0075 Hz estimator-bias decay and observation bias
+`[0.031, -0.030, -0.0039]` m/s. Endpoint error fell from 22.150 to 10.493 mm,
+a 52.6% reduction. Every other motion gate passed: braking was 2.703 mm,
+residual speed was 5.427 mm/s, stop-time error was 0.06 s, worst-axis NRMSE was
+8.254%, vertical NRMSE was 1.334%, yaw NRMSE was 3.091%, and heading error was
+2.542 degrees. Complete exact-tick replay passed with 0.031907 N maximum core
+collective and 0.008309 maximum physical-state motor RMSE.
+
+The selector landed at the maximum positive-X candidate. At fixed Y -0.030,
+endpoint improved monotonically through X +0.031; more negative Y worsened the
+frontier. The remaining endpoint excess is only 0.493 mm, while worst-axis
+NRMSE retains 1.746 percentage points of margin and physical-state motor RMSE
+retains 0.001691. Search X from +0.031 through +0.037 m/s in 0.001-0.002 m/s
+coarse steps with Y fixed at -0.030 and Z at -0.0039. Keep the broad decay
+stage and all controller, plant, probe, and gate contracts unchanged.

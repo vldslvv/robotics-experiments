@@ -66,30 +66,17 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # The fresh combined endpoint over-travels positive X and under-travels
-  # negative Y. Sweep the previously evidenced positive-X and negative-Y
-  # corrections together, retaining the measured vertical estimator offset.
+  # The coarse planar sweep places the endpoint crossing just beyond its
+  # positive-X boundary. Refine only that boundary with Y/Z fixed.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [0.006, -0.030, -0.0039]
-      - [0.006, -0.034, -0.0039]
-      - [0.006, -0.038, -0.0039]
-      - [0.011, -0.030, -0.0039]
-      - [0.011, -0.034, -0.0039]
-      - [0.011, -0.038, -0.0039]
-      - [0.016, -0.030, -0.0039]
-      - [0.016, -0.034, -0.0039]
-      - [0.016, -0.038, -0.0039]
-      - [0.021, -0.030, -0.0039]
-      - [0.021, -0.034, -0.0039]
-      - [0.021, -0.038, -0.0039]
-      - [0.026, -0.030, -0.0039]
-      - [0.026, -0.034, -0.0039]
-      - [0.026, -0.038, -0.0039]
       - [0.031, -0.030, -0.0039]
-      - [0.031, -0.034, -0.0039]
-      - [0.031, -0.038, -0.0039]
+      - [0.032, -0.030, -0.0039]
+      - [0.033, -0.030, -0.0039]
+      - [0.034, -0.030, -0.0039]
+      - [0.035, -0.030, -0.0039]
+      - [0.037, -0.030, -0.0039]
 
 selection_metric: controller-quality
 publication_metrics:
