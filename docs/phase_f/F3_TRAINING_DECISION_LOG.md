@@ -8892,3 +8892,27 @@ reference to search X from -0.030 through +0.006 m/s with Y fixed at -0.030
 and Z at -0.0039. Keep the decay range and every controller, plant, replay, and
 gate contract unchanged. A diagnostic pass must then be folded into a single
 broad scratch range and verified on another fresh capture.
+
+### 261. The third fresh reference passes at zero X bias
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T173448Z-diagnostic-negative-x`
+completed the sweep that was active when rotational-gate coverage was reviewed.
+It reused the Entry 260 fresh reference from clean source commit `b9e3002`,
+evaluated 203 unique candidates in seven GPU batches and 124.8 seconds, averaged
+30.7% GPU utilization, and reached 1.627 useful candidates per second.
+
+Candidate 28 selected 0.0125 Hz estimator-bias decay and observation bias
+`[0.000, -0.030, -0.0039]` m/s. All eight motion gates passed: braking was
+3.186 mm, residual speed was 7.594 mm/s, stop-time error was 0.10 s, worst-axis
+velocity NRMSE was 3.529%, vertical policy-envelope NRMSE was 1.430%, yaw-rate
+NRMSE was 3.059%, heading error was 2.583 degrees, and endpoint error was 8.417
+mm. Complete controller replay also passed, with 0.045536 N maximum core
+collective RMSE, 0.008236 maximum core normalized motor RMSE, 0.009363 maximum
+physical-state normalized motor RMSE, and zero timestamp-join error.
+
+This closes the interrupted diagnostic cleanly but is not publishable acceptance
+because it reused a reference. The run artifacts are complete and preserved.
+The user's `TODO.txt` was restored unchanged after the run.
