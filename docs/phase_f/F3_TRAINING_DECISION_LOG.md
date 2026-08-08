@@ -8081,3 +8081,30 @@ offset from -0.006 through -0.016 m/s. Attempt 205 improved endpoint error
 monotonically by 3.94 mm over the preceding 0.006 m/s range and placed the
 linear 10 mm crossing near -0.0134 m/s. Keep scale, transient decay, filters,
 controller gains, cadence, allocator, actuator, plant, probes, and gates fixed.
+
+### 225. Fresh capture retains one monotonic endpoint failure
+
+Date: 2026-08-08.
+
+The target-only diagnostic on the Attempt 205 reference selected a
+`velocity_observation_bias_mps` Y component of -0.016 m/s and passed all eight
+motion gates. The corrected controller-boundary replay also passed all 12
+profiles, with 0.03151 N maximum core collective RMSE and 0.00971 maximum
+physical-state normalized motor RMSE.
+
+Run `20260808T140000Z` then repeated the entire capture, actuator audit, target
+sweep, fit, and replay from clean source commit `05b73b8`. The actuator audit
+passed with zero timestamp error, 0.00032 maximum normalized motor RMSE, and
+0.01236 N maximum collective RMSE. The selected -0.016 m/s candidate passed
+seven of eight motion gates: braking distance was 0.00475 m, residual speed was
+0.00505 m/s, stop time was 0.1 s, worst-axis velocity NRMSE was 0.04976,
+vertical policy-envelope NRMSE was 0.01368, yaw-rate NRMSE was 0.03060, and
+heading error was 2.558 degrees. Combined endpoint error remained 0.02003 m.
+
+The endpoint response stayed monotonic across the complete fresh candidate
+set, improving from 0.02589 m at -0.006 m/s to 0.02003 m at -0.016 m/s. The
+controller replay passed every profile with zero timestamp error, 0.03920 N
+maximum core collective RMSE, and 0.00977 maximum physical-state normalized
+motor RMSE. Preserve the complete fresh ULog, bridge log, reference, actuator
+audit, candidates, selection, telemetry, controller artifact, and replay under
+the run directory. Do not publish the rejected controller.
