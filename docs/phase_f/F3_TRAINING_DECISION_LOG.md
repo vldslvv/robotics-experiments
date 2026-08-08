@@ -8307,3 +8307,19 @@ all profiles with 0.00994 maximum physical-state normalized motor RMSE.
 Preserve the complete sweep and replay. The 0.0125 Hz point has 2.20 mm of
 endpoint margin and only small braking/residual excess, which supports a
 focused scale correction rather than more steady bias.
+
+### 237. Spend endpoint margin on lower lateral observation scale
+
+Date: 2026-08-08.
+
+Fix estimator-bias decay at its 0.0125 Hz endpoint-passing crossing. Earlier
+scale sweeps measured that lowering Y observation scale improves lateral
+braking while worsening endpoint by a smaller amount: around the old frontier,
+a 0.02 scale reduction recovered approximately 0.86 mm of braking at a 0.63 mm
+endpoint cost. Extrapolation places the fresh braking crossing near Y scale
+1.11 while retaining endpoint below 10 mm.
+
+Search only Y observation scale from 1.08 through 1.15, with X/Z fixed at 0.98
+and 1.0. Keep the `[0.006, -0.030, 0.0]` m/s steady bias, controller gains,
+filters, cadence, allocator, actuator, plant, probes, and gates fixed. Replay a
+motion pass immediately; do not expand scale without a matching gate trend.

@@ -24,10 +24,10 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.98, 1.15, 1.0]
+  velocity_observation_scale: [0.98, 1.11, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
   velocity_observation_bias_mps: [0.006, -0.030, 0.0]
-  velocity_estimator_bias_decay_hz: 0.005
+  velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
@@ -61,17 +61,18 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # Retain each fresh profile's captured estimator offset for the measured
-  # transient duration without consuming more steady-bias margin.
-  - field: velocity_estimator_bias_decay_hz
+  # At the decay crossing, reduce lateral scale to recover braking and
+  # residual-speed margin while spending the available endpoint margin.
+  - field: velocity_observation_scale
     stage: 1
     candidates:
-      - 0.0
-      - 0.0025
-      - 0.005
-      - 0.01
-      - 0.02
-      - 0.04
+      - [0.98, 1.08, 1.0]
+      - [0.98, 1.10, 1.0]
+      - [0.98, 1.11, 1.0]
+      - [0.98, 1.12, 1.0]
+      - [0.98, 1.13, 1.0]
+      - [0.98, 1.14, 1.0]
+      - [0.98, 1.15, 1.0]
 
 selection_metric: controller-quality
 publication_metrics:
