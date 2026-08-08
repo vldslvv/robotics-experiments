@@ -7862,3 +7862,23 @@ the measured 0.9766 ratio. This is the evidenced physical-to-PX4-estimator
 adapter already audited by the mandatory physical-state replay, not a change to
 PX4 controller gains or the plant. Reuse Attempt 204's fresh reference for a
 compact target diagnostic, then run the replay before any new capture.
+
+### 214. The lateral scale response has the opposite closed-loop sign
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-y-scale` evaluated
+19 unique candidates in four GPU batches and approximately 54 seconds of
+search time. Every candidate again passed seven gates and failed only the
+endpoint. Candidate 8 at the upper Y-scale boundary of 1.02 was selected with
+14.087 mm endpoint error. Decreasing the scale monotonically worsened endpoint
+error to 16.865 mm at 0.94. The validation endpoint Y delta moved from
+-16.71 mm at 0.94 to -13.86 mm at 1.02.
+
+The direct estimated-to-physical regression does not predict the closed-loop
+sign because the scaled physical state is combined with a decaying initialized
+estimator bias, body-frame command rotation, and yaw motion. Reject the lower
+scale hypothesis. The candidate response itself supports expanding Y scale
+above 1.02, but the mandatory physical-state controller replay must accept the
+result before it can become a controller artifact.
