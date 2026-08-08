@@ -7973,3 +7973,25 @@ the disabled base, before combining it with scale and decay. This wide single-
 coordinate control costs only a few GPU batches and establishes whether lag
 moves the lateral braking and endpoint gates toward or away from a joint
 crossing. It does not change the pinned disabled `MPC_VEL_LP` controller field.
+
+### 220. Reject low-pass lag and route the measured steady offset
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-velocity-filter`
+evaluated 22 unique candidates in four GPU batches and approximately 54
+seconds of search time. The disabled-filter base was selected. Its braking and
+endpoint errors were 7.538 mm and 10.063 mm. Every enabled 2.5-20 Hz cutoff
+worsened braking; cutoffs through 7.5 Hz also added a third failed gate. The
+observed estimator phase lag is real but a first-order low-pass in this
+controller state is not the missing boundary, so return the field to disabled.
+
+The same physics-rate fit measures persistent negative Y intercepts of
+-0.00560 m/s on the lateral reversal and -0.00156 m/s on the combined path.
+Unlike scale and low-pass lag, a negative steady observation offset has the
+correct closed-loop sign for both failures: it increases the target's lateral
+braking distance and corrects its combined-path Y under-travel. Add one strict
+schema-1 steady estimator-bias vector to the shared NumPy/Torch controller,
+zero it for PX4-estimated-state replay, retain it for physical-state replay,
+and fit only the evidenced negative Y range around the current frontier.
