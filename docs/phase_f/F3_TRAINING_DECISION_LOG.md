@@ -8288,3 +8288,22 @@ value is a persistent captured offset; the range brackets the previously
 evidenced 0.005-0.04 Hz transient. Keep estimator scale, controller gains,
 filters, cadence, allocator, actuator, plant, probes, and gates fixed. Reuse
 the latest fresh reference for this direction test and replay any motion pass.
+
+### 236. Estimator persistence exposes a scale-correctable crossing
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T143000Z-diagnostic-estimator-persistence`
+evaluated 16 unique decay candidates in four GPU batches and 53.5 seconds.
+Decay moves the three active gates in distinct, monotonic directions through
+the useful region. At 0.0125 Hz, endpoint passes at 7.80 mm, while braking is
+6.87 mm and residual speed is 10.48 mm/s. At 0.01 Hz, braking is 7.44 mm,
+residual speed passes at 9.47 mm/s, and endpoint is 11.23 mm.
+
+No decay alone passes all gates. The selected 0.015 Hz candidate failed
+braking and residual speed but passed endpoint; its controller replay passed
+all profiles with 0.00994 maximum physical-state normalized motor RMSE.
+Preserve the complete sweep and replay. The 0.0125 Hz point has 2.20 mm of
+endpoint margin and only small braking/residual excess, which supports a
+focused scale correction rather than more steady bias.
