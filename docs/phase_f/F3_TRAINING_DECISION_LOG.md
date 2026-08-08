@@ -8863,3 +8863,32 @@ approximately `[0.035, -0.030]` and `[0.024, -0.005]` m/s. Replace the narrow
 one-axis vectors with a coarse Cartesian X/Y grid covering both basins, retain
 automatic midpoint refinement and fixed measured Z bias, then run one clean
 capture, audit, fit, replay, and finalization without intervening tuning.
+
+### 260. A third fresh capture moves beyond the positive-X span
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T172203Z` completed capture,
+actuator audit, a 777-candidate 11-batch Cartesian search, held-out fit, and
+complete controller replay from clean source commit `420f6e6`. Search took
+235.4 seconds, averaged 28.0% GPU utilization, and evaluated 3.301 useful
+candidates per second. Capture actuator reconstruction passed with zero join
+error, normalized motor RMSE below 0.00030, and collective RMSE below 0.0091 N.
+
+No motion candidate passed all gates. Candidate 684 selected 0.011875 Hz decay
+and observation bias `[0.006, -0.030, -0.002925]` m/s. Seven gates passed:
+braking was 3.255 mm, residual speed was 7.871 mm/s, stop time was 0.10 s,
+worst-axis NRMSE was 4.300%, vertical policy-envelope NRMSE was 1.433%, yaw-rate
+NRMSE was 3.059%, and heading error was 2.583 degrees. Endpoint error was the
+only rejection at 13.706 mm. Complete replay passed with 0.045536 N maximum
+core collective RMSE, 0.008236 maximum core normalized motor RMSE, 0.009285
+maximum physical-state normalized motor RMSE, and zero timestamp-join error.
+
+The endpoint delta was `(-13.689, 0.523, -0.443)` mm in world ENU. Y and Z are
+already negligible, while X selected the minimum declared +0.006 m/s bias. The
+previous sweeps measure approximately 0.6 mm of endpoint-X correction per
+0.001 m/s bias change, placing the crossing near -0.017 m/s. Reuse this fresh
+reference to search X from -0.030 through +0.006 m/s with Y fixed at -0.030
+and Z at -0.0039. Keep the decay range and every controller, plant, replay, and
+gate contract unchanged. A diagnostic pass must then be folded into a single
+broad scratch range and verified on another fresh capture.
