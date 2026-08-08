@@ -7882,3 +7882,18 @@ estimator bias, body-frame command rotation, and yaw motion. Reject the lower
 scale hypothesis. The candidate response itself supports expanding Y scale
 above 1.02, but the mandatory physical-state controller replay must accept the
 result before it can become a controller artifact.
+
+### 215. Expand the replay-audited lateral scale boundary
+
+Date: 2026-08-08.
+
+The target diagnostic supplies matching trace evidence for a range expansion:
+endpoint Y error improved monotonically by 2.85 mm as observation scale moved
+from 0.94 to the 1.02 boundary, with no other gate regression. Linear
+extrapolation places the 10 mm endpoint crossing near 1.13. Search Y scales
+from 1.02 through 1.18 in 0.02 increments with two midpoint refinements.
+
+Keep X/Z scale, bias decay, angular-rate filtering, gains, actuator behavior,
+and every gate fixed. If a target candidate passes motion, run the physical-
+state controller replay immediately. A replay failure rejects the scale as
+motion compensation; a replay pass justifies a fresh end-to-end capture.

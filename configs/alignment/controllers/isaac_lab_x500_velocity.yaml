@@ -24,7 +24,7 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.98, 0.98, 1.0]
+  velocity_observation_scale: [0.98, 1.10, 1.0]
   velocity_estimator_bias_decay_hz: 0.0275
   # Target-side observation filtering models the PX4 estimator boundary between
   # captured physical velocity and vehicle_local_position.
@@ -61,21 +61,21 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # The preserved validation-combined trace measures PX4 estimated Y velocity
-  # at 0.9766 times physical velocity. Search that evidenced boundary while
-  # retaining the replay-passing decay and angular-rate filter.
+  # The target-only response improves monotonically through the prior 1.02
+  # upper boundary. Expand only that evidenced axis while retaining the
+  # replay-passing decay and angular-rate filter.
   - field: velocity_observation_scale
     stage: 1
     candidates:
-      - [0.98, 0.94, 1.0]
-      - [0.98, 0.95, 1.0]
-      - [0.98, 0.96, 1.0]
-      - [0.98, 0.97, 1.0]
-      - [0.98, 0.98, 1.0]
-      - [0.98, 0.99, 1.0]
-      - [0.98, 1.00, 1.0]
-      - [0.98, 1.01, 1.0]
       - [0.98, 1.02, 1.0]
+      - [0.98, 1.04, 1.0]
+      - [0.98, 1.06, 1.0]
+      - [0.98, 1.08, 1.0]
+      - [0.98, 1.10, 1.0]
+      - [0.98, 1.12, 1.0]
+      - [0.98, 1.14, 1.0]
+      - [0.98, 1.16, 1.0]
+      - [0.98, 1.18, 1.0]
 
 selection_metric: controller-quality
 publication_metrics:
