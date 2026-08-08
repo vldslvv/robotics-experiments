@@ -8186,3 +8186,19 @@ As with the earlier direct scale regression, the measured estimator intercept
 does not predict the closed-loop sign through the seeded transient, rotated
 body command, and combined yaw path. Preserve all diagnostic artifacts and
 reject the negative X direction.
+
+### 230. Search the observed positive X direction with replay margin
+
+Date: 2026-08-08.
+
+Across the negative-X diagnostic, each 0.001 m/s step toward zero improved the
+combined endpoint by approximately 0.68 mm. Extrapolation from the 13.20 mm
+zero-X result places the endpoint crossing near +0.005 m/s. Search positive X
+offsets from 0 through +0.010 m/s with midpoint refinement.
+
+Back the fixed Y offset from -0.032 to -0.030 m/s before this search. The wide
+Y sweep shows that this costs less than 0.6 mm of endpoint error while
+recovering residual-speed and physical-state motor margin. Keep estimator
+scale and transient decay, controller gains, filters, cadence, allocator,
+actuator, plant, probes, and gates fixed. Replay the selected controller before
+requesting a fresh end-to-end capture.
