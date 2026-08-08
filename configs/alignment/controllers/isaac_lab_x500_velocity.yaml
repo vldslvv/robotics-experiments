@@ -66,18 +66,17 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # Fresh captures place the endpoint crossing at different positive-X offsets.
-  # Retain the complete evidenced span and refine within the current run.
+  # The current fresh capture's stop-valid endpoint is dominated by its positive
+  # world-Y residual. Search through the crossing evidenced by the prior planar
+  # sweep while holding the already-small X/Z endpoint components fixed.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [0.006, -0.030, -0.0039]
-      - [0.011, -0.030, -0.0039]
-      - [0.016, -0.030, -0.0039]
-      - [0.021, -0.030, -0.0039]
-      - [0.026, -0.030, -0.0039]
-      - [0.031, -0.030, -0.0039]
-      - [0.037, -0.030, -0.0039]
+      - [0.0235, -0.030, -0.0039]
+      - [0.0235, -0.020, -0.0039]
+      - [0.0235, -0.010, -0.0039]
+      - [0.0235, 0.000, -0.0039]
+      - [0.0235, 0.010, -0.0039]
 
 selection_metric: controller-quality
 publication_metrics:
