@@ -79,7 +79,7 @@ parameters:
     candidates: [1.0, 1.15, 1.30]
   - field: horizontal_velocity_error_gain_start_mps
     stage: 1
-    candidates: [0.10, 0.15, 0.20]
+    candidates: [0.10, 0.15, 0.20, 0.25, 0.30]
   - field: horizontal_velocity_error_gain_full_mps
     stage: 1
     candidates: [0.25, 0.35, 0.45]
@@ -89,18 +89,24 @@ parameters:
       - [0.0, 0.0, 0.0]
       - [0.3, 0.3, 1.5]
       - [0.6, 0.6, 3.0]
+      - [0.8, 0.8, 4.0]
+      - [1.0, 1.0, 5.0]
   - field: kd_vel
     stage: 1
     candidates:
       - [0.0, 0.0, 0.0]
       - [0.3, 0.3, 0.0]
       - [0.6, 0.6, 0.1]
+      - [0.8, 0.8, 0.2]
+      - [1.0, 1.0, 0.3]
   - field: velocity_integral_limit_mps2
     stage: 1
     candidates:
       - [1.0, 1.0, 2.0]
       - [2.5, 2.5, 5.0]
       - [4.0, 4.0, 8.0]
+      - [6.0, 6.0, 12.0]
+      - [8.0, 8.0, 16.0]
   - field: kp_att
     stage: 2
     candidates:

@@ -7422,3 +7422,40 @@ instability detection, and two-X500 PX4 takeoff. Its run began with cache
 artifacts under
 `.build/docker/integration/test-integration-warm-isaac-cache.20260802T131307Z.422751`;
 each target's sibling run directory preserves its complete logs.
+
+### 197. Start strict-v1 vertical alignment campaign
+
+Date: 2026-08-08.
+
+The controller, alignment, and policy contracts were replaced by strict schema
+1. `robotics_experiments.controller` now owns the shared normalized controller;
+RL consumes its artifact without importing alignment. Physical-force and old
+schema paths, migrations, checkpoint initialization, resume, and actor-only
+fine-tuning were removed. Press training is one fresh optimizer lineage with
+two declarative in-run phases.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T065952Z` captured twelve
+profiles, including the new 0.8 m/s vertical policy envelope. Its actuator
+audit passed: normalized motor RMSE stayed below 0.00037, collective RMSE below
+0.012 N, and timestamp joins within one 4 ms tick. The optimized one-worker,
+128-slot search evaluated 5,155 unique candidates in 62 GPU batches and selected
+candidate 4,957. End-to-end useful throughput was about 4.3 candidates/s;
+sampled GPU utilization averaged 26%, confirming Isaac/PhysX stepping rather
+than tensor capacity as the bottleneck.
+
+The first fit incorrectly applied the pre-existing braking-distance gate to the
+new high-speed vertical profile. This changed an existing metric while also
+adding the dedicated vertical NRMSE gate. The metric now keeps approach braking
+unchanged and evaluates vertical response only through its explicit gate.
+Rescoring all preserved candidates under that corrected contract found 28 with
+only combined endpoint failing. Candidate 1,478 passes braking at 4.908 mm and
+vertical response at 0.08543 NRMSE; its endpoint is 13.820 mm against the 10 mm
+limit.
+
+Among candidates passing every other gate, endpoint quality improves at four
+searched upper boundaries: horizontal gain-start 0.20, velocity I
+`[0.6, 0.6, 3.0]`, velocity D `[0.6, 0.6, 0.1]`, and integral limit
+`[4.0, 4.0, 8.0]`. Expand only those four declarative ranges for the next fresh
+attempt. Do not change the controller structure. Metric and controller source
+hashes now enter the comparison fingerprint so implementation changes cannot
+remain in an old comparison.
