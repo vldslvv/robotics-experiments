@@ -7922,3 +7922,21 @@ Keep the endpoint-crossing scales as one coordinate and reopen only the
 already-evidenced estimator-bias decay as a second coordinate. This tests
 whether initialization-transient duration can recover lateral braking without
 discarding the steady endpoint correction. Do not add controller gains.
+
+### 217. Search estimator transient duration at the endpoint crossing
+
+Date: 2026-08-08.
+
+The high-scale diagnostic isolates the tradeoff to two Y-axis profiles: a
+steady combined path that needs scale at or above approximately 1.16, and a
+lateral reversal whose braking distance becomes too short at that scale. The
+target estimator adapter seeds each profile from the captured PX4 estimate,
+then decays the initial estimator-to-scaled-physical offset. Bias-decay rate is
+therefore the existing field that directly controls this transient-versus-
+steady balance.
+
+Search Y scale 1.12-1.18 jointly with evidenced decay rates 0.005-0.04 Hz.
+Retain the 13.125 Hz angular-rate filter and every downstream controller,
+allocator, actuator, plant, and gate value. This is a two-field declarative
+target-only diagnostic. A motion-passing result remains provisional until the
+physical-state replay passes all profiles.

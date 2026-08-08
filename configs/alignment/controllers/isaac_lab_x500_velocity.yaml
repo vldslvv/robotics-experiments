@@ -24,7 +24,7 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.98, 1.10, 1.0]
+  velocity_observation_scale: [0.98, 1.16, 1.0]
   velocity_estimator_bias_decay_hz: 0.0275
   # Target-side observation filtering models the PX4 estimator boundary between
   # captured physical velocity and vehicle_local_position.
@@ -67,15 +67,15 @@ parameters:
   - field: velocity_observation_scale
     stage: 1
     candidates:
-      - [0.98, 1.02, 1.0]
-      - [0.98, 1.04, 1.0]
-      - [0.98, 1.06, 1.0]
-      - [0.98, 1.08, 1.0]
-      - [0.98, 1.10, 1.0]
       - [0.98, 1.12, 1.0]
       - [0.98, 1.14, 1.0]
+      - [0.98, 1.15, 1.0]
       - [0.98, 1.16, 1.0]
+      - [0.98, 1.17, 1.0]
       - [0.98, 1.18, 1.0]
+  - field: velocity_estimator_bias_decay_hz
+    stage: 1
+    candidates: [0.005, 0.01, 0.015, 0.02, 0.0275, 0.035, 0.04]
 
 selection_metric: controller-quality
 publication_metrics:
