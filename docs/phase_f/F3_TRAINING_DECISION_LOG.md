@@ -8484,3 +8484,50 @@ margin is only 0.60 mm. Preserve all artifacts and keep the broad low-decay
 scratch search. Repeat capture, actuator audit, sweep, fit, and replay from the
 clean implementation commit before publication; do not accept the reused
 reference alone.
+
+### 246. Fresh scratch motion passes but exposes a vertical replay phase
+
+Date: 2026-08-08.
+
+Fresh end-to-end run `.build/alignment/x500-px4-v1/20260808T151750Z`
+completed capture, actuator audit, a 17-candidate coarse-to-fine sweep, fit,
+and controller replay from clean commit `c969ee4`. The sweep used four GPU
+batches in 59.58 seconds, averaged 39.12% GPU utilization, and evaluated 0.285
+useful candidates per second. Candidate 15 selected 0.010625 Hz estimator-bias
+decay and passed all eight motion gates: endpoint error was 9.815 mm, braking
+error was 2.716 mm, residual-speed error was 6.635 mm/s, stop-time error was
+0.1 s, worst-axis velocity NRMSE was 4.441%, vertical policy-envelope NRMSE was
+1.378%, yaw-rate NRMSE was 3.061%, and heading error was 2.566 degrees.
+
+Finalization rejected only the estimated-state controller replay for
+`validation-vertical-policy-envelope`: collective RMSE was 0.105184 N against
+the 0.050000 N limit. Its normalized motor RMSE remained passing at 0.001509,
+and the profile's motion-level vertical gate passed. Preserve the complete
+reference ULog, bridge log, manifest, actuator audit, target candidates,
+selection, controller, telemetry, and replay. The first unresolved boundary is
+the high-amplitude vertical controller phase, not target motion.
+
+### 247. Match the captured outer-loop and wire-command phases
+
+Date: 2026-08-08.
+
+The failing vertical replay is dominated by one high-authority transition.
+The motor-derived collective error reaches -0.595 N at 4.056 seconds, after
+the 0.8 m/s vertical command returns to zero. Disabling hover-estimate updates
+worsens profile collective RMSE from 0.1052 N to 0.1123 N. Replaying the same
+capture with zero accrued outer-loop time instead lowers collective RMSE to
+0.0450 N and normalized motor RMSE to 0.000699, passing both boundary limits.
+The captured `vehicle_local_position` cadence first updates four milliseconds
+after the profile boundary, so the strict shared seed must start with zero
+accrued time; the prior one-tick seed advances the 125 Hz loop by one physics
+tick.
+
+Independently, deployment transmits its held BODY_NED setpoint at the configured
+50 Hz OFFBOARD rate while policy inference produces actions at 20 Hz. PX4
+converts body velocity to local NED on every received transmission. Represent
+these as separate boundaries: hold the latest normalized policy action, refresh
+its world-frame controller command at 50 Hz after transport delay, and advance
+the controller and actuator at 250 Hz. Apply the same refresh schedule in
+physical-state replay. Keep all fitted ranges, controller gains, plant values,
+probes, and gates unchanged, then rerun target fitting before another fresh
+capture.
