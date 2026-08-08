@@ -7701,3 +7701,21 @@ supports lateral derivative damping, rather than a wider proportional or
 actuator sweep, as the next parameter. Search `kd_vel.y` around the pinned PX4
 value while retaining a narrow P/I neighborhood, then run a fresh capture once
 the joint basin is demonstrated.
+
+### 206. Derivative damping leaves a sub-millimeter endpoint excess
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T115400Z-diagnostic` reused the same fresh
+Attempt 203 reference and evaluated 471 unique candidates in 11 GPU batches.
+The sweep completed in 203.2 s at 28.9% average sampled GPU utilization.
+
+Candidate 176, with `kp_vel.y=1.1375`, `ki_vel.y=0.125`, and
+`kd_vel.y=0.25`, passed seven gates and reduced the sole endpoint failure to
+10.693 mm. Its worst-axis NRMSE was 9.423%, braking error was 4.910 mm, and
+stop-time error was exactly 0.10 s. This is a 70% reduction in normalized
+endpoint excess from the preceding diagnostic and leaves only 0.693 mm to the
+gate. Because all three selected gains are generated interior points and no
+new boundary fails, run one fine P/I/D sweep around this basin before making
+another structural change or paying for a fresh capture.

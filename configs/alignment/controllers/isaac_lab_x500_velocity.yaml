@@ -18,12 +18,12 @@ command_interface:
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
-  kp_vel: [1.8, 1.10, 4.20]
+  kp_vel: [1.8, 1.1375, 4.20]
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.4, 0.10, 2.1]
-  kd_vel: [0.2, 0.2, 0.0]
+  ki_vel: [0.4, 0.125, 2.1]
+  kd_vel: [0.2, 0.25, 0.0]
   velocity_observation_scale: [0.98, 1.02, 1.0]
   velocity_estimator_bias_decay_hz: 0.02
   # Target-side observation filtering models the PX4 estimator boundary between
@@ -61,29 +61,32 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # The preserved Attempt 203 diagnostic narrows lateral P/I response to this
-  # basin. Fit derivative damping here to close its remaining endpoint/braking
-  # tradeoff while preserving the audited vertical and estimator boundary.
+  # The preserved-reference P/I/D diagnostic leaves only 0.693 mm of endpoint
+  # excess. Resolve that demonstrated basin at finer steps before spending a
+  # new PX4 capture.
   - field: kp_vel
     stage: 1
     candidates:
-      - [1.8, 1.05, 4.2]
-      - [1.8, 1.10, 4.2]
-      - [1.8, 1.15, 4.2]
+      - [1.8, 1.130, 4.2]
+      - [1.8, 1.135, 4.2]
+      - [1.8, 1.140, 4.2]
+      - [1.8, 1.145, 4.2]
   - field: ki_vel
     stage: 1
     candidates:
-      - [0.4, 0.05, 2.1]
-      - [0.4, 0.10, 2.1]
-      - [0.4, 0.15, 2.1]
+      - [0.4, 0.100, 2.1]
+      - [0.4, 0.115, 2.1]
+      - [0.4, 0.125, 2.1]
+      - [0.4, 0.135, 2.1]
+      - [0.4, 0.150, 2.1]
   - field: kd_vel
     stage: 1
     candidates:
-      - [0.2, 0.15, 0.0]
-      - [0.2, 0.20, 0.0]
-      - [0.2, 0.25, 0.0]
-      - [0.2, 0.30, 0.0]
-      - [0.2, 0.40, 0.0]
+      - [0.2, 0.230, 0.0]
+      - [0.2, 0.240, 0.0]
+      - [0.2, 0.250, 0.0]
+      - [0.2, 0.260, 0.0]
+      - [0.2, 0.270, 0.0]
 
 selection_metric: controller-quality
 publication_metrics:
