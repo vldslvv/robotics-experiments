@@ -312,8 +312,8 @@ def _metric_result(
         **{f"validation_{name}": value for name, value in validation.items()},
     }
     ranking = (
-        validation["braking_distance_error_m"],
         validation["residual_speed_error_mps"],
+        validation["braking_distance_error_m"],
         validation["worst_axis_velocity_nrmse"],
         validation["yaw_rate_nrmse"],
         validation["heading_error_deg"],

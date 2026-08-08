@@ -809,6 +809,8 @@ def test_controller_quality_reports_braking_distance_and_residual_speed_error() 
 
     assert result.validation_metrics["braking_distance_error_m"] > 0.0
     assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+    assert result.ranking_values[3] == result.validation_metrics["residual_speed_error_mps"]
+    assert result.ranking_values[4] == result.validation_metrics["braking_distance_error_m"]
 
 
 def test_vertical_envelope_has_a_dedicated_gate_without_redefining_braking() -> None:

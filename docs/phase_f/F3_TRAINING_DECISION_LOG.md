@@ -9044,3 +9044,37 @@ Verify motion and complete replay against the preserved fresh reference. If it
 passes, run one new clean capture through audit, search, fit, replay,
 finalization, publication, and the required hover/goto integration gate without
 post-capture changes.
+
+### 266. Rank gate-passing candidates by residual settling before braking distance
+
+Date: 2026-08-08.
+
+The declarative 0.25 m/s2 integral-cap diagnostic
+`.build/alignment/x500-px4-v1/20260808T184900Z-diagnostic-ilim025` reused the
+Entry 263 fresh reference from clean commit `8b7d4e8`. It evaluated 627 unique
+candidates in nine GPU batches and 168.4 seconds. Candidate 511 passed all eight
+motion gates, and complete controller replay passed with 0.044680 N maximum
+core collective RMSE, 0.008255 maximum core motor RMSE, 0.009147 maximum
+physical-state motor RMSE, and zero timestamp error. Its integration check
+still failed hover at 0.103 m because the motion selector retained observation
+bias `[0.000, -0.0225, -0.0039]` m/s.
+
+The selector currently ranks gate-passing candidates by braking distance before
+residual speed. Candidate 511 beats candidate 520 by only 0.058 mm of braking
+error, while candidate 520 reduces residual speed from 4.134 to 0.843 mm/s.
+With the integral cap, candidate 520 passes the complete integration gate.
+
+Candidate 242 is the residual-speed champion among all motion-passing
+candidates: 0.633 mm/s residual speed, 3.470 mm braking error, 4.856% worst-axis
+NRMSE, and 9.819 mm endpoint error. Its settings use 0.010 Hz decay and bias
+`[0.000, -0.010, -0.0039]` m/s. The diagnostic integration gate passed with
+0.092 m hover drift, 0.035 m goto last-window error, and 0.495 m final handoff
+range.
+
+Keep gate feasibility as the first selection tier, but rank candidates that
+pass every gate by residual speed before braking distance. Residual speed is the
+direct post-command settling quantity exercised by hover and goto; braking
+remains the next tie-break and retains its unchanged 5 mm acceptance limit.
+This metric-order change starts a new comparison fingerprint. Refit and replay
+the preserved reference, then require one clean scratch run and published
+integration pass without post-capture changes.
