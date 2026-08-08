@@ -434,12 +434,20 @@ def _make_env(
             self._controller_state = seed_flight_controller_state(
                 state=self._controller_state,  # type: ignore[has-type]  # Isaac base owns state.
                 params=self.actuation_params,
+                physical_linear_velocity_world=linear_velocity_world,
                 filtered_linear_velocity_world=torch.as_tensor(
                     [trace["initial_estimated_linear_velocity_enu_mps"] for trace in traces],
                     dtype=torch.float32,
                     device=self.device,
                 ),
-                angular_velocity_body=angular_body,
+                filtered_angular_velocity_body=torch.as_tensor(
+                    [
+                        trace["initial_estimated_angular_velocity_body_flu_radps"]
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 acceleration_setpoint_world=torch.as_tensor(
                     [
                         trace.get(

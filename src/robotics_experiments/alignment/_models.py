@@ -65,6 +65,8 @@ class ControllerStateSourceAge:
     """Age of each lower-rate PX4 topic used to seed one probe boundary."""
 
     vehicle_local_position_setpoint: int
+    vehicle_local_position: int
+    vehicle_angular_velocity: int
     rate_ctrl_status: int
     hover_thrust_estimate: int
 
@@ -89,10 +91,11 @@ class ProbeTrace:
     initial_linear_velocity_enu_mps: Vector3
     initial_estimated_linear_velocity_enu_mps: Vector3
     initial_angular_velocity_body_flu_radps: Vector3
+    initial_estimated_angular_velocity_body_flu_radps: Vector3
     completed: bool
     initial_controller_state_valid: bool = False
     initial_controller_state_source_age_us: ControllerStateSourceAge = ControllerStateSourceAge(
-        0, 0, 0
+        0, 0, 0, 0, 0
     )
     initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)

@@ -12,6 +12,7 @@ from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
+    _delay_velocity_actions,
     _hold_indices,
     _interpolate_quaternions,
     _linear_interpolate,
@@ -37,6 +38,24 @@ def test_hold_indices_preserve_previous_controller_setpoint():
     query = np.array([0.0, 1.6, 3.7, 5.0])
 
     assert _hold_indices(source_t=source, query_t=query).tolist() == [0, 0, 1, 2]
+
+
+def test_velocity_action_delay_shifts_the_complete_command():
+    actions = np.arange(20, dtype=np.float64).reshape(5, 4)
+
+    delayed = _delay_velocity_actions(
+        actions=actions,
+        delay_steps=2,
+    )
+
+    assert delayed[:, :3].tolist() == [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 2.0],
+        [4.0, 5.0, 6.0],
+        [8.0, 9.0, 10.0],
+    ]
+    assert delayed[:, 3].tolist() == [0.0, 0.0, 3.0, 7.0, 11.0]
 
 
 def test_linear_interpolation_resamples_controller_state():
@@ -327,6 +346,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                 "vehicle_angular_velocity",
                 {
                     "timestamp": np.array([100_000, 108_000]),
+                    "xyz[0]": np.array([0.1, 0.3]),
+                    "xyz[1]": np.array([0.2, 0.4]),
+                    "xyz[2]": np.array([0.3, 0.5]),
                     "xyz_derivative[0]": np.array([1.0, 3.0]),
                     "xyz_derivative[1]": np.array([2.0, 4.0]),
                     "xyz_derivative[2]": np.array([3.0, 5.0]),
@@ -362,6 +384,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
     assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
+    assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
+        [0.2, -0.3, -0.4]
+    )
     assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
@@ -373,6 +398,8 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_local_position_setpoint": 4000,
+        "vehicle_local_position": 4000,
+        "vehicle_angular_velocity": 4000,
         "rate_ctrl_status": 4000,
         "hover_thrust_estimate": 4000,
     }

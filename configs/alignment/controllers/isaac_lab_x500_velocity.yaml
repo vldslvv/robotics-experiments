@@ -16,7 +16,7 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.0725
+  command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
   kp_vel: [1.8, 1.8, 4.25]
   horizontal_velocity_error_gain_scale: 1.0
@@ -25,6 +25,7 @@ settings:
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [1.0, 1.0, 1.0]
+  velocity_estimator_bias_decay_hz: 0.02
   # Target-side observation filtering models the PX4 estimator boundary between
   # captured physical velocity and vehicle_local_position.
   velocity_filter_hz: 0.0
@@ -38,6 +39,7 @@ settings:
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
+  angular_velocity_filter_hz: 10.0
   rate_derivative_filter_hz: 20.0
   yaw_torque_filter_hz: 2.0
   rate_integral_limit: [0.30, 0.30, 0.30]
@@ -59,9 +61,12 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  - field: command_delay_s
+  - field: velocity_estimator_bias_decay_hz
     stage: 1
-    candidates: [0.0, 0.03, 0.06, 0.09]
+    candidates: [0.0, 0.01, 0.02, 0.04]
+  - field: angular_velocity_filter_hz
+    stage: 1
+    candidates: [0.0, 7.5, 10.0, 15.0]
   - field: hover_thrust_normalized
     stage: 1
     candidates: [0.54, 0.56, 0.58, 0.60]

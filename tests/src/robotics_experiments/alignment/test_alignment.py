@@ -73,6 +73,7 @@ def _settings(
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
@@ -83,6 +84,7 @@ def _settings(
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.01, 0.01, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        angular_velocity_filter_hz=0.0,
         rate_derivative_filter_hz=30.0,
         yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
@@ -208,6 +210,7 @@ def _response_traces(
                 initial_linear_velocity_enu_mps=_ZERO3,
                 initial_estimated_linear_velocity_enu_mps=_ZERO3,
                 initial_angular_velocity_body_flu_radps=_ZERO3,
+                initial_estimated_angular_velocity_body_flu_radps=_ZERO3,
                 completed=True,
             )
         )
@@ -287,7 +290,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.backend == "isaac-lab"
     assert target.alignment_id == "x500-px4-v1"
     assert target.controller_schema_version == 1
-    assert target.base_settings.command_delay_s == pytest.approx(0.0725)
+    assert target.base_settings.command_delay_s == pytest.approx(0.0)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.25))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)

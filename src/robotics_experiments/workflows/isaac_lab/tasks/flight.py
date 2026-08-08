@@ -110,6 +110,7 @@ class _FlightActuationParams:
     ki_rate: torch.Tensor
     kd_rate: torch.Tensor
     kff_rate: torch.Tensor
+    angular_velocity_filter_hz: float | torch.Tensor
     rate_derivative_filter_hz: float | torch.Tensor
     yaw_torque_filter_hz: float | torch.Tensor
     rate_integral_limit: torch.Tensor
@@ -123,6 +124,7 @@ class _FlightActuationParams:
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_observation_scale: torch.Tensor
+    velocity_estimator_bias_decay_hz: float | torch.Tensor
     velocity_filter_hz: float | torch.Tensor
     velocity_derivative_filter_hz: float | torch.Tensor
     velocity_integral_limit_mps2: torch.Tensor
@@ -141,6 +143,7 @@ class _FlightControllerState:
     """Batched state of the PX4-like velocity and rate cascade."""
 
     filtered_velocity_world: torch.Tensor
+    velocity_estimator_bias_world: torch.Tensor
     acceleration_world: torch.Tensor
     acceleration_setpoint_world: torch.Tensor
     velocity_integral_world: torch.Tensor
@@ -540,8 +543,23 @@ def _rate_to_omega(
     /,
 ) -> tuple[_FlightControllerState, torch.Tensor]:
     rate = torch.clamp(body_rate_setpoint, -params.max_body_rate_radps, params.max_body_rate_radps)
+    angular_velocity_alpha = _low_pass_alpha(
+        cutoff_hz=params.angular_velocity_filter_hz,
+        dt_s=dt_s,
+    )
+    if isinstance(angular_velocity_alpha, torch.Tensor):
+        angular_velocity_alpha = angular_velocity_alpha.unsqueeze(-1)
+    candidate_angular_velocity = controller_state.previous_angular_velocity_body + (
+        angular_velocity_alpha
+        * (angular_velocity_body - controller_state.previous_angular_velocity_body)
+    )
+    filtered_angular_velocity = torch.where(
+        controller_state.initialized.unsqueeze(-1),
+        candidate_angular_velocity,
+        angular_velocity_body,
+    )
     raw_angular_acceleration = (
-        angular_velocity_body - controller_state.previous_angular_velocity_body
+        filtered_angular_velocity - controller_state.previous_angular_velocity_body
     ) / dt_s
     alpha = _low_pass_alpha(
         cutoff_hz=params.rate_derivative_filter_hz,
@@ -557,7 +575,7 @@ def _rate_to_omega(
         filtered_angular_acceleration,
         torch.zeros_like(filtered_angular_acceleration),
     )
-    rate_error = rate - angular_velocity_body
+    rate_error = rate - filtered_angular_velocity
     normalized_torque = (
         params.kp_rate * rate_error
         + controller_state.rate_integral_body
@@ -586,10 +604,11 @@ def _rate_to_omega(
     )
     successor = _FlightControllerState(
         filtered_velocity_world=controller_state.filtered_velocity_world,
+        velocity_estimator_bias_world=controller_state.velocity_estimator_bias_world,
         acceleration_world=controller_state.acceleration_world,
         acceleration_setpoint_world=controller_state.acceleration_setpoint_world,
         velocity_integral_world=controller_state.velocity_integral_world,
-        previous_angular_velocity_body=angular_velocity_body,
+        previous_angular_velocity_body=filtered_angular_velocity,
         angular_acceleration_body=angular_acceleration,
         rate_integral_body=rate_integral,
         filtered_yaw_torque=filtered_yaw_torque,
@@ -658,7 +677,10 @@ def _velocity(
     )
     if isinstance(velocity_alpha, torch.Tensor):
         velocity_alpha = velocity_alpha.unsqueeze(-1)
-    observed_velocity_world = params.velocity_observation_scale * linear_velocity_world
+    observed_velocity_world = (
+        params.velocity_observation_scale * linear_velocity_world
+        + controller_state.velocity_estimator_bias_world
+    )
     candidate_filtered_velocity = controller_state.filtered_velocity_world + velocity_alpha * (
         observed_velocity_world - controller_state.filtered_velocity_world
     )
@@ -684,6 +706,12 @@ def _velocity(
         candidate_acceleration,
         torch.zeros_like(candidate_acceleration),
     )
+    bias_decay_hz = _environment_values(
+        params.velocity_estimator_bias_decay_hz,
+        outer_loop_elapsed_s,
+    )
+    bias_decay = torch.exp(-2.0 * math.pi * bias_decay_hz * outer_loop_period_s).unsqueeze(-1)
+    velocity_estimator_bias = controller_state.velocity_estimator_bias_world * bias_decay
     velocity_error = velocity_setpoint_world - filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     desired_acceleration = (
@@ -736,6 +764,11 @@ def _velocity(
     outer_successor = _FlightControllerState(
         filtered_velocity_world=torch.where(
             outer_selected, filtered_velocity, controller_state.filtered_velocity_world
+        ),
+        velocity_estimator_bias_world=torch.where(
+            outer_selected,
+            velocity_estimator_bias,
+            controller_state.velocity_estimator_bias_world,
         ),
         acceleration_world=torch.where(
             outer_selected, acceleration, controller_state.acceleration_world
@@ -882,6 +915,7 @@ def build_flight_actuation_params(
         ki_rate=_tensor(controller_settings.ki_rate),
         kd_rate=_tensor(controller_settings.kd_rate),
         kff_rate=_tensor(controller_settings.kff_rate),
+        angular_velocity_filter_hz=float(controller_settings.angular_velocity_filter_hz),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
         yaw_torque_filter_hz=float(controller_settings.yaw_torque_filter_hz),
         rate_integral_limit=_tensor(controller_settings.rate_integral_limit),
@@ -905,6 +939,9 @@ def build_flight_actuation_params(
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_observation_scale=_tensor(controller_settings.velocity_observation_scale),
+        velocity_estimator_bias_decay_hz=float(
+            controller_settings.velocity_estimator_bias_decay_hz
+        ),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_tensor(controller_settings.velocity_integral_limit_mps2),
@@ -962,6 +999,7 @@ def _replace_controller_settings_batch(
         ki_rate=_vectors("ki_rate"),
         kd_rate=_vectors("kd_rate"),
         kff_rate=_vectors("kff_rate"),
+        angular_velocity_filter_hz=_scalars("angular_velocity_filter_hz"),
         rate_derivative_filter_hz=_scalars("rate_derivative_filter_hz"),
         yaw_torque_filter_hz=_scalars("yaw_torque_filter_hz"),
         rate_integral_limit=_vectors("rate_integral_limit"),
@@ -974,6 +1012,7 @@ def _replace_controller_settings_batch(
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_observation_scale=_vectors("velocity_observation_scale"),
+        velocity_estimator_bias_decay_hz=_scalars("velocity_estimator_bias_decay_hz"),
         velocity_filter_hz=_scalars("velocity_filter_hz"),
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
@@ -1018,6 +1057,7 @@ def initial_flight_controller_state(
     zeros = torch.zeros((num_envs, 3), dtype=torch.float32, device=device)
     return _FlightControllerState(
         filtered_velocity_world=zeros.clone(),
+        velocity_estimator_bias_world=zeros.clone(),
         acceleration_world=zeros.clone(),
         acceleration_setpoint_world=zeros.clone(),
         velocity_integral_world=zeros.clone(),
@@ -1046,6 +1086,7 @@ def reset_flight_controller_state(
     values = {}
     for name in (
         "filtered_velocity_world",
+        "velocity_estimator_bias_world",
         "acceleration_world",
         "acceleration_setpoint_world",
         "velocity_integral_world",
@@ -1069,8 +1110,9 @@ def seed_flight_controller_state(
     *,
     state: _FlightControllerState,
     params: _FlightActuationParams,
+    physical_linear_velocity_world: torch.Tensor,
     filtered_linear_velocity_world: torch.Tensor,
-    angular_velocity_body: torch.Tensor,
+    filtered_angular_velocity_body: torch.Tensor,
     acceleration_setpoint_world: torch.Tensor,
     linear_acceleration_world: torch.Tensor,
     angular_acceleration_body: torch.Tensor,
@@ -1083,8 +1125,9 @@ def seed_flight_controller_state(
         raise ValueError("controller-state seeding requires velocity actuation")
     expected = state.filtered_velocity_world.shape
     vectors = {
+        "physical_linear_velocity_world": physical_linear_velocity_world,
         "filtered_linear_velocity_world": filtered_linear_velocity_world,
-        "angular_velocity_body": angular_velocity_body,
+        "filtered_angular_velocity_body": filtered_angular_velocity_body,
         "acceleration_setpoint_world": acceleration_setpoint_world,
         "linear_acceleration_world": linear_acceleration_world,
         "angular_acceleration_body": angular_acceleration_body,
@@ -1130,6 +1173,12 @@ def seed_flight_controller_state(
             filtered_linear_velocity_world,
             state.filtered_velocity_world,
         ),
+        velocity_estimator_bias_world=torch.where(
+            selected,
+            filtered_linear_velocity_world
+            - params.velocity_observation_scale * physical_linear_velocity_world,
+            state.velocity_estimator_bias_world,
+        ),
         acceleration_world=torch.where(
             selected,
             linear_acceleration_world,
@@ -1147,7 +1196,7 @@ def seed_flight_controller_state(
         ),
         previous_angular_velocity_body=torch.where(
             selected,
-            angular_velocity_body,
+            filtered_angular_velocity_body,
             state.previous_angular_velocity_body,
         ),
         angular_acceleration_body=torch.where(

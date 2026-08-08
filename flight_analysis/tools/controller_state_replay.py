@@ -86,6 +86,21 @@ def _hold_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray:
     return np.clip(np.searchsorted(source_t, query_t, side="right") - 1, 0, len(source_t) - 1)
 
 
+def _delay_velocity_actions(
+    *,
+    actions: np.ndarray,
+    delay_steps: int,
+) -> np.ndarray:
+    if actions.ndim != 2 or actions.shape[1] != 4:
+        raise ValueError(f"velocity actions must have shape (samples, 4), got {actions.shape}")
+    if delay_steps < 0:
+        raise ValueError("velocity action delay must be non-negative")
+    delayed = np.zeros_like(actions)
+    if delay_steps < len(actions):
+        delayed[delay_steps:] = actions[: len(actions) - delay_steps]
+    return delayed
+
+
 def _linear_interpolate(
     *,
     source_t: np.ndarray,
@@ -452,6 +467,10 @@ def _controller_boundary(
             "xyz_derivative[2]",
         ),
     )
+    estimated_angular_velocity_frd = interpolated_vector(
+        topic=angular_velocity,
+        fields=("xyz[0]", "xyz[1]", "xyz[2]"),
+    )
     rate_integral_frd = interpolated_vector(
         topic=rate_status,
         fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
@@ -469,6 +488,9 @@ def _controller_boundary(
     )
     vectors = {
         "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
+        "initial_estimated_angular_velocity_body_flu_radps": (
+            _FLU_TO_FRD @ estimated_angular_velocity_frd
+        ),
         "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
         "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
         "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
@@ -483,6 +505,8 @@ def _controller_boundary(
         vectors,
         {
             "vehicle_local_position_setpoint": setpoint_age_us,
+            "vehicle_local_position": held_age_us(topic=local_position),
+            "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
             "rate_ctrl_status": rate_age_us,
             "hover_thrust_estimate": held_age_us(topic=hover),
         },
@@ -809,7 +833,9 @@ def _report(
         controller_settings = replace(
             controller_settings,
             velocity_observation_scale=(1.0, 1.0, 1.0),
+            velocity_estimator_bias_decay_hz=0.0,
             velocity_filter_hz=0.0,
+            angular_velocity_filter_hz=0.0,
         )
     params = build_actuation_params(
         geometry=geometry,
@@ -879,6 +905,10 @@ def _report(
                 commanded_body_velocity / config.rl.action.max_body_velocity_mps,
                 command_yaw_rate[command_index, None] / config.rl.action.max_yaw_rate_radps,
             ]
+        )
+        replay_actions = _delay_velocity_actions(
+            actions=replay_actions,
+            delay_steps=round(controller_settings.command_delay_s * config.sim.physics_hz),
         )
         velocity_ned = np.zeros_like(commanded_body_velocity)
         velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
@@ -974,12 +1004,15 @@ def _report(
     )
     controller_state = seed_actuation_controller_state(
         params=params,
+        physical_linear_velocity_enu=replay_velocity_enu[0],
         filtered_linear_velocity_enu=(
             controller_vectors["initial_estimated_linear_velocity_enu_mps"]
             if physical_state
             else replay_velocity_enu[0]
         ),
-        angular_velocity_body_flu=replay_angular_velocity_flu[0],
+        angular_velocity_body_flu=controller_vectors[
+            "initial_estimated_angular_velocity_body_flu_radps"
+        ],
         acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
         linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
         angular_acceleration_body_flu_radps2=controller_vectors[
@@ -1137,7 +1170,7 @@ def _report(
     ]
     return {
         "schema_version": 1,
-        "method": "px4-ulog-state-replay-v1-250hz",
+        "method": "px4-ulog-state-replay-v1-physics-rate",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
@@ -1297,7 +1330,7 @@ def _profile_replay_report(
         )
     return {
         "schema_version": 1,
-        "method": "physical-and-estimated-state-px4-profile-replay-v1-250hz",
+        "method": "physical-and-estimated-state-px4-profile-replay-v1-physics-rate",
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),

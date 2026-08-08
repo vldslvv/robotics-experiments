@@ -112,6 +112,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             payload["velocity_observation_scale"],
             f"{name}.velocity_observation_scale",
         ),
+        velocity_estimator_bias_decay_hz=_finite(
+            value=payload["velocity_estimator_bias_decay_hz"],
+            name=f"{name}.velocity_estimator_bias_decay_hz",
+            nonnegative=True,
+        ),
         velocity_filter_hz=_finite(
             value=payload["velocity_filter_hz"], name=f"{name}.velocity_filter_hz", nonnegative=True
         ),
@@ -138,6 +143,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         ki_rate=_vector(payload["ki_rate"], f"{name}.ki_rate"),
         kd_rate=_vector(payload["kd_rate"], f"{name}.kd_rate"),
         kff_rate=_vector(payload["kff_rate"], f"{name}.kff_rate"),
+        angular_velocity_filter_hz=_finite(
+            value=payload["angular_velocity_filter_hz"],
+            name=f"{name}.angular_velocity_filter_hz",
+            nonnegative=True,
+        ),
         rate_derivative_filter_hz=_finite(
             value=payload["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",

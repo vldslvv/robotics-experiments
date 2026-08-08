@@ -7587,3 +7587,33 @@ sweep under the fingerprinted metric before a fresh capture. The physics-rate
 physical-state replay remains diagnostic evidence for the estimator seam: its
 largest normalized motor RMSE is 0.01280 in the stability profile, while the
 controller replay on the state PX4 actually consumed passes.
+
+### 202. Model the transient PX4 estimator boundary
+
+Date: 2026-08-08.
+
+The preserved Attempt 201 evidence rejects command-delay splitting. Delaying
+linear commands by 45 ms while retaining the 7.5 ms yaw delay increased the
+vertical physical-state collective residual to 0.171 N and the stability
+residual to 0.073 N. The target returns to one zero-valued command delay; delay
+is no longer a fitted field.
+
+Physics-rate hybrid replay instead identifies the first failing input boundary.
+Replacing only physical velocity with PX4 estimated velocity reduced the
+fit-vertical motor/collective errors from 0.01163 and 0.0850 N to 0.00300 and
+0.00539 N. On the stability profile, replacing physical angular rate reduced
+normalized motor RMSE from 0.01133 to 0.00789. The initial velocity discrepancy
+must not remain constant, as Attempt 200 established, but replaying it as a
+decaying estimator initialization at 0.02 Hz reduced fit-vertical motor RMSE to
+0.00524. Combining that transient state with a 10 Hz body-rate filter reduced
+the stability motor residual to approximately 0.0086.
+
+The next clean attempt therefore adds only these two evidenced estimator
+adapter fields to strict v1 `ControllerSettings`: initial velocity-bias decay
+and articulation angular-rate filtering. Both are implemented in the shared
+NumPy controller and its Torch twin, seeded from distinct physical and PX4
+estimated states, reset explicitly, checked for sequential parity, and fitted
+through declarative coarse-to-fine ranges. The core controller replay bypasses
+the target-only adapters because it already consumes PX4 estimates; the
+physical-state replay retains them and must pass normalized motor RMSE. The
+actuator audit and core replay retain the 0.05 N collective gate.

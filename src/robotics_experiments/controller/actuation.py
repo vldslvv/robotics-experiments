@@ -103,6 +103,7 @@ class ActuationControllerState:
     """State carried by the PX4-like velocity and body-rate cascade."""
 
     filtered_velocity_enu: np.ndarray
+    velocity_estimator_bias_enu: np.ndarray
     acceleration_enu: np.ndarray
     acceleration_setpoint_enu: np.ndarray
     velocity_integral_enu: np.ndarray
@@ -136,6 +137,7 @@ class ActuationParams:
     ki_rate: np.ndarray
     kd_rate: np.ndarray
     kff_rate: np.ndarray
+    angular_velocity_filter_hz: float
     rate_derivative_filter_hz: float
     yaw_torque_filter_hz: float
     rate_integral_limit: np.ndarray
@@ -149,6 +151,7 @@ class ActuationParams:
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_observation_scale: np.ndarray
+    velocity_estimator_bias_decay_hz: float
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: np.ndarray
@@ -462,8 +465,16 @@ def _rate_to_omega(
 ) -> tuple[ActuationControllerState, np.ndarray]:
     """Stateful body-rate PID: rate setpoint -> body torque -> rotor omega."""
     rate = np.clip(body_rate_setpoint, -params.max_body_rate_radps, params.max_body_rate_radps)
-    angular_velocity = np.asarray(state.angular_velocity_body_flu, dtype=np.float64)
+    raw_angular_velocity = np.asarray(state.angular_velocity_body_flu, dtype=np.float64)
     if controller_state.initialized:
+        angular_velocity_alpha = _low_pass_alpha(
+            cutoff_hz=params.angular_velocity_filter_hz,
+            dt_s=dt_s,
+        )
+        angular_velocity = controller_state.previous_angular_velocity_body_flu + (
+            angular_velocity_alpha
+            * (raw_angular_velocity - controller_state.previous_angular_velocity_body_flu)
+        )
         raw_angular_acceleration = (
             angular_velocity - controller_state.previous_angular_velocity_body_flu
         ) / dt_s
@@ -475,6 +486,7 @@ def _rate_to_omega(
             raw_angular_acceleration - controller_state.angular_acceleration_body_flu
         )
     else:
+        angular_velocity = raw_angular_velocity
         angular_acceleration = np.zeros(3, dtype=np.float64)
     rate_error: np.ndarray = rate - angular_velocity
     normalized_torque = (
@@ -502,6 +514,7 @@ def _rate_to_omega(
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
+        velocity_estimator_bias_enu=_readonly_copy(controller_state.velocity_estimator_bias_enu),
         acceleration_enu=_readonly_copy(controller_state.acceleration_enu),
         acceleration_setpoint_enu=_readonly_copy(controller_state.acceleration_setpoint_enu),
         velocity_integral_enu=_readonly_copy(controller_state.velocity_integral_enu),
@@ -557,10 +570,11 @@ def _velocity_action_to_omega(
     )
 
     velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
-    measured_velocity = params.velocity_observation_scale * np.asarray(
+    physical_velocity = params.velocity_observation_scale * np.asarray(
         state.linear_velocity_enu,
         dtype=np.float64,
     )
+    measured_velocity = physical_velocity + controller_state.velocity_estimator_bias_enu
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_filter_hz,
@@ -577,9 +591,12 @@ def _velocity_action_to_omega(
         acceleration = controller_state.acceleration_enu + derivative_alpha * (
             raw_acceleration - controller_state.acceleration_enu
         )
+        bias_decay = math.exp(-2.0 * math.pi * params.velocity_estimator_bias_decay_hz * outer_dt_s)
+        velocity_estimator_bias = controller_state.velocity_estimator_bias_enu * bias_decay
     else:
         filtered_velocity = measured_velocity
         acceleration = np.zeros(3, dtype=np.float64)
+        velocity_estimator_bias = np.zeros(3, dtype=np.float64)
     velocity_error = velocity_setpoint_world - filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     desired_acceleration = (
@@ -628,6 +645,7 @@ def _velocity_action_to_omega(
     )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_estimator_bias_enu=_readonly_copy(velocity_estimator_bias),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(desired_acceleration),
         velocity_integral_enu=_readonly_copy(velocity_integral),
@@ -764,6 +782,7 @@ def build_actuation_params(
         ki_rate=_readonly_copy(controller_settings.ki_rate),
         kd_rate=_readonly_copy(controller_settings.kd_rate),
         kff_rate=_readonly_copy(controller_settings.kff_rate),
+        angular_velocity_filter_hz=float(controller_settings.angular_velocity_filter_hz),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
         yaw_torque_filter_hz=float(controller_settings.yaw_torque_filter_hz),
         rate_integral_limit=_readonly_copy(controller_settings.rate_integral_limit),
@@ -783,6 +802,9 @@ def build_actuation_params(
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
         velocity_observation_scale=_readonly_copy(controller_settings.velocity_observation_scale),
+        velocity_estimator_bias_decay_hz=float(
+            controller_settings.velocity_estimator_bias_decay_hz
+        ),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_readonly_copy(
@@ -811,6 +833,7 @@ def initial_actuation_controller_state() -> ActuationControllerState:
     zero = np.zeros(3, dtype=np.float64)
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(zero),
+        velocity_estimator_bias_enu=_readonly_copy(zero),
         acceleration_enu=_readonly_copy(zero),
         acceleration_setpoint_enu=_readonly_copy(zero),
         velocity_integral_enu=_readonly_copy(zero),
@@ -829,6 +852,7 @@ def initial_actuation_controller_state() -> ActuationControllerState:
 def seed_actuation_controller_state(
     *,
     params: ActuationParams,
+    physical_linear_velocity_enu: np.ndarray,
     filtered_linear_velocity_enu: np.ndarray,
     angular_velocity_body_flu: np.ndarray,
     acceleration_setpoint_enu_mps2: np.ndarray,
@@ -850,6 +874,10 @@ def seed_actuation_controller_state(
     filtered_velocity = vector(
         filtered_linear_velocity_enu,
         "filtered_linear_velocity_enu",
+    )
+    physical_velocity = params.velocity_observation_scale * vector(
+        physical_linear_velocity_enu,
+        "physical_linear_velocity_enu",
     )
     angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
     acceleration_setpoint = vector(
@@ -880,6 +908,7 @@ def seed_actuation_controller_state(
     )
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_estimator_bias_enu=_readonly_copy(filtered_velocity - physical_velocity),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(acceleration_setpoint),
         velocity_integral_enu=_readonly_copy(velocity_integral),

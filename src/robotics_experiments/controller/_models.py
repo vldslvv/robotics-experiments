@@ -22,6 +22,7 @@ class ControllerSettings:
     ki_vel: Vector3
     kd_vel: Vector3
     velocity_observation_scale: Vector3
+    velocity_estimator_bias_decay_hz: float
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3
@@ -32,6 +33,7 @@ class ControllerSettings:
     ki_rate: Vector3
     kd_rate: Vector3
     kff_rate: Vector3
+    angular_velocity_filter_hz: float
     rate_derivative_filter_hz: float
     yaw_torque_filter_hz: float
     rate_integral_limit: Vector3

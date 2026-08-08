@@ -34,10 +34,13 @@ input is approximately 0.375. Controller hover is represented only by
 NumPy is the single-environment reference and the Isaac Lab Torch seam is its
 batched twin. Both apply the same filter, saturation, anti-windup, reset, and
 allocator ordering. The strict settings include the velocity-controller update
-rate and PX4's dedicated yaw-torque low-pass. Controller state carries the
-held outer-loop setpoints and the acceleration setpoint needed for PX4's
-thrust-preserving hover-estimate integrator correction. Sequential parity is a
-host-test requirement.
+rate, PX4's dedicated yaw-torque low-pass, and the target-side estimator
+adapter. That adapter seeds a velocity offset from the captured PX4 estimate
+and decays it toward scaled articulation velocity; it also filters articulation
+body rate from the captured PX4 angular-rate seed. Controller state carries
+these estimator states, the held outer-loop setpoints, and the acceleration
+setpoint needed for PX4's thrust-preserving hover-estimate integrator
+correction. Sequential NumPy/Torch parity is a host-test requirement.
 
 ## Search
 
@@ -86,12 +89,12 @@ profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
 and recorded command cadence; ULog rate-limited `trajectory_setpoint` samples
 are not used to infer command transitions. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates
-at their source timestamps. The target-only `velocity_observation_scale`
-models the evidenced physical-to-estimated velocity boundary without changing
-the pinned PX4 controller gains.
-The core replay bypasses both target-only observation scale and filtering
-because its input is already PX4-estimated velocity; the physical-state replay
-retains them and therefore audits the deployment boundary.
+at their source timestamps. The target-only `velocity_observation_scale`,
+`velocity_estimator_bias_decay_hz`, and `angular_velocity_filter_hz` model the
+evidenced physical-to-estimated state boundary without changing the pinned PX4
+controller gains. The core replay bypasses these target-only adapters because
+its inputs are already PX4-estimated state; the physical-state replay retains
+them and therefore audits the deployment boundary.
 
 ## Quality and acceptance
 
