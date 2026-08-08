@@ -1225,7 +1225,10 @@ def seed_flight_controller_state(
         ),
         outer_loop_elapsed_s=torch.where(
             valid,
-            torch.zeros_like(state.outer_loop_elapsed_s),
+            torch.full_like(
+                state.outer_loop_elapsed_s,
+                params.controller_dt_s,
+            ),
             state.outer_loop_elapsed_s,
         ),
         collective_thrust_setpoint=torch.where(

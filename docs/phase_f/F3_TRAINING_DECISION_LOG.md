@@ -8397,3 +8397,19 @@ still sets zero accrued outer-loop time. The target therefore delays its first
 125 Hz velocity update by one 4 ms tick and reconstructs initial rotor thrust
 from the wrong controller phase. Correct this shared seed contract before any
 further parameter search.
+
+### 242. Apply the captured profile phase in the shared controller seed
+
+Date: 2026-08-08.
+
+Move the verified one-tick phase into the strict controller seed itself. Both
+the NumPy controller and Torch twin now seed one `controller_dt_s` of accrued
+outer-loop time, so the first 4 ms replay step performs the 125 Hz velocity
+update represented by the captured boundary. Remove the replay tool's local
+state replacement; controller replay, target fitting, and future consumers now
+share one phase contract.
+
+Add NumPy and Torch regression assertions for the accrued seed phase and retain
+sequential parity coverage. Reuse the latest fresh reference with the unchanged
+1.04-1.08 scale candidates to measure the structural correction before paying
+for another capture.

@@ -572,6 +572,7 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
     params = _params("velocity")
     state = seed_actuation_controller_state(
         params=params,
+        controller_dt_s=0.004,
         physical_linear_velocity_enu=np.zeros(3),
         filtered_linear_velocity_enu=np.zeros(3),
         angular_velocity_body_flu=np.zeros(3),
@@ -606,6 +607,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
 
     state = seed_actuation_controller_state(
         params=params,
+        controller_dt_s=0.004,
         physical_linear_velocity_enu=filtered_velocity,
         filtered_linear_velocity_enu=filtered_velocity,
         angular_velocity_body_flu=angular_velocity,
@@ -628,6 +630,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
     assert state.angular_acceleration_body_flu == pytest.approx(angular_acceleration)
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
     assert state.hover_thrust_normalized == pytest.approx(0.572)
+    assert state.outer_loop_elapsed_s == pytest.approx(0.004)
 
 
 def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
@@ -645,6 +648,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
     zero = np.zeros(3)
     controller = seed_actuation_controller_state(
         params=params,
+        controller_dt_s=0.004,
         physical_linear_velocity_enu=zero,
         filtered_linear_velocity_enu=np.array([0.1, -0.2, 0.3]),
         angular_velocity_body_flu=zero,
@@ -681,6 +685,7 @@ def test_body_rate_input_filter_uses_the_seeded_estimator_state():
     zero = np.zeros(3)
     controller = seed_actuation_controller_state(
         params=params,
+        controller_dt_s=0.004,
         physical_linear_velocity_enu=zero,
         filtered_linear_velocity_enu=zero,
         angular_velocity_body_flu=zero,
@@ -716,6 +721,7 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
     def neutral_omega(hover: float) -> np.ndarray:
         controller = seed_actuation_controller_state(
             params=params,
+            controller_dt_s=0.004,
             physical_linear_velocity_enu=zero,
             filtered_linear_velocity_enu=zero,
             angular_velocity_body_flu=zero,
@@ -856,6 +862,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
         hover_thrust_normalized=torch.tensor([0.572]),
         valid=torch.tensor([True]),
     )
+    assert state.outer_loop_elapsed_s.item() == pytest.approx(params.controller_dt_s)
     velocity_integral_before = state.velocity_integral_world.clone()
 
     thrust = _initial_rotor_thrust_from_controller_state(
@@ -928,6 +935,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     seed_rate_integral = np.array([0.01, -0.02, 0.03])
     numpy_controller = seed_actuation_controller_state(
         params=numpy_params,
+        controller_dt_s=0.004,
         physical_linear_velocity_enu=physical_seed_velocity,
         filtered_linear_velocity_enu=seed_velocity,
         angular_velocity_body_flu=seed_angular_velocity,
