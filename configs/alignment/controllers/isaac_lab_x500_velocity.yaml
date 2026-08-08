@@ -66,36 +66,16 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # Fresh captures occupy two evidenced planar endpoint basins. Search both
-  # axes at large steps, then refine only around retained gate champions.
+  # The current fresh capture selected the lowest X bias while Y/Z already
+  # matched. Search through the extrapolated negative-X endpoint crossing.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
+      - [-0.030, -0.030, -0.0039]
+      - [-0.020, -0.030, -0.0039]
+      - [-0.010, -0.030, -0.0039]
+      - [0.000, -0.030, -0.0039]
       - [0.006, -0.030, -0.0039]
-      - [0.006, -0.020, -0.0039]
-      - [0.006, -0.010, -0.0039]
-      - [0.006, 0.000, -0.0039]
-      - [0.006, 0.010, -0.0039]
-      - [0.014, -0.030, -0.0039]
-      - [0.014, -0.020, -0.0039]
-      - [0.014, -0.010, -0.0039]
-      - [0.014, 0.000, -0.0039]
-      - [0.014, 0.010, -0.0039]
-      - [0.022, -0.030, -0.0039]
-      - [0.022, -0.020, -0.0039]
-      - [0.022, -0.010, -0.0039]
-      - [0.022, 0.000, -0.0039]
-      - [0.022, 0.010, -0.0039]
-      - [0.030, -0.030, -0.0039]
-      - [0.030, -0.020, -0.0039]
-      - [0.030, -0.010, -0.0039]
-      - [0.030, 0.000, -0.0039]
-      - [0.030, 0.010, -0.0039]
-      - [0.038, -0.030, -0.0039]
-      - [0.038, -0.020, -0.0039]
-      - [0.038, -0.010, -0.0039]
-      - [0.038, 0.000, -0.0039]
-      - [0.038, 0.010, -0.0039]
 
 selection_metric: controller-quality
 publication_metrics:
