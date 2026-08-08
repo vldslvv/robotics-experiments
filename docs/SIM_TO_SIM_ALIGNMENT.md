@@ -77,12 +77,17 @@ reconstructed collective/torque, and `hover_thrust_estimate` by timestamp. It
 fails on incomplete topic coverage, a join error above one 4 ms physics tick,
 normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
 controller-boundary replay applies the selected controller to every fit,
-validation, and stability profile and enforces the same motor and collective
-limits. It uses each profile's absolute PX4 boot time and recorded command
-cadence; ULog rate-limited `trajectory_setpoint` samples are not used to infer
-command transitions. The replay also reproduces PX4's velocity-only vertical
-state blending and applies logged hover-estimate updates at their source
-timestamps.
+validation, and stability profile. Its core replay uses PX4-estimated state and
+enforces the same motor and collective limits. A second replay starts from the
+captured physical articulation state, seeds the recorded estimator offset, and
+requires normalized motor RMSE below 0.01; closed-loop motion gates cover the
+remaining estimator residual. It uses each profile's absolute PX4 boot time and
+recorded command cadence; ULog rate-limited `trajectory_setpoint` samples are
+not used to infer command transitions. The replay also reproduces PX4's
+velocity-only vertical state blending and applies logged hover-estimate updates
+at their source timestamps. The target-only `velocity_observation_scale`
+models the evidenced physical-to-estimated velocity boundary without changing
+the pinned PX4 controller gains.
 
 ## Quality and acceptance
 

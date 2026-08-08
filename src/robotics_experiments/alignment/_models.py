@@ -87,6 +87,7 @@ class ProbeTrace:
     initial_position_enu_m: Vector3
     initial_attitude_flu_enu_wxyz: tuple[float, float, float, float]
     initial_linear_velocity_enu_mps: Vector3
+    initial_estimated_linear_velocity_enu_mps: Vector3
     initial_angular_velocity_body_flu_radps: Vector3
     completed: bool
     initial_controller_state_valid: bool = False

@@ -21,6 +21,7 @@ class ControllerSettings:
     horizontal_velocity_error_gain_full_mps: float
     ki_vel: Vector3
     kd_vel: Vector3
+    velocity_observation_scale: Vector3
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3

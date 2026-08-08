@@ -108,6 +108,10 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         ),
         ki_vel=_vector(payload["ki_vel"], f"{name}.ki_vel"),
         kd_vel=_vector(payload["kd_vel"], f"{name}.kd_vel"),
+        velocity_observation_scale=_vector(
+            payload["velocity_observation_scale"],
+            f"{name}.velocity_observation_scale",
+        ),
         velocity_filter_hz=_finite(
             value=payload["velocity_filter_hz"], name=f"{name}.velocity_filter_hz", nonnegative=True
         ),

@@ -206,6 +206,16 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                             [1.0, 0.0, 0.0, 0.0],
                             [1.0, 0.0, 0.0, 0.0],
                         ],
+                        "velocity_enu_mps": [
+                            [0.0, 0.0, 0.0],
+                            [0.1, 0.0, 0.0],
+                            [0.0, 0.0, 0.0],
+                        ],
+                        "angular_velocity_body_flu_radps": [
+                            [0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.2],
+                            [0.0, 0.0, 0.0],
+                        ],
                     }
                 ],
             }
@@ -231,6 +241,16 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                     [1.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 0.0],
+                ],
+                "velocity_enu_mps": [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                "angular_velocity_body_flu_radps": [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.2],
+                    [0.0, 0.0, 0.0],
                 ],
             },
         }
@@ -275,6 +295,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                     "ax": np.array([2.0, 4.0]),
                     "ay": np.array([4.0, 8.0]),
                     "az": np.array([6.0, 12.0]),
+                    "vx": np.array([0.1, 0.3]),
+                    "vy": np.array([0.2, 0.4]),
+                    "vz": np.array([0.3, 0.5]),
                 },
             ),
             dataset(
@@ -315,6 +338,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert report["method"] == "px4-ulog-controller-boundary-v1"
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
+    assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
     assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [

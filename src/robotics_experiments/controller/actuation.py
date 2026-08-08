@@ -103,6 +103,7 @@ class ActuationControllerState:
     """State carried by the PX4-like velocity and body-rate cascade."""
 
     filtered_velocity_enu: np.ndarray
+    velocity_observation_bias_enu: np.ndarray
     acceleration_enu: np.ndarray
     acceleration_setpoint_enu: np.ndarray
     velocity_integral_enu: np.ndarray
@@ -148,6 +149,7 @@ class ActuationParams:
     horizontal_velocity_error_gain_full_mps: float
     ki_vel: np.ndarray
     kd_vel: np.ndarray
+    velocity_observation_scale: np.ndarray
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: np.ndarray
@@ -501,6 +503,9 @@ def _rate_to_omega(
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
+        velocity_observation_bias_enu=_readonly_copy(
+            controller_state.velocity_observation_bias_enu
+        ),
         acceleration_enu=_readonly_copy(controller_state.acceleration_enu),
         acceleration_setpoint_enu=_readonly_copy(controller_state.acceleration_setpoint_enu),
         velocity_integral_enu=_readonly_copy(controller_state.velocity_integral_enu),
@@ -556,7 +561,10 @@ def _velocity_action_to_omega(
     )
 
     velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
-    measured_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
+    measured_velocity = (
+        params.velocity_observation_scale * np.asarray(state.linear_velocity_enu, dtype=np.float64)
+        + controller_state.velocity_observation_bias_enu
+    )
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_filter_hz,
@@ -624,6 +632,9 @@ def _velocity_action_to_omega(
     )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_observation_bias_enu=_readonly_copy(
+            controller_state.velocity_observation_bias_enu
+        ),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(desired_acceleration),
         velocity_integral_enu=_readonly_copy(velocity_integral),
@@ -778,6 +789,7 @@ def build_actuation_params(
         ),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
+        velocity_observation_scale=_readonly_copy(controller_settings.velocity_observation_scale),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_readonly_copy(
@@ -806,6 +818,7 @@ def initial_actuation_controller_state() -> ActuationControllerState:
     zero = np.zeros(3, dtype=np.float64)
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(zero),
+        velocity_observation_bias_enu=_readonly_copy(zero),
         acceleration_enu=_readonly_copy(zero),
         acceleration_setpoint_enu=_readonly_copy(zero),
         velocity_integral_enu=_readonly_copy(zero),
@@ -825,6 +838,7 @@ def seed_actuation_controller_state(
     *,
     params: ActuationParams,
     linear_velocity_enu: np.ndarray,
+    filtered_linear_velocity_enu: np.ndarray,
     angular_velocity_body_flu: np.ndarray,
     acceleration_setpoint_enu_mps2: np.ndarray,
     linear_acceleration_enu_mps2: np.ndarray,
@@ -843,6 +857,10 @@ def seed_actuation_controller_state(
         return result
 
     velocity = vector(linear_velocity_enu, "linear_velocity_enu")
+    filtered_velocity = vector(
+        filtered_linear_velocity_enu,
+        "filtered_linear_velocity_enu",
+    )
     angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
     acceleration_setpoint = vector(
         acceleration_setpoint_enu_mps2,
@@ -863,7 +881,7 @@ def seed_actuation_controller_state(
         or hover_thrust_normalized > 1.0
     ):
         raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
-    velocity_error = -velocity
+    velocity_error = -filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
         acceleration_setpoint - effective_kp_vel * velocity_error + params.kd_vel * acceleration,
@@ -871,7 +889,10 @@ def seed_actuation_controller_state(
         params.velocity_integral_limit_mps2,
     )
     return ActuationControllerState(
-        filtered_velocity_enu=_readonly_copy(velocity),
+        filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_observation_bias_enu=_readonly_copy(
+            filtered_velocity - params.velocity_observation_scale * velocity
+        ),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(acceleration_setpoint),
         velocity_integral_enu=_readonly_copy(velocity_integral),

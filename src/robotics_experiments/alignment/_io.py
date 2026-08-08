@@ -123,6 +123,10 @@ def _settings(
         ),
         ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
+        velocity_observation_scale=_vector(
+            value=settings["velocity_observation_scale"],
+            name=f"{name}.velocity_observation_scale",
+        ),
         velocity_filter_hz=_finite(
             value=settings["velocity_filter_hz"],
             name=f"{name}.velocity_filter_hz",
@@ -560,6 +564,10 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         initial_linear_velocity_enu_mps=_vector(
             value=trace["initial_linear_velocity_enu_mps"],
             name=f"{name}.initial_linear_velocity_enu_mps",
+        ),
+        initial_estimated_linear_velocity_enu_mps=_vector(
+            value=trace["initial_estimated_linear_velocity_enu_mps"],
+            name=f"{name}.initial_estimated_linear_velocity_enu_mps",
         ),
         initial_angular_velocity_body_flu_radps=_vector(
             value=trace["initial_angular_velocity_body_flu_radps"],

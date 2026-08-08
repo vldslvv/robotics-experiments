@@ -72,6 +72,7 @@ def _settings(
         horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
+        velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
@@ -205,6 +206,7 @@ def _response_traces(
                 initial_position_enu_m=_ZERO3,
                 initial_attitude_flu_enu_wxyz=_IDENTITY,
                 initial_linear_velocity_enu_mps=_ZERO3,
+                initial_estimated_linear_velocity_enu_mps=_ZERO3,
                 initial_angular_velocity_body_flu_radps=_ZERO3,
                 completed=True,
             )

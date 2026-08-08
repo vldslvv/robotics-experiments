@@ -24,7 +24,9 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
-  # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
+  velocity_observation_scale: [1.0, 1.0, 1.0]
+  # Target-side observation filtering models the PX4 estimator boundary between
+  # captured physical velocity and vehicle_local_position.
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
@@ -63,6 +65,14 @@ parameters:
   - field: hover_thrust_normalized
     stage: 1
     candidates: [0.54, 0.56, 0.58, 0.60]
+  - field: velocity_observation_scale
+    stage: 1
+    candidates:
+      - [1.0, 1.0, 1.0]
+      - [1.02, 0.98, 1.0]
+      - [1.01, 0.98, 1.01]
+      - [0.98, 1.02, 1.0]
+      - [1.04, 0.96, 1.02]
   - field: max_tilt_cmd_deg
     stage: 2
     candidates: [22.5, 45.0, 67.5]

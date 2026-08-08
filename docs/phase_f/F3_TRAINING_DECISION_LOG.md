@@ -7490,3 +7490,32 @@ boundary-valid controller family. Search only transport delay, normalized
 hover, tilt, and actuator realization. If motion remains outside a gate, fix
 the evidenced plant seam rather than retuning the now-passing controller
 boundary.
+
+### 199. Move the boundary upstream of the PX4 estimator
+
+Date: 2026-08-08.
+
+Fresh attempt `.build/alignment/x500-px4-v1/20260808T084846Z` used source
+commit `9c868c4`, evaluated 1,407 unique candidates in 22 GPU batches, and
+selected candidate 980. Search elapsed time was 445.3 s at 3.15 useful
+candidates/s. Average GPU utilization was 27.6%, with 1,409 padded slots, so
+the remaining throughput limit is sequential Isaac/PhysX stepping and
+underfilled adaptive batches rather than tensor capacity.
+
+The actuator audit and the post-estimator controller replay both passed. The
+held-out stability replay had normalized motor RMSE 0.00656 and collective
+RMSE 0.02432 N. Motion publication correctly failed braking distance
+(17.221 mm), stop time (0.9 s), and combined endpoint (18.388 mm). No candidate
+could pass braking or stop time; candidate-wide minima were 16.456 mm and
+0.9 s. The best endpoint was 10.891 mm. This is no progress relative to the
+preceding motion frontier, despite a passing controller replay.
+
+The failure exposes an incomplete boundary definition. The replay feeds the
+target PX4's already-estimated `vehicle_local_position` velocity, while Isaac
+Lab closes its controller on instantaneous articulation velocity. Joining the
+preserved bridge truth to the ULog shows profile velocity discrepancies of
+roughly 0.004-0.007 m/s and horizontal phase offsets around 20-68 ms. These are
+the same scale as the closed-loop stopping residuals. The next attempt must
+replay from captured physical state, seed the target's observation state from
+the PX4 estimate, and fit only the evidenced observation filter before motor
+comparison. Keep the pinned controller gains unchanged.

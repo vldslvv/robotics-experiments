@@ -435,6 +435,11 @@ def _make_env(
                 state=self._controller_state,  # type: ignore[has-type]  # Isaac base owns state.
                 params=self.actuation_params,
                 linear_velocity_world=linear_velocity_world,
+                filtered_linear_velocity_world=torch.as_tensor(
+                    [trace["initial_estimated_linear_velocity_enu_mps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 angular_velocity_body=angular_body,
                 acceleration_setpoint_world=torch.as_tensor(
                     [

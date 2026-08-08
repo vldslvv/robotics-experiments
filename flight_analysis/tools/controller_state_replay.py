@@ -15,6 +15,7 @@ import ast
 import json
 import math
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -404,6 +405,10 @@ def _controller_boundary(
         topic=rate_status,
         fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
     )
+    estimated_velocity_ned = interpolated_vector(
+        topic=local_position,
+        fields=("vx", "vy", "vz"),
+    )
     hover_thrust_normalized = float(
         _linear_interpolate(
             source_t=_topic_time_us(topic=hover).astype(np.float64),
@@ -412,6 +417,7 @@ def _controller_boundary(
         )[0]
     )
     vectors = {
+        "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
         "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
         "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
         "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
@@ -721,6 +727,7 @@ def _report(
     end_s: float,
     time_origin_us: int,
     command_trace: dict | None,
+    physical_state: bool,
 ) -> dict:
     config = load_config(config_path)
     vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
@@ -739,6 +746,11 @@ def _report(
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     controller_settings = load_controller_artifact(controller_artifact_path).selected_settings
+    if not physical_state:
+        controller_settings = replace(
+            controller_settings,
+            velocity_observation_scale=(1.0, 1.0, 1.0),
+        )
     params = build_actuation_params(
         geometry=geometry,
         action_cfg=config.rl.action,
@@ -860,6 +872,43 @@ def _report(
         ),
         query_t=replay_t,
     )
+    if not physical_state:
+        replay_velocity_enu = local_velocity_ned @ _NED_TO_ENU
+        replay_quaternion_flu_enu = np.asarray(
+            [
+                _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=value)[0]
+                for value in quaternion_frd_ned
+            ],
+            dtype=np.float64,
+        )
+        replay_angular_velocity_flu = angular_velocity_frd @ _FLU_TO_FRD
+        replay_state_source = "px4-estimated-state"
+    else:
+        if command_trace is None:
+            raise ValueError("physical-state replay requires a captured command trace")
+        physical_time = np.asarray(command_trace["time_s"], dtype=np.float64)
+        replay_velocity_enu = _linear_interpolate(
+            source_t=physical_time,
+            values=np.asarray(command_trace["velocity_enu_mps"], dtype=np.float64),
+            query_t=replay_t - start_s,
+        )
+        replay_quaternion_flu_enu = _interpolate_quaternions(
+            source_t=physical_time,
+            quaternions_wxyz=np.asarray(
+                command_trace["attitude_flu_enu_wxyz"],
+                dtype=np.float64,
+            ),
+            query_t=replay_t - start_s,
+        )
+        replay_angular_velocity_flu = _linear_interpolate(
+            source_t=physical_time,
+            values=np.asarray(
+                command_trace["angular_velocity_body_flu_radps"],
+                dtype=np.float64,
+            ),
+            query_t=replay_t - start_s,
+        )
+        replay_state_source = "captured-physical-state"
     hover_index = _hold_indices(source_t=relative_time(hover), query_t=replay_t)
     replay_hover_thrust = np.asarray(hover["hover_thrust"], dtype=np.float64)[hover_index]
 
@@ -881,8 +930,13 @@ def _report(
     )
     controller_state = seed_actuation_controller_state(
         params=params,
-        linear_velocity_enu=_NED_TO_ENU @ local_velocity_ned[0],
-        angular_velocity_body_flu=_FLU_TO_FRD @ angular_velocity_frd[0],
+        linear_velocity_enu=replay_velocity_enu[0],
+        filtered_linear_velocity_enu=(
+            controller_vectors["initial_estimated_linear_velocity_enu_mps"]
+            if physical_state
+            else replay_velocity_enu[0]
+        ),
+        angular_velocity_body_flu=replay_angular_velocity_flu[0],
         acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
         linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
         angular_acceleration_body_flu_radps2=controller_vectors[
@@ -896,28 +950,33 @@ def _report(
     for (
         velocity_setpoint_ned,
         yaw_setpoint_rate,
-        velocity_state_ned,
+        velocity_state_enu,
         quaternion,
-        rates_frd,
+        rates_flu,
         hover_thrust_normalized,
     ) in zip(
         velocity_ned,
         yaw_speed,
-        local_velocity_ned,
-        quaternion_frd_ned,
-        angular_velocity_frd,
+        replay_velocity_enu,
+        replay_quaternion_flu_enu,
+        replay_angular_velocity_flu,
         replay_hover_thrust,
         strict=True,
     ):
         if not (
             np.all(np.isfinite(velocity_setpoint_ned))
             and math.isfinite(float(yaw_setpoint_rate))
-            and np.all(np.isfinite(velocity_state_ned))
+            and np.all(np.isfinite(velocity_state_enu))
             and np.all(np.isfinite(quaternion))
-            and np.all(np.isfinite(rates_frd))
+            and np.all(np.isfinite(rates_flu))
         ):
             raise ValueError("selected replay window contains non-finite controller inputs")
-        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion)
+        quaternion_flu_enu = quaternion
+        _w, qx, qy, qz = quaternion_flu_enu
+        yaw = math.atan2(
+            2.0 * (_w * qz + qx * qy),
+            1.0 - 2.0 * (qy * qy + qz * qz),
+        )
         velocity_setpoint_enu = _NED_TO_ENU @ velocity_setpoint_ned
         heading = np.array(
             [
@@ -933,8 +992,8 @@ def _report(
 
         state = ActuationState(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
-            linear_velocity_enu=_NED_TO_ENU @ velocity_state_ned,
-            angular_velocity_body_flu=_FLU_TO_FRD @ rates_frd,
+            linear_velocity_enu=velocity_state_enu,
+            angular_velocity_body_flu=rates_flu,
         )
         controller_state = update_hover_thrust_estimate(
             params=params,
@@ -1037,6 +1096,7 @@ def _report(
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
+        "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
@@ -1082,6 +1142,10 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
                     "command_velocity_body_flu_mps": raw_profile["command_velocity_body_flu_mps"],
                     "command_yaw_rate_radps": raw_profile["command_yaw_rate_radps"],
                     "attitude_flu_enu_wxyz": raw_profile["attitude_flu_enu_wxyz"],
+                    "velocity_enu_mps": raw_profile["velocity_enu_mps"],
+                    "angular_velocity_body_flu_radps": raw_profile[
+                        "angular_velocity_body_flu_radps"
+                    ],
                 },
             }
         )
@@ -1098,7 +1162,7 @@ def _profile_replay_report(
     profiles = []
     failures = []
     for window in _profile_windows(reference_path=reference_path):
-        replay = _report(
+        core_replay = _report(
             ulog=ulog,
             config_path=config_path,
             controller_artifact_path=controller_artifact_path,
@@ -1106,8 +1170,20 @@ def _profile_replay_report(
             end_s=window["end_s"],
             time_origin_us=0,
             command_trace=window["command_trace"],
+            physical_state=False,
         )
-        metrics = replay["metrics"]
+        physical_replay = _report(
+            ulog=ulog,
+            config_path=config_path,
+            controller_artifact_path=controller_artifact_path,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+            time_origin_us=0,
+            command_trace=window["command_trace"],
+            physical_state=True,
+        )
+        metrics = core_replay["metrics"]
+        physical_metrics = physical_replay["metrics"]
         profile_name = window["profile"]
         if metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
             failures.append(
@@ -1121,6 +1197,12 @@ def _profile_replay_report(
                 f"{metrics['collective_thrust_rmse_n']:.6f} N exceeds "
                 f"{_MAX_COLLECTIVE_RMSE_N:.6f} N"
             )
+        if physical_metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
+            failures.append(
+                f"{profile_name}: physical-state normalized motor RMSE "
+                f"{physical_metrics['normalized_motor_rmse']:.6f} exceeds "
+                f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
         profiles.append(
             {
                 "profile": window["profile"],
@@ -1128,16 +1210,18 @@ def _profile_replay_report(
                 "axis": window["axis"],
                 "start_s": window["start_s"],
                 "end_s": window["end_s"],
-                "sample_count": replay["sample_count"],
-                "controller_sample_count": replay["controller_sample_count"],
-                "controller_state_source_age_us": replay["controller_state_source_age_us"],
-                "sample_time_s": replay["sample_time_s"],
+                "sample_count": core_replay["sample_count"],
+                "controller_sample_count": core_replay["controller_sample_count"],
+                "controller_state_source": core_replay["controller_state_source"],
+                "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
+                "sample_time_s": core_replay["sample_time_s"],
                 "metrics": metrics,
+                "physical_state_metrics": physical_metrics,
             }
         )
     return {
         "schema_version": 1,
-        "method": "px4-ulog-profile-state-replay-v1-250hz",
+        "method": "physical-and-estimated-state-px4-profile-replay-v1-250hz",
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),
@@ -1216,6 +1300,7 @@ def main() -> None:
             end_s=end_s,
             time_origin_us=replay_ulog.start_timestamp,
             command_trace=None,
+            physical_state=False,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:
