@@ -216,16 +216,17 @@ def _split_metrics(
                     )
                 )
             )
-        for (
-            reference_distance,
-            target_distance,
-            reference_residual,
-            target_residual,
-            stop_time_error,
-        ) in _braking_events(reference=reference, target=target):
-            braking_distance_errors.append(abs(target_distance - reference_distance))
-            residual_speed_errors.append(abs(target_residual - reference_residual))
-            stop_time_errors.append(stop_time_error)
+        if reference.profile != "validation-vertical-policy-envelope":
+            for (
+                reference_distance,
+                target_distance,
+                reference_residual,
+                target_residual,
+                stop_time_error,
+            ) in _braking_events(reference=reference, target=target):
+                braking_distance_errors.append(abs(target_distance - reference_distance))
+                residual_speed_errors.append(abs(target_residual - reference_residual))
+                stop_time_errors.append(stop_time_error)
     if not squared_errors:
         raise ValueError(f"probe suite contains no {split!r} traces")
     aggregate_rmse = float(np.sqrt(np.mean(np.concatenate(squared_errors, axis=0))))

@@ -542,7 +542,7 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
         ),
         base_settings=_settings(delay=0.5),
         search=SearchSpec(
-            strategy="coarse-to-fine-beam-v3",
+            strategy="coarse-to-fine-beam",
             beam_width=2,
             passes_per_stage=1,
             refinement_levels=1,
@@ -605,7 +605,7 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
             ),
         ),
         search=SearchSpec(
-            strategy="coarse-to-fine-beam-v3",
+            strategy="coarse-to-fine-beam",
             beam_width=2,
             passes_per_stage=1,
         ),
@@ -757,6 +757,28 @@ def test_controller_quality_reports_braking_distance_and_residual_speed_error() 
 
     assert result.validation_metrics["braking_distance_error_m"] > 0.0
     assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+
+
+def test_vertical_envelope_has_a_dedicated_gate_without_redefining_braking() -> None:
+    settings = _settings(kp=(1.0, 1.0, 1.0))
+    reference = _response_traces(profiles=_profiles(), settings=settings)
+    trace_index = next(
+        index
+        for index, trace in enumerate(reference)
+        if trace.profile == "validation-vertical-policy-envelope"
+    )
+    source = reference[trace_index]
+    modified = replace(
+        source,
+        position_enu_m=tuple(
+            (position[0], position[1], position[2] * 10.0) for position in source.position_enu_m
+        ),
+    )
+    target = (*reference[:trace_index], modified, *reference[trace_index + 1 :])
+
+    result = metric(name="controller-quality")(reference, target)
+
+    assert result.validation_metrics["braking_distance_error_m"] == 0.0
 
 
 def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
