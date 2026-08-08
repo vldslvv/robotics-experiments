@@ -66,18 +66,30 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # During the fresh vertical stop, PX4's estimate followed physical Z velocity
-  # with a -0.00389 m/s intercept. Fit that evidenced estimator seam while
-  # retaining the replay-validated Z proportional gain.
+  # The fresh combined endpoint over-travels positive X and under-travels
+  # negative Y. Sweep the previously evidenced positive-X and negative-Y
+  # corrections together, retaining the measured vertical estimator offset.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [0.006, -0.030, 0.0]
-      - [0.006, -0.030, -0.0025]
-      - [0.006, -0.030, -0.0030]
-      - [0.006, -0.030, -0.0035]
       - [0.006, -0.030, -0.0039]
-      - [0.006, -0.030, -0.0045]
+      - [0.006, -0.034, -0.0039]
+      - [0.006, -0.038, -0.0039]
+      - [0.011, -0.030, -0.0039]
+      - [0.011, -0.034, -0.0039]
+      - [0.011, -0.038, -0.0039]
+      - [0.016, -0.030, -0.0039]
+      - [0.016, -0.034, -0.0039]
+      - [0.016, -0.038, -0.0039]
+      - [0.021, -0.030, -0.0039]
+      - [0.021, -0.034, -0.0039]
+      - [0.021, -0.038, -0.0039]
+      - [0.026, -0.030, -0.0039]
+      - [0.026, -0.034, -0.0039]
+      - [0.026, -0.038, -0.0039]
+      - [0.031, -0.030, -0.0039]
+      - [0.031, -0.034, -0.0039]
+      - [0.031, -0.038, -0.0039]
 
 selection_metric: controller-quality
 publication_metrics:

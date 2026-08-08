@@ -8733,3 +8733,21 @@ observation offset reduces positive X over-travel, while a more negative Y
 offset increases the missing negative-Y travel. Search those evidenced
 directions together, retain the measured -0.0039 m/s Z estimator offset, and
 require the complete replay motor margin after any motion pass.
+
+### 255. Sweep the evidenced planar endpoint directions together
+
+Date: 2026-08-08.
+
+Retain the broad 0-0.0125 Hz estimator-persistence stage. Replace the Z-only
+observation-bias stage with a coarse planar grid: X offsets from +0.006 through
++0.031 m/s in 0.005 m/s steps, Y offsets at -0.030, -0.034, and -0.038 m/s,
+and Z fixed at the measured -0.0039 m/s intercept. Midpoint refinement will
+concentrate only around retained candidates and per-gate champions.
+
+This 18-vector large-step stage covers the extrapolated X endpoint crossing
+while measuring the known residual-speed and physical-state motor tradeoffs of
+more negative Y. It is one declarative parameter addition, not a controller
+change. Reuse the Entry 253 fresh reference, select on all eight unchanged
+motion gates, and run the now exact-tick complete replay immediately. Do not
+expand a range unless the matching endpoint component and replay boundary
+support it.
