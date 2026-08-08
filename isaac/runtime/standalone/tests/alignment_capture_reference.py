@@ -275,7 +275,7 @@ def _policy_factory(*, definition: ControllerDefinition, config: ExperimentConfi
     return factory
 
 
-def _deploy_pusher(*, context: SceneTestContext, host) -> None:
+def _deploy_pusher(context: SceneTestContext, host, /) -> None:
     """Match the deployed-pusher plant used by Lab training and policy runtime."""
     if not context.config.alignment.capture.pusher_deployed:
         return

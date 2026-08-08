@@ -214,8 +214,8 @@ def test_capture_deploys_the_policy_plant_pusher(
     reports: list[str] = []
 
     module._deploy_pusher(  # noqa: SLF001 - focused capture plant-contract test
-        context=SimpleNamespace(config=config, report=reports.append),
-        host=SimpleNamespace(params=SimpleNamespace(articulation_path="/Drone")),
+        SimpleNamespace(config=config, report=reports.append),
+        SimpleNamespace(params=SimpleNamespace(articulation_path="/Drone")),
     )
 
     assert writes == {
