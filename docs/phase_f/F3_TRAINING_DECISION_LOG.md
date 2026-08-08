@@ -7719,3 +7719,26 @@ endpoint excess from the preceding diagnostic and leaves only 0.693 mm to the
 gate. Because all three selected gains are generated interior points and no
 new boundary fails, run one fine P/I/D sweep around this basin before making
 another structural change or paying for a fresh capture.
+
+### 207. Reject gain compensation and align the deployed plant
+
+Date: 2026-08-08.
+
+Precision diagnostic
+`.build/alignment/x500-px4-v1/20260808T120000Z-diagnostic-precision` evaluated
+885 candidates in 13 GPU batches and reduced the endpoint miss to 10.433 mm.
+The mandatory replay rejected that motion-only basin: stability normalized
+motor RMSE was 0.01359, stability collective RMSE was 0.07335 N, and the
+vertical-policy collective RMSE was 0.07810 N. The fitted lateral gains and
+500 N/s actuator rate therefore compensate downstream motion and are not a
+valid PX4 controller boundary. Restore pinned horizontal gains and the
+boundary-valid effectively instantaneous actuator slew.
+
+Plant inspection then found a concrete setup mismatch. Isaac Lab initializes
+and holds `pusher_joint` at its fully deployed 15 mm limit, while the
+task-neutral PX4 alignment adapter does not instantiate the press observer and
+leaves the same joint retracted. The next comparison explicitly deploys the
+pusher after PX4 takeoff and waits through ordinary probe preconditioning.
+This behavior is a Hydra capture contract, changes the resolved experiment
+fingerprint, and is tested independently. Search only the already-evidenced
+estimator adapter range on the fresh, mechanically matched capture.

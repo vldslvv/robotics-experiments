@@ -64,7 +64,9 @@ objective.
 ## Evidence and boundary audit
 
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. Each profile records its absolute PX4 simulation start time and the
+adapter. Its configured pusher is deployed after takeoff and before probe
+preconditioning so the reference plant matches Lab training and press-policy
+deployment. Each profile records its absolute PX4 simulation start time and the
 complete initial controller state required for replay. One run directory keeps:
 
 - the ULog and bridge log;

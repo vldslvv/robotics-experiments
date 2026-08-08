@@ -18,12 +18,12 @@ command_interface:
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
-  kp_vel: [1.8, 1.1375, 4.20]
+  kp_vel: [1.8, 1.8, 4.20]
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.4, 0.125, 2.1]
-  kd_vel: [0.2, 0.25, 0.0]
+  ki_vel: [0.4, 0.4, 2.1]
+  kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 1.02, 1.0]
   velocity_estimator_bias_decay_hz: 0.02
   # Target-side observation filtering models the PX4 estimator boundary between
@@ -49,7 +49,7 @@ settings:
   horizontal_thrust_margin_fraction: 0.30
   thruster_tau_inc_s: 0.04
   thruster_tau_dec_s: 0.02
-  thruster_max_thrust_rate_nps: 500.0
+  thruster_max_thrust_rate_nps: 100000.0
 
 search:
   strategy: coarse-to-fine-beam
@@ -61,32 +61,14 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # The preserved-reference P/I/D diagnostic leaves only 0.693 mm of endpoint
-  # excess. Resolve that demonstrated basin at finer steps before spending a
-  # new PX4 capture.
-  - field: kp_vel
+  # Search only the physical-to-estimated state boundary after the deployed
+  # pusher plant contract is made identical in both backends.
+  - field: velocity_estimator_bias_decay_hz
     stage: 1
-    candidates:
-      - [1.8, 1.130, 4.2]
-      - [1.8, 1.135, 4.2]
-      - [1.8, 1.140, 4.2]
-      - [1.8, 1.145, 4.2]
-  - field: ki_vel
+    candidates: [0.01, 0.015, 0.02, 0.03, 0.04]
+  - field: angular_velocity_filter_hz
     stage: 1
-    candidates:
-      - [0.4, 0.100, 2.1]
-      - [0.4, 0.115, 2.1]
-      - [0.4, 0.125, 2.1]
-      - [0.4, 0.135, 2.1]
-      - [0.4, 0.150, 2.1]
-  - field: kd_vel
-    stage: 1
-    candidates:
-      - [0.2, 0.230, 0.0]
-      - [0.2, 0.240, 0.0]
-      - [0.2, 0.250, 0.0]
-      - [0.2, 0.260, 0.0]
-      - [0.2, 0.270, 0.0]
+    candidates: [10.0, 12.5, 15.0]
 
 selection_metric: controller-quality
 publication_metrics:
