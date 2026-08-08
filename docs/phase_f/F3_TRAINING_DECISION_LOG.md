@@ -7843,3 +7843,22 @@ translation, retaining a keyword-only public call. The body-origin seam is not
 supported as the cause of the endpoint residual. The next diagnostic must
 preserve the position-less high-throughput sink and inspect a different plant
 boundary.
+
+### 213. Fit the evidenced lateral estimator scale
+
+Date: 2026-08-08.
+
+Joining the fresh Attempt 204 bridge state to `vehicle_local_position` at
+physics cadence isolates an upstream boundary with the correct error sign. In
+`validation-combined-turns`, least-squares PX4 estimated-to-physical velocity
+scale is 0.9766 on Y. The Lab adapter currently uses 1.02, causing it to
+perceive too much lateral velocity and predict the observed 13.52 mm Y
+under-travel. The corresponding endpoint X residual is only 2.08 mm, so X and
+Z scales stay fixed.
+
+Fix the selected replay-passing bias decay at 0.0275 Hz and angular-rate filter
+at 13.125 Hz. Search only Y observation scales from 0.94 through 1.02 around
+the measured 0.9766 ratio. This is the evidenced physical-to-PX4-estimator
+adapter already audited by the mandatory physical-state replay, not a change to
+PX4 controller gains or the plant. Reuse Attempt 204's fresh reference for a
+compact target diagnostic, then run the replay before any new capture.
