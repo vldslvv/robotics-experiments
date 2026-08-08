@@ -8981,3 +8981,33 @@ declarative third stage after planar feasibility. Reuse the current fresh
 reference to require the lower-integral candidates to pass all motion and replay
 gates. Only then predeclare the resulting scratch search and repeat the entire
 clean capture-to-integration procedure without post-capture tuning.
+
+### 264. Keep the integration-proven horizontal integral contract in the scratch fit
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T181839Z-diagnostic-integral` reused the
+accepted Entry 263 reference and evaluated 691 unique candidates in ten GPU
+batches and 298.3 seconds. Useful candidate batching raised average GPU
+utilization from 27.7% to 60.3%. The fit retained candidate 511 with horizontal
+`ki_vel=0.4` because the registered motion metric ranks it ahead of the new
+integral branches. Thirty-two candidates at each of 0.2 and 0.3 were evaluated.
+Twenty-one 0.3 candidates and three 0.2 candidates passed all eight motion
+gates, confirming that reduced horizontal integral authority is compatible with
+the exact-action limits rather than a post-fit controller override.
+
+The published-artifact integration diagnostic remains the discriminating
+evidence: 0.4 retains a long hover/goto transient, while 0.2 combined with a
++0.005 m/s X observation bias passes hover, goto settling, and the handoff
+range. The motion-only selector has no basis for preferring that candidate, so
+continuing to offer 0.4 cannot produce end-to-end acceptance in one invocation.
+
+Keep `ki_vel=[0.2, 0.2, 2.1]` as a declarative fit candidate for every planar
+branch. Retain the broad five-by-five fresh-capture grid, but set its minimum X
+bias to the evidenced +0.005 m/s integration boundary; retain Y from -0.030 to
++0.010 m/s, the full decay range, automatic midpoint refinement, and all
+existing motion, replay, and integration gates. First verify this predeclared
+contract against the preserved fresh reference, then run one new clean capture
+through final publication and `make test-integration-alignment-target` without
+post-capture changes.

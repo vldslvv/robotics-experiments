@@ -295,7 +295,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.20))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
-    assert target.base_settings.ki_vel == pytest.approx((0.4, 0.4, 2.1))
+    assert target.base_settings.ki_vel == pytest.approx((0.2, 0.2, 2.1))
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.search.strategy == "coarse-to-fine-beam"
     assert target.search.beam_width == 32
@@ -308,13 +308,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "ki_vel",
     )
     assert len(target.parameters[-2].candidates) == 25
-    assert target.parameters[-2].candidates[0] == pytest.approx((0.000, -0.030, -0.0039))
+    assert target.parameters[-2].candidates[0] == pytest.approx((0.005, -0.030, -0.0039))
     assert target.parameters[-2].candidates[-1] == pytest.approx((0.040, 0.010, -0.0039))
-    assert target.parameters[-1].candidates == (
-        pytest.approx((0.2, 0.2, 2.1)),
-        pytest.approx((0.3, 0.3, 2.1)),
-        pytest.approx((0.4, 0.4, 2.1)),
-    )
+    assert target.parameters[-1].candidates == (pytest.approx((0.2, 0.2, 2.1)),)
     extended = replace(
         target,
         parameters=(
