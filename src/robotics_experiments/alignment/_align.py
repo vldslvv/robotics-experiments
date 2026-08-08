@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+import robotics_experiments.alignment._metrics as metrics_module
+import robotics_experiments.controller.actuation as controller_actuation
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
     AlignmentResult,
@@ -39,6 +41,12 @@ def _fingerprint(value: object, /) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _module_fingerprint(module_file: str | None, /) -> str:
+    if module_file is None:
+        raise RuntimeError("fingerprinted controller modules must have source files")
+    return hashlib.sha256(Path(module_file).read_bytes()).hexdigest()
 
 
 def _plain(value: Any, /) -> Any:
@@ -700,6 +708,8 @@ def align(
             "reference_definition": reference.definition_fingerprint,
             "probe_suite": probe_suite_fingerprint,
             "selection_metric": target.selection_metric,
+            "metric_implementation": _module_fingerprint(metrics_module.__file__),
+            "controller_implementation": _module_fingerprint(controller_actuation.__file__),
             "experiment": experiment_fingerprint,
             "interface": asdict(target.command_interface),
             "target_image": target.image,

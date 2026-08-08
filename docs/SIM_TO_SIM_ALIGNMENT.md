@@ -118,7 +118,9 @@ fully accepted bundle.
 
 Changing a metric, probe suite, environment, image, controller interface,
 controller definition, or resolved experiment starts a new comparison
-fingerprint. Plant residuals must be fixed at the plant seam; they must not be
+fingerprint. The fingerprint includes hashes of the metric and normalized
+controller implementation modules, so an equation change cannot remain in an
+old comparison. Plant residuals must be fixed at the plant seam; they must not be
 absorbed into controller gains. A selected parameter touching a range boundary
 is not evidence by itself: the matching trace or ULog boundary must support an
 expanded range or structural correction.

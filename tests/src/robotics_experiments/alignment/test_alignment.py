@@ -18,6 +18,7 @@ from robotics_experiments.alignment import (
     load_controller_definition,
 )
 from robotics_experiments.alignment._align import (
+    _module_fingerprint,
     _resolved_experiment_fingerprint,
     _staged_beam_search,
 )
@@ -916,6 +917,15 @@ def test_experiment_fingerprint_includes_capture_but_excludes_execution(
 
     assert fingerprints[0] == fingerprints[1]
     assert fingerprints[0] != fingerprints[2]
+
+
+def test_module_fingerprint_changes_with_controller_or_metric_source(tmp_path: Path) -> None:
+    source = tmp_path / "implementation.py"
+    source.write_text("contract = 1\n")
+    first = _module_fingerprint(str(source))
+    source.write_text("contract = 2\n")
+
+    assert _module_fingerprint(str(source)) != first
 
 
 def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path) -> None:
