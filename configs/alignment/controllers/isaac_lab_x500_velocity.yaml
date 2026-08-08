@@ -17,26 +17,28 @@ command_interface:
 
 settings:
   command_delay_s: 0.0725
-  kp_vel: [1.8, 1.8, 4.0]
-  horizontal_velocity_error_gain_scale: 1.357142857
-  horizontal_velocity_error_gain_start_mps: 0.10
-  horizontal_velocity_error_gain_full_mps: 0.34
-  ki_vel: [0.35, 0.35, 1.5]
-  kd_vel: [0.4, 0.325, 0.0]
+  velocity_controller_rate_hz: 250.0
+  kp_vel: [1.8, 1.8, 4.25]
+  horizontal_velocity_error_gain_scale: 1.0
+  horizontal_velocity_error_gain_start_mps: 0.15
+  horizontal_velocity_error_gain_full_mps: 0.30
+  ki_vel: [0.4, 0.4, 2.1]
+  kd_vel: [0.2, 0.2, 0.0]
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 10.0
-  velocity_derivative_filter_hz: 1.5
-  velocity_integral_limit_mps2: [2.5, 2.5, 5.0]
+  velocity_filter_hz: 0.0
+  velocity_derivative_filter_hz: 5.0
+  velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.59125
-  kp_att: [5.0, 5.0, 3.5]
-  attitude_yaw_weight: 0.37578125
-  kp_rate: [0.1875, 0.1875, 0.25]
-  ki_rate: [0.30, 0.30, 0.15]
-  kd_rate: [0.00225, 0.00225, 0.0]
-  kff_rate: [0.0, 0.0, 0.025]
-  rate_derivative_filter_hz: 22.5
-  rate_integral_limit: [0.45, 0.45, 0.45]
+  kp_att: [4.0, 4.0, 2.8]
+  attitude_yaw_weight: 0.4
+  kp_rate: [0.15, 0.15, 0.20]
+  ki_rate: [0.20, 0.20, 0.10]
+  kd_rate: [0.003, 0.003, 0.0]
+  kff_rate: [0.0, 0.0, 0.0]
+  rate_derivative_filter_hz: 20.0
+  yaw_torque_filter_hz: 2.0
+  rate_integral_limit: [0.30, 0.30, 0.30]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
@@ -58,97 +60,9 @@ parameters:
   - field: command_delay_s
     stage: 1
     candidates: [0.0, 0.03, 0.06, 0.09]
-  - field: velocity_filter_hz
-    stage: 1
-    candidates: [0.0, 5.0, 10.0]
-  - field: velocity_derivative_filter_hz
-    stage: 1
-    candidates: [0.5, 2.5, 7.5]
   - field: hover_thrust_normalized
     stage: 1
     candidates: [0.54, 0.56, 0.58, 0.60]
-  - field: kp_vel
-    stage: 1
-    candidates:
-      - [1.2, 1.2, 3.0]
-      - [1.8, 1.8, 4.0]
-      - [2.4, 2.4, 6.0]
-      - [1.8, 1.8, 8.0]
-  - field: horizontal_velocity_error_gain_scale
-    stage: 1
-    candidates: [1.0, 1.15, 1.30]
-  - field: horizontal_velocity_error_gain_start_mps
-    stage: 1
-    candidates: [0.10, 0.15, 0.20, 0.25, 0.30]
-  - field: horizontal_velocity_error_gain_full_mps
-    stage: 1
-    candidates: [0.25, 0.35, 0.45]
-  - field: ki_vel
-    stage: 1
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.3, 0.3, 1.5]
-      - [0.6, 0.6, 3.0]
-      - [0.8, 0.8, 4.0]
-      - [1.0, 1.0, 5.0]
-  - field: kd_vel
-    stage: 1
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.3, 0.3, 0.0]
-      - [0.6, 0.6, 0.1]
-      - [0.8, 0.8, 0.2]
-      - [1.0, 1.0, 0.3]
-  - field: velocity_integral_limit_mps2
-    stage: 1
-    candidates:
-      - [1.0, 1.0, 2.0]
-      - [2.5, 2.5, 5.0]
-      - [4.0, 4.0, 8.0]
-      - [6.0, 6.0, 12.0]
-      - [8.0, 8.0, 16.0]
-  - field: kp_att
-    stage: 2
-    candidates:
-      - [3.0, 3.0, 2.1]
-      - [5.0, 5.0, 3.5]
-      - [7.0, 7.0, 4.9]
-  - field: attitude_yaw_weight
-    stage: 2
-    candidates: [0.25, 0.40, 0.55]
-  - field: kp_rate
-    stage: 2
-    candidates:
-      - [0.075, 0.075, 0.10]
-      - [0.15, 0.15, 0.20]
-      - [0.30, 0.30, 0.40]
-  - field: ki_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.15, 0.15, 0.075]
-      - [0.30, 0.30, 0.15]
-  - field: kd_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.00225, 0.00225, 0.0]
-      - [0.0045, 0.0045, 0.0]
-  - field: kff_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.0, 0.0, 0.025]
-      - [0.05, 0.05, 0.05]
-  - field: rate_derivative_filter_hz
-    stage: 2
-    candidates: [10.0, 22.5, 35.0]
-  - field: rate_integral_limit
-    stage: 2
-    candidates:
-      - [0.15, 0.15, 0.15]
-      - [0.45, 0.45, 0.45]
-      - [0.75, 0.75, 0.75]
   - field: max_tilt_cmd_deg
     stage: 2
     candidates: [22.5, 45.0, 67.5]

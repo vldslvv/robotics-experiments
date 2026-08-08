@@ -14,6 +14,7 @@ class ControllerSettings:
     """Complete normalized PX4-like controller and actuator settings."""
 
     command_delay_s: float
+    velocity_controller_rate_hz: float
     kp_vel: Vector3
     horizontal_velocity_error_gain_scale: float
     horizontal_velocity_error_gain_start_mps: float
@@ -31,6 +32,7 @@ class ControllerSettings:
     kd_rate: Vector3
     kff_rate: Vector3
     rate_derivative_filter_hz: float
+    yaw_torque_filter_hz: float
     rate_integral_limit: Vector3
     max_tilt_cmd_deg: float
     min_collective_thrust_fraction: float

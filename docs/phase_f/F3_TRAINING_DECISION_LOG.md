@@ -7459,3 +7459,34 @@ searched upper boundaries: horizontal gain-start 0.20, velocity I
 attempt. Do not change the controller structure. Metric and controller source
 hashes now enter the comparison fingerprint so implementation changes cannot
 remain in an old comparison.
+
+### 198. Correct the controller boundary before another motion fit
+
+Date: 2026-08-08.
+
+Fresh attempt `.build/alignment/x500-px4-v1/20260808T073926Z` evaluated 5,493
+unique candidates in 65 GPU batches. Candidate 5,399 reduced the motion result
+to one failed gate: braking distance was 5.801 mm against 5 mm. Endpoint error
+was 9.768 mm, vertical-envelope NRMSE 0.05685, and every other motion gate
+passed. This was material progress from two failed gates and 38.2% maximum
+excess to one gate and 16.0% excess.
+
+The required controller-boundary replay then located an earlier failure that
+made a braking-only refinement invalid. The replay had inferred command changes
+from rate-limited ULog trajectory samples and mixed absolute PX4 boot times with
+the ULog logging origin. After correcting that evidence contract, the remaining
+differences exposed two missing pinned PX4 behaviors: the 2 Hz yaw-torque output
+filter and thrust-preserving vertical-integrator correction on hover-estimate
+updates. The shared NumPy/Torch controller now also represents the velocity
+outer-loop rate and held setpoints.
+
+A host replay sweep against the preserved ULog routed the vertical boundary to
+`kp_vel.z=4.25`, `ki_vel.z=2.1`, and a 250 Hz target outer loop. With the other
+velocity, attitude, and rate terms held at their PX4 boundary values, every
+profile passes: vertical-policy collective RMSE is 0.04126 N, stability
+collective RMSE is 0.01967 N, and worst normalized motor RMSE is 0.00667. The
+limits are 0.05 N and 0.01 respectively. Constrain the next motion fit to this
+boundary-valid controller family. Search only transport delay, normalized
+hover, tilt, and actuator realization. If motion remains outside a gate, fix
+the evidenced plant seam rather than retuning the now-passing controller
+boundary.

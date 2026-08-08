@@ -23,12 +23,14 @@ from robotics_experiments.controller import (
     initial_actuation_controller_state,
     rotor_forces_to_body_wrench,
     seed_actuation_controller_state,
+    update_hover_thrust_estimate,
 )
 from robotics_experiments.controller.actuation import (
     _effective_velocity_proportional_gain,
     _normalized_controls_to_omega,
 )
 from robotics_experiments.px4_bridge import (
+    GRAVITY_M_S2,
     ActuatorCommands,
     PegasusQuadraticThrustModel,
     create_pegasus_thrust_model,
@@ -92,6 +94,7 @@ def _action_cfg(kind: str) -> RlActionConfig:
 def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.0,
+        velocity_controller_rate_hz=125.0,
         kp_vel=(4.0, 4.0, 5.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
@@ -109,6 +112,7 @@ def _controller_settings() -> ControllerSettings:
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
@@ -478,6 +482,7 @@ def test_controller_filters_are_sequential_and_fresh_state_resets_them():
         controller_settings=replace(
             _controller_settings(),
             hover_thrust_normalized=0.57,
+            velocity_controller_rate_hz=250.0,
         ),
         mass=_MASS_KG,
     )
@@ -511,7 +516,11 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
     params = build_actuation_params(
         geometry=_quad_geometry(),
         action_cfg=_action_cfg("velocity"),
-        controller_settings=replace(_controller_settings(), velocity_filter_hz=0.0),
+        controller_settings=replace(
+            _controller_settings(),
+            velocity_controller_rate_hz=250.0,
+            velocity_filter_hz=0.0,
+        ),
         mass=_MASS_KG,
     )
     controller, _omega = action_to_rotor_omega(
@@ -534,6 +543,50 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
     )
 
     assert controller.filtered_velocity_enu[0] == pytest.approx(1.0)
+
+
+def test_velocity_outer_loop_holds_between_declared_rate_updates():
+    params = _params("velocity")
+    controller, _omega = action_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    moving = replace(_level_rest_state(), linear_velocity_enu=np.array([1.0, 0.0, 0.0]))
+
+    held, _omega = action_to_rotor_omega(params, controller, np.zeros(4), moving, 0.004)
+    updated, _omega = action_to_rotor_omega(params, held, np.zeros(4), moving, 0.004)
+
+    assert np.array_equal(held.filtered_velocity_enu, controller.filtered_velocity_enu)
+    assert not np.array_equal(updated.filtered_velocity_enu, controller.filtered_velocity_enu)
+
+
+def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
+    params = _params("velocity")
+    state = seed_actuation_controller_state(
+        params=params,
+        linear_velocity_enu=np.zeros(3),
+        angular_velocity_body_flu=np.zeros(3),
+        acceleration_setpoint_enu_mps2=np.array([0.0, 0.0, 0.9]),
+        linear_acceleration_enu_mps2=np.zeros(3),
+        angular_acceleration_body_flu_radps2=np.zeros(3),
+        rate_integral_body_flu=np.zeros(3),
+        hover_thrust_normalized=0.55,
+    )
+
+    updated = update_hover_thrust_estimate(
+        params=params,
+        controller_state=state,
+        hover_thrust_normalized=0.56,
+    )
+
+    expected_delta = (0.9 + GRAVITY_M_S2) * (0.55 / 0.56 - 1.0)
+    assert updated.velocity_integral_enu[2] == pytest.approx(
+        state.velocity_integral_enu[2] + expected_delta
+    )
+    assert updated.hover_thrust_normalized == 0.56
 
 
 def test_seed_controller_state_matches_neutral_acceleration_boundary():

@@ -22,7 +22,7 @@ Two action levels (``kind``) are provided:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -47,6 +47,7 @@ __all__ = [
     "initial_actuation_controller_state",
     "rotor_forces_to_body_wrench",
     "seed_actuation_controller_state",
+    "update_hover_thrust_estimate",
 ]
 
 _EPS = 1e-9
@@ -103,11 +104,16 @@ class ActuationControllerState:
 
     filtered_velocity_enu: np.ndarray
     acceleration_enu: np.ndarray
+    acceleration_setpoint_enu: np.ndarray
     velocity_integral_enu: np.ndarray
     previous_angular_velocity_body_flu: np.ndarray
     angular_acceleration_body_flu: np.ndarray
     rate_integral_body_flu: np.ndarray
+    filtered_yaw_torque: float
     hover_thrust_normalized: float
+    outer_loop_elapsed_s: float
+    collective_thrust_setpoint: float
+    body_rate_setpoint: np.ndarray
     initialized: bool
 
 
@@ -131,8 +137,10 @@ class ActuationParams:
     kd_rate: np.ndarray
     kff_rate: np.ndarray
     rate_derivative_filter_hz: float
+    yaw_torque_filter_hz: float
     rate_integral_limit: np.ndarray
     max_body_rate_radps: float
+    velocity_controller_rate_hz: float
     hover_thrust_normalized: float
     kp_vel: np.ndarray
     horizontal_velocity_error_gain_scale: float
@@ -474,6 +482,13 @@ def _rate_to_omega(
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
     )
+    yaw_torque_alpha = _low_pass_alpha(
+        cutoff_hz=params.yaw_torque_filter_hz,
+        dt_s=dt_s,
+    )
+    normalized_torque[2] = controller_state.filtered_yaw_torque + yaw_torque_alpha * (
+        normalized_torque[2] - controller_state.filtered_yaw_torque
+    )
     integral_factor = np.maximum(
         0.0,
         1.0 - np.square(rate_error / np.radians(400.0)),
@@ -487,11 +502,16 @@ def _rate_to_omega(
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
         acceleration_enu=_readonly_copy(controller_state.acceleration_enu),
+        acceleration_setpoint_enu=_readonly_copy(controller_state.acceleration_setpoint_enu),
         velocity_integral_enu=_readonly_copy(controller_state.velocity_integral_enu),
         previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
         angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
         rate_integral_body_flu=_readonly_copy(rate_integral),
+        filtered_yaw_torque=float(normalized_torque[2]),
         hover_thrust_normalized=controller_state.hover_thrust_normalized,
+        outer_loop_elapsed_s=controller_state.outer_loop_elapsed_s,
+        collective_thrust_setpoint=controller_state.collective_thrust_setpoint,
+        body_rate_setpoint=_readonly_copy(controller_state.body_rate_setpoint),
         initialized=True,
     )
     omega = _normalized_controls_to_omega(
@@ -516,6 +536,19 @@ def _velocity_action_to_omega(
     vector (gravity-compensated) -> collective thrust + desired tilt -> geometric
     attitude error -> body-rate setpoint -> shared inner rate loop -> rotor omega.
     """
+    outer_loop_period_s = 1.0 / params.velocity_controller_rate_hz
+    outer_loop_elapsed_s = controller_state.outer_loop_elapsed_s + dt_s
+    if controller_state.initialized and outer_loop_elapsed_s < outer_loop_period_s - _EPS:
+        held_state = replace(controller_state, outer_loop_elapsed_s=outer_loop_elapsed_s)
+        return _rate_to_omega(
+            params,
+            held_state,
+            held_state.collective_thrust_setpoint,
+            held_state.body_rate_setpoint,
+            state,
+            dt_s,
+        )
+    outer_dt_s = outer_loop_period_s
     rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
     heading = np.array(
@@ -527,15 +560,15 @@ def _velocity_action_to_omega(
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_filter_hz,
-            dt_s=dt_s,
+            dt_s=outer_dt_s,
         )
         filtered_velocity = controller_state.filtered_velocity_enu + velocity_alpha * (
             measured_velocity - controller_state.filtered_velocity_enu
         )
-        raw_acceleration = (filtered_velocity - controller_state.filtered_velocity_enu) / dt_s
+        raw_acceleration = (filtered_velocity - controller_state.filtered_velocity_enu) / outer_dt_s
         derivative_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_derivative_filter_hz,
-            dt_s=dt_s,
+            dt_s=outer_dt_s,
         )
         acceleration = controller_state.acceleration_enu + derivative_alpha * (
             raw_acceleration - controller_state.acceleration_enu
@@ -563,7 +596,7 @@ def _velocity_action_to_omega(
         horizontal_proportional_gain=float(effective_kp_vel[0]),
     )
     velocity_integral = (
-        controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
+        controller_state.velocity_integral_enu + params.ki_vel * integration_error * outer_dt_s
     )
     velocity_integral = np.clip(
         velocity_integral,
@@ -592,6 +625,7 @@ def _velocity_action_to_omega(
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
         acceleration_enu=_readonly_copy(acceleration),
+        acceleration_setpoint_enu=_readonly_copy(desired_acceleration),
         velocity_integral_enu=_readonly_copy(velocity_integral),
         previous_angular_velocity_body_flu=_readonly_copy(
             controller_state.previous_angular_velocity_body_flu
@@ -600,7 +634,11 @@ def _velocity_action_to_omega(
             controller_state.angular_acceleration_body_flu
         ),
         rate_integral_body_flu=_readonly_copy(controller_state.rate_integral_body_flu),
+        filtered_yaw_torque=controller_state.filtered_yaw_torque,
         hover_thrust_normalized=hover_thrust_normalized,
+        outer_loop_elapsed_s=max(outer_loop_elapsed_s - outer_loop_period_s, 0.0),
+        collective_thrust_setpoint=collective,
+        body_rate_setpoint=_readonly_copy(body_rate_setpoint),
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
@@ -723,8 +761,10 @@ def build_actuation_params(
         kd_rate=_readonly_copy(controller_settings.kd_rate),
         kff_rate=_readonly_copy(controller_settings.kff_rate),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
+        yaw_torque_filter_hz=float(controller_settings.yaw_torque_filter_hz),
         rate_integral_limit=_readonly_copy(controller_settings.rate_integral_limit),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
+        velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
@@ -767,11 +807,16 @@ def initial_actuation_controller_state() -> ActuationControllerState:
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(zero),
         acceleration_enu=_readonly_copy(zero),
+        acceleration_setpoint_enu=_readonly_copy(zero),
         velocity_integral_enu=_readonly_copy(zero),
         previous_angular_velocity_body_flu=_readonly_copy(zero),
         angular_acceleration_body_flu=_readonly_copy(zero),
         rate_integral_body_flu=_readonly_copy(zero),
+        filtered_yaw_torque=0.0,
         hover_thrust_normalized=0.0,
+        outer_loop_elapsed_s=0.0,
+        collective_thrust_setpoint=0.0,
+        body_rate_setpoint=_readonly_copy(zero),
         initialized=False,
     )
 
@@ -828,6 +873,7 @@ def seed_actuation_controller_state(
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(velocity),
         acceleration_enu=_readonly_copy(acceleration),
+        acceleration_setpoint_enu=_readonly_copy(acceleration_setpoint),
         velocity_integral_enu=_readonly_copy(velocity_integral),
         previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
         angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
@@ -838,8 +884,49 @@ def seed_actuation_controller_state(
                 params.rate_integral_limit,
             )
         ),
+        filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
+        outer_loop_elapsed_s=0.0,
+        collective_thrust_setpoint=float(hover_thrust_normalized),
+        body_rate_setpoint=_readonly_copy(np.zeros(3)),
         initialized=True,
+    )
+
+
+def update_hover_thrust_estimate(
+    *,
+    params: ActuationParams,
+    controller_state: ActuationControllerState,
+    hover_thrust_normalized: float,
+) -> ActuationControllerState:
+    """Apply PX4's thrust-preserving hover-estimate integrator correction."""
+    if (
+        not math.isfinite(hover_thrust_normalized)
+        or hover_thrust_normalized <= 0.0
+        or hover_thrust_normalized > 1.0
+    ):
+        raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
+    previous_hover = (
+        controller_state.hover_thrust_normalized
+        if controller_state.hover_thrust_normalized > 0.0
+        else params.hover_thrust_normalized
+    )
+    if hover_thrust_normalized == previous_hover:
+        return controller_state
+    velocity_integral = np.array(controller_state.velocity_integral_enu, copy=True)
+    acceleration_setpoint_z = float(controller_state.acceleration_setpoint_enu[2])
+    velocity_integral[2] += (acceleration_setpoint_z + GRAVITY_M_S2) * (
+        previous_hover / hover_thrust_normalized - 1.0
+    )
+    velocity_integral = np.clip(
+        velocity_integral,
+        -params.velocity_integral_limit_mps2,
+        params.velocity_integral_limit_mps2,
+    )
+    return replace(
+        controller_state,
+        velocity_integral_enu=_readonly_copy(velocity_integral),
+        hover_thrust_normalized=float(hover_thrust_normalized),
     )
 
 

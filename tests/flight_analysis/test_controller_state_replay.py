@@ -20,6 +20,7 @@ from flight_analysis.tools.controller_state_replay import (
     _profile_topic,
     _profile_windows,
     _px4_attitude_to_isaac,
+    _px4_vertical_velocity_state,
 )
 
 
@@ -45,6 +46,18 @@ def test_linear_interpolation_resamples_controller_state():
     )
 
     assert np.allclose(result, [[0.5, 2.5], [1.5, 3.5]])
+
+
+def test_vertical_velocity_state_matches_px4_velocity_only_blending():
+    result = _px4_vertical_velocity_state(
+        velocity_setpoint_ned=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, -0.35], [0.0, 0.0, 0.8]]),
+        velocity_ned=np.array([[1.0, 2.0, 0.1], [1.0, 2.0, 0.2], [1.0, 2.0, 0.3]]),
+        position_derivative_z_ned=np.array([0.4, 0.6, 0.9]),
+        landing_speed_mps=0.7,
+    )
+
+    assert np.allclose(result[:, :2], [[1.0, 2.0]] * 3)
+    assert np.allclose(result[:, 2], [0.1, 0.4, 0.9])
 
 
 def test_quaternion_interpolation_uses_shortest_normalized_path():
@@ -182,6 +195,17 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                         "axis": "combined",
                         "start_sim_time_us": 116_384_000,
                         "time_s": [0.0, 2.5, 5.7],
+                        "command_velocity_body_flu_mps": [
+                            [0.0, 0.0, 0.0],
+                            [0.1, 0.0, 0.0],
+                            [0.0, 0.0, 0.0],
+                        ],
+                        "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                        "attitude_flu_enu_wxyz": [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0, 0.0],
+                        ],
                     }
                 ],
             }
@@ -195,6 +219,20 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
             "axis": "combined",
             "start_s": 116.384,
             "end_s": 122.084,
+            "command_trace": {
+                "time_s": [0.0, 2.5, 5.7],
+                "command_velocity_body_flu_mps": [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                "attitude_flu_enu_wxyz": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                ],
+            },
         }
     ]
 

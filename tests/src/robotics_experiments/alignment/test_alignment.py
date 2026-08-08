@@ -65,6 +65,7 @@ def _settings(
 ) -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=delay,
+        velocity_controller_rate_hz=125.0,
         kp_vel=kp,
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
@@ -82,6 +83,7 @@ def _settings(
         kd_rate=(0.01, 0.01, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
@@ -284,11 +286,11 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.alignment_id == "x500-px4-v1"
     assert target.controller_schema_version == 1
     assert target.base_settings.command_delay_s == pytest.approx(0.0725)
-    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
-    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
-    assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.34)
-    assert target.base_settings.ki_vel == pytest.approx((0.35, 0.35, 1.5))
-    assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
+    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.25))
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
+    assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
+    assert target.base_settings.ki_vel == pytest.approx((0.4, 0.4, 2.1))
+    assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.search.strategy == "coarse-to-fine-beam"
     assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1

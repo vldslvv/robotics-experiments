@@ -33,7 +33,11 @@ input is approximately 0.375. Controller hover is represented only by
 
 NumPy is the single-environment reference and the Isaac Lab Torch seam is its
 batched twin. Both apply the same filter, saturation, anti-windup, reset, and
-allocator ordering. Sequential parity is a host-test requirement.
+allocator ordering. The strict settings include the velocity-controller update
+rate and PX4's dedicated yaw-torque low-pass. Controller state carries the
+held outer-loop setpoints and the acceleration setpoint needed for PX4's
+thrust-preserving hover-estimate integrator correction. Sequential parity is a
+host-test requirement.
 
 ## Search
 
@@ -74,7 +78,11 @@ fails on incomplete topic coverage, a join error above one 4 ms physics tick,
 normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
 controller-boundary replay applies the selected controller to every fit,
 validation, and stability profile and enforces the same motor and collective
-limits.
+limits. It uses each profile's absolute PX4 boot time and recorded command
+cadence; ULog rate-limited `trajectory_setpoint` samples are not used to infer
+command transitions. The replay also reproduces PX4's velocity-only vertical
+state blending and applies logged hover-estimate updates at their source
+timestamps.
 
 ## Quality and acceptance
 

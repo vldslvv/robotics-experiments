@@ -85,6 +85,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         command_delay_s=_finite(
             value=payload["command_delay_s"], name=f"{name}.command_delay_s", nonnegative=True
         ),
+        velocity_controller_rate_hz=_finite(
+            value=payload["velocity_controller_rate_hz"],
+            name=f"{name}.velocity_controller_rate_hz",
+            positive=True,
+        ),
         kp_vel=_vector(payload["kp_vel"], f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
             value=payload["horizontal_velocity_error_gain_scale"],
@@ -132,6 +137,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         rate_derivative_filter_hz=_finite(
             value=payload["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",
+            positive=True,
+        ),
+        yaw_torque_filter_hz=_finite(
+            value=payload["yaw_torque_filter_hz"],
+            name=f"{name}.yaw_torque_filter_hz",
             positive=True,
         ),
         rate_integral_limit=_vector(payload["rate_integral_limit"], f"{name}.rate_integral_limit"),

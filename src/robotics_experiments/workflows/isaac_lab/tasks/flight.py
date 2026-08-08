@@ -111,8 +111,10 @@ class _FlightActuationParams:
     kd_rate: torch.Tensor
     kff_rate: torch.Tensor
     rate_derivative_filter_hz: float | torch.Tensor
+    yaw_torque_filter_hz: float | torch.Tensor
     rate_integral_limit: torch.Tensor
     max_body_rate_radps: float
+    velocity_controller_rate_hz: float
     hover_thrust_normalized: float | torch.Tensor
     kp_vel: torch.Tensor
     horizontal_velocity_error_gain_scale: float | torch.Tensor
@@ -139,11 +141,16 @@ class _FlightControllerState:
 
     filtered_velocity_world: torch.Tensor
     acceleration_world: torch.Tensor
+    acceleration_setpoint_world: torch.Tensor
     velocity_integral_world: torch.Tensor
     previous_angular_velocity_body: torch.Tensor
     angular_acceleration_body: torch.Tensor
     rate_integral_body: torch.Tensor
+    filtered_yaw_torque: torch.Tensor
     hover_thrust_normalized: torch.Tensor
+    outer_loop_elapsed_s: torch.Tensor
+    collective_thrust_setpoint: torch.Tensor
+    body_rate_setpoint: torch.Tensor
     initialized: torch.Tensor
 
 
@@ -556,6 +563,17 @@ def _rate_to_omega(
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
     )
+    yaw_torque_alpha = _low_pass_alpha(
+        cutoff_hz=params.yaw_torque_filter_hz,
+        dt_s=dt_s,
+    )
+    filtered_yaw_torque = controller_state.filtered_yaw_torque + yaw_torque_alpha * (
+        normalized_torque[:, 2] - controller_state.filtered_yaw_torque
+    )
+    normalized_torque = torch.cat(
+        [normalized_torque[:, :2], filtered_yaw_torque.unsqueeze(-1)],
+        dim=-1,
+    )
     integral_factor = torch.clamp(
         1.0 - torch.square(rate_error / math.radians(400.0)),
         min=0.0,
@@ -568,11 +586,16 @@ def _rate_to_omega(
     successor = _FlightControllerState(
         filtered_velocity_world=controller_state.filtered_velocity_world,
         acceleration_world=controller_state.acceleration_world,
+        acceleration_setpoint_world=controller_state.acceleration_setpoint_world,
         velocity_integral_world=controller_state.velocity_integral_world,
         previous_angular_velocity_body=angular_velocity_body,
         angular_acceleration_body=angular_acceleration,
         rate_integral_body=rate_integral,
+        filtered_yaw_torque=filtered_yaw_torque,
         hover_thrust_normalized=controller_state.hover_thrust_normalized,
+        outer_loop_elapsed_s=controller_state.outer_loop_elapsed_s,
+        collective_thrust_setpoint=controller_state.collective_thrust_setpoint,
+        body_rate_setpoint=controller_state.body_rate_setpoint,
         initialized=torch.ones_like(controller_state.initialized),
     )
     omega = _normalized_controls_to_omega(params, collective, normalized_torque)
@@ -609,6 +632,12 @@ def _velocity(
     dt_s: float,
     /,
 ) -> tuple[_FlightControllerState, torch.Tensor]:
+    outer_loop_period_s = 1.0 / params.velocity_controller_rate_hz
+    outer_loop_elapsed_s = controller_state.outer_loop_elapsed_s + dt_s
+    update_outer_loop = (~controller_state.initialized) | (
+        outer_loop_elapsed_s >= outer_loop_period_s - _EPS
+    )
+    outer_selected = update_outer_loop.unsqueeze(-1)
     rotation = _matrix_from_quat_wxyz(attitude_wxyz)  # [B, 3, 3]
     yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])  # [B]
     cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
@@ -624,7 +653,7 @@ def _velocity(
     )
     velocity_alpha = _low_pass_alpha(
         cutoff_hz=params.velocity_filter_hz,
-        dt_s=dt_s,
+        dt_s=outer_loop_period_s,
     )
     if isinstance(velocity_alpha, torch.Tensor):
         velocity_alpha = velocity_alpha.unsqueeze(-1)
@@ -636,10 +665,12 @@ def _velocity(
         candidate_filtered_velocity,
         linear_velocity_world,
     )
-    raw_acceleration = (filtered_velocity - controller_state.filtered_velocity_world) / dt_s
+    raw_acceleration = (
+        filtered_velocity - controller_state.filtered_velocity_world
+    ) / outer_loop_period_s
     derivative_alpha = _low_pass_alpha(
         cutoff_hz=params.velocity_derivative_filter_hz,
-        dt_s=dt_s,
+        dt_s=outer_loop_period_s,
     )
     if isinstance(derivative_alpha, torch.Tensor):
         derivative_alpha = derivative_alpha.unsqueeze(-1)
@@ -675,7 +706,8 @@ def _velocity(
         horizontal_proportional_gain=effective_kp_vel[:, 0],
     )
     velocity_integral = (
-        controller_state.velocity_integral_world + params.ki_vel * integration_error * dt_s
+        controller_state.velocity_integral_world
+        + params.ki_vel * integration_error * outer_loop_period_s
     )
     velocity_integral = torch.clamp(
         velocity_integral,
@@ -700,20 +732,51 @@ def _velocity(
         yaw_rate_radps=action[:, 3] * params.max_yaw_rate_radps,
     )
     outer_successor = _FlightControllerState(
-        filtered_velocity_world=filtered_velocity,
-        acceleration_world=acceleration,
-        velocity_integral_world=velocity_integral,
+        filtered_velocity_world=torch.where(
+            outer_selected, filtered_velocity, controller_state.filtered_velocity_world
+        ),
+        acceleration_world=torch.where(
+            outer_selected, acceleration, controller_state.acceleration_world
+        ),
+        acceleration_setpoint_world=torch.where(
+            outer_selected,
+            desired_acceleration,
+            controller_state.acceleration_setpoint_world,
+        ),
+        velocity_integral_world=torch.where(
+            outer_selected, velocity_integral, controller_state.velocity_integral_world
+        ),
         previous_angular_velocity_body=controller_state.previous_angular_velocity_body,
         angular_acceleration_body=controller_state.angular_acceleration_body,
         rate_integral_body=controller_state.rate_integral_body,
-        hover_thrust_normalized=hover_thrust_normalized,
+        filtered_yaw_torque=controller_state.filtered_yaw_torque,
+        hover_thrust_normalized=torch.where(
+            update_outer_loop,
+            hover_thrust_normalized,
+            controller_state.hover_thrust_normalized,
+        ),
+        outer_loop_elapsed_s=torch.where(
+            update_outer_loop,
+            torch.clamp_min(outer_loop_elapsed_s - outer_loop_period_s, 0.0),
+            outer_loop_elapsed_s,
+        ),
+        collective_thrust_setpoint=torch.where(
+            update_outer_loop,
+            collective,
+            controller_state.collective_thrust_setpoint,
+        ),
+        body_rate_setpoint=torch.where(
+            outer_selected,
+            body_rate_setpoint,
+            controller_state.body_rate_setpoint,
+        ),
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
         params,
         outer_successor,
-        collective,
-        body_rate_setpoint,
+        outer_successor.collective_thrust_setpoint,
+        outer_successor.body_rate_setpoint,
         angular_velocity_body,
         dt_s,
     )
@@ -818,12 +881,14 @@ def build_flight_actuation_params(
         kd_rate=_tensor(controller_settings.kd_rate),
         kff_rate=_tensor(controller_settings.kff_rate),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
+        yaw_torque_filter_hz=float(controller_settings.yaw_torque_filter_hz),
         rate_integral_limit=_tensor(controller_settings.rate_integral_limit),
         max_body_rate_radps=float(
             action_cfg.max_body_rate_radps
             if policy_contract is None
             else policy_contract.max_body_rate_radps
         ),
+        velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_tensor(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
@@ -895,6 +960,7 @@ def _replace_controller_settings_batch(
         kd_rate=_vectors("kd_rate"),
         kff_rate=_vectors("kff_rate"),
         rate_derivative_filter_hz=_scalars("rate_derivative_filter_hz"),
+        yaw_torque_filter_hz=_scalars("yaw_torque_filter_hz"),
         rate_integral_limit=_vectors("rate_integral_limit"),
         kp_vel=_vectors("kp_vel"),
         horizontal_velocity_error_gain_scale=_scalars("horizontal_velocity_error_gain_scale"),
@@ -949,15 +1015,20 @@ def initial_flight_controller_state(
     return _FlightControllerState(
         filtered_velocity_world=zeros.clone(),
         acceleration_world=zeros.clone(),
+        acceleration_setpoint_world=zeros.clone(),
         velocity_integral_world=zeros.clone(),
         previous_angular_velocity_body=zeros.clone(),
         angular_acceleration_body=zeros.clone(),
         rate_integral_body=zeros.clone(),
+        filtered_yaw_torque=torch.zeros(num_envs, dtype=torch.float32, device=device),
         hover_thrust_normalized=torch.zeros(
             num_envs,
             dtype=torch.float32,
             device=device,
         ),
+        outer_loop_elapsed_s=torch.zeros(num_envs, dtype=torch.float32, device=device),
+        collective_thrust_setpoint=torch.zeros(num_envs, dtype=torch.float32, device=device),
+        body_rate_setpoint=zeros.clone(),
         initialized=torch.zeros(num_envs, dtype=torch.bool, device=device),
     )
 
@@ -972,11 +1043,16 @@ def reset_flight_controller_state(
     for name in (
         "filtered_velocity_world",
         "acceleration_world",
+        "acceleration_setpoint_world",
         "velocity_integral_world",
         "previous_angular_velocity_body",
         "angular_acceleration_body",
         "rate_integral_body",
+        "filtered_yaw_torque",
         "hover_thrust_normalized",
+        "outer_loop_elapsed_s",
+        "collective_thrust_setpoint",
+        "body_rate_setpoint",
         "initialized",
     ):
         tensor = getattr(state, name).clone()
@@ -1055,6 +1131,11 @@ def seed_flight_controller_state(
             linear_acceleration_world,
             state.acceleration_world,
         ),
+        acceleration_setpoint_world=torch.where(
+            selected,
+            acceleration_setpoint_world,
+            state.acceleration_setpoint_world,
+        ),
         velocity_integral_world=torch.where(
             selected,
             velocity_integral,
@@ -1075,10 +1156,30 @@ def seed_flight_controller_state(
             clipped_rate_integral,
             state.rate_integral_body,
         ),
+        filtered_yaw_torque=torch.where(
+            valid,
+            torch.zeros_like(state.filtered_yaw_torque),
+            state.filtered_yaw_torque,
+        ),
         hover_thrust_normalized=torch.where(
             valid,
             hover_thrust_normalized,
             state.hover_thrust_normalized,
+        ),
+        outer_loop_elapsed_s=torch.where(
+            valid,
+            torch.zeros_like(state.outer_loop_elapsed_s),
+            state.outer_loop_elapsed_s,
+        ),
+        collective_thrust_setpoint=torch.where(
+            valid,
+            hover_thrust_normalized,
+            state.collective_thrust_setpoint,
+        ),
+        body_rate_setpoint=torch.where(
+            selected,
+            torch.zeros_like(state.body_rate_setpoint),
+            state.body_rate_setpoint,
         ),
         initialized=state.initialized | valid,
     )

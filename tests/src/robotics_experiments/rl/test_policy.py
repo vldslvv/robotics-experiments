@@ -54,6 +54,7 @@ def _action_cfg(**overrides):
 def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
+        velocity_controller_rate_hz=125.0,
         kp_vel=(2.0, 2.0, 3.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
@@ -71,6 +72,7 @@ def _controller_settings() -> ControllerSettings:
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,

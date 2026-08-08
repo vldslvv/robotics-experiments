@@ -27,6 +27,7 @@ from robotics_experiments.controller import (
     build_actuation_params,
     load_controller_artifact,
     seed_actuation_controller_state,
+    update_hover_thrust_estimate,
 )
 from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
@@ -87,6 +88,27 @@ def _linear_interpolate(
         [np.interp(query_t, source_t, columns[:, index]) for index in range(columns.shape[1])]
     )
     return result.reshape((len(query_t), *values.shape[1:]))
+
+
+def _px4_vertical_velocity_state(
+    *,
+    velocity_setpoint_ned: np.ndarray,
+    velocity_ned: np.ndarray,
+    position_derivative_z_ned: np.ndarray,
+    landing_speed_mps: float,
+) -> np.ndarray:
+    """Reproduce PX4's velocity-only vertical estimator blending seam."""
+    if not math.isfinite(landing_speed_mps) or landing_speed_mps <= 0.0:
+        raise ValueError("MPC_LAND_SPEED must be finite and positive")
+    result = np.array(velocity_ned, dtype=np.float64, copy=True)
+    commanded_z = np.asarray(velocity_setpoint_ned, dtype=np.float64)[:, 2]
+    position_derivative = np.asarray(position_derivative_z_ned, dtype=np.float64)
+    active = np.isfinite(commanded_z) & (np.abs(commanded_z) > np.finfo(np.float32).eps)
+    weight = np.minimum(np.abs(commanded_z) / landing_speed_mps, 1.0)
+    result[active, 2] = position_derivative[active] * weight[active] + result[active, 2] * (
+        1.0 - weight[active]
+    )
+    return result
 
 
 def _interpolate_quaternions(
@@ -697,6 +719,8 @@ def _report(
     controller_artifact_path: Path,
     start_s: float,
     end_s: float,
+    time_origin_us: int,
+    command_trace: dict | None,
 ) -> dict:
     config = load_config(config_path)
     vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
@@ -732,16 +756,16 @@ def _report(
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
     thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
-    start_timestamp = float(ulog.start_timestamp)
+    time_origin = float(time_origin_us)
 
-    motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
+    motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - time_origin) / 1e6
     selected = (motor_t >= start_s) & (motor_t <= end_s)
     sample_t = motor_t[selected]
     if not sample_t.size:
         raise ValueError(f"no actuator_motors samples in [{start_s}, {end_s}] seconds")
 
     def relative_time(data: dict) -> np.ndarray:
-        return (np.asarray(data["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
+        return (np.asarray(data["timestamp"], dtype=np.float64) - time_origin) / 1e6
 
     motor_index = np.flatnonzero(selected)
     controller_dt_s = 1.0 / config.sim.physics_hz
@@ -751,20 +775,76 @@ def _report(
         controller_dt_s,
         dtype=np.float64,
     )
-    trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
-    velocity_ned = np.column_stack(
-        [
-            np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
-            for index in range(3)
-        ]
-    )
-    yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    if command_trace is None:
+        trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
+        velocity_ned = np.column_stack(
+            [
+                np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
+                for index in range(3)
+            ]
+        )
+        yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    else:
+        command_time = np.asarray(command_trace["time_s"], dtype=np.float64)
+        command_velocity = np.asarray(
+            command_trace["command_velocity_body_flu_mps"], dtype=np.float64
+        )
+        command_yaw_rate = np.asarray(command_trace["command_yaw_rate_radps"], dtype=np.float64)
+        command_attitude = np.asarray(command_trace["attitude_flu_enu_wxyz"], dtype=np.float64)
+        if (
+            command_time.ndim != 1
+            or command_velocity.shape != (len(command_time), 3)
+            or command_yaw_rate.shape != (len(command_time),)
+            or command_attitude.shape != (len(command_time), 4)
+        ):
+            raise ValueError("profile command trace fields have inconsistent lengths")
+        command_index = _hold_indices(
+            source_t=command_time,
+            query_t=replay_t - start_s,
+        )
+        commanded_body_velocity = command_velocity[command_index]
+        command_quaternion = command_attitude[command_index]
+        command_yaw = np.array(
+            [
+                math.atan2(
+                    2.0 * (quaternion[0] * quaternion[3] + quaternion[1] * quaternion[2]),
+                    1.0 - 2.0 * (quaternion[2] ** 2 + quaternion[3] ** 2),
+                )
+                for quaternion in command_quaternion
+            ]
+        )
+        cosine = np.cos(command_yaw)
+        sine = np.sin(command_yaw)
+        velocity_enu = np.column_stack(
+            [
+                cosine * commanded_body_velocity[:, 0] - sine * commanded_body_velocity[:, 1],
+                sine * commanded_body_velocity[:, 0] + cosine * commanded_body_velocity[:, 1],
+                commanded_body_velocity[:, 2],
+            ]
+        )
+        velocity_ned = velocity_enu @ _NED_TO_ENU
+        yaw_speed = -command_yaw_rate[command_index]
     local_velocity_ned = _linear_interpolate(
         source_t=relative_time(local_position),
         values=np.column_stack(
             [np.asarray(local_position[name], dtype=np.float64) for name in ("vx", "vy", "vz")]
         ),
         query_t=replay_t,
+    )
+    position_derivative_z_ned = _linear_interpolate(
+        source_t=relative_time(local_position),
+        values=np.asarray(local_position["z_deriv"], dtype=np.float64),
+        query_t=replay_t,
+    )
+    try:
+        landing_speed_mps = float(ulog.initial_parameters["MPC_LAND_SPEED"])
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("ULog is missing the finite MPC_LAND_SPEED controller parameter") from exc
+    local_velocity_ned = _px4_vertical_velocity_state(
+        velocity_setpoint_ned=velocity_ned,
+        velocity_ned=local_velocity_ned,
+        position_derivative_z_ned=position_derivative_z_ned,
+        landing_speed_mps=landing_speed_mps,
     )
     quaternion_frd_ned = _interpolate_quaternions(
         source_t=relative_time(attitude),
@@ -780,6 +860,8 @@ def _report(
         ),
         query_t=replay_t,
     )
+    hover_index = _hold_indices(source_t=relative_time(hover), query_t=replay_t)
+    replay_hover_thrust = np.asarray(hover["hover_thrust"], dtype=np.float64)[hover_index]
 
     px4_omega_rows: list[np.ndarray] = []
     isaac_omega_rows: list[np.ndarray] = []
@@ -795,7 +877,7 @@ def _report(
         angular_velocity=angular_velocity,
         rate_status=rate_status,
         hover=hover,
-        timestamp_us=round(start_timestamp + start_s * 1e6),
+        timestamp_us=round(time_origin + start_s * 1e6),
     )
     controller_state = seed_actuation_controller_state(
         params=params,
@@ -811,12 +893,20 @@ def _report(
     )
     isaac_omega_grid = []
 
-    for velocity_setpoint_ned, yaw_setpoint_rate, velocity_state_ned, quaternion, rates_frd in zip(
+    for (
+        velocity_setpoint_ned,
+        yaw_setpoint_rate,
+        velocity_state_ned,
+        quaternion,
+        rates_frd,
+        hover_thrust_normalized,
+    ) in zip(
         velocity_ned,
         yaw_speed,
         local_velocity_ned,
         quaternion_frd_ned,
         angular_velocity_frd,
+        replay_hover_thrust,
         strict=True,
     ):
         if not (
@@ -845,6 +935,11 @@ def _report(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
             linear_velocity_enu=_NED_TO_ENU @ velocity_state_ned,
             angular_velocity_body_flu=_FLU_TO_FRD @ rates_frd,
+        )
+        controller_state = update_hover_thrust_estimate(
+            params=params,
+            controller_state=controller_state,
+            hover_thrust_normalized=float(hover_thrust_normalized),
         )
         controller_state, isaac_omega = action_to_rotor_omega(
             params,
@@ -982,6 +1077,12 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
                 "axis": raw_profile["axis"],
                 "start_s": start_s,
                 "end_s": start_s + float(relative_time_s[-1]),
+                "command_trace": {
+                    "time_s": relative_time_s,
+                    "command_velocity_body_flu_mps": raw_profile["command_velocity_body_flu_mps"],
+                    "command_yaw_rate_radps": raw_profile["command_yaw_rate_radps"],
+                    "attitude_flu_enu_wxyz": raw_profile["attitude_flu_enu_wxyz"],
+                },
             }
         )
     return windows
@@ -1003,6 +1104,8 @@ def _profile_replay_report(
             controller_artifact_path=controller_artifact_path,
             start_s=window["start_s"],
             end_s=window["end_s"],
+            time_origin_us=0,
+            command_trace=window["command_trace"],
         )
         metrics = replay["metrics"]
         profile_name = window["profile"]
@@ -1020,7 +1123,11 @@ def _profile_replay_report(
             )
         profiles.append(
             {
-                **window,
+                "profile": window["profile"],
+                "split": window["split"],
+                "axis": window["axis"],
+                "start_s": window["start_s"],
+                "end_s": window["end_s"],
                 "sample_count": replay["sample_count"],
                 "controller_sample_count": replay["controller_sample_count"],
                 "controller_state_source_age_us": replay["controller_state_source_age_us"],
@@ -1100,12 +1207,15 @@ def main() -> None:
         if args.controller_artifact is None or args.window is None:
             parser.error("--controller-artifact and --window are required for controller replay")
         start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
+        replay_ulog = ULog(str(ulog_path))
         report = _report(
-            ulog=ULog(str(ulog_path)),
+            ulog=replay_ulog,
             config_path=args.config,
             controller_artifact_path=args.controller_artifact,
             start_s=start_s,
             end_s=end_s,
+            time_origin_us=replay_ulog.start_timestamp,
+            command_trace=None,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:

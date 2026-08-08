@@ -19,6 +19,7 @@ command_interface:
 # definition complete and seed the target's deterministic candidate centers.
 settings:
   command_delay_s: 0.0
+  velocity_controller_rate_hz: 125.0
   kp_vel: [1.8, 1.8, 4.0]
   # PX4 does not use the Lab-only large-error schedule during reference capture.
   horizontal_velocity_error_gain_scale: 1.0
@@ -39,6 +40,7 @@ settings:
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
   rate_derivative_filter_hz: 20.0
+  yaw_torque_filter_hz: 2.0
   rate_integral_limit: [0.30, 0.30, 0.30]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12

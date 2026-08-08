@@ -21,6 +21,7 @@ from robotics_experiments.controller.actuation import (
     initial_actuation_controller_state,
     rotor_forces_to_body_wrench,
     seed_actuation_controller_state,
+    update_hover_thrust_estimate,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "rotor_forces_to_body_wrench",
     "resolve_controller_path",
     "seed_actuation_controller_state",
+    "update_hover_thrust_estimate",
 ]
