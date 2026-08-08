@@ -866,12 +866,15 @@ def seed_actuation_controller_state(
     angular_acceleration_body_flu_radps2: np.ndarray,
     rate_integral_body_flu: np.ndarray,
     hover_thrust_normalized: float,
+    outer_loop_elapsed_s: float,
 ) -> ActuationControllerState:
     """Match a neutral-command PX4 controller boundary for one replay."""
     if params.kind != "velocity":
         raise ValueError("controller-state seeding requires velocity actuation")
     if not math.isfinite(controller_dt_s) or controller_dt_s <= 0.0:
         raise ValueError("controller_dt_s must be finite and positive")
+    if not math.isfinite(outer_loop_elapsed_s):
+        raise ValueError("outer_loop_elapsed_s must be finite")
 
     def vector(values: np.ndarray, name: str) -> np.ndarray:
         result = np.asarray(values, dtype=np.float64)
@@ -935,9 +938,7 @@ def seed_actuation_controller_state(
         ),
         filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
-        # The captured boundary precedes the next 125 Hz local-position update
-        # by one physics tick, so elapsed outer-loop time starts at zero.
-        outer_loop_elapsed_s=0.0,
+        outer_loop_elapsed_s=outer_loop_elapsed_s,
         collective_thrust_setpoint=float(hover_thrust_normalized),
         body_rate_setpoint=_readonly_copy(np.zeros(3)),
         initialized=True,

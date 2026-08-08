@@ -8661,3 +8661,38 @@ controller or plant change. It remains a diagnostic because it reused the
 reference. Preserve all artifacts and run one clean fresh capture, actuator
 audit, staged fit, complete controller replay, and finalization with the same
 declarative search before accepting or publishing the result.
+
+### 253. Fresh capture exposes profile-relative seed phase
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T161456Z` completed capture,
+actuator audit, a 258-candidate seven-batch target search, fit, and complete
+controller replay from clean commit `7a94270`. The capture and actuator audit
+passed with complete topic coverage, zero timestamp error, normalized motor
+RMSE below 0.00032, and collective RMSE below 0.0107 N. The search took 132.8
+seconds, averaged 31.1% GPU utilization, and evaluated 1.943 useful candidates
+per second.
+
+No target candidate passed motion. Candidate 27 selected 0.008125 Hz decay and
+-0.0045 m/s Z observation bias. Seven gates passed, including 2.074 mm braking,
+4.290 mm/s residual speed, 0.04 s stop-time error, 5.717% worst-axis NRMSE,
+1.351% vertical NRMSE, 3.062% yaw NRMSE, and 2.558 degree heading error.
+Combined endpoint error was the only motion rejection at 20.937 mm. Its endpoint
+delta was approximately `(19.03, 8.35, -2.53)` mm in world ENU. Preserve the
+complete rejected bundle and do not publish it.
+
+Controller replay rejected `fit-vertical-low-speed` collective at 0.291420 N
+and `validation-vertical-policy-envelope` collective at 0.077556 N. Both
+profiles began exactly on a `vehicle_local_position` publication, with zero
+source age. The preceding replay-passing fresh capture began both profiles four
+milliseconds after publication. A fixed zero elapsed seed matches the latter
+phase but advances the former by one physics tick; the earlier fixed one-tick
+seed has the opposite limitation.
+
+Make the strict NumPy and Torch seed contracts accept the captured outer-loop
+phase. For each profile, derive initial elapsed time as local-position source
+age minus one 4 ms replay-grid tick. Apply the same value in target fitting and
+both replay paths, retain all controller settings and ranges, and rerun the
+fresh reference. Diagnose the remaining combined endpoint only after removing
+this structural phase error.

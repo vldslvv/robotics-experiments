@@ -98,9 +98,11 @@ physics-rate physical articulation state in the bridge log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
-and recorded command cadence. The captured boundary accrues one 4 ms physics
-tick before its first replay update because the profile sample is recorded
-after estimator publication and before PX4 processes that tick. ULog
+and recorded command cadence. The seed phase is derived per profile from the
+recorded age of its `vehicle_local_position` sample. Because the replay grid
+includes the profile boundary, its initial accrued outer-loop time is the
+sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
+whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
 transitions. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates

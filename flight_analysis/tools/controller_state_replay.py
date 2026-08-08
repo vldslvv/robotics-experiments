@@ -1024,6 +1024,9 @@ def _report(
         ],
         rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
         hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
+        outer_loop_elapsed_s=(
+            controller_source_age_us["vehicle_local_position"] / 1e6 - controller_dt_s
+        ),
     )
     isaac_omega_grid = []
     command_refresh_cadence = _CadenceState(previous_time_ns=0)
