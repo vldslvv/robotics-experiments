@@ -1003,24 +1003,31 @@ def _report(
         hover=hover,
         timestamp_us=round(time_origin + start_s * 1e6),
     )
-    controller_state = seed_actuation_controller_state(
-        params=params,
-        physical_linear_velocity_enu=replay_velocity_enu[0],
-        filtered_linear_velocity_enu=(
-            controller_vectors["initial_estimated_linear_velocity_enu_mps"]
-            if physical_state
-            else replay_velocity_enu[0]
+    controller_state = replace(
+        seed_actuation_controller_state(
+            params=params,
+            physical_linear_velocity_enu=replay_velocity_enu[0],
+            filtered_linear_velocity_enu=(
+                controller_vectors["initial_estimated_linear_velocity_enu_mps"]
+                if physical_state
+                else replay_velocity_enu[0]
+            ),
+            angular_velocity_body_flu=controller_vectors[
+                "initial_estimated_angular_velocity_body_flu_radps"
+            ],
+            acceleration_setpoint_enu_mps2=controller_vectors[
+                "initial_acceleration_setpoint_enu_mps2"
+            ],
+            linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
+            angular_acceleration_body_flu_radps2=controller_vectors[
+                "initial_angular_acceleration_body_flu_radps2"
+            ],
+            rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
+            hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
         ),
-        angular_velocity_body_flu=controller_vectors[
-            "initial_estimated_angular_velocity_body_flu_radps"
-        ],
-        acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
-        linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
-        angular_acceleration_body_flu_radps2=controller_vectors[
-            "initial_angular_acceleration_body_flu_radps2"
-        ],
-        rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
-        hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
+        # The profile boundary is sampled after publishing the estimator input
+        # and before PX4 processes that physics tick.
+        outer_loop_elapsed_s=controller_dt_s,
     )
     isaac_omega_grid = []
 

@@ -8057,3 +8057,27 @@ error was zero. This failure is independent of the Y-only candidate and must
 be diagnosed before expanding the evidenced negative-bias boundary. Preserve
 the complete fresh ULog, bridge log, reference, target traces, selection,
 telemetry, actuator audit, and replay under the run directory.
+
+### 224. Correct profile-boundary controller phase before bias expansion
+
+Date: 2026-08-08.
+
+The Attempt 205 vertical replay residual is concentrated immediately after
+each command transition: the largest errors occur at 1.056, 1.556, 2.556,
+3.056, and 4.056 seconds, while the initial one-second hold has only 0.00035 N
+collective RMSE. Hover estimate spans only 0.57023-0.57214 and is not correlated
+with those errors. Changing command delay in either direction worsens replay.
+
+The captured profile boundary records the estimator sample published at the
+current physics tick before PX4's callback processes it. Replay instead seeded
+zero accrued outer-loop time, delaying that first update by one 4 ms physics
+tick. Seed one tick of elapsed outer-loop time while retaining the pinned 125
+Hz cadence. On all 12 Attempt 205 profiles this reduces the failing vertical
+collective RMSE from 0.07763 to 0.03151 N and produces a complete replay pass;
+the stability physical-state motor RMSE remains below its limit at 0.00958.
+
+With the first failed boundary corrected, expand only the Y steady observation
+offset from -0.006 through -0.016 m/s. Attempt 205 improved endpoint error
+monotonically by 3.94 mm over the preceding 0.006 m/s range and placed the
+linear 10 mm crossing near -0.0134 m/s. Keep scale, transient decay, filters,
+controller gains, cadence, allocator, actuator, plant, probes, and gates fixed.

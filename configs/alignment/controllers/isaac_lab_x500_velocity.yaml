@@ -26,7 +26,7 @@ settings:
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 1.15, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.0, -0.003, 0.0]
+  velocity_observation_bias_mps: [0.0, -0.012, 0.0]
   velocity_estimator_bias_decay_hz: 0.01
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
@@ -61,17 +61,17 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # Fit the measured steady estimator offset around the scale/decay frontier.
+  # Expand the monotonically improving steady-offset boundary through the
+  # endpoint crossing predicted by Attempt 205.
   - field: velocity_observation_bias_mps
     stage: 1
     candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.0, -0.001, 0.0]
-      - [0.0, -0.002, 0.0]
-      - [0.0, -0.003, 0.0]
-      - [0.0, -0.004, 0.0]
-      - [0.0, -0.005, 0.0]
       - [0.0, -0.006, 0.0]
+      - [0.0, -0.008, 0.0]
+      - [0.0, -0.010, 0.0]
+      - [0.0, -0.012, 0.0]
+      - [0.0, -0.014, 0.0]
+      - [0.0, -0.016, 0.0]
 
 selection_metric: controller-quality
 publication_metrics:
