@@ -8341,3 +8341,17 @@ zero timestamp error and 0.00900 maximum physical-state normalized motor RMSE,
 substantially improving replay margin. Residual speed improves toward lower
 scale across the focused range. Preserve all diagnostic artifacts and expand
 only that boundary far enough to measure the predicted crossing near 1.07.
+
+### 239. Cross the final residual boundary with a compact scale expansion
+
+Date: 2026-08-08.
+
+The 1.08 boundary misses residual-speed acceptance by 0.46% of the limit while
+holding 2.32 mm endpoint margin, 1.92 mm braking margin, and 0.000999 replay
+motor margin. Search Y observation scale from 1.04 through 1.08. Keep decay at
+0.0125 Hz, steady bias at `[0.006, -0.030, 0.0]` m/s, and every downstream
+controller, allocator, actuator, plant, probe, and gate value fixed.
+
+The prior scale slope places residual acceptance near 1.07. Stop expanding if
+endpoint, braking, or replay regresses; otherwise replay the selected complete
+motion pass and advance to a fresh end-to-end reproduction.
