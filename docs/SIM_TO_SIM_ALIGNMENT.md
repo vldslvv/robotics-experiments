@@ -62,6 +62,15 @@ fields. The `coarse-to-fine-beam` strategy:
 4. generates midpoints only around retained regions for two refinement levels;
 5. deduplicates settings by their exact float32 controller representation.
 
+A zero-centered fitted field may declare a positive
+`selection_regularization_scale`. If the registered metric finds any
+quality-passing candidates, the search selects the passing candidate with the
+smallest dimensionless L2 correction across those declared fields, then uses
+the response metrics as tie-breakers. If no candidate passes, gate proximity
+continues to determine selection. This keeps an estimator-offset fit from
+spending unnecessary correction authority merely to improve an already-passing
+trace metric.
+
 The default uses one persistent worker and 128 candidate slots. This is the
 measured useful-throughput optimum for the current GPU; additional workers
 increase PhysX contention. The target coordinator reports candidates per

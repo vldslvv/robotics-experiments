@@ -384,6 +384,7 @@ def _parameters(
         if not isinstance(raw_candidates, list) or not raw_candidates:
             raise ValueError(f"{name}.candidates must be a non-empty list")
         template = getattr(base_settings, field_name)
+        raw_regularization_scale = parameter.get("selection_regularization_scale")
         parameters.append(
             ParameterSpec(
                 field=field_name,
@@ -398,6 +399,15 @@ def _parameters(
                         name=f"{name}.candidates[{candidate_index}]",
                     )
                     for candidate_index, candidate in enumerate(raw_candidates)
+                ),
+                selection_regularization_scale=(
+                    None
+                    if raw_regularization_scale is None
+                    else _finite(
+                        value=raw_regularization_scale,
+                        name=f"{name}.selection_regularization_scale",
+                        positive=True,
+                    )
                 ),
             )
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 from collections import Counter
 from collections.abc import Mapping
@@ -58,6 +59,22 @@ def _plain(value: Any, /) -> Any:
     if isinstance(value, (list, tuple)):
         return [_plain(item) for item in value]
     return value
+
+
+def _selection_regularization(
+    settings: ControllerSettings,
+    parameters: tuple[ParameterSpec, ...],
+    /,
+) -> float:
+    normalized_components: list[float] = []
+    for parameter in parameters:
+        scale = parameter.selection_regularization_scale
+        if scale is None:
+            continue
+        value = getattr(settings, parameter.field)
+        components = value if isinstance(value, tuple) else (value,)
+        normalized_components.extend(component / scale for component in components)
+    return math.sqrt(sum(component * component for component in normalized_components))
 
 
 @dataclass(frozen=True)
@@ -210,6 +227,19 @@ def _staged_beam_search(
     }
     generated_refinements: list[Mapping[str, Any]] = []
     next_index = 0
+    has_selection_regularization = any(
+        parameter.selection_regularization_scale is not None for parameter in target.parameters
+    )
+
+    def selection_ranking(
+        *, settings: ControllerSettings, result: MetricResult
+    ) -> tuple[float, ...]:
+        if not has_selection_regularization:
+            return result.ranking_values
+        regularization = _selection_regularization(settings, target.parameters)
+        if result.quality_passed:
+            return (0.0, regularization, *result.ranking_values)
+        return (1.0, *result.ranking_values, regularization)
 
     def record(
         *,
@@ -249,7 +279,7 @@ def _staged_beam_search(
                     **result.validation_metrics,
                     **result.metrics,
                 },
-                ranking_values=result.ranking_values,
+                ranking_values=selection_ranking(settings=settings, result=result),
                 failure_reason=None,
             )
             results_by_index[index] = result
@@ -281,7 +311,11 @@ def _staged_beam_search(
             settings=settings,
             usable=source.usable,
             metrics=source.metrics,
-            ranking_values=source.ranking_values,
+            ranking_values=(
+                selection_ranking(settings=settings, result=results_by_index[source.index])
+                if source.usable
+                else source.ranking_values
+            ),
             failure_reason=source.failure_reason,
         )
         scores_by_settings[settings] = score

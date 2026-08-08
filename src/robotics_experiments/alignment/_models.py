@@ -46,6 +46,7 @@ class ParameterSpec:
     field: str
     stage: int
     candidates: tuple[SettingValue, ...]
+    selection_regularization_scale: float | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,7 @@ class MetricResult:
     fit_metrics: Mapping[str, float]
     validation_metrics: Mapping[str, float]
     beam_values: tuple[float, ...] = ()
+    quality_passed: bool = True
 
 
 MetricFunction = Callable[

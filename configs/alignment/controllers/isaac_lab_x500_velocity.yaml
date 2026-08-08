@@ -71,6 +71,9 @@ parameters:
   # large steps, then refine only around retained gate champions.
   - field: velocity_observation_bias_mps
     stage: 2
+    # Once response gates pass, prefer the least estimator correction so the
+    # aligned controller retains return-to-hover margin outside short probes.
+    selection_regularization_scale: 1.0
     candidates:
       - [0.000, -0.030, -0.0039]
       - [0.000, -0.020, -0.0039]

@@ -311,6 +311,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert len(target.parameters[-2].candidates) == 25
     assert target.parameters[-2].candidates[0] == pytest.approx((0.000, -0.030, -0.0039))
     assert target.parameters[-2].candidates[-1] == pytest.approx((0.040, 0.010, -0.0039))
+    assert target.parameters[-2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     extended = replace(
         target,
@@ -927,6 +928,7 @@ def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(
 
     assert result.ranking_values[:3] == pytest.approx((1.0, 1.0, 1.0))
     assert result.beam_values[2] == 2.0
+    assert not result.quality_passed
 
 
 def test_registered_metric_can_change_selection_without_changing_aligner(
@@ -964,6 +966,44 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
     )
 
     assert align(target, reference).controller.selected_settings.kp_vel == (3.0, 1.0, 1.0)
+
+
+def test_regularized_parameter_prefers_smallest_quality_passing_correction() -> None:
+    name = "test-regularized-highest-x-response-v1"
+
+    def highest_x(reference, target, /):
+        peak = max(abs(value[0]) for trace in target for value in trace.velocity_body_flu_mps)
+        return MetricResult(
+            metrics={"negative_peak": -peak},
+            ranking_values=(-peak,),
+            fit_metrics={"velocity_rmse_mps": 0.0},
+            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
+        )
+
+    register_metric(name=name, metric=highest_x)
+    parameters = (
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (3.0, 1.0, 1.0)),
+            selection_regularization_scale=1.0,
+        ),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=_settings(kp=(1.0, 1.0, 1.0))),
+        metric_name=name,
+    )
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=_Evaluator(),
+        parameters=parameters,
+        metric_name=name,
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings.kp_vel == (1.0, 1.0, 1.0)
 
 
 def test_experiment_fingerprint_includes_capture_but_excludes_execution(

@@ -9163,3 +9163,49 @@ pass actuator audit, fit all eight motion gates, pass complete replay, pass the
 run-local hover/goto integration gate, and only then finalize and publish. That
 single invocation is the required from-scratch demonstration; stop before
 policy training after recording its result.
+
+### 270. Regularize quality-passing estimator corrections before another scratch run
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T192610Z` executed the corrected
+pre-publication workflow from clean source commit `fdb3b96`. Capture and
+actuator audit passed. The target evaluated 902 unique candidates in 13 GPU
+batches and 281.1 seconds, averaging 29.3% GPU utilization and 3.209 useful
+candidates per second. Candidate 612 passed all eight motion gates with 4.906
+mm braking error, 5.854 mm/s residual-speed error, 0.10 s stop-time error,
+8.294% worst-axis NRMSE, 1.453% vertical policy-envelope NRMSE, 3.057% yaw-rate
+NRMSE, 2.572 degrees heading error, and 8.056 mm combined endpoint error.
+Complete replay passed with 0.045477 N maximum core collective RMSE, 0.008230
+maximum core motor RMSE, 0.009139 maximum physical-state motor RMSE, and zero
+timestamp error.
+
+The run-local integration gate correctly rejected the artifact before
+finalization or publication: hover last-window error was 0.107 m against the
+0.100 m limit. The selected 0.0125 Hz decay and
+`[0.0200, -0.0175, -0.0039]` m/s observation bias won by only 0.020 mm/s of
+residual-speed error over the next passing candidate. The sweep contained 133
+candidates that passed every motion gate, so the failure is selection margin,
+not an infeasible fit.
+
+Two same-reference diagnostics isolated the discriminating behavior. Ranking
+passing candidates by combined endpoint chose
+`[0.0150, -0.0250, -0.0039]` m/s and improved endpoint error to 0.682 mm, but
+still missed hover at 0.103 m; increasing its horizontal integral cap from
+0.35 to 0.40 m/s2 had no effect, confirming that the return transient was not
+cap-saturated. Candidate 623 uses the smallest planar observation-bias norm
+among all 133 passing candidates, with 0.0125 Hz decay and
+`[0.0125, -0.0200, -0.0039]` m/s bias. Its exact artifact passed the complete
+integration gate: hover was 0.100 m, goto was 0.037 m, and the final handoff
+range was 0.488 m with the gate ready.
+
+Add generic declarative zero-centered selection regularization to
+`ParameterSpec` and apply it only after the registered metric reports quality
+success. Declare it for the target-side velocity observation bias. Failed fits
+must remain ordered by gate proximity, while multiple passing fits prefer the
+smallest necessary estimator correction before trace-metric tie-breakers. This
+records the live return-to-hover evidence without hard-coding one candidate or
+controller field into the fitter. Commit and run the complete scratch campaign
+again; acceptance still requires the new run to pass capture, audit, all eight
+motion gates, replay, live integration, finalization, and publication in one
+unchanged invocation.

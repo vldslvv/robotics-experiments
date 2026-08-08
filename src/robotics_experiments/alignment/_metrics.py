@@ -349,6 +349,7 @@ def _feasibility_metric_result(
         fit_metrics=result.fit_metrics,
         validation_metrics=validation,
         beam_values=ratios,
+        quality_passed=not any(excesses),
     )
 
 
