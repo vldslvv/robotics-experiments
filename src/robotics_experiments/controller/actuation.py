@@ -935,9 +935,9 @@ def seed_actuation_controller_state(
         ),
         filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
-        # The captured boundary is published before PX4 processes the current
-        # physics tick, so the first replay step must run the outer loop.
-        outer_loop_elapsed_s=controller_dt_s,
+        # The captured boundary precedes the next 125 Hz local-position update
+        # by one physics tick, so elapsed outer-loop time starts at zero.
+        outer_loop_elapsed_s=0.0,
         collective_thrust_setpoint=float(hover_thrust_normalized),
         body_rate_setpoint=_readonly_copy(np.zeros(3)),
         initialized=True,

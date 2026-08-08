@@ -658,7 +658,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
     assert state.angular_acceleration_body_flu == pytest.approx(angular_acceleration)
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
     assert state.hover_thrust_normalized == pytest.approx(0.572)
-    assert state.outer_loop_elapsed_s == pytest.approx(0.004)
+    assert state.outer_loop_elapsed_s == pytest.approx(0.0)
 
 
 def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
@@ -890,7 +890,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
         hover_thrust_normalized=torch.tensor([0.572]),
         valid=torch.tensor([True]),
     )
-    assert state.outer_loop_elapsed_s.item() == pytest.approx(params.controller_dt_s)
+    assert state.outer_loop_elapsed_s.item() == pytest.approx(0.0)
     velocity_integral_before = state.velocity_integral_world.clone()
 
     thrust = _initial_rotor_thrust_from_controller_state(

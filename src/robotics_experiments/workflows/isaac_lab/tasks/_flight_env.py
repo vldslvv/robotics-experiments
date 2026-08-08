@@ -62,15 +62,12 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self._nominal_step_dt = 1.0 / cfg.policy_rate_hz
         self._physics_period_ns = int(round(cfg.sim.dt * 1_000_000_000))
         self._policy_cadence = _CadenceState(previous_time_ns=0)
+        self._command_refresh_cadence = _CadenceState(previous_time_ns=0)
+        self._command_refresh_steps_remaining = 0
         super().__init__(cfg, render_mode, **kwargs)
         self.actions = torch.zeros((self.num_envs, self.cfg.action_space), device=self.device)
         self._applied_actions = self.actions.clone()
         self._controller_command = self.actions.clone()
-        self._action_arrival_pending = torch.zeros(
-            self.num_envs,
-            dtype=torch.bool,
-            device=self.device,
-        )
         self._command_delay_steps: torch.Tensor
         self._command_delay_index: int
         self._command_delay_buffer: torch.Tensor
@@ -199,14 +196,9 @@ class _FlightDirectRLEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self.actions = actions.clone().clamp(-1.0, 1.0)
-        self._action_arrival_pending.fill_(True)
 
     def _apply_action(self) -> None:
         self._command_delay_buffer[self._command_delay_index].copy_(self.actions)
-        self._command_delay_arrival_buffer[self._command_delay_index].copy_(
-            self._action_arrival_pending
-        )
-        self._action_arrival_pending.zero_()
         delayed_indices = (
             self._command_delay_index - self._command_delay_steps
         ) % self._command_delay_buffer.shape[0]
@@ -215,20 +207,21 @@ class _FlightDirectRLEnv(DirectRLEnv):
             delayed_indices,
             environment_indices,
         ].clone()
-        arrivals = self._command_delay_arrival_buffer[
-            delayed_indices,
-            environment_indices,
-        ]
-        candidate_command = _normalized_action_to_controller_command(
-            self.actuation_params,
-            self._applied_actions,
-            self.drone.data.root_quat_w,
-        )
-        self._controller_command = torch.where(
-            arrivals.unsqueeze(-1),
-            candidate_command,
-            self._controller_command,
-        )
+        if self._command_refresh_steps_remaining == 0:
+            self._controller_command = _normalized_action_to_controller_command(
+                self.actuation_params,
+                self._applied_actions,
+                self.drone.data.root_quat_w,
+            )
+            (
+                self._command_refresh_cadence,
+                self._command_refresh_steps_remaining,
+            ) = _next_interval_steps(
+                state=self._command_refresh_cadence,
+                source_period_ns=self._physics_period_ns,
+                rate_hz=self._experiment_config.driver.offboard_setpoint_rate_hz,
+            )
+        self._command_refresh_steps_remaining -= 1
         self._command_delay_index = (
             self._command_delay_index + 1
         ) % self._command_delay_buffer.shape[0]
@@ -285,11 +278,6 @@ class _FlightDirectRLEnv(DirectRLEnv):
             dtype=self.actions.dtype,
             device=self.device,
         )
-        self._command_delay_arrival_buffer = torch.zeros(
-            self._command_delay_buffer.shape[:2],
-            dtype=torch.bool,
-            device=self.device,
-        )
 
     def _set_controller_settings_batch(
         self,
@@ -318,7 +306,8 @@ class _FlightDirectRLEnv(DirectRLEnv):
         )
         self._applied_actions.zero_()
         self._controller_command.zero_()
-        self._action_arrival_pending.zero_()
+        self._command_refresh_cadence = _CadenceState(previous_time_ns=0)
+        self._command_refresh_steps_remaining = 0
         self._controller_state = initial_flight_controller_state(
             num_envs=self.num_envs,
             device=self.device,
@@ -364,9 +353,7 @@ class _FlightDirectRLEnv(DirectRLEnv):
         self.actions[env_ids] = 0.0
         self._applied_actions[env_ids] = 0.0
         self._controller_command[env_ids] = 0.0
-        self._action_arrival_pending[env_ids] = False
         self._command_delay_buffer[:, env_ids] = 0.0
-        self._command_delay_arrival_buffer[:, env_ids] = False
         self._controller_state = reset_flight_controller_state(
             state=self._controller_state,
             env_ids=env_ids,

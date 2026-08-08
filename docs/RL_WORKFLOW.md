@@ -42,10 +42,11 @@ PhysX's center-of-mass force path before submission.
 Controller gains, hover thrust, filters, limits, delay, allocation, and actuator
 response come only from the embedded controller settings. At 250 Hz physics and
 20 Hz policy rate, the exact-average cadence alternates 13 and 12 physics ticks
-per policy step. A velocity action is converted from body-FLU to a world-frame
-setpoint once after its configured transport delay, using the attitude at that
-arrival. The world command is held across the faster controller and physics
-substeps, matching deployment through PX4's body-NED MAVLink receiver.
+per policy step. The retained velocity action passes through its configured
+transport delay and is converted from body-FLU to a world-frame setpoint on the
+independent 50 Hz OFFBOARD stream, using the attitude at each transmission. The
+world command is held across the faster controller and physics substeps,
+matching deployment through PX4's body-NED MAVLink receiver.
 
 ## Press approach task
 

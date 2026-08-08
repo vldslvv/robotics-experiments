@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
@@ -1025,6 +1026,9 @@ def _report(
         hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
     )
     isaac_omega_grid = []
+    command_refresh_cadence = _CadenceState(previous_time_ns=0)
+    command_refresh_steps_remaining = 0
+    held_controller_command = np.zeros(4, dtype=np.float64)
 
     for (
         replay_action,
@@ -1065,15 +1069,22 @@ def _report(
             controller_state=controller_state,
             hover_thrust_normalized=float(hover_thrust_normalized),
         )
-        command = (
-            np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
-            if replay_actions is None
-            else normalized_action_to_controller_command(
-                params,
-                np.clip(replay_action, -1.0, 1.0),
-                quaternion_flu_enu,
-            )
-        )
+        if replay_actions is None:
+            command = np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
+        else:
+            if command_refresh_steps_remaining == 0:
+                held_controller_command = normalized_action_to_controller_command(
+                    params,
+                    np.clip(replay_action, -1.0, 1.0),
+                    quaternion_flu_enu,
+                )
+                command_refresh_cadence, command_refresh_steps_remaining = _next_interval_steps(
+                    state=command_refresh_cadence,
+                    source_period_ns=round(controller_dt_s * 1_000_000_000),
+                    rate_hz=config.driver.offboard_setpoint_rate_hz,
+                )
+            command_refresh_steps_remaining -= 1
+            command = held_controller_command
         controller_state, isaac_omega = controller_command_to_rotor_omega(
             params,
             controller_state,
