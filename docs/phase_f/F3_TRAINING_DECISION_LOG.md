@@ -8149,3 +8149,21 @@ The steady offset therefore cannot close endpoint safely by itself. Preserve
 the complete target traces, selection, telemetry, controller artifact, and
 replay with the copied fresh reference evidence. Do not publish the rejected
 controller and do not expand the bias farther.
+
+### 228. Route the residual endpoint to the measured X estimator offset
+
+Date: 2026-08-08.
+
+Decomposing candidate 5's validation combined-path endpoint delta gives
+approximately `(11.55, -2.13, -3.31)` mm in world ENU. The Y offset has removed
+the original lateral under-travel; the remaining endpoint norm is now bounded
+by X, so further negative Y bias cannot pass the endpoint gate.
+
+A physics-rate join of the fresh bridge state to PX4
+`vehicle_local_position` measures X estimator intercepts of -0.00321 m/s on
+the combined path and -0.00490 m/s on the held-out approach/brake profile.
+Back Y bias off to -0.032 m/s, where residual-speed margin remains 0.00133 m/s,
+and fit only X offsets from 0 through -0.008 m/s around those measurements.
+Keep estimator scale and transient decay, controller gains, filters, cadence,
+allocator, actuator, plant, probes, and gates fixed. The selected motion result
+must pass controller replay before a fresh capture is justified.

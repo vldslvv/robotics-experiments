@@ -26,7 +26,7 @@ settings:
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 1.15, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.0, -0.028, 0.0]
+  velocity_observation_bias_mps: [-0.004, -0.032, 0.0]
   velocity_estimator_bias_decay_hz: 0.01
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
@@ -61,17 +61,16 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  # Continue the fresh capture's monotonic endpoint trend while measuring the
-  # residual-speed and controller-replay tradeoff at the wider boundary.
+  # With Y inside its replay boundary, fit the newly isolated X endpoint
+  # residual around the measured PX4 estimator intercept.
   - field: velocity_observation_bias_mps
     stage: 1
     candidates:
-      - [0.0, -0.016, 0.0]
-      - [0.0, -0.020, 0.0]
-      - [0.0, -0.024, 0.0]
-      - [0.0, -0.028, 0.0]
       - [0.0, -0.032, 0.0]
-      - [0.0, -0.036, 0.0]
+      - [-0.002, -0.032, 0.0]
+      - [-0.004, -0.032, 0.0]
+      - [-0.006, -0.032, 0.0]
+      - [-0.008, -0.032, 0.0]
 
 selection_metric: controller-quality
 publication_metrics:
