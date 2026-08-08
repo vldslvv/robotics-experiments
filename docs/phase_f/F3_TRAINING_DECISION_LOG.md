@@ -8460,3 +8460,27 @@ estimator-bias decay at `[0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]` Hz with
 midpoint refinement. Keep every gain, steady bias, downstream controller,
 plant, probe, and gate unchanged. Reuse the latest fresh reference first; a
 motion and replay pass must then reproduce through a new clean capture.
+
+### 245. Latched commands and lower decay pass the fresh reference
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T151403Z-diagnostic-command-latch-persistence`
+evaluated 18 unique candidates in four GPU batches and 59.8 seconds. Average
+GPU utilization improved to 42.3%, and useful throughput was 0.301 candidates
+per second. Candidate 14 selected a refined estimator-bias decay of 0.005625 Hz
+and passed every motion gate.
+
+Combined endpoint error improved from 23.24 mm to 9.40 mm. Braking error was
+2.74 mm, residual speed was 4.59 mm/s, stop time was 0.1 s, worst-axis velocity
+NRMSE was 5.207%, vertical policy-envelope NRMSE was 1.349%, yaw-rate NRMSE was
+3.093%, and heading error was 2.537 degrees. Controller replay passed every
+profile with zero timestamp error and 0.00786 maximum physical-state normalized
+motor RMSE.
+
+This is material progress and a complete diagnostic pass, but its endpoint
+margin is only 0.60 mm. Preserve all artifacts and keep the broad low-decay
+scratch search. Repeat capture, actuator audit, sweep, fit, and replay from the
+clean implementation commit before publication; do not accept the reused
+reference alone.
