@@ -97,6 +97,15 @@ parameters:
       - [0.040, -0.010, -0.0039]
       - [0.040, 0.000, -0.0039]
       - [0.040, 0.010, -0.0039]
+  # The published-artifact integration gate shows that PX4's 0.4 horizontal
+  # integral gain retains a long goto transient. Fit the evidenced lower range
+  # after planar feasibility so the same candidate must satisfy both boundaries.
+  - field: ki_vel
+    stage: 3
+    candidates:
+      - [0.2, 0.2, 2.1]
+      - [0.3, 0.3, 2.1]
+      - [0.4, 0.4, 2.1]
 
 selection_metric: controller-quality
 publication_metrics:

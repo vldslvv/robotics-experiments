@@ -8936,3 +8936,48 @@ plant, probes, metric definitions, replay audit, and thresholds unchanged. Run
 a completely new capture, audit, search, fit, replay, and finalization from this
 clean commit with no post-capture change. Acceptance additionally requires the
 published artifact to pass `make test-integration-alignment-target`.
+
+### 263. Scratch motion acceptance exposes the existing goto integration boundary
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T175146Z` executed the complete
+predeclared procedure from source commit `b024e3e`: new PX4 capture, actuator
+audit, 627-candidate nine-batch search, held-out fit, complete controller replay,
+finalization, and publication. The search took 170.4 seconds, averaged 27.7%
+GPU utilization, and reached 3.680 useful candidates per second.
+
+Candidate 511 selected 0.0125 Hz estimator-bias decay and observation bias
+`[0.000, -0.0225, -0.0039]` m/s. All eight motion gates passed: braking was
+3.387 mm, residual speed was 4.134 mm/s, stop-time error was 0.10 s, worst-axis
+velocity NRMSE was 4.436%, vertical policy-envelope NRMSE was 1.445%, yaw-rate
+NRMSE was 3.060%, heading error was 2.583 degrees, and endpoint error was 6.180
+mm. Complete replay passed with 0.044680 N maximum core collective RMSE,
+0.008255 maximum core normalized motor RMSE, 0.009147 maximum physical-state
+normalized motor RMSE, and zero timestamp-join error. Finalization advanced
+both `latest` and `best` to this run. An unrelated user edit to `TODO.txt`
+arrived while fitting, so the artifact honestly records `source_dirty=true`
+despite launching from a clean source commit.
+
+The required published-artifact integration gate then failed reproducibly at
+the existing task-neutral hover/goto boundary. The selected candidate's batched
+hover last-window maximum was 0.103 m against 0.100 m. Candidate 520 from the
+same scratch search, with observation bias `[0.000, -0.0075, -0.0039]` m/s,
+passed hover at 0.089 m and goto position at 0.086 m but stopped 58 mm beyond
+the goto target, making the press handoff range 0.422 m instead of at least
+0.450 m.
+
+Controller-only diagnostics localized the transient to horizontal velocity
+integral accumulation. Reducing horizontal `ki_vel` from 0.4 to 0.2 improved
+hover to 0.084 m and goto final error to 0.034 m. Combining that gain with
+scratch candidate 418's already motion-passing `[0.005, -0.010, -0.0039]` m/s
+bias passed the complete integration gate: hover was 0.083 m, goto last-window
+maximum was 0.031 m, final handoff range was 0.457 m, and the handoff gate was
+ready. These manually composed settings are diagnostic only because the
+0.2 integral gain has not yet passed the alignment fit and replay.
+
+Add horizontal integral candidates 0.2, 0.3, and the original 0.4 as one
+declarative third stage after planar feasibility. Reuse the current fresh
+reference to require the lower-integral candidates to pass all motion and replay
+gates. Only then predeclare the resulting scratch search and repeat the entire
+clean capture-to-integration procedure without post-capture tuning.
