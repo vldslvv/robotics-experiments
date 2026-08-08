@@ -9078,3 +9078,31 @@ remains the next tie-break and retains its unchanged 5 mm acceptance limit.
 This metric-order change starts a new comparison fingerprint. Refit and replay
 the preserved reference, then require one clean scratch run and published
 integration pass without post-capture changes.
+
+### 267. Launch the unchanged residual-settling contract from scratch
+
+Date: 2026-08-08.
+
+The exact committed metric refit
+`.build/alignment/x500-px4-v1/20260808T185700Z-diagnostic-residual-ranking`
+reused the Entry 266 candidate traces from clean source commit `481dbe5` and
+selected candidate 244. Its settings are 0.010 Hz estimator-bias decay,
+observation bias `[0.000, -0.010, -0.0039]` m/s, the original horizontal
+integral gain 0.4, and the declarative horizontal integral cap 0.25 m/s2.
+
+All eight motion gates passed: braking error was 3.470 mm, residual speed was
+0.633 mm/s, stop-time error was 0.10 s, worst-axis velocity NRMSE was 4.856%,
+vertical policy-envelope NRMSE was 1.448%, yaw-rate NRMSE was 3.060%, heading
+error was 2.583 degrees, and combined endpoint error was 9.819 mm. Complete
+replay passed with 0.044680 N maximum core collective RMSE, 0.008255 maximum
+core motor RMSE, 0.009006 maximum physical-state motor RMSE, and zero timestamp
+error. The exact fitted artifact passed integration with 0.092 m hover drift,
+0.035 m goto last-window error, and 0.495 m final handoff range.
+
+This closes the preserved-reference diagnostic but is not scratch acceptance.
+Run a new PX4 capture from this clean commit, then execute actuator audit,
+target sweep, fit, complete replay, finalization, publication, and the required
+published-artifact hover/goto integration gate without changing the controller,
+search, probes, metrics, or thresholds. Stop before policy training after the
+fresh artifact either passes the complete sequence or supplies a new evidenced
+boundary.
