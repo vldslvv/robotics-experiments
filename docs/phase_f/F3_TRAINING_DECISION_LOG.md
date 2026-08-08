@@ -8233,3 +8233,23 @@ controller authority among the motion-passing candidates. Run the complete
 controller replay. If its stability physical-state motor RMSE passes 0.01,
 promote this setting to a fresh end-to-end attempt; otherwise the replay seam
 rather than further motion search becomes the first failed boundary.
+
+### 233. The minimum-authority controller passes motion and replay
+
+Date: 2026-08-08.
+
+Focused diagnostic
+`.build/alignment/x500-px4-v1/20260808T140000Z-diagnostic-minimum-pass`
+evaluated the fixed `[0.006, -0.030, 0.0]` m/s observation bias in one GPU
+batch and 10.5 seconds. All eight motion gates passed: braking error was 3.12
+mm, residual-speed error was 8.68 mm/s, stop-time error was 0.1 s, worst-axis
+velocity NRMSE was 5.341%, vertical policy-envelope NRMSE was 1.368%, yaw-rate
+NRMSE was 3.060%, heading error was 2.557 degrees, and endpoint error was 9.77
+mm.
+
+The mandatory controller replay passed all 12 profiles with zero timestamp
+error. Maximum core collective RMSE was 0.03920 N and stability physical-state
+normalized motor RMSE was 0.009981. This is provisional acceptance against a
+reused fresh reference. Run the complete clean-source capture, audit,
+single-candidate target evaluation, fit, replay, and finalization before
+publishing the controller.
