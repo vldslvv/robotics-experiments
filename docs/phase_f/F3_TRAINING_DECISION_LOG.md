@@ -7824,3 +7824,22 @@ definition identifier becomes `isaac-lab-x500-body-origin-v1`, changing the
 comparison fingerprint while retaining strict artifact schema 1. Reuse the
 fresh Attempt 204 reference and unchanged candidates for the target-only
 diagnostic before deciding whether another capture is justified.
+
+### 212. Reject the explicit-position wrench path on throughput
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-body-origin` was
+stopped after 251 seconds. The one-candidate base batch completed in 13.7
+seconds, but the next four-candidate batch did not complete after more than
+three minutes. The worker remained active in simulation rather than compiling,
+showing that the pinned explicit-position wrench composer introduces
+prohibitive per-step overhead. It cannot satisfy the project's measured useful
+throughput contract and produced no motion result to justify the cost.
+
+Restore the mathematically equivalent COM-applied wrench and its torque
+translation, retaining a keyword-only public call. The body-origin seam is not
+supported as the cause of the endpoint residual. The next diagnostic must
+preserve the position-less high-throughput sink and inspect a different plant
+boundary.

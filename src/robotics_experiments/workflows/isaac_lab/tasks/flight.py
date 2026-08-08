@@ -17,9 +17,9 @@ term-for-term:
 of package-root ``IsaacArticulationIO.apply_dynamics``:
 per-rotor thrust ``[0, 0, T_i]`` at the body-FLU rotor offsets, the body-Z yaw
 reaction, and linear drag, reduced to one equivalent wrench per env applied at
-the body origin in the body frame. The sink passes that origin explicitly to
-Isaac Lab, matching the bridge's body-relative application point without a
-center-of-mass translation. Isaac Lab accepts the force and torque in the body
+the body origin in the body frame. PhysX's position-less force is applied at
+the center of mass, so the sink translates the origin-referenced torque to the
+COM before submission. Isaac Lab accepts the force and torque in the body
 frame, so no body->world rotation is needed -- unlike the bridge's
 ``is_global=True`` path.
 
@@ -1310,21 +1310,29 @@ def apply_body_wrench(
     *,
     articulation,
     body_id: int,
+    body_com_position_body: torch.Tensor,
     force_body: torch.Tensor,
     torque_body: torch.Tensor,
 ) -> None:
-    """Write a reduced rotor wrench at the body's local-frame origin.
+    """Write an origin-referenced body wrench through PhysX's COM force path.
 
-    All vectors are ``[B, 3]`` in body-FLU. Explicitly supplying the zero
-    position makes Isaac Lab use the same application point as the PX4 bridge's
-    body effects and avoids translating through a separately reported center
-    of mass. The env's ``write_data_to_sim`` flushes the stored wrench.
+    All vectors are ``[B, 3]`` in body-FLU. The reduced rotor torque is about
+    the body origin. Isaac Lab submits a position-less force at the center of
+    mass, so ``-com x force`` preserves the same physical wrench without the
+    explicit-position composer's per-step overhead. The env's
+    ``write_data_to_sim`` flushes the stored wrench.
     """
     forces = force_body.unsqueeze(1)
-    torques = torque_body.unsqueeze(1)
+    torques = (
+        torque_body
+        - torch.linalg.cross(
+            body_com_position_body,
+            force_body,
+            dim=-1,
+        )
+    ).unsqueeze(1)
     articulation.set_external_force_and_torque(
         forces=forces,
         torques=torques,
-        positions=torch.zeros_like(forces),
         body_ids=[body_id],
     )

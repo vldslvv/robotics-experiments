@@ -29,8 +29,8 @@ owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
 sole body-wrench sink. Lab rigid-body gyroscopic forces are Hydra-owned and
 disabled to match the standalone PX4 plant's generated-USD/default PhysX
 contract; yaw reaction remains explicitly modeled by the rotor wrench. The
-reduced Lab rotor wrench is applied at the body's local-frame origin, the same
-application point used by the bridge's body effects.
+reduced Lab rotor wrench is translated from the body's local-frame origin to
+PhysX's center-of-mass force path before submission.
 
 ## Action and cadence
 

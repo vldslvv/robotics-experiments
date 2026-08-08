@@ -1,5 +1,5 @@
 alignment_id: x500-px4-v1
-controller_id: isaac-lab-x500-body-origin-v1
+controller_id: isaac-lab-x500-v1
 controller_schema_version: 1
 backend: isaac-lab
 experiment_config: configs/alignment_px4_x500_velocity.yaml
