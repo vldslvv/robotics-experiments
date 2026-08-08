@@ -8632,3 +8632,32 @@ including the measured -0.0039 m/s intercept. Keep X/Y observation corrections,
 the low-decay search, plant, probes, and gates unchanged. Reuse the fresh
 capture first, and require both motion and complete controller replay to pass
 before starting another fresh end-to-end attempt.
+
+### 252. The measured vertical estimator seam passes jointly
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T161033Z-diagnostic-estimator-seam`
+reused the fresh Entry 249 capture from clean source commit `5d4c13b`. It
+evaluated 253 unique candidates in seven GPU batches and 117.7 seconds, with
+35.1% average GPU utilization and 2.149 useful candidates per second. The
+larger final batches amortized startup substantially better than the preceding
+narrow sweep. Candidate 189 selected 0.01125 Hz estimator-bias decay and a
+Z velocity-observation bias of -0.00435 m/s, close to the measured -0.003886
+m/s estimator intercept.
+
+All eight motion gates passed: braking error was 3.144 mm, residual-speed error
+was 7.254 mm/s, stop-time error was 0.1 s, worst-axis velocity NRMSE was 4.350%,
+vertical policy-envelope NRMSE was 1.443%, yaw-rate NRMSE was 3.059%, heading
+error was 2.581 degrees, and endpoint error was 8.923 mm. The complete
+controller replay also passed every profile. Vertical-policy collective RMSE
+was 0.044962 N, stability collective RMSE was 0.045220 N, maximum
+physical-state normalized motor RMSE was 0.008477, and maximum timestamp join
+error was zero.
+
+This resolves the gain conflict at the evidenced estimator boundary without a
+controller or plant change. It remains a diagnostic because it reused the
+reference. Preserve all artifacts and run one clean fresh capture, actuator
+audit, staged fit, complete controller replay, and finalization with the same
+declarative search before accepting or publishing the result.
