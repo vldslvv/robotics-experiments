@@ -9011,3 +9011,36 @@ existing motion, replay, and integration gates. First verify this predeclared
 contract against the preserved fresh reference, then run one new clean capture
 through final publication and `make test-integration-alignment-target` without
 post-capture changes.
+
+### 265. Cap the long-horizon integral instead of weakening the fitted response
+
+Date: 2026-08-08.
+
+The preserved-reference fit
+`.build/alignment/x500-px4-v1/20260808T183355Z-diagnostic-ki02` evaluated 731
+unique candidates in 11 GPU batches and 203.3 seconds from clean commit
+`97f0829`. It falsified the Entry 264 fixed-gain hypothesis: no candidate with
+horizontal `ki_vel=0.2` passed all motion gates. Candidate 508 was closest, but
+its combined endpoint error was 13.910 mm. The earlier manually composed
+artifact's quality flag was inherited from its source candidate and therefore
+was not evidence that the changed gain passed the real fit.
+
+A real 0.3-gain candidate from the Entry 263 reference passes every motion gate,
+but its integration check stopped at hover fractionally above the 0.100 m
+limit. Adding the +0.005 m/s X bias passed hover at 0.087 m and goto settling at
+0.057 m, but overshot the handoff to 0.434 m range. The gain/bias trade therefore
+does not leave enough margin at both endpoints.
+
+The horizontal velocity-integral limit isolates the long-duration behavior.
+With the original motion-passing gain and candidate 520 bias, reducing the cap
+from 2.0 to 0.20 m/s2 passed hover at 0.089 m and goto settling at 0.027 m but
+stopped 4 mm too far from the handoff. Refining the cap to 0.25 m/s2 passed the
+complete integration gate: hover remained 0.089 m, goto last-window error was
+0.034 m, and the final handoff range was 0.496 m with the gate ready.
+
+Restore the broad planar and decay search with `ki_vel=[0.4, 0.4, 2.1]`, and
+make `velocity_integral_limit_mps2=[0.25, 0.25, 4.0]` a declarative fit field.
+Verify motion and complete replay against the preserved fresh reference. If it
+passes, run one new clean capture through audit, search, fit, replay,
+finalization, publication, and the required hover/goto integration gate without
+post-capture changes.

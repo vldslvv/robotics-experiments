@@ -22,15 +22,15 @@ settings:
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.2, 0.2, 2.1]
+  ki_vel: [0.4, 0.4, 2.1]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 1.0425, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.005, -0.010, -0.0039]
+  velocity_observation_bias_mps: [0.006, -0.030, 0.0]
   velocity_estimator_bias_decay_hz: 0.0
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
-  velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
+  velocity_integral_limit_mps2: [0.25, 0.25, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.54
   kp_att: [4.0, 4.0, 2.8]
@@ -66,19 +66,17 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # Independent fresh captures occupy the evidenced X range through +0.035 m/s
-  # and the Y range from -0.030 through -0.005 m/s. The published-artifact
-  # integration gate requires at least +0.005 m/s X bias with the lower
-  # horizontal integral gain. Cover both boundaries at large steps, then refine
-  # only around retained gate champions.
+  # Independent fresh captures occupy the evidenced X range from zero through
+  # +0.035 m/s and the Y range from -0.030 through -0.005 m/s. Cover both at
+  # large steps, then refine only around retained gate champions.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [0.005, -0.030, -0.0039]
-      - [0.005, -0.020, -0.0039]
-      - [0.005, -0.010, -0.0039]
-      - [0.005, 0.000, -0.0039]
-      - [0.005, 0.010, -0.0039]
+      - [0.000, -0.030, -0.0039]
+      - [0.000, -0.020, -0.0039]
+      - [0.000, -0.010, -0.0039]
+      - [0.000, 0.000, -0.0039]
+      - [0.000, 0.010, -0.0039]
       - [0.010, -0.030, -0.0039]
       - [0.010, -0.020, -0.0039]
       - [0.010, -0.010, -0.0039]
@@ -99,13 +97,13 @@ parameters:
       - [0.040, -0.010, -0.0039]
       - [0.040, 0.000, -0.0039]
       - [0.040, 0.010, -0.0039]
-  # The published-artifact integration gate shows that PX4's 0.4 horizontal
-  # integral gain retains a long goto transient. Keep the evidenced passing 0.2
-  # value declarative so every evaluated planar candidate carries that contract.
-  - field: ki_vel
+  # Short alignment profiles remain below this evidenced cap, while the longer
+  # published-artifact goto is prevented from retaining excessive integral
+  # acceleration. Keep it declarative so fit and runtime share the same limit.
+  - field: velocity_integral_limit_mps2
     stage: 3
     candidates:
-      - [0.2, 0.2, 2.1]
+      - [0.25, 0.25, 4.0]
 
 selection_metric: controller-quality
 publication_metrics:
