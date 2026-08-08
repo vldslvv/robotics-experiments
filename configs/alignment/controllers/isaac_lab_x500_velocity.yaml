@@ -30,7 +30,7 @@ settings:
   velocity_estimator_bias_decay_hz: 0.0
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
-  velocity_integral_limit_mps2: [0.25, 0.25, 4.0]
+  velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.54
   kp_att: [4.0, 4.0, 2.8]
@@ -103,7 +103,7 @@ parameters:
   - field: velocity_integral_limit_mps2
     stage: 3
     candidates:
-      - [0.25, 0.25, 4.0]
+      - [0.35, 0.35, 4.0]
 
 selection_metric: controller-quality
 publication_metrics:

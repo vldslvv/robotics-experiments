@@ -61,6 +61,18 @@ def test_alignment_targets_are_defined_only_in_alignment_makefile() -> None:
     assert definitions == {target: ["alignment.mk"] for target in targets}
 
 
+def test_alignment_campaign_runs_integration_before_publication() -> None:
+    alignment_makefile = (REPO_ROOT / "make" / "alignment.mk").read_text()
+    campaign = alignment_makefile.split("align-controllers:", maxsplit=1)[1].split(
+        ".PHONY: test-integration-alignment-target", maxsplit=1
+    )[0]
+
+    integration = campaign.index("test-integration-alignment-target")
+    finalization = campaign.index("--finalize")
+    assert "CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json'" in campaign
+    assert integration < finalization
+
+
 def test_alignment_capacity_benchmark_flag_reaches_container_runner() -> None:
     result = subprocess.run(
         [

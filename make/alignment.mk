@@ -106,6 +106,8 @@ align-controllers:
 	@$(MAKE) alignment-fit ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-replay-controller ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
+	@$(MAKE) test-integration-alignment-target \
+	    CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json'
 	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
 	    --run-dir '$(ALIGNMENT_RUN_DIR)' --finalize
 

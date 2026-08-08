@@ -9106,3 +9106,35 @@ published-artifact hover/goto integration gate without changing the controller,
 search, probes, metrics, or thresholds. Stop before policy training after the
 fresh artifact either passes the complete sequence or supplies a new evidenced
 boundary.
+
+### 268. Move the integral cap to the fresh-reference interior and gate publication
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T190133Z` executed capture,
+actuator audit, an 1131-candidate 14-batch sweep, fit, replay, finalization, and
+publication from clean source commit `56f3df0`. Candidate 895 passed all eight
+motion gates with 2.627 mm/s residual speed, 2.868 mm braking error, 0.10 s
+stop-time error, 6.651% worst-axis NRMSE, 1.440% vertical NRMSE, 3.056% yaw
+NRMSE, 2.585 degree heading error, and 9.977 mm endpoint error. Complete replay
+passed with 0.038580 N maximum core collective RMSE, 0.005444 maximum core motor
+RMSE, 0.007382 maximum physical-state motor RMSE, and zero timestamp error.
+
+The published-artifact integration gate then failed only the handoff range.
+The fresh reference selected X observation bias +0.0125 m/s, and the 0.25 m/s2
+integral cap stopped at 0.509 m range, 9 mm too far. All 268 motion-passing
+candidates required at least this X bias, so constraining bias would regress
+fresh-reference reproducibility.
+
+Integral-cap diagnostics on the exact selected artifact placed 0.30 m/s2 at
+0.501 m range and 0.35 m/s2 at 0.488 m. The latter passed the full integration
+gate with 0.100 m hover drift and 0.037 m goto last-window error. On the prior
+reference, the measured cap response predicts that 0.35 remains inside the
+handoff interval with more margin than the 0.25 boundary solution.
+
+Set the declarative horizontal integral cap to 0.35 m/s2, retain every other
+controller, search, probe, metric, and threshold, and verify fit plus replay on
+the preserved fresh reference before another complete scratch run. Also move
+the run-local integration gate into `make align-controllers` before
+finalization: a future integration rejection must preserve evidence without
+advancing `latest` or `best`.

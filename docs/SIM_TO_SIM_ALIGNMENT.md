@@ -155,6 +155,10 @@ Run the full campaign with:
 make align-controllers
 ```
 
+The campaign runs the authoritative integration gate against its run-local
+`controller.json` after replay and before finalization. A failure therefore
+preserves diagnostic evidence without advancing `latest` or `best`.
+
 `controller.json` is the downstream product. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
 controller artifact. `latest` and comparable `best` links advance only for a
