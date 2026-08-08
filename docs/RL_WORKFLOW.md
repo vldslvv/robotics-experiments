@@ -28,7 +28,9 @@ The pinned Isaac Lab `Thruster` realizes per-rotor response while the project
 owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
 sole body-wrench sink. Lab rigid-body gyroscopic forces are Hydra-owned and
 disabled to match the standalone PX4 plant's generated-USD/default PhysX
-contract; yaw reaction remains explicitly modeled by the rotor wrench.
+contract; yaw reaction remains explicitly modeled by the rotor wrench. The
+reduced Lab rotor wrench is applied at the body's local-frame origin, the same
+application point used by the bridge's body effects.
 
 ## Action and cadence
 

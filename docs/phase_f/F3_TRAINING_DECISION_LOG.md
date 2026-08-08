@@ -7810,3 +7810,17 @@ reported center of mass, and submits it without a position. The pinned Isaac
 Lab API supports an explicit body-relative application position. Test a direct
 body-origin wrench, which removes the center-of-mass translation seam while
 preserving the mathematically identical net force and origin torque.
+
+### 211. Apply the Lab wrench directly at the body origin
+
+Date: 2026-08-08.
+
+The pinned Isaac Lab articulation API accepts a body-relative wrench position.
+Replace the position-less COM application and explicit `-com x force` torque
+translation with the already-reduced force and origin torque at position zero.
+This mirrors the bridge's body-origin application contract directly and removes
+one independently sampled transform from every physics tick. The controller
+definition identifier becomes `isaac-lab-x500-body-origin-v1`, changing the
+comparison fingerprint while retaining strict artifact schema 1. Reuse the
+fresh Attempt 204 reference and unchanged candidates for the target-only
+diagnostic before deciding whether another capture is justified.

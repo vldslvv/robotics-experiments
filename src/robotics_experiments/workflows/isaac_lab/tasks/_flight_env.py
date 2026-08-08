@@ -108,7 +108,6 @@ class _FlightDirectRLEnv(DirectRLEnv):
         masses = self.drone.root_physx_view.get_masses()
         total_mass = float(masses[0].sum().item())
         self._body_id = int(self.drone.find_bodies("body")[0][0])
-        self._body_com_position_body = self.drone.data.body_com_pos_b[:, self._body_id].clone()
         self._linear_drag = torch.as_tensor(
             bridge.linear_drag, dtype=torch.float32, device=self.device
         )
@@ -235,11 +234,10 @@ class _FlightDirectRLEnv(DirectRLEnv):
             self._linear_drag,
         )
         apply_body_wrench(
-            self.drone,
-            self._body_id,
-            self._body_com_position_body,
-            force_body,
-            torque_body,
+            articulation=self.drone,
+            body_id=self._body_id,
+            force_body=force_body,
+            torque_body=torque_body,
         )
 
     def _set_command_delay_steps(self, *, delay_steps: torch.Tensor) -> None:

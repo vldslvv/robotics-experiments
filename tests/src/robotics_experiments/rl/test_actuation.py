@@ -733,7 +733,7 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
     assert np.all(neutral_omega(0.572) > neutral_omega(0.57))
 
 
-def test_lab_body_wrench_translates_origin_torque_to_com():
+def test_lab_body_wrench_applies_at_body_origin():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import apply_body_wrench
 
@@ -743,20 +743,26 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
             *,
             forces,
             torques,
+            positions,
             body_ids,
         ):
-            self.arguments = forces, torques, body_ids
+            self.arguments = forces, torques, positions, body_ids
 
     articulation = Articulation()
-    com_position = torch.tensor([[0.25, 0.0, 0.0]])
     force = torch.tensor([[0.0, 0.0, 3.0]])
     torque = torch.tensor([[4.0, 5.0, 6.0]])
 
-    apply_body_wrench(articulation, 2, com_position, force, torque)
+    apply_body_wrench(
+        articulation=articulation,
+        body_id=2,
+        force_body=force,
+        torque_body=torque,
+    )
 
-    forces, torques, body_ids = articulation.arguments
+    forces, torques, positions, body_ids = articulation.arguments
     assert torch.equal(forces, force.unsqueeze(1))
-    assert torch.equal(torques, torch.tensor([[[4.0, 5.75, 6.0]]]))
+    assert torch.equal(torques, torque.unsqueeze(1))
+    assert torch.equal(positions, torch.zeros_like(forces))
     assert body_ids == [2]
 
 
