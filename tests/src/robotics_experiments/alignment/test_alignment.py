@@ -830,7 +830,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     reference_velocity = (
         (1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
-        (0.02, 0.0, 0.0),
+        (0.6, 0.0, 0.0),
         _ZERO3,
         _ZERO3,
         _ZERO3,
@@ -838,7 +838,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     target_velocity = (
         (1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
-        (0.02, 0.0, 0.0),
+        (0.6, 0.0, 0.0),
         (0.02, 0.0, 0.0),
         (0.02, 0.0, 0.0),
         _ZERO3,
@@ -859,6 +859,29 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     events = _braking_events(reference=reference, target=target)
 
     assert events[0][-1] == 0.1
+
+
+def test_braking_ignores_transition_before_reference_reaches_half_command() -> None:
+    source = _response_traces(
+        profiles=_profiles(),
+        settings=_settings(kp=(1.0, 1.0, 1.0)),
+    )[0]
+    command = ((0.04, 0.0, 0.0),) * 2 + (_ZERO3,) * 2
+    reference_velocity = (
+        _ZERO3,
+        (0.009, 0.0, 0.0),
+        (0.011, 0.0, 0.0),
+        _ZERO3,
+    )
+    reference = replace(
+        source,
+        time_s=(0.0, 0.05, 0.10, 0.15),
+        command_velocity_body_flu_mps=command,
+        velocity_body_flu_mps=reference_velocity,
+        position_enu_m=((0.0, 0.0, 0.0),) * 4,
+    )
+
+    assert _braking_events(reference=reference, target=reference) == []
 
 
 def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(

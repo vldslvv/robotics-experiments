@@ -7553,3 +7553,37 @@ through mismatched physical and estimated headings. A cadence sweep on the
 preserved ULog restored the actual pinned 125 Hz PX4 velocity loop: its vertical
 collective RMSE was 0.0364 N, compared with 0.0725 N at the incorrectly inferred
 250 Hz cadence. Run the next fit with 125 Hz fixed and no persistent bias.
+
+### 201. Qualify braking events by established reference motion
+
+Date: 2026-08-08.
+
+Fresh attempt `.build/alignment/x500-px4-v1/20260808T100853Z` used clean source
+commit `0b86286`, captured bridge state at 250 Hz, and evaluated 1,437 unique
+candidates in 21 GPU batches. Average sampled GPU utilization was 27.4%; the
+search remains limited by sequential Isaac/PhysX stepping. The actuator audit
+passed with zero timestamp error, normalized motor RMSE below 0.00030, and
+collective RMSE below 0.0095 N. The estimated-state controller replay also
+passed with normalized motor RMSE below 0.0071. Physics-rate evidence therefore
+confirms the allocator, bridge mapping, controller cadence, and target
+controller equations.
+
+Candidate 1,109 failed braking distance at 11.917 mm, stop time at 0.46 s, and
+combined endpoint at 19.065 mm; its vertical policy-envelope NRMSE passed at
+0.02472. Every candidate had the same 0.46 s stop failure and none passed
+braking, while 70 passed endpoint and 1,405 passed the vertical gate. The
+limiting event began at only 0.01025 m/s after a -0.04 m/s command, essentially
+on the 0.01 m/s stop threshold. The lateral event behind the next-largest
+errors reached only 0.02435 m/s of its -0.06 m/s command. These short reversals
+never established the commanded motion, so threshold crossing measured an
+acceleration transient rather than braking.
+
+Braking and stop metrics now require the PX4 reference to reach at least half
+of the preceding command at the transition. Rescoring all preserved traces
+under this definition leaves four established braking events. In that
+diagnostic, 918 candidates pass both exact-action gates; the best joint result
+has 1.680 mm braking error and 0.06 s stop error. Rescore the complete preserved
+sweep under the fingerprinted metric before a fresh capture. The physics-rate
+physical-state replay remains diagnostic evidence for the estimator seam: its
+largest normalized motor RMSE is 0.01280 in the stability profile, while the
+controller replay on the state PX4 actually consumed passes.

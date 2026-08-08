@@ -107,6 +107,12 @@ applies these hard validation limits:
 - heading error <= 3 degrees;
 - combined endpoint error <= 0.01 m.
 
+Braking distance and stop time apply only when the PX4 reference has reached
+at least half of the preceding nonzero command at the transition. This keeps
+the exact-action gates tied to genuine braking responses; a short reversal
+that never establishes the commanded motion remains covered by velocity,
+acceleration, residual, settling, and endpoint metrics.
+
 The vertical policy envelope is an independent ascent, descent, neutral-return
 profile using commands through 0.8 m/s. It prevents a low-speed aggregate from
 hiding the wrong climb/descend correction observed during policy execution.

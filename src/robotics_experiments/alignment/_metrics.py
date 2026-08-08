@@ -13,6 +13,7 @@ __all__: list[str] = []
 
 _CONTROLLER_QUALITY_METRIC = "controller-quality"
 _STOP_SPEED_MPS = 0.01
+_MIN_BRAKING_RESPONSE_FRACTION = 0.5
 _METRICS: dict[str, MetricFunction] = {}
 _QUALITY_LIMITS = (
     ("braking_distance_error_m", 0.005),
@@ -116,6 +117,10 @@ def _braking_events(
     events = []
     for previous in transitions:
         start = int(previous + 1)
+        if abs(reference_velocity[start]) < (
+            _MIN_BRAKING_RESPONSE_FRACTION * abs(command[previous])
+        ):
+            continue
         reference_stop = _stop_index(velocity=reference_velocity, start=start)
         target_stop = _stop_index(velocity=target_velocity, start=start)
         reference_distance = float(
