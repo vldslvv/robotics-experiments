@@ -41,7 +41,7 @@ def _make_drone_articulation_cfg(*, usd_path: str, prim_path: str, lab_vehicle) 
                 max_linear_velocity=lab_vehicle.max_linear_velocity_mps,
                 max_angular_velocity=lab_vehicle.max_angular_velocity_radps,
                 max_depenetration_velocity=lab_vehicle.max_depenetration_velocity_mps,
-                enable_gyroscopic_forces=True,
+                enable_gyroscopic_forces=lab_vehicle.enable_gyroscopic_forces,
             ),
             activate_contact_sensors=True,
             # No mass override: the USD carries the computed body mass/inertia/CoM

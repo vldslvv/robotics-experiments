@@ -26,7 +26,9 @@ The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 Torch implementation is required to match the NumPy controller sequentially.
 The pinned Isaac Lab `Thruster` realizes per-rotor response while the project
 owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
-sole body-wrench sink.
+sole body-wrench sink. Lab rigid-body gyroscopic forces are Hydra-owned and
+disabled to match the standalone PX4 plant's generated-USD/default PhysX
+contract; yaw reaction remains explicitly modeled by the rotor wrench.
 
 ## Action and cadence
 

@@ -7772,3 +7772,21 @@ controller-boundary replay passes. Inspect the first downstream plant boundary
 under identical rotor inputs, especially reference-versus-Lab rigid-body
 settings and origin/center-of-mass force application. Do not reopen controller
 gain fitting without matching controller-boundary evidence.
+
+### 209. Match the rigid-body gyroscopic-force contract
+
+Date: 2026-08-08.
+
+The first inspected downstream plant boundary contains a concrete mismatch.
+The standalone reference loads the generated USD without enabling PhysX
+gyroscopic rigid-body forces, while the Isaac Lab articulation configuration
+unconditionally enables them. Rotor yaw reaction is already applied explicitly
+by both plant sinks, so this extra Lab-only rigid-body term is neither part of
+the shared rotor model nor represented by a controller setting.
+
+Make `rl.lab_vehicle.enable_gyroscopic_forces` the Hydra-owned Lab plant
+contract and set it to false, matching the PX4 reference. This resolved
+experiment change produces a new comparison fingerprint without introducing a
+new schema. Reuse Attempt 204's fresh reference for a target-only diagnostic;
+run a new clean capture only if the validation endpoint improves materially.
+Keep every controller candidate and gate unchanged.

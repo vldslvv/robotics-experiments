@@ -66,8 +66,10 @@ objective.
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
 adapter. Its configured pusher is deployed after takeoff and before probe
 preconditioning so the reference plant matches Lab training and press-policy
-deployment. Each profile records its absolute PX4 simulation start time and the
-complete initial controller state required for replay. One run directory keeps:
+deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
+force setting, which is disabled to match the standalone PX4 plant. Each
+profile records its absolute PX4 simulation start time and the complete initial
+controller state required for replay. One run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;

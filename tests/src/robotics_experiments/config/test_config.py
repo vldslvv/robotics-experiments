@@ -231,6 +231,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
 
     assert config.rl.action.action_dim == 4
     assert config.rl.action.max_body_velocity_mps == 2.0
+    assert not config.rl.lab_vehicle.enable_gyroscopic_forces
     assert training.controller_artifact == ".build/alignment/x500-px4-v1/best"
     assert config.rl.press.reset.physical_contact_enabled
     assert config.rl.num_envs == 32768
