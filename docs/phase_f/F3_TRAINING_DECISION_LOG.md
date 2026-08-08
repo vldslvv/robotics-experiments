@@ -8013,3 +8013,20 @@ At the scale 1.15, decay 0.01 Hz one-failure frontier, sweep only Y offsets from
 -0.00156 and -0.00560 m/s intercepts. Keep velocity filtering disabled and all
 downstream controller, allocator, actuator, plant, probe, and gate contracts
 fixed. A motion pass remains provisional until controller replay passes.
+
+### 222. Require a fresh reference for the strict controller interface
+
+Date: 2026-08-08.
+
+Target sweep
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-steady-bias`
+evaluated 16 unique candidates in four GPU batches and 53.8 seconds. Fitting
+then correctly rejected the copied Attempt 204 reference as captured from a
+different definition. The new required controller field changes the comparison
+fingerprint even though its PX4 value is zero; rewriting captured provenance
+would violate the strict artifact contract.
+
+Preserve the diagnostic traces, but do not interpret their motion metrics
+against the rejected reference. Run a fresh PX4 capture, actuator audit, target
+sweep, fit, and controller replay from commit `7619e8d` with the same focused
+steady-offset candidates.
