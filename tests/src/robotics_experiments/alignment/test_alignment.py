@@ -306,8 +306,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_estimator_bias_decay_hz",
         "velocity_observation_bias_mps",
     )
-    assert len(target.parameters[-1].candidates) == 6
-    assert target.parameters[-1].candidates[0] == pytest.approx((0.031, -0.030, -0.0039))
+    assert len(target.parameters[-1].candidates) == 7
+    assert target.parameters[-1].candidates[0] == pytest.approx((0.006, -0.030, -0.0039))
     assert target.parameters[-1].candidates[-1] == pytest.approx((0.037, -0.030, -0.0039))
     extended = replace(
         target,

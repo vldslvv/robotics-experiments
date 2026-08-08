@@ -8777,3 +8777,32 @@ NRMSE retains 1.746 percentage points of margin and physical-state motor RMSE
 retains 0.001691. Search X from +0.031 through +0.037 m/s in 0.001-0.002 m/s
 coarse steps with Y fixed at -0.030 and Z at -0.0039. Keep the broad decay
 stage and all controller, plant, probe, and gate contracts unchanged.
+
+### 257. Retain the evidenced X span for fresh one-go fitting
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T165312Z-diagnostic-x-endpoint`
+reused the Entry 253 fresh capture from clean source commit `8e28418`. It
+evaluated 271 unique candidates in seven GPU batches and 133.9 seconds,
+averaged 32.5% GPU utilization, and reached 2.024 useful candidates per second.
+Thirty-eight candidates passed all eight motion gates.
+
+Candidate 245 selected 0.00625 Hz estimator-bias decay and observation bias
+`[0.03475, -0.030, -0.0039]` m/s. All motion gates passed: endpoint was 9.879
+mm, braking was 2.321 mm, residual speed was 4.714 mm/s, stop-time error was
+0.06 s, worst-axis NRMSE was 8.167%, vertical NRMSE was 1.335%, yaw NRMSE was
+3.091%, and heading error was 2.542 degrees. Complete replay passed with
+0.031907 N maximum core collective, 0.006353 maximum core motor RMSE, 0.008258
+maximum physical-state motor RMSE, and zero timestamp error.
+
+This is complete diagnostic acceptance but reuses the reference. The earlier
+fresh capture passed near X +0.006, while the latest capture requires about
++0.035 because its seeded estimator residual has the opposite X sign. A
+scratch procedure narrowed to either basin would not be reproducible. Keep Y
+fixed at -0.030 and Z at the measured -0.0039, but restore coarse X candidates
+from +0.006 through +0.037 m/s with automatic midpoint refinement. This single
+declarative stage covers both observed fresh basins at substantially lower cost
+than the 18-vector planar grid. Run a clean fresh capture, audit, fit, exact-tick
+replay, and finalization without any intervening tuning.
