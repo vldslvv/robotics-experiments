@@ -8202,3 +8202,22 @@ recovering residual-speed and physical-state motor margin. Keep estimator
 scale and transient decay, controller gains, filters, cadence, allocator,
 actuator, plant, probes, and gates fixed. Replay the selected controller before
 requesting a fresh end-to-end capture.
+
+### 231. Positive X crosses motion before the replay boundary
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T140000Z-diagnostic-x-bias-positive`
+evaluated 17 unique candidates in four GPU batches and 63.0 seconds. Candidate
+8 at X +0.009 and Y -0.030 m/s passed all eight motion gates. Its endpoint
+error was 8.32 mm, braking error was 3.12 mm, residual-speed error was 8.87
+mm/s, and worst-axis velocity NRMSE was 5.761%.
+
+The mandatory replay rejected the ranker's most accurate motion candidate by
+a narrow stability margin: physical-state normalized motor RMSE was 0.010015
+against 0.010000. Every other replay boundary and profile passed. The sweep
+also contains a lower-authority motion pass at X +0.006 m/s: endpoint error is
+9.93 mm, while braking, residual-speed, and all other motion gates pass.
+Preserve the complete sweep and replay. Test the lowest passing X setting as a
+focused replay-margin control instead of expanding or refining the range.
