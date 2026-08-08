@@ -7519,3 +7519,37 @@ the same scale as the closed-loop stopping residuals. The next attempt must
 replay from captured physical state, seed the target's observation state from
 the PX4 estimate, and fit only the evidenced observation filter before motor
 comparison. Keep the pinned controller gains unchanged.
+
+### 200. Reject persistent estimator bias and restore physics-rate evidence
+
+Date: 2026-08-08.
+
+Fresh attempt `.build/alignment/x500-px4-v1/20260808T092841Z` used clean source
+commit `258a21a` and evaluated 1,642 unique candidates in 23 batches over
+424.7 s. Average sampled GPU utilization was 27.2%, again confirming that
+sequential Isaac/PhysX stepping, rather than tensor capacity, limits useful
+throughput. Candidate 1,582 was selected. The actuator audit passed with
+normalized motor RMSE below 0.00030, collective RMSE below 0.0096 N, and zero
+timestamp error.
+
+Motion regressed to three failed gates: braking-distance error was 8.585 mm,
+stop-time error 0.26 s, and combined endpoint error 36.600 mm. Vertical policy
+envelope NRMSE remained passing at 0.07447. Candidate-wide minima were
+6.932 mm braking, 0.20 s stop time, and 29.179 mm endpoint, so no candidate
+approached the preceding frontier. The persistent initial estimator-offset
+model is therefore rejected: an initial estimator discrepancy is evidence for
+seed state, not for a constant bias applied throughout every profile.
+
+Replaying the preserved evidence after removing that bias exposed a separate
+audit-resolution defect. Physical state had been sampled at the 20 Hz OFFBOARD
+command cadence and interpolated into a 250 Hz rate loop. Even replacing all
+three physical inputs with PX4-estimated values at that downsampled cadence
+left normalized motor RMSE at 0.0121, while native ULog state passed. Filter
+sweeps could not correct this information loss. The bridge already owns the
+physics-tick state, so the next clean capture records its pose, linear velocity,
+and body angular velocity every 4 ms and joins that evidence directly. The
+replay also now feeds captured body commands directly instead of rotating them
+through mismatched physical and estimated headings. A cadence sweep on the
+preserved ULog restored the actual pinned 125 Hz PX4 velocity loop: its vertical
+collective RMSE was 0.0364 N, compared with 0.0725 N at the incorrectly inferred
+250 Hz cadence. Run the next fit with 125 Hz fixed and no persistent bias.

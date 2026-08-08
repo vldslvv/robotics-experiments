@@ -103,7 +103,6 @@ class ActuationControllerState:
     """State carried by the PX4-like velocity and body-rate cascade."""
 
     filtered_velocity_enu: np.ndarray
-    velocity_observation_bias_enu: np.ndarray
     acceleration_enu: np.ndarray
     acceleration_setpoint_enu: np.ndarray
     velocity_integral_enu: np.ndarray
@@ -503,9 +502,6 @@ def _rate_to_omega(
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
-        velocity_observation_bias_enu=_readonly_copy(
-            controller_state.velocity_observation_bias_enu
-        ),
         acceleration_enu=_readonly_copy(controller_state.acceleration_enu),
         acceleration_setpoint_enu=_readonly_copy(controller_state.acceleration_setpoint_enu),
         velocity_integral_enu=_readonly_copy(controller_state.velocity_integral_enu),
@@ -561,9 +557,9 @@ def _velocity_action_to_omega(
     )
 
     velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
-    measured_velocity = (
-        params.velocity_observation_scale * np.asarray(state.linear_velocity_enu, dtype=np.float64)
-        + controller_state.velocity_observation_bias_enu
+    measured_velocity = params.velocity_observation_scale * np.asarray(
+        state.linear_velocity_enu,
+        dtype=np.float64,
     )
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha(
@@ -632,9 +628,6 @@ def _velocity_action_to_omega(
     )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
-        velocity_observation_bias_enu=_readonly_copy(
-            controller_state.velocity_observation_bias_enu
-        ),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(desired_acceleration),
         velocity_integral_enu=_readonly_copy(velocity_integral),
@@ -818,7 +811,6 @@ def initial_actuation_controller_state() -> ActuationControllerState:
     zero = np.zeros(3, dtype=np.float64)
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(zero),
-        velocity_observation_bias_enu=_readonly_copy(zero),
         acceleration_enu=_readonly_copy(zero),
         acceleration_setpoint_enu=_readonly_copy(zero),
         velocity_integral_enu=_readonly_copy(zero),
@@ -837,7 +829,6 @@ def initial_actuation_controller_state() -> ActuationControllerState:
 def seed_actuation_controller_state(
     *,
     params: ActuationParams,
-    linear_velocity_enu: np.ndarray,
     filtered_linear_velocity_enu: np.ndarray,
     angular_velocity_body_flu: np.ndarray,
     acceleration_setpoint_enu_mps2: np.ndarray,
@@ -856,7 +847,6 @@ def seed_actuation_controller_state(
             raise ValueError(f"{name} must contain three finite values")
         return result
 
-    velocity = vector(linear_velocity_enu, "linear_velocity_enu")
     filtered_velocity = vector(
         filtered_linear_velocity_enu,
         "filtered_linear_velocity_enu",
@@ -890,9 +880,6 @@ def seed_actuation_controller_state(
     )
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
-        velocity_observation_bias_enu=_readonly_copy(
-            filtered_velocity - params.velocity_observation_scale * velocity
-        ),
         acceleration_enu=_readonly_copy(acceleration),
         acceleration_setpoint_enu=_readonly_copy(acceleration_setpoint),
         velocity_integral_enu=_readonly_copy(velocity_integral),

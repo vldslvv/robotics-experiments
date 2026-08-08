@@ -93,6 +93,7 @@ alignment-replay-controller:
 	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
 	    --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
 	    --profile-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
+	    --bridge-log '$(ALIGNMENT_RUN_DIR)/bridge.log' \
 	    --json '$(ALIGNMENT_RUN_DIR)/controller_boundary_replay.json'
 
 .PHONY: align-controllers

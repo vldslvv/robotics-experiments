@@ -57,6 +57,14 @@ _BRIDGE_DYNAMICS_PATTERN = re.compile(
     r"forces_n=(?P<forces>\[[^\]]+\]) "
     r"body_torque_n_m=(?P<body_torque>\[[^\]]+\])"
 )
+_BRIDGE_STATE_PATTERN = re.compile(
+    r"PX4 bridge dynamics: .* sim_time_us=(?P<sim_time_us>\d+).* "
+    r"position_enu=(?P<position>\[[^\]]+\]) "
+    r"quat_wxyz=(?P<attitude>\[[^\]]+\]) "
+    r"velocity_enu=(?P<velocity>\[[^\]]+\]) "
+    r"body_velocity_flu=\[[^\]]+\] "
+    r"angular_velocity_body_flu=(?P<angular_velocity>\[[^\]]+\])"
+)
 
 
 def _dataset(*, ulog, name: str) -> dict:
@@ -345,6 +353,49 @@ def _bridge_actuator_samples(
     )
 
 
+def _bridge_state_samples(
+    *,
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    times: list[int] = []
+    positions: list[list[float]] = []
+    attitudes: list[list[float]] = []
+    velocities: list[list[float]] = []
+    angular_velocities: list[list[float]] = []
+    for line in path.read_text().splitlines():
+        state_match = _BRIDGE_STATE_PATTERN.search(line)
+        if state_match is None:
+            continue
+        sample_time = int(state_match.group("sim_time_us"))
+        position = list(ast.literal_eval(state_match.group("position")))
+        attitude = list(ast.literal_eval(state_match.group("attitude")))
+        velocity = list(ast.literal_eval(state_match.group("velocity")))
+        angular_velocity = list(ast.literal_eval(state_match.group("angular_velocity")))
+        if times and sample_time == times[-1]:
+            positions[-1] = position
+            attitudes[-1] = attitude
+            velocities[-1] = velocity
+            angular_velocities[-1] = angular_velocity
+            continue
+        if times and sample_time < times[-1]:
+            raise ValueError(f"bridge log {path} physical-state timestamps regress")
+        times.append(sample_time)
+        positions.append(position)
+        attitudes.append(attitude)
+        velocities.append(velocity)
+        angular_velocities.append(angular_velocity)
+    if not times:
+        raise ValueError(f"bridge log {path} has incomplete physical-state diagnostics")
+    time_array = np.asarray(times, dtype=np.int64)
+    return (
+        time_array,
+        np.asarray(positions, dtype=np.float64),
+        np.asarray(attitudes, dtype=np.float64),
+        np.asarray(velocities, dtype=np.float64),
+        np.asarray(angular_velocities, dtype=np.float64),
+    )
+
+
 def _profile_topic(
     *,
     topic: dict,
@@ -544,25 +595,29 @@ def _actuator_boundary_report(
     bridge_body_torque = bridge_join_and_torque[:, 1:]
 
     motor_time_us = _topic_time_us(topic=motors)
-    motor_index = _nearest_indices(source_t=motor_time_us, query_t=bridge_time_us)
-    motor_join_error_us = np.abs(motor_time_us[motor_index] - bridge_time_us)
+    bridge_index = _nearest_indices(
+        source_t=bridge_time_us.astype(np.float64),
+        query_t=motor_time_us.astype(np.float64),
+    )
+    motor_join_error_us = np.abs(bridge_time_us[bridge_index] - motor_time_us)
     input_scaling = np.asarray(bridge.input_scaling, dtype=np.float64)
     input_offset = np.asarray(bridge.input_offset, dtype=np.float64)
     armed_zero = np.asarray(bridge.zero_position_armed, dtype=np.float64)
-    bridge_normalized_motor = (bridge_rotor_speed - armed_zero) / input_scaling - input_offset
-    expected_rotor_speed = (
-        motor_values[motor_index] * input_scaling + armed_zero + input_offset * input_scaling
-    )
+    sampled_rotor_speed = bridge_rotor_speed[bridge_index]
+    sampled_forces = bridge_forces[bridge_index]
+    sampled_body_torque = bridge_body_torque[bridge_index]
+    bridge_normalized_motor = (sampled_rotor_speed - armed_zero) / input_scaling - input_offset
+    expected_rotor_speed = motor_values * input_scaling + armed_zero + input_offset * input_scaling
     expected_collective = np.sum(
         geometry.rotor_constant * np.square(expected_rotor_speed),
         axis=1,
     )
-    bridge_collective = np.sum(bridge_forces, axis=1)
+    bridge_collective = np.sum(sampled_forces, axis=1)
     bridge_torque = np.column_stack(
         [
-            np.sum(geometry.positions_body[:, 1] * bridge_forces, axis=1),
-            -np.sum(geometry.positions_body[:, 0] * bridge_forces, axis=1),
-            bridge_body_torque[:, 2],
+            np.sum(geometry.positions_body[:, 1] * sampled_forces, axis=1),
+            -np.sum(geometry.positions_body[:, 0] * sampled_forces, axis=1),
+            sampled_body_torque[:, 2],
         ]
     )
 
@@ -573,7 +628,7 @@ def _actuator_boundary_report(
         start_us = int(raw_profile["start_sim_time_us"])
         relative_time_s = raw_profile["time_s"]
         end_us = start_us + round(float(relative_time_s[-1]) * 1_000_000)
-        bridge_selected = (bridge_time_us >= start_us) & (bridge_time_us <= end_us)
+        bridge_selected = (motor_time_us >= start_us) & (motor_time_us <= end_us)
         topic_reports = {
             "vehicle_thrust_setpoint": _profile_topic(
                 topic=thrust,
@@ -621,7 +676,7 @@ def _actuator_boundary_report(
             for name, topic_report in topic_reports.items()
         }
         profile_motor_error = (
-            bridge_normalized_motor[bridge_selected] - motor_values[motor_index][bridge_selected]
+            bridge_normalized_motor[bridge_selected] - motor_values[bridge_selected]
         )
         profile_collective_error = (
             bridge_collective[bridge_selected] - expected_collective[bridge_selected]
@@ -637,7 +692,10 @@ def _actuator_boundary_report(
         max_join_error_us = int(
             max(
                 np.max(motor_join_error_us[bridge_selected], initial=0),
-                np.max(bridge_dynamics_join_error_us[bridge_selected], initial=0),
+                np.max(
+                    bridge_dynamics_join_error_us[bridge_index][bridge_selected],
+                    initial=0,
+                ),
             )
         )
         if max_join_error_us > _PHYSICS_TICK_US:
@@ -666,7 +724,7 @@ def _actuator_boundary_report(
                 "bridge": {
                     "sample_count": int(np.count_nonzero(bridge_selected)),
                     "mean_mapped_rotor_speed_radps": np.mean(
-                        bridge_rotor_speed[bridge_selected], axis=0
+                        sampled_rotor_speed[bridge_selected], axis=0
                     ).tolist(),
                     "mean_reconstructed_collective_thrust_n": float(
                         np.mean(bridge_collective[bridge_selected])
@@ -728,6 +786,7 @@ def _report(
     time_origin_us: int,
     command_trace: dict | None,
     physical_state: bool,
+    bridge_state: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None,
 ) -> dict:
     config = load_config(config_path)
     vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
@@ -750,6 +809,7 @@ def _report(
         controller_settings = replace(
             controller_settings,
             velocity_observation_scale=(1.0, 1.0, 1.0),
+            velocity_filter_hz=0.0,
         )
     params = build_actuation_params(
         geometry=geometry,
@@ -788,6 +848,7 @@ def _report(
         dtype=np.float64,
     )
     if command_trace is None:
+        replay_actions = None
         trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
         velocity_ned = np.column_stack(
             [
@@ -802,12 +863,10 @@ def _report(
             command_trace["command_velocity_body_flu_mps"], dtype=np.float64
         )
         command_yaw_rate = np.asarray(command_trace["command_yaw_rate_radps"], dtype=np.float64)
-        command_attitude = np.asarray(command_trace["attitude_flu_enu_wxyz"], dtype=np.float64)
         if (
             command_time.ndim != 1
             or command_velocity.shape != (len(command_time), 3)
             or command_yaw_rate.shape != (len(command_time),)
-            or command_attitude.shape != (len(command_time), 4)
         ):
             raise ValueError("profile command trace fields have inconsistent lengths")
         command_index = _hold_indices(
@@ -815,26 +874,14 @@ def _report(
             query_t=replay_t - start_s,
         )
         commanded_body_velocity = command_velocity[command_index]
-        command_quaternion = command_attitude[command_index]
-        command_yaw = np.array(
+        replay_actions = np.column_stack(
             [
-                math.atan2(
-                    2.0 * (quaternion[0] * quaternion[3] + quaternion[1] * quaternion[2]),
-                    1.0 - 2.0 * (quaternion[2] ** 2 + quaternion[3] ** 2),
-                )
-                for quaternion in command_quaternion
+                commanded_body_velocity / config.rl.action.max_body_velocity_mps,
+                command_yaw_rate[command_index, None] / config.rl.action.max_yaw_rate_radps,
             ]
         )
-        cosine = np.cos(command_yaw)
-        sine = np.sin(command_yaw)
-        velocity_enu = np.column_stack(
-            [
-                cosine * commanded_body_velocity[:, 0] - sine * commanded_body_velocity[:, 1],
-                sine * commanded_body_velocity[:, 0] + cosine * commanded_body_velocity[:, 1],
-                commanded_body_velocity[:, 2],
-            ]
-        )
-        velocity_ned = velocity_enu @ _NED_TO_ENU
+        velocity_ned = np.zeros_like(commanded_body_velocity)
+        velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
         yaw_speed = -command_yaw_rate[command_index]
     local_velocity_ned = _linear_interpolate(
         source_t=relative_time(local_position),
@@ -884,29 +931,26 @@ def _report(
         replay_angular_velocity_flu = angular_velocity_frd @ _FLU_TO_FRD
         replay_state_source = "px4-estimated-state"
     else:
-        if command_trace is None:
-            raise ValueError("physical-state replay requires a captured command trace")
-        physical_time = np.asarray(command_trace["time_s"], dtype=np.float64)
+        if command_trace is None or bridge_state is None:
+            raise ValueError("physical-state replay requires command and bridge state traces")
+        physical_time_us, _position, physical_attitude, physical_velocity, physical_rates = (
+            bridge_state
+        )
+        physical_time = physical_time_us.astype(np.float64) / 1e6
         replay_velocity_enu = _linear_interpolate(
             source_t=physical_time,
-            values=np.asarray(command_trace["velocity_enu_mps"], dtype=np.float64),
-            query_t=replay_t - start_s,
+            values=physical_velocity,
+            query_t=replay_t,
         )
         replay_quaternion_flu_enu = _interpolate_quaternions(
             source_t=physical_time,
-            quaternions_wxyz=np.asarray(
-                command_trace["attitude_flu_enu_wxyz"],
-                dtype=np.float64,
-            ),
-            query_t=replay_t - start_s,
+            quaternions_wxyz=physical_attitude,
+            query_t=replay_t,
         )
         replay_angular_velocity_flu = _linear_interpolate(
             source_t=physical_time,
-            values=np.asarray(
-                command_trace["angular_velocity_body_flu_radps"],
-                dtype=np.float64,
-            ),
-            query_t=replay_t - start_s,
+            values=physical_rates,
+            query_t=replay_t,
         )
         replay_state_source = "captured-physical-state"
     hover_index = _hold_indices(source_t=relative_time(hover), query_t=replay_t)
@@ -930,7 +974,6 @@ def _report(
     )
     controller_state = seed_actuation_controller_state(
         params=params,
-        linear_velocity_enu=replay_velocity_enu[0],
         filtered_linear_velocity_enu=(
             controller_vectors["initial_estimated_linear_velocity_enu_mps"]
             if physical_state
@@ -948,6 +991,7 @@ def _report(
     isaac_omega_grid = []
 
     for (
+        replay_action,
         velocity_setpoint_ned,
         yaw_setpoint_rate,
         velocity_state_enu,
@@ -955,6 +999,7 @@ def _report(
         rates_flu,
         hover_thrust_normalized,
     ) in zip(
+        replay_actions if replay_actions is not None else np.full((len(replay_t), 4), np.nan),
         velocity_ned,
         yaw_speed,
         replay_velocity_enu,
@@ -985,9 +1030,12 @@ def _report(
                 [0.0, 0.0, 1.0],
             ]
         )
-        action = np.zeros(4)
-        action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
-        action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
+        if replay_actions is None:
+            action = np.zeros(4)
+            action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
+            action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
+        else:
+            action = replay_action
         action = np.clip(action, -1.0, 1.0)
 
         state = ActuationState(
@@ -1098,6 +1146,23 @@ def _report(
         "controller_rate_hz": config.sim.physics_hz,
         "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
+        "physical_state_timestamp_join_error_us": (
+            int(
+                np.max(
+                    np.abs(
+                        physical_time_us[
+                            _nearest_indices(
+                                source_t=physical_time_us.astype(np.float64),
+                                query_t=replay_t * 1e6,
+                            )
+                        ]
+                        - np.rint(replay_t * 1e6).astype(np.int64)
+                    )
+                )
+            )
+            if physical_state and bridge_state is not None
+            else 0
+        ),
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             **boundary_metrics,
@@ -1158,7 +1223,9 @@ def _profile_replay_report(
     config_path: Path,
     controller_artifact_path: Path,
     reference_path: Path,
+    bridge_log_path: Path,
 ) -> dict:
+    bridge_state = _bridge_state_samples(path=bridge_log_path)
     profiles = []
     failures = []
     for window in _profile_windows(reference_path=reference_path):
@@ -1171,6 +1238,7 @@ def _profile_replay_report(
             time_origin_us=0,
             command_trace=window["command_trace"],
             physical_state=False,
+            bridge_state=None,
         )
         physical_replay = _report(
             ulog=ulog,
@@ -1181,6 +1249,7 @@ def _profile_replay_report(
             time_origin_us=0,
             command_trace=window["command_trace"],
             physical_state=True,
+            bridge_state=bridge_state,
         )
         metrics = core_replay["metrics"]
         physical_metrics = physical_replay["metrics"]
@@ -1203,6 +1272,12 @@ def _profile_replay_report(
                 f"{physical_metrics['normalized_motor_rmse']:.6f} exceeds "
                 f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
             )
+        physical_join_error_us = physical_replay["physical_state_timestamp_join_error_us"]
+        if physical_join_error_us > _PHYSICS_TICK_US:
+            failures.append(
+                f"{profile_name}: physical-state timestamp join error "
+                f"{physical_join_error_us} us exceeds {_PHYSICS_TICK_US} us"
+            )
         profiles.append(
             {
                 "profile": window["profile"],
@@ -1217,6 +1292,7 @@ def _profile_replay_report(
                 "sample_time_s": core_replay["sample_time_s"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,
+                "physical_state_timestamp_join_error_us": physical_join_error_us,
             }
         )
     return {
@@ -1225,6 +1301,7 @@ def _profile_replay_report(
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),
+        "bridge_log": str(bridge_log_path),
         "limits": {
             "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
             "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
@@ -1265,9 +1342,20 @@ def main() -> None:
             ulog=ULog(str(ulog_path)),
             reference_path=args.augment_reference,
         )
+    elif args.profile_reference is not None:
+        if args.controller_artifact is None or args.bridge_log is None or args.window is not None:
+            parser.error(
+                "--profile-reference requires --controller-artifact and --bridge-log, "
+                "and cannot use --window"
+            )
+        report = _profile_replay_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            controller_artifact_path=args.controller_artifact,
+            reference_path=args.profile_reference,
+            bridge_log_path=args.bridge_log,
+        )
     elif args.audit_reference is not None or args.bridge_log is not None:
-        if args.profile_reference is not None:
-            parser.error("--profile-reference cannot be combined with actuator audit options")
         if args.audit_reference is None or args.bridge_log is None:
             parser.error("--audit-reference and --bridge-log must be provided together")
         report = _actuator_boundary_report(
@@ -1275,17 +1363,6 @@ def main() -> None:
             config_path=args.config,
             reference_path=args.audit_reference,
             bridge_log_path=args.bridge_log,
-        )
-    elif args.profile_reference is not None:
-        if args.controller_artifact is None or args.window is not None:
-            parser.error(
-                "--profile-reference requires --controller-artifact and cannot use --window"
-            )
-        report = _profile_replay_report(
-            ulog=ULog(str(ulog_path)),
-            config_path=args.config,
-            controller_artifact_path=args.controller_artifact,
-            reference_path=args.profile_reference,
         )
     else:
         if args.controller_artifact is None or args.window is None:
@@ -1301,6 +1378,7 @@ def main() -> None:
             time_origin_us=replay_ulog.start_timestamp,
             command_trace=None,
             physical_state=False,
+            bridge_state=None,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:

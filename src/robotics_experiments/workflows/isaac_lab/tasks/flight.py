@@ -141,7 +141,6 @@ class _FlightControllerState:
     """Batched state of the PX4-like velocity and rate cascade."""
 
     filtered_velocity_world: torch.Tensor
-    velocity_observation_bias_world: torch.Tensor
     acceleration_world: torch.Tensor
     acceleration_setpoint_world: torch.Tensor
     velocity_integral_world: torch.Tensor
@@ -587,7 +586,6 @@ def _rate_to_omega(
     )
     successor = _FlightControllerState(
         filtered_velocity_world=controller_state.filtered_velocity_world,
-        velocity_observation_bias_world=controller_state.velocity_observation_bias_world,
         acceleration_world=controller_state.acceleration_world,
         acceleration_setpoint_world=controller_state.acceleration_setpoint_world,
         velocity_integral_world=controller_state.velocity_integral_world,
@@ -660,10 +658,7 @@ def _velocity(
     )
     if isinstance(velocity_alpha, torch.Tensor):
         velocity_alpha = velocity_alpha.unsqueeze(-1)
-    observed_velocity_world = (
-        params.velocity_observation_scale * linear_velocity_world
-        + controller_state.velocity_observation_bias_world
-    )
+    observed_velocity_world = params.velocity_observation_scale * linear_velocity_world
     candidate_filtered_velocity = controller_state.filtered_velocity_world + velocity_alpha * (
         observed_velocity_world - controller_state.filtered_velocity_world
     )
@@ -742,7 +737,6 @@ def _velocity(
         filtered_velocity_world=torch.where(
             outer_selected, filtered_velocity, controller_state.filtered_velocity_world
         ),
-        velocity_observation_bias_world=controller_state.velocity_observation_bias_world,
         acceleration_world=torch.where(
             outer_selected, acceleration, controller_state.acceleration_world
         ),
@@ -1024,7 +1018,6 @@ def initial_flight_controller_state(
     zeros = torch.zeros((num_envs, 3), dtype=torch.float32, device=device)
     return _FlightControllerState(
         filtered_velocity_world=zeros.clone(),
-        velocity_observation_bias_world=zeros.clone(),
         acceleration_world=zeros.clone(),
         acceleration_setpoint_world=zeros.clone(),
         velocity_integral_world=zeros.clone(),
@@ -1053,7 +1046,6 @@ def reset_flight_controller_state(
     values = {}
     for name in (
         "filtered_velocity_world",
-        "velocity_observation_bias_world",
         "acceleration_world",
         "acceleration_setpoint_world",
         "velocity_integral_world",
@@ -1077,7 +1069,6 @@ def seed_flight_controller_state(
     *,
     state: _FlightControllerState,
     params: _FlightActuationParams,
-    linear_velocity_world: torch.Tensor,
     filtered_linear_velocity_world: torch.Tensor,
     angular_velocity_body: torch.Tensor,
     acceleration_setpoint_world: torch.Tensor,
@@ -1092,7 +1083,6 @@ def seed_flight_controller_state(
         raise ValueError("controller-state seeding requires velocity actuation")
     expected = state.filtered_velocity_world.shape
     vectors = {
-        "linear_velocity_world": linear_velocity_world,
         "filtered_linear_velocity_world": filtered_linear_velocity_world,
         "angular_velocity_body": angular_velocity_body,
         "acceleration_setpoint_world": acceleration_setpoint_world,
@@ -1139,12 +1129,6 @@ def seed_flight_controller_state(
             selected,
             filtered_linear_velocity_world,
             state.filtered_velocity_world,
-        ),
-        velocity_observation_bias_world=torch.where(
-            selected,
-            filtered_linear_velocity_world
-            - params.velocity_observation_scale * linear_velocity_world,
-            state.velocity_observation_bias_world,
         ),
         acceleration_world=torch.where(
             selected,

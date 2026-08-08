@@ -256,6 +256,7 @@ def _build_bridge(*, host: BridgeHost, state: _BridgeHostState) -> _BridgeHostSt
         thrust_model=thrust_model,
         port=port,
         max_tilt_angle_deg=cfg.max_tilt_angle_deg,
+        dynamics_debug_interval=cfg.dynamics_debug_log_interval,
         rotor_spin_visual_scale=cfg.rotor_spin_visual_scale,
         rotor_spin_signs=rotor_mapping.rot_dir,
     )

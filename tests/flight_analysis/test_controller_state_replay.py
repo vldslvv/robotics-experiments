@@ -11,6 +11,7 @@ import pytest
 from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
+    _bridge_state_samples,
     _hold_indices,
     _interpolate_quaternions,
     _linear_interpolate,
@@ -163,6 +164,28 @@ def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
     assert rotor_speed.tolist() == [[100.0, 101.0, 102.0, 103.0]]
     assert forces.tolist() == [[1.0, 1.1, 1.2, 1.3]]
     assert join_and_torque.tolist() == [[4000.0, 0.0, 0.0, 0.01]]
+
+
+def test_bridge_state_samples_preserve_physics_tick_inputs(tmp_path: Path):
+    log = tmp_path / "bridge.log"
+    log.write_text(
+        "PX4 bridge dynamics: tick=26 sim_time_us=104000 "
+        "last_actuator_us=104000 actuator_lag_us=0 connected=True armed=True "
+        "commands=[100.0, 101.0, 102.0, 103.0] "
+        "forces_n=[1.0, 1.1, 1.2, 1.3] "
+        "body_torque_n_m=[0.0, 0.0, 0.01] body_drag_n=[0.0, 0.0, 0.0] "
+        "position_enu=[1.0, 2.0, 3.0] quat_wxyz=[1.0, 0.0, 0.0, 0.0] "
+        "velocity_enu=[0.1, 0.2, 0.3] body_velocity_flu=[0.1, 0.2, 0.3] "
+        "angular_velocity_body_flu=[0.01, 0.02, 0.03]\n"
+    )
+
+    time_us, position, attitude, velocity, angular_velocity = _bridge_state_samples(path=log)
+
+    assert time_us.tolist() == [104000]
+    assert position.tolist() == [[1.0, 2.0, 3.0]]
+    assert attitude.tolist() == [[1.0, 0.0, 0.0, 0.0]]
+    assert velocity.tolist() == [[0.1, 0.2, 0.3]]
+    assert angular_velocity.tolist() == [[0.01, 0.02, 0.03]]
 
 
 def test_profile_topic_uses_absolute_simulation_window():
