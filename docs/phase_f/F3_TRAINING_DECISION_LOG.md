@@ -7897,3 +7897,28 @@ Keep X/Z scale, bias decay, angular-rate filtering, gains, actuator behavior,
 and every gate fixed. If a target candidate passes motion, run the physical-
 state controller replay immediately. A replay failure rejects the scale as
 motion compensation; a replay pass justifies a fresh end-to-end capture.
+
+### 216. Higher scale crosses endpoint but fails lateral braking
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-y-scale-high`
+evaluated 21 unique candidates in four GPU batches and approximately 54
+seconds of search time. Endpoint error continued improving from 13.984 mm at
+Y scale 1.02 to 9.759 mm at 1.16 and 9.158 mm at 1.18. The endpoint crossing
+therefore reproduced the predicted range, but it exposed a second gate rather
+than producing an acceptable candidate.
+
+At scale 1.16, the lateral reversal's PX4 braking distance was 56.290 mm while
+Lab stopped in 46.576 mm, a 9.715 mm error against the 5 mm limit. Residual
+speed, stop time, worst-axis response, vertical response, yaw, heading, and
+endpoint all passed. Scale 1.14 missed braking at 8.857 mm and endpoint at
+10.389 mm. The selected one-failure frontier remained scale 1.055 with a
+12.859 mm endpoint. Scale alone cannot pass both lateral transient and combined
+steady-path gates.
+
+Keep the endpoint-crossing scales as one coordinate and reopen only the
+already-evidenced estimator-bias decay as a second coordinate. This tests
+whether initialization-transient duration can recover lateral braking without
+discarding the steady endpoint correction. Do not add controller gains.
