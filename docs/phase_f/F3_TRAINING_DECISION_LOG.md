@@ -7940,3 +7940,24 @@ Retain the 13.125 Hz angular-rate filter and every downstream controller,
 allocator, actuator, plant, and gate value. This is a two-field declarative
 target-only diagnostic. A motion-passing result remains provisional until the
 physical-state replay passes all profiles.
+
+### 218. Bias decay improves the frontier but cannot close braking
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-y-transient`
+evaluated 345 unique candidates in seven GPU batches and 118.6 seconds of
+search time. No candidate passed all gates. Candidate 37 at Y scale 1.15 and
+0.01 Hz decay was selected: endpoint passed at 9.806 mm and braking improved
+from the high-scale frontier's 9.715 mm error to 7.593 mm. The other seven
+gates passed. This is a 21.8% reduction in the remaining braking error and
+therefore material progress, but decay/scale alone retain the same tradeoff.
+
+Physics-rate state joining now measures the missing estimator dynamics rather
+than inferring them from selected settings. PX4 Y velocity lags physical Y by
+16 ms on the lateral reversal and 32 ms on the combined path after fitting
+scale and intercept. This supports a target-side velocity observation filter
+with a time constant in that measured range. Add only that existing estimator
+field to the focused scale/decay basin; leave the pinned PX4
+position-controller filter and all downstream controller values unchanged.
