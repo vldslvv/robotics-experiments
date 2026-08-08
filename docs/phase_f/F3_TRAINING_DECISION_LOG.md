@@ -7790,3 +7790,23 @@ experiment change produces a new comparison fingerprint without introducing a
 new schema. Reuse Attempt 204's fresh reference for a target-only diagnostic;
 run a new clean capture only if the validation endpoint improves materially.
 Keep every controller candidate and gate unchanged.
+
+### 210. Gyroscopic-force matching is behaviorally neutral
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T124000Z-diagnostic-gyro` reused Attempt
+204's fresh PX4 reference from clean source commit `43f2f75`. It evaluated the
+same 129 candidates in seven GPU batches. Candidate 87 and every metric were
+bit-for-bit unchanged, including the 13.733 mm endpoint error. Disabling the
+Lab-only gyroscopic term is retained as an explicit production-plant contract,
+but it does not explain the remaining alignment error.
+
+The next downstream difference is the wrench sink. The bridge submits rotor
+forces at body-relative positions and body effects at the body origin. Lab
+currently reduces those effects to one wrench, translates its torque using the
+reported center of mass, and submits it without a position. The pinned Isaac
+Lab API supports an explicit body-relative application position. Test a direct
+body-origin wrench, which removes the center-of-mass translation seam while
+preserving the mathematically identical net force and origin torque.
