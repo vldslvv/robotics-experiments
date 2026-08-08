@@ -61,6 +61,15 @@ class SearchSpec:
 
 
 @dataclass(frozen=True)
+class ControllerStateSourceAge:
+    """Age of each lower-rate PX4 topic used to seed one probe boundary."""
+
+    vehicle_local_position_setpoint: int
+    rate_ctrl_status: int
+    hover_thrust_estimate: int
+
+
+@dataclass(frozen=True)
 class ProbeTrace:
     """One backend response sampled at the exact command-update times."""
 
@@ -81,6 +90,9 @@ class ProbeTrace:
     initial_angular_velocity_body_flu_radps: Vector3
     completed: bool
     initial_controller_state_valid: bool = False
+    initial_controller_state_source_age_us: ControllerStateSourceAge = ControllerStateSourceAge(
+        0, 0, 0
+    )
     initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
     initial_linear_acceleration_enu_mps2: Vector3 = (0.0, 0.0, 0.0)

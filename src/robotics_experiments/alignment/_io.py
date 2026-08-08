@@ -20,6 +20,7 @@ from robotics_experiments.alignment._models import (
     CommandInterface,
     ControllerDefinition,
     ControllerSettings,
+    ControllerStateSourceAge,
     ParameterSpec,
     ProbeCommand,
     ProbeProfile,
@@ -498,6 +499,17 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     )
     if initial_hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
+    source_age = _object(
+        value=trace["initial_controller_state_source_age_us"],
+        name=f"{name}.initial_controller_state_source_age_us",
+    )
+    expected_source_age = {
+        "vehicle_local_position_setpoint",
+        "rate_ctrl_status",
+        "hover_thrust_estimate",
+    }
+    if set(source_age) != expected_source_age:
+        raise ValueError(f"{name}.initial_controller_state_source_age_us fields mismatch")
     return ProbeTrace(
         profile=_string(value=trace["profile"], name=f"{name}.profile"),
         split=_string(value=trace["split"], name=f"{name}.split"),
@@ -547,6 +559,23 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         initial_controller_state_valid=_boolean(
             value=trace["initial_controller_state_valid"],
             name=f"{name}.initial_controller_state_valid",
+        ),
+        initial_controller_state_source_age_us=ControllerStateSourceAge(
+            vehicle_local_position_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_local_position_setpoint"],
+                name=(
+                    f"{name}.initial_controller_state_source_age_us."
+                    "vehicle_local_position_setpoint"
+                ),
+            ),
+            rate_ctrl_status=_nonnegative_integer(
+                value=source_age["rate_ctrl_status"],
+                name=f"{name}.initial_controller_state_source_age_us.rate_ctrl_status",
+            ),
+            hover_thrust_estimate=_nonnegative_integer(
+                value=source_age["hover_thrust_estimate"],
+                name=f"{name}.initial_controller_state_source_age_us.hover_thrust_estimate",
+            ),
         ),
         initial_hover_thrust_normalized=initial_hover_thrust_normalized,
         initial_acceleration_setpoint_enu_mps2=_vector(
