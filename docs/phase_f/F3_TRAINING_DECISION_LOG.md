@@ -8030,3 +8030,30 @@ Preserve the diagnostic traces, but do not interpret their motion metrics
 against the rejected reference. Run a fresh PX4 capture, actuator audit, target
 sweep, fit, and controller replay from commit `7619e8d` with the same focused
 steady-offset candidates.
+
+### 223. Attempt 205 confirms bias direction and exposes vertical replay
+
+Date: 2026-08-08.
+
+Fresh end-to-end run
+`.build/alignment/x500-px4-v1/20260808T132700Z` captured all 12 profiles from
+commit `7d57edf`; the pusher deployed to 0.015 m. The actuator audit passed
+every profile with zero timestamp-join error, normalized motor RMSE near
+0.00030, and collective RMSE between 0.00850 and 0.01131 N.
+
+The target search evaluated 12 unique candidates in four GPU batches and 62.4
+seconds. Exact caching avoided 17 of 29 attempted settings. The selected
+-0.006 m/s Y offset passed braking at 4.972 mm and the other six non-endpoint
+motion gates, but endpoint error remained 14.865 mm. Relative to the zero-bias
+candidate's 18.805 mm endpoint error, this is a 21.0% reduction while changing
+braking from 5.663 mm failure to pass. The selected endpoint result is still
+worse than the old-fingerprint Attempt 204 value of 13.733 mm, so this strict
+fingerprint is not accepted.
+
+Controller replay failed earlier at the normalized vertical-thrust boundary:
+`validation-vertical-policy-envelope` collective RMSE was 0.07763 N against
+the 0.05 N limit. Its normalized motor RMSE was 0.00123 and timestamp join
+error was zero. This failure is independent of the Y-only candidate and must
+be diagnosed before expanding the evidenced negative-bias boundary. Preserve
+the complete fresh ULog, bridge log, reference, target traces, selection,
+telemetry, actuator audit, and replay under the run directory.
