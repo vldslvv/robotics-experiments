@@ -123,6 +123,7 @@ class _FlightActuationParams:
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_observation_scale: torch.Tensor
+    velocity_observation_bias_mps: torch.Tensor
     velocity_estimator_bias_decay_hz: float | torch.Tensor
     velocity_filter_hz: float | torch.Tensor
     velocity_derivative_filter_hz: float | torch.Tensor
@@ -678,6 +679,7 @@ def _velocity(
         velocity_alpha = velocity_alpha.unsqueeze(-1)
     observed_velocity_world = (
         params.velocity_observation_scale * linear_velocity_world
+        + params.velocity_observation_bias_mps
         + controller_state.velocity_estimator_bias_world
     )
     candidate_filtered_velocity = controller_state.filtered_velocity_world + velocity_alpha * (
@@ -938,6 +940,7 @@ def build_flight_actuation_params(
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_observation_scale=_tensor(controller_settings.velocity_observation_scale),
+        velocity_observation_bias_mps=_tensor(controller_settings.velocity_observation_bias_mps),
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
         ),
@@ -1011,6 +1014,7 @@ def _replace_controller_settings_batch(
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_observation_scale=_vectors("velocity_observation_scale"),
+        velocity_observation_bias_mps=_vectors("velocity_observation_bias_mps"),
         velocity_estimator_bias_decay_hz=_scalars("velocity_estimator_bias_decay_hz"),
         velocity_filter_hz=_scalars("velocity_filter_hz"),
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
@@ -1175,7 +1179,8 @@ def seed_flight_controller_state(
         velocity_estimator_bias_world=torch.where(
             selected,
             filtered_linear_velocity_world
-            - params.velocity_observation_scale * physical_linear_velocity_world,
+            - params.velocity_observation_scale * physical_linear_velocity_world
+            - params.velocity_observation_bias_mps,
             state.velocity_estimator_bias_world,
         ),
         acceleration_world=torch.where(

@@ -73,6 +73,7 @@ def _settings(
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,

@@ -71,10 +71,15 @@ def _integer(value: Any, name: str, /) -> int:
     return value
 
 
-def _vector(value: Any, name: str, /) -> tuple[float, float, float]:
+def _vector(
+    value: Any,
+    name: str,
+    nonnegative: bool = True,
+    /,
+) -> tuple[float, float, float]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{name} must contain three finite values")
-    parsed = tuple(_finite(value=item, name=name, nonnegative=True) for item in value)
+    parsed = tuple(_finite(value=item, name=name, nonnegative=nonnegative) for item in value)
     return parsed[0], parsed[1], parsed[2]
 
 
@@ -111,6 +116,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         velocity_observation_scale=_vector(
             payload["velocity_observation_scale"],
             f"{name}.velocity_observation_scale",
+        ),
+        velocity_observation_bias_mps=_vector(
+            payload["velocity_observation_bias_mps"],
+            f"{name}.velocity_observation_bias_mps",
+            False,
         ),
         velocity_estimator_bias_decay_hz=_finite(
             value=payload["velocity_estimator_bias_decay_hz"],

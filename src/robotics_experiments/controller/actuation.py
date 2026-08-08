@@ -151,6 +151,7 @@ class ActuationParams:
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_observation_scale: np.ndarray
+    velocity_observation_bias_mps: np.ndarray
     velocity_estimator_bias_decay_hz: float
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
@@ -570,9 +571,13 @@ def _velocity_action_to_omega(
     )
 
     velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
-    physical_velocity = params.velocity_observation_scale * np.asarray(
-        state.linear_velocity_enu,
-        dtype=np.float64,
+    physical_velocity = (
+        params.velocity_observation_scale
+        * np.asarray(
+            state.linear_velocity_enu,
+            dtype=np.float64,
+        )
+        + params.velocity_observation_bias_mps
     )
     measured_velocity = physical_velocity + controller_state.velocity_estimator_bias_enu
     if controller_state.initialized:
@@ -802,6 +807,9 @@ def build_actuation_params(
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
         velocity_observation_scale=_readonly_copy(controller_settings.velocity_observation_scale),
+        velocity_observation_bias_mps=_readonly_copy(
+            controller_settings.velocity_observation_bias_mps
+        ),
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
         ),
@@ -875,9 +883,13 @@ def seed_actuation_controller_state(
         filtered_linear_velocity_enu,
         "filtered_linear_velocity_enu",
     )
-    physical_velocity = params.velocity_observation_scale * vector(
-        physical_linear_velocity_enu,
-        "physical_linear_velocity_enu",
+    physical_velocity = (
+        params.velocity_observation_scale
+        * vector(
+            physical_linear_velocity_enu,
+            "physical_linear_velocity_enu",
+        )
+        + params.velocity_observation_bias_mps
     )
     angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
     acceleration_setpoint = vector(

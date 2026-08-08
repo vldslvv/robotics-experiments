@@ -22,6 +22,7 @@ class ControllerSettings:
     ki_vel: Vector3
     kd_vel: Vector3
     velocity_observation_scale: Vector3
+    velocity_observation_bias_mps: Vector3
     velocity_estimator_bias_decay_hz: float
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float

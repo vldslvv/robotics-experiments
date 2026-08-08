@@ -102,6 +102,7 @@ def _controller_settings() -> ControllerSettings:
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
@@ -630,11 +631,13 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
 
 
 def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
+    steady_bias = np.array([0.001, -0.003, 0.002])
     params = build_actuation_params(
         geometry=_quad_geometry(),
         action_cfg=_action_cfg("velocity"),
         controller_settings=replace(
             _controller_settings(),
+            velocity_observation_bias_mps=tuple(steady_bias),
             velocity_estimator_bias_decay_hz=2.0,
         ),
         mass=_MASS_KG,
@@ -652,6 +655,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
         hover_thrust_normalized=0.57,
     )
     initial_bias = np.array(controller.velocity_estimator_bias_enu)
+    assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
 
     controller, _omega = action_to_rotor_omega(
         params, controller, np.zeros(4), _level_rest_state(), 0.004
@@ -888,6 +892,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     settings = replace(
         _controller_settings(),
         hover_thrust_normalized=0.57,
+        velocity_observation_bias_mps=(0.001, -0.003, 0.002),
     )
     action_cfg = _action_cfg("velocity")
     numpy_params = build_actuation_params(

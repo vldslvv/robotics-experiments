@@ -833,6 +833,7 @@ def _report(
         controller_settings = replace(
             controller_settings,
             velocity_observation_scale=(1.0, 1.0, 1.0),
+            velocity_observation_bias_mps=(0.0, 0.0, 0.0),
             velocity_estimator_bias_decay_hz=0.0,
             velocity_filter_hz=0.0,
             angular_velocity_filter_hz=0.0,

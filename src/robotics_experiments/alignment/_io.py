@@ -127,6 +127,10 @@ def _settings(
             value=settings["velocity_observation_scale"],
             name=f"{name}.velocity_observation_scale",
         ),
+        velocity_observation_bias_mps=_vector(
+            value=settings["velocity_observation_bias_mps"],
+            name=f"{name}.velocity_observation_bias_mps",
+        ),
         velocity_estimator_bias_decay_hz=_finite(
             value=settings["velocity_estimator_bias_decay_hz"],
             name=f"{name}.velocity_estimator_bias_decay_hz",

@@ -7995,3 +7995,21 @@ braking distance and corrects its combined-path Y under-travel. Add one strict
 schema-1 steady estimator-bias vector to the shared NumPy/Torch controller,
 zero it for PX4-estimated-state replay, retain it for physical-state replay,
 and fit only the evidenced negative Y range around the current frontier.
+
+### 221. Fit the measured steady estimator offset
+
+Date: 2026-08-08.
+
+Add `velocity_observation_bias_mps` as a required strict schema-1 controller
+setting shared by the NumPy deployment controller and Torch training twin. It
+is a world-ENU physical-to-estimated velocity offset, distinct from the seeded
+per-profile estimator transient: seeding subtracts the steady offset so the
+captured initial estimate is continuous, then only the transient decays. The
+PX4 definition and PX4-estimated-state controller replay use zero; the target
+physical-state path retains the selected offset.
+
+At the scale 1.15, decay 0.01 Hz one-failure frontier, sweep only Y offsets from
+0 through -0.006 m/s in 0.001 m/s steps. This range brackets the measured
+-0.00156 and -0.00560 m/s intercepts. Keep velocity filtering disabled and all
+downstream controller, allocator, actuator, plant, probe, and gate contracts
+fixed. A motion pass remains provisional until controller replay passes.
