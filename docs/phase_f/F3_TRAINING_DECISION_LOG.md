@@ -7742,3 +7742,33 @@ pusher after PX4 takeoff and waits through ordinary probe preconditioning.
 This behavior is a Hydra capture contract, changes the resolved experiment
 fingerprint, and is tested independently. Search only the already-evidenced
 estimator adapter range on the fresh, mechanically matched capture.
+
+### 208. Attempt 204 confirms a remaining lateral plant seam
+
+Date: 2026-08-08.
+
+Fresh run `.build/alignment/x500-px4-v1/20260808T124000Z` used clean source
+commit `72ba6b2`. The reference log confirms that the pusher reached its fully
+deployed 15 mm position before probe capture. The actuator audit passed every
+profile with zero timestamp-join error, normalized motor RMSE below 0.00030,
+and collective RMSE below 0.0109 N. The focused coarse-to-fine sweep evaluated
+129 unique candidates in seven GPU batches and selected candidate 87 in
+approximately 101 seconds. Average sampled GPU utilization was 34.0%; the
+small search intentionally favored useful work over padded scene capacity.
+
+Every candidate passed braking, residual-speed, stop-time, worst-axis,
+vertical-policy, yaw-rate, and heading gates. None passed the endpoint gate.
+Candidate 87 recorded 3.215 mm braking error, 0.00268 m/s residual error,
+0.10 s stop-time error, 4.620% worst-axis NRMSE, 1.438% vertical-policy NRMSE,
+3.059% yaw-rate NRMSE, 2.576 degrees heading error, and 13.733 mm combined
+endpoint error. The endpoint improved 28.2% from Attempt 203's 19.135 mm,
+which confirms that matching the deployed pusher was material progress, but
+leaves a single 37.3% normalized gate excess.
+
+The validation endpoint delta is `(2.08, -13.52, -1.24) mm`; lateral Y is the
+remaining boundary. Candidate variation changes the endpoint only from 13.733
+to 15.189 mm, so the two estimator adapter fields cannot close it. The selected
+controller-boundary replay passes. Inspect the first downstream plant boundary
+under identical rotor inputs, especially reference-versus-Lab rigid-body
+settings and origin/center-of-mass force application. Do not reopen controller
+gain fitting without matching controller-boundary evidence.
