@@ -8558,3 +8558,46 @@ reuses a prior capture. Preserve its reference, target candidates, selection,
 controller, telemetry, and replay. Run one clean fresh capture, actuator audit,
 coarse-to-fine sweep, held-out fit, controller replay, and finalization without
 changing the settings or search range.
+
+### 249. Fresh phases isolate a threshold-sensitive vertical stop
+
+Date: 2026-08-08.
+
+Fresh end-to-end run `.build/alignment/x500-px4-v1/20260808T154845Z` ran from
+clean source commit `e591af6` through capture, actuator audit, an 18-candidate
+coarse-to-fine sweep, fit, and controller replay. The actuator audit passed all
+profiles with zero timestamp error, normalized motor RMSE below 0.00034, and
+collective RMSE below 0.0129 N. The sweep used four GPU batches in 57.15
+seconds, averaged 40.63% GPU utilization, and reached 0.315 useful candidates
+per second. Candidate 17 selected 0.011875 Hz estimator-bias decay.
+
+The complete controller replay passed: maximum core collective RMSE was
+0.04522 N, vertical policy-envelope collective RMSE was 0.04496 N, maximum
+physical-state normalized motor RMSE was 0.00854, and timestamp error was zero.
+Seven of eight motion gates also passed. Braking error was 3.735 mm, residual
+speed was 7.605 mm/s, worst-axis velocity NRMSE was 4.369%, vertical policy
+NRMSE was 1.455%, yaw-rate NRMSE was 3.059%, heading error was 2.581 degrees,
+and endpoint error was 9.579 mm. Finalization rejected only stop-time error at
+0.16 s against the 0.10 s limit.
+
+Every decay candidate had the same 0.16 s stop-time error, so expanding decay
+is unsupported. The first failed event is the validation vertical reversal:
+after the 0.09 m/s command returns to zero, PX4 first crosses 0.01 m/s at 2.90
+seconds while the target crosses at 2.74 seconds. At that target sample the
+speed is 0.00976 m/s, immediately below the discrete threshold, while PX4 is
+still at 0.02068 m/s. The target therefore brakes slightly too quickly.
+
+### 250. Fit only the evidenced vertical proportional boundary
+
+Date: 2026-08-08.
+
+Keep the passing command phases, estimator decay range, controller structure,
+plant, probes, and gates unchanged. Add one declarative second-stage `kp_vel`
+range with X/Y fixed at 1.8 and Z candidates `[4.00, 4.05, 4.10, 4.15, 4.175,
+4.20]`. This narrowly brackets pinned PX4's 4.0 value and the current
+replay-validated 4.2 value. Lower Z proportional gain is expected to move the
+target's first stopped sample from 2.74 toward PX4's 2.90 seconds. The selected
+candidate must retain the high-amplitude vertical and stability collective
+replay limits; do not absorb a replay regression into another gain or plant
+parameter. Reuse the fresh capture first and repeat a clean fresh capture only
+after motion and replay pass together.
