@@ -8916,3 +8916,23 @@ physical-state normalized motor RMSE, and zero timestamp-join error.
 This closes the interrupted diagnostic cleanly but is not publishable acceptance
 because it reused a reference. The run artifacts are complete and preserved.
 The user's `TODO.txt` was restored unchanged after the run.
+
+### 262. Predeclare the complete observed planar scratch range
+
+Date: 2026-08-08.
+
+The accepted diagnostics on independent fresh references selected planar
+observation biases near `[0.035, -0.030]`, `[0.024, -0.005]`, and
+`[0.000, -0.030]` m/s. The preceding one-go grid missed the third crossing only
+because its minimum X candidate was +0.006 m/s; rerunning that same reference
+with zero included passed endpoint at 8.417 mm and every other motion and replay
+gate.
+
+Predeclare a 5 by 5 large-step planar grid covering X 0.000 through 0.040 m/s
+and Y -0.030 through +0.010 m/s, with Z fixed at the measured -0.0039 m/s
+intercept. Automatic two-level midpoint refinement supplies the smaller steps
+around retained candidates. Keep the broad evidenced decay range, controller,
+plant, probes, metric definitions, replay audit, and thresholds unchanged. Run
+a completely new capture, audit, search, fit, replay, and finalization from this
+clean commit with no post-capture change. Acceptance additionally requires the
+published artifact to pass `make test-integration-alignment-target`.

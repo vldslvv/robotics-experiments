@@ -66,16 +66,37 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # The current fresh capture selected the lowest X bias while Y/Z already
-  # matched. Search through the extrapolated negative-X endpoint crossing.
+  # Independent fresh captures occupy the evidenced X range from zero through
+  # +0.035 m/s and the Y range from -0.030 through -0.005 m/s. Cover both at
+  # large steps, then refine only around retained gate champions.
   - field: velocity_observation_bias_mps
     stage: 2
     candidates:
-      - [-0.030, -0.030, -0.0039]
-      - [-0.020, -0.030, -0.0039]
-      - [-0.010, -0.030, -0.0039]
       - [0.000, -0.030, -0.0039]
-      - [0.006, -0.030, -0.0039]
+      - [0.000, -0.020, -0.0039]
+      - [0.000, -0.010, -0.0039]
+      - [0.000, 0.000, -0.0039]
+      - [0.000, 0.010, -0.0039]
+      - [0.010, -0.030, -0.0039]
+      - [0.010, -0.020, -0.0039]
+      - [0.010, -0.010, -0.0039]
+      - [0.010, 0.000, -0.0039]
+      - [0.010, 0.010, -0.0039]
+      - [0.020, -0.030, -0.0039]
+      - [0.020, -0.020, -0.0039]
+      - [0.020, -0.010, -0.0039]
+      - [0.020, 0.000, -0.0039]
+      - [0.020, 0.010, -0.0039]
+      - [0.030, -0.030, -0.0039]
+      - [0.030, -0.020, -0.0039]
+      - [0.030, -0.010, -0.0039]
+      - [0.030, 0.000, -0.0039]
+      - [0.030, 0.010, -0.0039]
+      - [0.040, -0.030, -0.0039]
+      - [0.040, -0.020, -0.0039]
+      - [0.040, -0.010, -0.0039]
+      - [0.040, 0.000, -0.0039]
+      - [0.040, 0.010, -0.0039]
 
 selection_metric: controller-quality
 publication_metrics:
