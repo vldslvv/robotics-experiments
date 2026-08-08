@@ -9138,3 +9138,28 @@ the preserved fresh reference before another complete scratch run. Also move
 the run-local integration gate into `make align-controllers` before
 finalization: a future integration rejection must preserve evidence without
 advancing `latest` or `best`.
+
+### 269. Predeclare the final robust-cap scratch demonstration
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T191700Z-diagnostic-ilim035` reused the
+fresh Entry 268 PX4 reference from clean source commit `8716677`. It evaluated
+1131 unique candidates in 14 GPU batches and 307.2 seconds and selected the
+same candidate 895 basin with the now-declared 0.35 m/s2 horizontal integral
+cap. All eight motion gates passed, and complete replay passed with 0.038580 N
+maximum core collective RMSE, 0.005444 maximum core motor RMSE, 0.007382
+maximum physical-state motor RMSE, and zero timestamp error.
+
+The exact fitted artifact passed the complete integration gate: hover
+last-window drift was 0.100 m, goto last-window error was 0.037 m, and the final
+handoff range was 0.488 m with the gate ready. This is complete diagnostic
+acceptance but reuses a reference.
+
+Run `make align-controllers` once from a new clean source commit with no
+post-capture changes. The corrected campaign must capture a new PX4 reference,
+pass actuator audit, fit all eight motion gates, pass complete replay, pass the
+run-local hover/goto integration gate, and only then finalize and publish. That
+single invocation is the required from-scratch demonstration; stop before
+policy training after recording its result.
