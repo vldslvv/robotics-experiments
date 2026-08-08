@@ -8167,3 +8167,22 @@ and fit only X offsets from 0 through -0.008 m/s around those measurements.
 Keep estimator scale and transient decay, controller gains, filters, cadence,
 allocator, actuator, plant, probes, and gates fixed. The selected motion result
 must pass controller replay before a fresh capture is justified.
+
+### 229. The measured X intercept has the opposite closed-loop sign
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T140000Z-diagnostic-x-bias` evaluated 13
+unique candidates in four GPU batches and 61.9 seconds against the fresh
+reference. Negative X bias worsened endpoint monotonically from 13.20 mm at
+zero to 18.62 mm at -0.008 m/s. The selected zero-X candidate passed all other
+motion gates, including 3.12 mm braking error and 8.67 mm/s residual-speed
+error, but still failed endpoint.
+
+The controller replay passed all profiles with zero timestamp error. Stability
+physical-state normalized motor RMSE was 0.00996, leaving only a narrow margin.
+As with the earlier direct scale regression, the measured estimator intercept
+does not predict the closed-loop sign through the seeded transient, rotated
+body command, and combined yaw path. Preserve all diagnostic artifacts and
+reject the negative X direction.
