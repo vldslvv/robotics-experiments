@@ -8108,3 +8108,21 @@ maximum core collective RMSE, and 0.00977 maximum physical-state normalized
 motor RMSE. Preserve the complete fresh ULog, bridge log, reference, actuator
 audit, candidates, selection, telemetry, controller artifact, and replay under
 the run directory. Do not publish the rejected controller.
+
+### 226. Measure the wider steady-bias tradeoff on the fresh reference
+
+Date: 2026-08-08.
+
+The sole failed motion boundary in run `20260808T140000Z` remains combined
+endpoint position, and every increasingly negative Y observation bias improved
+it. Extrapolation of the fresh local slope places the 10 mm crossing near
+-0.036 m/s. Expand the one-dimensional coarse search to -0.016, -0.020,
+-0.024, -0.028, -0.032, and -0.036 m/s, retaining midpoint refinement.
+
+This expansion must also measure two competing limits instead of treating the
+endpoint trend alone as sufficient evidence. Residual-speed error rose to
+0.00505 m/s against its 0.01 m/s limit, and stability physical-state normalized
+motor RMSE rose to 0.00977 against its 0.01 limit. Keep estimator scale and
+transient decay, controller gains, filters, cadence, allocator, actuator,
+plant, probes, and gates fixed. Reject bias as the remaining seam if the motor
+or residual boundary fails before endpoint reaches 10 mm.
