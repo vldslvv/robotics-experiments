@@ -8253,3 +8253,21 @@ normalized motor RMSE was 0.009981. This is provisional acceptance against a
 reused fresh reference. Run the complete clean-source capture, audit,
 single-candidate target evaluation, fit, replay, and finalization before
 publishing the controller.
+
+### 234. A fixed bias pair does not reproduce across fresh captures
+
+Date: 2026-08-08.
+
+Fresh end-to-end run `.build/alignment/x500-px4-v1/20260808T143000Z` repeated
+capture, actuator audit, target evaluation, fit, replay, and finalization from
+clean commit `976142f`. The actuator audit and every controller-replay profile
+passed. Replay recorded 0.03932 N maximum core collective RMSE, 0.00973 maximum
+physical-state normalized motor RMSE, and zero timestamp error.
+
+The fixed `[0.006, -0.030, 0.0]` m/s bias did not reproduce the motion pass.
+Braking error was 7.44 mm and endpoint error was 10.22 mm; both gates failed.
+Residual-speed error remained inside its limit by only 0.53 mm/s. Worst-axis
+velocity, vertical policy-envelope, stop-time, yaw-rate, and heading gates all
+passed. Preserve the complete fresh ULog, bridge log, reference, actuator
+audit, target trace, selection, telemetry, controller artifact, and replay.
+Do not publish the rejected controller.
