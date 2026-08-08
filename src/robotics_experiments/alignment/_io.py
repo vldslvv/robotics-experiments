@@ -20,6 +20,7 @@ from robotics_experiments.alignment._models import (
     CommandInterface,
     ControllerDefinition,
     ControllerSettings,
+    ControllerStateSourceAge,
     ParameterSpec,
     ProbeCommand,
     ProbeProfile,
@@ -99,6 +100,11 @@ def _settings(
             name=f"{name}.command_delay_s",
             nonnegative=True,
         ),
+        velocity_controller_rate_hz=_finite(
+            value=settings["velocity_controller_rate_hz"],
+            name=f"{name}.velocity_controller_rate_hz",
+            positive=True,
+        ),
         kp_vel=_vector(value=settings["kp_vel"], name=f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
             value=settings["horizontal_velocity_error_gain_scale"],
@@ -117,6 +123,19 @@ def _settings(
         ),
         ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
+        velocity_observation_scale=_vector(
+            value=settings["velocity_observation_scale"],
+            name=f"{name}.velocity_observation_scale",
+        ),
+        velocity_observation_bias_mps=_vector(
+            value=settings["velocity_observation_bias_mps"],
+            name=f"{name}.velocity_observation_bias_mps",
+        ),
+        velocity_estimator_bias_decay_hz=_finite(
+            value=settings["velocity_estimator_bias_decay_hz"],
+            name=f"{name}.velocity_estimator_bias_decay_hz",
+            nonnegative=True,
+        ),
         velocity_filter_hz=_finite(
             value=settings["velocity_filter_hz"],
             name=f"{name}.velocity_filter_hz",
@@ -146,9 +165,19 @@ def _settings(
         ki_rate=_vector(value=settings["ki_rate"], name=f"{name}.ki_rate"),
         kd_rate=_vector(value=settings["kd_rate"], name=f"{name}.kd_rate"),
         kff_rate=_vector(value=settings["kff_rate"], name=f"{name}.kff_rate"),
+        angular_velocity_filter_hz=_finite(
+            value=settings["angular_velocity_filter_hz"],
+            name=f"{name}.angular_velocity_filter_hz",
+            nonnegative=True,
+        ),
         rate_derivative_filter_hz=_finite(
             value=settings["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",
+            positive=True,
+        ),
+        yaw_torque_filter_hz=_finite(
+            value=settings["yaw_torque_filter_hz"],
+            name=f"{name}.yaw_torque_filter_hz",
             positive=True,
         ),
         rate_integral_limit=_vector(
@@ -355,6 +384,7 @@ def _parameters(
         if not isinstance(raw_candidates, list) or not raw_candidates:
             raise ValueError(f"{name}.candidates must be a non-empty list")
         template = getattr(base_settings, field_name)
+        raw_regularization_scale = parameter.get("selection_regularization_scale")
         parameters.append(
             ParameterSpec(
                 field=field_name,
@@ -369,6 +399,15 @@ def _parameters(
                         name=f"{name}.candidates[{candidate_index}]",
                     )
                     for candidate_index, candidate in enumerate(raw_candidates)
+                ),
+                selection_regularization_scale=(
+                    None
+                    if raw_regularization_scale is None
+                    else _finite(
+                        value=raw_regularization_scale,
+                        name=f"{name}.selection_regularization_scale",
+                        positive=True,
+                    )
                 ),
             )
         )
@@ -498,6 +537,19 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     )
     if initial_hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
+    source_age = _object(
+        value=trace["initial_controller_state_source_age_us"],
+        name=f"{name}.initial_controller_state_source_age_us",
+    )
+    expected_source_age = {
+        "vehicle_local_position_setpoint",
+        "vehicle_local_position",
+        "vehicle_angular_velocity",
+        "rate_ctrl_status",
+        "hover_thrust_estimate",
+    }
+    if set(source_age) != expected_source_age:
+        raise ValueError(f"{name}.initial_controller_state_source_age_us fields mismatch")
     return ProbeTrace(
         profile=_string(value=trace["profile"], name=f"{name}.profile"),
         split=_string(value=trace["split"], name=f"{name}.split"),
@@ -539,14 +591,47 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             value=trace["initial_linear_velocity_enu_mps"],
             name=f"{name}.initial_linear_velocity_enu_mps",
         ),
+        initial_estimated_linear_velocity_enu_mps=_vector(
+            value=trace["initial_estimated_linear_velocity_enu_mps"],
+            name=f"{name}.initial_estimated_linear_velocity_enu_mps",
+        ),
         initial_angular_velocity_body_flu_radps=_vector(
             value=trace["initial_angular_velocity_body_flu_radps"],
             name=f"{name}.initial_angular_velocity_body_flu_radps",
+        ),
+        initial_estimated_angular_velocity_body_flu_radps=_vector(
+            value=trace["initial_estimated_angular_velocity_body_flu_radps"],
+            name=f"{name}.initial_estimated_angular_velocity_body_flu_radps",
         ),
         completed=completed,
         initial_controller_state_valid=_boolean(
             value=trace["initial_controller_state_valid"],
             name=f"{name}.initial_controller_state_valid",
+        ),
+        initial_controller_state_source_age_us=ControllerStateSourceAge(
+            vehicle_local_position_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_local_position_setpoint"],
+                name=(
+                    f"{name}.initial_controller_state_source_age_us."
+                    "vehicle_local_position_setpoint"
+                ),
+            ),
+            vehicle_local_position=_nonnegative_integer(
+                value=source_age["vehicle_local_position"],
+                name=f"{name}.initial_controller_state_source_age_us.vehicle_local_position",
+            ),
+            vehicle_angular_velocity=_nonnegative_integer(
+                value=source_age["vehicle_angular_velocity"],
+                name=f"{name}.initial_controller_state_source_age_us.vehicle_angular_velocity",
+            ),
+            rate_ctrl_status=_nonnegative_integer(
+                value=source_age["rate_ctrl_status"],
+                name=f"{name}.initial_controller_state_source_age_us.rate_ctrl_status",
+            ),
+            hover_thrust_estimate=_nonnegative_integer(
+                value=source_age["hover_thrust_estimate"],
+                name=f"{name}.initial_controller_state_source_age_us.hover_thrust_estimate",
+            ),
         ),
         initial_hover_thrust_normalized=initial_hover_thrust_normalized,
         initial_acceleration_setpoint_enu_mps2=_vector(

@@ -1,10 +1,10 @@
 """Compare PX4 and Isaac velocity-controller outputs at matched replay states.
 
 The PX4 ULog is the controller oracle. At each logged motor sample in the
-selected window, this tool reconstructs the normalized body-FLU velocity action
-from PX4's world-NED trajectory setpoint, converts the logged estimator state to
-the Isaac controller's ENU/FLU convention, and evaluates the host numpy
-actuation reference. Both outputs are reduced to the same physical boundary:
+selected window, this tool reads PX4's held world-NED trajectory command,
+converts the logged estimator state to the Isaac controller's ENU/FLU
+convention, and evaluates the host numpy actuation reference. Both outputs are
+reduced to the same physical boundary:
 per-rotor angular velocity and the resulting body wrench.
 """
 
@@ -15,18 +15,22 @@ import ast
 import json
 import math
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
+from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
     MixerGeometry,
-    action_to_rotor_omega,
     build_actuation_params,
+    controller_command_to_rotor_omega,
     load_controller_artifact,
+    normalized_action_to_controller_command,
     seed_actuation_controller_state,
+    update_hover_thrust_estimate,
 )
 from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
@@ -55,6 +59,14 @@ _BRIDGE_DYNAMICS_PATTERN = re.compile(
     r"forces_n=(?P<forces>\[[^\]]+\]) "
     r"body_torque_n_m=(?P<body_torque>\[[^\]]+\])"
 )
+_BRIDGE_STATE_PATTERN = re.compile(
+    r"PX4 bridge dynamics: .* sim_time_us=(?P<sim_time_us>\d+).* "
+    r"position_enu=(?P<position>\[[^\]]+\]) "
+    r"quat_wxyz=(?P<attitude>\[[^\]]+\]) "
+    r"velocity_enu=(?P<velocity>\[[^\]]+\]) "
+    r"body_velocity_flu=\[[^\]]+\] "
+    r"angular_velocity_body_flu=(?P<angular_velocity>\[[^\]]+\])"
+)
 
 
 def _dataset(*, ulog, name: str) -> dict:
@@ -76,6 +88,32 @@ def _hold_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray:
     return np.clip(np.searchsorted(source_t, query_t, side="right") - 1, 0, len(source_t) - 1)
 
 
+def _replay_time_grid(
+    *,
+    start_s: float,
+    end_s: float,
+    controller_dt_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    step_count = round((end_s - start_s) / controller_dt_s)
+    relative_time_s = np.arange(step_count + 1, dtype=np.float64) * controller_dt_s
+    return start_s + relative_time_s, relative_time_s
+
+
+def _delay_velocity_actions(
+    *,
+    actions: np.ndarray,
+    delay_steps: int,
+) -> np.ndarray:
+    if actions.ndim != 2 or actions.shape[1] != 4:
+        raise ValueError(f"velocity actions must have shape (samples, 4), got {actions.shape}")
+    if delay_steps < 0:
+        raise ValueError("velocity action delay must be non-negative")
+    delayed = np.zeros_like(actions)
+    if delay_steps < len(actions):
+        delayed[delay_steps:] = actions[: len(actions) - delay_steps]
+    return delayed
+
+
 def _linear_interpolate(
     *,
     source_t: np.ndarray,
@@ -87,6 +125,27 @@ def _linear_interpolate(
         [np.interp(query_t, source_t, columns[:, index]) for index in range(columns.shape[1])]
     )
     return result.reshape((len(query_t), *values.shape[1:]))
+
+
+def _px4_vertical_velocity_state(
+    *,
+    velocity_setpoint_ned: np.ndarray,
+    velocity_ned: np.ndarray,
+    position_derivative_z_ned: np.ndarray,
+    landing_speed_mps: float,
+) -> np.ndarray:
+    """Reproduce PX4's velocity-only vertical estimator blending seam."""
+    if not math.isfinite(landing_speed_mps) or landing_speed_mps <= 0.0:
+        raise ValueError("MPC_LAND_SPEED must be finite and positive")
+    result = np.array(velocity_ned, dtype=np.float64, copy=True)
+    commanded_z = np.asarray(velocity_setpoint_ned, dtype=np.float64)[:, 2]
+    position_derivative = np.asarray(position_derivative_z_ned, dtype=np.float64)
+    active = np.isfinite(commanded_z) & (np.abs(commanded_z) > np.finfo(np.float32).eps)
+    weight = np.minimum(np.abs(commanded_z) / landing_speed_mps, 1.0)
+    result[active, 2] = position_derivative[active] * weight[active] + result[active, 2] * (
+        1.0 - weight[active]
+    )
+    return result
 
 
 def _interpolate_quaternions(
@@ -322,6 +381,49 @@ def _bridge_actuator_samples(
     )
 
 
+def _bridge_state_samples(
+    *,
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    times: list[int] = []
+    positions: list[list[float]] = []
+    attitudes: list[list[float]] = []
+    velocities: list[list[float]] = []
+    angular_velocities: list[list[float]] = []
+    for line in path.read_text().splitlines():
+        state_match = _BRIDGE_STATE_PATTERN.search(line)
+        if state_match is None:
+            continue
+        sample_time = int(state_match.group("sim_time_us"))
+        position = list(ast.literal_eval(state_match.group("position")))
+        attitude = list(ast.literal_eval(state_match.group("attitude")))
+        velocity = list(ast.literal_eval(state_match.group("velocity")))
+        angular_velocity = list(ast.literal_eval(state_match.group("angular_velocity")))
+        if times and sample_time == times[-1]:
+            positions[-1] = position
+            attitudes[-1] = attitude
+            velocities[-1] = velocity
+            angular_velocities[-1] = angular_velocity
+            continue
+        if times and sample_time < times[-1]:
+            raise ValueError(f"bridge log {path} physical-state timestamps regress")
+        times.append(sample_time)
+        positions.append(position)
+        attitudes.append(attitude)
+        velocities.append(velocity)
+        angular_velocities.append(angular_velocity)
+    if not times:
+        raise ValueError(f"bridge log {path} has incomplete physical-state diagnostics")
+    time_array = np.asarray(times, dtype=np.int64)
+    return (
+        time_array,
+        np.asarray(positions, dtype=np.float64),
+        np.asarray(attitudes, dtype=np.float64),
+        np.asarray(velocities, dtype=np.float64),
+        np.asarray(angular_velocities, dtype=np.float64),
+    )
+
+
 def _profile_topic(
     *,
     topic: dict,
@@ -378,9 +480,17 @@ def _controller_boundary(
             "xyz_derivative[2]",
         ),
     )
+    estimated_angular_velocity_frd = interpolated_vector(
+        topic=angular_velocity,
+        fields=("xyz[0]", "xyz[1]", "xyz[2]"),
+    )
     rate_integral_frd = interpolated_vector(
         topic=rate_status,
         fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
+    )
+    estimated_velocity_ned = interpolated_vector(
+        topic=local_position,
+        fields=("vx", "vy", "vz"),
     )
     hover_thrust_normalized = float(
         _linear_interpolate(
@@ -390,6 +500,10 @@ def _controller_boundary(
         )[0]
     )
     vectors = {
+        "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
+        "initial_estimated_angular_velocity_body_flu_radps": (
+            _FLU_TO_FRD @ estimated_angular_velocity_frd
+        ),
         "initial_acceleration_setpoint_enu_mps2": _NED_TO_ENU @ acceleration_setpoint_ned,
         "initial_linear_acceleration_enu_mps2": _NED_TO_ENU @ linear_acceleration_ned,
         "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
@@ -404,6 +518,8 @@ def _controller_boundary(
         vectors,
         {
             "vehicle_local_position_setpoint": setpoint_age_us,
+            "vehicle_local_position": held_age_us(topic=local_position),
+            "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
             "rate_ctrl_status": rate_age_us,
             "hover_thrust_estimate": held_age_us(topic=hover),
         },
@@ -516,25 +632,29 @@ def _actuator_boundary_report(
     bridge_body_torque = bridge_join_and_torque[:, 1:]
 
     motor_time_us = _topic_time_us(topic=motors)
-    motor_index = _nearest_indices(source_t=motor_time_us, query_t=bridge_time_us)
-    motor_join_error_us = np.abs(motor_time_us[motor_index] - bridge_time_us)
+    bridge_index = _nearest_indices(
+        source_t=bridge_time_us.astype(np.float64),
+        query_t=motor_time_us.astype(np.float64),
+    )
+    motor_join_error_us = np.abs(bridge_time_us[bridge_index] - motor_time_us)
     input_scaling = np.asarray(bridge.input_scaling, dtype=np.float64)
     input_offset = np.asarray(bridge.input_offset, dtype=np.float64)
     armed_zero = np.asarray(bridge.zero_position_armed, dtype=np.float64)
-    bridge_normalized_motor = (bridge_rotor_speed - armed_zero) / input_scaling - input_offset
-    expected_rotor_speed = (
-        motor_values[motor_index] * input_scaling + armed_zero + input_offset * input_scaling
-    )
+    sampled_rotor_speed = bridge_rotor_speed[bridge_index]
+    sampled_forces = bridge_forces[bridge_index]
+    sampled_body_torque = bridge_body_torque[bridge_index]
+    bridge_normalized_motor = (sampled_rotor_speed - armed_zero) / input_scaling - input_offset
+    expected_rotor_speed = motor_values * input_scaling + armed_zero + input_offset * input_scaling
     expected_collective = np.sum(
         geometry.rotor_constant * np.square(expected_rotor_speed),
         axis=1,
     )
-    bridge_collective = np.sum(bridge_forces, axis=1)
+    bridge_collective = np.sum(sampled_forces, axis=1)
     bridge_torque = np.column_stack(
         [
-            np.sum(geometry.positions_body[:, 1] * bridge_forces, axis=1),
-            -np.sum(geometry.positions_body[:, 0] * bridge_forces, axis=1),
-            bridge_body_torque[:, 2],
+            np.sum(geometry.positions_body[:, 1] * sampled_forces, axis=1),
+            -np.sum(geometry.positions_body[:, 0] * sampled_forces, axis=1),
+            sampled_body_torque[:, 2],
         ]
     )
 
@@ -545,7 +665,7 @@ def _actuator_boundary_report(
         start_us = int(raw_profile["start_sim_time_us"])
         relative_time_s = raw_profile["time_s"]
         end_us = start_us + round(float(relative_time_s[-1]) * 1_000_000)
-        bridge_selected = (bridge_time_us >= start_us) & (bridge_time_us <= end_us)
+        bridge_selected = (motor_time_us >= start_us) & (motor_time_us <= end_us)
         topic_reports = {
             "vehicle_thrust_setpoint": _profile_topic(
                 topic=thrust,
@@ -593,7 +713,7 @@ def _actuator_boundary_report(
             for name, topic_report in topic_reports.items()
         }
         profile_motor_error = (
-            bridge_normalized_motor[bridge_selected] - motor_values[motor_index][bridge_selected]
+            bridge_normalized_motor[bridge_selected] - motor_values[bridge_selected]
         )
         profile_collective_error = (
             bridge_collective[bridge_selected] - expected_collective[bridge_selected]
@@ -609,7 +729,10 @@ def _actuator_boundary_report(
         max_join_error_us = int(
             max(
                 np.max(motor_join_error_us[bridge_selected], initial=0),
-                np.max(bridge_dynamics_join_error_us[bridge_selected], initial=0),
+                np.max(
+                    bridge_dynamics_join_error_us[bridge_index][bridge_selected],
+                    initial=0,
+                ),
             )
         )
         if max_join_error_us > _PHYSICS_TICK_US:
@@ -638,7 +761,7 @@ def _actuator_boundary_report(
                 "bridge": {
                     "sample_count": int(np.count_nonzero(bridge_selected)),
                     "mean_mapped_rotor_speed_radps": np.mean(
-                        bridge_rotor_speed[bridge_selected], axis=0
+                        sampled_rotor_speed[bridge_selected], axis=0
                     ).tolist(),
                     "mean_reconstructed_collective_thrust_n": float(
                         np.mean(bridge_collective[bridge_selected])
@@ -697,6 +820,10 @@ def _report(
     controller_artifact_path: Path,
     start_s: float,
     end_s: float,
+    time_origin_us: int,
+    command_trace: dict | None,
+    physical_state: bool,
+    bridge_state: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None,
 ) -> dict:
     config = load_config(config_path)
     vehicle = next(vehicle for vehicle in config.vehicles.values() if vehicle.bridge.enabled)
@@ -715,6 +842,15 @@ def _report(
         zero_position_armed=np.asarray(bridge.zero_position_armed),
     )
     controller_settings = load_controller_artifact(controller_artifact_path).selected_settings
+    if not physical_state:
+        controller_settings = replace(
+            controller_settings,
+            velocity_observation_scale=(1.0, 1.0, 1.0),
+            velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+            velocity_estimator_bias_decay_hz=0.0,
+            velocity_filter_hz=0.0,
+            angular_velocity_filter_hz=0.0,
+        )
     params = build_actuation_params(
         geometry=geometry,
         action_cfg=config.rl.action,
@@ -732,39 +868,85 @@ def _report(
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
     thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
-    start_timestamp = float(ulog.start_timestamp)
+    time_origin = float(time_origin_us)
 
-    motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
+    motor_t = (np.asarray(motor["timestamp"], dtype=np.float64) - time_origin) / 1e6
     selected = (motor_t >= start_s) & (motor_t <= end_s)
     sample_t = motor_t[selected]
     if not sample_t.size:
         raise ValueError(f"no actuator_motors samples in [{start_s}, {end_s}] seconds")
 
     def relative_time(data: dict) -> np.ndarray:
-        return (np.asarray(data["timestamp"], dtype=np.float64) - start_timestamp) / 1e6
+        return (np.asarray(data["timestamp"], dtype=np.float64) - time_origin) / 1e6
 
     motor_index = np.flatnonzero(selected)
     controller_dt_s = 1.0 / config.sim.physics_hz
-    replay_t = np.arange(
-        start_s,
-        end_s + controller_dt_s * 0.5,
-        controller_dt_s,
-        dtype=np.float64,
+    replay_t, replay_relative_t = _replay_time_grid(
+        start_s=start_s,
+        end_s=end_s,
+        controller_dt_s=controller_dt_s,
     )
-    trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
-    velocity_ned = np.column_stack(
-        [
-            np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
-            for index in range(3)
-        ]
-    )
-    yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    if command_trace is None:
+        replay_actions = None
+        trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
+        velocity_ned = np.column_stack(
+            [
+                np.asarray(trajectory[f"velocity[{index}]"], dtype=np.float64)[trajectory_index]
+                for index in range(3)
+            ]
+        )
+        yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
+    else:
+        command_time = np.asarray(command_trace["time_s"], dtype=np.float64)
+        command_velocity = np.asarray(
+            command_trace["command_velocity_body_flu_mps"], dtype=np.float64
+        )
+        command_yaw_rate = np.asarray(command_trace["command_yaw_rate_radps"], dtype=np.float64)
+        if (
+            command_time.ndim != 1
+            or command_velocity.shape != (len(command_time), 3)
+            or command_yaw_rate.shape != (len(command_time),)
+        ):
+            raise ValueError("profile command trace fields have inconsistent lengths")
+        command_index = _hold_indices(
+            source_t=command_time,
+            query_t=replay_relative_t,
+        )
+        commanded_body_velocity = command_velocity[command_index]
+        replay_actions = np.column_stack(
+            [
+                commanded_body_velocity / config.rl.action.max_body_velocity_mps,
+                command_yaw_rate[command_index, None] / config.rl.action.max_yaw_rate_radps,
+            ]
+        )
+        replay_actions = _delay_velocity_actions(
+            actions=replay_actions,
+            delay_steps=round(controller_settings.command_delay_s * config.sim.physics_hz),
+        )
+        velocity_ned = np.zeros_like(commanded_body_velocity)
+        velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
+        yaw_speed = -command_yaw_rate[command_index]
     local_velocity_ned = _linear_interpolate(
         source_t=relative_time(local_position),
         values=np.column_stack(
             [np.asarray(local_position[name], dtype=np.float64) for name in ("vx", "vy", "vz")]
         ),
         query_t=replay_t,
+    )
+    position_derivative_z_ned = _linear_interpolate(
+        source_t=relative_time(local_position),
+        values=np.asarray(local_position["z_deriv"], dtype=np.float64),
+        query_t=replay_t,
+    )
+    try:
+        landing_speed_mps = float(ulog.initial_parameters["MPC_LAND_SPEED"])
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("ULog is missing the finite MPC_LAND_SPEED controller parameter") from exc
+    local_velocity_ned = _px4_vertical_velocity_state(
+        velocity_setpoint_ned=velocity_ned,
+        velocity_ned=local_velocity_ned,
+        position_derivative_z_ned=position_derivative_z_ned,
+        landing_speed_mps=landing_speed_mps,
     )
     quaternion_frd_ned = _interpolate_quaternions(
         source_t=relative_time(attitude),
@@ -780,6 +962,42 @@ def _report(
         ),
         query_t=replay_t,
     )
+    if not physical_state:
+        replay_velocity_enu = local_velocity_ned @ _NED_TO_ENU
+        replay_quaternion_flu_enu = np.asarray(
+            [
+                _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=value)[0]
+                for value in quaternion_frd_ned
+            ],
+            dtype=np.float64,
+        )
+        replay_angular_velocity_flu = angular_velocity_frd @ _FLU_TO_FRD
+        replay_state_source = "px4-estimated-state"
+    else:
+        if command_trace is None or bridge_state is None:
+            raise ValueError("physical-state replay requires command and bridge state traces")
+        physical_time_us, _position, physical_attitude, physical_velocity, physical_rates = (
+            bridge_state
+        )
+        physical_time = physical_time_us.astype(np.float64) / 1e6
+        replay_velocity_enu = _linear_interpolate(
+            source_t=physical_time,
+            values=physical_velocity,
+            query_t=replay_t,
+        )
+        replay_quaternion_flu_enu = _interpolate_quaternions(
+            source_t=physical_time,
+            quaternions_wxyz=physical_attitude,
+            query_t=replay_t,
+        )
+        replay_angular_velocity_flu = _linear_interpolate(
+            source_t=physical_time,
+            values=physical_rates,
+            query_t=replay_t,
+        )
+        replay_state_source = "captured-physical-state"
+    hover_index = _hold_indices(source_t=relative_time(hover), query_t=replay_t)
+    replay_hover_thrust = np.asarray(hover["hover_thrust"], dtype=np.float64)[hover_index]
 
     px4_omega_rows: list[np.ndarray] = []
     isaac_omega_rows: list[np.ndarray] = []
@@ -795,12 +1013,20 @@ def _report(
         angular_velocity=angular_velocity,
         rate_status=rate_status,
         hover=hover,
-        timestamp_us=round(start_timestamp + start_s * 1e6),
+        timestamp_us=round(time_origin + start_s * 1e6),
     )
     controller_state = seed_actuation_controller_state(
         params=params,
-        linear_velocity_enu=_NED_TO_ENU @ local_velocity_ned[0],
-        angular_velocity_body_flu=_FLU_TO_FRD @ angular_velocity_frd[0],
+        controller_dt_s=controller_dt_s,
+        physical_linear_velocity_enu=replay_velocity_enu[0],
+        filtered_linear_velocity_enu=(
+            controller_vectors["initial_estimated_linear_velocity_enu_mps"]
+            if physical_state
+            else replay_velocity_enu[0]
+        ),
+        angular_velocity_body_flu=controller_vectors[
+            "initial_estimated_angular_velocity_body_flu_radps"
+        ],
         acceleration_setpoint_enu_mps2=controller_vectors["initial_acceleration_setpoint_enu_mps2"],
         linear_acceleration_enu_mps2=controller_vectors["initial_linear_acceleration_enu_mps2"],
         angular_acceleration_body_flu_radps2=controller_vectors[
@@ -808,48 +1034,74 @@ def _report(
         ],
         rate_integral_body_flu=controller_vectors["initial_rate_integral_body_flu"],
         hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
+        outer_loop_elapsed_s=(
+            controller_source_age_us["vehicle_local_position"] / 1e6 - controller_dt_s
+        ),
     )
     isaac_omega_grid = []
+    command_refresh_cadence = _CadenceState(previous_time_ns=0)
+    command_refresh_steps_remaining = 0
+    held_controller_command = np.zeros(4, dtype=np.float64)
 
-    for velocity_setpoint_ned, yaw_setpoint_rate, velocity_state_ned, quaternion, rates_frd in zip(
+    for (
+        replay_action,
+        velocity_setpoint_ned,
+        yaw_setpoint_rate,
+        velocity_state_enu,
+        quaternion,
+        rates_flu,
+        hover_thrust_normalized,
+    ) in zip(
+        replay_actions if replay_actions is not None else np.full((len(replay_t), 4), np.nan),
         velocity_ned,
         yaw_speed,
-        local_velocity_ned,
-        quaternion_frd_ned,
-        angular_velocity_frd,
+        replay_velocity_enu,
+        replay_quaternion_flu_enu,
+        replay_angular_velocity_flu,
+        replay_hover_thrust,
         strict=True,
     ):
         if not (
             np.all(np.isfinite(velocity_setpoint_ned))
             and math.isfinite(float(yaw_setpoint_rate))
-            and np.all(np.isfinite(velocity_state_ned))
+            and np.all(np.isfinite(velocity_state_enu))
             and np.all(np.isfinite(quaternion))
-            and np.all(np.isfinite(rates_frd))
+            and np.all(np.isfinite(rates_flu))
         ):
             raise ValueError("selected replay window contains non-finite controller inputs")
-        quaternion_flu_enu, yaw = _px4_attitude_to_isaac(quaternion_frd_ned_wxyz=quaternion)
+        quaternion_flu_enu = quaternion
         velocity_setpoint_enu = _NED_TO_ENU @ velocity_setpoint_ned
-        heading = np.array(
-            [
-                [math.cos(yaw), -math.sin(yaw), 0.0],
-                [math.sin(yaw), math.cos(yaw), 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        action = np.zeros(4)
-        action[:3] = heading.T @ velocity_setpoint_enu / config.rl.action.max_body_velocity_mps
-        action[3] = -float(yaw_setpoint_rate) / config.rl.action.max_yaw_rate_radps
-        action = np.clip(action, -1.0, 1.0)
 
         state = ActuationState(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
-            linear_velocity_enu=_NED_TO_ENU @ velocity_state_ned,
-            angular_velocity_body_flu=_FLU_TO_FRD @ rates_frd,
+            linear_velocity_enu=velocity_state_enu,
+            angular_velocity_body_flu=rates_flu,
         )
-        controller_state, isaac_omega = action_to_rotor_omega(
+        controller_state = update_hover_thrust_estimate(
+            params=params,
+            controller_state=controller_state,
+            hover_thrust_normalized=float(hover_thrust_normalized),
+        )
+        if replay_actions is None:
+            command = np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
+        else:
+            if command_refresh_steps_remaining == 0:
+                held_controller_command = normalized_action_to_controller_command(
+                    params,
+                    np.clip(replay_action, -1.0, 1.0),
+                    quaternion_flu_enu,
+                )
+                command_refresh_cadence, command_refresh_steps_remaining = _next_interval_steps(
+                    state=command_refresh_cadence,
+                    source_period_ns=round(controller_dt_s * 1_000_000_000),
+                    rate_hz=config.driver.offboard_setpoint_rate_hz,
+                )
+            command_refresh_steps_remaining -= 1
+            command = held_controller_command
+        controller_state, isaac_omega = controller_command_to_rotor_omega(
             params,
             controller_state,
-            action,
+            command,
             state,
             controller_dt_s,
         )
@@ -935,14 +1187,32 @@ def _report(
     ]
     return {
         "schema_version": 1,
-        "method": "px4-ulog-state-replay-v1-250hz",
+        "method": "px4-ulog-state-replay-v1-physics-rate",
         "config": str(config_path),
         "airframe": airframe_name,
         "window_s": [start_s, end_s],
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
+        "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
+        "physical_state_timestamp_join_error_us": (
+            int(
+                np.max(
+                    np.abs(
+                        physical_time_us[
+                            _nearest_indices(
+                                source_t=physical_time_us.astype(np.float64),
+                                query_t=replay_t * 1e6,
+                            )
+                        ]
+                        - np.rint(replay_t * 1e6).astype(np.int64)
+                    )
+                )
+            )
+            if physical_state and bridge_state is not None
+            else 0
+        ),
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             **boundary_metrics,
@@ -982,6 +1252,16 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
                 "axis": raw_profile["axis"],
                 "start_s": start_s,
                 "end_s": start_s + float(relative_time_s[-1]),
+                "command_trace": {
+                    "time_s": relative_time_s,
+                    "command_velocity_body_flu_mps": raw_profile["command_velocity_body_flu_mps"],
+                    "command_yaw_rate_radps": raw_profile["command_yaw_rate_radps"],
+                    "attitude_flu_enu_wxyz": raw_profile["attitude_flu_enu_wxyz"],
+                    "velocity_enu_mps": raw_profile["velocity_enu_mps"],
+                    "angular_velocity_body_flu_radps": raw_profile[
+                        "angular_velocity_body_flu_radps"
+                    ],
+                },
             }
         )
     return windows
@@ -993,18 +1273,36 @@ def _profile_replay_report(
     config_path: Path,
     controller_artifact_path: Path,
     reference_path: Path,
+    bridge_log_path: Path,
 ) -> dict:
+    bridge_state = _bridge_state_samples(path=bridge_log_path)
     profiles = []
     failures = []
     for window in _profile_windows(reference_path=reference_path):
-        replay = _report(
+        core_replay = _report(
             ulog=ulog,
             config_path=config_path,
             controller_artifact_path=controller_artifact_path,
             start_s=window["start_s"],
             end_s=window["end_s"],
+            time_origin_us=0,
+            command_trace=window["command_trace"],
+            physical_state=False,
+            bridge_state=None,
         )
-        metrics = replay["metrics"]
+        physical_replay = _report(
+            ulog=ulog,
+            config_path=config_path,
+            controller_artifact_path=controller_artifact_path,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+            time_origin_us=0,
+            command_trace=window["command_trace"],
+            physical_state=True,
+            bridge_state=bridge_state,
+        )
+        metrics = core_replay["metrics"]
+        physical_metrics = physical_replay["metrics"]
         profile_name = window["profile"]
         if metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
             failures.append(
@@ -1018,22 +1316,42 @@ def _profile_replay_report(
                 f"{metrics['collective_thrust_rmse_n']:.6f} N exceeds "
                 f"{_MAX_COLLECTIVE_RMSE_N:.6f} N"
             )
+        if physical_metrics["normalized_motor_rmse"] > _MAX_NORMALIZED_MOTOR_RMSE:
+            failures.append(
+                f"{profile_name}: physical-state normalized motor RMSE "
+                f"{physical_metrics['normalized_motor_rmse']:.6f} exceeds "
+                f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
+            )
+        physical_join_error_us = physical_replay["physical_state_timestamp_join_error_us"]
+        if physical_join_error_us > _PHYSICS_TICK_US:
+            failures.append(
+                f"{profile_name}: physical-state timestamp join error "
+                f"{physical_join_error_us} us exceeds {_PHYSICS_TICK_US} us"
+            )
         profiles.append(
             {
-                **window,
-                "sample_count": replay["sample_count"],
-                "controller_sample_count": replay["controller_sample_count"],
-                "controller_state_source_age_us": replay["controller_state_source_age_us"],
-                "sample_time_s": replay["sample_time_s"],
+                "profile": window["profile"],
+                "split": window["split"],
+                "axis": window["axis"],
+                "start_s": window["start_s"],
+                "end_s": window["end_s"],
+                "sample_count": core_replay["sample_count"],
+                "controller_sample_count": core_replay["controller_sample_count"],
+                "controller_state_source": core_replay["controller_state_source"],
+                "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
+                "sample_time_s": core_replay["sample_time_s"],
                 "metrics": metrics,
+                "physical_state_metrics": physical_metrics,
+                "physical_state_timestamp_join_error_us": physical_join_error_us,
             }
         )
     return {
         "schema_version": 1,
-        "method": "px4-ulog-profile-state-replay-v1-250hz",
+        "method": "physical-and-estimated-state-px4-profile-replay-v1-physics-rate",
         "config": str(config_path),
         "controller_artifact": str(controller_artifact_path),
         "reference": str(reference_path),
+        "bridge_log": str(bridge_log_path),
         "limits": {
             "normalized_motor_rmse": _MAX_NORMALIZED_MOTOR_RMSE,
             "collective_thrust_rmse_n": _MAX_COLLECTIVE_RMSE_N,
@@ -1074,9 +1392,20 @@ def main() -> None:
             ulog=ULog(str(ulog_path)),
             reference_path=args.augment_reference,
         )
+    elif args.profile_reference is not None:
+        if args.controller_artifact is None or args.bridge_log is None or args.window is not None:
+            parser.error(
+                "--profile-reference requires --controller-artifact and --bridge-log, "
+                "and cannot use --window"
+            )
+        report = _profile_replay_report(
+            ulog=ULog(str(ulog_path)),
+            config_path=args.config,
+            controller_artifact_path=args.controller_artifact,
+            reference_path=args.profile_reference,
+            bridge_log_path=args.bridge_log,
+        )
     elif args.audit_reference is not None or args.bridge_log is not None:
-        if args.profile_reference is not None:
-            parser.error("--profile-reference cannot be combined with actuator audit options")
         if args.audit_reference is None or args.bridge_log is None:
             parser.error("--audit-reference and --bridge-log must be provided together")
         report = _actuator_boundary_report(
@@ -1085,27 +1414,21 @@ def main() -> None:
             reference_path=args.audit_reference,
             bridge_log_path=args.bridge_log,
         )
-    elif args.profile_reference is not None:
-        if args.controller_artifact is None or args.window is not None:
-            parser.error(
-                "--profile-reference requires --controller-artifact and cannot use --window"
-            )
-        report = _profile_replay_report(
-            ulog=ULog(str(ulog_path)),
-            config_path=args.config,
-            controller_artifact_path=args.controller_artifact,
-            reference_path=args.profile_reference,
-        )
     else:
         if args.controller_artifact is None or args.window is None:
             parser.error("--controller-artifact and --window are required for controller replay")
         start_s, end_s = (float(value) for value in args.window.split(",", maxsplit=1))
+        replay_ulog = ULog(str(ulog_path))
         report = _report(
-            ulog=ULog(str(ulog_path)),
+            ulog=replay_ulog,
             config_path=args.config,
             controller_artifact_path=args.controller_artifact,
             start_s=start_s,
             end_s=end_s,
+            time_origin_us=replay_ulog.start_timestamp,
+            command_trace=None,
+            physical_state=False,
+            bridge_state=None,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     if args.json is not None:

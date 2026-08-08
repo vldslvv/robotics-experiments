@@ -54,12 +54,16 @@ def _action_cfg(**overrides):
 def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
+        velocity_controller_rate_hz=125.0,
         kp_vel=(2.0, 2.0, 3.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
+        velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
@@ -70,7 +74,9 @@ def _controller_settings() -> ControllerSettings:
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        angular_velocity_filter_hz=0.0,
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
@@ -214,40 +220,6 @@ def test_contract_rejects_invalid_json_and_missing_scale(tmp_path: Path) -> None
     (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match="max_yaw_rate_radps"):
         load_policy_metadata(artifact_dir=tmp_path)
-
-
-def _obsolete_schema6_policy_metadata_loads_gain_schedule_and_schema5_is_neutral(
-    tmp_path: Path,
-) -> None:
-    metadata = _metadata()
-    metadata["alignment"]["schema_version"] = 6
-    settings = metadata["alignment"]["settings"]
-    settings["hover_thrust_normalized"] = 0.57
-    settings["horizontal_velocity_error_gain_scale"] = 8.0 / 7.0
-    settings["horizontal_velocity_error_gain_start_mps"] = 0.15
-    settings["horizontal_velocity_error_gain_full_mps"] = 0.30
-    _write_metadata_artifact(tmp_path, metadata)
-
-    loaded = load_policy_metadata(artifact_dir=tmp_path)
-
-    assert loaded.controller_settings.horizontal_velocity_error_gain_scale == pytest.approx(
-        8.0 / 7.0
-    )
-
-    metadata["alignment"]["schema_version"] = 5
-    for name in (
-        "horizontal_velocity_error_gain_scale",
-        "horizontal_velocity_error_gain_start_mps",
-        "horizontal_velocity_error_gain_full_mps",
-    ):
-        settings.pop(name)
-    (tmp_path / METADATA_FILENAME).write_text(json.dumps(metadata))
-
-    legacy = load_policy_metadata(artifact_dir=tmp_path)
-
-    assert legacy.controller_settings.horizontal_velocity_error_gain_scale == 1.0
-    assert legacy.controller_settings.horizontal_velocity_error_gain_start_mps == 0.15
-    assert legacy.controller_settings.horizontal_velocity_error_gain_full_mps == 0.30
 
 
 def test_artifact_scales_drive_hover_offboard_mapping(tmp_path: Path) -> None:

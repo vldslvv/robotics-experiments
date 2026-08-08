@@ -370,6 +370,10 @@ Sampled `PX4 bridge dynamics` diagnostics record
 `last_actuator_receive_us` as `last_actuator_us` and the corresponding
 `actuator_lag_us` beside the mapped rotor commands and realized wrench. This is
 the timestamp contract used to join bridge actuation to PX4 ULog topics.
+The same record includes the physics-tick body pose, linear velocity, and body
+angular velocity. `px4.dynamics_debug_log_interval` controls its cadence;
+alignment capture sets it to one so controller replay never reconstructs the
+250 Hz plant input from the 20 Hz command trace.
 
 **Lockstep ordering contract:** a tick decomposes into `send(state)` -- which
 sends `HIL_SENSOR` (advancing `time_usec`) without blocking and returns `None`

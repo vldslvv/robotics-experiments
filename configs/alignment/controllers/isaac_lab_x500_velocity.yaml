@@ -16,34 +16,40 @@ command_interface:
   yaw_rate_scale_radps: 1.5
 
 settings:
-  command_delay_s: 0.0725
-  kp_vel: [1.8, 1.8, 4.0]
-  horizontal_velocity_error_gain_scale: 1.357142857
-  horizontal_velocity_error_gain_start_mps: 0.10
-  horizontal_velocity_error_gain_full_mps: 0.34
-  ki_vel: [0.35, 0.35, 1.5]
-  kd_vel: [0.4, 0.325, 0.0]
-  # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 10.0
-  velocity_derivative_filter_hz: 1.5
-  velocity_integral_limit_mps2: [2.5, 2.5, 5.0]
+  command_delay_s: 0.0
+  velocity_controller_rate_hz: 125.0
+  kp_vel: [1.8, 1.8, 4.20]
+  horizontal_velocity_error_gain_scale: 1.0
+  horizontal_velocity_error_gain_start_mps: 0.15
+  horizontal_velocity_error_gain_full_mps: 0.30
+  ki_vel: [0.4, 0.4, 2.1]
+  kd_vel: [0.2, 0.2, 0.0]
+  velocity_observation_scale: [0.98, 1.0425, 1.0]
+  # Steady world-ENU physical-to-estimator offset measured from the reference.
+  velocity_observation_bias_mps: [0.006, -0.030, 0.0]
+  velocity_estimator_bias_decay_hz: 0.0
+  velocity_filter_hz: 0.0
+  velocity_derivative_filter_hz: 5.0
+  velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
-  hover_thrust_normalized: 0.59125
-  kp_att: [5.0, 5.0, 3.5]
-  attitude_yaw_weight: 0.37578125
-  kp_rate: [0.1875, 0.1875, 0.25]
-  ki_rate: [0.30, 0.30, 0.15]
-  kd_rate: [0.00225, 0.00225, 0.0]
-  kff_rate: [0.0, 0.0, 0.025]
-  rate_derivative_filter_hz: 22.5
-  rate_integral_limit: [0.45, 0.45, 0.45]
+  hover_thrust_normalized: 0.54
+  kp_att: [4.0, 4.0, 2.8]
+  attitude_yaw_weight: 0.4
+  kp_rate: [0.15, 0.15, 0.20]
+  ki_rate: [0.20, 0.20, 0.10]
+  kd_rate: [0.003, 0.003, 0.0]
+  kff_rate: [0.0, 0.0, 0.0]
+  angular_velocity_filter_hz: 13.125
+  rate_derivative_filter_hz: 20.0
+  yaw_torque_filter_hz: 2.0
+  rate_integral_limit: [0.30, 0.30, 0.30]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12
   max_collective_thrust_fraction: 1.0
   horizontal_thrust_margin_fraction: 0.30
   thruster_tau_inc_s: 0.04
   thruster_tau_dec_s: 0.02
-  thruster_max_thrust_rate_nps: 500.0
+  thruster_max_thrust_rate_nps: 100000.0
 
 search:
   strategy: coarse-to-fine-beam
@@ -55,106 +61,52 @@ search:
   min_refinement_survivors: 2
 
 parameters:
-  - field: command_delay_s
+  # PX4's captured residual persisted across the fresh combined profile; fit
+  # only the measured low-decay region and refine around its gate champions.
+  - field: velocity_estimator_bias_decay_hz
     stage: 1
-    candidates: [0.0, 0.03, 0.06, 0.09]
-  - field: velocity_filter_hz
-    stage: 1
-    candidates: [0.0, 5.0, 10.0]
-  - field: velocity_derivative_filter_hz
-    stage: 1
-    candidates: [0.5, 2.5, 7.5]
-  - field: hover_thrust_normalized
-    stage: 1
-    candidates: [0.54, 0.56, 0.58, 0.60]
-  - field: kp_vel
-    stage: 1
+    candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
+  # Independent fresh captures occupy the evidenced X range from zero through
+  # +0.035 m/s and the Y range from -0.030 through -0.005 m/s. Cover both at
+  # large steps, then refine only around retained gate champions.
+  - field: velocity_observation_bias_mps
+    stage: 2
+    # Once response gates pass, prefer the least estimator correction so the
+    # aligned controller retains return-to-hover margin outside short probes.
+    selection_regularization_scale: 1.0
     candidates:
-      - [1.2, 1.2, 3.0]
-      - [1.8, 1.8, 4.0]
-      - [2.4, 2.4, 6.0]
-      - [1.8, 1.8, 8.0]
-  - field: horizontal_velocity_error_gain_scale
-    stage: 1
-    candidates: [1.0, 1.15, 1.30]
-  - field: horizontal_velocity_error_gain_start_mps
-    stage: 1
-    candidates: [0.10, 0.15, 0.20]
-  - field: horizontal_velocity_error_gain_full_mps
-    stage: 1
-    candidates: [0.25, 0.35, 0.45]
-  - field: ki_vel
-    stage: 1
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.3, 0.3, 1.5]
-      - [0.6, 0.6, 3.0]
-  - field: kd_vel
-    stage: 1
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.3, 0.3, 0.0]
-      - [0.6, 0.6, 0.1]
+      - [0.000, -0.030, -0.0039]
+      - [0.000, -0.020, -0.0039]
+      - [0.000, -0.010, -0.0039]
+      - [0.000, 0.000, -0.0039]
+      - [0.000, 0.010, -0.0039]
+      - [0.010, -0.030, -0.0039]
+      - [0.010, -0.020, -0.0039]
+      - [0.010, -0.010, -0.0039]
+      - [0.010, 0.000, -0.0039]
+      - [0.010, 0.010, -0.0039]
+      - [0.020, -0.030, -0.0039]
+      - [0.020, -0.020, -0.0039]
+      - [0.020, -0.010, -0.0039]
+      - [0.020, 0.000, -0.0039]
+      - [0.020, 0.010, -0.0039]
+      - [0.030, -0.030, -0.0039]
+      - [0.030, -0.020, -0.0039]
+      - [0.030, -0.010, -0.0039]
+      - [0.030, 0.000, -0.0039]
+      - [0.030, 0.010, -0.0039]
+      - [0.040, -0.030, -0.0039]
+      - [0.040, -0.020, -0.0039]
+      - [0.040, -0.010, -0.0039]
+      - [0.040, 0.000, -0.0039]
+      - [0.040, 0.010, -0.0039]
+  # Short alignment profiles remain below this evidenced cap, while the longer
+  # published-artifact goto is prevented from retaining excessive integral
+  # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 1
-    candidates:
-      - [1.0, 1.0, 2.0]
-      - [2.5, 2.5, 5.0]
-      - [4.0, 4.0, 8.0]
-  - field: kp_att
-    stage: 2
-    candidates:
-      - [3.0, 3.0, 2.1]
-      - [5.0, 5.0, 3.5]
-      - [7.0, 7.0, 4.9]
-  - field: attitude_yaw_weight
-    stage: 2
-    candidates: [0.25, 0.40, 0.55]
-  - field: kp_rate
-    stage: 2
-    candidates:
-      - [0.075, 0.075, 0.10]
-      - [0.15, 0.15, 0.20]
-      - [0.30, 0.30, 0.40]
-  - field: ki_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.15, 0.15, 0.075]
-      - [0.30, 0.30, 0.15]
-  - field: kd_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.00225, 0.00225, 0.0]
-      - [0.0045, 0.0045, 0.0]
-  - field: kff_rate
-    stage: 2
-    candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.0, 0.0, 0.025]
-      - [0.05, 0.05, 0.05]
-  - field: rate_derivative_filter_hz
-    stage: 2
-    candidates: [10.0, 22.5, 35.0]
-  - field: rate_integral_limit
-    stage: 2
-    candidates:
-      - [0.15, 0.15, 0.15]
-      - [0.45, 0.45, 0.45]
-      - [0.75, 0.75, 0.75]
-  - field: max_tilt_cmd_deg
-    stage: 2
-    candidates: [22.5, 45.0, 67.5]
-  - field: thruster_tau_inc_s
     stage: 3
-    candidates: [0.0, 0.02, 0.04, 0.08]
-  - field: thruster_tau_dec_s
-    stage: 3
-    candidates: [0.0, 0.02, 0.04, 0.08]
-  - field: thruster_max_thrust_rate_nps
-    stage: 3
-    candidates: [100.0, 500.0, 1000.0, 100000.0]
+    candidates:
+      - [0.35, 0.35, 4.0]
 
 selection_metric: controller-quality
 publication_metrics:

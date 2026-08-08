@@ -59,6 +59,7 @@ def create_px4_bridge(
     port: Px4MavlinkPort,
     articulation_io: Optional[_ArticulationIO] = None,
     max_tilt_angle_deg: float = 180.0,
+    dynamics_debug_interval: int = 50,
     rotor_spin_visual_scale: float = 0.03,
     rotor_spin_signs: Sequence[float] | None = None,
 ) -> Px4BridgeState:
@@ -72,6 +73,8 @@ def create_px4_bridge(
         raise ValueError(
             f"rotor_link_paths has {len(rotor_link_paths)} entries; expected {port.num_rotors}"
         )
+    if dynamics_debug_interval < 1:
+        raise ValueError("dynamics_debug_interval must be positive")
     if articulation_io is None:
         from robotics_experiments.px4_bridge.isaac_articulation import IsaacArticulationIO
 
@@ -86,6 +89,7 @@ def create_px4_bridge(
         thrust_model=thrust_model,
         articulation_io=articulation_io,
         max_tilt_angle_deg=max_tilt_angle_deg,
+        dynamics_debug_interval=dynamics_debug_interval,
     )
 
 
@@ -190,7 +194,8 @@ def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
             "PX4 bridge dynamics: tick=%d sim_time_us=%d last_actuator_us=%s "
             "actuator_lag_us=%s connected=%s armed=%s "
             "commands=%s forces_n=%s body_torque_n_m=%s body_drag_n=%s "
-            "position_enu=%s quat_wxyz=%s velocity_enu=%s body_velocity_flu=%s",
+            "position_enu=%s quat_wxyz=%s velocity_enu=%s body_velocity_flu=%s "
+            "angular_velocity_body_flu=%s",
             tick_count,
             pending.sim_time_us,
             status.last_actuator_receive_us,
@@ -205,6 +210,7 @@ def recv_and_apply(*, state: Px4BridgeState) -> Px4BridgeState:
             np.asarray(pending.state.orientation_flu_enu_wxyz, dtype=np.float64).tolist(),
             np.asarray(pending.state.linear_velocity_enu, dtype=np.float64).tolist(),
             np.asarray(body_velocity_flu, dtype=np.float64).tolist(),
+            np.asarray(pending.state.angular_velocity_flu, dtype=np.float64).tolist(),
         )
     state.articulation_io.apply_dynamics(dynamics)
     return replace(consumed, tick_count=tick_count)

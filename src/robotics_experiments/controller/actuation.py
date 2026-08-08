@@ -1,4 +1,4 @@
-"""Pure normalized command -> per-rotor angular-velocity controller.
+"""Pure controller command -> per-rotor angular-velocity controller.
 
 numpy + stdlib only. State lives in frozen params dataclasses and behavior in
 pure top-level functions (``f(params, inputs) -> outputs``), so the actuation
@@ -13,16 +13,17 @@ bridge-owned affine motor mapping and quadratic rotor curve.
 
 Two action levels (``kind``) are provided:
 
-- ``velocity`` -- action ``[vx, vy, vz, yaw_rate]`` (normalized): a cascaded
-  geometric controller tracks a yaw-frame body velocity + yaw-rate command.
-- ``ctbr`` -- action ``[thrust, wx, wy, wz]`` (normalized): collective thrust +
-  body-rate setpoint closed by the inner rate loop shared with ``velocity``.
+- ``velocity`` -- a world-ENU velocity + yaw-rate command produced when the
+  normalized body-frame action arrives; the cascaded geometric controller
+  holds that command while its faster loops run.
+- ``ctbr`` -- normalized collective thrust + body-rate setpoint closed by the
+  inner rate loop shared with ``velocity``.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -41,12 +42,14 @@ __all__ = [
     "ActuationParams",
     "ActuationState",
     "MixerGeometry",
-    "action_to_rotor_omega",
     "build_actuation_params",
+    "controller_command_to_rotor_omega",
     "hover_action",
     "initial_actuation_controller_state",
+    "normalized_action_to_controller_command",
     "rotor_forces_to_body_wrench",
     "seed_actuation_controller_state",
+    "update_hover_thrust_estimate",
 ]
 
 _EPS = 1e-9
@@ -102,12 +105,18 @@ class ActuationControllerState:
     """State carried by the PX4-like velocity and body-rate cascade."""
 
     filtered_velocity_enu: np.ndarray
+    velocity_estimator_bias_enu: np.ndarray
     acceleration_enu: np.ndarray
+    acceleration_setpoint_enu: np.ndarray
     velocity_integral_enu: np.ndarray
     previous_angular_velocity_body_flu: np.ndarray
     angular_acceleration_body_flu: np.ndarray
     rate_integral_body_flu: np.ndarray
+    filtered_yaw_torque: float
     hover_thrust_normalized: float
+    outer_loop_elapsed_s: float
+    collective_thrust_setpoint: float
+    body_rate_setpoint: np.ndarray
     initialized: bool
 
 
@@ -130,9 +139,12 @@ class ActuationParams:
     ki_rate: np.ndarray
     kd_rate: np.ndarray
     kff_rate: np.ndarray
+    angular_velocity_filter_hz: float
     rate_derivative_filter_hz: float
+    yaw_torque_filter_hz: float
     rate_integral_limit: np.ndarray
     max_body_rate_radps: float
+    velocity_controller_rate_hz: float
     hover_thrust_normalized: float
     kp_vel: np.ndarray
     horizontal_velocity_error_gain_scale: float
@@ -140,6 +152,9 @@ class ActuationParams:
     horizontal_velocity_error_gain_full_mps: float
     ki_vel: np.ndarray
     kd_vel: np.ndarray
+    velocity_observation_scale: np.ndarray
+    velocity_observation_bias_mps: np.ndarray
+    velocity_estimator_bias_decay_hz: float
     velocity_filter_hz: float
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: np.ndarray
@@ -453,8 +468,16 @@ def _rate_to_omega(
 ) -> tuple[ActuationControllerState, np.ndarray]:
     """Stateful body-rate PID: rate setpoint -> body torque -> rotor omega."""
     rate = np.clip(body_rate_setpoint, -params.max_body_rate_radps, params.max_body_rate_radps)
-    angular_velocity = np.asarray(state.angular_velocity_body_flu, dtype=np.float64)
+    raw_angular_velocity = np.asarray(state.angular_velocity_body_flu, dtype=np.float64)
     if controller_state.initialized:
+        angular_velocity_alpha = _low_pass_alpha(
+            cutoff_hz=params.angular_velocity_filter_hz,
+            dt_s=dt_s,
+        )
+        angular_velocity = controller_state.previous_angular_velocity_body_flu + (
+            angular_velocity_alpha
+            * (raw_angular_velocity - controller_state.previous_angular_velocity_body_flu)
+        )
         raw_angular_acceleration = (
             angular_velocity - controller_state.previous_angular_velocity_body_flu
         ) / dt_s
@@ -466,6 +489,7 @@ def _rate_to_omega(
             raw_angular_acceleration - controller_state.angular_acceleration_body_flu
         )
     else:
+        angular_velocity = raw_angular_velocity
         angular_acceleration = np.zeros(3, dtype=np.float64)
     rate_error: np.ndarray = rate - angular_velocity
     normalized_torque = (
@@ -473,6 +497,13 @@ def _rate_to_omega(
         + controller_state.rate_integral_body_flu
         - params.kd_rate * angular_acceleration
         + params.kff_rate * rate
+    )
+    yaw_torque_alpha = _low_pass_alpha(
+        cutoff_hz=params.yaw_torque_filter_hz,
+        dt_s=dt_s,
+    )
+    normalized_torque[2] = controller_state.filtered_yaw_torque + yaw_torque_alpha * (
+        normalized_torque[2] - controller_state.filtered_yaw_torque
     )
     integral_factor = np.maximum(
         0.0,
@@ -486,12 +517,18 @@ def _rate_to_omega(
     )
     successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(controller_state.filtered_velocity_enu),
+        velocity_estimator_bias_enu=_readonly_copy(controller_state.velocity_estimator_bias_enu),
         acceleration_enu=_readonly_copy(controller_state.acceleration_enu),
+        acceleration_setpoint_enu=_readonly_copy(controller_state.acceleration_setpoint_enu),
         velocity_integral_enu=_readonly_copy(controller_state.velocity_integral_enu),
         previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
         angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
         rate_integral_body_flu=_readonly_copy(rate_integral),
+        filtered_yaw_torque=float(normalized_torque[2]),
         hover_thrust_normalized=controller_state.hover_thrust_normalized,
+        outer_loop_elapsed_s=controller_state.outer_loop_elapsed_s,
+        collective_thrust_setpoint=controller_state.collective_thrust_setpoint,
+        body_rate_setpoint=_readonly_copy(controller_state.body_rate_setpoint),
         initialized=True,
     )
     omega = _normalized_controls_to_omega(
@@ -502,47 +539,67 @@ def _rate_to_omega(
     return successor, omega
 
 
-def _velocity_action_to_omega(
+def _velocity_command_to_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
-    action: np.ndarray,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
 ) -> tuple[ActuationControllerState, np.ndarray]:
-    """Cascaded geometric velocity controller (action ``[vx, vy, vz, yaw_rate]``).
+    """Cascaded geometric velocity controller over one held physical command.
 
     Yaw-frame velocity + yaw-rate command -> world acceleration -> desired thrust
     vector (gravity-compensated) -> collective thrust + desired tilt -> geometric
     attitude error -> body-rate setpoint -> shared inner rate loop -> rotor omega.
     """
+    outer_loop_period_s = 1.0 / params.velocity_controller_rate_hz
+    outer_loop_elapsed_s = controller_state.outer_loop_elapsed_s + dt_s
+    if controller_state.initialized and outer_loop_elapsed_s < outer_loop_period_s - _EPS:
+        held_state = replace(controller_state, outer_loop_elapsed_s=outer_loop_elapsed_s)
+        return _rate_to_omega(
+            params,
+            held_state,
+            held_state.collective_thrust_setpoint,
+            held_state.body_rate_setpoint,
+            state,
+            dt_s,
+        )
+    outer_dt_s = outer_loop_period_s
     rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
-    heading = np.array(
-        [[np.cos(yaw), -np.sin(yaw), 0.0], [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]]
+    velocity_setpoint_world = command[:3]
+    physical_velocity = (
+        params.velocity_observation_scale
+        * np.asarray(
+            state.linear_velocity_enu,
+            dtype=np.float64,
+        )
+        + params.velocity_observation_bias_mps
     )
-
-    velocity_setpoint_world = heading @ (action[:3] * params.max_body_velocity_mps)
-    measured_velocity = np.asarray(state.linear_velocity_enu, dtype=np.float64)
+    measured_velocity = physical_velocity + controller_state.velocity_estimator_bias_enu
     if controller_state.initialized:
         velocity_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_filter_hz,
-            dt_s=dt_s,
+            dt_s=outer_dt_s,
         )
         filtered_velocity = controller_state.filtered_velocity_enu + velocity_alpha * (
             measured_velocity - controller_state.filtered_velocity_enu
         )
-        raw_acceleration = (filtered_velocity - controller_state.filtered_velocity_enu) / dt_s
+        raw_acceleration = (filtered_velocity - controller_state.filtered_velocity_enu) / outer_dt_s
         derivative_alpha = _low_pass_alpha(
             cutoff_hz=params.velocity_derivative_filter_hz,
-            dt_s=dt_s,
+            dt_s=outer_dt_s,
         )
         acceleration = controller_state.acceleration_enu + derivative_alpha * (
             raw_acceleration - controller_state.acceleration_enu
         )
+        bias_decay = math.exp(-2.0 * math.pi * params.velocity_estimator_bias_decay_hz * outer_dt_s)
+        velocity_estimator_bias = controller_state.velocity_estimator_bias_enu * bias_decay
     else:
         filtered_velocity = measured_velocity
         acceleration = np.zeros(3, dtype=np.float64)
+        velocity_estimator_bias = np.zeros(3, dtype=np.float64)
     velocity_error = velocity_setpoint_world - filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     desired_acceleration = (
@@ -563,7 +620,7 @@ def _velocity_action_to_omega(
         horizontal_proportional_gain=float(effective_kp_vel[0]),
     )
     velocity_integral = (
-        controller_state.velocity_integral_enu + params.ki_vel * integration_error * dt_s
+        controller_state.velocity_integral_enu + params.ki_vel * integration_error * outer_dt_s
     )
     velocity_integral = np.clip(
         velocity_integral,
@@ -587,11 +644,13 @@ def _velocity_action_to_omega(
         desired_rotation=desired_rotation,
         proportional_gain=params.kp_att,
         yaw_weight=params.attitude_yaw_weight,
-        yaw_rate_radps=float(action[3] * params.max_yaw_rate_radps),
+        yaw_rate_radps=float(command[3]),
     )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_estimator_bias_enu=_readonly_copy(velocity_estimator_bias),
         acceleration_enu=_readonly_copy(acceleration),
+        acceleration_setpoint_enu=_readonly_copy(desired_acceleration),
         velocity_integral_enu=_readonly_copy(velocity_integral),
         previous_angular_velocity_body_flu=_readonly_copy(
             controller_state.previous_angular_velocity_body_flu
@@ -600,7 +659,11 @@ def _velocity_action_to_omega(
             controller_state.angular_acceleration_body_flu
         ),
         rate_integral_body_flu=_readonly_copy(controller_state.rate_integral_body_flu),
+        filtered_yaw_torque=controller_state.filtered_yaw_torque,
         hover_thrust_normalized=hover_thrust_normalized,
+        outer_loop_elapsed_s=max(outer_loop_elapsed_s - outer_loop_period_s, 0.0),
+        collective_thrust_setpoint=collective,
+        body_rate_setpoint=_readonly_copy(body_rate_setpoint),
         initialized=controller_state.initialized,
     )
     return _rate_to_omega(
@@ -618,23 +681,22 @@ def _ctbr_collective(params: ActuationParams, thrust_command: float) -> float:
     return float(np.clip(params.hover_thrust_normalized * (1.0 + thrust_command), 0.0, 1.0))
 
 
-def _ctbr_action_to_omega(
+def _ctbr_command_to_omega(
     params: ActuationParams,
     controller_state: ActuationControllerState,
-    action: np.ndarray,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
 ) -> tuple[ActuationControllerState, np.ndarray]:
-    """Collective-thrust + body-rate (CTBR) model (action ``[thrust, wx, wy, wz]``).
+    """Collective-thrust + body-rate (CTBR) model over a physical command.
 
     The inner rate loop of the ``velocity`` cascade; the attitude/velocity outer
-    loops are the policy's job. ``action[0]`` maps to collective thrust centered
-    on aligned normalized hover thrust (``action[0] = 0`` -> hover),
-    ``action[1:]`` to the body-rate setpoint.
+    loops are the policy's job. Command conversion maps the normalized action to
+    hover-centered collective thrust and physical body rates at ingestion.
     """
-    collective = _ctbr_collective(params, float(action[0]))
-    body_rate_setpoint = action[1:4] * params.max_body_rate_radps
+    collective = float(command[0])
+    body_rate_setpoint = command[1:4]
     return _rate_to_omega(
         params,
         controller_state,
@@ -722,9 +784,12 @@ def build_actuation_params(
         ki_rate=_readonly_copy(controller_settings.ki_rate),
         kd_rate=_readonly_copy(controller_settings.kd_rate),
         kff_rate=_readonly_copy(controller_settings.kff_rate),
+        angular_velocity_filter_hz=float(controller_settings.angular_velocity_filter_hz),
         rate_derivative_filter_hz=float(controller_settings.rate_derivative_filter_hz),
+        yaw_torque_filter_hz=float(controller_settings.yaw_torque_filter_hz),
         rate_integral_limit=_readonly_copy(controller_settings.rate_integral_limit),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
+        velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
@@ -738,6 +803,13 @@ def build_actuation_params(
         ),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),
+        velocity_observation_scale=_readonly_copy(controller_settings.velocity_observation_scale),
+        velocity_observation_bias_mps=_readonly_copy(
+            controller_settings.velocity_observation_bias_mps
+        ),
+        velocity_estimator_bias_decay_hz=float(
+            controller_settings.velocity_estimator_bias_decay_hz
+        ),
         velocity_filter_hz=float(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_readonly_copy(
@@ -766,12 +838,18 @@ def initial_actuation_controller_state() -> ActuationControllerState:
     zero = np.zeros(3, dtype=np.float64)
     return ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(zero),
+        velocity_estimator_bias_enu=_readonly_copy(zero),
         acceleration_enu=_readonly_copy(zero),
+        acceleration_setpoint_enu=_readonly_copy(zero),
         velocity_integral_enu=_readonly_copy(zero),
         previous_angular_velocity_body_flu=_readonly_copy(zero),
         angular_acceleration_body_flu=_readonly_copy(zero),
         rate_integral_body_flu=_readonly_copy(zero),
+        filtered_yaw_torque=0.0,
         hover_thrust_normalized=0.0,
+        outer_loop_elapsed_s=0.0,
+        collective_thrust_setpoint=0.0,
+        body_rate_setpoint=_readonly_copy(zero),
         initialized=False,
     )
 
@@ -779,17 +857,24 @@ def initial_actuation_controller_state() -> ActuationControllerState:
 def seed_actuation_controller_state(
     *,
     params: ActuationParams,
-    linear_velocity_enu: np.ndarray,
+    controller_dt_s: float,
+    physical_linear_velocity_enu: np.ndarray,
+    filtered_linear_velocity_enu: np.ndarray,
     angular_velocity_body_flu: np.ndarray,
     acceleration_setpoint_enu_mps2: np.ndarray,
     linear_acceleration_enu_mps2: np.ndarray,
     angular_acceleration_body_flu_radps2: np.ndarray,
     rate_integral_body_flu: np.ndarray,
     hover_thrust_normalized: float,
+    outer_loop_elapsed_s: float,
 ) -> ActuationControllerState:
     """Match a neutral-command PX4 controller boundary for one replay."""
     if params.kind != "velocity":
         raise ValueError("controller-state seeding requires velocity actuation")
+    if not math.isfinite(controller_dt_s) or controller_dt_s <= 0.0:
+        raise ValueError("controller_dt_s must be finite and positive")
+    if not math.isfinite(outer_loop_elapsed_s):
+        raise ValueError("outer_loop_elapsed_s must be finite")
 
     def vector(values: np.ndarray, name: str) -> np.ndarray:
         result = np.asarray(values, dtype=np.float64)
@@ -797,7 +882,18 @@ def seed_actuation_controller_state(
             raise ValueError(f"{name} must contain three finite values")
         return result
 
-    velocity = vector(linear_velocity_enu, "linear_velocity_enu")
+    filtered_velocity = vector(
+        filtered_linear_velocity_enu,
+        "filtered_linear_velocity_enu",
+    )
+    physical_velocity = (
+        params.velocity_observation_scale
+        * vector(
+            physical_linear_velocity_enu,
+            "physical_linear_velocity_enu",
+        )
+        + params.velocity_observation_bias_mps
+    )
     angular_velocity = vector(angular_velocity_body_flu, "angular_velocity_body_flu")
     acceleration_setpoint = vector(
         acceleration_setpoint_enu_mps2,
@@ -818,7 +914,7 @@ def seed_actuation_controller_state(
         or hover_thrust_normalized > 1.0
     ):
         raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
-    velocity_error = -velocity
+    velocity_error = -filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
         acceleration_setpoint - effective_kp_vel * velocity_error + params.kd_vel * acceleration,
@@ -826,8 +922,10 @@ def seed_actuation_controller_state(
         params.velocity_integral_limit_mps2,
     )
     return ActuationControllerState(
-        filtered_velocity_enu=_readonly_copy(velocity),
+        filtered_velocity_enu=_readonly_copy(filtered_velocity),
+        velocity_estimator_bias_enu=_readonly_copy(filtered_velocity - physical_velocity),
         acceleration_enu=_readonly_copy(acceleration),
+        acceleration_setpoint_enu=_readonly_copy(acceleration_setpoint),
         velocity_integral_enu=_readonly_copy(velocity_integral),
         previous_angular_velocity_body_flu=_readonly_copy(angular_velocity),
         angular_acceleration_body_flu=_readonly_copy(angular_acceleration),
@@ -838,15 +936,96 @@ def seed_actuation_controller_state(
                 params.rate_integral_limit,
             )
         ),
+        filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
+        outer_loop_elapsed_s=outer_loop_elapsed_s,
+        collective_thrust_setpoint=float(hover_thrust_normalized),
+        body_rate_setpoint=_readonly_copy(np.zeros(3)),
         initialized=True,
     )
 
 
-def action_to_rotor_omega(
+def update_hover_thrust_estimate(
+    *,
     params: ActuationParams,
     controller_state: ActuationControllerState,
+    hover_thrust_normalized: float,
+) -> ActuationControllerState:
+    """Apply PX4's thrust-preserving hover-estimate integrator correction."""
+    if (
+        not math.isfinite(hover_thrust_normalized)
+        or hover_thrust_normalized <= 0.0
+        or hover_thrust_normalized > 1.0
+    ):
+        raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
+    previous_hover = (
+        controller_state.hover_thrust_normalized
+        if controller_state.hover_thrust_normalized > 0.0
+        else params.hover_thrust_normalized
+    )
+    if hover_thrust_normalized == previous_hover:
+        return controller_state
+    velocity_integral = np.array(controller_state.velocity_integral_enu, copy=True)
+    acceleration_setpoint_z = float(controller_state.acceleration_setpoint_enu[2])
+    velocity_integral[2] += (acceleration_setpoint_z + GRAVITY_M_S2) * (
+        previous_hover / hover_thrust_normalized - 1.0
+    )
+    velocity_integral = np.clip(
+        velocity_integral,
+        -params.velocity_integral_limit_mps2,
+        params.velocity_integral_limit_mps2,
+    )
+    return replace(
+        controller_state,
+        velocity_integral_enu=_readonly_copy(velocity_integral),
+        hover_thrust_normalized=float(hover_thrust_normalized),
+    )
+
+
+def normalized_action_to_controller_command(
+    params: ActuationParams,
     action: np.ndarray,
+    attitude_flu_enu_wxyz: np.ndarray,
+    /,
+) -> np.ndarray:
+    """Convert one normalized policy action at its arrival boundary.
+
+    Velocity actions become ``[vx_enu, vy_enu, vz_enu, yaw_rate]`` in physical
+    units using the arrival attitude. CTBR actions become
+    ``[collective, roll_rate, pitch_rate, yaw_rate]``. The returned command is
+    held unchanged while the faster controller and physics loops advance.
+    """
+    action = np.asarray(action, dtype=np.float64)
+    if params.kind == "ctbr":
+        return _readonly_copy(
+            np.concatenate(
+                (
+                    [_ctbr_collective(params, float(action[0]))],
+                    action[1:4] * params.max_body_rate_radps,
+                )
+            )
+        )
+    rotation = _rotation_from_wxyz(attitude_flu_enu_wxyz)
+    yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    velocity_body = action[:3] * params.max_body_velocity_mps
+    return _readonly_copy(
+        np.array(
+            [
+                cos_yaw * velocity_body[0] - sin_yaw * velocity_body[1],
+                sin_yaw * velocity_body[0] + cos_yaw * velocity_body[1],
+                velocity_body[2],
+                action[3] * params.max_yaw_rate_radps,
+            ]
+        )
+    )
+
+
+def controller_command_to_rotor_omega(
+    params: ActuationParams,
+    controller_state: ActuationControllerState,
+    command: np.ndarray,
     state: ActuationState,
     dt_s: float,
     /,
@@ -854,19 +1033,19 @@ def action_to_rotor_omega(
     """Advance the controller and return clipped per-rotor velocity references."""
     if not math.isfinite(dt_s) or dt_s <= 0.0:
         raise ValueError("controller dt_s must be finite and positive")
-    action = np.asarray(action, dtype=np.float64)
+    command = np.asarray(command, dtype=np.float64)
     if params.kind == "ctbr":
-        return _ctbr_action_to_omega(
+        return _ctbr_command_to_omega(
             params,
             controller_state,
-            action,
+            command,
             state,
             dt_s,
         )
-    return _velocity_action_to_omega(
+    return _velocity_command_to_omega(
         params,
         controller_state,
-        action,
+        command,
         state,
         dt_s,
     )

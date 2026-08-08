@@ -17,18 +17,21 @@ from robotics_experiments.controller import (
     ActuationState,
     ControllerSettings,
     MixerGeometry,
-    action_to_rotor_omega,
     build_actuation_params,
+    controller_command_to_rotor_omega,
     hover_action,
     initial_actuation_controller_state,
+    normalized_action_to_controller_command,
     rotor_forces_to_body_wrench,
     seed_actuation_controller_state,
+    update_hover_thrust_estimate,
 )
 from robotics_experiments.controller.actuation import (
     _effective_velocity_proportional_gain,
     _normalized_controls_to_omega,
 )
 from robotics_experiments.px4_bridge import (
+    GRAVITY_M_S2,
     ActuatorCommands,
     PegasusQuadraticThrustModel,
     create_pegasus_thrust_model,
@@ -40,6 +43,15 @@ _ROLLING_MOMENT = 1e-6
 _MAX_OMEGA = 1100.0
 _ARM_RADIUS = 0.25
 _ROT_DIR = [-1.0, -1.0, 1.0, 1.0]
+
+
+def _step_controller(params, controller, action, state, dt_s, /):
+    command = normalized_action_to_controller_command(
+        params,
+        action,
+        state.attitude_flu_enu_wxyz,
+    )
+    return controller_command_to_rotor_omega(params, controller, command, state, dt_s)
 
 
 def _quad_geometry() -> MixerGeometry:
@@ -79,6 +91,24 @@ def _thrust_model() -> PegasusQuadraticThrustModel:
     )
 
 
+def test_velocity_action_is_converted_once_at_command_arrival():
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=_controller_settings(),
+        mass=_MASS_KG,
+    )
+    action = np.array([0.5, 0.0, 0.0, 0.25])
+    level = np.array([1.0, 0.0, 0.0, 0.0])
+    yaw_90 = np.array([math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)])
+
+    held_command = normalized_action_to_controller_command(params, action, level)
+    next_command = normalized_action_to_controller_command(params, action, yaw_90)
+
+    assert held_command == pytest.approx([1.5, 0.0, 0.0, 0.375])
+    assert next_command == pytest.approx([0.0, 1.5, 0.0, 0.375], abs=1e-12)
+
+
 def _action_cfg(kind: str) -> RlActionConfig:
     return RlActionConfig(
         kind=kind,
@@ -92,12 +122,16 @@ def _action_cfg(kind: str) -> RlActionConfig:
 def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.0,
+        velocity_controller_rate_hz=125.0,
         kp_vel=(4.0, 4.0, 5.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
+        velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
@@ -108,7 +142,9 @@ def _controller_settings() -> ControllerSettings:
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.003, 0.003, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        angular_velocity_filter_hz=0.0,
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
@@ -139,7 +175,7 @@ def _level_rest_state():
 
 def _realized_wrench(params, action, state):
     geometry = _quad_geometry()
-    _controller_state, omega = action_to_rotor_omega(
+    _controller_state, omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         action,
@@ -241,7 +277,7 @@ def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
         mass=_MASS_KG,
     )
 
-    _controller, omega = action_to_rotor_omega(
+    _controller, omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         np.zeros(4),
@@ -281,14 +317,14 @@ def test_collective_preserves_desired_thrust_magnitude_during_attitude_error():
         ),
     )
 
-    _level_controller, level_omega = action_to_rotor_omega(
+    _level_controller, level_omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         np.zeros(4),
         _level_rest_state(),
         0.004,
     )
-    _tilted_controller, tilted_omega = action_to_rotor_omega(
+    _tilted_controller, tilted_omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         np.zeros(4),
@@ -342,7 +378,7 @@ def test_normalized_velocity_anti_windup_blocks_vertical_saturation():
     )
     controller = initial_actuation_controller_state()
     for _step in range(100):
-        controller, omega = action_to_rotor_omega(
+        controller, omega = _step_controller(
             params,
             controller,
             np.array([0.0, 0.0, 1.0, 0.0]),
@@ -419,14 +455,14 @@ def test_rate_integral_affects_the_following_control_cycle():
         mass=_MASS_KG,
     )
     action = np.array([0.0, 0.1, 0.0, 0.0])
-    controller, first_omega = action_to_rotor_omega(
+    controller, first_omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         action,
         _level_rest_state(),
         0.004,
     )
-    _controller, second_omega = action_to_rotor_omega(
+    _controller, second_omega = _step_controller(
         params,
         controller,
         action,
@@ -457,7 +493,7 @@ def test_velocity_integral_back_calculates_against_thrust_saturation():
     controller_state = initial_actuation_controller_state()
     action = np.array([1.0, 0.0, 0.0, 0.0])
     for _step in range(100):
-        controller_state, _omega = action_to_rotor_omega(
+        controller_state, _omega = _step_controller(
             params,
             controller_state,
             action,
@@ -478,10 +514,11 @@ def test_controller_filters_are_sequential_and_fresh_state_resets_them():
         controller_settings=replace(
             _controller_settings(),
             hover_thrust_normalized=0.57,
+            velocity_controller_rate_hz=250.0,
         ),
         mass=_MASS_KG,
     )
-    controller_state, _omega = action_to_rotor_omega(
+    controller_state, _omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         np.zeros(4),
@@ -492,7 +529,7 @@ def test_controller_filters_are_sequential_and_fresh_state_resets_them():
         _level_rest_state(),
         linear_velocity_enu=np.array([1.0, 0.0, 0.0]),
     )
-    controller_state, _omega = action_to_rotor_omega(
+    controller_state, _omega = _step_controller(
         params,
         controller_state,
         np.zeros(4),
@@ -505,16 +542,21 @@ def test_controller_filters_are_sequential_and_fresh_state_resets_them():
     reset = initial_actuation_controller_state()
     assert not reset.initialized
     assert np.array_equal(reset.filtered_velocity_enu, np.zeros(3))
+    assert np.array_equal(reset.velocity_estimator_bias_enu, np.zeros(3))
 
 
 def test_zero_velocity_filter_cutoff_disables_filtering():
     params = build_actuation_params(
         geometry=_quad_geometry(),
         action_cfg=_action_cfg("velocity"),
-        controller_settings=replace(_controller_settings(), velocity_filter_hz=0.0),
+        controller_settings=replace(
+            _controller_settings(),
+            velocity_controller_rate_hz=250.0,
+            velocity_filter_hz=0.0,
+        ),
         mass=_MASS_KG,
     )
-    controller, _omega = action_to_rotor_omega(
+    controller, _omega = _step_controller(
         params,
         initial_actuation_controller_state(),
         np.zeros(4),
@@ -525,7 +567,7 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
         _level_rest_state(),
         linear_velocity_enu=np.array([1.0, 0.0, 0.0]),
     )
-    controller, _omega = action_to_rotor_omega(
+    controller, _omega = _step_controller(
         params,
         controller,
         np.zeros(4),
@@ -536,9 +578,56 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
     assert controller.filtered_velocity_enu[0] == pytest.approx(1.0)
 
 
+def test_velocity_outer_loop_holds_between_declared_rate_updates():
+    params = _params("velocity")
+    controller, _omega = _step_controller(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    moving = replace(_level_rest_state(), linear_velocity_enu=np.array([1.0, 0.0, 0.0]))
+
+    held, _omega = _step_controller(params, controller, np.zeros(4), moving, 0.004)
+    updated, _omega = _step_controller(params, held, np.zeros(4), moving, 0.004)
+
+    assert np.array_equal(held.filtered_velocity_enu, controller.filtered_velocity_enu)
+    assert not np.array_equal(updated.filtered_velocity_enu, controller.filtered_velocity_enu)
+
+
+def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
+    params = _params("velocity")
+    state = seed_actuation_controller_state(
+        params=params,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=np.zeros(3),
+        filtered_linear_velocity_enu=np.zeros(3),
+        angular_velocity_body_flu=np.zeros(3),
+        acceleration_setpoint_enu_mps2=np.array([0.0, 0.0, 0.9]),
+        linear_acceleration_enu_mps2=np.zeros(3),
+        angular_acceleration_body_flu_radps2=np.zeros(3),
+        rate_integral_body_flu=np.zeros(3),
+        hover_thrust_normalized=0.55,
+        outer_loop_elapsed_s=0.0,
+    )
+
+    updated = update_hover_thrust_estimate(
+        params=params,
+        controller_state=state,
+        hover_thrust_normalized=0.56,
+    )
+
+    expected_delta = (0.9 + GRAVITY_M_S2) * (0.55 / 0.56 - 1.0)
+    assert updated.velocity_integral_enu[2] == pytest.approx(
+        state.velocity_integral_enu[2] + expected_delta
+    )
+    assert updated.hover_thrust_normalized == 0.56
+
+
 def test_seed_controller_state_matches_neutral_acceleration_boundary():
     params = _params("velocity")
-    velocity = np.array([0.1, -0.2, 0.05])
+    filtered_velocity = np.array([0.08, -0.18, 0.04])
     acceleration = np.array([0.3, -0.4, 0.2])
     acceleration_setpoint = np.array([0.7, -0.8, 0.9])
     angular_velocity = np.array([0.01, -0.02, 0.03])
@@ -547,24 +636,106 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary():
 
     state = seed_actuation_controller_state(
         params=params,
-        linear_velocity_enu=velocity,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=filtered_velocity,
+        filtered_linear_velocity_enu=filtered_velocity,
         angular_velocity_body_flu=angular_velocity,
         acceleration_setpoint_enu_mps2=acceleration_setpoint,
         linear_acceleration_enu_mps2=acceleration,
         angular_acceleration_body_flu_radps2=angular_acceleration,
         rate_integral_body_flu=rate_integral,
         hover_thrust_normalized=0.572,
+        outer_loop_elapsed_s=-0.004,
     )
     reconstructed = (
-        params.kp_vel * -velocity + state.velocity_integral_enu - params.kd_vel * acceleration
+        params.kp_vel * -filtered_velocity
+        + state.velocity_integral_enu
+        - params.kd_vel * acceleration
     )
 
     assert state.initialized
+    assert state.filtered_velocity_enu == pytest.approx(filtered_velocity)
     assert reconstructed == pytest.approx(acceleration_setpoint)
     assert state.previous_angular_velocity_body_flu == pytest.approx(angular_velocity)
     assert state.angular_acceleration_body_flu == pytest.approx(angular_acceleration)
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
     assert state.hover_thrust_normalized == pytest.approx(0.572)
+    assert state.outer_loop_elapsed_s == pytest.approx(-0.004)
+
+
+def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
+    steady_bias = np.array([0.001, -0.003, 0.002])
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            _controller_settings(),
+            velocity_observation_bias_mps=tuple(steady_bias),
+            velocity_estimator_bias_decay_hz=2.0,
+        ),
+        mass=_MASS_KG,
+    )
+    zero = np.zeros(3)
+    controller = seed_actuation_controller_state(
+        params=params,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=zero,
+        filtered_linear_velocity_enu=np.array([0.1, -0.2, 0.3]),
+        angular_velocity_body_flu=zero,
+        acceleration_setpoint_enu_mps2=zero,
+        linear_acceleration_enu_mps2=zero,
+        angular_acceleration_body_flu_radps2=zero,
+        rate_integral_body_flu=zero,
+        hover_thrust_normalized=0.57,
+        outer_loop_elapsed_s=0.0,
+    )
+    initial_bias = np.array(controller.velocity_estimator_bias_enu)
+    assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
+
+    controller, _omega = _step_controller(
+        params, controller, np.zeros(4), _level_rest_state(), 0.004
+    )
+    controller, _omega = _step_controller(
+        params, controller, np.zeros(4), _level_rest_state(), 0.004
+    )
+
+    expected_decay = math.exp(-2.0 * math.pi * 2.0 / 125.0)
+    assert controller.velocity_estimator_bias_enu == pytest.approx(initial_bias * expected_decay)
+
+
+def test_body_rate_input_filter_uses_the_seeded_estimator_state():
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            _controller_settings(),
+            angular_velocity_filter_hz=10.0,
+        ),
+        mass=_MASS_KG,
+    )
+    zero = np.zeros(3)
+    controller = seed_actuation_controller_state(
+        params=params,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=zero,
+        filtered_linear_velocity_enu=zero,
+        angular_velocity_body_flu=zero,
+        acceleration_setpoint_enu_mps2=zero,
+        linear_acceleration_enu_mps2=zero,
+        angular_acceleration_body_flu_radps2=zero,
+        rate_integral_body_flu=zero,
+        hover_thrust_normalized=0.57,
+        outer_loop_elapsed_s=0.0,
+    )
+    rotating = replace(
+        _level_rest_state(),
+        angular_velocity_body_flu=np.ones(3),
+    )
+
+    controller, _omega = _step_controller(params, controller, np.zeros(4), rotating, 0.004)
+
+    assert np.all(controller.previous_angular_velocity_body_flu > 0.0)
+    assert np.all(controller.previous_angular_velocity_body_flu < 1.0)
 
 
 def test_seeded_hover_estimate_controls_neutral_collective() -> None:
@@ -582,15 +753,18 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
     def neutral_omega(hover: float) -> np.ndarray:
         controller = seed_actuation_controller_state(
             params=params,
-            linear_velocity_enu=zero,
+            controller_dt_s=0.004,
+            physical_linear_velocity_enu=zero,
+            filtered_linear_velocity_enu=zero,
             angular_velocity_body_flu=zero,
             acceleration_setpoint_enu_mps2=zero,
             linear_acceleration_enu_mps2=zero,
             angular_acceleration_body_flu_radps2=zero,
             rate_integral_body_flu=zero,
             hover_thrust_normalized=hover,
+            outer_loop_elapsed_s=0.0,
         )
-        _successor, omega = action_to_rotor_omega(
+        _successor, omega = _step_controller(
             params,
             controller,
             np.zeros(4),
@@ -621,7 +795,13 @@ def test_lab_body_wrench_translates_origin_torque_to_com():
     force = torch.tensor([[0.0, 0.0, 3.0]])
     torque = torch.tensor([[4.0, 5.0, 6.0]])
 
-    apply_body_wrench(articulation, 2, com_position, force, torque)
+    apply_body_wrench(
+        articulation=articulation,
+        body_id=2,
+        body_com_position_body=com_position,
+        force_body=force,
+        torque_body=torque,
+    )
 
     forces, torques, body_ids = articulation.arguments
     assert torch.equal(forces, force.unsqueeze(1))
@@ -677,6 +857,8 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
     settings = replace(
         _controller_settings(),
         hover_thrust_normalized=0.57,
+        velocity_estimator_bias_decay_hz=0.02,
+        angular_velocity_filter_hz=10.0,
         horizontal_velocity_error_gain_scale=8.0 / 7.0,
         horizontal_velocity_error_gain_start_mps=0.1,
         horizontal_velocity_error_gain_full_mps=0.3,
@@ -703,15 +885,18 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
     state = seed_flight_controller_state(
         state=initial_flight_controller_state(num_envs=1, device="cpu"),
         params=params,
-        linear_velocity_world=zero,
-        angular_velocity_body=zero,
+        physical_linear_velocity_world=zero,
+        filtered_linear_velocity_world=zero,
+        filtered_angular_velocity_body=zero,
         acceleration_setpoint_world=zero,
         linear_acceleration_world=zero,
         angular_acceleration_body=zero,
         rate_integral_body=zero,
         hover_thrust_normalized=torch.tensor([0.572]),
+        outer_loop_elapsed_s=torch.tensor([-0.004]),
         valid=torch.tensor([True]),
     )
+    assert state.outer_loop_elapsed_s.item() == pytest.approx(-0.004)
     velocity_integral_before = state.velocity_integral_world.clone()
 
     thrust = _initial_rotor_thrust_from_controller_state(
@@ -731,12 +916,15 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
 def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-        action_to_rotor_omega as torch_action_to_rotor_omega,
+        _normalized_action_to_controller_command as torch_action_to_command,
     )
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
         build_flight_actuation_params,
         initial_flight_controller_state,
         seed_flight_controller_state,
+    )
+    from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+        controller_command_to_rotor_omega as torch_controller_step,
     )
 
     geometry = replace(
@@ -748,6 +936,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     settings = replace(
         _controller_settings(),
         hover_thrust_normalized=0.57,
+        velocity_observation_bias_mps=(0.001, -0.003, 0.002),
     )
     action_cfg = _action_cfg("velocity")
     numpy_params = build_actuation_params(
@@ -774,6 +963,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         controller_dt_s=0.004,
         device="cpu",
     )
+    physical_seed_velocity = np.array([0.16, -0.11, 0.015])
     seed_velocity = np.array([0.18, -0.12, 0.01])
     seed_angular_velocity = np.array([0.01, -0.015, 0.02])
     seed_acceleration_setpoint = np.array([0.04, -0.03, 0.02])
@@ -782,19 +972,29 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     seed_rate_integral = np.array([0.01, -0.02, 0.03])
     numpy_controller = seed_actuation_controller_state(
         params=numpy_params,
-        linear_velocity_enu=seed_velocity,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=physical_seed_velocity,
+        filtered_linear_velocity_enu=seed_velocity,
         angular_velocity_body_flu=seed_angular_velocity,
         acceleration_setpoint_enu_mps2=seed_acceleration_setpoint,
         linear_acceleration_enu_mps2=seed_acceleration,
         angular_acceleration_body_flu_radps2=seed_angular_acceleration,
         rate_integral_body_flu=seed_rate_integral,
         hover_thrust_normalized=0.572,
+        outer_loop_elapsed_s=-0.004,
     )
     torch_controller = seed_flight_controller_state(
         state=initial_flight_controller_state(num_envs=1, device="cpu"),
         params=torch_params,
-        linear_velocity_world=torch.as_tensor(seed_velocity, dtype=torch.float32).reshape(1, 3),
-        angular_velocity_body=torch.as_tensor(
+        physical_linear_velocity_world=torch.as_tensor(
+            physical_seed_velocity,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        filtered_linear_velocity_world=torch.as_tensor(
+            seed_velocity,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        filtered_angular_velocity_body=torch.as_tensor(
             seed_angular_velocity,
             dtype=torch.float32,
         ).reshape(1, 3),
@@ -815,6 +1015,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
             dtype=torch.float32,
         ).reshape(1, 3),
         hover_thrust_normalized=torch.tensor([0.572]),
+        outer_loop_elapsed_s=torch.tensor([-0.004]),
         valid=torch.tensor([True]),
     )
     actions = (
@@ -838,21 +1039,28 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
             linear_velocity_enu=np.array([0.05 * index, -0.02 * index, 0.01 * index]),
             angular_velocity_body_flu=np.array([0.01 * index, -0.015 * index, 0.02 * index]),
         )
-        numpy_controller, numpy_omega = action_to_rotor_omega(
+        numpy_controller, numpy_omega = _step_controller(
             numpy_params,
             numpy_controller,
             action,
             state,
             0.004,
         )
-        torch_controller, torch_omega = torch_action_to_rotor_omega(
+        torch_action = torch.as_tensor(action, dtype=torch.float32).reshape(1, 4)
+        torch_attitude = torch.as_tensor(
+            state.attitude_flu_enu_wxyz,
+            dtype=torch.float32,
+        ).reshape(1, 4)
+        torch_command = torch_action_to_command(
+            torch_params,
+            torch_action,
+            torch_attitude,
+        )
+        torch_controller, torch_omega = torch_controller_step(
             torch_params,
             torch_controller,
-            torch.as_tensor(action, dtype=torch.float32).reshape(1, 4),
-            torch.as_tensor(
-                state.attitude_flu_enu_wxyz,
-                dtype=torch.float32,
-            ).reshape(1, 4),
+            torch_command,
+            torch_attitude,
             torch.as_tensor(
                 state.linear_velocity_enu,
                 dtype=torch.float32,
@@ -872,6 +1080,18 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         assert np.allclose(
             numpy_controller.filtered_velocity_enu,
             torch_controller.filtered_velocity_world[0].detach().numpy(),
+            rtol=2e-5,
+            atol=2e-5,
+        )
+        assert np.allclose(
+            numpy_controller.velocity_estimator_bias_enu,
+            torch_controller.velocity_estimator_bias_world[0].detach().numpy(),
+            rtol=2e-5,
+            atol=2e-5,
+        )
+        assert np.allclose(
+            numpy_controller.previous_angular_velocity_body_flu,
+            torch_controller.previous_angular_velocity_body[0].detach().numpy(),
             rtol=2e-5,
             atol=2e-5,
         )

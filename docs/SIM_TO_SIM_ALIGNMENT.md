@@ -33,7 +33,22 @@ input is approximately 0.375. Controller hover is represented only by
 
 NumPy is the single-environment reference and the Isaac Lab Torch seam is its
 batched twin. Both apply the same filter, saturation, anti-windup, reset, and
-allocator ordering. Sequential parity is a host-test requirement.
+allocator ordering. The strict settings include the velocity-controller update
+rate, PX4's dedicated yaw-torque low-pass, and the target-side estimator
+adapter. That adapter seeds a velocity offset from the captured PX4 estimate
+and decays it toward scaled articulation velocity; it also filters articulation
+body rate from the captured PX4 angular-rate seed. Controller state carries
+these estimator states, the held outer-loop setpoints, and the acceleration
+setpoint needed for PX4's thrust-preserving hover-estimate integrator
+correction. Sequential NumPy/Torch parity is a host-test requirement.
+
+The latest body-FLU policy action is held across its 20 Hz inference interval.
+The configured 50 Hz OFFBOARD stream converts that retained action with the
+attitude at each wire transmission, then holds the resulting world-ENU velocity
+setpoint while the 125 Hz velocity loop and 250 Hz rate, allocator, actuator,
+and physics loops advance. This mirrors PX4's `MAV_FRAME_BODY_NED` receiver:
+body-to-world conversion occurs for each received message, independently of the
+slower policy cadence.
 
 ## Search
 
@@ -47,6 +62,15 @@ fields. The `coarse-to-fine-beam` strategy:
 4. generates midpoints only around retained regions for two refinement levels;
 5. deduplicates settings by their exact float32 controller representation.
 
+A zero-centered fitted field may declare a positive
+`selection_regularization_scale`. If the registered metric finds any
+quality-passing candidates, the search selects the passing candidate with the
+smallest dimensionless L2 correction across those declared fields, then uses
+the response metrics as tie-breakers. If no candidate passes, gate proximity
+continues to determine selection. This keeps an estimator-offset fit from
+spending unnecessary correction authority merely to improve an already-passing
+trace metric.
+
 The default uses one persistent worker and 128 candidate slots. This is the
 measured useful-throughput optimum for the current GPU; additional workers
 increase PhysX contention. The target coordinator reports candidates per
@@ -57,8 +81,12 @@ objective.
 ## Evidence and boundary audit
 
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. Each profile records its absolute PX4 simulation start time and the
-complete initial controller state required for replay. One run directory keeps:
+adapter. Its configured pusher is deployed after takeoff and before probe
+preconditioning so the reference plant matches Lab training and press-policy
+deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
+force setting, which is disabled to match the standalone PX4 plant. Each
+profile records its absolute PX4 simulation start time and the complete initial
+controller state required for replay. One run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;
@@ -73,8 +101,29 @@ reconstructed collective/torque, and `hover_thrust_estimate` by timestamp. It
 fails on incomplete topic coverage, a join error above one 4 ms physics tick,
 normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
 controller-boundary replay applies the selected controller to every fit,
-validation, and stability profile and enforces the same motor and collective
-limits.
+validation, and stability profile. Its core replay uses PX4-estimated state and
+enforces the same motor and collective limits. A second replay starts from the
+physics-rate physical articulation state in the bridge log, seeds the recorded
+initial estimator state, and requires normalized motor RMSE below 0.01;
+closed-loop motion gates cover the remaining estimator residual. It uses each
+profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
+and recorded command cadence. The seed phase is derived per profile from the
+recorded age of its `vehicle_local_position` sample. Because the replay grid
+includes the profile boundary, its initial accrued outer-loop time is the
+sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
+whether the boundary lands on or between estimator publications. ULog
+rate-limited `trajectory_setpoint` samples are not used to infer command
+transitions. Replay builds relative command time from integer physics steps so
+large absolute profile start times cannot delay an exact command boundary by a
+floating-point tick. The replay also reproduces PX4's
+velocity-only vertical state blending and applies logged hover-estimate updates
+at their source timestamps. The target-only `velocity_observation_scale`,
+steady world-ENU `velocity_observation_bias_mps`,
+`velocity_estimator_bias_decay_hz`, and `angular_velocity_filter_hz` model the
+evidenced physical-to-estimated state boundary without changing the pinned PX4
+controller gains. The core replay bypasses these target-only adapters because
+its inputs are already PX4-estimated state; the physical-state replay retains
+them and therefore audits the deployment boundary.
 
 ## Quality and acceptance
 
@@ -89,6 +138,12 @@ applies these hard validation limits:
 - yaw-rate NRMSE <= 0.10;
 - heading error <= 3 degrees;
 - combined endpoint error <= 0.01 m.
+
+Braking distance and stop time apply only when the PX4 reference has reached
+at least half of the preceding nonzero command at the transition. This keeps
+the exact-action gates tied to genuine braking responses; a short reversal
+that never establishes the commanded motion remains covered by velocity,
+acceleration, residual, settling, and endpoint metrics.
 
 The vertical policy envelope is an independent ascent, descent, neutral-return
 profile using commands through 0.8 m/s. It prevents a low-speed aggregate from
@@ -109,6 +164,10 @@ Run the full campaign with:
 make align-controllers
 ```
 
+The campaign runs the authoritative integration gate against its run-local
+`controller.json` after replay and before finalization. A failure therefore
+preserves diagnostic evidence without advancing `latest` or `best`.
+
 `controller.json` is the downstream product. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
 controller artifact. `latest` and comparable `best` links advance only for a
@@ -118,7 +177,9 @@ fully accepted bundle.
 
 Changing a metric, probe suite, environment, image, controller interface,
 controller definition, or resolved experiment starts a new comparison
-fingerprint. Plant residuals must be fixed at the plant seam; they must not be
+fingerprint. The fingerprint includes hashes of the metric and normalized
+controller implementation modules, so an equation change cannot remain in an
+old comparison. Plant residuals must be fixed at the plant seam; they must not be
 absorbed into controller gains. A selected parameter touching a range boundary
 is not evidence by itself: the matching trace or ULog boundary must support an
 expanded range or structural correction.

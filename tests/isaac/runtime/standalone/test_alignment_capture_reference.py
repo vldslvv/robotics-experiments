@@ -158,6 +158,74 @@ def test_capture_seeds_sensor_noise_before_starting_scenario(
     assert seeds == [42]
 
 
+def test_capture_deploys_the_policy_plant_pusher(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    writes: dict[str, float] = {}
+
+    class _Attribute:
+        def __init__(self, value: float = 0.0):
+            self.value = value
+
+        def Get(self) -> float:
+            return self.value
+
+        def Set(self, value: float) -> None:
+            self.value = value
+
+    class _Prim:
+        def IsValid(self) -> bool:
+            return True
+
+    prim = _Prim()
+    stage = SimpleNamespace(GetPrimAtPath=lambda _path: prim)
+    omni = ModuleType("omni")
+    omni_usd = ModuleType("omni.usd")
+    omni_usd.get_context = lambda: SimpleNamespace(get_stage=lambda: stage)  # type: ignore[attr-defined]
+    omni.usd = omni_usd  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "omni", omni)
+    monkeypatch.setitem(sys.modules, "omni.usd", omni_usd)
+
+    class _Joint:
+        def __init__(self, _prim):
+            pass
+
+        def GetUpperLimitAttr(self):
+            return _Attribute(0.015)
+
+    drive = SimpleNamespace(
+        CreateTargetPositionAttr=lambda value: writes.__setitem__("target", value),
+        CreateMaxForceAttr=lambda value: writes.__setitem__("force", value),
+    )
+    velocity = _Attribute()
+    pxr = ModuleType("pxr")
+    pxr.UsdPhysics = SimpleNamespace(  # type: ignore[attr-defined]
+        PrismaticJoint=_Joint,
+        DriveAPI=SimpleNamespace(Get=lambda _prim, _kind: drive),
+    )
+    pxr.PhysxSchema = SimpleNamespace(  # type: ignore[attr-defined]
+        PhysxJointAPI=SimpleNamespace(
+            Apply=lambda _prim: SimpleNamespace(CreateMaxJointVelocityAttr=lambda: velocity)
+        )
+    )
+    monkeypatch.setitem(sys.modules, "pxr", pxr)
+    reports: list[str] = []
+
+    module._deploy_pusher(  # noqa: SLF001 - focused capture plant-contract test
+        SimpleNamespace(config=config, report=reports.append),
+        SimpleNamespace(params=SimpleNamespace(articulation_path="/Drone")),
+    )
+
+    assert writes == {
+        "target": 0.015,
+        "force": config.rl.lab_vehicle.pusher_effort_limit_n,
+    }
+    assert velocity.value == config.rl.lab_vehicle.pusher_velocity_limit_mps
+    assert reports == ["alignment plant pusher deployed to 0.015000 m"]
+
+
 def test_capture_rejects_wrong_body_flu_yaw_response_sign(monkeypatch: pytest.MonkeyPatch):
     module = _load_script(monkeypatch)
     samples = tuple(

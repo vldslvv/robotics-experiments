@@ -173,6 +173,7 @@ def test_drone_hover_task_import_and_config_when_isaac_lab_available():
     assert not hasattr(cfg, "physics_rate_hz")
     assert cfg.sim.dt == pytest.approx(1.0 / 250.0)
     assert not cfg.sim.physx.enable_enhanced_determinism
+    assert not cfg.drone_cfg.spawn.rigid_props.enable_gyroscopic_forces
     assert (
         _episode_step_count(
             episode_length_s=cfg.episode_length_s,

@@ -18,6 +18,7 @@ from robotics_experiments.alignment import (
     load_controller_definition,
 )
 from robotics_experiments.alignment._align import (
+    _module_fingerprint,
     _resolved_experiment_fingerprint,
     _staged_beam_search,
 )
@@ -64,12 +65,16 @@ def _settings(
 ) -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=delay,
+        velocity_controller_rate_hz=125.0,
         kp_vel=kp,
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
+        velocity_observation_scale=(1.0, 1.0, 1.0),
+        velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=10.0,
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
@@ -80,7 +85,9 @@ def _settings(
         ki_rate=(0.2, 0.2, 0.1),
         kd_rate=(0.01, 0.01, 0.0),
         kff_rate=(0.0, 0.0, 0.0),
+        angular_velocity_filter_hz=0.0,
         rate_derivative_filter_hz=30.0,
+        yaw_torque_filter_hz=2.0,
         rate_integral_limit=(0.3, 0.3, 0.2),
         max_tilt_cmd_deg=30.0,
         min_collective_thrust_fraction=0.05,
@@ -202,7 +209,9 @@ def _response_traces(
                 initial_position_enu_m=_ZERO3,
                 initial_attitude_flu_enu_wxyz=_IDENTITY,
                 initial_linear_velocity_enu_mps=_ZERO3,
+                initial_estimated_linear_velocity_enu_mps=_ZERO3,
                 initial_angular_velocity_body_flu_radps=_ZERO3,
+                initial_estimated_angular_velocity_body_flu_radps=_ZERO3,
                 completed=True,
             )
         )
@@ -282,18 +291,28 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.backend == "isaac-lab"
     assert target.alignment_id == "x500-px4-v1"
     assert target.controller_schema_version == 1
-    assert target.base_settings.command_delay_s == pytest.approx(0.0725)
-    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
-    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(9.5 / 7.0)
-    assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.34)
-    assert target.base_settings.ki_vel == pytest.approx((0.35, 0.35, 1.5))
-    assert target.base_settings.kd_vel == pytest.approx((0.4, 0.325, 0.0))
+    assert target.base_settings.command_delay_s == pytest.approx(0.0)
+    assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.20))
+    assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
+    assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
+    assert target.base_settings.ki_vel == pytest.approx((0.4, 0.4, 2.1))
+    assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
+    assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
     assert target.search.strategy == "coarse-to-fine-beam"
     assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 2
     assert target.search.initial_settings == ()
-    assert target.parameters
+    assert tuple(parameter.field for parameter in target.parameters) == (
+        "velocity_estimator_bias_decay_hz",
+        "velocity_observation_bias_mps",
+        "velocity_integral_limit_mps2",
+    )
+    assert len(target.parameters[-2].candidates) == 25
+    assert target.parameters[-2].candidates[0] == pytest.approx((0.000, -0.030, -0.0039))
+    assert target.parameters[-2].candidates[-1] == pytest.approx((0.040, 0.010, -0.0039))
+    assert target.parameters[-2].selection_regularization_scale == pytest.approx(1.0)
+    assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     extended = replace(
         target,
         parameters=(
@@ -542,7 +561,7 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
         ),
         base_settings=_settings(delay=0.5),
         search=SearchSpec(
-            strategy="coarse-to-fine-beam-v3",
+            strategy="coarse-to-fine-beam",
             beam_width=2,
             passes_per_stage=1,
             refinement_levels=1,
@@ -557,6 +576,40 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
     assert any(
         record["field"] == "command_delay_s" and record["candidate"] == pytest.approx(0.25)
         for record in outcome.generated_refinements
+    )
+
+
+def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> None:
+    target = replace(
+        _definition(
+            backend="isaac-lab",
+            evaluator=_BatchEvaluator(),
+            parameters=(
+                ParameterSpec(
+                    "horizontal_velocity_error_gain_start_mps",
+                    1,
+                    (0.2, 0.4),
+                ),
+            ),
+        ),
+        base_settings=replace(
+            _settings(),
+            horizontal_velocity_error_gain_start_mps=0.1,
+            horizontal_velocity_error_gain_full_mps=0.3,
+        ),
+    )
+    reference_traces = _response_traces(
+        profiles=target.probes,
+        settings=target.base_settings,
+    )
+
+    outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
+
+    assert outcome.statistics["rejected_invalid_settings"] >= 1
+    assert all(
+        candidate.settings.horizontal_velocity_error_gain_start_mps
+        < candidate.settings.horizontal_velocity_error_gain_full_mps
+        for candidate in outcome.candidate_scores
     )
 
 
@@ -605,7 +658,7 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
             ),
         ),
         search=SearchSpec(
-            strategy="coarse-to-fine-beam-v3",
+            strategy="coarse-to-fine-beam",
             beam_width=2,
             passes_per_stage=1,
         ),
@@ -757,6 +810,30 @@ def test_controller_quality_reports_braking_distance_and_residual_speed_error() 
 
     assert result.validation_metrics["braking_distance_error_m"] > 0.0
     assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
+    assert result.ranking_values[3] == result.validation_metrics["residual_speed_error_mps"]
+    assert result.ranking_values[4] == result.validation_metrics["braking_distance_error_m"]
+
+
+def test_vertical_envelope_has_a_dedicated_gate_without_redefining_braking() -> None:
+    settings = _settings(kp=(1.0, 1.0, 1.0))
+    reference = _response_traces(profiles=_profiles(), settings=settings)
+    trace_index = next(
+        index
+        for index, trace in enumerate(reference)
+        if trace.profile == "validation-vertical-policy-envelope"
+    )
+    source = reference[trace_index]
+    modified = replace(
+        source,
+        position_enu_m=tuple(
+            (position[0], position[1], position[2] * 10.0) for position in source.position_enu_m
+        ),
+    )
+    target = (*reference[:trace_index], modified, *reference[trace_index + 1 :])
+
+    result = metric(name="controller-quality")(reference, target)
+
+    assert result.validation_metrics["braking_distance_error_m"] == 0.0
 
 
 def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
@@ -769,7 +846,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     reference_velocity = (
         (1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
-        (0.02, 0.0, 0.0),
+        (0.6, 0.0, 0.0),
         _ZERO3,
         _ZERO3,
         _ZERO3,
@@ -777,7 +854,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     target_velocity = (
         (1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
-        (0.02, 0.0, 0.0),
+        (0.6, 0.0, 0.0),
         (0.02, 0.0, 0.0),
         (0.02, 0.0, 0.0),
         _ZERO3,
@@ -798,6 +875,29 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
     events = _braking_events(reference=reference, target=target)
 
     assert events[0][-1] == 0.1
+
+
+def test_braking_ignores_transition_before_reference_reaches_half_command() -> None:
+    source = _response_traces(
+        profiles=_profiles(),
+        settings=_settings(kp=(1.0, 1.0, 1.0)),
+    )[0]
+    command = ((0.04, 0.0, 0.0),) * 2 + (_ZERO3,) * 2
+    reference_velocity = (
+        _ZERO3,
+        (0.009, 0.0, 0.0),
+        (0.011, 0.0, 0.0),
+        _ZERO3,
+    )
+    reference = replace(
+        source,
+        time_s=(0.0, 0.05, 0.10, 0.15),
+        command_velocity_body_flu_mps=command,
+        velocity_body_flu_mps=reference_velocity,
+        position_enu_m=((0.0, 0.0, 0.0),) * 4,
+    )
+
+    assert _braking_events(reference=reference, target=reference) == []
 
 
 def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(
@@ -828,6 +928,7 @@ def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(
 
     assert result.ranking_values[:3] == pytest.approx((1.0, 1.0, 1.0))
     assert result.beam_values[2] == 2.0
+    assert not result.quality_passed
 
 
 def test_registered_metric_can_change_selection_without_changing_aligner(
@@ -867,6 +968,44 @@ def test_registered_metric_can_change_selection_without_changing_aligner(
     assert align(target, reference).controller.selected_settings.kp_vel == (3.0, 1.0, 1.0)
 
 
+def test_regularized_parameter_prefers_smallest_quality_passing_correction() -> None:
+    name = "test-regularized-highest-x-response-v1"
+
+    def highest_x(reference, target, /):
+        peak = max(abs(value[0]) for trace in target for value in trace.velocity_body_flu_mps)
+        return MetricResult(
+            metrics={"negative_peak": -peak},
+            ranking_values=(-peak,),
+            fit_metrics={"velocity_rmse_mps": 0.0},
+            validation_metrics={"worst_axis_velocity_nrmse": 0.0},
+        )
+
+    register_metric(name=name, metric=highest_x)
+    parameters = (
+        ParameterSpec(
+            "kp_vel",
+            1,
+            ((1.0, 1.0, 1.0), (3.0, 1.0, 1.0)),
+            selection_regularization_scale=1.0,
+        ),
+    )
+    reference = _definition(
+        backend="px4-sitl",
+        evaluator=_Evaluator(reference_settings=_settings(kp=(1.0, 1.0, 1.0))),
+        metric_name=name,
+    )
+    target = _definition(
+        backend="isaac-lab",
+        evaluator=_Evaluator(),
+        parameters=parameters,
+        metric_name=name,
+    )
+
+    result = align(target, reference)
+
+    assert result.controller.selected_settings.kp_vel == (1.0, 1.0, 1.0)
+
+
 def test_experiment_fingerprint_includes_capture_but_excludes_execution(
     tmp_path: Path,
 ) -> None:
@@ -894,6 +1033,15 @@ def test_experiment_fingerprint_includes_capture_but_excludes_execution(
 
     assert fingerprints[0] == fingerprints[1]
     assert fingerprints[0] != fingerprints[2]
+
+
+def test_module_fingerprint_changes_with_controller_or_metric_source(tmp_path: Path) -> None:
+    source = tmp_path / "implementation.py"
+    source.write_text("contract = 1\n")
+    first = _module_fingerprint(str(source))
+    source.write_text("contract = 2\n")
+
+    assert _module_fingerprint(str(source)) != first
 
 
 def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path) -> None:

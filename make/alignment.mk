@@ -93,6 +93,7 @@ alignment-replay-controller:
 	    --ulog '$(ALIGNMENT_RUN_DIR)/reference.ulg' \
 	    --controller-artifact '$(ALIGNMENT_RUN_DIR)/controller.json' \
 	    --profile-reference '$(ALIGNMENT_RUN_DIR)/reference.json' \
+	    --bridge-log '$(ALIGNMENT_RUN_DIR)/bridge.log' \
 	    --json '$(ALIGNMENT_RUN_DIR)/controller_boundary_replay.json'
 
 .PHONY: align-controllers
@@ -105,6 +106,8 @@ align-controllers:
 	@$(MAKE) alignment-fit ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)' \
 	    ALIGNMENT_TARGET='$(ALIGNMENT_TARGET)' ALIGNMENT_REFERENCE='$(ALIGNMENT_REFERENCE)'
 	@$(MAKE) alignment-replay-controller ALIGNMENT_RUN_ID='$(ALIGNMENT_RUN_ID)'
+	@$(MAKE) test-integration-alignment-target \
+	    CONTROLLER_ARTIFACT='$(ALIGNMENT_RUN_DIR)/controller.json'
 	@PYTHONPATH=src uv run python '$(ALIGNMENT_FIT_SCRIPT)' \
 	    --run-dir '$(ALIGNMENT_RUN_DIR)' --finalize
 

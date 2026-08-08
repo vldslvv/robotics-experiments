@@ -96,7 +96,9 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
         initial_position_enu_m=(0.0, 0.0, 0.0),
         initial_attitude_flu_enu_wxyz=(1.0, 0.0, 0.0, 0.0),
         initial_linear_velocity_enu_mps=(0.0, 0.0, 0.0),
+        initial_estimated_linear_velocity_enu_mps=(0.0, 0.0, 0.0),
         initial_angular_velocity_body_flu_radps=(0.0, 0.0, 0.0),
+        initial_estimated_angular_velocity_body_flu_radps=(0.0, 0.0, 0.0),
         completed=True,
     )
     path = tmp_path / "target_candidates.json"

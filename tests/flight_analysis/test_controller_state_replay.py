@@ -11,6 +11,8 @@ import pytest
 from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
+    _bridge_state_samples,
+    _delay_velocity_actions,
     _hold_indices,
     _interpolate_quaternions,
     _linear_interpolate,
@@ -20,6 +22,8 @@ from flight_analysis.tools.controller_state_replay import (
     _profile_topic,
     _profile_windows,
     _px4_attitude_to_isaac,
+    _px4_vertical_velocity_state,
+    _replay_time_grid,
 )
 
 
@@ -37,6 +41,40 @@ def test_hold_indices_preserve_previous_controller_setpoint():
     assert _hold_indices(source_t=source, query_t=query).tolist() == [0, 0, 1, 2]
 
 
+def test_replay_grid_preserves_exact_relative_command_ticks() -> None:
+    absolute_time, relative_time = _replay_time_grid(
+        start_s=43.884,
+        end_s=45.084,
+        controller_dt_s=0.004,
+    )
+    command_index = _hold_indices(
+        source_t=np.array([0.0, 1.0]),
+        query_t=relative_time,
+    )
+
+    assert relative_time[250] == 1.0
+    assert absolute_time[250] == pytest.approx(44.884)
+    assert command_index[249:251].tolist() == [0, 1]
+
+
+def test_velocity_action_delay_shifts_the_complete_command():
+    actions = np.arange(20, dtype=np.float64).reshape(5, 4)
+
+    delayed = _delay_velocity_actions(
+        actions=actions,
+        delay_steps=2,
+    )
+
+    assert delayed[:, :3].tolist() == [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 2.0],
+        [4.0, 5.0, 6.0],
+        [8.0, 9.0, 10.0],
+    ]
+    assert delayed[:, 3].tolist() == [0.0, 0.0, 3.0, 7.0, 11.0]
+
+
 def test_linear_interpolation_resamples_controller_state():
     result = _linear_interpolate(
         source_t=np.array([0.0, 1.0]),
@@ -45,6 +83,18 @@ def test_linear_interpolation_resamples_controller_state():
     )
 
     assert np.allclose(result, [[0.5, 2.5], [1.5, 3.5]])
+
+
+def test_vertical_velocity_state_matches_px4_velocity_only_blending():
+    result = _px4_vertical_velocity_state(
+        velocity_setpoint_ned=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, -0.35], [0.0, 0.0, 0.8]]),
+        velocity_ned=np.array([[1.0, 2.0, 0.1], [1.0, 2.0, 0.2], [1.0, 2.0, 0.3]]),
+        position_derivative_z_ned=np.array([0.4, 0.6, 0.9]),
+        landing_speed_mps=0.7,
+    )
+
+    assert np.allclose(result[:, :2], [[1.0, 2.0]] * 3)
+    assert np.allclose(result[:, 2], [0.1, 0.4, 0.9])
 
 
 def test_quaternion_interpolation_uses_shortest_normalized_path():
@@ -152,6 +202,28 @@ def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):
     assert join_and_torque.tolist() == [[4000.0, 0.0, 0.0, 0.01]]
 
 
+def test_bridge_state_samples_preserve_physics_tick_inputs(tmp_path: Path):
+    log = tmp_path / "bridge.log"
+    log.write_text(
+        "PX4 bridge dynamics: tick=26 sim_time_us=104000 "
+        "last_actuator_us=104000 actuator_lag_us=0 connected=True armed=True "
+        "commands=[100.0, 101.0, 102.0, 103.0] "
+        "forces_n=[1.0, 1.1, 1.2, 1.3] "
+        "body_torque_n_m=[0.0, 0.0, 0.01] body_drag_n=[0.0, 0.0, 0.0] "
+        "position_enu=[1.0, 2.0, 3.0] quat_wxyz=[1.0, 0.0, 0.0, 0.0] "
+        "velocity_enu=[0.1, 0.2, 0.3] body_velocity_flu=[0.1, 0.2, 0.3] "
+        "angular_velocity_body_flu=[0.01, 0.02, 0.03]\n"
+    )
+
+    time_us, position, attitude, velocity, angular_velocity = _bridge_state_samples(path=log)
+
+    assert time_us.tolist() == [104000]
+    assert position.tolist() == [[1.0, 2.0, 3.0]]
+    assert attitude.tolist() == [[1.0, 0.0, 0.0, 0.0]]
+    assert velocity.tolist() == [[0.1, 0.2, 0.3]]
+    assert angular_velocity.tolist() == [[0.01, 0.02, 0.03]]
+
+
 def test_profile_topic_uses_absolute_simulation_window():
     topic = {
         "timestamp": np.array([96_000, 100_000, 104_000, 108_000]),
@@ -182,6 +254,27 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                         "axis": "combined",
                         "start_sim_time_us": 116_384_000,
                         "time_s": [0.0, 2.5, 5.7],
+                        "command_velocity_body_flu_mps": [
+                            [0.0, 0.0, 0.0],
+                            [0.1, 0.0, 0.0],
+                            [0.0, 0.0, 0.0],
+                        ],
+                        "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                        "attitude_flu_enu_wxyz": [
+                            [1.0, 0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0, 0.0],
+                        ],
+                        "velocity_enu_mps": [
+                            [0.0, 0.0, 0.0],
+                            [0.1, 0.0, 0.0],
+                            [0.0, 0.0, 0.0],
+                        ],
+                        "angular_velocity_body_flu_radps": [
+                            [0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.2],
+                            [0.0, 0.0, 0.0],
+                        ],
                     }
                 ],
             }
@@ -195,6 +288,30 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
             "axis": "combined",
             "start_s": 116.384,
             "end_s": 122.084,
+            "command_trace": {
+                "time_s": [0.0, 2.5, 5.7],
+                "command_velocity_body_flu_mps": [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                "attitude_flu_enu_wxyz": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                ],
+                "velocity_enu_mps": [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                "angular_velocity_body_flu_radps": [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.2],
+                    [0.0, 0.0, 0.0],
+                ],
+            },
         }
     ]
 
@@ -237,12 +354,18 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                     "ax": np.array([2.0, 4.0]),
                     "ay": np.array([4.0, 8.0]),
                     "az": np.array([6.0, 12.0]),
+                    "vx": np.array([0.1, 0.3]),
+                    "vy": np.array([0.2, 0.4]),
+                    "vz": np.array([0.3, 0.5]),
                 },
             ),
             dataset(
                 "vehicle_angular_velocity",
                 {
                     "timestamp": np.array([100_000, 108_000]),
+                    "xyz[0]": np.array([0.1, 0.3]),
+                    "xyz[1]": np.array([0.2, 0.4]),
+                    "xyz[2]": np.array([0.3, 0.5]),
                     "xyz_derivative[0]": np.array([1.0, 3.0]),
                     "xyz_derivative[1]": np.array([2.0, 4.0]),
                     "xyz_derivative[2]": np.array([3.0, 5.0]),
@@ -277,6 +400,10 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert report["method"] == "px4-ulog-controller-boundary-v1"
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
+    assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
+    assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
+        [0.2, -0.3, -0.4]
+    )
     assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
@@ -288,6 +415,8 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_local_position_setpoint": 4000,
+        "vehicle_local_position": 4000,
+        "vehicle_angular_velocity": 4000,
         "rate_ctrl_status": 4000,
         "hover_thrust_estimate": 4000,
     }

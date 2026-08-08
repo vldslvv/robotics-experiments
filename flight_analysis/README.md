@@ -41,9 +41,16 @@ torque, reporting the per-axis N-m conversion scale, intercept, and fit RMSE.
 This is a diagnostic, not the controller-alignment publication path.
 
 Alignment trace schema 1 records every profile's absolute PX4 simulation start
-time and its controller acceleration, rate-integral, and normalized hover-thrust
-state at that timestamp. The tool uses those boundaries to audit the captured
-ULog against the bridge log without manual windows. It reports thrust and torque setpoints,
+time, exact command cadence, physical and PX4-estimated initial velocity, and
+controller acceleration, rate-integral, and normalized hover-thrust state at
+that timestamp. Profile replay uses those absolute boot times directly. It
+checks both the core controller on PX4-estimated state and the complete
+physical-state observation boundary seeded from the recorded estimator offset.
+The core enforces motor and collective limits; the physical-state replay adds a
+normalized motor limit. The replay includes the recorded command transitions,
+PX4's velocity-only vertical-state blend, and timestamped hover-estimate
+updates. It does not reconstruct transitions from rate-limited ULog
+`trajectory_setpoint` output. The tool reports thrust and torque setpoints,
 motor controls, bridge-mapped rotor speed, reconstructed wrench, hover-thrust
 estimate, and timestamp errors per fit, validation, and stability profile:
 

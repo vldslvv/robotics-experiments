@@ -71,10 +71,15 @@ def _integer(value: Any, name: str, /) -> int:
     return value
 
 
-def _vector(value: Any, name: str, /) -> tuple[float, float, float]:
+def _vector(
+    value: Any,
+    name: str,
+    nonnegative: bool = True,
+    /,
+) -> tuple[float, float, float]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{name} must contain three finite values")
-    parsed = tuple(_finite(value=item, name=name, nonnegative=True) for item in value)
+    parsed = tuple(_finite(value=item, name=name, nonnegative=nonnegative) for item in value)
     return parsed[0], parsed[1], parsed[2]
 
 
@@ -84,6 +89,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
     result = ControllerSettings(
         command_delay_s=_finite(
             value=payload["command_delay_s"], name=f"{name}.command_delay_s", nonnegative=True
+        ),
+        velocity_controller_rate_hz=_finite(
+            value=payload["velocity_controller_rate_hz"],
+            name=f"{name}.velocity_controller_rate_hz",
+            positive=True,
         ),
         kp_vel=_vector(payload["kp_vel"], f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
@@ -103,6 +113,20 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         ),
         ki_vel=_vector(payload["ki_vel"], f"{name}.ki_vel"),
         kd_vel=_vector(payload["kd_vel"], f"{name}.kd_vel"),
+        velocity_observation_scale=_vector(
+            payload["velocity_observation_scale"],
+            f"{name}.velocity_observation_scale",
+        ),
+        velocity_observation_bias_mps=_vector(
+            payload["velocity_observation_bias_mps"],
+            f"{name}.velocity_observation_bias_mps",
+            False,
+        ),
+        velocity_estimator_bias_decay_hz=_finite(
+            value=payload["velocity_estimator_bias_decay_hz"],
+            name=f"{name}.velocity_estimator_bias_decay_hz",
+            nonnegative=True,
+        ),
         velocity_filter_hz=_finite(
             value=payload["velocity_filter_hz"], name=f"{name}.velocity_filter_hz", nonnegative=True
         ),
@@ -129,9 +153,19 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         ki_rate=_vector(payload["ki_rate"], f"{name}.ki_rate"),
         kd_rate=_vector(payload["kd_rate"], f"{name}.kd_rate"),
         kff_rate=_vector(payload["kff_rate"], f"{name}.kff_rate"),
+        angular_velocity_filter_hz=_finite(
+            value=payload["angular_velocity_filter_hz"],
+            name=f"{name}.angular_velocity_filter_hz",
+            nonnegative=True,
+        ),
         rate_derivative_filter_hz=_finite(
             value=payload["rate_derivative_filter_hz"],
             name=f"{name}.rate_derivative_filter_hz",
+            positive=True,
+        ),
+        yaw_torque_filter_hz=_finite(
+            value=payload["yaw_torque_filter_hz"],
+            name=f"{name}.yaw_torque_filter_hz",
             positive=True,
         ),
         rate_integral_limit=_vector(payload["rate_integral_limit"], f"{name}.rate_integral_limit"),

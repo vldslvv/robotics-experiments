@@ -86,7 +86,8 @@ def __getattr__(name: str):
         }[name]
     if name == "compute_lab_rotor_omega":
         from robotics_experiments.workflows.isaac_lab.tasks.flight import (
-            action_to_rotor_omega,
+            _normalized_action_to_controller_command,
+            controller_command_to_rotor_omega,
             initial_flight_controller_state,
         )
 
@@ -102,10 +103,11 @@ def __getattr__(name: str):
                 num_envs=int(action.shape[0]),
                 device=action.device,
             )
-            _successor, omega = action_to_rotor_omega(
+            command = _normalized_action_to_controller_command(params, action, attitude_wxyz)
+            _successor, omega = controller_command_to_rotor_omega(
                 params,
                 state,
-                action,
+                command,
                 attitude_wxyz,
                 linear_velocity_world,
                 angular_velocity_body,

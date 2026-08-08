@@ -167,10 +167,12 @@ def make_drone_hover_env_cfg(
 class DroneHoverEnv(_FlightDirectRLEnv):
     """Drone-hover task that actually flies N parallel drones.
 
-    ``_apply_action`` closes the actuation loop every physics substep: the stored
-    normalized action -> per-rotor omega (``action_to_rotor_omega`` over the
-    frozen ``actuation_params``) -> the realized body wrench (thrust at the
-    rotor offsets + yaw reaction + drag) -> the vectorized force sink.
+    ``_pre_physics_step`` retains the latest normalized policy action. After its
+    configured transport delay, the shared flight runtime refreshes body
+    velocity as a held world command at the configured OFFBOARD stream cadence,
+    matching PX4's MAVLink receiver. The faster controller and physics substeps
+    advance that held command to per-rotor omega, then to the realized body
+    wrench and vectorized force sink.
     ``actuation_params`` is public: it is the composition seam external
     consumers (e.g. the standalone hover+goto gate) run the same pure functions
     against.

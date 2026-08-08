@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 from collections import Counter
 from collections.abc import Mapping
@@ -14,6 +15,9 @@ from typing import Any
 
 import numpy as np
 
+import robotics_experiments.alignment._metrics as metrics_module
+import robotics_experiments.controller.actuation as controller_actuation
+from robotics_experiments.alignment._io import _settings as _validated_settings
 from robotics_experiments.alignment._metrics import _finite_metric_result, metric
 from robotics_experiments.alignment._models import (
     AlignmentResult,
@@ -41,6 +45,12 @@ def _fingerprint(value: object, /) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _module_fingerprint(module_file: str | None, /) -> str:
+    if module_file is None:
+        raise RuntimeError("fingerprinted controller modules must have source files")
+    return hashlib.sha256(Path(module_file).read_bytes()).hexdigest()
+
+
 def _plain(value: Any, /) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {item.name: _plain(getattr(value, item.name)) for item in fields(value)}
@@ -49,6 +59,22 @@ def _plain(value: Any, /) -> Any:
     if isinstance(value, (list, tuple)):
         return [_plain(item) for item in value]
     return value
+
+
+def _selection_regularization(
+    settings: ControllerSettings,
+    parameters: tuple[ParameterSpec, ...],
+    /,
+) -> float:
+    normalized_components: list[float] = []
+    for parameter in parameters:
+        scale = parameter.selection_regularization_scale
+        if scale is None:
+            continue
+        value = getattr(settings, parameter.field)
+        components = value if isinstance(value, tuple) else (value,)
+        normalized_components.extend(component / scale for component in components)
+    return math.sqrt(sum(component * component for component in normalized_components))
 
 
 @dataclass(frozen=True)
@@ -197,9 +223,23 @@ def _staged_beam_search(
         "effective_key_aliases": 0,
         "submitted_unique_candidates": 0,
         "skipped_fixed_point_passes": 0,
+        "rejected_invalid_settings": 0,
     }
     generated_refinements: list[Mapping[str, Any]] = []
     next_index = 0
+    has_selection_regularization = any(
+        parameter.selection_regularization_scale is not None for parameter in target.parameters
+    )
+
+    def selection_ranking(
+        *, settings: ControllerSettings, result: MetricResult
+    ) -> tuple[float, ...]:
+        if not has_selection_regularization:
+            return result.ranking_values
+        regularization = _selection_regularization(settings, target.parameters)
+        if result.quality_passed:
+            return (0.0, regularization, *result.ranking_values)
+        return (1.0, *result.ranking_values, regularization)
 
     def record(
         *,
@@ -239,7 +279,7 @@ def _staged_beam_search(
                     **result.validation_metrics,
                     **result.metrics,
                 },
-                ranking_values=result.ranking_values,
+                ranking_values=selection_ranking(settings=settings, result=result),
                 failure_reason=None,
             )
             results_by_index[index] = result
@@ -271,7 +311,11 @@ def _staged_beam_search(
             settings=settings,
             usable=source.usable,
             metrics=source.metrics,
-            ranking_values=source.ranking_values,
+            ranking_values=(
+                selection_ranking(settings=settings, result=results_by_index[source.index])
+                if source.usable
+                else source.ranking_values
+            ),
             failure_reason=source.failure_reason,
         )
         scores_by_settings[settings] = score
@@ -445,14 +489,23 @@ def _staged_beam_search(
 
     def sweep_parameter(*, parameter: ParameterSpec, candidates: tuple[SettingValue, ...]) -> None:
         nonlocal retained
+        replacements = []
+        for settings in retained:
+            for candidate in candidates:
+                proposed = replace(settings, **{parameter.field: candidate})
+                try:
+                    replacements.append(
+                        _validated_settings(
+                            value=asdict(proposed),
+                            name=f"candidate.{parameter.field}",
+                        )
+                    )
+                except ValueError:
+                    statistics["rejected_invalid_settings"] += 1
         expanded = _deduplicate_settings(
             [
                 *retained,
-                *(
-                    replace(settings, **{parameter.field: candidate})
-                    for settings in retained
-                    for candidate in candidates
-                ),
+                *replacements,
             ]
         )
         evaluated = evaluate_many(expanded)
@@ -700,6 +753,8 @@ def align(
             "reference_definition": reference.definition_fingerprint,
             "probe_suite": probe_suite_fingerprint,
             "selection_metric": target.selection_metric,
+            "metric_implementation": _module_fingerprint(metrics_module.__file__),
+            "controller_implementation": _module_fingerprint(controller_actuation.__file__),
             "experiment": experiment_fingerprint,
             "interface": asdict(target.command_interface),
             "target_image": target.image,

@@ -46,6 +46,7 @@ class ParameterSpec:
     field: str
     stage: int
     candidates: tuple[SettingValue, ...]
+    selection_regularization_scale: float | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,17 @@ class SearchSpec:
     refinement_levels: int = 0
     min_refinement_survivors: int = 2
     initial_settings: tuple[ControllerSettings, ...] = ()
+
+
+@dataclass(frozen=True)
+class ControllerStateSourceAge:
+    """Age of each lower-rate PX4 topic used to seed one probe boundary."""
+
+    vehicle_local_position_setpoint: int
+    vehicle_local_position: int
+    vehicle_angular_velocity: int
+    rate_ctrl_status: int
+    hover_thrust_estimate: int
 
 
 @dataclass(frozen=True)
@@ -78,9 +90,14 @@ class ProbeTrace:
     initial_position_enu_m: Vector3
     initial_attitude_flu_enu_wxyz: tuple[float, float, float, float]
     initial_linear_velocity_enu_mps: Vector3
+    initial_estimated_linear_velocity_enu_mps: Vector3
     initial_angular_velocity_body_flu_radps: Vector3
+    initial_estimated_angular_velocity_body_flu_radps: Vector3
     completed: bool
     initial_controller_state_valid: bool = False
+    initial_controller_state_source_age_us: ControllerStateSourceAge = ControllerStateSourceAge(
+        0, 0, 0, 0, 0
+    )
     initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
     initial_linear_acceleration_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
@@ -163,6 +180,7 @@ class MetricResult:
     fit_metrics: Mapping[str, float]
     validation_metrics: Mapping[str, float]
     beam_values: tuple[float, ...] = ()
+    quality_passed: bool = True
 
 
 MetricFunction = Callable[

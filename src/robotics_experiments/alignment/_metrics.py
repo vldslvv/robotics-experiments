@@ -13,6 +13,7 @@ __all__: list[str] = []
 
 _CONTROLLER_QUALITY_METRIC = "controller-quality"
 _STOP_SPEED_MPS = 0.01
+_MIN_BRAKING_RESPONSE_FRACTION = 0.5
 _METRICS: dict[str, MetricFunction] = {}
 _QUALITY_LIMITS = (
     ("braking_distance_error_m", 0.005),
@@ -116,6 +117,10 @@ def _braking_events(
     events = []
     for previous in transitions:
         start = int(previous + 1)
+        if abs(reference_velocity[start]) < (
+            _MIN_BRAKING_RESPONSE_FRACTION * abs(command[previous])
+        ):
+            continue
         reference_stop = _stop_index(velocity=reference_velocity, start=start)
         target_stop = _stop_index(velocity=target_velocity, start=start)
         reference_distance = float(
@@ -216,16 +221,17 @@ def _split_metrics(
                     )
                 )
             )
-        for (
-            reference_distance,
-            target_distance,
-            reference_residual,
-            target_residual,
-            stop_time_error,
-        ) in _braking_events(reference=reference, target=target):
-            braking_distance_errors.append(abs(target_distance - reference_distance))
-            residual_speed_errors.append(abs(target_residual - reference_residual))
-            stop_time_errors.append(stop_time_error)
+        if reference.profile != "validation-vertical-policy-envelope":
+            for (
+                reference_distance,
+                target_distance,
+                reference_residual,
+                target_residual,
+                stop_time_error,
+            ) in _braking_events(reference=reference, target=target):
+                braking_distance_errors.append(abs(target_distance - reference_distance))
+                residual_speed_errors.append(abs(target_residual - reference_residual))
+                stop_time_errors.append(stop_time_error)
     if not squared_errors:
         raise ValueError(f"probe suite contains no {split!r} traces")
     aggregate_rmse = float(np.sqrt(np.mean(np.concatenate(squared_errors, axis=0))))
@@ -306,8 +312,8 @@ def _metric_result(
         **{f"validation_{name}": value for name, value in validation.items()},
     }
     ranking = (
-        validation["braking_distance_error_m"],
         validation["residual_speed_error_mps"],
+        validation["braking_distance_error_m"],
         validation["worst_axis_velocity_nrmse"],
         validation["yaw_rate_nrmse"],
         validation["heading_error_deg"],
@@ -343,6 +349,7 @@ def _feasibility_metric_result(
         fit_metrics=result.fit_metrics,
         validation_metrics=validation,
         beam_values=ratios,
+        quality_passed=not any(excesses),
     )
 
 

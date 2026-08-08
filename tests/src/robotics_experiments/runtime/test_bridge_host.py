@@ -130,6 +130,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
         thrust_model,
         port,
         max_tilt_angle_deg=180.0,
+        dynamics_debug_interval=50,
         rotor_spin_visual_scale=0.03,
         rotor_spin_signs=None,
     ):
@@ -139,6 +140,7 @@ def _install_fake_px4_bridge(monkeypatch, calls):
                 articulation_path,
                 rotor_link_paths,
                 max_tilt_angle_deg,
+                dynamics_debug_interval,
                 rotor_spin_visual_scale,
                 rotor_spin_signs,
             )
@@ -242,6 +244,7 @@ def _config(**overrides):
         "debug_log_path": "",
         "debug_log_level": "DEBUG",
         "sensor_debug_log_interval": 50,
+        "dynamics_debug_log_interval": 50,
         "max_tilt_angle_deg": 60.0,
         "rotor_spin_visual_scale": 0.03,
     }
@@ -427,7 +430,8 @@ def test_bridge_host_uses_discovered_rotor_mapping(monkeypatch):
         "/World/Drone/body/propulsion/motor_4/prop",
         "/World/Drone/body/propulsion/motor_2/prop",
     ]
-    assert bridge_call[5] == [-1.0, 1.0]
+    assert bridge_call[4] == 50
+    assert bridge_call[6] == [-1.0, 1.0]
 
 
 def test_two_bridge_hosts_have_independent_endpoints(monkeypatch):

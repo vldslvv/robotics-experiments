@@ -19,6 +19,7 @@ command_interface:
 # definition complete and seed the target's deterministic candidate centers.
 settings:
   command_delay_s: 0.0
+  velocity_controller_rate_hz: 125.0
   kp_vel: [1.8, 1.8, 4.0]
   # PX4 does not use the Lab-only large-error schedule during reference capture.
   horizontal_velocity_error_gain_scale: 1.0
@@ -26,6 +27,10 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
+  velocity_observation_scale: [1.0, 1.0, 1.0]
+  velocity_observation_bias_mps: [0.0, 0.0, 0.0]
+  # PX4 supplies the estimator signal directly; these target-side adapters are inactive.
+  velocity_estimator_bias_decay_hz: 0.0
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
   velocity_filter_hz: 0.0
   velocity_derivative_filter_hz: 5.0
@@ -38,7 +43,9 @@ settings:
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
+  angular_velocity_filter_hz: 0.0
   rate_derivative_filter_hz: 20.0
+  yaw_torque_filter_hz: 2.0
   rate_integral_limit: [0.30, 0.30, 0.30]
   max_tilt_cmd_deg: 45.0
   min_collective_thrust_fraction: 0.12

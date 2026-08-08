@@ -37,6 +37,7 @@ class IsaacLabVehicleConfig(_FreezableConfig):
     max_linear_velocity_mps: float
     max_angular_velocity_radps: float
     max_depenetration_velocity_mps: float
+    enable_gyroscopic_forces: bool
     pusher_effort_limit_n: float
     pusher_velocity_limit_mps: float
 

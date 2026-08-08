@@ -275,6 +275,29 @@ def _policy_factory(*, definition: ControllerDefinition, config: ExperimentConfi
     return factory
 
 
+def _deploy_pusher(context: SceneTestContext, host, /) -> None:
+    """Match the deployed-pusher plant used by Lab training and policy runtime."""
+    if not context.config.alignment.capture.pusher_deployed:
+        return
+    import omni.usd
+    from pxr import PhysxSchema, UsdPhysics
+
+    stage = omni.usd.get_context().get_stage()
+    joint_path = f"{host.params.articulation_path}/pusher_joint"
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if not joint_prim.IsValid():
+        raise RuntimeError(f"alignment plant has no pusher joint at {joint_path!r}")
+    joint = UsdPhysics.PrismaticJoint(joint_prim)
+    upper_limit = float(joint.GetUpperLimitAttr().Get())
+    drive = UsdPhysics.DriveAPI.Get(joint_prim, "linear")
+    drive.CreateTargetPositionAttr(upper_limit)
+    drive.CreateMaxForceAttr(float(context.config.rl.lab_vehicle.pusher_effort_limit_n))
+    PhysxSchema.PhysxJointAPI.Apply(joint_prim).CreateMaxJointVelocityAttr().Set(
+        float(context.config.rl.lab_vehicle.pusher_velocity_limit_mps)
+    )
+    context.report(f"alignment plant pusher deployed to {upper_limit:.6f} m")
+
+
 def _assert_yaw_response_sign(*, samples: tuple[_Sample, ...]) -> None:
     segment: list[_Sample] = []
     previous_command = 0.0
@@ -413,6 +436,7 @@ def _run(*, context: SceneTestContext, definition: ControllerDefinition, run_dir
         Px4TakeoffScenarioOptions(
             test_name=_TEST_NAME,
             px4_container_log_name="alignment_capture_reference_px4.log",
+            post_takeoff_hook=_deploy_pusher,
             post_routine_hook=post_routine,
             policy_factory=_policy_factory(definition=definition, config=context.config),
             success_label="PX4 controller alignment probes",

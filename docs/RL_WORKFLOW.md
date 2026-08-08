@@ -26,7 +26,11 @@ The registered tasks are `Isaac-Drone-Hover-Direct-v1` and
 Torch implementation is required to match the NumPy controller sequentially.
 The pinned Isaac Lab `Thruster` realizes per-rotor response while the project
 owns allocation, yaw reaction, drag, the pusher-equipped articulation, and the
-sole body-wrench sink.
+sole body-wrench sink. Lab rigid-body gyroscopic forces are Hydra-owned and
+disabled to match the standalone PX4 plant's generated-USD/default PhysX
+contract; yaw reaction remains explicitly modeled by the rotor wrench. The
+reduced Lab rotor wrench is translated from the body's local-frame origin to
+PhysX's center-of-mass force path before submission.
 
 ## Action and cadence
 
@@ -38,7 +42,11 @@ sole body-wrench sink.
 Controller gains, hover thrust, filters, limits, delay, allocation, and actuator
 response come only from the embedded controller settings. At 250 Hz physics and
 20 Hz policy rate, the exact-average cadence alternates 13 and 12 physics ticks
-per policy step.
+per policy step. The retained velocity action passes through its configured
+transport delay and is converted from body-FLU to a world-frame setpoint on the
+independent 50 Hz OFFBOARD stream, using the attitude at each transmission. The
+world command is held across the faster controller and physics substeps,
+matching deployment through PX4's body-NED MAVLink receiver.
 
 ## Press approach task
 
