@@ -23,6 +23,7 @@ from flight_analysis.tools.controller_state_replay import (
     _profile_windows,
     _px4_attitude_to_isaac,
     _px4_vertical_velocity_state,
+    _replay_time_grid,
 )
 
 
@@ -38,6 +39,22 @@ def test_hold_indices_preserve_previous_controller_setpoint():
     query = np.array([0.0, 1.6, 3.7, 5.0])
 
     assert _hold_indices(source_t=source, query_t=query).tolist() == [0, 0, 1, 2]
+
+
+def test_replay_grid_preserves_exact_relative_command_ticks() -> None:
+    absolute_time, relative_time = _replay_time_grid(
+        start_s=43.884,
+        end_s=45.084,
+        controller_dt_s=0.004,
+    )
+    command_index = _hold_indices(
+        source_t=np.array([0.0, 1.0]),
+        query_t=relative_time,
+    )
+
+    assert relative_time[250] == 1.0
+    assert absolute_time[250] == pytest.approx(44.884)
+    assert command_index[249:251].tolist() == [0, 1]
 
 
 def test_velocity_action_delay_shifts_the_complete_command():

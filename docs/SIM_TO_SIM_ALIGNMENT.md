@@ -104,7 +104,9 @@ includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
 whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
-transitions. The replay also reproduces PX4's
+transitions. Replay builds relative command time from integer physics steps so
+large absolute profile start times cannot delay an exact command boundary by a
+floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates
 at their source timestamps. The target-only `velocity_observation_scale`,
 steady world-ENU `velocity_observation_bias_mps`,

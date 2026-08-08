@@ -88,6 +88,17 @@ def _hold_indices(*, source_t: np.ndarray, query_t: np.ndarray) -> np.ndarray:
     return np.clip(np.searchsorted(source_t, query_t, side="right") - 1, 0, len(source_t) - 1)
 
 
+def _replay_time_grid(
+    *,
+    start_s: float,
+    end_s: float,
+    controller_dt_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    step_count = round((end_s - start_s) / controller_dt_s)
+    relative_time_s = np.arange(step_count + 1, dtype=np.float64) * controller_dt_s
+    return start_s + relative_time_s, relative_time_s
+
+
 def _delay_velocity_actions(
     *,
     actions: np.ndarray,
@@ -870,11 +881,10 @@ def _report(
 
     motor_index = np.flatnonzero(selected)
     controller_dt_s = 1.0 / config.sim.physics_hz
-    replay_t = np.arange(
-        start_s,
-        end_s + controller_dt_s * 0.5,
-        controller_dt_s,
-        dtype=np.float64,
+    replay_t, replay_relative_t = _replay_time_grid(
+        start_s=start_s,
+        end_s=end_s,
+        controller_dt_s=controller_dt_s,
     )
     if command_trace is None:
         replay_actions = None
@@ -900,7 +910,7 @@ def _report(
             raise ValueError("profile command trace fields have inconsistent lengths")
         command_index = _hold_indices(
             source_t=command_time,
-            query_t=replay_t - start_s,
+            query_t=replay_relative_t,
         )
         commanded_body_velocity = command_velocity[command_index]
         replay_actions = np.column_stack(

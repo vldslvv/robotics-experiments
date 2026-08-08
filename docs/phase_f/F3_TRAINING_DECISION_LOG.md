@@ -8696,3 +8696,40 @@ age minus one 4 ms replay-grid tick. Apply the same value in target fitting and
 both replay paths, retain all controller settings and ranges, and rerun the
 fresh reference. Diagnose the remaining combined endpoint only after removing
 this structural phase error.
+
+### 254. Preserve exact command ticks in controller replay
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T163019Z-diagnostic-profile-phase`
+reused the Entry 253 fresh capture from clean source commit `ec002f0`. Its
+263-candidate search used seven GPU batches and 131.3 seconds, averaged 32.3%
+GPU utilization, and reached 2.003 useful candidates per second. Candidate 30
+selected 0.008125 Hz decay and -0.0035 m/s Z observation bias. It again passed
+seven motion gates and rejected only combined endpoint at 22.150 mm; braking
+was 2.147 mm, residual speed was 4.360 mm/s, stop time was 0.04 s, worst-axis
+NRMSE was 5.644%, vertical NRMSE was 1.334%, yaw NRMSE was 3.091%, and heading
+error was 2.541 degrees.
+
+The profile-relative phase reduced vertical-policy collective replay from
+0.077556 N to 0.031907 N, but low-speed vertical collective initially remained
+0.288473 N. That residual consisted of four isolated motor samples: the first
+sample after each command transition. Between transitions, segment collective
+RMSE was below 0.010 N. Subtracting the 43.884 s absolute profile start from
+the replay grid represented nominal 1.000 s just below the boundary, so the
+held-command join retained the preceding command for one physics tick.
+
+Construct relative replay time directly from integer 4 ms step indices, then
+add the absolute start only for ULog joins. The corrected replay passes every
+profile: low-speed vertical collective falls to 0.016815 N, maximum core
+collective is 0.031907 N, maximum core motor RMSE is 0.006353, maximum
+physical-state motor RMSE is 0.008331, and timestamp join error is zero.
+
+The first unresolved boundary is now solely the combined-path motion endpoint.
+The target endpoint exceeds PX4 by approximately `(19.03, 8.35, -2.53)` mm in
+world ENU. Prior evidenced sweeps establish that a more positive X steady
+observation offset reduces positive X over-travel, while a more negative Y
+offset increases the missing negative-Y travel. Search those evidenced
+directions together, retain the measured -0.0039 m/s Z estimator offset, and
+require the complete replay motor margin after any motion pass.
