@@ -8126,3 +8126,26 @@ motor RMSE rose to 0.00977 against its 0.01 limit. Keep estimator scale and
 transient decay, controller gains, filters, cadence, allocator, actuator,
 plant, probes, and gates fixed. Reject bias as the remaining seam if the motor
 or residual boundary fails before endpoint reaches 10 mm.
+
+### 227. Steady bias reaches competing boundaries before endpoint acceptance
+
+Date: 2026-08-08.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260808T140000Z-diagnostic-bias-wide` reused the
+fresh Attempt 206 reference and evaluated 11 unique candidates in four GPU
+batches and 62.2 seconds. Average sampled GPU utilization was 36.6%; exact
+caching avoided 18 of 29 attempted settings.
+
+The endpoint trend remained monotonic but did not cross the gate. Candidate 5
+at the -0.036 m/s boundary reduced endpoint error from 20.34 mm at -0.016 m/s
+to 12.20 mm. Braking passed at 3.10 mm, worst-axis velocity passed at 4.386%,
+and residual speed remained barely inside its gate at 9.58 mm/s. The mandatory
+controller replay rejected that candidate: stability physical-state normalized
+motor RMSE was 0.010025 against the 0.010000 limit. All other replay profiles
+and boundaries passed.
+
+The steady offset therefore cannot close endpoint safely by itself. Preserve
+the complete target traces, selection, telemetry, controller artifact, and
+replay with the copied fresh reference evidence. Do not publish the rejected
+controller and do not expand the bias farther.
