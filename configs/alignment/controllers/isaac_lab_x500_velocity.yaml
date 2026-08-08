@@ -66,12 +66,7 @@ parameters:
   - field: velocity_observation_bias_mps
     stage: 1
     candidates:
-      - [0.0, -0.030, 0.0]
-      - [0.002, -0.030, 0.0]
-      - [0.004, -0.030, 0.0]
       - [0.006, -0.030, 0.0]
-      - [0.008, -0.030, 0.0]
-      - [0.010, -0.030, 0.0]
 
 selection_metric: controller-quality
 publication_metrics:

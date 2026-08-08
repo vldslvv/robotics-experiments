@@ -8221,3 +8221,15 @@ also contains a lower-authority motion pass at X +0.006 m/s: endpoint error is
 9.93 mm, while braking, residual-speed, and all other motion gates pass.
 Preserve the complete sweep and replay. Test the lowest passing X setting as a
 focused replay-margin control instead of expanding or refining the range.
+
+### 232. Validate the minimum motion-passing offset
+
+Date: 2026-08-08.
+
+Fix `velocity_observation_bias_mps` at `[0.006, -0.030, 0.0]` and evaluate it
+alone against the same fresh reference. It is the smallest observed positive X
+offset that passes endpoint, at 9.93 mm, and therefore minimizes additional
+controller authority among the motion-passing candidates. Run the complete
+controller replay. If its stability physical-state motor RMSE passes 0.01,
+promote this setting to a fresh end-to-end attempt; otherwise the replay seam
+rather than further motion search becomes the first failed boundary.
