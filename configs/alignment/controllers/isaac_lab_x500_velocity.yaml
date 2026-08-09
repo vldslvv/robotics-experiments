@@ -59,7 +59,7 @@ parameters:
   # fractional cadence distinct from both position and rate control.
   - field: attitude_controller_rate_hz
     stage: 1
-    candidates: [166.6667, 187.5, 200.0, 250.0]
+    candidates: [125.0, 142.8571, 150.0, 160.0, 166.6667, 187.5, 200.0, 250.0]
   # PX4's captured residual persisted across the fresh combined profile; fit
   # only the measured low-decay region and refine around its gate champions.
   - field: velocity_estimator_bias_decay_hz
