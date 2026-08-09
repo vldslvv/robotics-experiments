@@ -552,6 +552,7 @@ def _profile_topic(
 def _controller_boundary(
     *,
     attitude_setpoint: dict,
+    local_setpoint: dict,
     local_position: dict,
     angular_velocity: dict,
     rate_status: dict,
@@ -572,8 +573,13 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
 
-    setpoint_age_us = held_age_us(topic=attitude_setpoint)
+    attitude_setpoint_age_us = held_age_us(topic=attitude_setpoint)
+    local_setpoint_age_us = held_age_us(topic=local_setpoint)
     rate_age_us = held_age_us(topic=rate_status)
+    acceleration_setpoint_ned = interpolated_vector(
+        topic=local_setpoint,
+        fields=("acceleration[0]", "acceleration[1]", "acceleration[2]"),
+    )
     linear_acceleration_ned = interpolated_vector(
         topic=local_position,
         fields=("ax", "ay", "az"),
@@ -619,11 +625,12 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
     )
-    acceleration_setpoint_ned = _acceleration_setpoint_from_attitude(
+    attitude_acceleration_setpoint_ned = _acceleration_setpoint_from_attitude(
         quaternion_frd_ned_wxyz=desired_attitude_frd_ned,
         thrust_body_z=thrust_body_z,
         hover_thrust_normalized=hover_thrust_normalized,
     )
+    acceleration_setpoint_ned[2] = attitude_acceleration_setpoint_ned[2]
     vectors = {
         "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
         "initial_estimated_angular_velocity_body_flu_radps": (
@@ -642,7 +649,8 @@ def _controller_boundary(
     return (
         vectors,
         {
-            "vehicle_attitude_setpoint": setpoint_age_us,
+            "vehicle_attitude_setpoint": attitude_setpoint_age_us,
+            "vehicle_local_position_setpoint": local_setpoint_age_us,
             "vehicle_local_position": held_age_us(topic=local_position),
             "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
             "rate_ctrl_status": rate_age_us,
@@ -664,6 +672,7 @@ def _augment_reference_controller_state(
         raise ValueError(f"{reference_path} has no alignment traces")
 
     attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
@@ -674,6 +683,7 @@ def _augment_reference_controller_state(
         start_us = int(raw_profile["start_sim_time_us"])
         controller_vectors, source_age_us = _controller_boundary(
             attitude_setpoint=attitude_setpoint,
+            local_setpoint=local_setpoint,
             local_position=local_position,
             angular_velocity=angular_velocity,
             rate_status=rate_status,
@@ -992,6 +1002,7 @@ def _report(
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
+    local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
     rates_setpoint = _dataset(ulog=ulog, name="vehicle_rates_setpoint")
@@ -1181,6 +1192,7 @@ def _report(
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
         attitude_setpoint=attitude_setpoint,
+        local_setpoint=local_setpoint,
         local_position=local_position,
         angular_velocity=angular_velocity,
         rate_status=rate_status,

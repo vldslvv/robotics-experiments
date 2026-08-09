@@ -432,6 +432,15 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                 },
             ),
             dataset(
+                "vehicle_local_position_setpoint",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "acceleration[0]": np.array([1.0, 3.0]),
+                    "acceleration[1]": np.array([2.0, 4.0]),
+                    "acceleration[2]": np.array([3.0, 5.0]),
+                },
+            ),
+            dataset(
                 "vehicle_local_position",
                 {
                     "timestamp": np.array([100_000, 108_000]),
@@ -488,7 +497,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
         [0.2, -0.3, -0.4]
     )
-    assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([0.0, 0.0, -4.0])
+    assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([3.0, 2.0, -4.0])
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
         2.0,
@@ -499,6 +508,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_attitude_setpoint": 4000,
+        "vehicle_local_position_setpoint": 4000,
         "vehicle_local_position": 4000,
         "vehicle_angular_velocity": 4000,
         "rate_ctrl_status": 4000,
