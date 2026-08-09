@@ -10396,3 +10396,22 @@ recorded 125 Hz local-position updates, and avoids fitting a scalar rate to
 PX4's asynchronous one-or-two-tick module timing. Keep the exact schedule out
 of policy training; the deployable controller retains only its settings and
 deterministic cadence, while motion gates judge its response.
+
+### 321. Publication timestamps do not equal module execution order
+
+Date: 2026-08-09.
+
+Driving the target attitude stage directly from recorded `vehicle_attitude`
+timestamps regresses the preserved replay from 6 to 8 failures. Z-envelope
+collective rises from 0.233732 N to 0.615848 N and moderate collective rises
+from 0.057749 N to 0.178688 N. The topic timestamps identify publication but
+not whether position control or attitude control ran first on a shared tick;
+forcing them as execution triggers double-counts part of the already modeled
+handoff.
+
+Preserve the report as negative evidence and remove the replay-only trigger.
+Keep the separated controller stages and 142.8571 Hz deterministic target
+base. The remaining trace-supported diagnostic is the outer acceleration
+transition itself: scan replayed vertical acceleration setpoint against the
+exact full-rate reconstructed PX4 acceleration over zero through three physics
+ticks before changing another controller setting.
