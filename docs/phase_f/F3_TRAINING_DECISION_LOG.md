@@ -9932,3 +9932,37 @@ integral-limit stages after estimator decay and bias. Retain the complete probe
 families, every quality and replay limit, actuator and plant contracts, and the
 fresh Entry 300 PX4 capture. Require motion quality, replay, and live integration
 before finalization.
+
+### 302. Pinned gains pass motion and narrow replay to lateral torque
+
+Date: 2026-08-09.
+
+Diagnostic run
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-pinned-gains-diagnostic`
+reused Entry 300's fresh audited capture and evaluated 3,274 unique candidates
+in 34 GPU batches and 1,206.9 seconds. Average sampled GPU utilization was
+23.9%. Removing the disproved gain stages reduced the population by 32% and
+the sweep time by about ten minutes without losing a passing motion basin.
+
+Candidate 3197 passed every X/Y/Z, roll/pitch/yaw, collective, stability, and
+combined endpoint motion gate while retaining the exact pinned lateral PX4
+gains. Its fitted target-only estimator settings were 0.0125 Hz initial-bias
+decay, observation bias `[0.005, -0.020, -0.0039]` m/s, no velocity filtering,
+and observation scale `[0.98, 1.039375, 1.0]`. Principal errors were 4.552 mm X
+braking, 2.221 mm Y braking, 1.389 mm Z braking, 9.680 mm combined endpoint,
+and 0.0108 Y-envelope velocity NRMSE.
+
+Mandatory replay rejected only `validation-y-envelope`. Its core normalized
+motor RMSE was 0.010796 against the 0.010 limit, improved from Entry 300's
+0.011343. Physical-state normalized motor RMSE passed narrowly at 0.009972,
+collective RMSE passed at 0.02135 N, and all timestamp joins were exact. The
+remaining unsaturated boundary error is roll/pitch normalized torque RMSE
+`[0.01502, 0.01129, 0.00007]`; collective and yaw are aligned.
+
+The first unresolved boundary is therefore the velocity path's conversion of
+a high-speed lateral thrust vector into attitude/rate torque, not translational
+feedback gains, target-state adaptation, allocation, actuator dynamics, or
+plant collective. Keep P/I/D pinned and inspect the thrust-vector direction
+and generated attitude/rate setpoints before introducing another fit parameter
+or changing an equation. Do not finalize or run the live acceptance gate while
+this replay remains above its limit.
