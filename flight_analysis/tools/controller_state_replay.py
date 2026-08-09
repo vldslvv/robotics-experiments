@@ -339,6 +339,38 @@ def _normalized_boundary_metrics(
     }
 
 
+def _controller_setpoint_metrics(
+    *,
+    target_body_rate_flu: np.ndarray,
+    px4_body_rate_flu: np.ndarray,
+    target_collective: np.ndarray,
+    px4_collective: np.ndarray,
+) -> dict:
+    """Compare the attitude-loop output before the shared rate controller."""
+    target_rate = np.asarray(target_body_rate_flu, dtype=np.float64)
+    px4_rate = np.asarray(px4_body_rate_flu, dtype=np.float64)
+    target_thrust = np.asarray(target_collective, dtype=np.float64)
+    px4_thrust = np.asarray(px4_collective, dtype=np.float64)
+    if target_rate.shape != px4_rate.shape or target_rate.ndim != 2 or target_rate.shape[1] != 3:
+        raise ValueError(
+            "target and PX4 body-rate setpoints must have matching (samples, 3) shapes, got "
+            f"{target_rate.shape} and {px4_rate.shape}"
+        )
+    expected_collective_shape = (len(target_rate),)
+    if target_thrust.shape != expected_collective_shape or px4_thrust.shape != (
+        expected_collective_shape
+    ):
+        raise ValueError(
+            "target and PX4 collective setpoints must match the body-rate sample count"
+        )
+    return {
+        "body_rate_setpoint_rmse_radps": [
+            _root_mean_square(values=target_rate[:, axis] - px4_rate[:, axis]) for axis in range(3)
+        ],
+        "collective_setpoint_rmse": _root_mean_square(values=target_thrust - px4_thrust),
+    }
+
+
 def _topic_time_us(*, topic: dict) -> np.ndarray:
     return np.asarray(topic["timestamp"], dtype=np.int64)
 
@@ -869,6 +901,7 @@ def _report(
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
+    rates_setpoint = _dataset(ulog=ulog, name="vehicle_rates_setpoint")
     thrust_setpoint = _dataset(ulog=ulog, name="vehicle_thrust_setpoint")
     torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     time_origin = float(time_origin_us)
@@ -1034,6 +1067,8 @@ def _report(
     isaac_motor_rows: list[np.ndarray] = []
     px4_wrench_rows: list[np.ndarray] = []
     isaac_wrench_rows: list[np.ndarray] = []
+    isaac_rate_setpoint_rows: list[np.ndarray] = []
+    isaac_collective_setpoint_rows: list[float] = []
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
@@ -1068,6 +1103,8 @@ def _report(
         ),
     )
     isaac_omega_grid = []
+    isaac_rate_setpoint_grid = []
+    isaac_collective_setpoint_grid = []
     command_refresh_cadence = _CadenceState(previous_time_ns=0)
     command_refresh_steps_remaining = 0
     held_controller_command = np.zeros(4, dtype=np.float64)
@@ -1135,6 +1172,8 @@ def _report(
             controller_dt_s,
         )
         isaac_omega_grid.append(isaac_omega)
+        isaac_rate_setpoint_grid.append(controller_state.body_rate_setpoint)
+        isaac_collective_setpoint_grid.append(controller_state.collective_thrust_setpoint)
 
     replay_index = _nearest_indices(source_t=replay_t, query_t=sample_t)
     for time_s, mi, replay_sample_index in zip(
@@ -1166,6 +1205,8 @@ def _report(
         isaac_omega_rows.append(isaac_omega)
         px4_wrench_rows.append(_wrench(geometry=geometry, omega=px4_omega))
         isaac_wrench_rows.append(_wrench(geometry=geometry, omega=isaac_omega))
+        isaac_rate_setpoint_rows.append(isaac_rate_setpoint_grid[replay_sample_index])
+        isaac_collective_setpoint_rows.append(isaac_collective_setpoint_grid[replay_sample_index])
 
     if not used_t:
         raise ValueError("selected window contains no finite velocity-setpoint/motor samples")
@@ -1176,6 +1217,11 @@ def _report(
     isaac_motor_array = np.stack(isaac_motor_rows)
     px4_wrench_array = np.stack(px4_wrench_rows)
     isaac_wrench_array = np.stack(isaac_wrench_rows)
+    isaac_rate_setpoint_array = np.stack(isaac_rate_setpoint_rows)
+    isaac_collective_setpoint_array = np.asarray(
+        isaac_collective_setpoint_rows,
+        dtype=np.float64,
+    )
     omega_error = isaac_omega_array - px4_omega_array
     wrench_error = isaac_wrench_array - px4_wrench_array
     max_omega = np.asarray(bridge.max_rotor_velocity)
@@ -1200,12 +1246,33 @@ def _report(
             for index in range(3)
         ]
     )
+    rates_setpoint_index = _nearest_indices(
+        source_t=relative_time(rates_setpoint),
+        query_t=np.asarray(used_t),
+    )
+    px4_rate_setpoint_flu = np.column_stack(
+        [
+            np.asarray(rates_setpoint[field], dtype=np.float64)[rates_setpoint_index]
+            for field in ("roll", "pitch", "yaw")
+        ]
+    )
+    px4_rate_setpoint_flu *= np.array([1.0, -1.0, -1.0])
+    px4_collective_setpoint = -np.asarray(
+        rates_setpoint["thrust_body[2]"],
+        dtype=np.float64,
+    )[rates_setpoint_index]
     boundary_metrics = _normalized_boundary_metrics(
         target_motor_controls=isaac_motor_array,
         px4_motor_controls=px4_motor_array,
         normalized_mix=params.normalized_allocation_mix,
         px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
         px4_torque_flu=torque_setpoint_flu,
+    )
+    setpoint_metrics = _controller_setpoint_metrics(
+        target_body_rate_flu=isaac_rate_setpoint_array,
+        px4_body_rate_flu=px4_rate_setpoint_flu,
+        target_collective=isaac_collective_setpoint_array,
+        px4_collective=px4_collective_setpoint,
     )
     scale_fits = [
         _linear_scale_with_intercept(
@@ -1242,9 +1309,16 @@ def _report(
             if physical_state and bridge_state is not None
             else 0
         ),
+        "controller_setpoint_timestamp_join_error_us": int(
+            np.max(
+                np.abs(relative_time(rates_setpoint)[rates_setpoint_index] - np.asarray(used_t))
+                * 1e6
+            )
+        ),
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             **boundary_metrics,
+            **setpoint_metrics,
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),

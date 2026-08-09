@@ -12,6 +12,7 @@ from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
+    _controller_setpoint_metrics,
     _delay_velocity_actions,
     _hold_indices,
     _interpolate_quaternions,
@@ -182,6 +183,22 @@ def test_normalized_boundary_excludes_saturated_samples_from_upstream_metrics():
     assert metrics["saturated_sample_count"] == 1
     assert metrics["normalized_collective_rmse"] == pytest.approx(0.0)
     assert metrics["normalized_torque_rmse"] == pytest.approx([0.0, 0.0, 0.0])
+
+
+def test_controller_setpoint_metrics_keep_each_rate_axis_visible():
+    metrics = _controller_setpoint_metrics(
+        target_body_rate_flu=np.array([[0.2, -0.1, 0.4], [0.0, 0.3, -0.2]]),
+        px4_body_rate_flu=np.array([[0.1, -0.3, 0.4], [0.0, 0.1, 0.0]]),
+        target_collective=np.array([0.55, 0.60]),
+        px4_collective=np.array([0.50, 0.60]),
+    )
+
+    assert metrics == {
+        "body_rate_setpoint_rmse_radps": pytest.approx(
+            [np.sqrt(0.01 / 2.0), 0.2, 0.2 / np.sqrt(2.0)]
+        ),
+        "collective_setpoint_rmse": pytest.approx(0.05 / np.sqrt(2.0)),
+    }
 
 
 def test_bridge_actuator_samples_join_dynamics_within_one_tick(tmp_path: Path):

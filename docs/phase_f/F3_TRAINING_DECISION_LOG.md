@@ -9966,3 +9966,19 @@ plant collective. Keep P/I/D pinned and inspect the thrust-vector direction
 and generated attitude/rate setpoints before introducing another fit parameter
 or changing an equation. Do not finalize or run the live acceptance gate while
 this replay remains above its limit.
+
+### 303. Instrument the attitude-to-rate controller boundary
+
+Date: 2026-08-09.
+
+The accepted ULog evidence includes `vehicle_rates_setpoint`, but the replay
+report currently jumps from collective magnitude to normalized torque. Add a
+diagnostic comparison of the target controller's held body-rate and collective
+setpoints against the timestamp-joined PX4 rate setpoint for every profile.
+Keep the existing motor, collective, and timestamp acceptance limits unchanged.
+
+This separates the two remaining hypotheses without a new fitted parameter. A
+body-rate-setpoint mismatch locates the defect in velocity-thrust direction or
+attitude control; matching rate setpoints with mismatched torque locate it in
+the rate PID. Preserve roll, pitch, and yaw errors independently and report the
+join error so an apparent controller mismatch cannot conceal a phase error.
