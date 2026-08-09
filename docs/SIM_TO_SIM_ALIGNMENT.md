@@ -135,9 +135,7 @@ initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
 the target's fitted fractional attitude-loop cadence, and recorded command
-cadence. Boundary replay triggers the attitude stage from the exact full-rate
-`vehicle_attitude` publication schedule in the ULog so PX4 module scheduling is
-an observed input rather than a fitted controller gain. A recorded policy sample contains the setpoint
+cadence. A recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
 setpoint on the following 4 ms controller tick. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.
@@ -157,7 +155,9 @@ velocity-only vertical state blending and applies logged hover-estimate updates
 at their source timestamps. For velocity profiles it also reconstructs PX4's
 exact vertical acceleration setpoint from the full-rate desired attitude,
 collective thrust, and hover estimate, then reports acceleration-setpoint and
-inferred velocity-integral error before the thrust conversion boundary. A
+inferred velocity-integral error before the thrust conversion boundary. It
+scans that upstream vertical setpoint over zero through three physics ticks so
+outer-loop phase error remains separate from controller gains. A
 zero-through-three-tick delay scan compares the target attitude-loop output to
 PX4's downstream rates setpoint so asynchronous module handoff error remains
 separate from controller gains. The

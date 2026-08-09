@@ -27,9 +27,9 @@ from flight_analysis.tools.controller_state_replay import (
     _px4_attitude_to_isaac,
     _px4_vertical_velocity_state,
     _rate_input_metrics,
-    _recorded_update_mask,
     _replay_time_grid,
     _vertical_acceleration_setpoint_enu,
+    _vertical_setpoint_delay_scan,
 )
 
 
@@ -61,15 +61,6 @@ def test_replay_grid_preserves_exact_relative_command_ticks() -> None:
     assert relative_time[250] == 1.0
     assert absolute_time[250] == pytest.approx(44.884)
     assert command_index[249:251].tolist() == [0, 1]
-
-
-def test_recorded_update_mask_preserves_irregular_physics_ticks() -> None:
-    result = _recorded_update_mask(
-        source_time_s=np.array([12.000, 12.004, 12.012]),
-        replay_time_s=np.array([12.000, 12.004, 12.008, 12.012]),
-    )
-
-    assert result.tolist() == [True, True, False, True]
 
 
 def test_velocity_action_delay_shifts_the_complete_command():
@@ -195,6 +186,27 @@ def test_controller_setpoint_delay_scan_finds_one_tick_handoff() -> None:
     assert result[0]["collective_setpoint_rmse"] > 0.0
     assert result[1]["collective_setpoint_rmse"] == 0.0
     assert result[1]["body_rate_setpoint_rmse_radps"] == [0.0, 0.0, 0.0]
+
+
+def test_vertical_setpoint_delay_scan_finds_two_tick_outer_phase() -> None:
+    target = np.column_stack(
+        [
+            np.zeros(5),
+            np.zeros(5),
+            np.arange(5, dtype=np.float64),
+        ]
+    )
+
+    result = _vertical_setpoint_delay_scan(
+        target_acceleration_setpoint_grid_enu=target,
+        replay_indices=np.array([2, 3, 4]),
+        px4_acceleration_setpoint_z_enu=np.array([0.0, 1.0, 2.0]),
+        maximum_delay_steps=3,
+    )
+
+    assert result[0]["rmse_mps2"] > 0.0
+    assert result[2]["rmse_mps2"] == 0.0
+    assert result[2]["max_abs_mps2"] == 0.0
 
 
 def test_normalized_boundary_reconstructs_unsaturated_collective_and_torque():

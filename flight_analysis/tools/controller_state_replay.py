@@ -99,17 +99,6 @@ def _replay_time_grid(
     return start_s + relative_time_s, relative_time_s
 
 
-def _recorded_update_mask(
-    *,
-    source_time_s: np.ndarray,
-    replay_time_s: np.ndarray,
-) -> np.ndarray:
-    """Join exact physics-representable module updates onto the replay grid."""
-    source_ticks_us = np.rint(np.asarray(source_time_s, dtype=np.float64) * 1e6).astype(np.int64)
-    replay_ticks_us = np.rint(np.asarray(replay_time_s, dtype=np.float64) * 1e6).astype(np.int64)
-    return np.isin(replay_ticks_us, source_ticks_us)
-
-
 def _delay_velocity_actions(
     *,
     actions: np.ndarray,
@@ -456,6 +445,39 @@ def _controller_setpoint_delay_scan(
             px4_collective=px4_collective,
         )
         results.append({"delay_steps": delay_steps, **metrics})
+    return results
+
+
+def _vertical_setpoint_delay_scan(
+    *,
+    target_acceleration_setpoint_grid_enu: np.ndarray,
+    replay_indices: np.ndarray,
+    px4_acceleration_setpoint_z_enu: np.ndarray,
+    maximum_delay_steps: int,
+) -> list[dict]:
+    """Measure outer-loop Z setpoint timing before attitude conversion."""
+    target = np.asarray(target_acceleration_setpoint_grid_enu, dtype=np.float64)
+    indices = np.asarray(replay_indices, dtype=np.int64)
+    px4 = np.asarray(px4_acceleration_setpoint_z_enu, dtype=np.float64)
+    if target.ndim != 2 or target.shape[1] != 3:
+        raise ValueError("target acceleration setpoint grid must have shape (samples, 3)")
+    if indices.ndim != 1 or px4.shape != indices.shape:
+        raise ValueError("replay indices and PX4 acceleration setpoints must match")
+    if maximum_delay_steps < 0 or np.any(indices < 0):
+        raise ValueError("delay steps and replay indices must be non-negative")
+    if indices.size and int(np.max(indices)) >= len(target):
+        raise ValueError("replay index exceeds the target acceleration setpoint grid")
+    results = []
+    for delay_steps in range(maximum_delay_steps + 1):
+        delayed_indices = np.maximum(indices - delay_steps, 0)
+        error = target[delayed_indices, 2] - px4
+        results.append(
+            {
+                "delay_steps": delay_steps,
+                "rmse_mps2": _root_mean_square(values=error),
+                "max_abs_mps2": float(np.max(np.abs(error))),
+            }
+        )
     return results
 
 
@@ -1043,10 +1065,6 @@ def _report(
         end_s=end_s,
         controller_dt_s=controller_dt_s,
     )
-    attitude_update_mask = _recorded_update_mask(
-        source_time_s=relative_time(attitude),
-        replay_time_s=replay_t,
-    )
     if command_trace is None:
         replay_actions = None
         trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
@@ -1266,7 +1284,6 @@ def _report(
         quaternion,
         rates_flu,
         hover_thrust_normalized,
-        attitude_updated,
     ) in zip(
         replay_actions if replay_actions is not None else np.full((len(replay_t), 4), np.nan),
         velocity_ned,
@@ -1275,7 +1292,6 @@ def _report(
         replay_quaternion_flu_enu,
         replay_angular_velocity_flu,
         replay_hover_thrust,
-        attitude_update_mask,
         strict=True,
     ):
         if not (
@@ -1293,13 +1309,6 @@ def _report(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
             linear_velocity_enu=velocity_state_enu,
             angular_velocity_body_flu=rates_flu,
-        )
-        attitude_period_s = 1.0 / params.attitude_controller_rate_hz
-        controller_state = replace(
-            controller_state,
-            attitude_loop_elapsed_s=(
-                attitude_period_s - controller_dt_s if attitude_updated else -controller_dt_s
-            ),
         )
         controller_state = update_hover_thrust_estimate(
             params=params,
@@ -1502,6 +1511,7 @@ def _report(
         px4_angular_acceleration_flu=px4_angular_acceleration_flu,
     )
     outer_loop_metrics: dict[str, float] = {}
+    vertical_setpoint_delay_scan: list[dict] = []
     if control_mode == "velocity":
         used_time = np.asarray(used_t)
         attitude_setpoint_index = _hold_indices(
@@ -1540,6 +1550,12 @@ def _report(
             + params.kd_vel[2] * isaac_acceleration_array[:, 2]
         )
         velocity_integral_z_error = isaac_velocity_integral_array[:, 2] - px4_velocity_integral_z
+        vertical_setpoint_delay_scan = _vertical_setpoint_delay_scan(
+            target_acceleration_setpoint_grid_enu=np.stack(isaac_acceleration_setpoint_grid),
+            replay_indices=np.asarray(used_replay_indices),
+            px4_acceleration_setpoint_z_enu=px4_acceleration_setpoint_z,
+            maximum_delay_steps=3,
+        )
         outer_loop_metrics = {
             "vertical_acceleration_setpoint_rmse_mps2": _root_mean_square(
                 values=acceleration_setpoint_z_error
@@ -1570,7 +1586,6 @@ def _report(
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
-        "attitude_update_schedule_source": "vehicle_attitude",
         "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
         "physical_state_timestamp_join_error_us": (
@@ -1601,6 +1616,7 @@ def _report(
         ),
         "sample_time_s": [min(used_t), max(used_t)],
         "outer_loop_handoff_delay_scan": handoff_delay_scan,
+        "vertical_setpoint_delay_scan": vertical_setpoint_delay_scan,
         "metrics": {
             **boundary_metrics,
             **setpoint_metrics,
@@ -1740,13 +1756,13 @@ def _profile_replay_report(
                 "end_s": window["end_s"],
                 "sample_count": core_replay["sample_count"],
                 "controller_sample_count": core_replay["controller_sample_count"],
-                "attitude_update_schedule_source": core_replay["attitude_update_schedule_source"],
                 "controller_state_source": core_replay["controller_state_source"],
                 "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
                 "controller_setpoint_max_source_age_us": setpoint_source_age_us,
                 "rate_input_nearest_sample_error_us": rate_input_sample_error_us,
                 "sample_time_s": core_replay["sample_time_s"],
                 "outer_loop_handoff_delay_scan": core_replay["outer_loop_handoff_delay_scan"],
+                "vertical_setpoint_delay_scan": core_replay["vertical_setpoint_delay_scan"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,
                 "physical_state_timestamp_join_error_us": physical_join_error_us,

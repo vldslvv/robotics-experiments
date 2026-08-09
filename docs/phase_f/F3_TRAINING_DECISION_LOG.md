@@ -10415,3 +10415,32 @@ base. The remaining trace-supported diagnostic is the outer acceleration
 transition itself: scan replayed vertical acceleration setpoint against the
 exact full-rate reconstructed PX4 acceleration over zero through three physics
 ticks before changing another controller setting.
+
+### 322. Checkpoint before vertical acceleration phase scan
+
+Date: 2026-08-09.
+
+The unsuccessful replay-only `vehicle_attitude` timestamp trigger has been
+removed after recording its regression. The deployable controller remains at
+the best deterministic 142.8571 Hz attitude cadence. Boundary replay now
+reports a zero-through-three-physics-tick delay scan between the target's
+upstream vertical acceleration setpoint and PX4's full-rate reconstructed
+vertical acceleration setpoint. A focused host test proves that the diagnostic
+identifies a known two-tick phase offset. No new runtime replay has been run at
+this checkpoint.
+
+Resume from the preserved high-rate run with:
+
+```sh
+make alignment-replay-controller ALIGNMENT_RUN_ID=20260809T-uniform-6dof-high-rate-scratch
+jq -r '.profiles[] | select(.control_mode == "velocity") | .profile as $profile | .vertical_setpoint_delay_scan[] | [$profile, .delay_steps, .rmse_mps2, .max_abs_mps2] | @tsv' .build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-rate-scratch/controller_boundary_replay.json
+```
+
+If one shift materially dominates for `validation-z-envelope` and
+`stability-moderate-envelope` without regressing passed boundaries, model that
+outer-stage phase and rerun the unchanged candidates. If it does not, stop
+changing timing and inspect the remaining physical Y actuator-adapter residual
+as a separate plant-boundary issue. The current preserved controller artifact
+was mechanically updated for diagnostics and is not publishable; a fresh
+scratch target fit and capture under the new comparison fingerprint are still
+required before policy training.
