@@ -9719,3 +9719,17 @@ can build the missing pre-transition velocity while retained proportional and
 derivative damping control endpoint and stopping. Keep the evidenced integral
 acceleration limit fixed for this diagnostic so gain and authority are not
 changed simultaneously.
+
+### 293. Fit lateral integral buildup at fixed authority
+
+Date: 2026-08-09.
+
+Add `ki_vel.y` candidates `[0.2, 0.4, 0.6, 0.8, 1.0, 1.2]` after the P/D
+response stages and before observation-scale polishing. Keep `ki_vel.x/z` and
+the `[0.35, 0.35, 4.0]` m/s2 integral limit fixed, so the diagnostic isolates
+integral buildup rate from total controller authority. Generated midpoint
+refinement supplies 0.05 resolution around gate champions.
+
+Retain every existing setting range, controller structure, plant contract,
+probe family, metric, and limit. Reuse Entry 286's fresh capture and require
+all quality gates before replay and live validation.
