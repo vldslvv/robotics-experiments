@@ -491,6 +491,23 @@ def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> No
     }
 
 
+def test_ctbr_rotation_profiles_have_zero_net_commanded_rotation() -> None:
+    definition = load_controller_definition(
+        REPO_ROOT / "configs/alignment/controllers/px4_sitl_x500_velocity.yaml"
+    )
+    family = next(family for family in definition.probe_families if family.name == "ctbr")
+
+    for profile in family.profiles:
+        commanded_rotation = tuple(
+            sum(
+                command.body_rate_flu_radps[axis] * command.duration_s
+                for command in profile.commands
+            )
+            for axis in range(3)
+        )
+        assert commanded_rotation == pytest.approx(_ZERO3, abs=1e-12), profile.name
+
+
 def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
     tmp_path: Path,
 ) -> None:

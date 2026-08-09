@@ -9276,3 +9276,23 @@ fit, complete family replay, and live integration gate. Do not reuse or promote
 the Entry 271 artifact under the new criteria. If the new family gates expose a
 boundary, expand only declarative settings supported by its trace and repeat
 until one unchanged scratch invocation passes.
+
+### 273. Balance direct body-rate probes before repeating uniform acceptance
+
+Date: 2026-08-09.
+
+The first clean Entry 272 campaign,
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-scratch`, reached the first
+CTBR roll profile after completing the velocity family but intentionally stopped
+before producing a reference: the routine safety envelope detected 2.05 m of
+lateral drift against its 2.00 m limit. The fit profile commanded +0.35 rad/s
+for 1.5 s but only -0.25 rad/s for 1.0 s. A neutral CTBR rate holds the resulting
+attitude instead of returning the vehicle level, so the profile's nonzero
+commanded angular impulse made the capture unsafe and prevented the gate from
+measuring the intended controller boundary.
+
+Keep amplitudes and per-axis coverage, but shorten and balance every CTBR
+rotational profile so its commanded angular impulse is zero. Add a configuration
+regression test for that invariant. Do not weaken the routine's 2.00 m safety
+envelope. Start a new clean scratch campaign because the corrected probe suite
+has a new comparison fingerprint.
