@@ -93,11 +93,22 @@ parameters:
       - [0.040, -0.010, -0.0039]
       - [0.040, 0.000, -0.0039]
       - [0.040, 0.010, -0.0039]
+  # The fresh uniform-axis trace stops 40 ms earlier than PX4 and travels
+  # 6.481 mm less during Y braking. Reduce only lateral derivative damping
+  # after the broad estimator search, then refine around gate champions.
+  - field: kd_vel
+    stage: 3
+    candidates:
+      - [0.2, 0.00, 0.0]
+      - [0.2, 0.05, 0.0]
+      - [0.2, 0.10, 0.0]
+      - [0.2, 0.15, 0.0]
+      - [0.2, 0.20, 0.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 3
+    stage: 4
     candidates:
       - [0.35, 0.35, 4.0]
 

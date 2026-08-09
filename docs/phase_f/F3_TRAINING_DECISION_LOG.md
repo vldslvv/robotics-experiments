@@ -9484,3 +9484,21 @@ in the declared decay-and-bias population passed both. The selected endpoint
 error was already 0.009826 m against 0.010 m, leaving only 0.174 mm of margin.
 The next diagnostic must therefore add an independently evidenced lateral
 transient parameter rather than extend steady observation bias farther.
+
+### 283. Reduce the measured lateral over-damping
+
+Date: 2026-08-09.
+
+Inspect the selected Entry 282 validation lateral reversal at its accepted
+reference/target boundary. PX4 traveled 53.892 mm from the braking transition
+until crossing the 0.01 m/s stop threshold. The target traveled only 47.411 mm,
+an undershoot of exactly the reported 6.481 mm gate error, and crossed the stop
+threshold one 40 ms sample earlier. This is over-damping, not insufficient
+braking authority.
+
+Add one declarative `kd_vel.y` stage below the pinned 0.2 setting, searching
+`[0.00, 0.05, 0.10, 0.15, 0.20]` with the existing generated midpoint
+refinement. Keep X/Z derivative gains, P/I gains, estimator scale, controller
+structure, plant, profiles, and gates unchanged. Reuse the fresh Entry 282
+reference for a target-only diagnostic. Require a candidate to pass both Y
+braking and combined endpoint before repeating a fully fresh publishable run.
