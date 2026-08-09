@@ -573,6 +573,20 @@ def test_staged_beam_search_is_deterministic() -> None:
     assert first.controller.selected_settings == second.controller.selected_settings
 
 
+def test_staged_beam_search_reports_initial_candidate_failure() -> None:
+    class FailedEvaluator(_Evaluator):
+        _retain_traces = False
+
+        def evaluate_scored_batch(self, *, definition, settings, reference_traces):
+            del definition, reference_traces
+            return tuple("ctbr trace failed" for _settings in settings)
+
+    target = _definition(backend="isaac-lab", evaluator=FailedEvaluator())
+
+    with pytest.raises(RuntimeError, match="unusable: ctbr trace failed"):
+        _staged_beam_search(target=target, reference_traces=())
+
+
 def test_beam_retains_per_objective_champions() -> None:
     name = "test-diverse-beam-v1"
 

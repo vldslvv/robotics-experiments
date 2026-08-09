@@ -9397,3 +9397,20 @@ while avoiding the unsupported second environment and reducing scene memory.
 Commit the structural correction, reuse this run's accepted capture only to
 diagnose target startup and fitting, then rerun the full publishable campaign
 from clean source.
+
+### 279. Preserve evaluator reasons when the initial candidate is unusable
+
+Date: 2026-08-09.
+
+The target-only diagnostic after Entry 278 proved the single-environment worker
+contract: it initialized one fixed scene and evaluated the base candidate in
+17.8 seconds, with 30.3% average and 42.0% peak GPU utilization. The evaluator
+marked that candidate unusable before metric scoring, but the generic staged
+search replaced its concrete failure with only `every initial alignment setting
+was unusable`, leaving the first failed trace boundary inaccessible.
+
+Include up to three distinct candidate-local failure reasons in the generic
+initial and stage-wide unusable errors, with a host regression test. This is an
+evidence-reporting correction and does not change candidate generation, scoring,
+ranking, or acceptance. Commit it and repeat the target-only diagnostic against
+the preserved capture.

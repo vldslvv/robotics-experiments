@@ -417,6 +417,14 @@ def _staged_beam_search(
     )
     retained = initial_settings
 
+    def unusable_details(scores: list[CandidateScore], /) -> str:
+        reasons = tuple(
+            dict.fromkeys(
+                score.failure_reason or "candidate returned no failure reason" for score in scores
+            )
+        )
+        return "; ".join(reasons[:3])
+
     def retain(
         scores: list[CandidateScore],
         /,
@@ -513,14 +521,18 @@ def _staged_beam_search(
         if not usable:
             raise RuntimeError(
                 f"every alignment candidate was unusable while fitting "
-                f"stage {parameter.stage} field {parameter.field!r}"
+                f"stage {parameter.stage} field {parameter.field!r}: "
+                f"{unusable_details(evaluated)}"
             )
         usable = [score for score in scores_by_settings.values() if score.usable]
         retained = retain(usable)
 
-    initial_usable = [score for score in evaluate_many(initial_settings) if score.usable]
+    initial_scores = evaluate_many(initial_settings)
+    initial_usable = [score for score in initial_scores if score.usable]
     if not initial_usable:
-        raise RuntimeError("every initial alignment setting was unusable")
+        raise RuntimeError(
+            "every initial alignment setting was unusable: " f"{unusable_details(initial_scores)}"
+        )
     retained = tuple(score.settings for score in initial_usable)
     grids = {
         parameter.field: tuple(
