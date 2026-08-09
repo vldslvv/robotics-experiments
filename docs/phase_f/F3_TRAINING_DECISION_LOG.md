@@ -9982,3 +9982,24 @@ body-rate-setpoint mismatch locates the defect in velocity-thrust direction or
 attitude control; matching rate setpoints with mismatched torque locate it in
 the rate PID. Preserve roll, pitch, and yaw errors independently and report the
 join error so an apparent controller mismatch cannot conceal a phase error.
+
+### 304. Inspect rate-loop state after the setpoint boundary
+
+Date: 2026-08-09.
+
+The first instrumented replay keeps the same sole Y-envelope motor failure.
+That profile's body-rate setpoint RMSE is `[0.00611, 0.01483, 0.00041]` rad/s
+and its collective-setpoint RMSE is 0.000084. With lateral rate proportional
+gain 0.15, this setpoint difference is too small to explain normalized torque
+RMSE `[0.01502, 0.01129, 0.00007]` by itself.
+
+Report the target and PX4 angular-velocity and angular-acceleration inputs at
+the rate PID. The replay already consumes PX4's `vehicle_angular_velocity`
+topic, including its published derivative, but the target reconstructs the
+derivative from the physics-rate velocity stream. Keep the controller and all
+acceptance limits unchanged until this comparison establishes whether the
+remaining error begins in derivative reconstruction or rate-loop state.
+
+Correct the CTBR setpoint diagnostic to compare its direct command rather than
+the velocity-loop held-state field, which CTBR does not use. This affects only
+diagnostic reporting, not controller output or acceptance.

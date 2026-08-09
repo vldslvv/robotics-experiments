@@ -371,6 +371,38 @@ def _controller_setpoint_metrics(
     }
 
 
+def _rate_input_metrics(
+    *,
+    target_angular_velocity_flu: np.ndarray,
+    px4_angular_velocity_flu: np.ndarray,
+    target_angular_acceleration_flu: np.ndarray,
+    px4_angular_acceleration_flu: np.ndarray,
+) -> dict:
+    """Compare the measured-state inputs consumed by the rate PID."""
+    target_rate = np.asarray(target_angular_velocity_flu, dtype=np.float64)
+    px4_rate = np.asarray(px4_angular_velocity_flu, dtype=np.float64)
+    target_acceleration = np.asarray(target_angular_acceleration_flu, dtype=np.float64)
+    px4_acceleration = np.asarray(px4_angular_acceleration_flu, dtype=np.float64)
+    expected_shape = target_rate.shape
+    if (
+        target_rate.ndim != 2
+        or expected_shape[1] != 3
+        or px4_rate.shape != expected_shape
+        or target_acceleration.shape != expected_shape
+        or px4_acceleration.shape != expected_shape
+    ):
+        raise ValueError("rate PID input arrays must have matching (samples, 3) shapes")
+    return {
+        "angular_velocity_input_rmse_radps": [
+            _root_mean_square(values=target_rate[:, axis] - px4_rate[:, axis]) for axis in range(3)
+        ],
+        "angular_acceleration_input_rmse_radps2": [
+            _root_mean_square(values=target_acceleration[:, axis] - px4_acceleration[:, axis])
+            for axis in range(3)
+        ],
+    }
+
+
 def _topic_time_us(*, topic: dict) -> np.ndarray:
     return np.asarray(topic["timestamp"], dtype=np.int64)
 
@@ -1069,6 +1101,8 @@ def _report(
     isaac_wrench_rows: list[np.ndarray] = []
     isaac_rate_setpoint_rows: list[np.ndarray] = []
     isaac_collective_setpoint_rows: list[float] = []
+    isaac_angular_velocity_rows: list[np.ndarray] = []
+    isaac_angular_acceleration_rows: list[np.ndarray] = []
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
@@ -1105,6 +1139,8 @@ def _report(
     isaac_omega_grid = []
     isaac_rate_setpoint_grid = []
     isaac_collective_setpoint_grid = []
+    isaac_angular_velocity_grid = []
+    isaac_angular_acceleration_grid = []
     command_refresh_cadence = _CadenceState(previous_time_ns=0)
     command_refresh_steps_remaining = 0
     held_controller_command = np.zeros(4, dtype=np.float64)
@@ -1172,8 +1208,16 @@ def _report(
             controller_dt_s,
         )
         isaac_omega_grid.append(isaac_omega)
-        isaac_rate_setpoint_grid.append(controller_state.body_rate_setpoint)
-        isaac_collective_setpoint_grid.append(controller_state.collective_thrust_setpoint)
+        isaac_rate_setpoint_grid.append(
+            command[1:4] if control_mode == "ctbr" else controller_state.body_rate_setpoint
+        )
+        isaac_collective_setpoint_grid.append(
+            float(command[0])
+            if control_mode == "ctbr"
+            else controller_state.collective_thrust_setpoint
+        )
+        isaac_angular_velocity_grid.append(controller_state.previous_angular_velocity_body_flu)
+        isaac_angular_acceleration_grid.append(controller_state.angular_acceleration_body_flu)
 
     replay_index = _nearest_indices(source_t=replay_t, query_t=sample_t)
     for time_s, mi, replay_sample_index in zip(
@@ -1207,6 +1251,8 @@ def _report(
         isaac_wrench_rows.append(_wrench(geometry=geometry, omega=isaac_omega))
         isaac_rate_setpoint_rows.append(isaac_rate_setpoint_grid[replay_sample_index])
         isaac_collective_setpoint_rows.append(isaac_collective_setpoint_grid[replay_sample_index])
+        isaac_angular_velocity_rows.append(isaac_angular_velocity_grid[replay_sample_index])
+        isaac_angular_acceleration_rows.append(isaac_angular_acceleration_grid[replay_sample_index])
 
     if not used_t:
         raise ValueError("selected window contains no finite velocity-setpoint/motor samples")
@@ -1222,6 +1268,8 @@ def _report(
         isaac_collective_setpoint_rows,
         dtype=np.float64,
     )
+    isaac_angular_velocity_array = np.stack(isaac_angular_velocity_rows)
+    isaac_angular_acceleration_array = np.stack(isaac_angular_acceleration_rows)
     omega_error = isaac_omega_array - px4_omega_array
     wrench_error = isaac_wrench_array - px4_wrench_array
     max_omega = np.asarray(bridge.max_rotor_velocity)
@@ -1261,6 +1309,26 @@ def _report(
         rates_setpoint["thrust_body[2]"],
         dtype=np.float64,
     )[rates_setpoint_index]
+    angular_velocity_index = _nearest_indices(
+        source_t=relative_time(angular_velocity),
+        query_t=np.asarray(used_t),
+    )
+    px4_angular_velocity_flu = np.column_stack(
+        [
+            np.asarray(angular_velocity[f"xyz[{index}]"], dtype=np.float64)[angular_velocity_index]
+            for index in range(3)
+        ]
+    )
+    px4_angular_velocity_flu *= np.array([1.0, -1.0, -1.0])
+    px4_angular_acceleration_flu = np.column_stack(
+        [
+            np.asarray(angular_velocity[f"xyz_derivative[{index}]"], dtype=np.float64)[
+                angular_velocity_index
+            ]
+            for index in range(3)
+        ]
+    )
+    px4_angular_acceleration_flu *= np.array([1.0, -1.0, -1.0])
     boundary_metrics = _normalized_boundary_metrics(
         target_motor_controls=isaac_motor_array,
         px4_motor_controls=px4_motor_array,
@@ -1273,6 +1341,12 @@ def _report(
         px4_body_rate_flu=px4_rate_setpoint_flu,
         target_collective=isaac_collective_setpoint_array,
         px4_collective=px4_collective_setpoint,
+    )
+    rate_input_metrics = _rate_input_metrics(
+        target_angular_velocity_flu=isaac_angular_velocity_array,
+        px4_angular_velocity_flu=px4_angular_velocity_flu,
+        target_angular_acceleration_flu=isaac_angular_acceleration_array,
+        px4_angular_acceleration_flu=px4_angular_acceleration_flu,
     )
     scale_fits = [
         _linear_scale_with_intercept(
@@ -1315,10 +1389,17 @@ def _report(
                 * 1e6
             )
         ),
+        "rate_input_timestamp_join_error_us": int(
+            np.max(
+                np.abs(relative_time(angular_velocity)[angular_velocity_index] - np.asarray(used_t))
+                * 1e6
+            )
+        ),
         "sample_time_s": [min(used_t), max(used_t)],
         "metrics": {
             **boundary_metrics,
             **setpoint_metrics,
+            **rate_input_metrics,
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),
@@ -1434,6 +1515,17 @@ def _profile_replay_report(
                 f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
             )
         physical_join_error_us = physical_replay["physical_state_timestamp_join_error_us"]
+        setpoint_join_error_us = core_replay["controller_setpoint_timestamp_join_error_us"]
+        rate_input_join_error_us = core_replay["rate_input_timestamp_join_error_us"]
+        for boundary_name, join_error_us in (
+            ("controller-setpoint", setpoint_join_error_us),
+            ("rate-input", rate_input_join_error_us),
+        ):
+            if join_error_us > _PHYSICS_TICK_US:
+                failures.append(
+                    f"{profile_name}: {boundary_name} timestamp join error "
+                    f"{join_error_us} us exceeds {_PHYSICS_TICK_US} us"
+                )
         if physical_join_error_us > _PHYSICS_TICK_US:
             failures.append(
                 f"{profile_name}: physical-state timestamp join error "
@@ -1453,6 +1545,8 @@ def _profile_replay_report(
                 "controller_sample_count": core_replay["controller_sample_count"],
                 "controller_state_source": core_replay["controller_state_source"],
                 "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
+                "controller_setpoint_timestamp_join_error_us": setpoint_join_error_us,
+                "rate_input_timestamp_join_error_us": rate_input_join_error_us,
                 "sample_time_s": core_replay["sample_time_s"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,

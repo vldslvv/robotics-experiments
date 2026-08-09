@@ -121,8 +121,9 @@ normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
 controller-boundary replay applies the selected controller to every fit,
 validation, and stability profile. Its core replay uses PX4-estimated state and
 reports the per-axis body-rate setpoint and collective setpoint errors before
-the rate controller, then enforces the same motor and collective limits. A
-second replay starts from the physics-rate physical articulation state in the
+the rate controller and the per-axis angular-velocity and derivative errors at
+the rate-controller input, then enforces the same motor and collective limits.
+A second replay starts from the physics-rate physical articulation state in the
 bridge log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each

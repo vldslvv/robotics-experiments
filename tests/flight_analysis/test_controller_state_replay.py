@@ -24,6 +24,7 @@ from flight_analysis.tools.controller_state_replay import (
     _profile_windows,
     _px4_attitude_to_isaac,
     _px4_vertical_velocity_state,
+    _rate_input_metrics,
     _replay_time_grid,
 )
 
@@ -198,6 +199,24 @@ def test_controller_setpoint_metrics_keep_each_rate_axis_visible():
             [np.sqrt(0.01 / 2.0), 0.2, 0.2 / np.sqrt(2.0)]
         ),
         "collective_setpoint_rmse": pytest.approx(0.05 / np.sqrt(2.0)),
+    }
+
+
+def test_rate_input_metrics_keep_velocity_and_derivative_errors_separate():
+    metrics = _rate_input_metrics(
+        target_angular_velocity_flu=np.array([[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]]),
+        px4_angular_velocity_flu=np.array([[0.1, 0.1, 0.3], [0.1, 0.2, 0.1]]),
+        target_angular_acceleration_flu=np.array([[1.0, 2.0, 3.0], [3.0, 2.0, 1.0]]),
+        px4_angular_acceleration_flu=np.array([[0.0, 2.0, 1.0], [3.0, 1.0, 1.0]]),
+    )
+
+    assert metrics == {
+        "angular_velocity_input_rmse_radps": pytest.approx(
+            [0.2 / np.sqrt(2.0), 0.1 / np.sqrt(2.0), 0.0]
+        ),
+        "angular_acceleration_input_rmse_radps2": pytest.approx(
+            [1.0 / np.sqrt(2.0), 1.0 / np.sqrt(2.0), np.sqrt(2.0)]
+        ),
     }
 
 
