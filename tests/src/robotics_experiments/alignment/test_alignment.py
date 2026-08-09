@@ -406,7 +406,20 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_integral_limit_mps2",
     )
     assert target.parameters[0].candidates == pytest.approx(
-        (125.0, 142.8571, 150.0, 160.0, 166.6667, 187.5, 200.0, 250.0)
+        (
+            125.0,
+            138.8889,
+            140.8451,
+            142.8571,
+            144.9275,
+            147.0588,
+            150.0,
+            160.0,
+            166.6667,
+            187.5,
+            200.0,
+            250.0,
+        )
     )
     assert len(target.parameters[2].candidates) == 63
     assert target.parameters[2].candidates[0] == pytest.approx((-0.040, -0.030, -0.0039))
