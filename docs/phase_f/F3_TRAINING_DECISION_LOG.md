@@ -9552,3 +9552,39 @@ maximum, and 0.452 m final handoff range. This is sufficient evidence to retain
 both declarative stages. Run a new clean-source capture, audit, 25-batch search,
 fit, replay, live gate, and finalization without reusing this reference or
 manually promoting candidate 2100.
+
+### 286. Fresh capture moves beyond the narrow diagnostic basin
+
+Date: 2026-08-09.
+
+Clean-source campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-damping-scale-scratch`
+recaptured and audited all 22 profiles from commit `52c602f`. Its staged search
+evaluated 1,951 unique candidates in 23 GPU batches and 788.3 seconds, averaging
+24.5% sampled GPU utilization. Deduplication saved 443 candidate evaluations
+and two batches relative to the reused-reference diagnostic.
+
+No candidate passed the uniform quality gates. Candidate 1698 was selected with
+0.011875 Hz bias decay, observation bias `[0.0, -0.03, -0.0039]` m/s, and Y
+scale 0.99; it failed only combined endpoint error at 44.631 mm. Eleven settings
+failed exactly one gate, all the combined endpoint gate. The candidate-wide
+minimum endpoint error was 13.266 mm, so the declared population did not reach
+the 10 mm boundary.
+
+Replay also rejected the selected poor-quality candidate: maximum collective
+error was 0.173267 N and maximum normalized motor RMSE was 0.011658. Timestamp
+join error remained zero. The live gate stopped at 0.120 m hover last-window
+error against 0.100 m. These failures are consistent with the selected large
+negative lateral observation bias and do not override the motion population's
+first failed boundary.
+
+The endpoint-minimum trace starts with exactly matched pose and velocity, then
+accumulates smoothly to an error vector `[-11.949, 5.113, 2.659]` mm; this is
+not an initialization impulse. Every endpoint champion used X observation bias
+zero, the lower edge of the declared range. At otherwise comparable settings,
+raising X bias from 0.00 to 0.01 m/s worsened endpoint error from 13.640 to
+22.371 mm. Extend X bias below zero. The best endpoint also used the upper
+declared Y bias of 0.01 m/s, while lower scale still left Y braking at 10.605 mm.
+Extend Y bias upward for endpoint authority and add lateral proportional gain
+as the independent transient control; do not reinterpret estimator scale as an
+arbitrary gain or alter the plant and gates.
