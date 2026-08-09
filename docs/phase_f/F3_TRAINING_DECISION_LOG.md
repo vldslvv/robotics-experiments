@@ -10377,3 +10377,22 @@ supported. Add 138.8889, 140.8451, 144.9275, and 147.0588 Hz, corresponding to
 7.2, 7.1, 6.9, and 6.8 ms periods. If none improves the Z collective frontier,
 stop rate expansion and reproduce the recorded attitude-publication schedule
 as an explicit controller input boundary.
+
+### 320. Rate refinement is exhausted
+
+Date: 2026-08-09.
+
+The narrow sweep did not improve the 142.8571 Hz frontier. At 140.8451 Hz, Z
+collective is 0.233811 N and moderate collective is 0.057714 N, effectively
+tied but slightly worse on Z. At 138.8889 Hz, the values regress to 0.304431 N
+and 0.176704 N. At 144.9275 and 147.0588 Hz, Z regresses above 0.675 N and
+moderate above 0.302 N. No further rate expansion is justified.
+
+Use 142.8571 Hz as the target's deterministic base cadence for motion fitting.
+For controller-boundary replay, drive the attitude stage from the exact
+full-rate `vehicle_attitude` publication timestamps already preserved in the
+ULog. This schedule is an observed controller input boundary, analogous to the
+recorded 125 Hz local-position updates, and avoids fitting a scalar rate to
+PX4's asynchronous one-or-two-tick module timing. Keep the exact schedule out
+of policy training; the deployable controller retains only its settings and
+deterministic cadence, while motion gates judge its response.
