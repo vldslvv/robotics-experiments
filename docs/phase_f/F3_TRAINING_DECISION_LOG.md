@@ -10003,3 +10003,29 @@ remaining error begins in derivative reconstruction or rate-loop state.
 Correct the CTBR setpoint diagnostic to compare its direct command rather than
 the velocity-loop held-state field, which CTBR does not use. This affects only
 diagnostic reporting, not controller output or acceptance.
+
+### 305. Published angular acceleration is the first mismatched rate boundary
+
+Date: 2026-08-09.
+
+The rate-input replay retained the same original Y-envelope motor error and
+located its dominant input mismatch. Core replay angular-velocity RMSE was
+`[0.02391, 0.00044, 0.00007]` rad/s and angular-acceleration RMSE was
+`[2.48608, 0.03822, 0.00702]` rad/s2. The roll P and D contributions implied by
+those errors account for most of the observed roll normalized-torque error.
+The physical-state derivative reconstruction was closer at 2.00556 rad/s2 and
+its motor replay remained passing at 0.009972, but it confirms the same seam.
+
+Pinned PX4 source confirms that `MulticopterRateControl` consumes both
+`vehicle_angular_velocity.xyz` and its independently published
+`xyz_derivative`. Core replay currently supplies the former but discards the
+latter after its initial seed, then derives acceleration again from sampled
+angular velocity. That is not an identical PX4 controller-state replay.
+
+The diagnostic also exposed that nearest-sample differences of 8 ms for held
+rate setpoints are valid source ages, not timestamp-join failures. Remove those
+new false failures, join held setpoints with hold semantics, and retain the
+source age as evidence. Then inject each timestamp-joined PX4 angular
+derivative into the core replay's rate-state boundary while leaving the
+physical-state replay and production controller unchanged. The physical replay
+continues to audit target-side derivative reconstruction.
