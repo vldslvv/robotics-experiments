@@ -9733,3 +9733,36 @@ refinement supplies 0.05 resolution around gate champions.
 Retain every existing setting range, controller structure, plant contract,
 probe family, metric, and limit. Reuse Entry 286's fresh capture and require
 all quality gates before replay and live validation.
+
+### 294. Integral buildup moves along the braking-endpoint trade-off
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-integral-diagnostic`
+reused the Entry 286 capture and evaluated 4,410 unique candidates in 47 GPU
+batches and 1,662.4 seconds. Average sampled GPU utilization was 23.6%; the
+recorded limiting seam remains deterministic single-environment physics rather
+than duplicate candidate work.
+
+Candidate 4015 selected `ki_vel.y=0.5`, `kd_vel.y=0.575`, `kp_vel.y=2.1`,
+0.01125 Hz bias decay, observation bias `[-0.015, 0.0, -0.0039]` m/s, and
+planar observation scale 0.98. Combined endpoint passed at 7.937 mm and every
+other velocity and CTBR gate passed, but Y braking remained 8.006 mm against
+5 mm. The best endpoint-passing braking result was candidate 4020 at 7.764 mm
+with `ki_vel.y=0.65`; this is only a 4.1% reduction from Entry 292's 8.093 mm
+and is not material progress.
+
+The population establishes a continuous but non-overlapping frontier. Of all
+4,410 usable candidates, 570 passed endpoint while failing Y braking, 186
+passed Y braking while failing endpoint, 3,654 failed both, and none passed
+both. Candidate-wide minima were 0.052 mm Y braking error and 1.634 mm endpoint
+error independently. Integral gain therefore changes authority but does not
+provide the missing transient shape at fixed filter dynamics.
+
+The retained trace is already over-braked at the zero-command transition, and
+the high derivative gain makes the fixed 5 Hz derivative filter the next
+independent, evidenced seam. Search lower lateral velocity-derivative cutoff
+frequencies to soften the transition while retaining D authority later in the
+stop. Keep the measured P/D/I ranges, integral limit, estimator ranges, plant,
+probe families, metrics, and limits unchanged.
