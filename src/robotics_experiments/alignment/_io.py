@@ -104,6 +104,11 @@ def _settings(
             name=f"{name}.velocity_controller_rate_hz",
             positive=True,
         ),
+        attitude_controller_rate_hz=_finite(
+            value=settings["attitude_controller_rate_hz"],
+            name=f"{name}.attitude_controller_rate_hz",
+            positive=True,
+        ),
         kp_vel=_vector(value=settings["kp_vel"], name=f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
             value=settings["horizontal_velocity_error_gain_scale"],

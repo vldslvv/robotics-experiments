@@ -88,6 +88,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.velocity_controller_rate_hz",
             positive=True,
         ),
+        attitude_controller_rate_hz=_finite(
+            value=payload["attitude_controller_rate_hz"],
+            name=f"{name}.attitude_controller_rate_hz",
+            positive=True,
+        ),
         kp_vel=_vector(payload["kp_vel"], f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
             value=payload["horizontal_velocity_error_gain_scale"],

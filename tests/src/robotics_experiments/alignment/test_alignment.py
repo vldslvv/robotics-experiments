@@ -66,6 +66,7 @@ def _settings(
     return ControllerSettings(
         command_delay_s=delay,
         velocity_controller_rate_hz=125.0,
+        attitude_controller_rate_hz=187.5,
         kp_vel=kp,
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
@@ -367,6 +368,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.alignment_id == "x500-px4-v1"
     assert target.controller_schema_version == 1
     assert target.base_settings.command_delay_s == pytest.approx(0.0)
+    assert target.base_settings.attitude_controller_rate_hz == pytest.approx(187.5)
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.20))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
@@ -396,21 +398,22 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "collective",
     }
     assert tuple(parameter.field for parameter in target.parameters) == (
+        "attitude_controller_rate_hz",
         "velocity_estimator_bias_decay_hz",
         "velocity_observation_bias_mps",
         "velocity_filter_hz",
         "velocity_observation_scale",
         "velocity_integral_limit_mps2",
     )
-    assert len(target.parameters[1].candidates) == 63
-    assert target.parameters[1].candidates[0] == pytest.approx((-0.040, -0.030, -0.0039))
-    assert target.parameters[1].candidates[-1] == pytest.approx((0.040, 0.030, -0.0039))
-    assert target.parameters[1].selection_regularization_scale == pytest.approx(1.0)
-    assert target.parameters[2].candidates[0] == pytest.approx((0.0, 0.0, 0.0))
-    assert target.parameters[2].candidates[3] == pytest.approx((0.0, 0.375, 0.0))
-    assert target.parameters[2].candidates[-1] == pytest.approx((0.0, 1.0, 0.0))
-    assert target.parameters[3].candidates[0] == pytest.approx((0.98, 0.9800, 1.0))
-    assert target.parameters[3].candidates[-1] == pytest.approx((0.98, 1.0425, 1.0))
+    assert len(target.parameters[2].candidates) == 63
+    assert target.parameters[2].candidates[0] == pytest.approx((-0.040, -0.030, -0.0039))
+    assert target.parameters[2].candidates[-1] == pytest.approx((0.040, 0.030, -0.0039))
+    assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
+    assert target.parameters[3].candidates[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert target.parameters[3].candidates[3] == pytest.approx((0.0, 0.375, 0.0))
+    assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.0, 0.0))
+    assert target.parameters[4].candidates[0] == pytest.approx((0.98, 0.9800, 1.0))
+    assert target.parameters[4].candidates[-1] == pytest.approx((0.98, 1.0425, 1.0))
     assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     extended = replace(
         target,

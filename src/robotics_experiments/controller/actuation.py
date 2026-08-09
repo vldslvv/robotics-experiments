@@ -115,6 +115,10 @@ class ActuationControllerState:
     filtered_yaw_torque: float
     hover_thrust_normalized: float
     outer_loop_elapsed_s: float
+    attitude_loop_elapsed_s: float
+    desired_rotation_enu_flu: np.ndarray
+    desired_yaw_rate_radps: float
+    desired_collective_thrust_setpoint: float
     collective_thrust_setpoint: float
     body_rate_setpoint: np.ndarray
     initialized: bool
@@ -145,6 +149,7 @@ class ActuationParams:
     rate_integral_limit: np.ndarray
     max_body_rate_radps: float
     velocity_controller_rate_hz: float
+    attitude_controller_rate_hz: float
     hover_thrust_normalized: float
     kp_vel: np.ndarray
     horizontal_velocity_error_gain_scale: float
@@ -533,6 +538,10 @@ def _rate_to_omega(
         filtered_yaw_torque=float(normalized_torque[2]),
         hover_thrust_normalized=controller_state.hover_thrust_normalized,
         outer_loop_elapsed_s=controller_state.outer_loop_elapsed_s,
+        attitude_loop_elapsed_s=controller_state.attitude_loop_elapsed_s,
+        desired_rotation_enu_flu=_readonly_copy(controller_state.desired_rotation_enu_flu),
+        desired_yaw_rate_radps=controller_state.desired_yaw_rate_radps,
+        desired_collective_thrust_setpoint=(controller_state.desired_collective_thrust_setpoint),
         collective_thrust_setpoint=controller_state.collective_thrust_setpoint,
         body_rate_setpoint=_readonly_copy(controller_state.body_rate_setpoint),
         initialized=True,
@@ -543,6 +552,35 @@ def _rate_to_omega(
         normalized_torque,
     )
     return successor, omega
+
+
+def _update_attitude_loop(
+    *,
+    params: ActuationParams,
+    successor: ActuationControllerState,
+    attitude_source: ActuationControllerState,
+    state: ActuationState,
+    dt_s: float,
+) -> ActuationControllerState:
+    period_s = 1.0 / params.attitude_controller_rate_hz
+    elapsed_s = successor.attitude_loop_elapsed_s + dt_s
+    if successor.initialized and elapsed_s < period_s - _EPS:
+        return replace(successor, attitude_loop_elapsed_s=elapsed_s)
+    rotation = _rotation_from_wxyz(state.attitude_flu_enu_wxyz)
+    body_rate_setpoint = _attitude_rate_setpoint(
+        attitude_wxyz=np.asarray(state.attitude_flu_enu_wxyz, dtype=np.float64),
+        rotation=rotation,
+        desired_rotation=attitude_source.desired_rotation_enu_flu,
+        proportional_gain=params.kp_att,
+        yaw_weight=params.attitude_yaw_weight,
+        yaw_rate_radps=attitude_source.desired_yaw_rate_radps,
+    )
+    return replace(
+        successor,
+        attitude_loop_elapsed_s=max(elapsed_s - period_s, 0.0),
+        collective_thrust_setpoint=attitude_source.desired_collective_thrust_setpoint,
+        body_rate_setpoint=_readonly_copy(body_rate_setpoint),
+    )
 
 
 def _velocity_command_to_omega(
@@ -562,7 +600,13 @@ def _velocity_command_to_omega(
     outer_loop_period_s = 1.0 / params.velocity_controller_rate_hz
     outer_loop_elapsed_s = controller_state.outer_loop_elapsed_s + dt_s
     if controller_state.initialized and outer_loop_elapsed_s < outer_loop_period_s - _EPS:
-        held_state = replace(controller_state, outer_loop_elapsed_s=outer_loop_elapsed_s)
+        held_state = _update_attitude_loop(
+            params=params,
+            successor=replace(controller_state, outer_loop_elapsed_s=outer_loop_elapsed_s),
+            attitude_source=controller_state,
+            state=state,
+            dt_s=dt_s,
+        )
         return _rate_to_omega(
             params,
             held_state,
@@ -644,14 +688,6 @@ def _velocity_command_to_omega(
     desired_x = np.cross(desired_y, desired_z)
     desired_rotation = np.stack([desired_x, desired_y, desired_z], axis=1)
 
-    body_rate_setpoint = _attitude_rate_setpoint(
-        attitude_wxyz=np.asarray(state.attitude_flu_enu_wxyz, dtype=np.float64),
-        rotation=rotation,
-        desired_rotation=desired_rotation,
-        proportional_gain=params.kp_att,
-        yaw_weight=params.attitude_yaw_weight,
-        yaw_rate_radps=float(command[3]),
-    )
     outer_successor = ActuationControllerState(
         filtered_velocity_enu=_readonly_copy(filtered_velocity),
         velocity_estimator_bias_enu=_readonly_copy(velocity_estimator_bias),
@@ -668,15 +704,27 @@ def _velocity_command_to_omega(
         filtered_yaw_torque=controller_state.filtered_yaw_torque,
         hover_thrust_normalized=hover_thrust_normalized,
         outer_loop_elapsed_s=max(outer_loop_elapsed_s - outer_loop_period_s, 0.0),
-        collective_thrust_setpoint=collective,
-        body_rate_setpoint=_readonly_copy(body_rate_setpoint),
+        attitude_loop_elapsed_s=controller_state.attitude_loop_elapsed_s,
+        desired_rotation_enu_flu=_readonly_copy(desired_rotation),
+        desired_yaw_rate_radps=float(command[3]),
+        desired_collective_thrust_setpoint=collective,
+        collective_thrust_setpoint=controller_state.collective_thrust_setpoint,
+        body_rate_setpoint=_readonly_copy(controller_state.body_rate_setpoint),
         initialized=controller_state.initialized,
+    )
+    attitude_source = outer_successor if not controller_state.initialized else controller_state
+    outer_successor = _update_attitude_loop(
+        params=params,
+        successor=outer_successor,
+        attitude_source=attitude_source,
+        state=state,
+        dt_s=dt_s,
     )
     return _rate_to_omega(
         params,
         outer_successor,
-        collective,
-        body_rate_setpoint,
+        outer_successor.collective_thrust_setpoint,
+        outer_successor.body_rate_setpoint,
         state,
         dt_s,
     )
@@ -796,6 +844,7 @@ def build_actuation_params(
         rate_integral_limit=_readonly_copy(controller_settings.rate_integral_limit),
         max_body_rate_radps=float(action_cfg.max_body_rate_radps),
         velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
+        attitude_controller_rate_hz=float(controller_settings.attitude_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
@@ -854,6 +903,10 @@ def initial_actuation_controller_state() -> ActuationControllerState:
         filtered_yaw_torque=0.0,
         hover_thrust_normalized=0.0,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=_readonly_copy(np.eye(3)),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.0,
         collective_thrust_setpoint=0.0,
         body_rate_setpoint=_readonly_copy(zero),
         initialized=False,
@@ -943,6 +996,10 @@ def seed_actuation_controller_state(
         filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
         outer_loop_elapsed_s=outer_loop_elapsed_s,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=_readonly_copy(np.eye(3)),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=float(hover_thrust_normalized),
         collective_thrust_setpoint=float(hover_thrust_normalized),
         body_rate_setpoint=_readonly_copy(np.zeros(3)),
         initialized=True,

@@ -15,6 +15,7 @@ class ControllerSettings:
 
     command_delay_s: float
     velocity_controller_rate_hz: float
+    attitude_controller_rate_hz: float
     kp_vel: Vector3
     horizontal_velocity_error_gain_scale: float
     horizontal_velocity_error_gain_start_mps: float

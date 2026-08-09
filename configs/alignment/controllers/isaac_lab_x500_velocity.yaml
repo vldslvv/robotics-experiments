@@ -11,6 +11,7 @@ command_rate_hz: 20.0
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
+  attitude_controller_rate_hz: 187.5
   kp_vel: [1.8, 1.8, 4.20]
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
@@ -54,16 +55,21 @@ search:
   min_refinement_survivors: 2
 
 parameters:
+  # PX4's attitude estimate drives its attitude controller at an evidenced
+  # fractional cadence distinct from both position and rate control.
+  - field: attitude_controller_rate_hz
+    stage: 1
+    candidates: [166.6667, 187.5, 200.0, 250.0]
   # PX4's captured residual persisted across the fresh combined profile; fit
   # only the measured low-decay region and refine around its gate champions.
   - field: velocity_estimator_bias_decay_hz
-    stage: 1
+    stage: 2
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
   # Fresh endpoint champions crossed X=-0.020 and Y=+0.025 m/s, with the X
   # trend continuing beyond the tested edge. Cover the crossing broadly, then
   # refine only around retained gate champions.
   - field: velocity_observation_bias_mps
-    stage: 2
+    stage: 3
     # Once response gates pass, prefer the least estimator correction so the
     # aligned controller retains return-to-hover margin outside short probes.
     selection_regularization_scale: 1.0
@@ -135,7 +141,7 @@ parameters:
   # a measured-velocity low-pass can reproduce that stateful lag while starting
   # from the exact captured estimator boundary.
   - field: velocity_filter_hz
-    stage: 3
+    stage: 4
     candidates:
       - [0.0, 0.0000, 0.0]
       - [0.0, 0.2500, 0.0]
@@ -148,7 +154,7 @@ parameters:
   # Lower lateral estimator scale lengthens the measured braking transient.
   # Search the narrow crossing only after the response stages create margin.
   - field: velocity_observation_scale
-    stage: 4
+    stage: 5
     candidates:
       - [0.98, 0.9800, 1.0]
       - [0.98, 1.0000, 1.0]
@@ -160,7 +166,7 @@ parameters:
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 5
+    stage: 6
     candidates:
       - [0.35, 0.35, 4.0]
 

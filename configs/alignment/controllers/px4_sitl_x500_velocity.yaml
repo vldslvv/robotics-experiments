@@ -13,6 +13,8 @@ command_rate_hz: 20.0
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
+  # Measured vehicle-attitude publication cadence in the pinned lockstep run.
+  attitude_controller_rate_hz: 187.5
   kp_vel: [1.8, 1.8, 4.0]
   # PX4 does not use the Lab-only large-error schedule during reference capture.
   horizontal_velocity_error_gain_scale: 1.0

@@ -123,6 +123,7 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.0,
         velocity_controller_rate_hz=125.0,
+        attitude_controller_rate_hz=187.5,
         kp_vel=(4.0, 4.0, 5.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
@@ -628,6 +629,24 @@ def test_velocity_outer_loop_holds_between_declared_rate_updates():
 
     assert np.array_equal(held.filtered_velocity_enu, controller.filtered_velocity_enu)
     assert not np.array_equal(updated.filtered_velocity_enu, controller.filtered_velocity_enu)
+
+
+def test_attitude_loop_uses_fractional_declared_cadence() -> None:
+    params = _params("velocity")
+    controller = initial_actuation_controller_state()
+    elapsed = []
+
+    for _step in range(5):
+        controller, _omega = _step_controller(
+            params,
+            controller,
+            np.zeros(4),
+            _level_rest_state(),
+            0.004,
+        )
+        elapsed.append(controller.attitude_loop_elapsed_s)
+
+    assert elapsed == pytest.approx([0.0, 0.004, 0.0026666667, 0.0013333333, 0.0])
 
 
 def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
