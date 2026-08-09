@@ -89,6 +89,11 @@ def _validate_fleet(vehicles: dict[str, VehicleConfig]) -> None:
     ros_namespaces: set[str] = set()
     ros_frame_prefixes: set[str] = set()
     for label, v in vehicles.items():
+        if not 0 <= v.px4.logging_profile <= 4095:
+            raise ValueError(
+                f"vehicle {label!r} px4.logging_profile must be between 0 and 4095, "
+                f"got {v.px4.logging_profile!r}"
+            )
         if not math.isfinite(v.px4.failsafe.offboard_loss_timeout_s) or not (
             0.0 <= v.px4.failsafe.offboard_loss_timeout_s <= 60.0
         ):
@@ -199,6 +204,8 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
         "minimum_neutral_s": capture.minimum_neutral_s,
         "stable_hold_s": capture.stable_hold_s,
         "timeout_s": capture.timeout_s,
+        "recenter_gain_hz": capture.recenter_gain_hz,
+        "recenter_max_speed_mps": capture.recenter_max_speed_mps,
         "max_linear_speed_mps": capture.max_linear_speed_mps,
         "max_angular_speed_radps": capture.max_angular_speed_radps,
         "max_tilt_deg": capture.max_tilt_deg,

@@ -31,6 +31,8 @@ class _AlignmentCaptureConfig(_FreezableConfig):
     minimum_neutral_s: float
     stable_hold_s: float
     timeout_s: float
+    recenter_gain_hz: float
+    recenter_max_speed_mps: float
     max_linear_speed_mps: float
     max_angular_speed_radps: float
     max_tilt_deg: float

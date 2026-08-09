@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.alignment import load_controller_definition
-from robotics_experiments.alignment._models import ProbeCommand, ProbeProfile
+from robotics_experiments.alignment._models import ProbeCommand, ProbeFamily, ProbeProfile
 from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.config import load_config
 from robotics_experiments.px4_bridge import VehicleState
@@ -38,10 +38,15 @@ def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def _input(*, sim_time_us: int, linear_velocity=(0.0, 0.0, 0.0)) -> PolicyInput:
+def _input(
+    *,
+    sim_time_us: int,
+    position=(0.0, 0.0, 2.5),
+    linear_velocity=(0.0, 0.0, 0.0),
+) -> PolicyInput:
     return PolicyInput(
         vehicle_state=VehicleState(
-            position_enu=np.array([0.0, 0.0, 2.5]),
+            position_enu=np.asarray(position, dtype=np.float64),
             orientation_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
             linear_velocity_enu=np.asarray(linear_velocity, dtype=np.float64),
             angular_velocity_flu=np.zeros(3),
@@ -59,12 +64,27 @@ def _yaw_definition():
     )
     return replace(
         source,
-        probes=(
-            ProbeProfile(
-                name="yaw",
-                split="fit",
-                axis="yaw",
-                commands=(ProbeCommand((0.0, 0.0, 0.0), 0.2, 1.0),),
+        probe_families=(
+            ProbeFamily(
+                name="velocity",
+                control_mode="velocity",
+                metric="translational-controller-quality",
+                profiles=(
+                    ProbeProfile(
+                        name="yaw",
+                        split="fit",
+                        axis="yaw",
+                        commands=(
+                            ProbeCommand(
+                                (0.0, 0.0, 0.0),
+                                0.2,
+                                0.0,
+                                (0.0, 0.0, 0.0),
+                                1.0,
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -116,6 +136,35 @@ def test_capture_stability_hold_restarts_after_motion(monkeypatch: pytest.Monkey
 
     assert restarted.setpoint.yaw_rate_radps == 0.0
     assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
+
+
+def test_capture_recenters_to_reference_between_profiles(monkeypatch: pytest.MonkeyPatch):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
+        definition=_yaw_definition(),
+        config=config,
+    )(
+        artifact="alignment-probe",
+        hold_s=None,
+    )
+
+    displaced = adapter.advance(
+        policy_input=_input(sim_time_us=0, position=(2.0, -2.0, 3.5)),
+        state=adapter.initial_state,
+    )
+
+    velocity = np.array(
+        [
+            displaced.setpoint.forward_mps,
+            -displaced.setpoint.right_mps,
+            -displaced.setpoint.down_mps,
+        ]
+    )
+    assert np.linalg.norm(velocity) == pytest.approx(
+        config.alignment.capture.recenter_max_speed_mps
+    )
+    assert np.dot(velocity, np.array([-2.0, 2.0, -1.0])) > 0.0
 
 
 def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch):
@@ -230,13 +279,36 @@ def test_capture_rejects_wrong_body_flu_yaw_response_sign(monkeypatch: pytest.Mo
     module = _load_script(monkeypatch)
     samples = tuple(
         SimpleNamespace(
+            control_mode="velocity",
+            profile="yaw",
             command_yaw_rate_radps=0.2,
+            command_body_rate_flu_radps=(0.0, 0.0, 0.0),
             angular_velocity_body_flu_radps=(0.0, 0.0, -0.1),
         )
         for _index in range(4)
     )
 
     with pytest.raises(AssertionError, match="sign disagrees"):
-        module._assert_yaw_response_sign(  # noqa: SLF001 - focused validation test
+        module._assert_rotational_response_sign(  # noqa: SLF001 - focused validation test
             samples=samples
         )
+
+
+def test_capture_checks_ctbr_roll_pitch_and_yaw_response_signs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_script(monkeypatch)
+    samples = tuple(
+        SimpleNamespace(
+            control_mode="ctbr",
+            profile="rates",
+            command_yaw_rate_radps=0.0,
+            command_body_rate_flu_radps=(0.2, -0.3, 0.4),
+            angular_velocity_body_flu_radps=(0.1, -0.1, 0.2),
+        )
+        for _index in range(4)
+    )
+
+    module._assert_rotational_response_sign(  # noqa: SLF001 - focused validation test
+        samples=samples
+    )

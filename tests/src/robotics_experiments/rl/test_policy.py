@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.commanding import PolicyInput
-from robotics_experiments.controller import CommandInterface, ControllerArtifact, ControllerSettings
+from robotics_experiments.controller import ControllerArtifact, ControllerSettings
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -55,19 +55,28 @@ def _controller_settings() -> ControllerSettings:
     return ControllerSettings(
         command_delay_s=0.2,
         velocity_controller_rate_hz=125.0,
+        attitude_controller_rate_hz=187.5,
         kp_vel=(2.0, 2.0, 3.0),
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
+        horizontal_velocity_error_gain_end_mps=0.80,
+        horizontal_velocity_braking_gain_scale=1.0,
+        horizontal_velocity_braking_gain_start_mps=0.05,
+        horizontal_velocity_braking_gain_full_mps=0.07,
+        horizontal_velocity_braking_gain_end_mps=0.10,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_observation_bias_command_start_mps=0.0,
+        velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
-        velocity_filter_hz=10.0,
+        velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_normalized=0.57,
+        ctbr_effective_collective_scale=1.0,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
@@ -107,13 +116,7 @@ def _controller_artifact() -> ControllerArtifact:
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
-        command_interface=CommandInterface(
-            kind="body-flu-velocity-yaw-rate",
-            dimension=4,
-            frame="body-flu",
-            linear_scale_mps=3.0,
-            yaw_rate_scale_radps=1.5,
-        ),
+        certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(

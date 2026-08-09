@@ -1,9 +1,9 @@
 # Controller alignment
 
 Controller alignment makes the high-throughput Isaac Lab controller reproduce
-PX4 SITL for identical body-FLU velocity and yaw-rate commands. It is upstream
-of reinforcement learning. Waypoint navigation, policy rewards, policy actions,
-and domain randomization are not fitting inputs.
+PX4 SITL for identical physical commands. It is upstream of reinforcement
+learning. Waypoint navigation, policy rewards, policy actions, and domain
+randomization are not fitting inputs.
 
 ## Architecture and contracts
 
@@ -20,7 +20,10 @@ The dependency direction is:
 The only supported controller and alignment artifact contract is schema 1.
 There are no artifact migrations, compatibility sentinels, alternate plant
 mappings, or physical-force controller paths. Older files under `.build/` are
-inert evidence and cannot be loaded by current production code.
+inert evidence and cannot be loaded by current production code. If an existing
+`latest` or `best` label names an unsupported artifact, the next accepted
+publication replaces that label atomically without loading or migrating the
+obsolete payload.
 
 The X500 normalized controller carries velocity, attitude, and rate state into
 PX4-style normalized thrust and torque. The generated X500 effectiveness matrix
@@ -30,6 +33,9 @@ scale, armed-zero position, quadratic rotor curve, and actuator rise/fall model.
 The composed Holybro X500 mapping is `omega = 50 + 475*u`; its physical hover
 input is approximately 0.375. Controller hover is represented only by
 `hover_thrust_normalized` at the PX4 controller boundary.
+For CTBR, `ctbr_effective_collective_scale` maps the raw streamed collective
+to the effective inner-loop collective observed at PX4's motor boundary; it
+does not change the raw normalized-action or OFFBOARD command contract.
 
 NumPy is the single-environment reference and the Isaac Lab Torch seam is its
 batched twin. Both apply the same filter, saturation, anti-windup, reset, and
@@ -42,6 +48,17 @@ these estimator states, the held outer-loop setpoints, and the acceleration
 setpoint needed for PX4's thrust-preserving hover-estimate integrator
 correction. Sequential NumPy/Torch parity is a host-test requirement.
 
+Horizontal velocity proportional gain has two bounded error schedules. The
+`horizontal_velocity_braking_gain_*` lobe owns low-error braking attenuation;
+the `horizontal_velocity_error_gain_*` lobe owns higher-error recovery
+authority. Each leaves the base gain unchanged below its `start_mps`, moves
+smoothly to its positive scale at `full_mps`, and returns smoothly to the base
+gain at `end_mps`. The disjoint lobe scales multiply. Settings validation
+requires each `scale > 0` and `start < full < end`; scales below one attenuate
+their bounded range and scales above one boost it. This lets alignment correct
+zero-command stopping without removing the independently evidenced live
+recovery authority.
+
 The latest body-FLU policy action is held across its 20 Hz inference interval.
 The configured 50 Hz OFFBOARD stream converts that retained action with the
 attitude at each wire transmission, then holds the resulting world-ENU velocity
@@ -49,6 +66,14 @@ setpoint while the 125 Hz velocity loop and 250 Hz rate, allocator, actuator,
 and physics loops advance. This mirrors PX4's `MAV_FRAME_BODY_NED` receiver:
 body-to-world conversion occurs for each received message, independently of the
 slower policy cadence.
+
+Alignment receives an ordered list of probe families. A family contract is
+only a stable name, a control mode, a registered metric, and physical command
+profiles. The current required families are `velocity`, covering body-FLU X/Y/Z
+velocity plus velocity-path yaw, and `ctbr`, covering normalized collective
+thrust plus body-FLU roll/pitch/yaw rates. Capture, Lab replay, search, evidence,
+and publication iterate this list generically. Adding a control capability does
+not require another alignment engine or a policy dependency.
 
 ## Search
 
@@ -59,7 +84,7 @@ fields. The `coarse-to-fine-beam` strategy:
 1. evaluates the committed base setting;
 2. performs one wide, large-step sweep for each declared field;
 3. retains the global beam plus per-gate champions;
-4. generates midpoints only around retained regions for two refinement levels;
+4. generates midpoints around retained regions for each configured refinement level;
 5. deduplicates settings by their exact float32 controller representation.
 
 A zero-centered fitted field may declare a positive
@@ -77,16 +102,41 @@ increase PhysX contention. The target coordinator reports candidates per
 second, padding, cache hits, batches, and sampled GPU utilization. The 95% GPU
 target remains diagnostic; deterministic useful throughput is the optimization
 objective.
+Explicit initial candidate settings participate in the same fixed-scene
+capacity calculation as staged beam expansions, so a focused seeded grid is
+evaluated in GPU-sized batches rather than one environment at a time.
+The current X500 definition uses an explicit joint boundary grid and disables
+additional midpoint refinement; broad exploratory definitions may enable it.
+
+Each worker owns one persistent Isaac Lab environment for the entire ordered
+probe-family list. Families execute sequentially by switching the controller
+mode and padding the smaller family's trace stride to the fixed scene capacity;
+constructing multiple `DirectRLEnv` instances in one process is unsupported by
+Isaac Lab's simulation-context ownership.
 
 ## Evidence and boundary audit
 
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. Its configured pusher is deployed after takeoff and before probe
+adapter. The alignment experiment selects PX4 logging profile `17`, preserving
+the default topic set plus full-rate attitude, rate, thrust, torque, and
+actuator topics needed for exact 250 Hz replay. Its configured pusher is
+deployed after takeoff and before probe
 preconditioning so the reference plant matches Lab training and press-policy
 deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
 force setting, which is disabled to match the standalone PX4 plant. Each
-profile records its absolute PX4 simulation start time and the complete initial
-controller state required for replay. One run directory keeps:
+profile precondition uses a bounded velocity command to return to the routine
+reference position before applying the configured stability hold. The recenter
+gain and speed bound live in `alignment.capture`, so profile order cannot
+accumulate displacement against the routine safety envelope. Each profile then
+records its absolute PX4 simulation start time and the complete initial
+controller state required for replay. That boundary includes both loop phases,
+the held velocity setpoint, the desired attitude and yaw rate, the desired and
+held collective setpoints, the held body-rate setpoint, the filtered yaw-torque
+state, velocity and rate integrals, estimator filters, and the hover estimate.
+Resetting any held state
+to a neutral value makes a profile's result depend on where capture happened to
+land in PX4's asynchronous controller schedule and is therefore invalid. One
+run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;
@@ -102,42 +152,94 @@ fails on incomplete topic coverage, a join error above one 4 ms physics tick,
 normalized motor RMSE above 0.01, or collective RMSE above 0.05 N. The
 controller-boundary replay applies the selected controller to every fit,
 validation, and stability profile. Its core replay uses PX4-estimated state and
-enforces the same motor and collective limits. A second replay starts from the
-physics-rate physical articulation state in the bridge log, seeds the recorded
+reports the per-axis body-rate setpoint and collective setpoint errors before
+the rate controller and the per-axis angular-velocity and derivative errors at
+the rate-controller input. It consumes PX4's independently published angular
+derivative rather than attempting to derive it again from logged rate samples;
+held-setpoint source ages and rate-sample interpolation errors remain visible.
+The core replay then enforces the same motor and collective limits. A second
+replay starts from the physics-rate physical articulation state in the bridge
+log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
-and recorded command cadence. The seed phase is derived per profile from the
+the target's fitted fractional attitude-loop cadence, and recorded command
+cadence. A recorded policy sample contains the setpoint
+published after observing that timestamp; replay therefore applies a changed
+setpoint on the following 4 ms controller tick. The controller command and
+PX4's vertical velocity-state blending both consume that same delayed setpoint.
+The collapsed target cascade consumes an attitude-loop publication in its rate
+controller on the same physics tick. PX4 runs attitude, rate, and allocation on
+independent work queues, so an adjacent subscriber can observe that publication
+on either the same tick or the next one. Replay derives those source-age choices
+from the recorded attitude, rate, and thrust topics, then joins the target motor
+prediction by at most one 4 ms physics tick. It reports both adjacent handoffs,
+the total actuator join offset distribution, and the peak collective window.
+The unshifted intermediate setpoint metrics remain authoritative, so this join
+cannot absorb a controller-value error. CTBR remains the direct rate-controller
+contract.
+Replay holds the exact recorded 40/60 ms intervals and does not quantize them
+through a second synthetic 20 Hz cadence. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
 includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
 whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
-transitions. Replay builds relative command time from integer physics steps so
+transitions. The velocity-integral seed reconstructs the current acceleration
+setpoint from the recorded `vehicle_local_position_setpoint` output and reports
+its source age. Replay builds relative command time from integer physics steps so
 large absolute profile start times cannot delay an exact command boundary by a
 floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates
-at their source timestamps. The target-only `velocity_observation_scale`,
+at their source timestamps. For velocity profiles it also reconstructs PX4's
+exact vertical acceleration setpoint from the full-rate desired attitude,
+collective thrust, and hover estimate, then reports acceleration-setpoint and
+inferred velocity-integral error before the thrust conversion boundary. It
+keeps desired-collective to attitude-setpoint, attitude-setpoint to
+rate-setpoint, and rate-setpoint to allocator-thrust error separate so the
+first divergent vertical boundary is explicit. It
+scans that upstream vertical setpoint over zero through three physics ticks so
+outer-loop phase error remains separate from controller gains. A
+zero-through-three-tick delay scan compares the target attitude-loop output to
+PX4's downstream rates setpoint so asynchronous module handoff error remains
+separate from controller gains. The
+target-only `velocity_observation_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
-`velocity_estimator_bias_decay_hz`, and `angular_velocity_filter_hz` model the
-evidenced physical-to-estimated state boundary without changing the pinned PX4
-controller gains. The core replay bypasses these target-only adapters because
-its inputs are already PX4-estimated state; the physical-state replay retains
-them and therefore audits the deployment boundary.
+the componentwise command-magnitude transition
+`velocity_observation_bias_command_start_mps` /
+`velocity_observation_bias_command_full_mps`, `velocity_estimator_bias_decay_hz`,
+per-axis `velocity_filter_hz`, and
+`angular_velocity_filter_hz` model the evidenced physical-to-estimated state
+boundary without changing the pinned PX4 controller gains. The smooth command
+transition suppresses steady correction during exact zero-command ringdown and
+reaches the authored bias outside that band uniformly for X/Y/Z. The core replay
+bypasses these target-only adapters because its inputs are already
+PX4-estimated state; the physical-state replay retains them and therefore
+audits the deployment boundary.
 
 ## Quality and acceptance
 
-The registered `controller-quality` metric ranks exact-action response and
-applies these hard validation limits:
+The registered `controller-quality` aggregate resolves each family's registered
+metric, keeps every axis visible, and ranks first by failed-gate count and
+normalized excess. The translational family applies the following limits to
+each of X, Y, and Z independently:
 
+- direct velocity NRMSE <= 0.10;
+- envelope velocity NRMSE <= 0.10;
 - braking-distance error <= 0.005 m;
 - residual-speed error <= 0.01 m/s;
-- stop-time error <= 0.10 s;
-- worst-axis velocity NRMSE <= 0.10;
-- vertical policy-envelope velocity NRMSE <= 0.10;
-- yaw-rate NRMSE <= 0.10;
-- heading error <= 3 degrees;
-- combined endpoint error <= 0.01 m.
+- stop-time error <= 0.10 s.
+
+Its combined endpoint error remains <= 0.01 m. The CTBR family applies these
+limits to roll, pitch, and yaw independently:
+
+- direct body-rate NRMSE <= 0.10;
+- envelope body-rate NRMSE <= 0.10;
+- attitude error <= 3 degrees.
+
+The CTBR collective probe additionally requires vertical-velocity and
+vertical-acceleration NRMSE <= 0.10. There is no worst-axis substitute: every
+declared axis gate must pass.
 
 Braking distance and stop time apply only when the PX4 reference has reached
 at least half of the preceding nonzero command at the transition. This keeps
@@ -145,9 +247,9 @@ the exact-action gates tied to genuine braking responses; a short reversal
 that never establishes the commanded motion remains covered by velocity,
 acceleration, residual, settling, and endpoint metrics.
 
-The vertical policy envelope is an independent ascent, descent, neutral-return
-profile using commands through 0.8 m/s. It prevents a low-speed aggregate from
-hiding the wrong climb/descend correction observed during policy execution.
+Each translational axis has an independent envelope profile through 0.8 m/s.
+The Z profile specifically prevents a low-speed aggregate from hiding the wrong
+climb/descend correction observed during policy execution.
 
 A run cannot finalize or publish unless all metric gates pass, every stability
 trace completes with finite values, the actuator audit passes, and the
@@ -168,7 +270,9 @@ The campaign runs the authoritative integration gate against its run-local
 `controller.json` after replay and before finalization. A failure therefore
 preserves diagnostic evidence without advancing `latest` or `best`.
 
-`controller.json` is the downstream product. Candidate traces and ULogs are
+`controller.json` is the downstream product. It contains complete controller
+settings and the control modes certified by the accepted probe-family list;
+policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
 controller artifact. `latest` and comparable `best` links advance only for a
 fully accepted bundle.

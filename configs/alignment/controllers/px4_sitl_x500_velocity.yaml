@@ -8,35 +8,38 @@ airframe: holybro_x500_v2.usda
 image: vv-px4-sitl
 command_rate_hz: 20.0
 
-command_interface:
-  kind: body-flu-velocity-yaw-rate
-  dimension: 4
-  frame: body-flu
-  linear_scale_mps: 3.0
-  yaw_rate_scale_radps: 1.5
-
 # PX4 owns this cascade during capture. The pinned values keep the reference
 # definition complete and seed the target's deterministic candidate centers.
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
+  # Measured vehicle-attitude publication cadence in the pinned lockstep run.
+  attitude_controller_rate_hz: 187.5
   kp_vel: [1.8, 1.8, 4.0]
   # PX4 does not use the Lab-only large-error schedule during reference capture.
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
+  horizontal_velocity_error_gain_end_mps: 0.80
+  horizontal_velocity_braking_gain_scale: 1.0
+  horizontal_velocity_braking_gain_start_mps: 0.05
+  horizontal_velocity_braking_gain_full_mps: 0.07
+  horizontal_velocity_braking_gain_end_mps: 0.10
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [1.0, 1.0, 1.0]
   velocity_observation_bias_mps: [0.0, 0.0, 0.0]
+  velocity_observation_bias_command_start_mps: 0.0
+  velocity_observation_bias_command_full_mps: 0.01
   # PX4 supplies the estimator signal directly; these target-side adapters are inactive.
   velocity_estimator_bias_decay_hz: 0.0
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 0.0
+  velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
   # Seed for the normalized PX4 thrust boundary.
   hover_thrust_normalized: 0.57
+  ctbr_effective_collective_scale: 1.0
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -65,129 +68,235 @@ search:
 parameters: []
 selection_metric: controller-quality
 publication_metrics:
-  - velocity_rmse_mps
-  - acceleration_rmse_mps2
-  - worst_axis_velocity_nrmse
-  - vertical_policy_envelope_nrmse
-  - braking_distance_error_m
-  - residual_speed_error_mps
-  - stop_time_error_s
-  - yaw_rate_nrmse
-  - heading_error_deg
-  - combined_endpoint_error_m
+  - velocity.x_velocity_nrmse
+  - velocity.y_velocity_nrmse
+  - velocity.z_velocity_nrmse
+  - velocity.x_envelope_velocity_nrmse
+  - velocity.y_envelope_velocity_nrmse
+  - velocity.z_envelope_velocity_nrmse
+  - ctbr.roll_body_rate_nrmse
+  - ctbr.pitch_body_rate_nrmse
+  - ctbr.yaw_body_rate_nrmse
+  - ctbr.collective_velocity_nrmse
+  - ctbr.collective_acceleration_nrmse
 
 # The probe suite must remain byte-for-byte equivalent to the target definition.
-probes:
-  - name: fit-forward-low-speed
-    split: fit
-    axis: x
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: fit-lateral-low-speed
-    split: fit
-    axis: y
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: fit-vertical-low-speed
-    split: fit
-    axis: z
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.08], yaw_rate_radps: 0.0, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, -0.06], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: fit-yaw-steps
-    split: fit
-    axis: yaw
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.35, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.25, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: fit-combined-turns
-    split: fit
-    axis: combined
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.30, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: -0.30, duration_s: 1.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-stage1-approach-brake
-    split: validation
-    axis: x
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-lateral-ramp-reversal
-    split: validation
-    axis: y
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.05, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.09, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, -0.06, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-vertical-ramp-reversal
-    split: validation
-    axis: z
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.05], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-vertical-policy-envelope
-    split: validation
-    axis: z
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.40], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, -0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-yaw-ramp-reversal
-    split: validation
-    axis: yaw
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.20, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.40, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.30, duration_s: 0.75}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: validation-combined-turns
-    split: validation
-    axis: combined
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.25, duration_s: 1.25}
-      - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
-      - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: -0.35, duration_s: 1.25}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
-  - name: stability-moderate-envelope
-    split: stability
-    axis: combined
-    commands:
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.8, 0.0, 0.0], yaw_rate_radps: 0.6, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, -0.6, 0.3], yaw_rate_radps: -0.5, duration_s: 1.0}
-      - {velocity_body_flu_mps: [-0.5, 0.0, -0.25], yaw_rate_radps: 0.0, duration_s: 1.0}
-      - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+probe_families:
+  - name: velocity
+    control_mode: velocity
+    metric: translational-controller-quality
+    profiles:
+      - name: fit-forward-low-speed
+        split: fit
+        axis: x
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: fit-lateral-low-speed
+        split: fit
+        axis: y
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: fit-vertical-low-speed
+        split: fit
+        axis: z
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.08], yaw_rate_radps: 0.0, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, -0.06], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: fit-yaw-steps
+        split: fit
+        axis: yaw
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.35, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.25, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: fit-combined-turns
+        split: fit
+        axis: combined
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.10, 0.0, 0.0], yaw_rate_radps: 0.30, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.10, 0.0], yaw_rate_radps: -0.30, duration_s: 1.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-stage1-approach-brake
+        split: validation
+        axis: x
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-lateral-ramp-reversal
+        split: validation
+        axis: y
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.05, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.09, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, -0.06, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-vertical-ramp-reversal
+        split: validation
+        axis: z
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.05], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.09], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, -0.05], yaw_rate_radps: 0.0, duration_s: 0.75}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-x-envelope
+        split: validation
+        axis: x
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.40, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.80, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [-0.80, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-y-envelope
+        split: validation
+        axis: y
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.40, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.80, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, -0.80, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-z-envelope
+        split: validation
+        axis: z
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.40], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, -0.80], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-yaw-ramp-reversal
+        split: validation
+        axis: yaw
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.20, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.40, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.5}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: -0.30, duration_s: 0.75}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: validation-combined-turns
+        split: validation
+        axis: combined
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.08, 0.0, 0.0], yaw_rate_radps: 0.25, duration_s: 1.25}
+          - {velocity_body_flu_mps: [-0.04, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 0.75}
+          - {velocity_body_flu_mps: [0.0, -0.08, 0.0], yaw_rate_radps: -0.35, duration_s: 1.25}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+      - name: stability-moderate-envelope
+        split: stability
+        axis: combined
+        commands:
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.8, 0.0, 0.0], yaw_rate_radps: 0.6, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, -0.6, 0.3], yaw_rate_radps: -0.5, duration_s: 1.0}
+          - {velocity_body_flu_mps: [-0.5, 0.0, -0.25], yaw_rate_radps: 0.0, duration_s: 1.0}
+          - {velocity_body_flu_mps: [0.0, 0.0, 0.0], yaw_rate_radps: 0.0, duration_s: 1.5}
+  - name: ctbr
+    control_mode: ctbr
+    metric: ctbr-controller-quality
+    profiles:
+      - name: fit-roll-steps
+        split: fit
+        axis: roll
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.35, 0.0, 0.0], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.35, 0.0, 0.0], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+      - name: fit-pitch-steps
+        split: fit
+        axis: pitch
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.35, 0.0], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.35, 0.0], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+      - name: fit-yaw-steps-ctbr
+        split: fit
+        axis: yaw
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.35], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.35], duration_s: 0.3}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.7}
+      - name: validation-roll-envelope
+        split: validation
+        axis: roll
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.30, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.60, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.60, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [-0.30, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - name: validation-pitch-envelope
+        split: validation
+        axis: pitch
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.30, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.60, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.60, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, -0.30, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - name: validation-yaw-envelope-ctbr
+        split: validation
+        axis: yaw
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.30], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.60], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.60], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, -0.30], duration_s: 0.2}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+      - name: validation-collective-envelope
+        split: validation
+        axis: collective
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.50, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+          - {collective_thrust_normalized: 0.64, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 0.5}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.5}
+      - name: stability-ctbr-combined
+        split: stability
+        axis: combined
+        commands:
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.60, body_rate_flu_radps: [0.40, -0.30, 0.20], duration_s: 0.4}
+          - {collective_thrust_normalized: 0.54, body_rate_flu_radps: [-0.40, 0.30, -0.20], duration_s: 0.4}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.2}

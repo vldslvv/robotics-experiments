@@ -9249,3 +9249,2999 @@ acceptance gates passing in one run, without checkpoint initialization,
 fine-tuning, post-capture edits, or manual candidate promotion. Stop at the
 controller boundary as requested; policy training remains a separate future
 step that consumes this accepted schema-1 controller artifact.
+
+### 272. Predeclare uniform six-axis probe-family acceptance
+
+Date: 2026-08-09.
+
+The Entry 271 artifact passed the then-current aggregate velocity/yaw gates,
+but those gates could hide an individual translational or rotational axis and
+did not certify the direct collective/body-rate controller path. Replace the
+flat velocity-only probe contract with an ordered list of minimal probe
+families. The initial list contains `velocity` and `ctbr`; each family declares
+only its physical control mode, profiles, and registered metric. Capture,
+batched target replay, generic search, evidence, and controller-boundary replay
+must consume that list without policy imports or family-specific orchestration.
+
+Require direct and envelope NRMSE independently for X, Y, Z, roll, pitch, and
+yaw. Retain per-axis translation braking, residual-speed, and stop-time limits;
+retain per-axis rotational attitude limits; add collective vertical-velocity
+and vertical-acceleration limits. Remove the worst-axis substitute. A published
+controller records the modes certified by this accepted family list, while
+policy-owned normalized action scales remain outside alignment.
+
+This changes the probe suite, metric definition, controller artifact shape, and
+comparison fingerprint. Run a new clean scratch capture, audit, target search,
+fit, complete family replay, and live integration gate. Do not reuse or promote
+the Entry 271 artifact under the new criteria. If the new family gates expose a
+boundary, expand only declarative settings supported by its trace and repeat
+until one unchanged scratch invocation passes.
+
+### 273. Balance direct body-rate probes before repeating uniform acceptance
+
+Date: 2026-08-09.
+
+The first clean Entry 272 campaign,
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-scratch`, reached the first
+CTBR roll profile after completing the velocity family but intentionally stopped
+before producing a reference: the routine safety envelope detected 2.05 m of
+lateral drift against its 2.00 m limit. The fit profile commanded +0.35 rad/s
+for 1.5 s but only -0.25 rad/s for 1.0 s. A neutral CTBR rate holds the resulting
+attitude instead of returning the vehicle level, so the profile's nonzero
+commanded angular impulse made the capture unsafe and prevented the gate from
+measuring the intended controller boundary.
+
+Keep amplitudes and per-axis coverage, but shorten and balance every CTBR
+rotational profile so its commanded angular impulse is zero. Add a configuration
+regression test for that invariant. Do not weaken the routine's 2.00 m safety
+envelope. Start a new clean scratch campaign because the corrected probe suite
+has a new comparison fingerprint.
+
+### 274. Make profile capture position-independent
+
+Date: 2026-08-09.
+
+The clean balanced-pulse campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-balanced-scratch` again
+stopped during capture before producing a reference, this time at 2.02 m of
+lateral drift. The rotational pulses now have zero commanded angular impulse.
+Inspection of the capture transition exposed a separate sequence contract: the
+three-second precondition sent zero velocity and stabilized at the endpoint of
+the prior profile, while the routine safety envelope remained relative to the
+original hover position. The existing velocity family therefore consumed
+nearly all of the 2.00 m budget cumulatively before CTBR began.
+
+During profile preconditioning, command a bounded velocity back to the routine's
+reference position before applying the unchanged stability hold. Keep the gain
+and speed bound in the alignment capture Hydra configuration and retain the
+global 2.00 m routine safety envelope. This makes profiles and families
+sequence-independent without changing recorded excitation or any acceptance
+limit. Commit the capture contract and repeat the entire campaign from clean
+source.
+
+### 275. Bound CTBR attitude excursion during rate identification
+
+Date: 2026-08-09.
+
+The recentered clean campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-recenter-scratch` proved
+that profile preconditioning returned the vehicle to the policy-step reference,
+then stopped in the first CTBR roll profile at 2.01 m of lateral drift. ULog
+samples isolate the cause: the vehicle began CTBR about 0.1 m from the baseline;
+the +0.35 rad/s pulse reached approximately 10 degrees of roll, and the
+following zero-rate interval held that attitude. Horizontal speed grew to about
+1.5 m/s before the balanced negative pulse leveled the vehicle, consuming the
+full safety envelope despite correct rate tracking.
+
+Shorten the direct and envelope body-rate pulses while retaining both signs,
+zero net commanded rotation, and dozens of 250 Hz controller samples per active
+segment. The revised direct profile peaks near six degrees of commanded
+excursion and the validation envelope near ten degrees, then returns level.
+Keep amplitudes, axis coverage, metric limits, recentering, and the 2.00 m
+routine safety envelope unchanged. Commit the new probe fingerprint and repeat
+the clean campaign.
+
+### 276. Resize the capture timeout for the expanded family list
+
+Date: 2026-08-09.
+
+The safe-pulse clean campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-safe-ctbr-scratch`
+completed all 14 velocity profiles and the first CTBR profile without breaching
+the unchanged flight envelope. It entered preconditioning for CTBR profile 2 of
+8, then the policy step reached its 150-second timeout. That timeout was sized
+for the former 14-profile suite and is no longer sufficient for 22 profiles,
+each with an independent recenter and stability hold.
+
+Increase only the alignment-capture policy-step timeout to 300 seconds. This is
+an execution allowance, not a controller, excitation, safety, or acceptance
+threshold. Commit it before repeating the full clean campaign.
+
+### 277. Give the combined yaw reversal time to cross zero
+
+Date: 2026-08-09.
+
+The extended-timeout campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-complete-capture-scratch`
+completed all 22 profiles inside the unchanged flight envelope. The final
+post-capture sign audit rejected only the -0.20 rad/s yaw segment in the
+combined CTBR stability profile: its 0.25-second segment ended while the
+settled-half mean was still +0.023 rad/s from the preceding positive command.
+The ULog shows the reversal crossing zero about 0.15 seconds after the command
+change and then continuing with the requested sign.
+
+Restore only the paired combined-stability pulses to 0.4 seconds. They remain
+equal and opposite with no zero-rate attitude hold between them, so their
+commanded rotation is still zero and their lateral excursion remains bounded.
+Also include the profile name in future sign-audit failures. Retain every
+acceptance threshold and repeat the full campaign from a clean commit.
+
+### 278. Reuse one Isaac Lab environment across probe families
+
+Date: 2026-08-09.
+
+Fresh run `.build/alignment/x500-px4-v1/20260809T-uniform-6dof-auditable-scratch`
+completed the 22-profile PX4 capture, sign audit, and actuator audit. The target
+worker then created the 1,792-environment velocity scene but stalled while
+constructing a second `DirectRLEnv` for CTBR in the same process, emitting the
+Isaac Lab destructor traceback before the worker-ready message. Process and GPU
+inspection showed one CPU-bound child, no useful GPU work, and no target batch
+after more than five minutes. The temporary target container was stopped while
+the accepted reference evidence remained in the run directory.
+
+Isaac Lab owns one simulation context per process. Keep one persistent fixed-size
+environment per worker, switch its controller mode sequentially for each family,
+and pad the smaller family's per-candidate trace stride to the largest family.
+This preserves candidate settings, authored profile order, and metric inputs
+while avoiding the unsupported second environment and reducing scene memory.
+Commit the structural correction, reuse this run's accepted capture only to
+diagnose target startup and fitting, then rerun the full publishable campaign
+from clean source.
+
+### 279. Preserve evaluator reasons when the initial candidate is unusable
+
+Date: 2026-08-09.
+
+The target-only diagnostic after Entry 278 proved the single-environment worker
+contract: it initialized one fixed scene and evaluated the base candidate in
+17.8 seconds, with 30.3% average and 42.0% peak GPU utilization. The evaluator
+marked that candidate unusable before metric scoring, but the generic staged
+search replaced its concrete failure with only `every initial alignment setting
+was unusable`, leaving the first failed trace boundary inaccessible.
+
+Include up to three distinct candidate-local failure reasons in the generic
+initial and stage-wide unusable errors, with a host regression test. This is an
+evidence-reporting correction and does not change candidate generation, scoring,
+ranking, or acceptance. Commit it and repeat the target-only diagnostic against
+the preserved capture.
+
+### 280. Seed the shared controller state for CTBR replay
+
+Date: 2026-08-09.
+
+With Entry 279 diagnostics, the next target-only run reported the exact base
+candidate failure: `controller-state seeding requires velocity actuation`. The
+strict controller state is shared by both modes and already carries the angular
+velocity estimate, angular acceleration, rate integral, hover estimate,
+collective setpoint, and body-rate setpoint required to begin CTBR from the
+captured PX4 boundary. The velocity-loop fields are harmless retained state that
+the CTBR path does not consume. Only legacy guards in the NumPy and Torch twins
+prevented the complete state from being restored.
+
+Remove those mode guards and run the existing controller-boundary and initial
+rotor-thrust seed tests for both `velocity` and `ctbr`. Keep the seed math and
+state shape identical across twins. Commit, then repeat the target-only
+diagnostic against the preserved capture before another full campaign.
+
+### 281. Prime target rotor thrust from the captured physical command
+
+Date: 2026-08-09.
+
+The post-Entry 280 target diagnostic evaluated 1,287 unique candidates in 16
+physical batches and 541.2 seconds. Candidate 1234 passed every per-axis
+translation and rotation gate plus collective acceleration. Only collective
+vertical-velocity NRMSE failed at 0.106735 against 0.10; collective acceleration
+NRMSE was 0.050839. The selected trace diverged immediately: at 40 ms its
+vertical velocity was -0.02265 m/s while PX4 was -0.00024 m/s, and that impulse
+persisted through the profile.
+
+Controller-boundary replay showed that the same collective profile already
+passes the intermediate boundary limits with 0.000561 normalized motor RMSE and
+0.036127 N collective-force RMSE. The motion failure therefore does not support
+an allocator or plant parameter. Target initialization instead reconstructed
+rotor thrust from normalized action zero. In CTBR, zero maps through the
+candidate hover setting (0.54), whereas the captured first physical collective
+command is 0.57. Prime each target environment from the first authored physical
+command in its trace, for both control modes, and add a CTBR regression test.
+Commit and repeat the target-only diagnostic before a new full campaign.
+
+### 282. Trace priming clears CTBR and exposes a lateral transient crossing
+
+Date: 2026-08-09.
+
+Fresh clean-source campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-trace-primed-scratch`
+captured all 22 velocity and CTBR profiles in 352.7 seconds, passed the actuator
+audit, and evaluated 1,464 unique settings in 16 GPU batches and 520.9 seconds.
+Candidate 1180 was selected from source commit `92f5c76`; average sampled GPU
+utilization was 23.0%, with deterministic single-environment PhysX stepping
+remaining the measured bottleneck.
+
+Priming from the first physical trace command resolved the Entry 281 boundary.
+Collective vertical-velocity NRMSE fell from 0.106735 to 0.079188 and collective
+acceleration NRMSE fell from 0.050839 to 0.029969. Every roll, pitch, yaw, X, and
+Z gate passed. Complete 22-profile controller replay also passed, as did the
+live hover, goto, and handoff integration gate: hover last-window maximum was
+0.094 m, goto last-window maximum was 0.031 m, and final handoff range was
+0.452 m.
+
+Finalization correctly rejected the run because the remaining Y braking-distance
+error was 0.006481 m against 0.005 m. Candidate-wide evidence shows a narrow
+translational crossing rather than a CTBR, allocator, actuator, or live-stability
+failure: 237 candidates failed exactly one gate, including 17 that failed only
+Y braking distance and 220 that failed only combined endpoint error. No setting
+in the declared decay-and-bias population passed both. The selected endpoint
+error was already 0.009826 m against 0.010 m, leaving only 0.174 mm of margin.
+The next diagnostic must therefore add an independently evidenced lateral
+transient parameter rather than extend steady observation bias farther.
+
+### 283. Reduce the measured lateral over-damping
+
+Date: 2026-08-09.
+
+Inspect the selected Entry 282 validation lateral reversal at its accepted
+reference/target boundary. PX4 traveled 53.892 mm from the braking transition
+until crossing the 0.01 m/s stop threshold. The target traveled only 47.411 mm,
+an undershoot of exactly the reported 6.481 mm gate error, and crossed the stop
+threshold one 40 ms sample earlier. This is over-damping, not insufficient
+braking authority.
+
+Add one declarative `kd_vel.y` stage below the pinned 0.2 setting, searching
+`[0.00, 0.05, 0.10, 0.15, 0.20]` with the existing generated midpoint
+refinement. Keep X/Z derivative gains, P/I gains, estimator scale, controller
+structure, plant, profiles, and gates unchanged. Reuse the fresh Entry 282
+reference for a target-only diagnostic. Require a candidate to pass both Y
+braking and combined endpoint before repeating a fully fresh publishable run.
+
+### 284. Lateral damping alone does not close the joint gate
+
+Date: 2026-08-09.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-kd-diagnostic`
+reused the Entry 282 capture and evaluated 1,884 unique candidates in 20 GPU
+batches and 654.8 seconds. Average sampled GPU utilization was 23.9%. The
+search retained candidate 1180 with the original `kd_vel.y=0.2`, so the
+diagnostic did not materially improve the selected frontier.
+
+The damping sweep nevertheless establishes the next direction. Low damping
+can pass Y braking: the best 0.025 candidate produced 4.945 mm, but its combined
+endpoint error was 26.627 mm. Near the useful endpoint frontier,
+`kd_vel.y=0.1875`, 0.0125 Hz bias decay, and observation bias
+`[0.0, 0.0025, -0.0039]` m/s produced 6.484 mm braking and 9.072 mm endpoint.
+This preserves the braking error but creates 0.928 mm of endpoint margin.
+
+Earlier measured scale sweeps establish that reducing Y observation scale
+lengthens braking distance while spending endpoint margin. Add that one
+declarative parameter after damping and search the physically narrow interval
+from 0.98 through the current 1.0425 value. Keep the damping stage because it
+provides the endpoint margin needed for the scale correction. Do not change
+gains, plant parameters, probe definitions, or acceptance limits.
+
+### 285. Damping and scale close every diagnostic boundary
+
+Date: 2026-08-09.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-scale-diagnostic`
+reused the Entry 282 capture and evaluated 2,394 unique candidates in 25 GPU
+batches and 822.6 seconds. Average sampled GPU utilization was 23.8%.
+Candidate 2100 selected `kd_vel.y=0.1625`, Y observation scale 1.005,
+0.0125 Hz estimator-bias decay, and observation bias
+`[0.0, 0.0025, -0.0039]` m/s.
+
+The candidate passed every declared velocity and CTBR gate. Y braking distance
+was 4.973 mm and combined endpoint error was 9.638 mm. X braking was 4.596 mm;
+X/Y/Z velocity NRMSE was 1.412%, 1.330%, and 1.008%. Roll/pitch/yaw body-rate
+NRMSE was 5.458%, 5.771%, and 6.945%. Collective velocity and acceleration
+NRMSE were 7.919% and 2.997%.
+
+Complete 22-profile controller-boundary replay passed. The required live gate
+also passed with 0.097 m hover last-window maximum, 0.030 m goto last-window
+maximum, and 0.452 m final handoff range. This is sufficient evidence to retain
+both declarative stages. Run a new clean-source capture, audit, 25-batch search,
+fit, replay, live gate, and finalization without reusing this reference or
+manually promoting candidate 2100.
+
+### 286. Fresh capture moves beyond the narrow diagnostic basin
+
+Date: 2026-08-09.
+
+Clean-source campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-damping-scale-scratch`
+recaptured and audited all 22 profiles from commit `52c602f`. Its staged search
+evaluated 1,951 unique candidates in 23 GPU batches and 788.3 seconds, averaging
+24.5% sampled GPU utilization. Deduplication saved 443 candidate evaluations
+and two batches relative to the reused-reference diagnostic.
+
+No candidate passed the uniform quality gates. Candidate 1698 was selected with
+0.011875 Hz bias decay, observation bias `[0.0, -0.03, -0.0039]` m/s, and Y
+scale 0.99; it failed only combined endpoint error at 44.631 mm. Eleven settings
+failed exactly one gate, all the combined endpoint gate. The candidate-wide
+minimum endpoint error was 13.266 mm, so the declared population did not reach
+the 10 mm boundary.
+
+Replay also rejected the selected poor-quality candidate: maximum collective
+error was 0.173267 N and maximum normalized motor RMSE was 0.011658. Timestamp
+join error remained zero. The live gate stopped at 0.120 m hover last-window
+error against 0.100 m. These failures are consistent with the selected large
+negative lateral observation bias and do not override the motion population's
+first failed boundary.
+
+The endpoint-minimum trace starts with exactly matched pose and velocity, then
+accumulates smoothly to an error vector `[-11.949, 5.113, 2.659]` mm; this is
+not an initialization impulse. Every endpoint champion used X observation bias
+zero, the lower edge of the declared range. At otherwise comparable settings,
+raising X bias from 0.00 to 0.01 m/s worsened endpoint error from 13.640 to
+22.371 mm. Extend X bias below zero. The best endpoint also used the upper
+declared Y bias of 0.01 m/s, while lower scale still left Y braking at 10.605 mm.
+Extend Y bias upward for endpoint authority and add lateral proportional gain
+as the independent transient control; do not reinterpret estimator scale as an
+arbitrary gain or alter the plant and gates.
+
+### 287. Expand the measured planar endpoint and response crossing
+
+Date: 2026-08-09.
+
+Extend the declarative planar observation-bias grid to X values from -0.02
+through +0.04 m/s and Y values from -0.03 through +0.03 m/s in 0.01 m/s broad
+steps. The Entry 286 endpoint trend predicts the X crossing near -0.005 m/s
+and the Y endpoint crossing above +0.01 m/s; generated midpoint refinement
+provides the needed precision without a dense fine grid.
+
+Add one independent `kp_vel.y` stage at `[0.8, 1.0, 1.2, 1.4, 1.6, 1.8]`
+after damping and before the narrow physical estimator-scale stage. The fresh
+upper-bias candidates need Y braking reduced from 10.605 mm to 5 mm, while
+changing derivative damping across its entire range moved that error by less
+than 0.3 mm. Prior fresh alignment evidence also located the useful lateral
+proportional basin around 1.1. Keep `kp_vel.x/z`, integral gains and limits,
+filters, actuator, plant, profiles, and all gates unchanged. Reuse Entry 286's
+fresh reference for a diagnostic; require quality, replay, and live gates before
+another clean publishable campaign.
+
+### 288. The planar crossing needs higher damping, not lower proportional gain
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-planar-response-diagnostic`
+reused the Entry 286 capture and evaluated 2,907 unique candidates in 32 GPU
+batches and 1,121.8 seconds. Average sampled GPU utilization was 24.3%.
+Candidate 2749 selected 0.01125 Hz decay, observation bias
+`[-0.02, -0.005, -0.0039]` m/s, and Y scale 0.985. It failed Y braking at
+9.566 mm and combined endpoint at 20.056 mm.
+
+The wider bias grid materially crossed the endpoint gate: candidate 1085
+reached 1.859 mm with bias `[-0.02, 0.025, -0.0039]` m/s, but retained
+15.353 mm Y braking, 13.336 mm/s residual speed, and 0.14 s stop-time error.
+The selected ranking frontier still used X bias -0.02, the new lower edge.
+The earlier X trend predicts the endpoint crossing near -0.03 to -0.04 m/s.
+
+Lower proportional gain is the wrong correction. Along the endpoint champion,
+reducing `kp_vel.y` from 1.75 toward 0.8 increased Y braking from about 15.34
+to 23.77 mm and increased residual speed. Remove that disproved parameter from
+the fit. The declared damping range stopped at 0.2; higher damping is the direct
+unevaluated direction for shortening the long braking transient. Expand
+`kd_vel.y` above 0.2 and X observation bias below -0.02, retain the physical
+scale range, and rerun the target diagnostic without changing gates or plant.
+
+### 289. Search the higher-damping endpoint basin
+
+Date: 2026-08-09.
+
+Extend X observation bias to -0.04 m/s in the existing 0.01 m/s broad steps,
+retaining the Y range and midpoint refinement. Extend `kd_vel.y` from the
+previous `[0.00, 0.20]` range through 0.60 at 0.10 broad steps. This brackets
+the endpoint trend and directly tests the unsearched damping direction required
+by the long-braking champion.
+
+Remove `kp_vel` from the fit because every lower candidate worsened the matching
+Y braking and residual-speed boundaries. Retain the PX4-like base proportional
+gain, the physical observation-scale range, decay, integral limit, controller
+structure, plant, probe list, and all acceptance limits. Reuse Entry 286's
+fresh reference for the diagnostic and preserve staged beam refinement; only a
+quality-passing candidate proceeds to replay and live validation.
+
+### 290. Higher damping leaves one lateral braking gate
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-damping-diagnostic`
+reused the Entry 286 capture and evaluated 3,450 unique candidates in 35 GPU
+batches and 1,259.7 seconds. Average sampled GPU utilization was 23.3%.
+Candidate 3040 selected `kd_vel.y=0.575`, 0.01125 Hz bias decay, observation
+bias `[-0.015, 0.0, -0.0039]` m/s, and Y scale 0.98.
+
+This materially advanced the frontier. Combined endpoint error passed at
+9.611 mm and every other velocity and CTBR gate passed. Only Y braking remained
+at 8.519 mm against 5 mm, down from Entry 288's selected 9.566 mm. The selected
+damping is near the 0.60 range edge, and lowering Y scale across the physical
+range also improves braking, but extrapolation would require an implausible
+estimator scale and is therefore rejected as the next correction.
+
+Entry 288's proportional sweep established a monotonic high-side direction:
+on the endpoint champion, increasing `kp_vel.y` from 1.2 to 1.75 reduced Y
+braking from 17.157 to 15.340 mm and reduced residual speed, while endpoint
+remained below 10 mm above about 1.3. Only gains below the 1.8 base were tested.
+Add a high-side proportional stage above 1.8, retain higher damping, and require
+the combined candidate to pass braking without regressing endpoint, residual,
+velocity-envelope, replay, or live gates.
+
+### 291. Search the high-side lateral proportional crossing
+
+Date: 2026-08-09.
+
+Add `kp_vel.y` candidates `[1.8, 2.2, 2.6, 3.0, 3.4, 3.8]` after the damping
+stage and before physical scale refinement. Generated midpoints provide 0.1
+resolution around gate champions without a dense fine grid. Keep X/Z gains and
+the full evidenced damping range unchanged.
+
+This is one declarative parameter addition supported by the Entry 288
+high-direction trend and Entry 290's remaining long-braking trace. It does not
+change the controller structure, estimator interpretation, actuator, plant,
+probe suite, metric definitions, or limits. Reuse Entry 286's fresh capture for
+the diagnostic and require exact quality, replay, and live acceptance before
+launching another clean scratch campaign.
+
+### 292. High proportional response leaves the target over-braked
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-p-diagnostic`
+reused the Entry 286 capture and evaluated 3,885 unique candidates in 41 GPU
+batches and 1,465.2 seconds. Average sampled GPU utilization was 23.5%.
+Candidate 3430 selected `kd_vel.y=0.6`, `kp_vel.y=2.4`, 0.011875 Hz decay,
+observation bias `[-0.01, -0.0075, -0.0039]` m/s, and Y scale 0.98.
+
+Every gate except Y braking passed. Braking improved from 8.519 to 8.093 mm,
+while combined endpoint passed narrowly at 9.923 mm. Higher P beyond roughly
+2.5 worsened braking and stop timing, so extending that range is not supported.
+The signed braking trace identifies the remaining boundary: PX4 entered at
+0.085865 m/s, traveled 54.648 mm, and stopped at 3.44 s. The target entered at
+0.084523 m/s, traveled 46.555 mm, and stopped at 3.34 s. The target is already
+over-braked and enters 1.342 mm/s slow; additional P or D would move both
+observations in the wrong direction.
+
+Fit lateral integral response as the next independent declarative setting. It
+can build the missing pre-transition velocity while retained proportional and
+derivative damping control endpoint and stopping. Keep the evidenced integral
+acceleration limit fixed for this diagnostic so gain and authority are not
+changed simultaneously.
+
+### 293. Fit lateral integral buildup at fixed authority
+
+Date: 2026-08-09.
+
+Add `ki_vel.y` candidates `[0.2, 0.4, 0.6, 0.8, 1.0, 1.2]` after the P/D
+response stages and before observation-scale polishing. Keep `ki_vel.x/z` and
+the `[0.35, 0.35, 4.0]` m/s2 integral limit fixed, so the diagnostic isolates
+integral buildup rate from total controller authority. Generated midpoint
+refinement supplies 0.05 resolution around gate champions.
+
+Retain every existing setting range, controller structure, plant contract,
+probe family, metric, and limit. Reuse Entry 286's fresh capture and require
+all quality gates before replay and live validation.
+
+### 294. Integral buildup moves along the braking-endpoint trade-off
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-integral-diagnostic`
+reused the Entry 286 capture and evaluated 4,410 unique candidates in 47 GPU
+batches and 1,662.4 seconds. Average sampled GPU utilization was 23.6%; the
+recorded limiting seam remains deterministic single-environment physics rather
+than duplicate candidate work.
+
+Candidate 4015 selected `ki_vel.y=0.5`, `kd_vel.y=0.575`, `kp_vel.y=2.1`,
+0.01125 Hz bias decay, observation bias `[-0.015, 0.0, -0.0039]` m/s, and
+planar observation scale 0.98. Combined endpoint passed at 7.937 mm and every
+other velocity and CTBR gate passed, but Y braking remained 8.006 mm against
+5 mm. The best endpoint-passing braking result was candidate 4020 at 7.764 mm
+with `ki_vel.y=0.65`; this is only a 4.1% reduction from Entry 292's 8.093 mm
+and is not material progress.
+
+The population establishes a continuous but non-overlapping frontier. Of all
+4,410 usable candidates, 570 passed endpoint while failing Y braking, 186
+passed Y braking while failing endpoint, 3,654 failed both, and none passed
+both. Candidate-wide minima were 0.052 mm Y braking error and 1.634 mm endpoint
+error independently. Integral gain therefore changes authority but does not
+provide the missing transient shape at fixed filter dynamics.
+
+The retained trace is already over-braked at the zero-command transition, and
+the high derivative gain makes the fixed 5 Hz derivative filter the next
+independent, evidenced seam. Search lower lateral velocity-derivative cutoff
+frequencies to soften the transition while retaining D authority later in the
+stop. Keep the measured P/D/I ranges, integral limit, estimator ranges, plant,
+probe families, metrics, and limits unchanged.
+
+### 295. Fit the derivative transient independently of authority
+
+Date: 2026-08-09.
+
+Add `velocity_derivative_filter_hz` candidates `[0.5, 1.0, 2.0, 3.0, 4.0,
+5.0]` after the P/D/I stages and before physical observation-scale polishing.
+Generated midpoint refinement supplies local cutoff resolution without a dense
+cartesian sweep. Unlike more P, D, or integral authority, lowering this cutoff
+attenuates the immediate acceleration estimate at the zero-command transition;
+the Entry 294 population shows that transient shape is the missing degree of
+freedom between independently passing braking and endpoint candidates.
+
+Keep the complete measured P/D/I and estimator ranges so the staged beam can
+re-optimize around the new cutoff. Do not change controller structure, actuator
+or plant contracts, probe families, metrics, or acceptance limits. Reuse Entry
+286's fresh capture for the diagnostic and require exact quality before replay
+or live validation.
+
+### 296. Derivative cutoff is inactive at the accepted frontier
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-derivative-filter-diagnostic`
+reused the Entry 286 capture and evaluated 5,005 unique candidates in 54 GPU
+batches and 1,914.8 seconds. Average sampled GPU utilization was 24.2%.
+Candidate 4610 retained the original 5 Hz derivative cutoff and otherwise
+selected the same response basin as Entry 294. It failed only Y braking at
+8.006 mm while combined endpoint passed at 7.937 mm.
+
+No candidate passed both coupled gates. There were 694 endpoint-passing/Y-
+braking-failing candidates, 243 braking-passing/endpoint-failing candidates,
+and 4,068 that failed both. The best endpoint-passing braking error was
+7.764 mm, unchanged from Entry 294. Lower derivative cutoffs therefore do not
+move the frontier and are not a supported expansion.
+
+Controller-boundary replay on the selected diagnostic provides the next
+boundary. The failing low-speed lateral profile passed with 0.004728 normalized
+motor RMSE and 0.00609 N collective RMSE. Its controller-to-motor boundary is
+already aligned; the residual appears when each backend evolves its own state.
+Joining the ULog velocity estimate to the bridge physical state shows that the
+lateral estimator error starts at +0.010437 m/s, crosses -0.010162 m/s, and
+ends at +0.001269 m/s. The validation combined profile starts at -0.010257 m/s
+and ends at +0.003733 m/s. The current constant observation correction plus
+one exponentially decaying initial bias cannot reproduce these sign-changing
+dynamics.
+
+Fit the existing measured-velocity low-pass as the minimal stateful estimator
+adapter. It starts from the captured PX4 estimate and can reproduce both decay
+and command-correlated lag without changing controller or plant structure.
+Keep the disproved derivative cutoff at 5 Hz and retain the measured P/D/I,
+observation, actuator, plant, probe, metric, and gate contracts.
+
+### 297. Fit the measured-velocity state dynamics
+
+Date: 2026-08-09.
+
+Replace the disproved derivative-cutoff stage with `velocity_filter_hz`
+candidates `[0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0]`. Zero retains the
+current unfiltered behavior, while the positive range covers long estimator
+settling through near-controller-bandwidth response. Generated midpoint
+refinement supplies the crossing precision after the broad sweep.
+
+The filter is initialized from each profile's timestamp-joined PX4 velocity
+estimate, so it models the evidenced estimator-to-physical convergence and
+phase lag rather than inventing an arbitrary initial condition. Keep the
+derivative filter fixed at its selected 5 Hz base and retain all measured
+P/D/I, estimator offset/scale/decay, actuator, plant, probe, metric, and gate
+contracts. Reuse Entry 286's fresh capture for the diagnostic; require exact
+quality before replay and live validation.
+
+### 298. Stateful filtering crosses the coupled gates but must be per-axis
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-velocity-filter-diagnostic`
+reused the Entry 286 capture and evaluated 5,005 unique candidates in 52 GPU
+batches and 1,851.2 seconds. Average sampled GPU utilization was 23.6%.
+Candidate 4620 retained the unfiltered base and failed only Y braking at
+8.006 mm, but the new population materially crossed the former frontier:
+11 candidates passed both Y braking and the combined endpoint gate.
+
+Candidate 4353 used a 0.375 Hz filter and reached 0.376 mm Y braking with a
+9.655 mm endpoint. Candidate 4434 used the same cutoff and reached 3.851 mm Y
+braking with a 7.926 mm endpoint. This validates the stateful estimator
+hypothesis. Those candidates were still rejected because the scalar cutoff
+also filtered the already aligned X and Z measurements: candidate 4353 failed
+nine other translation gates, while candidate 4434 failed ten. Candidate 4353's
+Y velocity NRMSE passed at 0.07547 and its Y envelope narrowly missed at
+0.10504, leaving an evidenced cutoff crossing slightly above 0.375 Hz.
+
+Replace the scalar velocity filter with a strict three-axis controller setting
+and fit only its Y component around the measured crossing. Keep X/Z unfiltered,
+retain the complete P/D/I and estimator ranges, and make no other structural or
+plant change. This is a strict schema-1 contract replacement; scalar artifacts
+are invalid and receive no compatibility path.
+
+### 299. Isolate the measured estimator lag to the lateral axis
+
+Date: 2026-08-09.
+
+Replace scalar `velocity_filter_hz` with a strict three-element X/Y/Z setting
+in the shared controller contract, normalized NumPy controller, batched Torch
+twin, alignment loader, artifact loader, replay diagnostic, and both controller
+definitions. Scalar schema-1 artifacts fail strict loading; no migration or
+compatibility path is provided.
+
+Keep X and Z cutoffs at zero and search only Y at `[0.0, 0.25, 0.3125, 0.375,
+0.4375, 0.5, 0.75, 1.0]` Hz. This brackets Entry 298's coupled-gate crossing
+and the nearby Y-envelope boundary while avoiding a repeated wide scalar sweep.
+Retain all P/D/I, observation offset/scale/decay, derivative filter, actuator,
+plant, probe, metric, and acceptance contracts. Reuse Entry 286's fresh capture
+for the diagnostic; a quality-passing candidate must still pass controller
+replay and live integration before a fresh scratch campaign.
+
+### 300. Fresh scratch motion passes; replay favors pinned PX4 gains
+
+Date: 2026-08-09.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-per-axis-filter-scratch`
+captured and timestamp-joined all 22 profiles from clean commit `f06beec`.
+Actuator audit passed with zero maximum timestamp error; representative
+normalized motor RMSE was about 0.0003 and every collective RMSE remained below
+0.05 N. The target sweep evaluated 4,826 unique candidates in 51 GPU batches
+and 1,804.8 seconds, averaging 24.2% sampled GPU utilization.
+
+Candidate 4727 passed every X/Y/Z, roll/pitch/yaw, collective, and combined
+endpoint motion gate. It selected no velocity filter, `kp_vel.y=1.9`,
+`ki_vel.y=0.35`, the pinned `kd_vel.y=0.2`, 0.0125 Hz estimator-bias decay,
+observation bias `[0.005, -0.020, -0.0039]` m/s, and Y scale 1.0125.
+Its principal motion metrics included 2.298 mm Y braking, 9.062 mm endpoint,
+0.01647 Y envelope NRMSE, and 0.07884 CTBR collective-velocity NRMSE.
+
+Mandatory replay rejected only `validation-y-envelope`: normalized motor RMSE
+was 0.011343 against 0.010, while its physical-state replay passed at 0.009627
+and collective RMSE passed at 0.02629 N. The mismatch is dominated by roll and
+pitch torque at the PX4-estimated-state boundary, not plant collective or
+timestamp joining.
+
+The population contains 444 motion-quality-passing candidates, including 64
+that retain the exact pinned PX4 lateral P/I/D gains. Candidate 1387 passes all
+motion gates with only 0.0125 Hz decay and observation bias
+`[0.005, -0.020, -0.0039]` m/s. Remove P/I/D from the fit rather than tuning
+controller authority past a passing controller boundary. Retain estimator
+decay, bias, per-axis filter, scale, all probes, and all gates, then rerun on
+this fresh audited reference.
+
+### 301. Keep controller authority pinned after motion acceptance
+
+Date: 2026-08-09.
+
+Remove `kp_vel`, `ki_vel`, and `kd_vel` from the declarative fit. The strict
+controller still carries the pinned PX4-like values, but alignment no longer
+searches them: Entry 300 demonstrates 64 motion-quality-passing candidates at
+the exact base gains, while the selected gain changes introduce the sole replay
+failure. This reduces both controller/alignment coupling and scratch search
+cost.
+
+Renumber the remaining per-axis velocity-filter, observation-scale, and fixed
+integral-limit stages after estimator decay and bias. Retain the complete probe
+families, every quality and replay limit, actuator and plant contracts, and the
+fresh Entry 300 PX4 capture. Require motion quality, replay, and live integration
+before finalization.
+
+### 302. Pinned gains pass motion and narrow replay to lateral torque
+
+Date: 2026-08-09.
+
+Diagnostic run
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-pinned-gains-diagnostic`
+reused Entry 300's fresh audited capture and evaluated 3,274 unique candidates
+in 34 GPU batches and 1,206.9 seconds. Average sampled GPU utilization was
+23.9%. Removing the disproved gain stages reduced the population by 32% and
+the sweep time by about ten minutes without losing a passing motion basin.
+
+Candidate 3197 passed every X/Y/Z, roll/pitch/yaw, collective, stability, and
+combined endpoint motion gate while retaining the exact pinned lateral PX4
+gains. Its fitted target-only estimator settings were 0.0125 Hz initial-bias
+decay, observation bias `[0.005, -0.020, -0.0039]` m/s, no velocity filtering,
+and observation scale `[0.98, 1.039375, 1.0]`. Principal errors were 4.552 mm X
+braking, 2.221 mm Y braking, 1.389 mm Z braking, 9.680 mm combined endpoint,
+and 0.0108 Y-envelope velocity NRMSE.
+
+Mandatory replay rejected only `validation-y-envelope`. Its core normalized
+motor RMSE was 0.010796 against the 0.010 limit, improved from Entry 300's
+0.011343. Physical-state normalized motor RMSE passed narrowly at 0.009972,
+collective RMSE passed at 0.02135 N, and all timestamp joins were exact. The
+remaining unsaturated boundary error is roll/pitch normalized torque RMSE
+`[0.01502, 0.01129, 0.00007]`; collective and yaw are aligned.
+
+The first unresolved boundary is therefore the velocity path's conversion of
+a high-speed lateral thrust vector into attitude/rate torque, not translational
+feedback gains, target-state adaptation, allocation, actuator dynamics, or
+plant collective. Keep P/I/D pinned and inspect the thrust-vector direction
+and generated attitude/rate setpoints before introducing another fit parameter
+or changing an equation. Do not finalize or run the live acceptance gate while
+this replay remains above its limit.
+
+### 303. Instrument the attitude-to-rate controller boundary
+
+Date: 2026-08-09.
+
+The accepted ULog evidence includes `vehicle_rates_setpoint`, but the replay
+report currently jumps from collective magnitude to normalized torque. Add a
+diagnostic comparison of the target controller's held body-rate and collective
+setpoints against the timestamp-joined PX4 rate setpoint for every profile.
+Keep the existing motor, collective, and timestamp acceptance limits unchanged.
+
+This separates the two remaining hypotheses without a new fitted parameter. A
+body-rate-setpoint mismatch locates the defect in velocity-thrust direction or
+attitude control; matching rate setpoints with mismatched torque locate it in
+the rate PID. Preserve roll, pitch, and yaw errors independently and report the
+join error so an apparent controller mismatch cannot conceal a phase error.
+
+### 304. Inspect rate-loop state after the setpoint boundary
+
+Date: 2026-08-09.
+
+The first instrumented replay keeps the same sole Y-envelope motor failure.
+That profile's body-rate setpoint RMSE is `[0.00611, 0.01483, 0.00041]` rad/s
+and its collective-setpoint RMSE is 0.000084. With lateral rate proportional
+gain 0.15, this setpoint difference is too small to explain normalized torque
+RMSE `[0.01502, 0.01129, 0.00007]` by itself.
+
+Report the target and PX4 angular-velocity and angular-acceleration inputs at
+the rate PID. The replay already consumes PX4's `vehicle_angular_velocity`
+topic, including its published derivative, but the target reconstructs the
+derivative from the physics-rate velocity stream. Keep the controller and all
+acceptance limits unchanged until this comparison establishes whether the
+remaining error begins in derivative reconstruction or rate-loop state.
+
+Correct the CTBR setpoint diagnostic to compare its direct command rather than
+the velocity-loop held-state field, which CTBR does not use. This affects only
+diagnostic reporting, not controller output or acceptance.
+
+### 305. Published angular acceleration is the first mismatched rate boundary
+
+Date: 2026-08-09.
+
+The rate-input replay retained the same original Y-envelope motor error and
+located its dominant input mismatch. Core replay angular-velocity RMSE was
+`[0.02391, 0.00044, 0.00007]` rad/s and angular-acceleration RMSE was
+`[2.48608, 0.03822, 0.00702]` rad/s2. The roll P and D contributions implied by
+those errors account for most of the observed roll normalized-torque error.
+The physical-state derivative reconstruction was closer at 2.00556 rad/s2 and
+its motor replay remained passing at 0.009972, but it confirms the same seam.
+
+Pinned PX4 source confirms that `MulticopterRateControl` consumes both
+`vehicle_angular_velocity.xyz` and its independently published
+`xyz_derivative`. Core replay currently supplies the former but discards the
+latter after its initial seed, then derives acceleration again from sampled
+angular velocity. That is not an identical PX4 controller-state replay.
+
+The diagnostic also exposed that nearest-sample differences of 8 ms for held
+rate setpoints are valid source ages, not timestamp-join failures. Remove those
+new false failures, join held setpoints with hold semantics, and retain the
+source age as evidence. Then inject each timestamp-joined PX4 angular
+derivative into the core replay's rate-state boundary while leaving the
+physical-state replay and production controller unchanged. The physical replay
+continues to audit target-side derivative reconstruction.
+
+### 306. Replay PX4's complete published rate state
+
+Date: 2026-08-09.
+
+For core replay only, join both fields consumed by pinned PX4 rate control:
+`vehicle_angular_velocity.xyz` and `xyz_derivative`. Seed the target rate-loop
+state on each physics tick so its next PID evaluation consumes that exact
+published angular derivative after the existing controller filter ordering.
+Do not change the production NumPy or Torch controller; the physical-state
+replay continues to derive angular acceleration from articulation rates and is
+the deployment-boundary audit.
+
+Join `vehicle_rates_setpoint` with hold semantics and report its maximum source
+age. Report the nearest angular-state sample distance as diagnostic evidence,
+but do not fail either for exceeding one physics tick: these are source cadence
+and logging-age properties, not joins between two representations of the same
+timestamp. Retain the one-tick failure for physical bridge-state joins and all
+motor and collective acceptance limits.
+
+### 307. Complete rate-state replay exposes default ULog decimation
+
+Date: 2026-08-09.
+
+Replaying the PX4-published angular derivative improved the only failing
+Y-envelope normalized motor RMSE from 0.010796 to 0.010302. No other original
+acceptance failure appeared, physical-state motor replay remained passing at
+0.009972, and collective remained passing at 0.01984 N. The residual is only
+3.02% above the motor limit.
+
+The captured default ULog is not dense enough to complete an exact 250 Hz
+controller join. Over the failing 5.46-second profile it contains 55
+`actuator_motors` samples, 273 rate/torque setpoints, and 546 angular-velocity
+samples. Pinned PX4's default logger intervals are respectively 100 ms, 20 ms,
+and 10 ms, while the rate controller consumes angular state every 4 ms. Linear
+interpolation cannot recover the discarded derivative and integral history at
+motor timestamps.
+
+Pinned PX4 provides `SDLOG_PROFILE` bit 4 specifically for full-rate attitude,
+rate, actuator, thrust, and torque topics. Configure alignment capture with the
+default profile plus high-rate bit (`17`) through the ordinary per-vehicle PX4
+runtime config. Keep the normal runtime default at `1`. A fresh capture is
+required; do not tune controller gains or relax replay limits against the
+decimated ULog.
+
+### 308. Capture exact controller topics at full rate
+
+Date: 2026-08-09.
+
+Add strict per-vehicle `px4.logging_profile` configuration and pass it to every
+PX4 container as `SDLOG_PROFILE`. Keep the shared runtime default at the compact
+general-analysis profile `1`; select `17` only in the alignment experiment to
+combine default and high-rate controller topics. Validate the PX4-supported
+0-4095 bitmask range at config load time.
+
+Thread the resolved value through persistent, integration, and flight-benchmark
+launches and include it in persistent-container recreation checks. This keeps
+the runtime graph as the single source of truth and prevents an alignment-only
+shell override from bypassing configuration fingerprints. Run all host gates,
+commit before capture, then execute a wholly fresh capture, audit, sweep, fit,
+and replay because the prior ULog cannot be densified after the fact.
+
+### 309. Fresh high-rate scratch fit passes motion and exposes scheduler phase
+
+Date: 2026-08-09.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-rate-scratch`
+ran from clean commit `79c4ea4`. The 89.2 MB ULog captured actuator motors,
+vehicle thrust, and vehicle torque at approximately 250 Hz. The actuator audit
+passed every profile with zero timestamp-join error; representative motor RMSE
+was about 0.0003 and collective RMSE remained below 0.01 N.
+
+The staged target sweep evaluated 3,658 unique candidates in 37 GPU batches
+and 1,375.2 seconds. Average sampled GPU utilization was 24.7%, again limited
+by deterministic simulation work rather than insufficient batch population.
+Candidate 2841 passed every per-axis and combined motion gate from scratch. It
+selected 0.011875 Hz estimator-bias decay, observation bias
+`[0.0, -0.01, -0.0039]` m/s, Y velocity filtering at 1.0 Hz, and retained the
+pinned controller gains. Held-out errors included 4.528 mm X braking, 0.117 mm
+Y braking, 1.440 mm Z braking, 9.980 mm combined endpoint error, X/Y/Z envelope
+velocity NRMSE 0.02052/0.06995/0.01347, and CTBR collective-velocity NRMSE
+0.07945. The live hover+goto gate also passed with 4.5 cm final hover error,
+2.9 cm final goto error, and a ready handoff at 0.453 m wall-normal range.
+
+Finalization correctly rejected the artifact because controller-boundary
+replay did not pass. High-rate evidence removes the prior decimation ambiguity:
+the largest reported failures were Z-envelope collective RMSE 1.221 N,
+moderate-envelope collective RMSE 0.595 N, CTBR collective-envelope RMSE
+0.308 N, and corresponding motor failures on the Z and moderate profiles.
+
+The first unresolved boundary is now replay scheduler phase, not the plant
+mapping. `vehicle_rates_setpoint` is a held upstream controller output, while
+`vehicle_thrust_setpoint`, `vehicle_torque_setpoint`, and `actuator_motors` are
+published by the downstream rate/allocation work item at the next controller
+tick. The replay currently evaluates the target controller at an actuator
+timestamp and compares that new result with PX4's already-published actuator
+result at the same timestamp. This combines different scheduler ticks. On the
+CTBR collective and combined profiles, comparing the downstream output with
+the held upstream input from one 4 ms tick earlier reduces normalized
+collective discrepancy from 0.004517/0.002750 to 0.000242/0.000123. The direct
+actuator audit independently proves that downstream PX4 thrust and motor
+topics agree at identical timestamps.
+
+Correct the replay to express this one-tick rate-to-allocation pipeline
+explicitly and test it with timestamped synthetic topics. Do not change
+controller settings, plant mapping, probe gates, or acceptance limits. Then
+rerun replay against this preserved high-rate campaign before deciding whether
+any residual controller boundary requires another scratch fit.
+
+### 310. Reproduce recorded command publication phase exactly
+
+Date: 2026-08-09.
+
+The capture trace is already the output of the 20 Hz policy/setpoint publisher:
+its alternating 40/60 ms timestamps are the actual physics-representable
+publication cadence. Controller replay was incorrectly passing that trace
+through a second independently phased synthetic 20 Hz cadence. This could hold
+a changed command for another 40-60 ms, while the target sweep applies each
+recorded command over its exact next trace interval.
+
+Remove the second cadence. Hold the recorded command directly on the 250 Hz
+replay grid and apply each change after its publishing physics tick, matching
+the observation-to-setpoint ordering used by capture and target sweep. Preserve
+the separate fitted `command_delay_s` behavior before this mandatory one-tick
+publication phase. Add a synthetic timestamp test proving that a command
+recorded at 40 ms first affects the 44 ms controller tick. Keep every
+controller setting, ULog input, gate, and acceptance limit unchanged, run the
+full host suite, and commit before replaying Entry 309's preserved high-rate
+campaign.
+
+### 311. Recorded command phase clears the CTBR replay boundary
+
+Date: 2026-08-09.
+
+Replaying Entry 309 after the command-publication correction reduced the
+failure count from 14 to 11 without changing its selected controller. Both
+previous CTBR collective failures now pass: collective-envelope motor RMSE is
+0.000512 with 0.0345 N collective RMSE, and combined CTBR motor RMSE is
+0.000387 with 0.0261 N collective RMSE. The Z-envelope collective error fell
+from 1.221 N to 0.939 N and motor RMSE from 0.01826 to 0.01433. The moderate
+velocity envelope fell from 0.595 N to 0.420 N and motor RMSE from 0.01340 to
+0.01059. This is material progress and validates the recorded-cadence model.
+
+Every remaining core failure begins in the velocity controller's collective
+setpoint. The replay seeds its velocity integral by interpolating
+`vehicle_local_position_setpoint.acceleration`, but that topic has only 2,169
+samples over this capture and is recorded mostly every 96-104 ms. In contrast,
+the high-rate ULog contains 26,878 `vehicle_attitude_setpoint` samples at the
+125 Hz velocity-loop cadence. That topic's desired quaternion and collective
+thrust encode the contemporaneous acceleration setpoint generated by PX4.
+
+Replace the stale seed source with acceleration reconstructed from the
+high-rate desired attitude and thrust: the desired body-Z direction recovers
+the horizontal acceleration for pinned `MPC_ACC_DECOUPLE=1`, while thrust-Z and
+the joined hover estimate recover vertical acceleration. Keep runtime
+controller equations and every acceptance limit unchanged. Test frame signs,
+vertical inversion, and source-age reporting before replaying the preserved
+campaign again.
+
+### 312. Desired attitude is exact only for the vertical seed
+
+Date: 2026-08-09.
+
+Full-vector acceleration reconstruction from desired attitude reduced
+fit-forward collective RMSE from 0.0525 N to 0.0374 N, but increased total
+failures from 11 to 19. It introduced motor failures on the lateral, yaw, and
+stage-1 profiles because desired attitude contains the tilt-limited thrust
+direction, not the exact pre-limit horizontal acceleration emitted by the
+velocity PID. Even small inverse differences become persistent horizontal
+velocity-integral offsets over a complete profile.
+
+The vertical inversion remains exact: PX4 publishes thrust NED-Z through the
+desired attitude's body-Z direction and collective magnitude, and vertical
+acceleration follows directly from thrust Z and the joined hover estimate. The
+large Z-envelope and moderate-envelope errors remained effectively unchanged,
+so the seed is not their primary cause, but the forward-profile improvement
+shows that it removes a real marginal collective bias.
+
+Restore `vehicle_local_position_setpoint.acceleration` as the horizontal seed
+and replace only its stale Z component with the full-rate attitude/thrust
+inversion. Report both source ages. This retains the exact upstream horizontal
+PID output, preserves the evidenced vertical improvement, and changes no
+production controller setting, equation, or limit.
+
+### 313. Vertical-only seed moves rather than removes the bias
+
+Date: 2026-08-09.
+
+Using the high-rate attitude/thrust inversion only for acceleration Z restored
+the prior lateral motor behavior and kept fit-forward collective passing at
+0.0376 N, but total failures remained 11. Fit-lateral collective moved from a
+pass at 0.0449 N to a failure at 0.0678 N, while Z-envelope stayed at 0.939 N
+and moderate-envelope stayed at 0.420 N. The mixed seed therefore does not
+provide material progress and should not replace the exact upstream
+`vehicle_local_position_setpoint.acceleration` seed.
+
+Code inspection found a more direct phase defect. Replay delays the recorded
+action by one 4 ms tick before the target controller consumes it, matching the
+capture publication order. The PX4 vertical velocity-state blending path still
+uses `commanded_body_velocity` before that delay. During every vertical command
+transition, target command generation and estimator blending therefore consume
+different setpoints. Restore the original acceleration seed and derive the NED
+vertical command used for PX4 blending from the same delayed action array that
+feeds the controller. Add a transition test covering both values before
+replaying the preserved campaign.
+
+### 314. Vertical command phase is correct but not the remaining boundary
+
+Date: 2026-08-09.
+
+The delayed vertical command is now shared by target controller input and the
+PX4 velocity-only estimator blending model, and the full host and pre-commit
+suites pass. Replaying the preserved high-rate campaign leaves the same 11
+failures. The dominant Z-envelope collective RMSE changes only from 0.939145 N
+to 0.938942 N, and the moderate-envelope collective RMSE changes only from
+0.419974 N to 0.419923 N. Fit-forward returns to 0.052544 N after restoring the
+exact recorded acceleration seed. The hypothesis therefore fixes a real phase
+contract but does not materially advance acceptance.
+
+Keep the correction because both consumers must observe one published command,
+but do not tune around this result. Inspect PX4's vertical controller update
+state directly: compare the replayed acceleration setpoint and velocity
+integral Z against the full-rate value reconstructed from desired attitude,
+collective thrust, and hover estimate over each profile. Use that boundary to
+distinguish an outer-loop update/seed defect from a later thrust-conversion
+defect before adding any candidates.
+
+### 315. The remaining vertical error is the PX4 module handoff
+
+Date: 2026-08-09.
+
+The full-rate vertical boundary diagnostic shows that target acceleration is
+already close to PX4 before thrust conversion. Acceleration-setpoint RMSE is
+0.03878 m/s2 on `validation-z-envelope` and 0.01765 m/s2 on
+`stability-moderate-envelope`, despite collective-setpoint RMSE of 0.01313 and
+0.00602 respectively. The inferred integral has isolated transition spikes,
+but its profile-wide RMSE remains 0.1441 m/s2 and 0.07984 m/s2.
+
+Directly comparing two PX4 topics localizes the discrepancy further. The
+collective in `vehicle_attitude_setpoint`, published by the 125 Hz position
+controller, differs from the downstream `vehicle_rates_setpoint` collective by
+0.01258 normalized on the Z envelope and 0.00578 on the moderate envelope.
+Those values nearly account for the target-to-rates errors. At the first Z
+transition, position control publishes the new collective at 127.692 s, while
+rates and motors first reflect it at 127.700 s. Later handoffs take either one
+or two 4 ms physics ticks because the PX4 modules run asynchronously.
+
+The first failed boundary is therefore the collapsed target
+position-to-attitude handoff, not velocity gains, hover thrust, or the plant.
+Measure target collective and body-rate error for deterministic one- and
+two-tick handoff delays on every profile. If one delay materially dominates,
+add that delay through the strict controller settings and fit it declaratively
+in the next scratch campaign; do not absorb it into controller gains.
+
+### 316. A distinct attitude cadence is required
+
+Date: 2026-08-09.
+
+The deterministic handoff scan rejects a single fixed-delay approximation.
+Two 4 ms ticks are best for collective: `validation-z-envelope` falls from
+0.01313 to 0.00583 normalized and `stability-moderate-envelope` falls from
+0.00602 to 0.00242. Those residuals still exceed the 0.05 N physical gate by a
+wide margin. One tick is better for most X/Y/yaw body-rate profiles, while the
+sharp vertical profiles prefer two. Do not add a fixed delay candidate.
+
+The high-rate ULog exposes the actual scheduler boundary. Over the capture,
+`vehicle_attitude` has 30,875 intervals of 4 ms and 14,335 intervals of 8 ms,
+an average publication rate close to 187.5 Hz. `vehicle_rates_setpoint` follows
+that attitude-driven module schedule. The target controller currently computes
+desired attitude, body-rate setpoint, and collective only inside its 125 Hz
+velocity-loop update, then runs the rate loop at 250 Hz. It therefore collapses
+three distinct PX4 module cadences into two.
+
+Separate the shared controller into a 125 Hz velocity stage that holds desired
+attitude and collective, a declarative attitude stage initially measured at
+187.5 Hz that holds body-rate and collective output, and the existing 250 Hz
+rate/allocator stage. Implement the same deterministic fractional cadence in
+NumPy and Torch, add it through `ParameterSpec`, and preserve strict schema 1.
+Then rerun the preserved high-rate replay before paying for a new scratch
+capture and fit.
+
+### 317. Separated attitude cadence materially improves replay
+
+Date: 2026-08-09.
+
+The strict schema-1 controller now separates its 125 Hz velocity stage,
+fractional attitude stage, and 250 Hz rate/allocation stage in both NumPy and
+Torch. Full host verification passes with 754 tests and one skip, and the
+complete pre-commit suite passes. The 187.5 Hz diagnostic reused only the
+preserved ULog/bridge trace and inserted the new setting into a copy of the old
+selected artifact; it is evidence, not a publishable artifact.
+
+Failures fall from 11 to 7. `validation-z-envelope` collective improves from
+0.938942 N to 0.672205 N, a 28.4% reduction, and core motor RMSE improves from
+0.014325 to 0.010474. `stability-moderate-envelope` collective improves from
+0.419923 N to 0.300914 N, a 28.3% reduction, while core motor RMSE now passes at
+0.008931. Both `fit-vertical-low-speed` and
+`validation-vertical-ramp-reversal` clear their collective gates. Remaining
+failures are marginal fit-forward collective, physical Y motor, core/physical
+Z motor and collective, and physical moderate motor.
+
+This is material progress and validates the three-stage controller structure.
+Preserve the 187.5 Hz report, sweep the declared 166.6667, 187.5, 200, and 250
+Hz candidates against the same high-rate evidence, then use the best evidenced
+rate as the base for a fresh scratch target fit and capture.
+
+### 318. Attitude-rate sweep advances the replay frontier
+
+Date: 2026-08-09.
+
+The four declared attitude-rate candidates were replayed against identical
+preserved high-rate evidence. At 187.5 Hz, 7 failures remain; 200 and 250 Hz
+each regress to 9. The lower edge, 166.6667 Hz, leaves 6 failures and is the new
+frontier. Z-envelope collective falls to 0.514393 N, 45.2% below the original
+0.938942 N, while core and physical Z motor RMSE now pass at 0.007479 and
+0.007620. Moderate collective falls to 0.214633 N and core motor passes at
+0.008221.
+
+The remaining failures at 166.6667 Hz are fit-forward collective at 0.052523 N,
+vertical-ramp collective at 0.064601 N, physical Y motor at 0.013373,
+Z-envelope collective at 0.514393 N, and moderate collective/physical motor at
+0.214633 N and 0.011049. Body-rate error begins to increase at the lower rate,
+but no passed replay gate regresses yet.
+
+The collective frontier is monotonic toward the tested lower boundary, so a
+second evidence-routed sweep is justified. Add only 125, 142.8571, 150, and 160
+Hz to the same declarative parameter. Stop expanding when collective ceases to
+improve or a previously passed core motor gate regresses.
+
+### 319. Seven-millisecond attitude period is the new frontier
+
+Date: 2026-08-09.
+
+The lower cadence sweep is non-monotonic. At 125 Hz, Z and moderate collective
+return to 0.672205 N and 0.300848 N. At 150 and 160 Hz, Z remains near 0.567 N
+and moderate near 0.302 N. The 142.8571 Hz candidate, an exact 7 ms fractional
+period on the 4 ms physics grid, is substantially better: Z collective is
+0.233732 N, moderate collective is 0.057749 N, and both core and physical Z
+motor RMSE pass at 0.004266 and 0.004521. Moderate physical motor also passes
+at 0.009966.
+
+Six collective/physical-boundary failures remain. The next change is a narrow
+rate-only refinement around the 7 ms resonance; no gain or plant change is
+supported. Add 138.8889, 140.8451, 144.9275, and 147.0588 Hz, corresponding to
+7.2, 7.1, 6.9, and 6.8 ms periods. If none improves the Z collective frontier,
+stop rate expansion and reproduce the recorded attitude-publication schedule
+as an explicit controller input boundary.
+
+### 320. Rate refinement is exhausted
+
+Date: 2026-08-09.
+
+The narrow sweep did not improve the 142.8571 Hz frontier. At 140.8451 Hz, Z
+collective is 0.233811 N and moderate collective is 0.057714 N, effectively
+tied but slightly worse on Z. At 138.8889 Hz, the values regress to 0.304431 N
+and 0.176704 N. At 144.9275 and 147.0588 Hz, Z regresses above 0.675 N and
+moderate above 0.302 N. No further rate expansion is justified.
+
+Use 142.8571 Hz as the target's deterministic base cadence for motion fitting.
+For controller-boundary replay, drive the attitude stage from the exact
+full-rate `vehicle_attitude` publication timestamps already preserved in the
+ULog. This schedule is an observed controller input boundary, analogous to the
+recorded 125 Hz local-position updates, and avoids fitting a scalar rate to
+PX4's asynchronous one-or-two-tick module timing. Keep the exact schedule out
+of policy training; the deployable controller retains only its settings and
+deterministic cadence, while motion gates judge its response.
+
+### 321. Publication timestamps do not equal module execution order
+
+Date: 2026-08-09.
+
+Driving the target attitude stage directly from recorded `vehicle_attitude`
+timestamps regresses the preserved replay from 6 to 8 failures. Z-envelope
+collective rises from 0.233732 N to 0.615848 N and moderate collective rises
+from 0.057749 N to 0.178688 N. The topic timestamps identify publication but
+not whether position control or attitude control ran first on a shared tick;
+forcing them as execution triggers double-counts part of the already modeled
+handoff.
+
+Preserve the report as negative evidence and remove the replay-only trigger.
+Keep the separated controller stages and 142.8571 Hz deterministic target
+base. The remaining trace-supported diagnostic is the outer acceleration
+transition itself: scan replayed vertical acceleration setpoint against the
+exact full-rate reconstructed PX4 acceleration over zero through three physics
+ticks before changing another controller setting.
+
+### 322. Checkpoint before vertical acceleration phase scan
+
+Date: 2026-08-09.
+
+The unsuccessful replay-only `vehicle_attitude` timestamp trigger has been
+removed after recording its regression. The deployable controller remains at
+the best deterministic 142.8571 Hz attitude cadence. Boundary replay now
+reports a zero-through-three-physics-tick delay scan between the target's
+upstream vertical acceleration setpoint and PX4's full-rate reconstructed
+vertical acceleration setpoint. A focused host test proves that the diagnostic
+identifies a known two-tick phase offset. No new runtime replay has been run at
+this checkpoint.
+
+Resume from the preserved high-rate run with:
+
+```sh
+make alignment-replay-controller ALIGNMENT_RUN_ID=20260809T-uniform-6dof-high-rate-scratch
+jq -r '.profiles[] | select(.control_mode == "velocity") | .profile as $profile | .vertical_setpoint_delay_scan[] | [$profile, .delay_steps, .rmse_mps2, .max_abs_mps2] | @tsv' .build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-rate-scratch/controller_boundary_replay.json
+```
+
+If one shift materially dominates for `validation-z-envelope` and
+`stability-moderate-envelope` without regressing passed boundaries, model that
+outer-stage phase and rerun the unchanged candidates. If it does not, stop
+changing timing and inspect the remaining physical Y actuator-adapter residual
+as a separate plant-boundary issue. The current preserved controller artifact
+was mechanically updated for diagnostics and is not publishable; a fresh
+scratch target fit and capture under the new comparison fingerprint are still
+required before policy training.
+
+### 323. Upstream vertical phase is already correct
+
+Date: 2026-08-10.
+
+The checkpointed zero-through-three-tick scan was run against the preserved
+high-rate campaign with the deterministic 142.8571 Hz attitude cadence. Zero
+added delay is decisively best on every vertical transition that limits replay.
+`validation-z-envelope` acceleration-setpoint RMSE is 0.03878 m/s2 at zero
+ticks and 0.17370 m/s2 at one tick; `stability-moderate-envelope` is 0.01765
+m/s2 at zero ticks and 0.07870 m/s2 at one tick. The low-speed and vertical
+ramp profiles show the same direction. Do not add an outer-loop delay or
+continue the cadence sweep.
+
+The deterministic replay returns to the six-failure frontier: marginal
+collective failures on forward, low-speed vertical, and vertical reversal;
+physical-state Y motor RMSE 0.013343; Z-envelope collective RMSE 0.233732 N;
+and moderate-envelope collective RMSE 0.057749 N. The upstream acceleration is
+not the first failed vertical boundary. Before changing thrust conversion,
+complete the replay's initial scheduler state by seeding the attitude-stage
+elapsed time from the last full-rate `vehicle_rates_setpoint` publication at
+each absolute profile boundary. This is captured controller state, not a
+fitted setting or another timing model.
+
+### 324. Rate-setpoint age is not the missing attitude phase
+
+Date: 2026-08-10.
+
+Seeding the attitude-stage elapsed time from the most recent
+`vehicle_rates_setpoint` publication regresses the preserved replay from six
+failures to eight. The affected profiles are exactly those whose boundary has
+a 4 ms rate-setpoint age. `validation-z-envelope` collective RMSE rises from
+0.233732 N to 0.676248 N and gains core and physical motor failures at
+0.010535 and 0.010579. `stability-moderate-envelope` collective rises from
+0.057749 N to 0.302611 N and physical motor RMSE rises from a pass to
+0.011452. The physical Y motor improves only marginally from 0.013343 to
+0.012910 and remains failed.
+
+The rate-setpoint output timestamp is therefore not a sufficient scheduler
+state: it does not encode the relative execution order of position, attitude,
+and rate-control modules on the shared tick. Preserve the negative report as
+`controller_boundary_replay-attitude-phase-seed.json`, remove the phase seed,
+and return to the six-failure deterministic frontier. The next diagnostic must
+decompose the vertical chain within the replay itself: reconstructed PX4
+acceleration, target desired collective, PX4 attitude-setpoint collective,
+PX4 rate-setpoint collective, and final motors/thrust. Change only the first
+boundary whose full-rate residual accounts for the failed collective gate.
+
+### 325. The rate controller consumes the previous attitude publication
+
+Date: 2026-08-10.
+
+The collective decomposition returns the unchanged six-failure frontier and
+identifies two distinct vertical handoffs. On `validation-z-envelope`, target
+desired collective differs from PX4 attitude-setpoint collective by only
+0.002257 normalized, while PX4 attitude-to-rate error is 0.012583 and
+rate-to-allocator error is 0.005170. On `stability-moderate-envelope`, the
+corresponding values are 0.000991, 0.005780, and 0.002126. The allocator seam
+is not a timestamp-join artifact: at the 129.692 s transition the attitude
+setpoint changes to 0.379500, the rate setpoint observes it at 129.696 s, and
+the thrust setpoint plus motors observe it at 129.700 s.
+
+The target currently updates its held attitude output and consumes that new
+value in the rate controller on the same physics tick. Preserve the explicit
+fractional attitude cadence, but test the velocity path's rate controller
+consuming the prior held attitude output for exactly one 4 ms tick. Keep CTBR's
+direct rate-controller contract unchanged because its replay boundaries
+already pass. Retain this structural correction only if it materially improves
+the six-failure frontier without regressing a passed gate.
+
+### 326. A fixed rate-controller handoff double-counts delay
+
+Date: 2026-08-10.
+
+The one-tick velocity-only attitude-to-rate handoff reduces the raw failure
+count from six to five by clearing the marginal low-speed vertical and vertical
+ramp collective gates, but it severely regresses the limiting profiles.
+`validation-z-envelope` collective rises from 0.233732 N to 0.631210 N;
+`stability-moderate-envelope` rises from 0.057749 N to 0.294502 N and its
+previously passed physical motor RMSE becomes 0.011113. The largest normalized
+excess grows by about 170 percent. Physical Y remains failed at 0.013135.
+
+Preserve `controller_boundary_replay-fixed-rate-handoff.json` as negative
+evidence and remove the fixed delay. The fitted 142.8571 Hz attitude-output
+cadence already approximates PX4's downstream rate-setpoint timing, so adding a
+second fixed handoff double-counts it. Restore the deterministic six-failure
+frontier. The remaining vertical discrepancy is PX4's variable shared-tick
+execution order; investigate a deterministic schedule that matches the
+observed downstream rate-setpoint publications directly, without driving it
+from upstream attitude timestamps or adding a universal delay.
+
+### 327. Refit cadence with the evidenced rate handoff
+
+Date: 2026-08-10.
+
+The failed 142.8571 Hz fixed-handoff control does not falsify PX4's observed
+attitude-to-rate pipeline; it falsifies composing that handoff with a cadence
+that was fitted while the handoff was absent. The current rate is a surrogate
+for the downstream schedule and cannot remain fixed when the structural seam
+changes.
+
+Restore the evidenced velocity-only one-tick handoff and replay the existing
+declared attitude-rate candidates against the same preserved ULog, changing no
+other setting. Start with 187.5 Hz because the ULog's 4/8 ms attitude
+publication mixture measures that mean cadence, then cover 166.6667, 200, 250,
+142.8571, and 125 Hz. This is one structural correction plus refitting one
+already-declared parameter. Retain the pair only if the sweep improves the
+six-failure frontier without regressing a passed boundary; otherwise remove
+the handoff again.
+
+### 328. Handoff-aware cadence fitting reduces failures to four
+
+Date: 2026-08-10.
+
+The preserved high-rate sweep confirms that the structural handoff must be
+fitted jointly with attitude cadence. At 200 Hz, failed replay gates fall from
+six to four. Low-speed vertical collective improves from 0.066303 N to
+0.025788 N, vertical-ramp collective improves from 0.070762 N to 0.037626 N,
+and the moderate physical motor gate remains passed at 0.009877. The limiting
+Z collective improves 26.8 percent from 0.233732 N to 0.170968 N. Remaining
+failures are marginal forward collective at 0.052481 N, physical Y motor at
+0.013051, Z collective, and moderate collective at 0.073508 N.
+
+The measured 187.5 Hz candidate gives the lowest tested Z error at 0.152817 N
+but leaves six failures. The other handoff-aware candidates are inferior:
+166.6667 Hz leaves five failures with Z at 0.456567 N; 250 Hz leaves five with
+Z at 0.152822 N and regresses the moderate physical motor; 142.8571 Hz and
+125 Hz regress the prior frontier. Select 200 Hz as the new deterministic base
+because failed-gate count remains the primary ranking dimension. Preserve all
+reports under the run directory.
+
+This is material progress but not acceptance. The residual is still dominated
+by PX4's irregular 4/8 ms shared-tick schedule. Before adding controller gain
+candidates, replay the exact recorded `vehicle_attitude` update mask together
+with the now-evidenced one-tick rate handoff. The earlier exact-mask diagnostic
+lacked that handoff and therefore tested an incomplete execution order.
+
+### 329. Re-test the exact attitude schedule with complete execution order
+
+Date: 2026-08-10.
+
+The earlier exact `vehicle_attitude` update-mask replay forced the target's
+attitude output and rate controller to execute on the same tick. PX4 evidence
+now proves that the rate controller consumes that output on the following
+physics tick. Reintroduce the replay-only update mask together with the
+structural one-tick handoff and rerun the selected 200 Hz artifact unchanged.
+
+This schedule is recorded controller-boundary evidence, not an artifact
+setting or a policy-training input. The deployable NumPy and Torch controller
+retains its deterministic 200 Hz cadence. Keep the mask only if the complete
+execution order reduces the four-failure frontier without regressing a passed
+boundary; otherwise remove it and continue deterministic schedule fitting.
+
+### 330. Upstream attitude timestamps remain the wrong replay trigger
+
+Date: 2026-08-10.
+
+The exact `vehicle_attitude` update mask plus the evidenced one-tick handoff
+regresses the selected 200 Hz deterministic frontier from four failures to
+six. Z collective rises from 0.170968 N to 0.325336 N, moderate collective
+rises from 0.073508 N to 0.253126 N, moderate physical motor regresses from a
+pass to 0.011483, and vertical-ramp collective fails again at 0.061899 N.
+
+Preserve `controller_boundary_replay-attitude-schedule-with-handoff.json` as
+negative evidence. As before, `vehicle_attitude` publication timestamps do not
+identify the downstream controller output schedule reliably. The remaining
+bounded schedule diagnostic is to trigger the replay attitude output from the
+recorded `vehicle_rates_setpoint` publication ticks and retain the one-tick
+rate-to-allocator handoff. This directly joins the boundary being compared;
+it must remain replay-only while the deployable controller continues to use
+the selected deterministic cadence.
+
+### 331. Join replay to the recorded downstream attitude output
+
+Date: 2026-08-10.
+
+Change the replay-only update mask from upstream `vehicle_attitude` timestamps
+to the full-rate `vehicle_rates_setpoint` publications already used for
+setpoint comparison. On each recorded publication tick the target refreshes
+its held attitude output; the structural rate handoff then delays allocator
+consumption by one 4 ms tick, matching the observed topic and motor ordering.
+
+This does not change `ControllerSettings`, NumPy/Torch deployment cadence, or
+policy training. It makes the replay's asynchronous schedule an observed input
+boundary while continuing to audit the target's setpoint values, rate PID,
+allocator, rotor mapping, and physical wrench. Retain it only if it improves
+the selected four-failure frontier without regressing a passed gate.
+
+### 332. Topic publications cannot replace scheduler state
+
+Date: 2026-08-10.
+
+Driving the target attitude output from `vehicle_rates_setpoint` publication
+ticks regresses the selected deterministic frontier from four to six failures.
+Z collective rises from 0.170968 N to 0.593953 N, moderate collective rises to
+0.252581 N, moderate physical motor regresses to 0.011487, and vertical-ramp
+collective fails again at 0.062177 N. Preserve the report as
+`controller_boundary_replay-rates-schedule-with-handoff.json`.
+
+Neither upstream nor downstream topic timestamps encode enough scheduler state
+to override the controller's update decision. Remove the replay-only mask and
+restore the deterministic 200 Hz, one-tick-handoff frontier. Continue with a
+narrow fractional-cadence refinement around its 5 ms period; the preserved
+coarse sweep has not yet tested the neighboring deterministic schedules.
+
+### 333. Deterministic cadence refinement is exhausted
+
+Date: 2026-08-10.
+
+The optimized host refinement evaluated 20 unique deterministic schedules with
+four workers. The first eight-candidate sweep completed in 25.5 seconds and the
+12-candidate fine sweep in 38.2 seconds. No duplicate tick schedules occurred
+over the longest profile horizon.
+
+A 4.8 ms period (`208.333333` Hz) is the best deterministic candidate. It
+retains four failures while improving Z collective from the 200 Hz value of
+0.170968 N to 0.152818 N and moderate collective from 0.073508 N to
+0.065262 N. Finer 4.625-4.9 ms periods either regress Z or add failures; the
+next best four-failure Z value is 0.167437 N. Select 208.333333 Hz and stop
+cadence expansion.
+
+The physical Y failure is independent. A 12-candidate scalar
+`angular_velocity_filter_hz` sweep from 0 through 25 Hz leaves it failed in
+every case. The best value, 20 Hz, changes physical motor RMSE only from
+0.013439 to 0.013335 and does not affect the vertical metrics. The Y profile's
+dominant body-X rate-setpoint RMSE is 0.074402 rad/s versus 0.024335 in the
+estimated-state replay, upstream of the rate-input filter. Do not add that
+filter range or replace it with a vector merely because a scalar candidate hit
+an edge. Measure the physical-to-estimated attitude boundary and its tick-delay
+scan before adding an attitude-state adapter.
+
+### 334. Preserved replay passes with pinned vertical gain
+
+Date: 2026-08-10.
+
+The physical-to-estimated attitude scan does not support a new attitude-state
+adapter. On the Y envelope, one tick of physical-attitude delay reduces roll
+error from 0.001142 to 0.000845 rad, far too little to explain the 0.074402
+rad/s body-rate-setpoint error. The first divergent Y boundary is desired tilt
+from the velocity adapter.
+
+Combining three existing declarative candidates clears that boundary:
+Y `velocity_filter_hz=0`, observation scale `0.98`, and observation bias
+`-0.03 m/s` reduce physical Y motor RMSE to 0.007437. Failed replay gates fall
+from four to three without changing vertical metrics.
+
+At that frontier, a parallel one-dimensional vertical gain sweep identifies
+the pinned PX4 proportional gain as the missing upstream correction. Changing
+only Z `kp_vel` from 4.2 to 4.0 reduces acceleration-setpoint RMSE from
+0.038781 to 0.008118 m/s2. All replay gates pass: forward collective is
+0.049668 N, Z collective is 0.040919 N, moderate collective is 0.015720 N,
+and physical Y remains passed. Varying Z `ki_vel` does not produce a comparable
+improvement.
+
+Promote 208.333333 Hz, the passing velocity adapter combination, and the
+declarative `[4.0, 4.1, 4.2]` Z proportional-gain range into the scratch
+definition. The mechanically modified preserved artifact remains diagnostic;
+run a complete fresh capture, audit, sweep, fit, replay, live motion gate, and
+finalization from a clean source commit before publication.
+
+### 335. Fresh scratch exposes an incomplete controller-state boundary
+
+Date: 2026-08-10.
+
+The clean `20260810T-replay-passing-scratch` campaign captured and audited a
+new PX4 reference, evaluated 4,575 unique candidates, and selected candidate
+4460. All structurally usable candidates still failed the combined endpoint
+gate; the selected value was 0.022140 m against the 0.010000 m limit. The
+selected controller replay then failed five profiles, including a 0.302316 N Z
+collective error, and the live hover gate missed only its last-window bound at
+0.105 m/s against 0.100 m/s. Nothing was published.
+
+This result invalidates the assumption that the earlier replay-passing settings
+were sufficient by themselves. Profile traces seeded velocity and rate
+integrals but reset the held attitude-controller output, rate-controller input,
+yaw filter, and attitude-loop phase to neutral values. Comparing preserved and
+fresh captures showed that the same settings could move the Z collective error
+from 0.040919 N to 0.479081 N solely through profile-boundary schedule phase.
+
+Extend the strict schema-1 trace boundary with the held
+`vehicle_attitude_setpoint`, `vehicle_rates_setpoint`, and
+`vehicle_torque_setpoint` state and their source ages. Restore the desired
+attitude and yaw rate, desired and held collective, held body-rate setpoint,
+filtered yaw torque, and attitude-loop elapsed time in both NumPy and Torch.
+The preserved-reference diagnostic after this structural correction reduces Z
+collective from 0.479081 N to a pass and leaves only three narrow failures:
+forward collective 0.057753 N, lateral-ramp motor 0.010227, and combined motor
+0.011384. Commit this boundary correction before acquiring another reference;
+all target evidence produced with the incomplete seed is diagnostic only.
+
+### 336. Complete velocity-setpoint boundary clears controller replay
+
+Date: 2026-08-10.
+
+The corrected `20260810T-complete-boundary-scratch` campaign captured and
+audited a fresh PX4 reference, then evaluated 4,681 unique candidates in 47 GPU
+batches. Candidate 4506 passed all six-axis motion gates, but controller replay
+failed four collective profiles and the live hover gate missed its last-window
+limit at 0.109 m against 0.100 m. The sweep averaged 23.4% GPU utilization; its
+GPU work completed in 1,590 seconds, while writing and reparsing 3.8 GB of full
+candidate traces remained the major host-side bottleneck. Nothing was
+published.
+
+Reranking the 200 motion-passing candidates by distance to the replay frontier
+identified candidate 3292. It reduced replay to two narrow collective failures:
+0.053017 N forward and 0.056694 N on the Z envelope. A 25-point cadence/Z-gain
+sweep and a 45-point pinned Z-integral sweep showed that 204 Hz, Z P=4.0, and Z
+I=2.0 clear the Z boundary but leave the forward profile at 0.052289 N.
+
+The remaining error was not a gain residual. The profile starts while PX4 still
+holds the small nonzero recenter velocity setpoint that generated its seeded
+acceleration and integrator state. For the forward profile, the omitted
+-0.002816 m/s NED Z setpoint times the pinned gain accounts for 0.0113 m/s2,
+nearly the complete observed 0.0133 m/s2 boundary error. Extend the strict trace
+with `initial_velocity_setpoint_enu_mps` from
+`vehicle_local_position_setpoint`, and use it when reconstructing the velocity
+integral in both NumPy and Torch.
+
+With that complete boundary, the 204 Hz / pinned-gain diagnostic passes every
+controller replay gate. Forward collective falls to 0.008163 N, with zero
+replay failures. Promote 204 Hz and the declarative Z-integral range
+`[2.0, 2.05, 2.1]`; reacquire and refit from a clean commit because all earlier
+target traces used the incomplete seed.
+
+### 337. Complete-boundary scratch isolates the lateral transient
+
+Date: 2026-08-10.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260810T-complete-velocity-boundary-scratch`
+ran from clean source commit `004866a`. It captured all 22 profiles, and its
+actuator audit passed with zero timestamp-join error, normalized motor RMSE
+near 0.0003, and collective RMSE below 0.01 N. The target search evaluated
+4,796 unique candidates in 49 GPU batches and 1,785 seconds. Average sampled
+GPU utilization was 24.1%, with a 45% p95 and 53% peak. The 4.11 GB target
+trace file and its sequential write/reparse path remain the measured
+performance bottleneck.
+
+Candidate 4692 was selected. It used 140.35605 Hz attitude cadence, 0.0125 Hz
+estimator-bias decay, observation bias `[0.0, 0.015, -0.0039]` m/s, no
+velocity filtering, observation scale `[0.98, 0.98, 1.0]`, Z P=4.125, and Z
+I=2.025. It failed only Y braking distance at 9.115 mm against 5 mm; combined
+endpoint passed at 9.578 mm. No candidate passed every motion gate. Of 4,766
+usable candidates, 1,101 failed exactly one gate: 877 passed Y braking but
+failed endpoint, while 224 passed endpoint but failed Y braking. Candidate-wide
+minima independently passed every gate.
+
+The signed lateral reversal establishes the first failed motion boundary. PX4
+entered the zero-command transition at 0.087951 m/s, stopped at 3.50 s, and
+traveled 56.671 mm. The target entered at 0.080632 m/s, stopped at 3.40 s, and
+traveled 47.556 mm. The target is both slow before the transition and
+over-damped afterward. Search lateral derivative damping, observation scale,
+and steady offset together around the endpoint-passing basin; pin the already
+replay-valid 204 Hz cadence and Z P/I values during that diagnostic.
+
+Mandatory replay on the rejected selection passed the forward boundary at
+0.000809 N collective RMSE but failed vertical low speed at 0.054522 N, Z
+envelope at 0.374102 N, moderate stability at 0.206445 N, and pitch collective
+at 0.052504 N. The live gate also failed hover last-window error at 0.115 m
+against 0.100 m. Nothing was finalized or published.
+
+### 338. Motion crossing exposes two narrow replay boundaries
+
+Date: 2026-08-10.
+
+Two preserved-reference diagnostics followed the failed scratch selection.
+The first pinned the replay-valid 204 Hz cadence and Z P/I gains and searched
+lateral derivative gain, observation scale, and offset. It reduced Y braking
+error from 9.115 mm to 5.389 mm while retaining the endpoint pass. The second
+extended Y observation scale through the evidenced crossing and found 54
+candidates that passed every motion gate. Candidate 447 used Y scale 0.87 and
+passed Y braking at 3.771 mm and the combined endpoint at 9.911 mm.
+
+Mandatory replay narrowed that motion pass to two failures. Physical-state Y
+motor RMSE was 0.011947 against 0.01, while the core estimated-state replay was
+0.000634. A parallel 55-point replay over eleven motion-passing candidates and
+five attitude cadences found the best Y value at 0.010583; cadence did not
+remove it. This supports searching a stateful Y observation filter with scale
+closer to one rather than extending the static scale correction farther.
+
+The second failure was the pitch CTBR collective at 0.052504 N against 0.05 N.
+ULog inspection shows the raw 0.57 MAVLink command interleaved with PX4's
+slightly higher effective rate-controller collective between 20 Hz command
+updates. The target modeled a perfect pass-through. Add one declarative
+`ctbr_effective_collective_scale` field which changes only the simulator-side
+effective inner-loop collective, retaining the raw policy/OFFBOARD command.
+Search 1.0000 through 1.0020, and search Y filter, scale, and offset jointly
+around the motion crossing. These diagnostics remain preserved evidence; a
+passing candidate still requires a fresh clean-source campaign.
+
+### 339. Effective CTBR mapping passes; focused seed batching was undersized
+
+Date: 2026-08-10.
+
+Preserved-reference replay confirms the declarative CTBR mapping. Scale
+1.0005 reduces pitch collective from 0.052504 N to 0.047987 N; every
+collective boundary passes, and the remaining failure is independent Y
+physical-state motor replay.
+
+A 1,740-candidate filter/scale/offset diagnostic found 347 motion-passing
+candidates, but the selected 1 Hz Y filter worsened physical Y motor RMSE to
+0.014106. Do not promote the filter. The no-filter, Y-scale 0.90 frontier is
+closer to the controller boundary: physical Y motor RMSE is 0.010100, only
+0.000100 above the limit, while Y braking misses by 0.000389 m.
+
+A compact explicit Y-gain grid found two motion-passing candidates. Both need
+Y P=1.7; the selected scale 0.9025 result passes Y braking at 0.004569 m and
+the endpoint at 0.009619 m, but gain deviation raises physical Y motor RMSE to
+0.010545. Continue with the pinned P=1.8 and lower Y offsets around scale
+0.9025, using X offset only to retain endpoint margin.
+
+The compact run also exposed a concrete performance bug: with no staged
+parameters, fixed scene capacity ignored 36 explicit `initial_settings` and
+fell back to one candidate. It therefore ran 36 GPU batches in 429.6 seconds
+instead of one capacity-sized batch. Include the base plus all initial settings
+when sizing the fixed scene. This directly implements the coarse-then-targeted
+search contract and removes the single-environment fallback before the next
+diagnostic.
+
+### 340. Joint motion and actuator-boundary candidate passes
+
+Date: 2026-08-10.
+
+The fixed-capacity implementation evaluated a 240-point angular-filter,
+lateral-scale, and offset grid in two GPU batches and 79.6 seconds. Twenty-nine
+candidates passed every motion gate. Mandatory replay of the full passing set
+found one combined pass at 22.5 Hz, but its Y motor margin was only 0.000006.
+
+A second 300-point local sweep widened the X offset and narrowed the lateral
+crossing. It completed 301 evaluations in three GPU batches and 111.3 seconds,
+or 2.70 useful candidates/s. Average GPU utilization remained 22.8%, with 45%
+p95 and 52% peak; fixed scene stepping and trace handling, rather than missing
+candidate concurrency, remain the measured limit.
+
+Candidate 200 passes all motion and controller-boundary gates with 23.75 Hz
+angular-velocity filtering, Y observation scale 0.8975, observation bias
+`[-0.005, 0.011, -0.0039]` m/s, and effective CTBR collective scale 1.0005.
+Its X/Y/Z braking errors are 1.664/4.986/0.983 mm, combined endpoint error is
+9.704 mm, physical-state Y motor RMSE is 0.009953, and worst collective replay
+error is 0.048683 N. Promote this point and only its evidenced local basin into
+the canonical scratch definition. A completely fresh capture, fit, replay, and
+live acceptance run is still required before publication.
+
+### 341. Fresh capture isolates asynchronous controller work queues
+
+Date: 2026-08-10.
+
+The clean-source campaign
+`.build/alignment/x500-px4-v1/20260810T-joint-boundary-scratch` captured all
+22 profiles and passed the actuator audit. Its 27-candidate joint boundary
+sweep completed in four GPU batches and selected candidate 26, which passed
+every motion gate. Mandatory replay failed only the moderate stability
+collective at 0.118280 N, and live acceptance separately missed the hover
+last-window limit at 0.131 m. Nothing was finalized or published.
+
+The replay failure is one 4 ms sample, not a controller-scale residual. At
+157.656 s PX4 collective changes from 23.07 N to 27.32 N while the target
+changes one tick later; removing the held target handoff fixes that event but
+breaks three transitions where PX4 consumes the publication one tick later.
+A 161-point attitude-cadence sweep from 180 through 260 Hz, vertical P/I,
+attitude gain, yaw weight, and lateral-boundary diagnostics did not remove the
+failure. The outer vertical acceleration setpoint already matches to 0.000552
+m/s2 RMSE.
+
+Pinned PX4 source establishes the structural cause: `mc_att_control` runs on
+`nav_and_controllers`, while `mc_rate_control` is triggered on the separate
+`rate_ctrl` work queue. Their same-timestamp publication order can therefore
+be same-tick or next-tick. Make the collapsed NumPy/Torch target consume its
+attitude publication immediately, but make evidence replay recover each
+adjacent PX4 source-age choice from `vehicle_attitude_setpoint`,
+`vehicle_rates_setpoint`, and `vehicle_thrust_setpoint`. The unshifted
+intermediate boundary metrics remain unchanged and the total join must stay
+within one 4 ms physics tick. Also seed controller-owned ULog fields with held,
+not future-interpolated, values.
+
+Applying that rule to the preserved capture passes all 22 controller-boundary
+profiles. Worst core collective RMSE is 0.049430 N, normalized motor RMSE is
+0.007425, and physical-state motor RMSE is 0.008438. Commit the structural
+contract and tests, then run a completely fresh capture, sweep, replay, and
+live gate before publication.
+
+### 342. Fresh asynchronous-handoff campaign passes every replay boundary
+
+Date: 2026-08-10.
+
+The clean-source campaign
+`.build/alignment/x500-px4-v1/20260810T-asynchronous-handoff-scratch`
+captured all 22 profiles and passed the actuator audit with zero timestamp-join
+error, about 0.0003 normalized motor RMSE, and collective errors below 0.01 N.
+Its 27-candidate sweep completed in four GPU batches and 84.3 seconds at 37.7%
+average sampled GPU utilization.  Candidate 1 then passed every one of the 22
+mandatory controller-boundary replay profiles.  Worst collective RMSE was
+below 0.05 N and worst normalized motor RMSE was below 0.01.
+
+Motion quality now fails only Y residual speed at 0.011506 m/s against 0.01 and
+the combined endpoint at 0.023101 m against 0.01.  All 27 candidates have the
+same two failures; X/Y/Z braking, every remaining translational gate, and all
+CTBR roll/pitch/yaw/collective gates pass.  The endpoint residual is mostly X:
+the reference finishes at `[0.101327, 0.109580, 2.244173]` m while candidate 1
+finishes at `[0.079308, 0.116404, 2.245667]` m.  More-negative X bias improves
+that endpoint, and Y residual speed improves monotonically at the former 0.900
+Y-scale boundary.
+
+The live analytic hover gate separately ended at 0.038 m error but reached
+0.132 m during its final one-second window, above 0.100 m.  This transient is
+not evidence for weakening a gate: the uniform Z profiles pass, and the motion
+candidate must first pass before the live trace is diagnosed with an accepted
+setting.
+
+Continue on this preserved fresh reference with an independent 24-point X/Y
+bias grid and five Y scales.  Keep the evidenced angular filter and all other
+controller fields pinned.  Fixed-capacity batching should evaluate the roughly
+150 unique settings in two GPU batches.  Replay every motion-passing candidate,
+then promote only a joint motion/replay pass into another completely fresh
+campaign.
+
+### 343. Independent endpoint correction leaves one lateral gate
+
+Date: 2026-08-10.
+
+The preserved-reference diagnostic evaluated 150 unique settings in three GPU
+batches and 90.9 seconds.  Average sampled GPU utilization was 27.7%; the fixed
+scene was fully populated in the large batch, so simulation stepping and trace
+serialization remain the measured limit rather than missing candidate work.
+
+Candidate 46 used observation bias `[-0.030, 0.008, -0.0039]` m/s and Y scale
+0.91.  It passed the combined endpoint at 8.624 mm and every gate except Y
+residual speed at 0.012031 m/s.  This is material progress from the fresh
+campaign's two failures and 1.310 largest normalized excess: one failure and
+0.203 excess remain, with no passed-gate regression in the selection.
+
+The grid gives a consistent next boundary.  At fixed X and scale, decreasing Y
+bias reduces both Y residual speed and Y braking error; the lowest tested value
+was 0.008 m/s.  Search Y bias down through -0.004 m/s at X biases -0.025,
+-0.030, and -0.035, retaining scales 0.90 through 0.94.  Do not change gains or
+filters unless this declarative boundary fails to produce a joint motion pass.
+
+### 344. Lateral bias cannot independently close the crossing
+
+Date: 2026-08-10.
+
+The lower-Y-bias diagnostic evaluated 132 candidates in three GPU batches and
+89.3 seconds at 28.8% average sampled GPU utilization.  It selected the same
+endpoint-passing bias neighborhood and did not improve the frontier: one gate
+and 0.204 normalized excess remain.  The closest joint point used Y bias 0.006
+and scale 0.93, but missed residual speed, braking, and endpoint by 3.5%, 6.0%,
+and 6.1%, respectively.  The boundary has opposite steady and endpoint effects,
+so extending bias again is unsupported.
+
+Mandatory replay also found the selected larger X offset raises the physical-
+state normalized motor RMSE for the vertical reversal to 0.010490, just over
+0.01.  This candidate is diagnostic evidence only.
+
+At the endpoint-passing Y bias of 0.008, increasing Y observation scale reduces
+residual speed while increasing braking distance.  PX4's velocity D term
+opposes deceleration while measured velocity falls.  Search Y D from 0 through
+the pinned 0.2 jointly with scales 0.94 through 0.97, keeping X/Z D and every
+other controller field unchanged.  Replay any motion pass before revisiting the
+independent angular-filter motor boundary.
+
+### 345. Derivative authority is not the lateral crossing
+
+Date: 2026-08-10.
+
+The derivative diagnostic evaluated 50 unique candidates in four GPU batches
+and 101.9 seconds at 33.2% average sampled GPU utilization.  Candidate 3 at Y
+scale 0.95 and pinned Y D=0.2 passed residual speed at 0.009972 m/s and endpoint
+at 8.738 mm, but missed Y braking at 6.516 mm.  Reducing Y D lengthened braking
+and moved the combined endpoint away; it is not the required correction.
+
+The selected diagnostic point retained one motion failure.  Mandatory replay
+again failed only the vertical reversal physical-state normalized motor RMSE,
+at 0.010478 against 0.01.  The repeated motor failure is tied to the larger
+endpoint-correcting X observation offset and remains queued behind motion.
+
+The lateral reversal trace ends at -0.01373 m/s for candidate 3 versus PX4 at
+-0.00344 m/s.  Excess retained negative velocity after the negative command is
+consistent with integral accumulation.  Search Y integral gain from 0.05
+through the pinned 0.4 jointly with Y scale 0.94 through 0.97.  Keep X/Z
+integral gains and every other controller field fixed.
+
+### 346. Integral sweep exposes a proportional-braking seam
+
+Date: 2026-08-10.
+
+The integral diagnostic evaluated 50 candidates in four GPU batches and 101.5
+seconds at 33.5% average sampled GPU utilization.  Candidate 20, using the
+original Y scale 0.8975 and Y integral gain 0.2, passed residual speed at
+0.008432 m/s and endpoint at 3.845 mm.  Its only failure was Y braking at 6.410
+mm.  At Y integral gain 0.3, residual and braking approached their gates from
+opposite sides; integral authority alone cannot close the boundary.
+
+Increasing Y proportional gain is the evidenced next control: it adds braking
+authority and steady correction without increasing retained integral.  Search
+Y P from 1.8 through 2.2 and Y I from 0.1 through 0.3 across Y scales 0.8975,
+0.900, and 0.910.  Keep X/Z gains and every other controller field fixed, then
+replay every motion-passing candidate.
+
+### 347. P/I frontier passes replay; braking needs observation lag
+
+Date: 2026-08-10.
+
+The joint P/I/scale diagnostic evaluated 180 candidates in six GPU batches and
+171.1 seconds at 32.0% average sampled GPU utilization.  Candidate 24 used Y
+scale 0.8975, Y P=1.8, and Y I=0.25.  It passed residual speed at 0.009593 m/s,
+the combined endpoint at 5.238 mm, and every motion gate except Y braking at
+5.809 mm.  Higher Y P shortened the target's already-short braking distance and
+therefore moved away from the boundary.
+
+Mandatory replay of candidate 24 passes all 22 profiles.  In particular, the
+vertical-reversal physical-state motor boundary that previously reached
+0.01048 now passes below 0.01.  This is the first fresh-reference candidate in
+the endpoint-correcting neighborhood to pass the complete internal controller
+boundary.
+
+Signed braking evidence shows PX4 travels 53.45 mm after the positive-to-zero Y
+transition while candidate 24 travels 47.64 mm.  Add only Y measured-velocity
+low-pass candidates from 1 through 30 Hz, retaining no-filter as the control.
+The intended effect is transition lag, not a steady gain change.  Prior 1 Hz
+evidence warns that low cutoff can regress physical motor replay, so replay
+every motion pass and select the highest-cutoff joint pass.
+
+### 348. Observation lag passes motion and isolates Y motor replay
+
+Date: 2026-08-10.
+
+The focused filter sweep evaluated nine candidates in two GPU batches and 51.5
+seconds at 35.0% average sampled GPU utilization.  The 1 Hz Y filter is the only
+motion pass in that coarse grid.  It passes Y braking at 2.182 mm, Y residual
+speed at 0.006240 m/s, combined endpoint at 2.331 mm, and every other motion and
+CTBR gate.  No gate is close to its limit except Y envelope NRMSE at 0.0753
+against 0.10.
+
+Mandatory replay fails only `validation-y-envelope` physical-state normalized
+motor RMSE at 0.011470 against 0.01.  Core estimated-state replay and every
+other profile pass.  This is the expected filter-induced physical-state seam,
+not an allocator or plant mapping failure.
+
+Use the motion margin to search filter cutoff 0.75 through 2 Hz jointly with Y
+observation scale 0.8975 through 1.0.  Scale toward one reduces the estimator
+correction at the failed physical boundary.  Replay all motion passes and
+promote only a combined motion/replay pass into a new scratch campaign.
+
+### 349. Joint motion/replay crossing exposes live horizontal return
+
+Date: 2026-08-10.
+
+The joint filter/scale diagnostic evaluated 42 candidates in three GPU batches
+and 79.7 seconds at 34.6% average sampled GPU utilization.  Four candidates
+pass every motion gate and all 22 mandatory replay profiles.  The balanced
+candidate 3 uses 1.5 Hz Y filtering and Y scale 0.8975.  It passes Y braking at
+4.257 mm, residual speed at 0.007670 m/s, endpoint at 3.593 mm, worst normalized
+motor RMSE at 0.009613, and worst collective RMSE at 0.048923 N.
+
+The live 16-environment hover remains rejected at 0.124 m during the first
+sample of its final one-second window, though it falls to 0.074 m by 3.5 s and
+finishes at 0.039 m.  Axis diagnostics show this is not the previously suspected
+vertical behavior: at 3.0 s the worst environment is +0.094 m X, -0.078 m Y,
+and -0.042 m Z.  A one-environment run passes hover at 0.060 m last-window max
+and goto at 0.088 m, but the X offset settles 0.069 m beyond target and places
+the drone 0.411 m from the switch, inside the handoff minimum.
+
+Search only X observation bias from -0.015 through -0.030 m/s around candidate
+3.  A smaller magnitude should reduce both live X return overshoot and goto
+steady offset.  Require motion, replay, 16-environment hover, goto, and handoff
+to pass before launching the fresh scratch campaign.
+
+### 350. X offset passes internal boundaries but leaves the planar return transient
+
+Date: 2026-08-10.
+
+The five-point X-offset diagnostic retained quality-passing candidate 3 at
+`[-0.025, 0.008, -0.0039]` m/s. It passed every per-axis motion gate, including
+2.205 mm X braking error, 2.595 mm/s X residual speed, 4.038 mm Y braking error,
+7.222 mm/s Y residual speed, and 6.396 mm combined endpoint error. Complete
+controller-boundary replay also passed all 22 profiles with no coverage,
+timestamp, normalized-motor, or collective-thrust failures.
+
+The 16-environment live gate improved only from 0.124 m to 0.119 m during the
+final hover window and still failed its 0.100 m limit. Diagnostics at 3.0 s
+localized the worst error to +0.088 m X, -0.078 m Y, and -0.042 m Z. The error
+falls below 0.100 m around 3.23 s and finishes at 0.037 m, so the unresolved
+boundary is a planar return transient rather than vertical authority or an
+actuator-boundary mismatch. Alternate joint replay passes at 1.75 Hz and at
+1.25 Hz produced 0.126 m and 0.118 m respectively, ruling out filter cutoff as
+an independent solution.
+
+Prior live-gate evidence identifies horizontal velocity-integral buildup as the
+matching controller boundary. Search an 18-point Cartesian grid with X integral
+gain 0.15 through 0.40 and Y integral gain 0.15 through 0.25. Keep the selected
+X/Y observation offsets, Y filter and scale, integral limits, controller
+structure, probes, metrics, and gates unchanged. Replay every motion pass and
+run the live gate only for replay-passing candidates before opening another
+parameter boundary.
+
+### 351. Integral buildup passes every internal boundary but does not close live return
+
+Date: 2026-08-10.
+
+The 18-point planar integral diagnostic completed in two GPU batches and 51.9
+seconds at 34.8% average sampled GPU utilization. Seven candidates passed every
+motion gate, and parallel replay confirmed that all seven pass every one of the
+22 controller-boundary profiles. Candidate 11 at X/Y integral gains 0.30/0.20
+had the widest replay margin, with 0.008625 worst normalized-motor RMSE and
+0.048919 N worst collective RMSE. Candidate 17 at 0.40/0.20 was selected by the
+registered motion ranking and also passed replay at 0.009048 motor RMSE and
+0.048921 N collective RMSE.
+
+Live checks falsified integral buildup as the independent solution. Candidate
+11 reached 0.118 m in the hover final window, while the lowest-integral
+motion-pass at 0.25/0.25 reached 0.119 m. Both remain well above the unchanged
+0.100 m gate and differ by only 1 mm from the 0.40/0.25 control.
+
+The existing controller contract already provides a smooth horizontal
+large-error gain schedule for this exact randomized return trajectory. Keep
+the fitted low-error gain 1.8 unchanged below 0.15 m/s error, retain the
+motion-selected 0.40/0.20 integral gains, and search only gain scale 1.0 through
+1.25 at the existing 0.30 m/s full-gain boundary. Require motion and replay
+before live acceptance. Expand the schedule transition boundaries only if the
+scale direction produces material progress.
+
+### 352. Large-error gain produces live progress at the replay boundary
+
+Date: 2026-08-10.
+
+The six-scale diagnostic completed in two GPU batches and 51.0 seconds at
+35.5% average sampled GPU utilization. Scales 1.0 through 1.20 passed every
+motion gate; 1.25 first failed the Y envelope NRMSE at 0.10370 against 0.10.
+Replay retained only the 1.0 control. Scale 1.05 narrowly failed the physical Y
+motor boundary at 0.010122 against 0.01, while scale 1.10 also crossed
+collective limits and is not a useful replay frontier.
+
+The scale-1.05 live diagnostic materially improved the hover final-window
+error from 0.118 m to 0.108 m. Largest normalized excess fell from 0.18 to
+0.08 without a motion-gate regression, supporting a targeted replay-margin
+recovery rather than abandoning the schedule.
+
+Search gain scales 1.0 through 1.10 jointly with angular-velocity filtering
+21.5 through 24 Hz. Prior replay evidence placed the same physical Y motor
+crossing between 22.5 and 23.75 Hz. Keep all remaining controller settings,
+probes, thresholds, and live-gate behavior unchanged. Replay every motion pass
+and run live acceptance on joint passes in descending scale order.
+
+### 353. Replay-safe large-error gain approaches live acceptance
+
+Date: 2026-08-10.
+
+The 49-point gain/filter diagnostic completed in three GPU batches and 80.7
+seconds at 34.4% average sampled GPU utilization. All candidates passed every
+motion gate. Parallel replay of the 24 live-promising candidates found that all
+scale-1.04 settings pass every boundary, with the best physical Y motor RMSE
+0.009767 at 24 Hz. Every scale-1.05 candidate narrowly failed that same motor
+boundary; 24 Hz was closest at 0.010108. Larger scales added collective
+failures.
+
+The joint scale-1.04/24 Hz candidate improved the live hover window to 0.110 m
+but did not pass. A scale-1.10/24 Hz feasibility diagnostic crossed the live
+response boundary: hover reached 0.100 m and goto passed at 0.098 m. It stopped
+95 mm beyond the goto target, leaving 0.385 m switch range and failing the
+handoff as too close. Its replay failures are X/Y/stability collective RMSE and
+physical Y motor RMSE, all first introduced by the high large-error gain.
+
+Search scales 1.075 through 1.10 jointly with X observation offset -0.010
+through -0.025 m/s and X/Y observation scales approaching one. The offset is
+the evidenced live endpoint control; the observation scales reduce the
+high-gain physical-state error that drives motor and collective replay. Retain
+24 Hz, the 1.5 Hz Y observation filter, integral gains, limits, controller
+structure, probes, and thresholds. Replay all motion passes, then evaluate
+joint replay passes live in descending scale and ascending X-offset magnitude.
+
+### 354. Monotonic high-error gain cannot satisfy replay and live ranges together
+
+Date: 2026-08-10.
+
+The 208-candidate observation-scale/endpoint diagnostic completed in five GPU
+batches and 150.2 seconds at 30.4% average sampled GPU utilization. Twelve
+high-scale candidates passed every motion gate, but replay rejected all of
+them. Moving X/Y observation scale toward one slightly increased physical Y
+motor error and did not change the estimated-state collective failures. The
+first failed boundary is therefore the scheduled acceleration setpoint,
+upstream of the physical-state adapter.
+
+The evidence exposes a representational conflict in the existing monotonic
+schedule. Live hover commands peak around 0.45 m/s and need approximately 1.10
+gain scale, while every new replay failure belongs to the 0.6-0.8 m/s envelope
+profiles. A monotonic schedule must apply at least as much gain to the replay
+envelope as to live hover, so no further scale, filter, bias, or observation
+grid can close both boundaries.
+
+Add one strict-v1 controller setting,
+`horizontal_velocity_error_gain_end_mps`, and make the existing smooth gain
+schedule return to the base PX4 gain above its evidenced moderate-error band.
+The ordering contract is `start < full < end`, shared exactly by NumPy and
+Torch. Search scales 1.0 through 1.30 and end boundaries 0.50 through 1.00 m/s,
+jointly with the evidenced X endpoint offsets. Keep the base gain, integral,
+filters, allocator, actuator, probe families, metrics, and thresholds
+unchanged. This is the single structural change for the next attempt.
+
+### 355. Fresh bounded schedule passes replay and live response, leaving endpoint only
+
+Date: 2026-08-10.
+
+Clean-source run
+`.build/alignment/x500-px4-v1/20260810T-bounded-gain-scratch` captured all 22
+profiles from commit `89d984d`. The actuator audit passed with zero timestamp
+error, about 0.0003 normalized motor RMSE, and 0.008-0.012 N collective RMSE.
+The 120-candidate bounded-schedule sweep completed in four GPU batches and
+114.7 seconds at 33.0% average sampled GPU utilization.
+
+No candidate passed motion quality. Selected candidate 44 uses scale 1.15, end
+boundary 0.50 m/s, and X bias -0.010 m/s. Its only motion failure is combined
+endpoint at 34.365 mm against 10 mm; all X/Y/Z braking, residual, stop-time,
+NRMSE, and all CTBR gates pass. Complete 22-profile replay passes with no motor,
+collective, timestamp, or coverage failures. Live hover passes at 0.085 m and
+goto passes at 0.048 m, proving the bounded schedule closed the response
+boundary. Handoff stops at 0.438 m and remains 12 mm too close.
+
+Across all 120 candidates, endpoint improves monotonically at the least
+negative tested X bias, -0.010 m/s. This is also the required live handoff
+direction. Fix scale 1.15 and end 0.50 m/s, then search X bias -0.010 through
++0.030 m/s across zero. Keep every other setting, probe, metric, replay limit,
+and live threshold unchanged. Require motion, replay, hover, goto, and handoff
+before promoting the point into another complete scratch campaign.
+
+### 356. Endpoint passes at a narrow bias but live hover needs bounded-gain margin
+
+Date: 2026-08-10.
+
+The nine-point fresh-reference X-bias sweep completed in two GPU batches and
+51.2 seconds at 34.7% average sampled GPU utilization. Candidate 6 at +0.020
+m/s is the only motion pass. Its endpoint is 8.795 mm, X braking 4.242 mm, X
+residual speed 2.724 mm/s, and every other translational and CTBR gate passes.
+Complete controller-boundary replay also passes all 22 profiles.
+
+The exact candidate narrowly fails live hover at 0.103 m against 0.100 m.
+Adjacent +0.015 m/s misses only endpoint at 12.244 mm, while +0.025 m/s first
+misses X braking at 5.061 mm. Refine bias from +0.017 through +0.020 m/s and
+jointly search bounded gain scale 1.15 through 1.25 at the fixed 0.50 m/s end
+boundary. Higher bounded gain is already isolated from the large replay
+envelope and directly addresses the 3 mm live excess. Require motion, replay,
+hover, goto, and handoff together; do not change the controller structure or
+any gate.
+
+### 357. Replay-safe response reaches the live hover rounding boundary
+
+Date: 2026-08-10.
+
+The 30-point bias/gain diagnostic completed in three GPU batches and 79.0
+seconds at 33.9% average sampled GPU utilization. Twenty-three candidates pass
+every motion gate. The fitter selected scale 1.225 and bias +0.018 m/s, with
+9.957 mm endpoint and 3.927 mm X braking, but replay rejected its physical Y
+motor RMSE at 0.010585.
+
+Parallel replay of all 23 motion passes found a clean scale boundary. Every
+1.175 candidate passes all 22 profiles at about 0.00968 worst motor RMSE and
+0.04171 N worst collective RMSE. Scale 1.20 first fails only physical Y motor
+at 0.010124. Exact candidate 10, scale 1.175 and bias +0.018 m/s, then reached a
+live hover value that prints as 0.100 m but remains fractionally above the
+strict 0.100 m comparison.
+
+Interpolate only the evidenced replay-safe interval: search scales 1.175
+through 1.1925 with X bias +0.018 through +0.019 m/s at the fixed 0.50 m/s end
+boundary. The motor crossing is estimated near scale 1.193, so the range stays
+inside measured replay feasibility while adding the small live-response margin.
+Keep all remaining settings, probes, metrics, and thresholds unchanged.
+
+### 358. The interpolated setting crosses every acceptance boundary
+
+Date: 2026-08-10.
+
+The 20-point gain/bias interpolation completed in three GPU batches and 77.1
+seconds at 36.3% average sampled GPU utilization. Every candidate passed all
+six-axis motion gates. Complete replay of the full frontier found that scales
+through 1.1925 pass all 22 profiles, with the physical Y-envelope motor RMSE
+increasing predictably toward the 0.01 limit.
+
+The registered fitter selected gain scale 1.19 and X bias +0.018 m/s. Its
+mandatory replay passes with 0.009945 worst normalized-motor RMSE and 0.041711 N
+worst collective RMSE. The exact artifact also passes the live integration
+gate: hover finishes at 0.052 m with a 0.100 m final-window maximum, goto
+finishes at 0.032 m with a 0.037 m final-window maximum, and handoff is ready at
+0.498 m wall-normal range.
+
+Promote this exact setting to the declarative controller definition and remove
+the completed diagnostic ranges. Run a wholly new clean-source reference
+capture, actuator audit, target evaluation, fit, controller-boundary replay,
+live integration, and finalization. Only that independent run may demonstrate
+that accepted alignment can be regenerated from scratch.
+
+### 359. First scratch proof preserves live and actuator acceptance but shifts motion
+
+Date: 2026-08-10.
+
+Clean-source run
+`.build/alignment/x500-px4-v1/20260810T-accepted-scratch-proof` recaptured all
+22 profiles from commit `ca68ac7`. The actuator audit passed with complete topic
+coverage, zero timestamp-join error, about 0.00030 normalized-motor RMSE, and
+collective RMSE below 0.01 N. The promoted candidate also passed all 22 replay
+profiles and reproduced the accepted live result: 0.100 m hover final-window
+maximum, 0.037 m goto final-window maximum, and ready handoff at 0.498 m.
+
+Finalization rejected only fresh-reference motion: X braking was 7.699 mm
+against 5 mm, X stop-time error was 0.14 s against 0.10 s, and the combined
+endpoint was 18.482 mm against 10 mm. Raw traces show the target X braking
+distance was 44.766 mm versus PX4 at 52.465 mm; the combined endpoint residual
+was +13.370 mm X, +12.541 mm Y, and +2.354 mm Z. The target initial state is
+seeded from each new PX4 capture, so the shifted target trajectory is expected
+capture-dependent evidence rather than candidate/environment assignment.
+
+Run a coarse 140-point Cartesian sweep on this preserved reference: five X
+biases, four Y biases, and seven X measured-velocity filter cutoffs. The filter
+is the evidenced control for lengthening braking response, while independent
+planar biases correct the endpoint. Keep the accepted moderate-error gain,
+vertical settings, CTBR settings, probes, and gates unchanged. Refine only the
+best passing neighborhood, replay every motion pass, then repeat the complete
+clean-source proof.
+
+### 360. Coarse planar/filter sweep exposes a scale-bias separation
+
+Date: 2026-08-10.
+
+The preserved-reference coarse sweep evaluated 140 unique candidates in three
+GPU batches and 93.4 seconds at 29.2% average sampled GPU utilization. No
+candidate passed motion. Every candidate failed the combined endpoint; 67 also
+failed X braking and 86 also failed X stop time.
+
+At bias `[0.026, 0.012, -0.0039]` m/s with no X filter, the endpoint reached
+10.707 mm, only 0.707 mm above its gate, but X braking was 9.074 mm and target
+stop preceded PX4 by 0.14 s. The 0.75 Hz X filter reduced braking error to 4.486
+mm but made the target stop 0.20 s early and moved endpoint to 14.742 mm.
+Conversely, X bias -0.010 m/s passed braking and stop time but left endpoint
+above 40 mm. Extending either bias or filtering independently is unsupported.
+
+PX4-estimate emulation applies `scale * physical_velocity + bias`. Keep the
+positive zero-speed bias that nearly passes endpoint and search X observation
+scale 0.60 through 0.98 to reduce the nonzero-speed estimate during braking.
+Jointly refine X bias 0.026 through 0.042 m/s and Y bias 0.012 through 0.018
+m/s, retaining no X filter. This 140-point targeted grid changes only two
+already-declarative estimator settings; controller structure and every gate
+remain unchanged.
+
+### 361. Scale-bias sweep reaches the dynamic frontier without crossing it
+
+Date: 2026-08-10.
+
+The targeted scale/bias sweep evaluated 147 unique candidates in three GPU
+batches and 94.5 seconds at 30.8% average sampled GPU utilization. No candidate
+passed motion. The base-bias scale 0.90 candidate passed every dynamic gate but
+left 28.104 mm endpoint error. At X/Y bias 0.026/0.014 m/s, scale 0.90 reached
+5.310 mm X braking, 0.10 s stop-time error, 10.50 mm/s residual speed, and
+18.58 mm endpoint error. Scale 0.98 at the same bias passed residual and
+endpoint but retained 9.159 mm braking and 0.14 s stop-time errors.
+
+Scale and static bias therefore approach braking, residual, and endpoint from
+opposite sides without a joint crossing. The seeded target controller state
+contains PX4's captured initial estimator correction, and
+`velocity_estimator_bias_decay_hz` controls when that correction yields to the
+authored static bias. Search eight decay rates from 0.0025 through 0.03 Hz,
+five X scales from 0.86 through 0.94, X bias 0.022 through 0.030 m/s, and Y bias
+0.018 through 0.030 m/s. Preserve the full 800-point Cartesian grid with beam
+width 160. Keep controller structure, all other settings, probes, replay
+limits, and acceptance gates unchanged.
+
+### 362. Estimator decay makes material progress and isolates X PID response
+
+Date: 2026-08-10.
+
+The decay/scale/bias search evaluated 968 unique candidates in 11 GPU batches
+and 396.5 seconds at 26.6% average sampled GPU utilization. Candidate 575 at
+decay 0.0125 Hz, bias `[0.022, 0.018, -0.0039]` m/s, and X scale 0.90 passed
+every dynamic and CTBR gate; only combined endpoint remained at 21.408 mm. This
+is a 24% reduction in largest normalized excess from 2.81 to 2.14 without a
+passed-gate regression, so the attempt is material progress.
+
+Candidate 165 at the same decay, bias `[0.030, 0.022, -0.0039]` m/s, and the
+original X scale 0.98 establishes the complementary boundary. Endpoint passes
+at 3.258 mm while only X braking at 10.096 mm, X residual at 10.621 mm/s, and X
+stop-time at 0.14 s fail. Raw combined traces show only 2.09 mm X and -0.85 mm
+Y endpoint residual, so yaw/frame behavior is not the first boundary.
+
+Fit X proportional gain 0.8 through 1.8, integral gain 0.1 through 0.6, and
+derivative gain 0 through 0.4 around candidate 165. Lower P and D are evidenced
+to lengthen the target's too-short braking response; I controls the remaining
+settling error. Keep Y/Z gains, estimator settings, controller structure,
+probes, replay limits, and all gates unchanged. Replay every motion pass before
+running the live acceptance gate.
+
+### 363. X PID passes its axis and reveals a signed Y endpoint residual
+
+Date: 2026-08-10.
+
+The endpoint-safe X PID search evaluated 360 unique candidates in seven GPU
+batches and 219.9 seconds at 28.9% average sampled GPU utilization. Candidate
+133 at X P/I/D 1.4/0.4/0.3 passed every per-axis velocity gate and every CTBR
+gate. Only combined endpoint remained at 13.224 mm, reducing largest normalized
+excess from 2.14 to 1.32 without regressing a passed gate.
+
+Raw endpoint comparison localizes the remaining error: +1.922 mm X, +12.871 mm
+Y, and +2.346 mm Z. The X controller boundary is therefore passed; further X
+gain fitting would be unsupported. Keep candidate 133's X gains and original X
+bias, then search only Y observation bias from 0.008 through 0.040 m/s. This
+directly targets the signed lateral endpoint while preserving controller
+structure, every other setting, probes, replay limits, and gates.
+
+### 364. Y bias reaches a narrow endpoint/braking crossing
+
+Date: 2026-08-10.
+
+The focused Y-bias diagnostic evaluated 36 unique candidates in four GPU
+batches and 105.4 seconds at 34.2% average sampled GPU utilization. No candidate
+passed motion, but two candidates bracket the remaining crossing. At Y bias
+0.012 m/s and X D=0.30, endpoint passes at 9.642 mm and X residual passes at
+9.979 mm/s, while X braking narrowly fails at 5.397 mm. At the same bias with X
+D=0.20, braking and residual pass at 4.861 mm and 9.936 mm/s, while endpoint
+narrowly fails at 11.084 mm.
+
+Interpolate Y bias 0.012 through 0.016 m/s and X D 0.18 through 0.30. Add only
+fine X P candidates 1.35/1.40/1.45 and X I candidates 0.35/0.40/0.45 to create
+margin around the crossing. Keep all other controller settings, structure,
+probes, replay limits, and gates unchanged. Replay every motion pass before
+live evaluation.
+
+### 365. Fine interpolation misses only X residual by 0.057 mm/s
+
+Date: 2026-08-10.
+
+The fine X PID/Y-bias search evaluated 690 unique candidates in nine GPU
+batches and 311.3 seconds at 27.5% average sampled GPU utilization. Candidate
+508 at Y bias 0.0135 m/s, X P/I/D 1.4/0.4/0.2 passes every gate except X
+residual speed. Endpoint is 9.953 mm, X braking is 4.933 mm, and residual is
+0.0100568 m/s against 0.010 m/s. Largest normalized excess is only 1.00568.
+
+At the same bias/P/D, X I=0.35 passes residual at 9.168 mm/s and endpoint at
+8.312 mm but misses braking at 5.841 mm. Linear interpolation places the joint
+braking/residual crossing between I=0.3963 and 0.3968. Search X I from 0.3950
+through 0.3970 in 0.00025 steps, with Y bias 0.0134/0.0135/0.0136, X D
+0.195/0.200/0.205, and X P 1.39/1.40/1.41. Keep every other setting,
+controller structure, probe, replay limit, and gate unchanged.
+
+### 366. Motion crossing passes but lacks high-error replay authority
+
+Date: 2026-08-10.
+
+The sub-millistep search evaluated 480 unique candidates in seven GPU batches
+and 235.3 seconds at 27.4% average sampled GPU utilization. Fourteen candidates
+pass every velocity and CTBR motion gate. Selected candidate 247 uses Y bias
+0.0134 m/s and X P/I/D 1.4/0.39675/0.2; its combined endpoint is 9.840 mm,
+X braking error is 4.994 mm, and X residual error is 9.952 mm/s.
+
+Controller-boundary replay rejected all fourteen motion passes with the same
+first failed boundary. Best replay candidate 229 has four failures:
+validation-X collective RMSE 0.071628 N, validation-X physical-state motor
+RMSE 0.010692, stability-moderate motor RMSE 0.011219, and its physical-state
+counterpart 0.010182. This is worse than the replay-safe controller only after
+low-speed X P was reduced from 1.8 to 1.4. The fixed high-error multiplier 1.19
+therefore produces only 1.666 effective proportional response instead of the
+previous replay-safe 2.142.
+
+Keep the motion-passing X P=1.4 seam and fit the already-declarative
+`horizontal_velocity_error_gain_scale` over 1.19, 1.30, 1.40, 1.50, 1.53,
+1.55, and 1.60. Retain X I 0.3965/0.39675, X D 0.195, and Y bias
+0.0135/0.0136. Keep controller structure, all probes, replay limits, and gates
+unchanged. Replay every motion pass before live evaluation.
+
+### 371. Positive bias has the right live sign; low scale breaks replay
+
+Date: 2026-08-10.
+
+The live-margin search evaluated 588 unique candidates in eight GPU batches
+and 275.5 seconds at 28.5% average sampled GPU utilization. Sixty-seven
+candidates pass every motion gate. Selected candidate 131 uses decay 0.075 Hz,
+X bias 0.001 m/s, a 30 Hz X filter, and X scale 0.92. It passes all 22 replay
+profiles, but the live gate settles at 0.422 m and remains `TOO_CLOSE`.
+
+Candidate 323 increases only X bias to 0.002 m/s on the same scale and passes
+both motion and all 22 replay profiles, with worst motor RMSE 0.008733. Its live
+range improves to 0.430 m, confirming the correction sign, but remains below
+the handoff band. Motion-passing candidates at bias 0.005-0.006 require scale
+0.86-0.88 in this grid; replay rejects them at the physical-state boundary,
+with validation-X motor RMSE 0.0112-0.0125.
+
+Do not lower observation scale further. Search X bias 0.003-0.010 m/s against
+the replay-safe 0.92-0.98 scale range, and use the already-evidenced 0.5-2 Hz X
+filter to recover the low-speed braking/stop gates. Include slower decay down
+to the replay-safe 0.0125 Hz frontier so positive steady bias does not distort
+short captured profiles while still changing the long live goto. Keep Y/Z,
+pinned PX4 gains, controller structure, all probes, replay limits, and quality
+gates unchanged. Replay every motion pass before live evaluation.
+
+### 372. Low-cutoff filtering does not preserve the stop-time gate
+
+Date: 2026-08-10.
+
+The replay-safe live stopping/filter search evaluated 808 unique candidates in
+ten GPU batches and 357.1 seconds at 26.8% average sampled GPU utilization.
+None passes every motion gate. Selected candidate 316 uses decay 0.075 Hz, X
+bias 0.003 m/s, no X filter, and X scale 0.92. It misses only X braking at
+5.689 mm against the 5 mm limit; its combined endpoint is 3.139 mm.
+
+The 0.5-2 Hz filter hypothesis is rejected. The strongest filtered branches
+move braking inside its limit but delay the detected X stop from the allowed
+0.10 seconds to 0.14 seconds. The unfiltered candidates preserve stop time but
+miss braking by at least 0.689 mm. Since the earlier 30 Hz candidate passes
+motion and replay, the first failed boundary is now isolated to the untested
+2-30 Hz transition rather than controller authority or the plant.
+
+Search the evidenced 3-30 Hz X-filter interval with X bias 0.003-0.006 m/s,
+replay-safe X scale 0.92-0.96, and decay 0.05/0.075 Hz. Keep Y/Z, pinned PX4
+gains, controller structure, all probes, replay limits, and quality gates
+unchanged. Replay every motion pass before live evaluation, prioritizing X bias
+0.005 m/s because the measured live response improved approximately 8 mm per
+0.001 m/s across the prior two replay-safe candidates.
+
+### 373. Filter transition exposes a narrow bias/scale crossing
+
+Date: 2026-08-10.
+
+The 3-30 Hz filter-transition search evaluated 588 unique candidates in eight
+GPU batches and 278.9 seconds at 27.2% average sampled GPU utilization. No
+candidate passes every motion gate. Selected candidate 309 uses decay 0.05 Hz,
+X bias 0.0045 m/s, a 30 Hz X filter, and X scale 0.92. Every gate except X
+braking passes; braking is 5.411 mm and combined endpoint is 9.850 mm.
+
+The local response is smooth and identifies a feasible joint crossing. At the
+selected bias and filter, changing X scale from 0.94 to 0.92 improves braking
+from 6.504 mm to 5.411 mm while increasing endpoint error from 7.984 mm to
+9.850 mm. At scale 0.92, raising bias from 0.0045 to 0.0050 m/s improves the
+endpoint to 8.936 mm while braking changes to 5.697 mm. Linear interpolation
+therefore places the joint braking/endpoint pass near bias 0.0052-0.0054 m/s
+and scale 0.902-0.908.
+
+Search that narrow region with X scale 0.900-0.910 in 0.002 steps, X bias
+0.0050-0.0058 m/s in 0.0002 steps, 20/30 Hz X filtering, and decay 0.05/0.075
+Hz. This is an evidenced boundary refinement: keep Y/Z, pinned PX4 gains,
+controller structure, all probes, replay limits, and quality gates unchanged.
+Replay every motion pass before live evaluation.
+
+### 374. Motion passes; physical replay misses by 0.000106
+
+Date: 2026-08-10.
+
+The fine bias/scale crossing evaluated 378 unique candidates in seven GPU
+batches and 227.9 seconds at 29.2% average sampled GPU utilization. Eight
+candidates pass every velocity and CTBR motion gate. Selected candidate 122
+uses decay 0.05 Hz, X bias 0.0050 m/s, no X filter, and X scale 0.904; X
+braking is 4.925 mm and combined endpoint is 9.817 mm.
+
+All eight motion passes fail exactly one replay boundary: validation-X-envelope
+physical-state normalized motor RMSE. Candidate 176 is closest at 0.010106
+against the 0.010000 limit. It uses bias 0.0052 m/s and scale 0.904; its motion
+braking is 4.950 mm and endpoint is 9.306 mm. Every other replay profile,
+timestamp join, collective limit, and core-state boundary passes.
+
+At fixed bias, each +0.002 scale step improves physical-state motor RMSE by
+approximately 0.00015 while increasing braking error by approximately 0.00006
+m. Refine X scale 0.9050-0.9070 in 0.0005 steps, X bias 0.0050-0.0052 m/s in
+0.00005 steps, and decay 0.045/0.050/0.055 Hz. Retain the unfiltered X branch
+and the existing Y filter. Keep pinned PX4 gains, controller structure, all
+probes, replay limits, and quality gates unchanged. Replay every motion pass
+before live evaluation.
+
+### 375. Decay crosses the final replay boundary
+
+Date: 2026-08-10.
+
+The motion/replay micro-refinement evaluated 144 unique candidates in four GPU
+batches and 120.9 seconds at 32.8% average sampled GPU utilization. Five
+candidates pass every motion gate. Selected candidate 55 uses decay 0.05 Hz,
+X bias 0.0050 m/s, and X scale 0.9055; X braking is 4.947 mm and combined
+endpoint is 9.529 mm. It misses only validation-X-envelope physical-state
+motor RMSE at 0.010027.
+
+A replay-only boundary diagnostic changed only candidate 55's estimator decay.
+Decay 0.051 Hz passes all 22 replay profiles with worst motor RMSE 0.009990;
+decay 0.052 Hz also passes at 0.009954. The response is monotonic across the
+tested 0.048-0.052 Hz interval, so controller and plant changes remain
+unwarranted.
+
+Confirm the joint motion/replay region in the simulator with decay
+0.051/0.052/0.053 Hz, X bias 0.0047-0.0050 m/s in 0.0001 steps, and X scale
+0.9045/0.9050/0.9055. Retain the unfiltered X branch and existing Y filter.
+Keep pinned PX4 gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 376. Motion and replay pass; live hover exposes estimator settling
+
+Date: 2026-08-10.
+
+The decay-confirmation search evaluated 80 unique candidates in four GPU
+batches and 115.9 seconds at 32.7% average sampled GPU utilization. Twenty
+candidates pass every motion gate, and three also pass all 22 replay profiles:
+candidates 49, 67, and 72. Candidate 72 has the largest live-correcting X bias
+at 0.0049 m/s, decay 0.053 Hz, and X scale 0.905. Its motion endpoint is
+8.172 mm and worst replay motor RMSE is 0.009973.
+
+The authoritative live test rejects candidates 72 and 49 at the same first
+boundary before goto: hover final error is 0.044 m, but last-second maximum
+error is 0.103 m against the 0.100 m limit. The identical result across bias
+0.0047/0.0049 m/s and scale 0.9050/0.9055 indicates that the narrow bias/scale
+spacing is not the live discriminator. Earlier decay 0.075 Hz candidates pass
+this hover boundary, including the replay-safe candidate 323 and zero-bias
+candidate 500.
+
+Route the next search through the evidenced settling dimension: decay
+0.060/0.065/0.070/0.075 Hz, X bias 0.0040/0.0045/0.0050 m/s, and X scale
+0.88/0.89/0.90/0.91. Higher decay increases replay margin; lower scale recovers
+the braking error it introduces, while bias 0.0045-0.0050 retains the measured
+live handoff correction. Keep the unfiltered X branch, existing Y filter,
+pinned PX4 gains, controller structure, all probes, replay limits, and quality
+gates unchanged. Replay every motion pass before live evaluation.
+
+### 377. Derivative authority improves both remaining boundaries
+
+Date: 2026-08-10.
+
+The live-stable estimator search evaluated 100 unique candidates in four GPU
+batches and 115.3 seconds at 32.2% average sampled GPU utilization. Twenty-four
+candidates pass every motion gate, but none passes replay. Candidate 46 is the
+closest: decay 0.070 Hz, X bias 0.0040 m/s, X scale 0.90, motion braking
+4.997 mm, and one replay failure at physical-state motor RMSE 0.010017.
+
+The higher-bias live-correction branch at decay 0.070 Hz, bias 0.0045 m/s, and
+scale 0.90 passes replay at the pinned X derivative 0.20 with worst motor RMSE
+0.009919 when evaluated as a boundary diagnostic, but its motion braking needs
+more damping. Increasing only X derivative monotonically improves replay:
+0.205, 0.210, and 0.215 produce worst motor RMSE 0.009876, 0.009836, and
+0.009798 respectively. This is the correct signed change for motion braking as
+well, unlike the rejected X-integral increase, which immediately worsened
+replay.
+
+Search decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X scale 0.90/0.91, and
+X derivative 0.205-0.225 in 0.005 steps. Keep the unfiltered X branch, existing
+Y filter, pinned P/I gains, controller structure, all probes, replay limits,
+and quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 378. Signed braking rejects derivative; lower gain passes replay
+
+Date: 2026-08-10.
+
+The derivative-authority search evaluated 162 unique candidates in six GPU
+batches and 174.7 seconds at 33.2% average sampled GPU utilization. No
+candidate passes motion. Selected candidate 17 uses decay 0.070 Hz, X bias
+0.0045 m/s, X scale 0.90, and the unchanged X derivative 0.20; only X braking
+fails at 5.322 mm. Increasing derivative monotonically worsens braking through
+5.603 mm at 0.225.
+
+A signed trace diagnostic shows why: the target stopping distance is 4.605 mm
+shorter than PX4 for the limiting validation approach/brake event. More damping
+therefore moves in the wrong direction. Lowering the already-declarative
+moderate-error gain is the evidenced correction because it lengthens the Lab
+stop without changing low-error hover behavior.
+
+Replay confirms the boundary is safe: at decay 0.070 Hz, bias 0.0045 m/s, and
+scale 0.90, horizontal gain scales 1.00, 1.05, 1.10, 1.15, and 1.19 all pass
+all 22 profiles. The best worst-motor RMSE is 0.009538 at scale 1.15.
+
+Search decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X observation scale
+0.90/0.91, and horizontal error-gain scale 1.00/1.05/1.10/1.15/1.19. Restore
+the pinned X derivative 0.20. Keep the unfiltered X branch, existing Y filter,
+pinned P/I/D gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 379. The configured gain window is inactive at the limiting brake
+
+Date: 2026-08-10.
+
+The signed-braking gain search evaluated 135 unique candidates in five GPU
+batches and 142.8 seconds at 30.8% average sampled GPU utilization. No
+candidate passes motion. Horizontal gain scales 1.00-1.19 change limiting X
+braking by less than one micrometre; selected candidate 71 remains at 5.321 mm.
+
+The limiting trace explains the fixed point. At the approach-to-zero command
+transition, the target's scaled and biased X velocity produces only 0.0724 m/s
+error. The current gain schedule starts at 0.15 m/s, so none of the searched
+scale values can affect the event. The Lab stopping distance is 4.605 mm
+shorter than PX4, requiring attenuation rather than the boost-only validation
+currently imposed by the strict settings loader.
+
+Correct the strict-v1 controller contract to accept any positive horizontal
+gain scale; the existing equation already supports both attenuation below 1
+and boost above 1. Add host coverage for attenuation and strict artifact
+loading. Move the declarative schedule to start/full/end 0.02/0.07/0.15 m/s
+and search scales 0.70/0.80/0.90/1.00 with decay 0.070/0.075 Hz, X bias
+0.0045/0.0050 m/s, and X observation scale 0.90/0.91. Keep the unfiltered X
+branch, existing Y filter, pinned P/I/D gains, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 380. Attenuation passes motion/replay but starts inside hover recovery
+
+Date: 2026-08-10.
+
+The low-error attenuation search evaluated 387 unique candidates in nine GPU
+batches and 278.4 seconds at 31.1% average sampled GPU utilization. Thirty-three
+candidates pass every motion gate and eight full-schedule candidates also pass
+all 22 replay profiles. The structural strict-v1 change is therefore validated:
+positive sub-unit gain scales load, execute with NumPy/Torch parity, and preserve
+the high-error controller boundary.
+
+Candidate 356 combines decay 0.075 Hz, X bias 0.0045 m/s, X scale 0.91,
+attenuation 0.90, and schedule 0.02/0.07/0.15 m/s. Motion braking is 4.254 mm,
+endpoint is 3.017 mm, and worst replay motor RMSE is 0.009986. The live gate
+rejects hover before goto: final error is 0.050 m and last-second maximum is
+0.108 m. Attenuation beginning at 0.02 m/s therefore weakens the low-velocity
+hover recovery that the earlier base-gain candidates passed.
+
+Narrow the schedule around the measured 0.0724 m/s brake error: start/full/end
+0.05/0.07/0.10 m/s. This preserves base gain for lower-error hover settling and
+returns to base gain before replay envelopes. Retain attenuation candidates
+0.70/0.80/0.90/1.00, decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, and X
+scale 0.90/0.91. Keep the unfiltered X branch, existing Y filter, pinned P/I/D
+gains, all probes, replay limits, and quality gates unchanged. Replay every
+motion pass before live evaluation.
+
+### 367. Error-based high-authority scaling does not repair replay
+
+Date: 2026-08-10.
+
+The high-error multiplier search evaluated 252 unique candidates in six GPU
+batches and 184.0 seconds at 29.3% average sampled GPU utilization. Twenty-two
+candidates pass every motion gate. Selected candidate 160 uses multiplier 1.30,
+X I 0.39675, and Y bias 0.0135 m/s.
+
+Replaying all twenty-two motion passes disproved the hypothesis. The best
+replay remains multiplier 1.19 candidate 177 with the same four failures as the
+prior attempt: validation-X collective RMSE 0.071626 N, validation-X
+physical-state motor RMSE 0.010691, stability-moderate motor RMSE 0.011221, and
+stability-moderate physical-state motor RMSE 0.010183. Larger multipliers add
+Y-envelope and stability failures; at 1.30 the replay has six failures and at
+1.40 or above it has eight.
+
+The error-based schedule is not the relevant discriminator: a high commanded
+speed may have a small instantaneous tracking error, while the low-speed
+approach and braking profiles deliberately use small commands. The next
+structural hypothesis is a per-axis, command-magnitude proportional-gain scale.
+It must retain X P=1.4 below the low-speed probe range, smoothly restore the
+replay-safe X P=1.8 by the envelope-command range, leave Y/Z at unit scale, and
+remain an explicit strict-v1 controller setting with NumPy/Torch parity. Keep
+all probes, replay limits, and quality gates unchanged.
+
+### 368. Correct the route to the evidenced estimator seam
+
+Date: 2026-08-10.
+
+Do not implement the command-magnitude gain hypothesis proposed in entry 367.
+The core controller-boundary failure already proves that changing the pinned
+PX4 proportional gain is the wrong seam. Conversely, the pinned X P=1.8
+controller passes all 22 core and physical-state replay profiles, so its
+remaining motion rejection must be diagnosed downstream of that boundary.
+
+A force-law regression over the fresh X/Y envelope and stability traces rules
+out the plant drag seam. The inferred Lab coefficients are 0.486 and 0.286 N
+per m/s, versus 0.486 and 0.288 for the PX4/Isaac reference, consistent with
+the configured 0.50/0.30 after numerical differentiation. Mass, gravity,
+rotor mapping, actuator audit, and wrench reduction remain unchanged and
+independently tested.
+
+The captured estimator boundary provides a stronger lead. PX4 estimated-minus-
+physical velocity generally returns near zero within about one second of each
+profile seed. The current target adapter instead uses decay 0.0125 Hz, X/Y
+steady biases +0.018/+0.008 m/s, Y scale 0.8975, and a 1.5 Hz Y filter. On the
+captured physical profiles this produces sustained signed errors and up to
+0.079 m/s Y estimator RMSE on the Y envelope, even though the resulting motor
+error remains just inside the replay tolerance.
+
+Restore the pinned X P/I/D 1.8/0.4/0.2 and search only the target-owned
+physical-to-estimated boundary: decay 0.10-1.00 Hz, X/Y steady biases
+-0.010 through +0.010 m/s, unit-centered X/Y scales 0.98/1.00, and immediate
+or high-cutoff Y filtering 0/5/15/30 Hz. Keep Z, controller structure, all
+probes, replay limits, and every quality gate unchanged. Replay every motion
+pass before live evaluation.
+
+### 369. Evidenced observer dynamics isolate X braking and Z endpoint
+
+Date: 2026-08-10.
+
+The evidence-centered estimator search evaluated 1,420 unique candidates in 14
+GPU batches and 529.4 seconds at 25.4% average sampled GPU utilization. No
+candidate passed motion, but the best candidate reduced the largest normalized
+excess from 2.810 to 2.132 without regressing a passed gate, which is material
+progress. Candidate 879 uses decay 0.10 Hz, bias [-0.005, 0.0, -0.0039] m/s,
+no velocity filter, and unit X/Y scale. Every per-axis velocity, braking,
+residual, stop-time, envelope, and CTBR gate passes; only the combined endpoint
+remains at 21.320 mm.
+
+The selected endpoint vector is [+15.331, -3.805, +14.319] mm. Candidate 837
+changes only the X observer bias to zero and moves that vector to
+[-0.425, -3.713, +14.320] mm, proving that the remaining endpoint components
+are separable. Candidate 837 has 14.799 mm endpoint magnitude but misses X
+braking at 7.199 mm and lands exactly on the 0.10 s stop-time limit. Earlier
+captured searches show that reduced X observation scale moves braking back
+inside its limit. The Z endpoint component is invariant across the planar
+observer grid because Z bias remained fixed at -0.0039 m/s.
+
+Preserve decay near 0.10 Hz and zero Y bias/filter with unit Y scale. Search X
+bias around zero together with the already-evidenced lower X scale, and search
+Z steady bias independently to remove the signed +14.3 mm vertical endpoint.
+Keep the pinned PX4 gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 381. Narrow attenuation still overlaps the live X recovery
+
+Date: 2026-08-10.
+
+The narrowed 0.05/0.07/0.10 m/s attenuation search evaluated 386 unique
+candidates in nine GPU batches and 281.5 seconds at 31.1% average sampled GPU
+utilization. Thirty-two candidates pass every motion gate, and ten of those
+also pass all 22 controller-boundary replay profiles. Candidate 360 uses
+estimator decay 0.075 Hz, X observation bias 0.0045 m/s, X observation scale
+0.91, gain scale 0.90, and the narrowed schedule. Its braking-distance error is
+3.998 mm, endpoint error is 3.638 mm, and worst replay motor RMSE is 0.009962.
+
+The authoritative 16-environment live gate rejects candidate 360 before goto:
+final hover error is 0.049 m and the last-second maximum is 0.107 m. A
+single-environment diagnostic reproduces the same 0.107 m rejection. At 3.00
+seconds the position-error vector is (-0.096, 0.000, -0.051) m, so X dominates
+the 0.109 m norm; by 3.95 seconds it has decayed to (-0.040, 0.000, -0.034) m.
+The first failed live boundary is therefore horizontal settling, not vertical
+control, allocation, or rotor response.
+
+The diagnostic X command and velocity imply approximately 0.076 m/s velocity
+error at the beginning of the final hover window. That still lies inside the
+current schedule's 0.07-0.10 m/s falling edge and overlaps the 0.0724 m/s
+zero-command braking error. Before introducing a command-conditioned controller
+branch, test the remaining error-only separation: search gain scale
+0.70/0.80/0.90 with schedule start 0.055/0.060, full 0.065/0.070, and end
+0.075/0.080 m/s. Retain decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X
+observation scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and
+quality gates. Replay every motion pass before live evaluation.
+
+### 382. One gain lobe cannot preserve braking and live recovery
+
+Date: 2026-08-10.
+
+The sharp error-band search evaluated 676 unique candidates in 11 GPU batches
+and 365.5 seconds at 28.5% average sampled GPU utilization. Exact caching
+removed 1,172 of 1,848 attempted settings. One hundred seventy-five candidates
+pass every motion gate, and exhaustive replay shows that 72 also pass all 22
+controller-boundary profiles.
+
+Candidate 570 uses decay 0.075 Hz, X bias 0.0045 m/s, X observation scale 0.91,
+gain scale 0.90, and schedule 0.055/0.070/0.075 m/s. Its X braking error is
+4.757 mm, endpoint error is 2.965 mm, and worst replay motor RMSE is 0.009960.
+The authoritative 16-environment live gate nevertheless reproduces the exact
+prior rejection: final hover error is 0.049 m and last-second maximum is 0.107
+m. Moving the falling edge below the measured 0.076 m/s recovery error does not
+alter the state at the beginning of the final hover window.
+
+The retained evidence separates two required responses. The earlier high-error
+1.19 gain lobe passes live hover and goto, but its 0.15 m/s start cannot affect
+the 0.0724 m/s zero-command braking boundary. Replacing that lobe with
+low-error attenuation fixes braking and replay but removes the recovery boost.
+Represent both evidenced ranges explicitly: retain the existing
+`horizontal_velocity_error_gain_*` lobe at 1.19 and 0.15/0.30/0.50 m/s, and add
+a disjoint `horizontal_velocity_braking_gain_*` lobe. Fit the new braking scale
+0.70/0.80/0.90 and start/full/end candidates 0.055/0.060,
+0.065/0.070, and 0.075/0.080 m/s. Add all four fields through declarative
+`ParameterSpec` candidates, strict artifact validation, and NumPy/Torch parity
+coverage. Retain decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X observation
+scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and quality
+gates unchanged.
+
+### 383. Dual lobes pass motion and replay; recovery needs two millimetres
+
+Date: 2026-08-10.
+
+The strict-v1 dual-lobe implementation passed 760 host tests and the complete
+pre-commit suite before execution. Its first sweep against the prior capture
+was retained as diagnostic evidence only: final fitting correctly rejected the
+changed reference-definition fingerprint. A clean source commit then produced
+a new 22-profile PX4 capture, and the actuator audit passed every profile with
+zero timestamp join error, motor RMSE near 0.0003 against the 0.01 limit, and
+collective RMSE no greater than approximately 0.012 N against the 0.05 N
+limit.
+
+The from-scratch dual-lobe sweep evaluated 482 unique candidates in ten GPU
+batches and 310.0 seconds at 30.4% average sampled GPU utilization. One hundred
+eighty-eight candidates pass every motion gate, and exhaustive replay confirms
+that all 188 also pass all 22 controller-boundary profiles. Candidate 109 uses
+the retained 1.19 recovery lobe, decay 0.075 Hz, X bias 0.005 m/s, X observation
+scale 0.91, and a 0.90 braking lobe at 0.060/0.070/0.075 m/s. Its X and Y
+braking errors are 2.947 mm and 3.358 mm, combined endpoint is 8.608 mm, and
+worst replay motor RMSE is 0.009680.
+
+The authoritative live gate improves materially but still rejects hover before
+goto: final error is 0.045 m and the last-second maximum is 0.102 m. Restoring
+the recovery lobe therefore removes 5 mm of the former 0.107 m excess, while
+the independent braking lobe preserves large motion and replay pass sets. The
+remaining first failed boundary is the same horizontal recovery response, now
+only 2 mm outside its live limit.
+
+Fit the existing recovery lobe rather than changing controller structure:
+search gain scale 1.19/1.23/1.27/1.31 and start 0.09/0.12/0.15 m/s. Keep its
+full/end values at 0.30/0.50 m/s, leaving a gap above the braking lobe's maximum
+0.08 m/s. Retain the braking grid, decay 0.070/0.075 Hz, X bias
+0.0045/0.0050 m/s, X observation scale 0.90/0.91, pinned P/I/D gains, all
+probes, replay limits, and quality gates. Replay every motion pass before live
+evaluation.
+
+### 370. Pinned controller passes motion and replay; live handoff is too close
+
+Date: 2026-08-10.
+
+The focused X-braking/Z-endpoint search evaluated 1,540 unique candidates in
+15 GPU batches and 570.2 seconds at 25.2% average sampled GPU utilization.
+Eleven candidates pass every motion gate with pinned PX4 velocity gains.
+Selected candidate 500 uses decay 0.075 Hz, zero steady observation bias and
+filter, X scale 0.94, and unit Y/Z scale. X braking is 4.714 mm, X stop time is
+exactly 0.10 s, and combined endpoint is 9.982 mm. All 22 core and
+physical-state controller-boundary replay profiles pass with zero failures.
+
+The authoritative live gate passes hover and goto stability but rejects the
+handoff endpoint. Hover final error is 0.041 m; goto final error is 0.046 m.
+The vehicle settles 0.434 m from the switch and the handoff predicate reports
+`TOO_CLOSE`. The earlier replay-safe positive-X-bias controller settled at
+0.498 m, so the signed live response supports a small positive X observer bias
+rather than a controller or plant change.
+
+The selected motion endpoint vector is [+9.781, +0.460, -1.941] mm. Nearby
+scale 0.92 candidate 702 moves it to [+7.759, -3.499, -1.939] mm, leaving room
+for a positive X bias to reduce forward endpoint displacement while a lower X
+scale preserves braking. Search positive X bias 0.001-0.006 m/s against X
+scale 0.82-0.92 and decay 0.05-0.10 Hz. Keep Y/Z observer correction, pinned
+PX4 gains, controller structure, all probes, replay limits, and quality gates
+unchanged. Replay every motion pass before live evaluation.
+
+### 384. Recovery passes live motion; handoff is the remaining boundary
+
+Date: 2026-08-10.
+
+The recovery-lobe search evaluated 1,124 unique candidates in 16 GPU batches
+and 573.5 seconds at 30.5% average sampled GPU utilization. Seven hundred
+thirty-four candidates pass every motion gate. Exhaustive controller-boundary
+replay checked all 734 in 1,248.8 seconds with eight host workers; 261 pass all
+22 profiles. Candidate 483 retains the evidenced 0.075 Hz estimator-bias decay,
++0.005 m/s X observation bias, 0.91 X observation scale, and 0.90 braking lobe
+at 0.055/0.070/0.075 m/s. It moves the recovery lobe to scale 1.23 beginning at
+0.09 m/s. Its X and Y braking errors are 2.874 mm and 3.864 mm, combined
+endpoint error is 8.821 mm, and worst normalized-motor replay RMSE is 0.009881.
+
+The authoritative live gate materially advances beyond the prior first failed
+boundary. Hover passes with 0.095 m last-second maximum against 0.100 m, and
+goto passes with 0.081 m against the same limit. The sole failure is now the
+downstream handoff range: the drone settles 0.423 m from the switch against the
+configured 0.45-0.50 m window and reports `TOO_CLOSE`.
+
+No controller-structure, allocator, plant, or recovery change is supported by
+this result. Pin candidate 483 and search only the signed X observation bias at
+0.008/0.011/0.014/0.017/0.020 m/s. This coarse five-point sweep brackets the
+earlier live-ready +0.018 m/s setting while preserving the current reference,
+probe families, motion gates, replay limits, and live acceptance contract.
+
+### 385. Bias-only correction breaks short-profile motion
+
+Date: 2026-08-10.
+
+The coarse signed-bias sweep evaluated five candidates in two GPU batches and
+52.7 seconds at 45.0% average sampled GPU utilization. None passes every motion
+gate. The closest candidate uses +0.008 m/s X bias: X braking is 5.264 mm,
+residual-speed error is 10.158 mm/s, stop-time error is 0.14 seconds, and
+combined endpoint error is 14.261 mm. Larger bias monotonically worsens the
+short-profile braking and endpoint metrics, so a bias-only expansion cannot be
+accepted even though the live handoff needs its positive signed correction.
+
+Fit the existing estimator bias build-up/decay dimension jointly with bias.
+Search decay 0.040/0.050/0.060/0.070/0.075 Hz and X bias
+0.0080/0.0095/0.0110/0.0125/0.0140 m/s. Prior retained traces establish this
+as the seam that separates short captured motion from the longer live goto;
+the new 1.23 recovery lobe must independently preserve live hover. Keep all
+other candidate-483 settings, probe families, gates, replay tolerances, and the
+live acceptance contract unchanged.
+
+### 386. Bias/decay passes axis gates but misses the combined endpoint
+
+Date: 2026-08-10.
+
+The joint bias/decay search evaluated 25 candidates in three GPU batches and
+94.7 seconds at 36.6% average sampled GPU utilization. No candidate passes all
+motion gates. Candidate 21 at decay 0.050 Hz and +0.008 m/s X bias passes every
+individual X/Y/Z velocity, braking, residual-speed, stop-time, envelope, and
+CTBR gate. Its only failure is the combined endpoint at 13.206 mm against
+10 mm. The signed endpoint vector is [-12.751, -2.312, -2.542] mm, which
+isolates X as the remaining component.
+
+Before adding estimator state, test the existing high-cutoff X velocity-filter
+seam retained by entries 372-374. Search 0/10/20/30 Hz X cutoff with decay
+0.040/0.050/0.060 Hz and X bias 0.0080/0.0095 m/s. Keep the Y filter at 1.5 Hz,
+Z unfiltered, and every other candidate-483 setting fixed. Low-cutoff filters
+remain excluded by their evidenced stop-time regression. Preserve all probe
+families, gates, replay tolerances, and the live acceptance contract.
+
+### 387. High-cutoff filtering cannot separate ringdown from live recovery
+
+Date: 2026-08-10.
+
+The high-cutoff search evaluated 24 candidates in four GPU batches and 118.7
+seconds at 37.1% average sampled GPU utilization. Its first launch crashed one
+Isaac worker before evaluation; the empty stale spool was preserved and the
+unchanged clean-source retry completed normally. No candidate passes all motion
+gates. The best candidate uses decay 0.050 Hz, +0.008 m/s X bias, and a 20 Hz X
+filter. It passes every individual velocity and CTBR gate but improves the sole
+combined endpoint failure only from 13.206 to 12.914 mm.
+
+A diagnostic live run of that non-publishable candidate passes hover at 0.096 m
+and goto at 0.068 m final-window maxima, but remains `TOO_CLOSE` at 0.431 m.
+The combined-turn trace localizes its [-12.4, -2.6, -2.5] mm endpoint error:
+X divergence accumulates during the 3.0-5.74 second interval where the commanded
+velocity is exactly zero. The live position supervisor instead continues to
+command approximately 0.05 m/s after overshoot. High-cutoff filtering affects
+both regimes and is therefore rejected as the separating seam.
+
+Add one strict-v1, componentwise command-magnitude transition around the
+existing velocity observation bias. Bias is zero at exact zero command, rises
+smoothly between declarative start/full thresholds, and remains fully active
+outside the band. Implement the same equation in NumPy, Torch, batch settings,
+and seeded controller reconstruction. Fit X bias 0.008/0.011/0.014/0.017 m/s,
+start 0/0.002/0.005 m/s, and full 0.020/0.030/0.040 m/s. Restore candidate 483's
+0.075 Hz decay and unfiltered X branch; keep every other setting, probe family,
+gate, replay tolerance, and live acceptance condition unchanged.
+
+### 388. Command gating fixes ringdown coupling; fresh X braking needs refitting
+
+Date: 2026-08-10.
+
+The strict-v1 componentwise command gate passed 761 host tests, the complete
+pre-commit suite, and NumPy/Torch seeded-state parity before execution. A fresh
+clean-source PX4 capture recorded all 22 velocity and CTBR profiles with their
+absolute simulation start times. The actuator audit passed every profile with
+complete topic coverage, zero timestamp-join error, normalized-motor RMSE near
+0.0003 against the 0.01 limit, and collective RMSE no greater than about
+0.012 N against the 0.05 N limit.
+
+The first command-gating fit evaluated 36 unique candidates in four GPU batches
+and 103.8 seconds at 33.3% average sampled GPU utilization. Candidate 14 uses
++0.008 m/s X observation bias with a 0-0.020 m/s command transition. Every
+X/Y/Z velocity NRMSE, residual-speed and stop-time gate passes, as do all CTBR
+roll/pitch/yaw/collective gates. The remaining failures are X braking at
+6.160 mm against 5 mm and the combined endpoint at 13.430 mm against 10 mm.
+Across the grid, wider transitions reduce the endpoint below 10 mm, but every
+candidate still misses X braking by at least 1.16 mm. The first failed boundary
+is therefore the existing low-error horizontal braking response, not command
+gating, allocation, rotor response, or CTBR control.
+
+Keep the evidenced command gate and run a broad fit of the existing braking
+scale at 0.60/0.70/0.80/0.85/0.90, crossed with the retained bias and command
+threshold candidates. Preserve the recovery lobe, estimator decay, filters,
+probe families, gates, replay tolerances, and live contract. Retain the complete
+grid before selection; if a passing frontier appears, interpolate only around
+that region before controller-boundary replay and the live gate.
+
+### 389. Broad braking fit isolates a small X/Y scalar tradeoff
+
+Date: 2026-08-10.
+
+The broad braking fit evaluated 180 unique candidates in five GPU batches and
+148.1 seconds at 31.4% average sampled GPU utilization. Candidate 40 uses a
+0.70 braking scale, +0.008 m/s X bias, and a 0-0.030 m/s command transition.
+It passes X braking at 4.898 mm and the combined endpoint at 7.317 mm. Every
+other velocity and CTBR gate also passes except Y braking, which is 5.286 mm
+against 5 mm. This reduces the campaign from two failures with 34.3% largest
+excess to one failure with 5.72% excess without regressing a passed gate, so it
+is material progress.
+
+The complete frontier shows opposing behavior under the shared horizontal
+braking scalar: lower scale clears X while higher scale clears Y. Before
+introducing axis-specific controller structure, fit the existing per-axis
+velocity observation scale at X values 0.85/0.87/0.89/0.91 with Y/Z pinned at
+one. Cross it with braking scales 0.70/0.80/0.85/0.90, the evidenced bias values
+0.008/0.011/0.014 m/s, and the existing command thresholds. Retain the complete
+grid before selection. This is the minimal axis-local parameter seam supported
+by the isolated X/Y probe evidence; recovery, CTBR, allocation, plant, gates,
+and replay remain unchanged.
+
+### 390. Axis-local motion passes; replay requires the higher-scale side
+
+Date: 2026-08-10.
+
+The X-scale/braking fit evaluated 432 unique candidates in eight GPU batches
+and 254.3 seconds at 28.9% average sampled GPU utilization. Candidate 85 is the
+sole candidate that passes every motion gate. It uses X observation scale 0.87,
+braking scale 0.85, +0.008 m/s X bias, and a 0.005-0.030 m/s command transition.
+X and Y braking are 4.592 mm and 4.943 mm, and the combined endpoint is
+9.961 mm. All remaining X/Y/Z and CTBR gates pass.
+
+Controller-boundary replay rejects that motion pass only at the physical-state
+observer boundary: normalized-motor RMSE is 0.013504 on the X validation
+profile and 0.010785 on moderate combined stability, against 0.01. Estimated-
+state replay, allocation, collective, timestamps, and CTBR profiles pass.
+Diagnostic replay establishes a monotonic X-scale frontier: scale 0.89 reduces
+worst motor RMSE to 0.011710 and 0.91 reduces it to 0.010608. At scale 0.91,
+the closest motion candidate passes X braking and endpoint and misses only Y
+braking by 0.286 mm.
+
+Move X observation scale into the replay-safe 0.91/0.92/0.93/0.94 region and
+fit the existing low-error braking lobe over scale 0.50/0.60/0.70/0.80, start
+0.050/0.055/0.060 m/s, full 0.065/0.070/0.075 m/s, and end
+0.075/0.080/0.085 m/s. Pin the sole motion-passing +0.008 m/s bias and
+0.005-0.030 m/s command gate. This uses the distinct error ranges exposed by
+the isolated X and Y probes while avoiding new controller structure. Replay
+every motion pass before live evaluation.
+
+### 391. Replay-safe braking frontier passes the authoritative live gate
+
+Date: 2026-08-10.
+
+The replay-safe braking-band search evaluated 1,232 unique candidates in 14 GPU
+batches and 506.9 seconds at 25.8% average sampled GPU utilization. It produced
+66 candidates that pass every velocity and CTBR motion gate. Exhaustive replay
+evaluated all 66 over all 22 profiles in 120.9 seconds with eight host workers;
+45 pass every estimated-state, physical-state, motor, collective, and timestamp
+boundary.
+
+Candidate 241 provides the largest replay margin. It uses X observation scale
+0.94, braking scale 0.50 with a 0.050/0.070/0.085 m/s band, +0.008 m/s X bias,
+and the 0.002-0.030 m/s command gate. Its X and Y braking errors are 2.386 mm
+and 4.251 mm, combined endpoint is 9.368 mm, worst replay motor RMSE is
+0.009108, and worst collective RMSE is 0.04122 N. It passes every replay
+profile.
+
+The authoritative 16-environment live gate also passes. Hover last-second
+maximum error is 0.092 m and goto is 0.034 m against 0.100 m limits. The final
+wall-normal handoff range is 0.451 m inside the 0.45-0.50 m window, and the
+handoff is ready with no failure reason. Pin candidate 241 exactly and execute
+one clean-source reproduction with a fresh PX4 capture, actuator audit, target
+evaluation, held-out fit, controller-boundary replay, and live gate before
+finalization and publication.
+
+### 392. Fixed-controller reproduction exposes fresh combined X/Y offset
+
+Date: 2026-08-10.
+
+The exact candidate-241 controller was committed and evaluated from a clean
+source commit against a second fresh PX4 capture. The capture completed all 22
+profiles, and the actuator audit passed with complete topic coverage, zero
+timestamp-join error, motor RMSE near 0.0003, and collective RMSE below 0.05 N.
+The pinned target evaluation completed normally, but held-out fitting rejects
+the controller only on combined endpoint error: 15.512 mm against 10 mm.
+
+Every isolated X/Y/Z velocity gate and every CTBR gate still passes. X and Y
+braking have increased margin at 3.211 mm and 1.281 mm. The signed combined
+endpoint error is [+10.56, -11.21, -1.89] mm, which localizes the fresh-capture
+variation to coupled horizontal offset rather than vertical response, CTBR,
+allocation, or the plant boundary. The fixed controller is therefore not
+robust enough to publish unchanged, but the alignment search still has an
+evidenced parameter seam.
+
+Keep the replay-safe X observation scale and braking band fixed. Fit the
+existing command-gated observation-bias vector over X 0.008/0.011/0.014 m/s,
+Y -0.006/-0.003/0/0.003/0.006 m/s, and Z zero, crossed with command transition
+start 0/0.002/0.005 m/s and full 0.020/0.030/0.040 m/s. Replay every motion
+pass and rerun the live gate before selecting the final fresh-reference
+artifact. This is an axis-local fit supported by the isolated probe margins and
+does not change controller structure or any gate.
+
+### 393. Paused after fresh-reference sweep, before held-out fitting
+
+Date: 2026-08-10.
+
+Work is paused at a complete, resumable stage on clean source commit `b93eafa`.
+The active run directory is
+`.build/alignment/x500-px4-v1/20260810T-accepted-reproduction`. Its second fresh
+PX4 capture and 22-profile actuator audit pass. The horizontal-bias sweep also
+finished writing 135 unique candidates with no candidate-evaluation failures,
+although the outer harness exited with status 130 after the requested interrupt.
+`target_candidates.json`, `gpu_utilization.json`, and
+`search_realization.json` are complete; no held-out fit has been run and no
+canonical `controller.json` or `selection.json.zst` exists at the run root.
+
+Resume without recapturing or resweeping by running
+`make alignment-fit ALIGNMENT_RUN_ID=20260810T-accepted-reproduction`. Report
+the selected settings and all failed gates immediately after that fit. If the
+fit passes, replay every motion-passing candidate against all 22 controller
+boundaries, choose a replay pass, and run the authoritative live hover/goto/
+handoff gate. Do not start policy training. Preserve `fit-attempt-01/`, which
+contains the failed fixed-controller reproduction evidence.
+
+### 394. Fresh-reference alignment passes motion, replay, and live acceptance
+
+Date: 2026-08-11.
+
+The preserved 135-candidate horizontal-bias sweep completed held-out fitting.
+Four candidates pass every velocity and CTBR motion gate; the remaining 131
+each fail exactly one gate. Candidate 22 is the regularized selection. It uses
+velocity observation bias `[0.008, -0.003, 0.0]` m/s and a 0.005-0.030 m/s
+command transition. Its combined endpoint error is 9.132 mm, X/Y/Z braking
+errors are 3.105/0.992/1.555 mm, and all per-axis velocity, body-rate,
+attitude, collective, residual, stop-time, and stability gates pass.
+
+Exhaustive controller-boundary replay confirms all four motion passes across
+all 22 profiles. Candidate 22 has the best replay margin: worst normalized
+motor RMSE is 0.008965 against 0.01, worst collective RMSE is 0.04185 N
+against 0.05 N, and physical-state timestamp join error is zero. The
+authoritative live gate also passes: hover last-second maximum error is
+0.092 m, goto is 0.034 m, final wall-normal range is 0.451 m, and handoff is
+ready.
+
+The accepted bundle is finalized at
+`.build/alignment/x500-px4-v1/20260810T-accepted-reproduction`. Publication
+alone is pending because the pre-v1 `best` label is unsupported by the strict
+controller loader. Replace unsupported labels atomically without loading or
+migrating their contents, publish this accepted bundle, then proceed to the
+controller/RL/deployment dependency audit before scratch policy training.

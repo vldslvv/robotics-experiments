@@ -17,6 +17,10 @@ alignment:
     minimum_neutral_s: 3.0
     stable_hold_s: 0.5
     timeout_s: 12.0
+    # Return to the routine's hover reference between independent profiles so
+    # suite order cannot accumulate displacement against the safety envelope.
+    recenter_gain_hz: 1.0
+    recenter_max_speed_mps: 0.8
     max_linear_speed_mps: 0.02
     max_angular_speed_radps: 0.03
     max_tilt_deg: 0.25

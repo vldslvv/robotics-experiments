@@ -13,6 +13,10 @@ vehicles:
     id: 0
     ros: {namespace: /x500_01}
     spawn: {position_xy: [0.0, 0.0]}
+    px4:
+      # Default topics plus full-rate attitude/rate/actuator topics. Exact
+      # 250 Hz controller replay cannot be reconstructed from decimated ULogs.
+      logging_profile: 17
     bridge:
       # Isolate controller/plant alignment from stochastic IMU/GPS inputs.
       # PX4 still requires nonconstant pressure samples to keep its barometer
@@ -36,4 +40,4 @@ vehicles:
         - kind: policy
           label: alignment-probes
           artifact: alignment-probe
-          timeout_s: 150.0
+          timeout_s: 300.0

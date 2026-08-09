@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -496,13 +497,21 @@ def publish_controller(*, run_dir: Path) -> None:
     best_link = root / "best"
     replace_best = True
     if best_link.exists() and (best_link / "controller.json").is_file():
-        best = load_controller_artifact(best_link)
-        if best.comparison_fingerprint == controller.comparison_fingerprint:
+        try:
+            best = load_controller_artifact(best_link)
             best_result = load_selection(run_dir=best_link.resolve(), controller=best)
-            best_ranking = best_result.candidates[
-                best_result.selected_candidate_index
-            ].ranking_values
-            replace_best = (ranking, controller.run_id) < (best_ranking, best.run_id)
+        except ValueError as exc:
+            warnings.warn(
+                f"replacing unsupported controller publication at {best_link}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        else:
+            if best.comparison_fingerprint == controller.comparison_fingerprint:
+                best_ranking = best_result.candidates[
+                    best_result.selected_candidate_index
+                ].ranking_values
+                replace_best = (ranking, controller.run_id) < (best_ranking, best.run_id)
     if replace_best:
         _replace_relative_symlink(link=best_link, target=run_dir)
     _replace_relative_symlink(link=root / "latest", target=run_dir)

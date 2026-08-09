@@ -17,7 +17,7 @@ lazy `robotics_experiments.workflows.isaac_lab` package.
 
 RL never imports alignment. Before Isaac Lab is constructed, training loads a
 quality-passing schema-1 controller artifact and validates its vehicle, airframe,
-cadence, interface, and action dimension. Policy metadata embeds the complete
+cadence, certified control mode, and four-dimensional action contract. Policy metadata embeds the complete
 controller record and its digest. Evaluation and deployment reuse that embedded
 record; they never resolve a newer alignment implicitly.
 

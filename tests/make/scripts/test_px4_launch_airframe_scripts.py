@@ -29,6 +29,8 @@ def test_persistent_launch_derives_and_propagates_airframe():
     assert "vehicle.px4.failsafe.offboard_loss_action_param" in containers
     assert "PX4_PARAM_COM_OBL_RC_ACT=" in containers
     assert "PX4_PARAM_COM_OF_LOSS_T=" in containers
+    assert "vehicle.px4.logging_profile" in containers
+    assert "PX4_PARAM_SDLOG_PROFILE=" in containers
     # Validates the PX4 image was rebuilt after airframe geometry/config changes.
     assert "px4_airframe_manifest_check.sh" in containers
     assert "check_px4_airframe_manifest_current" in containers
@@ -43,12 +45,14 @@ def test_persistent_launch_derives_and_propagates_airframe():
     assert '-e "PX4_SYS_AUTOSTART=${PX4_SYS_AUTOSTART}"' in instance
     assert '-e "PX4_PARAM_COM_OBL_RC_ACT=${PX4_PARAM_COM_OBL_RC_ACT}"' in instance
     assert '-e "PX4_PARAM_COM_OF_LOSS_T=${PX4_PARAM_COM_OF_LOSS_T}"' in instance
+    assert '-e "PX4_PARAM_SDLOG_PROFILE=${PX4_PARAM_SDLOG_PROFILE}"' in instance
     assert '-e "PX4_TOTAL_INSTANCES=${PX4_TOTAL_INSTANCES}"' in instance
     assert "docker image inspect" in instance
     assert "container_env_value PX4_SIM_MODEL" in instance
     assert "container_env_value PX4_SYS_AUTOSTART" in instance
     assert "container_env_value PX4_PARAM_COM_OBL_RC_ACT" in instance
     assert "container_env_value PX4_PARAM_COM_OF_LOSS_T" in instance
+    assert "container_env_value PX4_PARAM_SDLOG_PROFILE" in instance
     assert "docker rm -f" in instance
 
     make_target = _read("make/containers.mk")
@@ -57,6 +61,7 @@ def test_persistent_launch_derives_and_propagates_airframe():
     assert "PX4_SYS_AUTOSTART='$(PX4_SYS_AUTOSTART)'" in make_target
     assert "PX4_PARAM_COM_OBL_RC_ACT='$(PX4_PARAM_COM_OBL_RC_ACT)'" in make_target
     assert "PX4_PARAM_COM_OF_LOSS_T='$(PX4_PARAM_COM_OF_LOSS_T)'" in make_target
+    assert "PX4_PARAM_SDLOG_PROFILE='$(PX4_PARAM_SDLOG_PROFILE)'" in make_target
 
 
 def test_integration_launch_derives_and_propagates_airframe():
@@ -67,9 +72,18 @@ def test_integration_launch_derives_and_propagates_airframe():
     assert '-e "PX4_SYS_AUTOSTART=${sys_autostart}"' in integration
     assert '-e "PX4_PARAM_COM_OBL_RC_ACT=${offboard_loss_action}"' in integration
     assert '-e "PX4_PARAM_COM_OF_LOSS_T=${offboard_loss_timeout}"' in integration
+    assert "vehicle.px4.logging_profile" in integration
+    assert '-e "PX4_PARAM_SDLOG_PROFILE=${logging_profile}"' in integration
     assert "px4_airframe_manifest_check.sh" in integration
     assert "check_px4_airframe_manifest_current" in integration
     assert "generate_px4_airframes.py" not in integration
+
+
+def test_flight_benchmark_propagates_logging_profile():
+    benchmark = _read("make/scripts/run_flight_benchmark.sh")
+
+    assert "vehicle.px4.logging_profile" in benchmark
+    assert '-e "PX4_PARAM_SDLOG_PROFILE=${logging_profile}"' in benchmark
 
 
 def test_common_launcher_defaults_to_repo_generated_quad():

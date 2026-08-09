@@ -3,7 +3,7 @@
 import importlib.util
 import json
 from dataclasses import replace
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -47,6 +47,79 @@ def test_candidate_expansions_are_chunked_to_fixed_scene_capacity():
     assert [len(chunk) for chunk in chunks] == [4, 4, 2]
 
 
+def test_initial_settings_size_fixed_scene_when_no_staged_parameters():
+    module = _load_script()
+    definition = load_controller_definition(
+        REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
+    )
+    seeds = tuple(
+        replace(definition.base_settings, command_delay_s=offset * 0.001) for offset in range(1, 10)
+    )
+    definition = replace(
+        definition,
+        parameters=(),
+        search=replace(definition.search, initial_settings=seeds),
+    )
+
+    assert module._maximum_candidate_expansion(definition) == 10  # noqa: SLF001
+
+
+def test_smaller_probe_family_reuses_one_fixed_environment_stride():
+    module = _load_script()
+    traces = [{"profile": "roll"}, {"profile": "pitch"}]
+
+    padded = module._pad_family_traces(  # noqa: SLF001 - fixed-scene contract
+        reference_traces=traces,
+        environment_traces_per_candidate=3,
+        candidate_capacity=2,
+    )
+
+    assert padded == [
+        {"profile": "roll"},
+        {"profile": "pitch"},
+        {"profile": "pitch"},
+        {"profile": "roll"},
+        {"profile": "pitch"},
+        {"profile": "pitch"},
+    ]
+
+    with pytest.raises(ValueError, match="exceeds"):
+        module._pad_family_traces(  # noqa: SLF001 - fixed-scene contract
+            reference_traces=traces,
+            environment_traces_per_candidate=1,
+            candidate_capacity=2,
+        )
+
+
+def test_ctbr_initial_rotor_state_uses_first_physical_trace_command():
+    torch = pytest.importorskip("torch")
+    module = _load_script()
+    traces = [
+        {
+            "command_collective_thrust_normalized": [0.57],
+            "command_body_rate_flu_radps": [[0.2, -0.4, 0.1]],
+        },
+        {
+            "command_collective_thrust_normalized": [0.60],
+            "command_body_rate_flu_radps": [[0.0, 0.0, 0.0]],
+        },
+    ]
+    params = SimpleNamespace(
+        kind="ctbr",
+        hover_thrust_normalized=torch.tensor([0.54, 0.60]),
+        max_body_rate_radps=2.0,
+    )
+
+    actions = module._initial_trace_actions(  # noqa: SLF001 - replay boundary contract
+        traces=traces,
+        params=params,
+        device="cpu",
+    )
+
+    assert actions[:, 0].tolist() == pytest.approx([0.57 / 0.54 - 1.0, 0.0], abs=1e-6)
+    assert actions[0, 1:4].tolist() == pytest.approx([0.1, -0.2, 0.05])
+
+
 def test_worker_results_merge_in_candidate_order():
     module = _load_script()
 
@@ -82,12 +155,17 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
     first = _settings(1)[0]
     second = replace(first, command_delay_s=first.command_delay_s + 0.001)
     trace = module.ProbeTrace(
+        family="velocity",
+        control_mode="velocity",
+        family_metric="translational-controller-quality",
         profile="fit_x",
         split="fit",
         axis="x",
         time_s=(0.0,),
         command_velocity_body_flu_mps=((0.0, 0.0, 0.0),),
         command_yaw_rate_radps=(0.0,),
+        command_collective_thrust_normalized=(0.0,),
+        command_body_rate_flu_radps=((0.0, 0.0, 0.0),),
         position_enu_m=((0.0, 0.0, 0.0),),
         attitude_flu_enu_wxyz=((1.0, 0.0, 0.0, 0.0),),
         velocity_body_flu_mps=((0.0, 0.0, 0.0),),

@@ -210,7 +210,9 @@ iterates the enabled vehicles from `load_config(path)` and uses each
 non-contiguous ids keep their derived ports. The same resolved launch tuple
 threads each vehicle's PX4 simulator model/autostart plus
 `px4.failsafe.offboard_loss_action` and timeout into the container as pinned PX4
-startup parameters. The first instance in that list owns
+startup parameters. The same resolved tuple carries `px4.logging_profile` into
+PX4's `SDLOG_PROFILE`; ordinary tests retain profile `1`, while alignment opts
+into full-rate controller topics. The first instance in that list owns
 the network namespace. Each additional instance `i` joins that namespace
 (`--network container:<primary>`), runs with `PX4_INSTANCE=i` so
 `run_px4_sitl_ci.sh` launches PX4 `-i i` (simulator TCP `4560 + i`, GCS UDP

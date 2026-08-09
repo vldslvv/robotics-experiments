@@ -23,6 +23,7 @@ class _Px4RuntimeConfig(_FreezableConfig):
     """PX4 process configuration separate from the Isaac bridge."""
 
     failsafe: _Px4FailsafeConfig
+    logging_profile: int
 
 
 @dataclass

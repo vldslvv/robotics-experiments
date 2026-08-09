@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from robotics_experiments.controller._models import (
-    CommandInterface,
     ControllerArtifact,
     ControllerSettings,
 )
@@ -65,12 +64,6 @@ def _finite(
     return parsed
 
 
-def _integer(value: Any, name: str, /) -> int:
-    if type(value) is not int:
-        raise ValueError(f"{name} must be an integer")
-    return value
-
-
 def _vector(
     value: Any,
     name: str,
@@ -95,6 +88,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.velocity_controller_rate_hz",
             positive=True,
         ),
+        attitude_controller_rate_hz=_finite(
+            value=payload["attitude_controller_rate_hz"],
+            name=f"{name}.attitude_controller_rate_hz",
+            positive=True,
+        ),
         kp_vel=_vector(payload["kp_vel"], f"{name}.kp_vel"),
         horizontal_velocity_error_gain_scale=_finite(
             value=payload["horizontal_velocity_error_gain_scale"],
@@ -111,6 +109,31 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.horizontal_velocity_error_gain_full_mps",
             positive=True,
         ),
+        horizontal_velocity_error_gain_end_mps=_finite(
+            value=payload["horizontal_velocity_error_gain_end_mps"],
+            name=f"{name}.horizontal_velocity_error_gain_end_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_scale=_finite(
+            value=payload["horizontal_velocity_braking_gain_scale"],
+            name=f"{name}.horizontal_velocity_braking_gain_scale",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_start_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_start_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_start_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_full_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_full_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_full_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_end_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_end_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_end_mps",
+            positive=True,
+        ),
         ki_vel=_vector(payload["ki_vel"], f"{name}.ki_vel"),
         kd_vel=_vector(payload["kd_vel"], f"{name}.kd_vel"),
         velocity_observation_scale=_vector(
@@ -122,14 +145,22 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             f"{name}.velocity_observation_bias_mps",
             False,
         ),
+        velocity_observation_bias_command_start_mps=_finite(
+            value=payload["velocity_observation_bias_command_start_mps"],
+            name=f"{name}.velocity_observation_bias_command_start_mps",
+            nonnegative=True,
+        ),
+        velocity_observation_bias_command_full_mps=_finite(
+            value=payload["velocity_observation_bias_command_full_mps"],
+            name=f"{name}.velocity_observation_bias_command_full_mps",
+            positive=True,
+        ),
         velocity_estimator_bias_decay_hz=_finite(
             value=payload["velocity_estimator_bias_decay_hz"],
             name=f"{name}.velocity_estimator_bias_decay_hz",
             nonnegative=True,
         ),
-        velocity_filter_hz=_finite(
-            value=payload["velocity_filter_hz"], name=f"{name}.velocity_filter_hz", nonnegative=True
-        ),
+        velocity_filter_hz=_vector(payload["velocity_filter_hz"], f"{name}.velocity_filter_hz"),
         velocity_derivative_filter_hz=_finite(
             value=payload["velocity_derivative_filter_hz"],
             name=f"{name}.velocity_derivative_filter_hz",
@@ -141,6 +172,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         hover_thrust_normalized=_finite(
             value=payload["hover_thrust_normalized"],
             name=f"{name}.hover_thrust_normalized",
+            positive=True,
+        ),
+        ctbr_effective_collective_scale=_finite(
+            value=payload["ctbr_effective_collective_scale"],
+            name=f"{name}.ctbr_effective_collective_scale",
             positive=True,
         ),
         kp_att=_vector(payload["kp_att"], f"{name}.kp_att"),
@@ -203,13 +239,23 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
     if not 0.0 < result.hover_thrust_normalized <= 1.0:
         raise ValueError(f"{name}.hover_thrust_normalized must be in (0, 1]")
-    if result.horizontal_velocity_error_gain_scale < 1.0:
-        raise ValueError(f"{name}.horizontal_velocity_error_gain_scale must be at least 1")
     if (
-        result.horizontal_velocity_error_gain_start_mps
-        >= result.horizontal_velocity_error_gain_full_mps
+        not result.horizontal_velocity_error_gain_start_mps
+        < result.horizontal_velocity_error_gain_full_mps
+        < result.horizontal_velocity_error_gain_end_mps
     ):
-        raise ValueError(f"{name} horizontal gain transition must satisfy start < full")
+        raise ValueError(f"{name} horizontal gain transition must satisfy start < full < end")
+    if (
+        not result.horizontal_velocity_braking_gain_start_mps
+        < result.horizontal_velocity_braking_gain_full_mps
+        < result.horizontal_velocity_braking_gain_end_mps
+    ):
+        raise ValueError(f"{name} horizontal braking transition must satisfy start < full < end")
+    if (
+        result.velocity_observation_bias_command_start_mps
+        >= result.velocity_observation_bias_command_full_mps
+    ):
+        raise ValueError(f"{name} observation-bias command transition must satisfy start < full")
     if (
         not 0.0
         <= result.min_collective_thrust_fraction
@@ -234,25 +280,16 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
     _exact_fields(payload, ControllerArtifact, "controller artifact")
     if payload["artifact_kind"] != _ARTIFACT_KIND or payload["schema_version"] != _SCHEMA_VERSION:
         raise ValueError("controller artifact is not the supported controller-v1 contract")
-    interface_payload = _object(payload["command_interface"], "command_interface")
-    _exact_fields(interface_payload, CommandInterface, "command_interface")
-    interface = CommandInterface(
-        kind=_string(interface_payload["kind"], "command_interface.kind"),
-        dimension=_integer(interface_payload["dimension"], "command_interface.dimension"),
-        frame=_string(interface_payload["frame"], "command_interface.frame"),
-        linear_scale_mps=_finite(
-            value=interface_payload["linear_scale_mps"],
-            name="command_interface.linear_scale_mps",
-            positive=True,
-        ),
-        yaw_rate_scale_radps=_finite(
-            value=interface_payload["yaw_rate_scale_radps"],
-            name="command_interface.yaw_rate_scale_radps",
-            positive=True,
-        ),
-    )
-    if interface.dimension <= 0:
-        raise ValueError("command_interface.dimension must be positive")
+    modes = payload["certified_control_modes"]
+    if (
+        not isinstance(modes, list)
+        or not modes
+        or any(mode not in ("velocity", "ctbr") for mode in modes)
+        or len(set(modes)) != len(modes)
+    ):
+        raise ValueError(
+            "certified_control_modes must be a non-empty unique list of velocity and/or ctbr"
+        )
     settings = _settings(payload["selected_settings"], "selected_settings")
     settings_fingerprint = _string(payload["settings_fingerprint"], "settings_fingerprint")
     if settings_fingerprint != _fingerprint(asdict(settings)):
@@ -295,7 +332,7 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
         command_rate_hz=_finite(
             value=payload["command_rate_hz"], name="command_rate_hz", positive=True
         ),
-        command_interface=interface,
+        certified_control_modes=tuple(modes),
         selected_settings=settings,
         settings_fingerprint=settings_fingerprint,
         advisory_quality_passed=payload["advisory_quality_passed"],

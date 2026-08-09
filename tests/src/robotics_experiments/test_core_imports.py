@@ -1,3 +1,4 @@
+import ast
 import importlib
 import importlib.abc
 import subprocess
@@ -5,6 +6,27 @@ import sys
 import tomllib
 
 from tests.support.paths import REPO_ROOT
+
+
+def _project_imports(path, /):
+    imported = set()
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.add(node.module)
+    return imported
+
+
+def _package_imports(relative, /):
+    package = REPO_ROOT / "src" / "robotics_experiments" / relative
+    return {
+        imported
+        for path in package.rglob("*.py")
+        for imported in _project_imports(path)
+        if imported.startswith("robotics_experiments.")
+    }
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
@@ -15,6 +37,35 @@ class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
         if fullname.split(".", maxsplit=1)[0] in self._module_roots:
             raise ModuleNotFoundError(f"No module named {fullname!r}", name=fullname)
         return None
+
+
+def test_controller_alignment_rl_dependency_direction():
+    controller_imports = _package_imports("controller")
+    assert not any(
+        imported.startswith(
+            (
+                "robotics_experiments.alignment",
+                "robotics_experiments.rl",
+                "robotics_experiments.workflows",
+                "robotics_experiments.runtime",
+            )
+        )
+        for imported in controller_imports
+    )
+
+    for package in ("rl", "workflows/isaac_lab"):
+        assert not any(
+            imported.startswith("robotics_experiments.alignment")
+            for imported in _package_imports(package)
+        )
+
+    deployment_imports = _project_imports(
+        REPO_ROOT / "src" / "robotics_experiments" / "runtime" / "_policy.py"
+    )
+    assert not any(
+        imported.startswith(("robotics_experiments.alignment", "robotics_experiments.controller"))
+        for imported in deployment_imports
+    )
 
 
 def _drop_modules(*prefixes: str) -> None:

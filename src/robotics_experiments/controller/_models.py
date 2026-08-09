@@ -15,19 +15,28 @@ class ControllerSettings:
 
     command_delay_s: float
     velocity_controller_rate_hz: float
+    attitude_controller_rate_hz: float
     kp_vel: Vector3
     horizontal_velocity_error_gain_scale: float
     horizontal_velocity_error_gain_start_mps: float
     horizontal_velocity_error_gain_full_mps: float
+    horizontal_velocity_error_gain_end_mps: float
+    horizontal_velocity_braking_gain_scale: float
+    horizontal_velocity_braking_gain_start_mps: float
+    horizontal_velocity_braking_gain_full_mps: float
+    horizontal_velocity_braking_gain_end_mps: float
     ki_vel: Vector3
     kd_vel: Vector3
     velocity_observation_scale: Vector3
     velocity_observation_bias_mps: Vector3
+    velocity_observation_bias_command_start_mps: float
+    velocity_observation_bias_command_full_mps: float
     velocity_estimator_bias_decay_hz: float
-    velocity_filter_hz: float
+    velocity_filter_hz: Vector3
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3
     hover_thrust_normalized: float
+    ctbr_effective_collective_scale: float
     kp_att: Vector3
     attitude_yaw_weight: float
     kp_rate: Vector3
@@ -45,17 +54,6 @@ class ControllerSettings:
     thruster_tau_inc_s: float
     thruster_tau_dec_s: float
     thruster_max_thrust_rate_nps: float
-
-
-@dataclass(frozen=True)
-class CommandInterface:
-    """Policy-facing velocity command contract used by aligned controllers."""
-
-    kind: str
-    dimension: int
-    frame: str
-    linear_scale_mps: float
-    yaw_rate_scale_radps: float
 
 
 @dataclass(frozen=True)
@@ -78,7 +76,7 @@ class ControllerArtifact:
     vehicle: str
     airframe: str
     command_rate_hz: float
-    command_interface: CommandInterface
+    certified_control_modes: tuple[str, ...]
     probe_suite_fingerprint: str
     selected_settings: ControllerSettings
     settings_fingerprint: str

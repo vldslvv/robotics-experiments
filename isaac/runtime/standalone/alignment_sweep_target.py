@@ -220,6 +220,16 @@ def _chunk_settings(
     )
 
 
+def _maximum_candidate_expansion(definition: ControllerDefinition, /) -> int:
+    """Size the fixed scene for both seeded and staged candidate batches."""
+    expansions = [1 + len(definition.search.initial_settings)]
+    expansions.extend(
+        definition.search.beam_width * len(parameter.candidates)
+        for parameter in definition.parameters
+    )
+    return max(expansions)
+
+
 def _merge_indexed_results(
     *,
     result_count: int,
@@ -357,6 +367,7 @@ def _make_env(
     config: ExperimentConfig,
     num_envs: int,
     settings: ControllerSettings,
+    control_mode: str,
 ):
     from isaaclab.envs import DirectRLEnv
 
@@ -440,6 +451,11 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                velocity_setpoint_world=torch.as_tensor(
+                    [trace["initial_velocity_setpoint_enu_mps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 filtered_angular_velocity_body=torch.as_tensor(
                     [
                         trace["initial_estimated_angular_velocity_body_flu_radps"]
@@ -507,6 +523,47 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                attitude_loop_elapsed_s=torch.as_tensor(
+                    [
+                        trace["initial_controller_state_source_age_us"]["vehicle_rates_setpoint"]
+                        / 1e6
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                desired_rotation_world_body=math_utils.matrix_from_quat(
+                    torch.as_tensor(
+                        [trace["initial_desired_attitude_flu_enu_wxyz"] for trace in traces],
+                        dtype=torch.float32,
+                        device=self.device,
+                    )
+                ),
+                desired_yaw_rate_radps=torch.as_tensor(
+                    [trace["initial_desired_yaw_rate_radps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                desired_collective_thrust_setpoint=torch.as_tensor(
+                    [trace["initial_desired_collective_thrust_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                collective_thrust_setpoint=torch.as_tensor(
+                    [trace["initial_collective_thrust_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                body_rate_setpoint=torch.as_tensor(
+                    [trace["initial_body_rate_setpoint_flu_radps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                filtered_yaw_torque=torch.as_tensor(
+                    [trace["initial_filtered_yaw_torque_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 valid=torch.as_tensor(
                     [trace.get("initial_controller_state_valid", False) for trace in traces],
                     dtype=torch.bool,
@@ -516,7 +573,11 @@ def _make_env(
             self._thruster.curr_thrust[:] = _initial_rotor_thrust_from_controller_state(
                 params=self.actuation_params,
                 state=self._controller_state,
-                action=torch.zeros_like(self.actions),
+                action=_initial_trace_actions(
+                    traces=traces,
+                    params=self.actuation_params,
+                    device=self.device,
+                ),
                 attitude_wxyz=quaternion,
                 linear_velocity_world=linear_velocity_world,
                 angular_velocity_body=angular_body,
@@ -581,11 +642,41 @@ def _make_env(
     cfg.seed = config.rl.training.seed
     cfg.scene.num_envs = num_envs
     cfg.episode_length_s = 120.0
-    return _AlignmentReplayEnv(
+    env = _AlignmentReplayEnv(
         cfg=cfg,
         experiment_config=config,
         controller_settings=settings,
     )
+    env.actuation_params = replace(env.actuation_params, kind=control_mode)
+    return env
+
+
+def _initial_trace_actions(*, traces: list[dict[str, Any]], params, device) -> torch.Tensor:
+    actions = torch.zeros((len(traces), 4), dtype=torch.float32, device=device)
+    if params.kind == "ctbr":
+        collective = torch.as_tensor(
+            [trace["command_collective_thrust_normalized"][0] for trace in traces],
+            dtype=torch.float32,
+            device=device,
+        )
+        actions[:, 0] = collective / params.hover_thrust_normalized - 1.0
+        actions[:, 1:4] = torch.as_tensor(
+            [trace["command_body_rate_flu_radps"][0] for trace in traces],
+            dtype=torch.float32,
+            device=device,
+        ) / float(params.max_body_rate_radps)
+        return actions
+    actions[:, :3] = torch.as_tensor(
+        [trace["command_velocity_body_flu_mps"][0] for trace in traces],
+        dtype=torch.float32,
+        device=device,
+    ) / float(params.max_body_velocity_mps)
+    actions[:, 3] = torch.as_tensor(
+        [trace["command_yaw_rate_radps"][0] for trace in traces],
+        dtype=torch.float32,
+        device=device,
+    ) / float(params.max_yaw_rate_radps)
+    return actions
 
 
 def _assert_flight_envelope(
@@ -634,12 +725,27 @@ def _assert_flight_envelope(
         raise RuntimeError("target flight-envelope failure: " + "; ".join(failures))
 
 
+def _pad_family_traces(
+    *,
+    reference_traces: list[dict[str, Any]],
+    environment_traces_per_candidate: int,
+    candidate_capacity: int,
+) -> list[dict[str, Any]]:
+    if environment_traces_per_candidate < len(reference_traces):
+        raise ValueError("probe-family trace count exceeds the fixed environment stride")
+    padded = reference_traces + [reference_traces[-1]] * (
+        environment_traces_per_candidate - len(reference_traces)
+    )
+    return padded * candidate_capacity
+
+
 def _candidate_trace_batch(
     *,
     env,
     config: ExperimentConfig,
     settings: tuple[ControllerSettings, ...],
     candidate_capacity: int,
+    environment_traces_per_candidate: int,
     reference_traces: list[dict[str, Any]],
     vehicle_label: str,
 ) -> tuple[list[dict[str, Any]] | str, ...]:
@@ -648,16 +754,26 @@ def _candidate_trace_batch(
             f"candidate batch contains {len(settings)} settings for capacity "
             f"{candidate_capacity}"
         )
-    traces_per_candidate = len(reference_traces)
     padded_settings = settings + (settings[-1],) * (candidate_capacity - len(settings))
     physics_hz = config.sim.physics_hz
+    control_modes = {str(source["control_mode"]) for source in reference_traces}
+    if len(control_modes) != 1:
+        raise ValueError("one target batch must contain exactly one control mode")
+    control_mode = next(iter(control_modes))
     action_scale = config.rl.action.max_body_velocity_mps
     routine = config.vehicles[vehicle_label].routine
+    env.actuation_params = replace(env.actuation_params, kind=control_mode)
     env.apply_controller_settings_batch(
         controller_settings=padded_settings,
-        traces_per_candidate=traces_per_candidate,
+        traces_per_candidate=environment_traces_per_candidate,
     )
-    env.set_initial_states(traces=reference_traces * candidate_capacity)
+    env.set_initial_states(
+        traces=_pad_family_traces(
+            reference_traces=reference_traces,
+            environment_traces_per_candidate=environment_traces_per_candidate,
+            candidate_capacity=candidate_capacity,
+        )
+    )
     times = [[float(value) for value in source["time_s"]] for source in reference_traces]
     sample_indices = [1 for _source in reference_traces]
     trace_initial_positions = [
@@ -668,9 +784,8 @@ def _candidate_trace_batch(
         )
         for source in reference_traces
     ]
-    active_env_count = len(settings) * traces_per_candidate
-    initial_states = env.flight_states()[:active_env_count]
-    velocities = [[value] for value in env.body_velocities()[:active_env_count]]
+    initial_states = env.flight_states()
+    velocities = [[value] for value in env.body_velocities()]
     positions = [[state[0]] for state in initial_states]
     attitudes = [[state[1]] for state in initial_states]
     world_velocities = [[state[2]] for state in initial_states]
@@ -706,19 +821,31 @@ def _candidate_trace_batch(
                 sample_index = sample_indices[trace_index]
                 if sample_index >= len(times[trace_index]):
                     continue
-                command = source["command_velocity_body_flu_mps"][sample_index - 1]
-                env_index = candidate_index * traces_per_candidate + trace_index
-                action[env_index, :3] = (
-                    torch.as_tensor(
-                        command,
+                env_index = candidate_index * environment_traces_per_candidate + trace_index
+                if control_mode == "ctbr":
+                    collective = float(
+                        source["command_collective_thrust_normalized"][sample_index - 1]
+                    )
+                    hover = float(env.actuation_params.hover_thrust_normalized[env_index])
+                    action[env_index, 0] = collective / hover - 1.0
+                    action[env_index, 1:4] = torch.as_tensor(
+                        source["command_body_rate_flu_radps"][sample_index - 1],
                         dtype=torch.float32,
                         device=env.device,
+                    ) / float(config.rl.action.max_body_rate_radps)
+                else:
+                    command = source["command_velocity_body_flu_mps"][sample_index - 1]
+                    action[env_index, :3] = (
+                        torch.as_tensor(
+                            command,
+                            dtype=torch.float32,
+                            device=env.device,
+                        )
+                        / action_scale
                     )
-                    / action_scale
-                )
-                action[env_index, 3] = float(
-                    source["command_yaw_rate_radps"][sample_index - 1]
-                ) / float(config.rl.action.max_yaw_rate_radps)
+                    action[env_index, 3] = float(
+                        source["command_yaw_rate_radps"][sample_index - 1]
+                    ) / float(config.rl.action.max_yaw_rate_radps)
         env.step_with_physics_steps(
             action=action,
             physics_steps=physics_steps,
@@ -737,7 +864,7 @@ def _candidate_trace_batch(
             for candidate_index in range(len(settings)):
                 if failures[candidate_index] is not None:
                     continue
-                env_index = candidate_index * traces_per_candidate + trace_index
+                env_index = candidate_index * environment_traces_per_candidate + trace_index
                 velocity = body_velocities[env_index]
                 flight_state = flight_states[env_index]
                 try:
@@ -767,7 +894,7 @@ def _candidate_trace_batch(
             continue
         raw_traces = []
         for trace_index, source in enumerate(reference_traces):
-            env_index = candidate_index * traces_per_candidate + trace_index
+            env_index = candidate_index * environment_traces_per_candidate + trace_index
             raw_traces.append(
                 {
                     **source,
@@ -811,10 +938,20 @@ def _worker_main(
             for index, trace in enumerate(reference_traces)
         )
         score_metric = metric(name=target.selection_metric)
+        traces_by_mode = {
+            mode: [trace for trace in reference_traces if trace["control_mode"] == mode]
+            for mode in ("velocity", "ctbr")
+            if any(trace["control_mode"] == mode for trace in reference_traces)
+        }
+        environment_traces_per_candidate = max(
+            len(mode_traces) for mode_traces in traces_by_mode.values()
+        )
+        initial_mode = next(iter(traces_by_mode))
         env = _make_env(
             config=config,
-            num_envs=candidate_capacity * len(reference_traces),
+            num_envs=candidate_capacity * environment_traces_per_candidate,
             settings=target.base_settings,
+            control_mode=initial_mode,
         )
         spool_path = Path(spool_dir) / f"worker-{worker_index}.jsonl"
         with spool_path.open("x", encoding="utf-8") as spool:
@@ -825,14 +962,38 @@ def _worker_main(
                     break
                 batch_id, indexed_settings = task
                 settings = tuple(setting for _index, setting in indexed_settings)
-                raw = _candidate_trace_batch(
-                    env=env,
-                    config=config,
-                    settings=settings,
-                    candidate_capacity=candidate_capacity,
-                    reference_traces=reference_traces,
-                    vehicle_label=target.vehicle,
-                )
+                mode_results = {
+                    mode: _candidate_trace_batch(
+                        env=env,
+                        config=config,
+                        settings=settings,
+                        candidate_capacity=candidate_capacity,
+                        environment_traces_per_candidate=(environment_traces_per_candidate),
+                        reference_traces=mode_traces,
+                        vehicle_label=target.vehicle,
+                    )
+                    for mode, mode_traces in traces_by_mode.items()
+                }
+                raw: list[str | list[dict[str, Any]]] = []
+                order = {trace["profile"]: index for index, trace in enumerate(reference_traces)}
+                for candidate_index in range(len(settings)):
+                    candidate_results = [
+                        mode_results[mode][candidate_index] for mode in traces_by_mode
+                    ]
+                    failure = next(
+                        (result for result in candidate_results if isinstance(result, str)),
+                        None,
+                    )
+                    if failure is not None:
+                        raw.append(failure)
+                        continue
+                    combined = [
+                        trace
+                        for result in candidate_results
+                        if isinstance(result, list)
+                        for trace in result
+                    ]
+                    raw.append(sorted(combined, key=lambda trace: order[trace["profile"]]))
                 scored = []
                 for (index, setting), result in zip(indexed_settings, raw, strict=True):
                     if isinstance(result, str):
@@ -1084,10 +1245,7 @@ def _run(
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
-    maximum_expansion = max(
-        (target.search.beam_width * len(parameter.candidates) for parameter in target.parameters),
-        default=1,
-    )
+    maximum_expansion = _maximum_candidate_expansion(target)
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
     candidate_capacity = min(
         config.alignment.execution.candidate_capacity,
