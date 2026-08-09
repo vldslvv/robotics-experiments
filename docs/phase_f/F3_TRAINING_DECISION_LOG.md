@@ -9651,3 +9651,29 @@ gain, the physical observation-scale range, decay, integral limit, controller
 structure, plant, probe list, and all acceptance limits. Reuse Entry 286's
 fresh reference for the diagnostic and preserve staged beam refinement; only a
 quality-passing candidate proceeds to replay and live validation.
+
+### 290. Higher damping leaves one lateral braking gate
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-damping-diagnostic`
+reused the Entry 286 capture and evaluated 3,450 unique candidates in 35 GPU
+batches and 1,259.7 seconds. Average sampled GPU utilization was 23.3%.
+Candidate 3040 selected `kd_vel.y=0.575`, 0.01125 Hz bias decay, observation
+bias `[-0.015, 0.0, -0.0039]` m/s, and Y scale 0.98.
+
+This materially advanced the frontier. Combined endpoint error passed at
+9.611 mm and every other velocity and CTBR gate passed. Only Y braking remained
+at 8.519 mm against 5 mm, down from Entry 288's selected 9.566 mm. The selected
+damping is near the 0.60 range edge, and lowering Y scale across the physical
+range also improves braking, but extrapolation would require an implausible
+estimator scale and is therefore rejected as the next correction.
+
+Entry 288's proportional sweep established a monotonic high-side direction:
+on the endpoint champion, increasing `kp_vel.y` from 1.2 to 1.75 reduced Y
+braking from 17.157 to 15.340 mm and reduced residual speed, while endpoint
+remained below 10 mm above about 1.3. Only gains below the 1.8 base were tested.
+Add a high-side proportional stage above 1.8, retain higher damping, and require
+the combined candidate to pass braking without regressing endpoint, residual,
+velocity-envelope, replay, or live gates.
