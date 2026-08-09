@@ -9375,3 +9375,25 @@ equal and opposite with no zero-rate attitude hold between them, so their
 commanded rotation is still zero and their lateral excursion remains bounded.
 Also include the profile name in future sign-audit failures. Retain every
 acceptance threshold and repeat the full campaign from a clean commit.
+
+### 278. Reuse one Isaac Lab environment across probe families
+
+Date: 2026-08-09.
+
+Fresh run `.build/alignment/x500-px4-v1/20260809T-uniform-6dof-auditable-scratch`
+completed the 22-profile PX4 capture, sign audit, and actuator audit. The target
+worker then created the 1,792-environment velocity scene but stalled while
+constructing a second `DirectRLEnv` for CTBR in the same process, emitting the
+Isaac Lab destructor traceback before the worker-ready message. Process and GPU
+inspection showed one CPU-bound child, no useful GPU work, and no target batch
+after more than five minutes. The temporary target container was stopped while
+the accepted reference evidence remained in the run directory.
+
+Isaac Lab owns one simulation context per process. Keep one persistent fixed-size
+environment per worker, switch its controller mode sequentially for each family,
+and pad the smaller family's per-candidate trace stride to the largest family.
+This preserves candidate settings, authored profile order, and metric inputs
+while avoiding the unsupported second environment and reducing scene memory.
+Commit the structural correction, reuse this run's accepted capture only to
+diagnose target startup and fitting, then rerun the full publishable campaign
+from clean source.

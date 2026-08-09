@@ -47,6 +47,33 @@ def test_candidate_expansions_are_chunked_to_fixed_scene_capacity():
     assert [len(chunk) for chunk in chunks] == [4, 4, 2]
 
 
+def test_smaller_probe_family_reuses_one_fixed_environment_stride():
+    module = _load_script()
+    traces = [{"profile": "roll"}, {"profile": "pitch"}]
+
+    padded = module._pad_family_traces(  # noqa: SLF001 - fixed-scene contract
+        reference_traces=traces,
+        environment_traces_per_candidate=3,
+        candidate_capacity=2,
+    )
+
+    assert padded == [
+        {"profile": "roll"},
+        {"profile": "pitch"},
+        {"profile": "pitch"},
+        {"profile": "roll"},
+        {"profile": "pitch"},
+        {"profile": "pitch"},
+    ]
+
+    with pytest.raises(ValueError, match="exceeds"):
+        module._pad_family_traces(  # noqa: SLF001 - fixed-scene contract
+            reference_traces=traces,
+            environment_traces_per_candidate=1,
+            candidate_capacity=2,
+        )
+
+
 def test_worker_results_merge_in_candidate_order():
     module = _load_script()
 

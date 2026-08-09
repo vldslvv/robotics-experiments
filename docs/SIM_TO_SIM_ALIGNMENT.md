@@ -86,6 +86,12 @@ second, padding, cache hits, batches, and sampled GPU utilization. The 95% GPU
 target remains diagnostic; deterministic useful throughput is the optimization
 objective.
 
+Each worker owns one persistent Isaac Lab environment for the entire ordered
+probe-family list. Families execute sequentially by switching the controller
+mode and padding the smaller family's trace stride to the fixed scene capacity;
+constructing multiple `DirectRLEnv` instances in one process is unsupported by
+Isaac Lab's simulation-context ownership.
+
 ## Evidence and boundary audit
 
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy

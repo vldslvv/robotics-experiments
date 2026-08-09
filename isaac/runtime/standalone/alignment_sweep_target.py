@@ -637,12 +637,27 @@ def _assert_flight_envelope(
         raise RuntimeError("target flight-envelope failure: " + "; ".join(failures))
 
 
+def _pad_family_traces(
+    *,
+    reference_traces: list[dict[str, Any]],
+    environment_traces_per_candidate: int,
+    candidate_capacity: int,
+) -> list[dict[str, Any]]:
+    if environment_traces_per_candidate < len(reference_traces):
+        raise ValueError("probe-family trace count exceeds the fixed environment stride")
+    padded = reference_traces + [reference_traces[-1]] * (
+        environment_traces_per_candidate - len(reference_traces)
+    )
+    return padded * candidate_capacity
+
+
 def _candidate_trace_batch(
     *,
     env,
     config: ExperimentConfig,
     settings: tuple[ControllerSettings, ...],
     candidate_capacity: int,
+    environment_traces_per_candidate: int,
     reference_traces: list[dict[str, Any]],
     vehicle_label: str,
 ) -> tuple[list[dict[str, Any]] | str, ...]:
@@ -651,7 +666,6 @@ def _candidate_trace_batch(
             f"candidate batch contains {len(settings)} settings for capacity "
             f"{candidate_capacity}"
         )
-    traces_per_candidate = len(reference_traces)
     padded_settings = settings + (settings[-1],) * (candidate_capacity - len(settings))
     physics_hz = config.sim.physics_hz
     control_modes = {str(source["control_mode"]) for source in reference_traces}
@@ -660,11 +674,18 @@ def _candidate_trace_batch(
     control_mode = next(iter(control_modes))
     action_scale = config.rl.action.max_body_velocity_mps
     routine = config.vehicles[vehicle_label].routine
+    env.actuation_params = replace(env.actuation_params, kind=control_mode)
     env.apply_controller_settings_batch(
         controller_settings=padded_settings,
-        traces_per_candidate=traces_per_candidate,
+        traces_per_candidate=environment_traces_per_candidate,
     )
-    env.set_initial_states(traces=reference_traces * candidate_capacity)
+    env.set_initial_states(
+        traces=_pad_family_traces(
+            reference_traces=reference_traces,
+            environment_traces_per_candidate=environment_traces_per_candidate,
+            candidate_capacity=candidate_capacity,
+        )
+    )
     times = [[float(value) for value in source["time_s"]] for source in reference_traces]
     sample_indices = [1 for _source in reference_traces]
     trace_initial_positions = [
@@ -675,9 +696,8 @@ def _candidate_trace_batch(
         )
         for source in reference_traces
     ]
-    active_env_count = len(settings) * traces_per_candidate
-    initial_states = env.flight_states()[:active_env_count]
-    velocities = [[value] for value in env.body_velocities()[:active_env_count]]
+    initial_states = env.flight_states()
+    velocities = [[value] for value in env.body_velocities()]
     positions = [[state[0]] for state in initial_states]
     attitudes = [[state[1]] for state in initial_states]
     world_velocities = [[state[2]] for state in initial_states]
@@ -713,7 +733,7 @@ def _candidate_trace_batch(
                 sample_index = sample_indices[trace_index]
                 if sample_index >= len(times[trace_index]):
                     continue
-                env_index = candidate_index * traces_per_candidate + trace_index
+                env_index = candidate_index * environment_traces_per_candidate + trace_index
                 if control_mode == "ctbr":
                     collective = float(
                         source["command_collective_thrust_normalized"][sample_index - 1]
@@ -756,7 +776,7 @@ def _candidate_trace_batch(
             for candidate_index in range(len(settings)):
                 if failures[candidate_index] is not None:
                     continue
-                env_index = candidate_index * traces_per_candidate + trace_index
+                env_index = candidate_index * environment_traces_per_candidate + trace_index
                 velocity = body_velocities[env_index]
                 flight_state = flight_states[env_index]
                 try:
@@ -786,7 +806,7 @@ def _candidate_trace_batch(
             continue
         raw_traces = []
         for trace_index, source in enumerate(reference_traces):
-            env_index = candidate_index * traces_per_candidate + trace_index
+            env_index = candidate_index * environment_traces_per_candidate + trace_index
             raw_traces.append(
                 {
                     **source,
@@ -817,7 +837,7 @@ def _worker_main(
     result_queue,
 ) -> None:
     simulation_app = None
-    envs = {}
+    env = None
     try:
         from isaaclab.app import AppLauncher
 
@@ -835,15 +855,16 @@ def _worker_main(
             for mode in ("velocity", "ctbr")
             if any(trace["control_mode"] == mode for trace in reference_traces)
         }
-        envs = {
-            mode: _make_env(
-                config=config,
-                num_envs=candidate_capacity * len(mode_traces),
-                settings=target.base_settings,
-                control_mode=mode,
-            )
-            for mode, mode_traces in traces_by_mode.items()
-        }
+        environment_traces_per_candidate = max(
+            len(mode_traces) for mode_traces in traces_by_mode.values()
+        )
+        initial_mode = next(iter(traces_by_mode))
+        env = _make_env(
+            config=config,
+            num_envs=candidate_capacity * environment_traces_per_candidate,
+            settings=target.base_settings,
+            control_mode=initial_mode,
+        )
         spool_path = Path(spool_dir) / f"worker-{worker_index}.jsonl"
         with spool_path.open("x", encoding="utf-8") as spool:
             result_queue.put(("ready", worker_index, None))
@@ -855,10 +876,11 @@ def _worker_main(
                 settings = tuple(setting for _index, setting in indexed_settings)
                 mode_results = {
                     mode: _candidate_trace_batch(
-                        env=envs[mode],
+                        env=env,
                         config=config,
                         settings=settings,
                         candidate_capacity=candidate_capacity,
+                        environment_traces_per_candidate=(environment_traces_per_candidate),
                         reference_traces=mode_traces,
                         vehicle_label=target.vehicle,
                     )
@@ -913,7 +935,7 @@ def _worker_main(
     except BaseException as exc:
         result_queue.put(("error", worker_index, f"{type(exc).__name__}: {exc}"))
     finally:
-        for env in envs.values():
+        if env is not None:
             env.close()
         if simulation_app is not None:
             simulation_app.close()
