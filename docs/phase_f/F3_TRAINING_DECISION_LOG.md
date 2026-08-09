@@ -9502,3 +9502,28 @@ refinement. Keep X/Z derivative gains, P/I gains, estimator scale, controller
 structure, plant, profiles, and gates unchanged. Reuse the fresh Entry 282
 reference for a target-only diagnostic. Require a candidate to pass both Y
 braking and combined endpoint before repeating a fully fresh publishable run.
+
+### 284. Lateral damping alone does not close the joint gate
+
+Date: 2026-08-09.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-kd-diagnostic`
+reused the Entry 282 capture and evaluated 1,884 unique candidates in 20 GPU
+batches and 654.8 seconds. Average sampled GPU utilization was 23.9%. The
+search retained candidate 1180 with the original `kd_vel.y=0.2`, so the
+diagnostic did not materially improve the selected frontier.
+
+The damping sweep nevertheless establishes the next direction. Low damping
+can pass Y braking: the best 0.025 candidate produced 4.945 mm, but its combined
+endpoint error was 26.627 mm. Near the useful endpoint frontier,
+`kd_vel.y=0.1875`, 0.0125 Hz bias decay, and observation bias
+`[0.0, 0.0025, -0.0039]` m/s produced 6.484 mm braking and 9.072 mm endpoint.
+This preserves the braking error but creates 0.928 mm of endpoint margin.
+
+Earlier measured scale sweeps establish that reducing Y observation scale
+lengthens braking distance while spending endpoint margin. Add that one
+declarative parameter after damping and search the physically narrow interval
+from 0.98 through the current 1.0425 value. Keep the damping stage because it
+provides the endpoint margin needed for the scale correction. Do not change
+gains, plant parameters, probe definitions, or acceptance limits.
