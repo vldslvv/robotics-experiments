@@ -9693,3 +9693,29 @@ change the controller structure, estimator interpretation, actuator, plant,
 probe suite, metric definitions, or limits. Reuse Entry 286's fresh capture for
 the diagnostic and require exact quality, replay, and live acceptance before
 launching another clean scratch campaign.
+
+### 292. High proportional response leaves the target over-braked
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-p-diagnostic`
+reused the Entry 286 capture and evaluated 3,885 unique candidates in 41 GPU
+batches and 1,465.2 seconds. Average sampled GPU utilization was 23.5%.
+Candidate 3430 selected `kd_vel.y=0.6`, `kp_vel.y=2.4`, 0.011875 Hz decay,
+observation bias `[-0.01, -0.0075, -0.0039]` m/s, and Y scale 0.98.
+
+Every gate except Y braking passed. Braking improved from 8.519 to 8.093 mm,
+while combined endpoint passed narrowly at 9.923 mm. Higher P beyond roughly
+2.5 worsened braking and stop timing, so extending that range is not supported.
+The signed braking trace identifies the remaining boundary: PX4 entered at
+0.085865 m/s, traveled 54.648 mm, and stopped at 3.44 s. The target entered at
+0.084523 m/s, traveled 46.555 mm, and stopped at 3.34 s. The target is already
+over-braked and enters 1.342 mm/s slow; additional P or D would move both
+observations in the wrong direction.
+
+Fit lateral integral response as the next independent declarative setting. It
+can build the missing pre-transition velocity while retained proportional and
+derivative damping control endpoint and stopping. Keep the evidenced integral
+acceleration limit fixed for this diagnostic so gain and authority are not
+changed simultaneously.
