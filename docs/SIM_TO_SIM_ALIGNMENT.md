@@ -151,7 +151,11 @@ its source age. Replay builds relative command time from integer physics steps s
 large absolute profile start times cannot delay an exact command boundary by a
 floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates
-at their source timestamps. The target-only `velocity_observation_scale`,
+at their source timestamps. For velocity profiles it also reconstructs PX4's
+exact vertical acceleration setpoint from the full-rate desired attitude,
+collective thrust, and hover estimate, then reports acceleration-setpoint and
+inferred velocity-integral error before the thrust conversion boundary. The
+target-only `velocity_observation_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
 `velocity_estimator_bias_decay_hz`, per-axis `velocity_filter_hz`, and
 `angular_velocity_filter_hz` model the evidenced physical-to-estimated state

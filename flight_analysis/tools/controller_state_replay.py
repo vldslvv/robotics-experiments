@@ -35,6 +35,7 @@ from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
     load_builder_config,
 )
+from robotics_experiments.px4_bridge import GRAVITY_M_S2
 
 __all__ = ["main"]
 
@@ -160,6 +161,32 @@ def _px4_vertical_velocity_state(
         1.0 - weight[active]
     )
     return result
+
+
+def _vertical_acceleration_setpoint_enu(
+    *,
+    quaternion_frd_ned_wxyz: np.ndarray,
+    thrust_body_z: np.ndarray,
+    hover_thrust_normalized: np.ndarray,
+) -> np.ndarray:
+    """Recover PX4's exact vertical acceleration setpoint from its thrust output."""
+    quaternions = np.asarray(quaternion_frd_ned_wxyz, dtype=np.float64)
+    thrust = np.asarray(thrust_body_z, dtype=np.float64)
+    hover = np.asarray(hover_thrust_normalized, dtype=np.float64)
+    if quaternions.ndim != 2 or quaternions.shape[1] != 4:
+        raise ValueError("attitude setpoints must be an N x 4 quaternion matrix")
+    if thrust.shape != (len(quaternions),) or hover.shape != (len(quaternions),):
+        raise ValueError("attitude thrust and hover setpoints must match quaternion count")
+    if not np.all(np.isfinite(quaternions)) or not np.all(np.isfinite(thrust)):
+        raise ValueError("attitude setpoints must be finite")
+    if np.any(thrust > 0.0):
+        raise ValueError("attitude thrust_body_z must be non-positive")
+    if not np.all(np.isfinite(hover)) or np.any(hover <= 0.0) or np.any(hover > 1.0):
+        raise ValueError("hover thrust estimates must be finite and in (0, 1]")
+    body_z_ned = np.stack([_quat_to_matrix(quaternion_wxyz=value)[:, 2] for value in quaternions])
+    thrust_ned_z = body_z_ned[:, 2] * thrust
+    acceleration_ned_z = (thrust_ned_z + hover) * (GRAVITY_M_S2 / hover)
+    return -acceleration_ned_z
 
 
 def _interpolate_quaternions(
@@ -943,6 +970,7 @@ def _report(
     trajectory = _dataset(ulog=ulog, name="trajectory_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
+    attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
@@ -1128,6 +1156,11 @@ def _report(
     isaac_wrench_rows: list[np.ndarray] = []
     isaac_rate_setpoint_rows: list[np.ndarray] = []
     isaac_collective_setpoint_rows: list[float] = []
+    isaac_acceleration_setpoint_rows: list[np.ndarray] = []
+    isaac_velocity_integral_rows: list[np.ndarray] = []
+    isaac_filtered_velocity_rows: list[np.ndarray] = []
+    isaac_acceleration_rows: list[np.ndarray] = []
+    isaac_velocity_setpoint_rows: list[np.ndarray] = []
     isaac_angular_velocity_rows: list[np.ndarray] = []
     isaac_angular_acceleration_rows: list[np.ndarray] = []
     used_t: list[float] = []
@@ -1166,6 +1199,11 @@ def _report(
     isaac_omega_grid: list[np.ndarray] = []
     isaac_rate_setpoint_grid: list[np.ndarray] = []
     isaac_collective_setpoint_grid: list[float] = []
+    isaac_acceleration_setpoint_grid: list[np.ndarray] = []
+    isaac_velocity_integral_grid: list[np.ndarray] = []
+    isaac_filtered_velocity_grid: list[np.ndarray] = []
+    isaac_acceleration_grid: list[np.ndarray] = []
+    isaac_velocity_setpoint_grid: list[np.ndarray] = []
     isaac_angular_velocity_grid: list[np.ndarray] = []
     isaac_angular_acceleration_grid: list[np.ndarray] = []
     for (
@@ -1240,6 +1278,11 @@ def _report(
             if control_mode == "ctbr"
             else controller_state.collective_thrust_setpoint
         )
+        isaac_acceleration_setpoint_grid.append(controller_state.acceleration_setpoint_enu)
+        isaac_velocity_integral_grid.append(controller_state.velocity_integral_enu)
+        isaac_filtered_velocity_grid.append(controller_state.filtered_velocity_enu)
+        isaac_acceleration_grid.append(controller_state.acceleration_enu)
+        isaac_velocity_setpoint_grid.append(command[:3])
         isaac_angular_velocity_grid.append(controller_state.previous_angular_velocity_body_flu)
         isaac_angular_acceleration_grid.append(controller_state.angular_acceleration_body_flu)
 
@@ -1275,6 +1318,13 @@ def _report(
         isaac_wrench_rows.append(_wrench(geometry=geometry, omega=isaac_omega))
         isaac_rate_setpoint_rows.append(isaac_rate_setpoint_grid[replay_sample_index])
         isaac_collective_setpoint_rows.append(isaac_collective_setpoint_grid[replay_sample_index])
+        isaac_acceleration_setpoint_rows.append(
+            isaac_acceleration_setpoint_grid[replay_sample_index]
+        )
+        isaac_velocity_integral_rows.append(isaac_velocity_integral_grid[replay_sample_index])
+        isaac_filtered_velocity_rows.append(isaac_filtered_velocity_grid[replay_sample_index])
+        isaac_acceleration_rows.append(isaac_acceleration_grid[replay_sample_index])
+        isaac_velocity_setpoint_rows.append(isaac_velocity_setpoint_grid[replay_sample_index])
         isaac_angular_velocity_rows.append(isaac_angular_velocity_grid[replay_sample_index])
         isaac_angular_acceleration_rows.append(isaac_angular_acceleration_grid[replay_sample_index])
 
@@ -1292,6 +1342,11 @@ def _report(
         isaac_collective_setpoint_rows,
         dtype=np.float64,
     )
+    isaac_acceleration_setpoint_array = np.stack(isaac_acceleration_setpoint_rows)
+    isaac_velocity_integral_array = np.stack(isaac_velocity_integral_rows)
+    isaac_filtered_velocity_array = np.stack(isaac_filtered_velocity_rows)
+    isaac_acceleration_array = np.stack(isaac_acceleration_rows)
+    isaac_velocity_setpoint_array = np.stack(isaac_velocity_setpoint_rows)
     isaac_angular_velocity_array = np.stack(isaac_angular_velocity_rows)
     isaac_angular_acceleration_array = np.stack(isaac_angular_acceleration_rows)
     omega_error = isaac_omega_array - px4_omega_array
@@ -1372,6 +1427,59 @@ def _report(
         target_angular_acceleration_flu=isaac_angular_acceleration_array,
         px4_angular_acceleration_flu=px4_angular_acceleration_flu,
     )
+    outer_loop_metrics: dict[str, float] = {}
+    if control_mode == "velocity":
+        used_time = np.asarray(used_t)
+        attitude_setpoint_index = _hold_indices(
+            source_t=relative_time(attitude_setpoint),
+            query_t=used_time,
+        )
+        hover_setpoint_index = _hold_indices(
+            source_t=relative_time(hover),
+            query_t=used_time,
+        )
+        px4_acceleration_setpoint_z = _vertical_acceleration_setpoint_enu(
+            quaternion_frd_ned_wxyz=np.column_stack(
+                [
+                    np.asarray(attitude_setpoint[f"q_d[{index}]"], dtype=np.float64)[
+                        attitude_setpoint_index
+                    ]
+                    for index in range(4)
+                ]
+            ),
+            thrust_body_z=np.asarray(
+                attitude_setpoint["thrust_body[2]"],
+                dtype=np.float64,
+            )[attitude_setpoint_index],
+            hover_thrust_normalized=np.asarray(
+                hover["hover_thrust"],
+                dtype=np.float64,
+            )[hover_setpoint_index],
+        )
+        acceleration_setpoint_z_error = (
+            isaac_acceleration_setpoint_array[:, 2] - px4_acceleration_setpoint_z
+        )
+        px4_velocity_integral_z = (
+            px4_acceleration_setpoint_z
+            - params.kp_vel[2]
+            * (isaac_velocity_setpoint_array[:, 2] - isaac_filtered_velocity_array[:, 2])
+            + params.kd_vel[2] * isaac_acceleration_array[:, 2]
+        )
+        velocity_integral_z_error = isaac_velocity_integral_array[:, 2] - px4_velocity_integral_z
+        outer_loop_metrics = {
+            "vertical_acceleration_setpoint_rmse_mps2": _root_mean_square(
+                values=acceleration_setpoint_z_error
+            ),
+            "vertical_acceleration_setpoint_max_abs_mps2": float(
+                np.max(np.abs(acceleration_setpoint_z_error))
+            ),
+            "vertical_velocity_integral_rmse_mps2": _root_mean_square(
+                values=velocity_integral_z_error
+            ),
+            "vertical_velocity_integral_max_abs_mps2": float(
+                np.max(np.abs(velocity_integral_z_error))
+            ),
+        }
     scale_fits = [
         _linear_scale_with_intercept(
             controller_output=torque_setpoint_flu[:, axis],
@@ -1421,6 +1529,7 @@ def _report(
             **boundary_metrics,
             **setpoint_metrics,
             **rate_input_metrics,
+            **outer_loop_metrics,
             "rotor_omega_rmse_radps": _root_mean_square(values=omega_error),
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),

@@ -27,6 +27,7 @@ from flight_analysis.tools.controller_state_replay import (
     _px4_vertical_velocity_state,
     _rate_input_metrics,
     _replay_time_grid,
+    _vertical_acceleration_setpoint_enu,
 )
 
 
@@ -118,6 +119,20 @@ def test_vertical_velocity_state_matches_px4_velocity_only_blending():
 
     assert np.allclose(result[:, :2], [[1.0, 2.0]] * 3)
     assert np.allclose(result[:, 2], [0.1, 0.4, 0.9])
+
+
+def test_vertical_acceleration_setpoint_is_recovered_from_px4_thrust() -> None:
+    hover = np.array([0.57, 0.58])
+    acceleration_enu_z = np.array([1.5, -0.7])
+    thrust_ned_z = -acceleration_enu_z * hover / 9.81 - hover
+
+    result = _vertical_acceleration_setpoint_enu(
+        quaternion_frd_ned_wxyz=np.array([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]),
+        thrust_body_z=thrust_ned_z,
+        hover_thrust_normalized=hover,
+    )
+
+    assert result == pytest.approx(acceleration_enu_z)
 
 
 def test_quaternion_interpolation_uses_shortest_normalized_path():
