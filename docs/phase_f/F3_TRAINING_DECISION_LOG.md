@@ -10073,3 +10073,20 @@ default profile plus high-rate bit (`17`) through the ordinary per-vehicle PX4
 runtime config. Keep the normal runtime default at `1`. A fresh capture is
 required; do not tune controller gains or relax replay limits against the
 decimated ULog.
+
+### 308. Capture exact controller topics at full rate
+
+Date: 2026-08-09.
+
+Add strict per-vehicle `px4.logging_profile` configuration and pass it to every
+PX4 container as `SDLOG_PROFILE`. Keep the shared runtime default at the compact
+general-analysis profile `1`; select `17` only in the alignment experiment to
+combine default and high-rate controller topics. Validate the PX4-supported
+0-4095 bitmask range at config load time.
+
+Thread the resolved value through persistent, integration, and flight-benchmark
+launches and include it in persistent-container recreation checks. This keeps
+the runtime graph as the single source of truth and prevents an alignment-only
+shell override from bypassing configuration fingerprints. Run all host gates,
+commit before capture, then execute a wholly fresh capture, audit, sweep, fit,
+and replay because the prior ULog cannot be densified after the fact.

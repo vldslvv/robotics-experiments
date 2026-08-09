@@ -95,7 +95,10 @@ Isaac Lab's simulation-context ownership.
 ## Evidence and boundary audit
 
 PX4 capture uses the ordinary fleet/bridge path with a deterministic policy
-adapter. Its configured pusher is deployed after takeoff and before probe
+adapter. The alignment experiment selects PX4 logging profile `17`, preserving
+the default topic set plus full-rate attitude, rate, thrust, torque, and
+actuator topics needed for exact 250 Hz replay. Its configured pusher is
+deployed after takeoff and before probe
 preconditioning so the reference plant matches Lab training and press-policy
 deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
 force setting, which is disabled to match the standalone PX4 plant. Each

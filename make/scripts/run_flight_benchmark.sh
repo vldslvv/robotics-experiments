@@ -84,6 +84,7 @@ for vehicle in load_config(os.environ["ROBOTICS_EXPERIMENT_CONFIG_PATH"]).vehicl
             vehicle.px4_sys_autostart,
             vehicle.px4.failsafe.offboard_loss_action_param,
             vehicle.px4.failsafe.offboard_loss_timeout_s,
+            vehicle.px4.logging_profile,
         )'
 )
 if [ "${#launch_specs[@]}" -eq 0 ]; then
@@ -145,10 +146,11 @@ run_repetition() {
     local sys_autostart
     local offboard_loss_action
     local offboard_loss_timeout
+    local logging_profile
 
     mkdir -p "${output_dir}/logs" "${output_dir}/px4/logs" "${output_dir}/px4/eeprom"
     for spec in "${launch_specs[@]}"; do
-        read -r i sim_model sys_autostart offboard_loss_action offboard_loss_timeout <<<"${spec}"
+        read -r i sim_model sys_autostart offboard_loss_action offboard_loss_timeout logging_profile <<<"${spec}"
         local container="${container_prefix}-${label}-px4-${i}"
         local log_mount="${output_dir}/px4/logs/${i}"
         local eeprom_mount="${output_dir}/px4/eeprom/${i}"
@@ -161,6 +163,7 @@ run_repetition() {
             -e "PX4_SYS_AUTOSTART=${sys_autostart}" \
             -e "PX4_PARAM_COM_OBL_RC_ACT=${offboard_loss_action}" \
             -e "PX4_PARAM_COM_OF_LOSS_T=${offboard_loss_timeout}" \
+            -e "PX4_PARAM_SDLOG_PROFILE=${logging_profile}" \
             -v "${log_mount}:${PX4_ROOTFS}/${i}/log" \
             -v "${eeprom_mount}:${PX4_ROOTFS}/${i}/eeprom" \
             "${PX4_IMAGE}" \

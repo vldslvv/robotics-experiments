@@ -16,6 +16,9 @@ spawn:
   stationary_ground_clearance_m: 0.05
   stationary_spawn_z_fallback: 0.07
 px4:
+  # PX4 SDLOG_PROFILE bitmask. The default general-analysis profile remains
+  # compact; experiments that audit controller-rate topics opt into high rate.
+  logging_profile: 1
   failsafe:
     # PX4 COM_OBL_RC_ACT / COM_OF_LOSS_T. Land at the current position after
     # loss of the OFFBOARD stream instead of invoking the default RC-loss path,

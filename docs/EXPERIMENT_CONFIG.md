@@ -94,6 +94,11 @@ default is `land` after 1 second. PX4 has no native `disabled` value for
 `COM_OBL_RC_ACT`; use an explicit supported action instead of pretending the
 failsafe is disabled.
 
+`vehicles.<label>.px4.logging_profile` is the PX4 `SDLOG_PROFILE` bitmask and
+must be between 0 and 4095. Normal experiments use the compact default profile
+`1`; controller alignment uses `17` to add full-rate attitude, rate, thrust,
+torque, and actuator topics required by exact controller-boundary replay.
+
 ## RL vehicle selection
 
 `rl.training.vehicle_id` selects the fleet vehicle whose spawn asset and resolved

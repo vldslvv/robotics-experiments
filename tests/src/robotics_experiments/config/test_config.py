@@ -125,6 +125,7 @@ def test_default_experiment_has_only_global_root_config():
     assert vehicle.px4.failsafe.offboard_loss_action == "land"
     assert vehicle.px4.failsafe.offboard_loss_action_param == 4
     assert vehicle.px4.failsafe.offboard_loss_timeout_s == 1.0
+    assert vehicle.px4.logging_profile == 1
     assert vehicle.routine.failure_recovery_timeout_s == 30.0
     assert [step["kind"] for step in vehicle.routine.steps] == ["arm", "takeoff", "hover"]
     assert config.rl.training.vehicle_id == 0
@@ -145,6 +146,7 @@ def test_alignment_experiment_uses_deterministic_sensor_excitation():
     assert bridge.barometer_noise_std_pa == 0.1
     assert bridge.magnetometer_noise_scale == 0.1
     assert config.alignment.capture.sensor_seed == 42
+    assert config.vehicles["x500_01"].px4.logging_profile == 17
 
 
 def test_bridge_rejects_unknown_sensor_excitation_mode(tmp_path):
@@ -606,6 +608,10 @@ def test_switch_semantic_validation(tmp_path, overrides, match):
         (
             {"px4": {"failsafe": {"offboard_loss_timeout_s": 61.0}}},
             "offboard_loss_timeout_s must be",
+        ),
+        (
+            {"px4": {"logging_profile": 4096}},
+            "logging_profile must be",
         ),
         (
             {"routine": {"failure_recovery_timeout_s": 0.0}},
