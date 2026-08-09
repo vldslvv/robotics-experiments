@@ -9634,3 +9634,20 @@ the fit. The declared damping range stopped at 0.2; higher damping is the direct
 unevaluated direction for shortening the long braking transient. Expand
 `kd_vel.y` above 0.2 and X observation bias below -0.02, retain the physical
 scale range, and rerun the target diagnostic without changing gates or plant.
+
+### 289. Search the higher-damping endpoint basin
+
+Date: 2026-08-09.
+
+Extend X observation bias to -0.04 m/s in the existing 0.01 m/s broad steps,
+retaining the Y range and midpoint refinement. Extend `kd_vel.y` from the
+previous `[0.00, 0.20]` range through 0.60 at 0.10 broad steps. This brackets
+the endpoint trend and directly tests the unsearched damping direction required
+by the long-braking champion.
+
+Remove `kp_vel` from the fit because every lower candidate worsened the matching
+Y braking and residual-speed boundaries. Retain the PX4-like base proportional
+gain, the physical observation-scale range, decay, integral limit, controller
+structure, plant, probe list, and all acceptance limits. Reuse Entry 286's
+fresh reference for the diagnostic and preserve staged beam refinement; only a
+quality-passing candidate proceeds to replay and live validation.

@@ -59,15 +59,29 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 1
     candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # Fresh endpoint champions sit at X=0 and Y=+0.010 m/s, with the endpoint
-  # trend continuing beyond both edges. Cover the evidenced crossing broadly,
-  # then refine only around retained gate champions.
+  # Fresh endpoint champions crossed X=-0.020 and Y=+0.025 m/s, with the X
+  # trend continuing beyond the tested edge. Cover the crossing broadly, then
+  # refine only around retained gate champions.
   - field: velocity_observation_bias_mps
     stage: 2
     # Once response gates pass, prefer the least estimator correction so the
     # aligned controller retains return-to-hover margin outside short probes.
     selection_regularization_scale: 1.0
     candidates:
+      - [-0.040, -0.030, -0.0039]
+      - [-0.040, -0.020, -0.0039]
+      - [-0.040, -0.010, -0.0039]
+      - [-0.040, 0.000, -0.0039]
+      - [-0.040, 0.010, -0.0039]
+      - [-0.040, 0.020, -0.0039]
+      - [-0.040, 0.030, -0.0039]
+      - [-0.030, -0.030, -0.0039]
+      - [-0.030, -0.020, -0.0039]
+      - [-0.030, -0.010, -0.0039]
+      - [-0.030, 0.000, -0.0039]
+      - [-0.030, 0.010, -0.0039]
+      - [-0.030, 0.020, -0.0039]
+      - [-0.030, 0.030, -0.0039]
       - [-0.020, -0.030, -0.0039]
       - [-0.020, -0.020, -0.0039]
       - [-0.020, -0.010, -0.0039]
@@ -117,9 +131,9 @@ parameters:
       - [0.040, 0.010, -0.0039]
       - [0.040, 0.020, -0.0039]
       - [0.040, 0.030, -0.0039]
-  # The fresh uniform-axis trace stops 40 ms earlier than PX4 and travels
-  # 6.481 mm less during Y braking. Reduce only lateral derivative damping
-  # after the broad estimator search, then refine around gate champions.
+  # Independent fresh captures exposed both short- and long-braking frontiers.
+  # Bracket lateral derivative damping on both sides of the PX4 base setting,
+  # then refine around gate champions.
   - field: kd_vel
     stage: 3
     candidates:
@@ -128,22 +142,14 @@ parameters:
       - [0.2, 0.10, 0.0]
       - [0.2, 0.15, 0.0]
       - [0.2, 0.20, 0.0]
-  # The fresh upper-bias frontier needs a longer lateral braking transient.
-  # Fit proportional response independently instead of using estimator scale
-  # as an arbitrary controller gain.
-  - field: kp_vel
-    stage: 4
-    candidates:
-      - [1.8, 0.8, 4.2]
-      - [1.8, 1.0, 4.2]
-      - [1.8, 1.2, 4.2]
-      - [1.8, 1.4, 4.2]
-      - [1.8, 1.6, 4.2]
-      - [1.8, 1.8, 4.2]
+      - [0.2, 0.30, 0.0]
+      - [0.2, 0.40, 0.0]
+      - [0.2, 0.50, 0.0]
+      - [0.2, 0.60, 0.0]
   # Lower lateral estimator scale lengthens the measured braking transient.
   # Search the narrow crossing only after the response stages create margin.
   - field: velocity_observation_scale
-    stage: 5
+    stage: 4
     candidates:
       - [0.98, 0.9800, 1.0]
       - [0.98, 1.0000, 1.0]
@@ -155,7 +161,7 @@ parameters:
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 6
+    stage: 5
     candidates:
       - [0.35, 0.35, 4.0]
 
