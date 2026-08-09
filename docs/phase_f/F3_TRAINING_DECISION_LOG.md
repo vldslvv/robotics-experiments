@@ -9527,3 +9527,28 @@ declarative parameter after damping and search the physically narrow interval
 from 0.98 through the current 1.0425 value. Keep the damping stage because it
 provides the endpoint margin needed for the scale correction. Do not change
 gains, plant parameters, probe definitions, or acceptance limits.
+
+### 285. Damping and scale close every diagnostic boundary
+
+Date: 2026-08-09.
+
+Target-only diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-scale-diagnostic`
+reused the Entry 282 capture and evaluated 2,394 unique candidates in 25 GPU
+batches and 822.6 seconds. Average sampled GPU utilization was 23.8%.
+Candidate 2100 selected `kd_vel.y=0.1625`, Y observation scale 1.005,
+0.0125 Hz estimator-bias decay, and observation bias
+`[0.0, 0.0025, -0.0039]` m/s.
+
+The candidate passed every declared velocity and CTBR gate. Y braking distance
+was 4.973 mm and combined endpoint error was 9.638 mm. X braking was 4.596 mm;
+X/Y/Z velocity NRMSE was 1.412%, 1.330%, and 1.008%. Roll/pitch/yaw body-rate
+NRMSE was 5.458%, 5.771%, and 6.945%. Collective velocity and acceleration
+NRMSE were 7.919% and 2.997%.
+
+Complete 22-profile controller-boundary replay passed. The required live gate
+also passed with 0.097 m hover last-window maximum, 0.030 m goto last-window
+maximum, and 0.452 m final handoff range. This is sufficient evidence to retain
+both declarative stages. Run a new clean-source capture, audit, 25-batch search,
+fit, replay, live gate, and finalization without reusing this reference or
+manually promoting candidate 2100.
