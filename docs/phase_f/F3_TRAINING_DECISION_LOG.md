@@ -9677,3 +9677,19 @@ remained below 10 mm above about 1.3. Only gains below the 1.8 base were tested.
 Add a high-side proportional stage above 1.8, retain higher damping, and require
 the combined candidate to pass braking without regressing endpoint, residual,
 velocity-envelope, replay, or live gates.
+
+### 291. Search the high-side lateral proportional crossing
+
+Date: 2026-08-09.
+
+Add `kp_vel.y` candidates `[1.8, 2.2, 2.6, 3.0, 3.4, 3.8]` after the damping
+stage and before physical scale refinement. Generated midpoints provide 0.1
+resolution around gate champions without a dense fine grid. Keep X/Z gains and
+the full evidenced damping range unchanged.
+
+This is one declarative parameter addition supported by the Entry 288
+high-direction trend and Entry 290's remaining long-braking trace. It does not
+change the controller structure, estimator interpretation, actuator, plant,
+probe suite, metric definitions, or limits. Reuse Entry 286's fresh capture for
+the diagnostic and require exact quality, replay, and live acceptance before
+launching another clean scratch campaign.

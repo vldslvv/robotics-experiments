@@ -146,10 +146,21 @@ parameters:
       - [0.2, 0.40, 0.0]
       - [0.2, 0.50, 0.0]
       - [0.2, 0.60, 0.0]
+  # Higher proportional response shortens the remaining long-braking frontier;
+  # the low side was measured and rejected before this stage was declared.
+  - field: kp_vel
+    stage: 4
+    candidates:
+      - [1.8, 1.8, 4.2]
+      - [1.8, 2.2, 4.2]
+      - [1.8, 2.6, 4.2]
+      - [1.8, 3.0, 4.2]
+      - [1.8, 3.4, 4.2]
+      - [1.8, 3.8, 4.2]
   # Lower lateral estimator scale lengthens the measured braking transient.
   # Search the narrow crossing only after the response stages create margin.
   - field: velocity_observation_scale
-    stage: 4
+    stage: 5
     candidates:
       - [0.98, 0.9800, 1.0]
       - [0.98, 1.0000, 1.0]
@@ -161,7 +172,7 @@ parameters:
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 5
+    stage: 6
     candidates:
       - [0.35, 0.35, 4.0]
 
