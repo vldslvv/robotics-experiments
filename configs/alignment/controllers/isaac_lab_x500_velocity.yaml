@@ -104,11 +104,22 @@ parameters:
       - [0.2, 0.10, 0.0]
       - [0.2, 0.15, 0.0]
       - [0.2, 0.20, 0.0]
+  # Lower lateral estimator scale lengthens the measured braking transient.
+  # Search the narrow crossing only after damping has created endpoint margin.
+  - field: velocity_observation_scale
+    stage: 4
+    candidates:
+      - [0.98, 0.9800, 1.0]
+      - [0.98, 1.0000, 1.0]
+      - [0.98, 1.0100, 1.0]
+      - [0.98, 1.0200, 1.0]
+      - [0.98, 1.0300, 1.0]
+      - [0.98, 1.0425, 1.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 4
+    stage: 5
     candidates:
       - [0.35, 0.35, 4.0]
 
