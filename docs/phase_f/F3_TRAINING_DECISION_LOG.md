@@ -10048,3 +10048,28 @@ but do not fail either for exceeding one physics tick: these are source cadence
 and logging-age properties, not joins between two representations of the same
 timestamp. Retain the one-tick failure for physical bridge-state joins and all
 motor and collective acceptance limits.
+
+### 307. Complete rate-state replay exposes default ULog decimation
+
+Date: 2026-08-09.
+
+Replaying the PX4-published angular derivative improved the only failing
+Y-envelope normalized motor RMSE from 0.010796 to 0.010302. No other original
+acceptance failure appeared, physical-state motor replay remained passing at
+0.009972, and collective remained passing at 0.01984 N. The residual is only
+3.02% above the motor limit.
+
+The captured default ULog is not dense enough to complete an exact 250 Hz
+controller join. Over the failing 5.46-second profile it contains 55
+`actuator_motors` samples, 273 rate/torque setpoints, and 546 angular-velocity
+samples. Pinned PX4's default logger intervals are respectively 100 ms, 20 ms,
+and 10 ms, while the rate controller consumes angular state every 4 ms. Linear
+interpolation cannot recover the discarded derivative and integral history at
+motor timestamps.
+
+Pinned PX4 provides `SDLOG_PROFILE` bit 4 specifically for full-rate attitude,
+rate, actuator, thrust, and torque topics. Configure alignment capture with the
+default profile plus high-rate bit (`17`) through the ordinary per-vehicle PX4
+runtime config. Keep the normal runtime default at `1`. A fresh capture is
+required; do not tune controller gains or relax replay limits against the
+decimated ULog.
