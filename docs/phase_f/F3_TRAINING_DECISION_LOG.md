@@ -9837,3 +9837,30 @@ derivative filter fixed at its selected 5 Hz base and retain all measured
 P/D/I, estimator offset/scale/decay, actuator, plant, probe, metric, and gate
 contracts. Reuse Entry 286's fresh capture for the diagnostic; require exact
 quality before replay and live validation.
+
+### 298. Stateful filtering crosses the coupled gates but must be per-axis
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-velocity-filter-diagnostic`
+reused the Entry 286 capture and evaluated 5,005 unique candidates in 52 GPU
+batches and 1,851.2 seconds. Average sampled GPU utilization was 23.6%.
+Candidate 4620 retained the unfiltered base and failed only Y braking at
+8.006 mm, but the new population materially crossed the former frontier:
+11 candidates passed both Y braking and the combined endpoint gate.
+
+Candidate 4353 used a 0.375 Hz filter and reached 0.376 mm Y braking with a
+9.655 mm endpoint. Candidate 4434 used the same cutoff and reached 3.851 mm Y
+braking with a 7.926 mm endpoint. This validates the stateful estimator
+hypothesis. Those candidates were still rejected because the scalar cutoff
+also filtered the already aligned X and Z measurements: candidate 4353 failed
+nine other translation gates, while candidate 4434 failed ten. Candidate 4353's
+Y velocity NRMSE passed at 0.07547 and its Y envelope narrowly missed at
+0.10504, leaving an evidenced cutoff crossing slightly above 0.375 Hz.
+
+Replace the scalar velocity filter with a strict three-axis controller setting
+and fit only its Y component around the measured crossing. Keep X/Z unfiltered,
+retain the complete P/D/I and estimator ranges, and make no other structural or
+plant change. This is a strict schema-1 contract replacement; scalar artifacts
+are invalid and receive no compatibility path.
