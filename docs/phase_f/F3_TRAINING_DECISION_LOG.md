@@ -9340,3 +9340,19 @@ excursion and the validation envelope near ten degrees, then returns level.
 Keep amplitudes, axis coverage, metric limits, recentering, and the 2.00 m
 routine safety envelope unchanged. Commit the new probe fingerprint and repeat
 the clean campaign.
+
+### 276. Resize the capture timeout for the expanded family list
+
+Date: 2026-08-09.
+
+The safe-pulse clean campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-safe-ctbr-scratch`
+completed all 14 velocity profiles and the first CTBR profile without breaching
+the unchanged flight envelope. It entered preconditioning for CTBR profile 2 of
+8, then the policy step reached its 150-second timeout. That timeout was sized
+for the former 14-profile suite and is no longer sufficient for 22 profiles,
+each with an independent recenter and stability hold.
+
+Increase only the alignment-capture policy-step timeout to 300 seconds. This is
+an execution allowance, not a controller, excitation, safety, or acceptance
+threshold. Commit it before repeating the full clean campaign.
