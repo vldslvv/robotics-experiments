@@ -5,11 +5,7 @@ from robotics_experiments.controller._artifact import (
     load_controller_artifact,
     resolve_controller_path,
 )
-from robotics_experiments.controller._models import (
-    CommandInterface,
-    ControllerArtifact,
-    ControllerSettings,
-)
+from robotics_experiments.controller._models import ControllerArtifact, ControllerSettings
 from robotics_experiments.controller.actuation import (
     ActuationControllerState,
     ActuationParams,
@@ -26,7 +22,6 @@ from robotics_experiments.controller.actuation import (
 )
 
 __all__ = [
-    "CommandInterface",
     "ControllerArtifact",
     "ControllerSettings",
     "ActuationControllerState",

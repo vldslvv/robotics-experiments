@@ -606,8 +606,7 @@ def _validate_pair(
         "vehicle",
         "airframe",
         "command_rate_hz",
-        "command_interface",
-        "probes",
+        "probe_families",
         "selection_metric",
     ):
         if getattr(target, name) != getattr(reference, name):
@@ -662,13 +661,8 @@ def _resolved_experiment_fingerprint(
             f"command cadence {experiment.rl.policy_rate_hz} != " f"{target.command_rate_hz}"
         )
     action = experiment.rl.action
-    if action.kind != "velocity" or action.action_dim != target.command_interface.dimension:
-        mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
-    if (
-        action.max_body_velocity_mps != target.command_interface.linear_scale_mps
-        or action.max_yaw_rate_radps != target.command_interface.yaw_rate_scale_radps
-    ):
-        mismatches.append("normalized command scales differ")
+    if action.action_dim != 4:
+        mismatches.append(f"action dimension {action.action_dim!r} is incompatible")
     if mismatches:
         raise ValueError(
             "controller definition is incompatible with its resolved experiment: "
@@ -697,55 +691,18 @@ def align(
     )
     selected = outcome.selected
     selected_result = outcome.metric_results[selected.index]
-    quality_reasons = []
-    quality_thresholds: tuple[tuple[str, float, str], ...] = (
-        (
-            "braking_distance_error_m",
-            0.005,
-            "braking-distance error exceeds 5 mm",
-        ),
-        (
-            "residual_speed_error_mps",
-            0.01,
-            "residual-speed error exceeds 0.01 m/s",
-        ),
-        ("stop_time_error_s", 0.10, "stop-time error exceeds 0.10 s"),
-        (
-            "worst_axis_velocity_nrmse",
-            0.10,
-            "worst-axis velocity NRMSE exceeds 10%",
-        ),
-        (
-            "vertical_policy_envelope_nrmse",
-            0.10,
-            "vertical policy-envelope velocity NRMSE exceeds 10%",
-        ),
-        ("yaw_rate_nrmse", 0.10, "yaw-rate NRMSE exceeds 10%"),
-        ("heading_error_deg", 3.0, "heading error exceeds 3 degrees"),
-        (
-            "combined_endpoint_error_m",
-            0.01,
-            "combined-path endpoint error exceeds 10 mm",
-        ),
-    )
-    if target.selection_metric != "controller-quality":
-        quality_thresholds = (
-            (
-                "worst_axis_velocity_nrmse",
-                0.15,
-                "worst-axis validation velocity NRMSE exceeds 15%",
-            ),
-        )
-    for metric_name, threshold, reason in quality_thresholds:
-        if selected_result.validation_metrics[metric_name] > threshold:
-            quality_reasons.append(reason)
+    quality_reasons = [
+        f"{gate.name}={gate.value:.6g} exceeds {gate.limit:.6g}"
+        for gate in selected_result.gates
+        if gate.value > gate.limit
+    ]
     repo_root = Path(__file__).resolve().parents[3]
     source_commit, source_dirty = _git_source(repo_root=repo_root)
     experiment_fingerprint = _resolved_experiment_fingerprint(
         target=target,
         repo_root=repo_root,
     )
-    probe_suite_fingerprint = _fingerprint([asdict(profile) for profile in target.probes])
+    probe_suite_fingerprint = _fingerprint([asdict(family) for family in target.probe_families])
     comparison_fingerprint = _fingerprint(
         {
             "controller_artifact_schema": 1,
@@ -756,7 +713,7 @@ def align(
             "metric_implementation": _module_fingerprint(metrics_module.__file__),
             "controller_implementation": _module_fingerprint(controller_actuation.__file__),
             "experiment": experiment_fingerprint,
-            "interface": asdict(target.command_interface),
+            "control_modes": [family.control_mode for family in target.probe_families],
             "target_image": target.image,
             "reference_image": reference.image,
         }
@@ -779,7 +736,9 @@ def align(
         vehicle=target.vehicle,
         airframe=target.airframe,
         command_rate_hz=target.command_rate_hz,
-        command_interface=target.command_interface,
+        certified_control_modes=tuple(
+            dict.fromkeys(family.control_mode for family in target.probe_families)
+        ),
         probe_suite_fingerprint=probe_suite_fingerprint,
         selected_settings=selected.settings,
         settings_fingerprint=_fingerprint(asdict(selected.settings)),

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from robotics_experiments.controller._models import (
-    CommandInterface,
     ControllerArtifact,
     ControllerSettings,
 )
@@ -63,12 +62,6 @@ def _finite(
     if nonnegative and parsed < 0.0:
         raise ValueError(f"{name} must be non-negative")
     return parsed
-
-
-def _integer(value: Any, name: str, /) -> int:
-    if type(value) is not int:
-        raise ValueError(f"{name} must be an integer")
-    return value
 
 
 def _vector(
@@ -234,25 +227,16 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
     _exact_fields(payload, ControllerArtifact, "controller artifact")
     if payload["artifact_kind"] != _ARTIFACT_KIND or payload["schema_version"] != _SCHEMA_VERSION:
         raise ValueError("controller artifact is not the supported controller-v1 contract")
-    interface_payload = _object(payload["command_interface"], "command_interface")
-    _exact_fields(interface_payload, CommandInterface, "command_interface")
-    interface = CommandInterface(
-        kind=_string(interface_payload["kind"], "command_interface.kind"),
-        dimension=_integer(interface_payload["dimension"], "command_interface.dimension"),
-        frame=_string(interface_payload["frame"], "command_interface.frame"),
-        linear_scale_mps=_finite(
-            value=interface_payload["linear_scale_mps"],
-            name="command_interface.linear_scale_mps",
-            positive=True,
-        ),
-        yaw_rate_scale_radps=_finite(
-            value=interface_payload["yaw_rate_scale_radps"],
-            name="command_interface.yaw_rate_scale_radps",
-            positive=True,
-        ),
-    )
-    if interface.dimension <= 0:
-        raise ValueError("command_interface.dimension must be positive")
+    modes = payload["certified_control_modes"]
+    if (
+        not isinstance(modes, list)
+        or not modes
+        or any(mode not in ("velocity", "ctbr") for mode in modes)
+        or len(set(modes)) != len(modes)
+    ):
+        raise ValueError(
+            "certified_control_modes must be a non-empty unique list of velocity and/or ctbr"
+        )
     settings = _settings(payload["selected_settings"], "selected_settings")
     settings_fingerprint = _string(payload["settings_fingerprint"], "settings_fingerprint")
     if settings_fingerprint != _fingerprint(asdict(settings)):
@@ -295,7 +279,7 @@ def controller_artifact_from_payload(value: Any, /) -> ControllerArtifact:
         command_rate_hz=_finite(
             value=payload["command_rate_hz"], name="command_rate_hz", positive=True
         ),
-        command_interface=interface,
+        certified_control_modes=tuple(modes),
         selected_settings=settings,
         settings_fingerprint=settings_fingerprint,
         advisory_quality_passed=payload["advisory_quality_passed"],

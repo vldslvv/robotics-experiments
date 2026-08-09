@@ -41,7 +41,8 @@ An accepted run contains:
 ```
 
 `controller.json` contains identity, comparison fingerprints, complete selected
-settings, quality result, source provenance, and backend/image identity.
+settings, certified control modes, quality result, source provenance, and
+backend/image identity.
 `selection.json.zst` reconstructs every candidate from base settings plus exact
 overrides and stores its metrics, ranking, usability, and failure. The manifest
 inventories every payload exactly once.

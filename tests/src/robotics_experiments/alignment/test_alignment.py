@@ -9,6 +9,7 @@ import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import robotics_experiments.alignment._artifact as artifact_module
@@ -37,15 +38,14 @@ from robotics_experiments.alignment._io import (
 )
 from robotics_experiments.alignment._metrics import (
     _braking_events,
-    _feasibility_metric_result,
     metric,
     register_metric,
 )
 from robotics_experiments.alignment._models import (
-    CommandInterface,
     MetricResult,
     ParameterSpec,
     ProbeCommand,
+    ProbeFamily,
     ProbeProfile,
     ProbeTrace,
     SearchSpec,
@@ -109,21 +109,26 @@ def _profiles() -> tuple[ProbeProfile, ...]:
             negative[axis_index] = -amplitude * 0.5
             profiles.append(
                 ProbeProfile(
-                    name=(
-                        "validation-vertical-policy-envelope"
-                        if split == "validation" and axis == "z"
-                        else f"{split}-{axis}"
-                    ),
+                    name=f"{split}-{axis}",
                     split=split,
                     axis=axis,
                     commands=(
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
-                        ProbeCommand(tuple(positive), 0.0, 0.15),
-                        ProbeCommand(tuple(negative), 0.0, 0.1),
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
+                        ProbeCommand(tuple(positive), 0.0, 0.0, _ZERO3, 0.15),
+                        ProbeCommand(tuple(negative), 0.0, 0.0, _ZERO3, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
                     ),
                 )
             )
+            if split == "validation":
+                profiles.append(
+                    ProbeProfile(
+                        name=f"validation-{axis}-envelope",
+                        split=split,
+                        axis=axis,
+                        commands=profiles[-1].commands,
+                    )
+                )
         profiles.extend(
             (
                 ProbeProfile(
@@ -131,9 +136,9 @@ def _profiles() -> tuple[ProbeProfile, ...]:
                     split=split,
                     axis="yaw",
                     commands=(
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
-                        ProbeCommand(_ZERO3, amplitude * 0.2, 0.15),
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
+                        ProbeCommand(_ZERO3, amplitude * 0.2, 0.0, _ZERO3, 0.15),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
                     ),
                 ),
                 ProbeProfile(
@@ -141,9 +146,9 @@ def _profiles() -> tuple[ProbeProfile, ...]:
                     split=split,
                     axis="combined",
                     commands=(
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
-                        ProbeCommand((amplitude, amplitude * 0.5, 0.0), 0.2, 0.15),
-                        ProbeCommand(_ZERO3, 0.0, 0.1),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
+                        ProbeCommand((amplitude, amplitude * 0.5, 0.0), 0.2, 0.0, _ZERO3, 0.15),
+                        ProbeCommand(_ZERO3, 0.0, 0.0, _ZERO3, 0.1),
                     ),
                 ),
             )
@@ -195,17 +200,87 @@ def _response_traces(
             angular_velocities.append((0.0, 0.0, delayed_yaw))
         traces.append(
             ProbeTrace(
+                family="velocity",
+                control_mode="velocity",
+                family_metric="translational-controller-quality",
                 profile=profile.name,
                 split=profile.split,
                 axis=profile.axis,
                 time_s=tuple(index * 0.05 for index in range(len(commands))),
                 command_velocity_body_flu_mps=commands,
                 command_yaw_rate_radps=yaw_commands,
+                command_collective_thrust_normalized=tuple(0.0 for _ in commands),
+                command_body_rate_flu_radps=tuple(_ZERO3 for _ in commands),
                 position_enu_m=tuple(positions),
                 attitude_flu_enu_wxyz=tuple(attitudes),
                 velocity_body_flu_mps=tuple(velocities),
                 velocity_enu_mps=tuple(velocities),
                 angular_velocity_body_flu_radps=tuple(angular_velocities),
+                initial_position_enu_m=_ZERO3,
+                initial_attitude_flu_enu_wxyz=_IDENTITY,
+                initial_linear_velocity_enu_mps=_ZERO3,
+                initial_estimated_linear_velocity_enu_mps=_ZERO3,
+                initial_angular_velocity_body_flu_radps=_ZERO3,
+                initial_estimated_angular_velocity_body_flu_radps=_ZERO3,
+                completed=True,
+            )
+        )
+    return tuple(traces)
+
+
+def _ctbr_response_traces(*, family: ProbeFamily) -> tuple[ProbeTrace, ...]:
+    traces = []
+    for profile in family.profiles:
+        collective_commands = []
+        body_rate_commands = []
+        for command in profile.commands:
+            count = round(command.duration_s / 0.05)
+            collective_commands.extend([command.collective_thrust_normalized] * count)
+            body_rate_commands.extend([command.body_rate_flu_radps] * count)
+        position = np.zeros(3)
+        angles = np.zeros(3)
+        vertical_velocity = 0.0
+        positions = []
+        attitudes = []
+        velocities = []
+        for collective, body_rate in zip(collective_commands, body_rate_commands, strict=True):
+            vertical_velocity += (collective - 0.57) * 20.0 * 0.05
+            position[2] += vertical_velocity * 0.05
+            angles += np.asarray(body_rate) * 0.05
+            roll, pitch, yaw = angles / 2.0
+            attitudes.append(
+                (
+                    math.cos(roll) * math.cos(pitch) * math.cos(yaw)
+                    + math.sin(roll) * math.sin(pitch) * math.sin(yaw),
+                    math.sin(roll) * math.cos(pitch) * math.cos(yaw)
+                    - math.cos(roll) * math.sin(pitch) * math.sin(yaw),
+                    math.cos(roll) * math.sin(pitch) * math.cos(yaw)
+                    + math.sin(roll) * math.cos(pitch) * math.sin(yaw),
+                    math.cos(roll) * math.cos(pitch) * math.sin(yaw)
+                    - math.sin(roll) * math.sin(pitch) * math.cos(yaw),
+                )
+            )
+            positions.append(tuple(float(value) for value in position))
+            velocities.append((0.0, 0.0, vertical_velocity))
+        sample_count = len(collective_commands)
+        traces.append(
+            ProbeTrace(
+                family=family.name,
+                control_mode=family.control_mode,
+                family_metric=family.metric,
+                profile=profile.name,
+                split=profile.split,
+                axis=profile.axis,
+                time_s=tuple(index * 0.05 for index in range(sample_count)),
+                command_velocity_body_flu_mps=tuple(_ZERO3 for _ in range(sample_count)),
+                command_yaw_rate_radps=tuple(0.0 for _ in range(sample_count)),
+                command_collective_thrust_normalized=tuple(collective_commands),
+                command_body_rate_flu_radps=tuple(body_rate_commands),
+                position_enu_m=tuple(positions),
+                attitude_flu_enu_wxyz=tuple(attitudes),
+                velocity_body_flu_mps=tuple(velocities),
+                velocity_enu_mps=tuple(velocities),
+                angular_velocity_body_flu_radps=tuple(body_rate_commands),
                 initial_position_enu_m=_ZERO3,
                 initial_attitude_flu_enu_wxyz=_IDENTITY,
                 initial_linear_velocity_enu_mps=_ZERO3,
@@ -224,7 +299,7 @@ class _Evaluator:
 
     def evaluate(self, *, definition, settings, reference_traces):
         active = self._reference_settings or settings
-        return _response_traces(profiles=definition.probes, settings=active)
+        return _response_traces(profiles=definition.profiles, settings=active)
 
 
 class _BatchEvaluator(_Evaluator):
@@ -261,15 +336,15 @@ def _definition(
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
-        command_interface=CommandInterface(
-            kind="body-flu-velocity-yaw-rate",
-            dimension=4,
-            frame="body-flu",
-            linear_scale_mps=3.0,
-            yaw_rate_scale_radps=1.5,
-        ),
         base_settings=_settings(delay=0.0, kp=(1.0, 1.0, 1.0)),
-        probes=_profiles(),
+        probe_families=(
+            ProbeFamily(
+                name="velocity",
+                control_mode="velocity",
+                metric="translational-controller-quality",
+                profiles=_profiles(),
+            ),
+        ),
         parameters=parameters,
         search=SearchSpec(
             strategy="coarse-to-fine-beam",
@@ -277,7 +352,7 @@ def _definition(
             passes_per_stage=2,
         ),
         selection_metric=metric_name,
-        publication_metrics=("velocity_rmse_mps",),
+        publication_metrics=(),
         evaluator=evaluator,
         definition_fingerprint=f"{backend}-fingerprint",
         image=f"{backend}-image",
@@ -303,6 +378,23 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 2
     assert target.search.initial_settings == ()
+    assert tuple(
+        (family.name, family.control_mode, family.metric) for family in target.probe_families
+    ) == (
+        ("velocity", "velocity", "translational-controller-quality"),
+        ("ctbr", "ctbr", "ctbr-controller-quality"),
+    )
+    assert {profile.axis for profile in target.probe_families[0].profiles} >= {
+        "x",
+        "y",
+        "z",
+    }
+    assert {profile.axis for profile in target.probe_families[1].profiles} >= {
+        "roll",
+        "pitch",
+        "yaw",
+        "collective",
+    }
     assert tuple(parameter.field for parameter in target.parameters) == (
         "velocity_estimator_bias_decay_hz",
         "velocity_observation_bias_mps",
@@ -359,6 +451,46 @@ def test_trace_rejects_out_of_range_initial_hover_thrust() -> None:
         _trace(value=raw, name="trace")  # noqa: SLF001 - trace validation contract
 
 
+def test_ctbr_family_has_independent_roll_pitch_yaw_and_collective_gates() -> None:
+    definition = load_controller_definition(
+        REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
+    )
+    family = next(family for family in definition.probe_families if family.name == "ctbr")
+    reference = _ctbr_response_traces(family=family)
+
+    passing = metric(name=family.metric)(reference, reference)
+
+    assert passing.quality_passed
+    assert {gate.name for gate in passing.gates} == {
+        *(f"{axis}_body_rate_nrmse" for axis in ("roll", "pitch", "yaw")),
+        *(f"{axis}_envelope_body_rate_nrmse" for axis in ("roll", "pitch", "yaw")),
+        *(f"{axis}_attitude_error_deg" for axis in ("roll", "pitch", "yaw")),
+        "collective_velocity_nrmse",
+        "collective_acceleration_nrmse",
+    }
+    roll_index = next(
+        index
+        for index, trace in enumerate(reference)
+        if trace.profile == "validation-roll-envelope"
+    )
+    roll = reference[roll_index]
+    modified = replace(
+        roll,
+        angular_velocity_body_flu_radps=tuple(
+            (value[0] * 0.5, value[1], value[2]) for value in roll.angular_velocity_body_flu_radps
+        ),
+    )
+    target = (*reference[:roll_index], modified, *reference[roll_index + 1 :])
+
+    failed = metric(name=family.metric)(reference, target)
+
+    assert not failed.quality_passed
+    assert {gate.name for gate in failed.gates if gate.value > gate.limit} == {
+        "roll_body_rate_nrmse",
+        "roll_envelope_body_rate_nrmse",
+    }
+
+
 def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
     tmp_path: Path,
 ) -> None:
@@ -385,7 +517,7 @@ def test_align_recovers_known_delay_and_per_axis_gain_on_validation(
 
     assert result.controller.selected_settings.command_delay_s == 0.05
     assert result.controller.selected_settings.kp_vel == (2.0, 3.0, 4.0)
-    assert selected.metrics["worst_axis_velocity_nrmse"] == 0.0
+    assert selected.metrics["velocity.x_velocity_nrmse"] == 0.0
     assert result.controller.advisory_quality_passed
 
 
@@ -461,7 +593,7 @@ def test_beam_retains_per_objective_champions() -> None:
         ),
     )
     reference_traces = _response_traces(
-        profiles=target.probes,
+        profiles=target.profiles,
         settings=_settings(kp=(1.0, 1.0, 1.0)),
     )
 
@@ -540,7 +672,7 @@ def test_effective_key_aliases_float32_equivalent_settings_and_stops_fixed_point
             passes_per_stage=3,
         ),
     )
-    reference_traces = _response_traces(profiles=target.probes, settings=target.base_settings)
+    reference_traces = _response_traces(profiles=target.profiles, settings=target.base_settings)
 
     outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
 
@@ -568,7 +700,7 @@ def test_coarse_to_fine_search_refines_only_surviving_intervals() -> None:
             min_refinement_survivors=1,
         ),
     )
-    reference_traces = _response_traces(profiles=target.probes, settings=known)
+    reference_traces = _response_traces(profiles=target.profiles, settings=known)
 
     outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
 
@@ -599,7 +731,7 @@ def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> 
         ),
     )
     reference_traces = _response_traces(
-        profiles=target.probes,
+        profiles=target.profiles,
         settings=target.base_settings,
     )
 
@@ -687,7 +819,7 @@ def test_coarse_to_fine_search_expands_each_initial_setting() -> None:
             initial_settings=(seed,),
         ),
     )
-    reference_traces = _response_traces(profiles=target.probes, settings=base)
+    reference_traces = _response_traces(profiles=target.profiles, settings=base)
 
     outcome = _staged_beam_search(target=target, reference_traces=reference_traces)
 
@@ -729,7 +861,7 @@ def test_file_evaluator_indexes_candidate_diagnostics_once(
                     key: [
                         asdict(trace)
                         for trace in _response_traces(
-                            profiles=definition.probes,
+                            profiles=definition.profiles,
                             settings=settings,
                         )
                     ]
@@ -808,19 +940,15 @@ def test_controller_quality_reports_braking_distance_and_residual_speed_error() 
         target,
     )
 
-    assert result.validation_metrics["braking_distance_error_m"] > 0.0
-    assert result.validation_metrics["residual_speed_error_mps"] >= 0.0
-    assert result.ranking_values[3] == result.validation_metrics["residual_speed_error_mps"]
-    assert result.ranking_values[4] == result.validation_metrics["braking_distance_error_m"]
+    assert result.validation_metrics["velocity.x_braking_distance_error_m"] > 0.0
+    assert result.validation_metrics["velocity.x_residual_speed_error_mps"] >= 0.0
 
 
 def test_vertical_envelope_has_a_dedicated_gate_without_redefining_braking() -> None:
     settings = _settings(kp=(1.0, 1.0, 1.0))
     reference = _response_traces(profiles=_profiles(), settings=settings)
     trace_index = next(
-        index
-        for index, trace in enumerate(reference)
-        if trace.profile == "validation-vertical-policy-envelope"
+        index for index, trace in enumerate(reference) if trace.profile == "validation-z-envelope"
     )
     source = reference[trace_index]
     modified = replace(
@@ -833,7 +961,7 @@ def test_vertical_envelope_has_a_dedicated_gate_without_redefining_braking() -> 
 
     result = metric(name="controller-quality")(reference, target)
 
-    assert result.validation_metrics["braking_distance_error_m"] == 0.0
+    assert result.validation_metrics["velocity.z_braking_distance_error_m"] == 0.0
 
 
 def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
@@ -872,7 +1000,7 @@ def test_braking_stop_time_preserves_exact_trace_grid_boundary() -> None:
         velocity_body_flu_mps=target_velocity,
     )
 
-    events = _braking_events(reference=reference, target=target)
+    events = _braking_events(reference=reference, target=target, axis=0)
 
     assert events[0][-1] == 0.1
 
@@ -897,38 +1025,7 @@ def test_braking_ignores_transition_before_reference_reaches_half_command() -> N
         position_enu_m=((0.0, 0.0, 0.0),) * 4,
     )
 
-    assert _braking_events(reference=reference, target=reference) == []
-
-
-def test_controller_quality_prioritizes_gate_feasibility_and_includes_stop_time(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    validation = {
-        "braking_distance_error_m": 0.004,
-        "residual_speed_error_mps": 0.009,
-        "stop_time_error_s": 0.20,
-        "worst_axis_velocity_nrmse": 0.09,
-        "vertical_policy_envelope_nrmse": 0.09,
-        "yaw_rate_nrmse": 0.09,
-        "heading_error_deg": 2.0,
-        "combined_endpoint_error_m": 0.009,
-    }
-    base = MetricResult(
-        metrics={},
-        ranking_values=(0.004, 0.009, 0.09, 0.09, 2.0, 0.009, 0.0, 0.0),
-        fit_metrics={},
-        validation_metrics=validation,
-    )
-    monkeypatch.setattr(
-        "robotics_experiments.alignment._metrics._metric_result",
-        lambda _reference, _target: base,
-    )
-
-    result = _feasibility_metric_result((), ())
-
-    assert result.ranking_values[:3] == pytest.approx((1.0, 1.0, 1.0))
-    assert result.beam_values[2] == 2.0
-    assert not result.quality_passed
+    assert _braking_events(reference=reference, target=reference, axis=0) == []
 
 
 def test_registered_metric_can_change_selection_without_changing_aligner(
@@ -1079,6 +1176,7 @@ def test_controller_and_selection_artifacts_are_compact_and_exact(tmp_path: Path
         & payload.keys()
     )
     controller = load_controller_artifact(run_dir)
+    assert controller.certified_control_modes == ("velocity",)
     reconstructed = load_selection(run_dir=run_dir, controller=controller)
     assert reconstructed.candidates == result.candidates
     assert reconstructed.selected_candidate_index == result.selected_candidate_index

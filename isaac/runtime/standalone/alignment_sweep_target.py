@@ -357,6 +357,7 @@ def _make_env(
     config: ExperimentConfig,
     num_envs: int,
     settings: ControllerSettings,
+    control_mode: str,
 ):
     from isaaclab.envs import DirectRLEnv
 
@@ -581,11 +582,13 @@ def _make_env(
     cfg.seed = config.rl.training.seed
     cfg.scene.num_envs = num_envs
     cfg.episode_length_s = 120.0
-    return _AlignmentReplayEnv(
+    env = _AlignmentReplayEnv(
         cfg=cfg,
         experiment_config=config,
         controller_settings=settings,
     )
+    env.actuation_params = replace(env.actuation_params, kind=control_mode)
+    return env
 
 
 def _assert_flight_envelope(
@@ -651,6 +654,10 @@ def _candidate_trace_batch(
     traces_per_candidate = len(reference_traces)
     padded_settings = settings + (settings[-1],) * (candidate_capacity - len(settings))
     physics_hz = config.sim.physics_hz
+    control_modes = {str(source["control_mode"]) for source in reference_traces}
+    if len(control_modes) != 1:
+        raise ValueError("one target batch must contain exactly one control mode")
+    control_mode = next(iter(control_modes))
     action_scale = config.rl.action.max_body_velocity_mps
     routine = config.vehicles[vehicle_label].routine
     env.apply_controller_settings_batch(
@@ -706,19 +713,31 @@ def _candidate_trace_batch(
                 sample_index = sample_indices[trace_index]
                 if sample_index >= len(times[trace_index]):
                     continue
-                command = source["command_velocity_body_flu_mps"][sample_index - 1]
                 env_index = candidate_index * traces_per_candidate + trace_index
-                action[env_index, :3] = (
-                    torch.as_tensor(
-                        command,
+                if control_mode == "ctbr":
+                    collective = float(
+                        source["command_collective_thrust_normalized"][sample_index - 1]
+                    )
+                    hover = float(env.actuation_params.hover_thrust_normalized[env_index])
+                    action[env_index, 0] = collective / hover - 1.0
+                    action[env_index, 1:4] = torch.as_tensor(
+                        source["command_body_rate_flu_radps"][sample_index - 1],
                         dtype=torch.float32,
                         device=env.device,
+                    ) / float(config.rl.action.max_body_rate_radps)
+                else:
+                    command = source["command_velocity_body_flu_mps"][sample_index - 1]
+                    action[env_index, :3] = (
+                        torch.as_tensor(
+                            command,
+                            dtype=torch.float32,
+                            device=env.device,
+                        )
+                        / action_scale
                     )
-                    / action_scale
-                )
-                action[env_index, 3] = float(
-                    source["command_yaw_rate_radps"][sample_index - 1]
-                ) / float(config.rl.action.max_yaw_rate_radps)
+                    action[env_index, 3] = float(
+                        source["command_yaw_rate_radps"][sample_index - 1]
+                    ) / float(config.rl.action.max_yaw_rate_radps)
         env.step_with_physics_steps(
             action=action,
             physics_steps=physics_steps,
@@ -798,7 +817,7 @@ def _worker_main(
     result_queue,
 ) -> None:
     simulation_app = None
-    env = None
+    envs = {}
     try:
         from isaaclab.app import AppLauncher
 
@@ -811,11 +830,20 @@ def _worker_main(
             for index, trace in enumerate(reference_traces)
         )
         score_metric = metric(name=target.selection_metric)
-        env = _make_env(
-            config=config,
-            num_envs=candidate_capacity * len(reference_traces),
-            settings=target.base_settings,
-        )
+        traces_by_mode = {
+            mode: [trace for trace in reference_traces if trace["control_mode"] == mode]
+            for mode in ("velocity", "ctbr")
+            if any(trace["control_mode"] == mode for trace in reference_traces)
+        }
+        envs = {
+            mode: _make_env(
+                config=config,
+                num_envs=candidate_capacity * len(mode_traces),
+                settings=target.base_settings,
+                control_mode=mode,
+            )
+            for mode, mode_traces in traces_by_mode.items()
+        }
         spool_path = Path(spool_dir) / f"worker-{worker_index}.jsonl"
         with spool_path.open("x", encoding="utf-8") as spool:
             result_queue.put(("ready", worker_index, None))
@@ -825,14 +853,37 @@ def _worker_main(
                     break
                 batch_id, indexed_settings = task
                 settings = tuple(setting for _index, setting in indexed_settings)
-                raw = _candidate_trace_batch(
-                    env=env,
-                    config=config,
-                    settings=settings,
-                    candidate_capacity=candidate_capacity,
-                    reference_traces=reference_traces,
-                    vehicle_label=target.vehicle,
-                )
+                mode_results = {
+                    mode: _candidate_trace_batch(
+                        env=envs[mode],
+                        config=config,
+                        settings=settings,
+                        candidate_capacity=candidate_capacity,
+                        reference_traces=mode_traces,
+                        vehicle_label=target.vehicle,
+                    )
+                    for mode, mode_traces in traces_by_mode.items()
+                }
+                raw: list[str | list[dict[str, Any]]] = []
+                order = {trace["profile"]: index for index, trace in enumerate(reference_traces)}
+                for candidate_index in range(len(settings)):
+                    candidate_results = [
+                        mode_results[mode][candidate_index] for mode in traces_by_mode
+                    ]
+                    failure = next(
+                        (result for result in candidate_results if isinstance(result, str)),
+                        None,
+                    )
+                    if failure is not None:
+                        raw.append(failure)
+                        continue
+                    combined = [
+                        trace
+                        for result in candidate_results
+                        if isinstance(result, list)
+                        for trace in result
+                    ]
+                    raw.append(sorted(combined, key=lambda trace: order[trace["profile"]]))
                 scored = []
                 for (index, setting), result in zip(indexed_settings, raw, strict=True):
                     if isinstance(result, str):
@@ -862,7 +913,7 @@ def _worker_main(
     except BaseException as exc:
         result_queue.put(("error", worker_index, f"{type(exc).__name__}: {exc}"))
     finally:
-        if env is not None:
+        for env in envs.values():
             env.close()
         if simulation_app is not None:
             simulation_app.close()

@@ -17,12 +17,12 @@ import yaml
 
 from robotics_experiments.alignment._metrics import metric
 from robotics_experiments.alignment._models import (
-    CommandInterface,
     ControllerDefinition,
     ControllerSettings,
     ControllerStateSourceAge,
     ParameterSpec,
     ProbeCommand,
+    ProbeFamily,
     ProbeProfile,
     ProbeTrace,
     SearchSpec,
@@ -34,7 +34,6 @@ __all__: list[str] = []
 _TRACE_SCHEMA_VERSION = 1
 _SUPPORTED_TRACE_SCHEMA_VERSIONS = frozenset({_TRACE_SCHEMA_VERSION})
 _BACKENDS = frozenset({"isaac-lab", "px4-sitl"})
-_INTERFACE_KIND = "body-flu-velocity-yaw-rate"
 _SEARCH_STRATEGIES = frozenset({"coarse-to-fine-beam"})
 _SETTINGS_FIELDS = {item.name for item in fields(ControllerSettings)}
 _CANDIDATE_ENTRY = re.compile(rb'"([0-9a-f]{64})"\s*:\s*')
@@ -259,41 +258,13 @@ def _settings(
     return parsed
 
 
-def _interface(*, value: Any, name: str) -> CommandInterface:
-    interface = _object(value=value, name=name)
-    kind = _string(value=interface.get("kind"), name=f"{name}.kind")
-    if kind != _INTERFACE_KIND:
-        raise ValueError(f"unsupported {name}.kind={kind!r}")
-    dimension = interface.get("dimension")
-    if type(dimension) is not int or dimension != 4:
-        raise ValueError(f"{name}.dimension must be 4")
-    frame = _string(value=interface.get("frame"), name=f"{name}.frame")
-    if frame != "body-flu":
-        raise ValueError(f"unsupported {name}.frame={frame!r}")
-    return CommandInterface(
-        kind=kind,
-        dimension=dimension,
-        frame=frame,
-        linear_scale_mps=_finite(
-            value=interface.get("linear_scale_mps"),
-            name=f"{name}.linear_scale_mps",
-            positive=True,
-        ),
-        yaw_rate_scale_radps=_finite(
-            value=interface.get("yaw_rate_scale_radps"),
-            name=f"{name}.yaw_rate_scale_radps",
-            positive=True,
-        ),
-    )
-
-
-def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
+def _profiles(*, value: Any, family_name: str, control_mode: str) -> tuple[ProbeProfile, ...]:
     if not isinstance(value, list) or not value:
-        raise ValueError("probes must be a non-empty list")
+        raise ValueError(f"probe family {family_name!r} profiles must be a non-empty list")
     profiles: list[ProbeProfile] = []
     names: set[str] = set()
     for index, raw_profile in enumerate(value):
-        name = f"probes[{index}]"
+        name = f"probe_families[{family_name!r}].profiles[{index}]"
         profile = _object(value=raw_profile, name=name)
         profile_name = _string(value=profile.get("name"), name=f"{name}.name")
         if profile_name in names:
@@ -303,57 +274,117 @@ def _profiles(*, value: Any) -> tuple[ProbeProfile, ...]:
         if split not in ("fit", "validation", "stability"):
             raise ValueError(f"{name}.split must be 'fit', 'validation', or 'stability'")
         axis = _string(value=profile.get("axis"), name=f"{name}.axis")
-        if axis not in ("x", "y", "z", "yaw", "combined"):
-            raise ValueError(f"{name}.axis must be x, y, z, yaw, or combined")
+        if axis not in ("x", "y", "z", "roll", "pitch", "yaw", "collective", "combined"):
+            raise ValueError(
+                f"{name}.axis must be x, y, z, roll, pitch, yaw, collective, or combined"
+            )
         raw_commands = profile.get("commands")
         if not isinstance(raw_commands, list) or not raw_commands:
             raise ValueError(f"{name}.commands must be a non-empty list")
-        commands = tuple(
-            ProbeCommand(
-                velocity_body_flu_mps=_vector(
-                    value=_object(value=command, name=f"{name}.commands[{command_index}]").get(
-                        "velocity_body_flu_mps"
+        commands = []
+        for command_index, raw_command in enumerate(raw_commands):
+            command_name = f"{name}.commands[{command_index}]"
+            command = _object(value=raw_command, name=command_name)
+            velocity: tuple[float, float, float]
+            body_rate: tuple[float, float, float]
+            if control_mode == "velocity":
+                expected_fields = {"velocity_body_flu_mps", "yaw_rate_radps", "duration_s"}
+                if set(command) != expected_fields:
+                    raise ValueError(f"{command_name} fields mismatch for velocity control")
+                velocity_values = _vector(
+                    value=command["velocity_body_flu_mps"],
+                    name=f"{command_name}.velocity_body_flu_mps",
+                )
+                velocity = velocity_values[0], velocity_values[1], velocity_values[2]
+                yaw_rate = _finite(
+                    value=command["yaw_rate_radps"], name=f"{command_name}.yaw_rate_radps"
+                )
+                collective = 0.0
+                body_rate = (0.0, 0.0, 0.0)
+            else:
+                expected_fields = {
+                    "collective_thrust_normalized",
+                    "body_rate_flu_radps",
+                    "duration_s",
+                }
+                if set(command) != expected_fields:
+                    raise ValueError(f"{command_name} fields mismatch for CTBR control")
+                velocity = (0.0, 0.0, 0.0)
+                yaw_rate = 0.0
+                collective = _finite(
+                    value=command["collective_thrust_normalized"],
+                    name=f"{command_name}.collective_thrust_normalized",
+                    nonnegative=True,
+                )
+                if collective > 1.0:
+                    raise ValueError(
+                        f"{command_name}.collective_thrust_normalized must not exceed 1"
+                    )
+                body_rate_values = _vector(
+                    value=command["body_rate_flu_radps"],
+                    name=f"{command_name}.body_rate_flu_radps",
+                )
+                body_rate = body_rate_values[0], body_rate_values[1], body_rate_values[2]
+            commands.append(
+                ProbeCommand(
+                    velocity_body_flu_mps=velocity,
+                    yaw_rate_radps=yaw_rate,
+                    collective_thrust_normalized=collective,
+                    body_rate_flu_radps=body_rate,
+                    duration_s=_finite(
+                        value=command["duration_s"],
+                        name=f"{command_name}.duration_s",
+                        positive=True,
                     ),
-                    name=f"{name}.commands[{command_index}].velocity_body_flu_mps",
-                ),
-                yaw_rate_radps=_finite(
-                    value=_object(
-                        value=command,
-                        name=f"{name}.commands[{command_index}]",
-                    ).get("yaw_rate_radps"),
-                    name=f"{name}.commands[{command_index}].yaw_rate_radps",
-                ),
-                duration_s=_finite(
-                    value=_object(
-                        value=command,
-                        name=f"{name}.commands[{command_index}]",
-                    ).get("duration_s"),
-                    name=f"{name}.commands[{command_index}].duration_s",
-                    positive=True,
-                ),
+                )
             )
-            for command_index, command in enumerate(raw_commands)
-        )
         profiles.append(
             ProbeProfile(
                 name=profile_name,
                 split=split,
                 axis=axis,
-                commands=commands,
+                commands=tuple(commands),
             )
         )
-    covered = {(profile.split, profile.axis) for profile in profiles}
-    expected = {
-        (split, axis)
-        for split in ("fit", "validation")
-        for axis in ("x", "y", "z", "yaw", "combined")
-    }
-    if not expected <= covered:
-        raise ValueError(
-            "probes must cover x, y, z, yaw, and combined behavior for fit and validation; "
-            f"missing={sorted(expected - covered)!r}"
-        )
     return tuple(profiles)
+
+
+def _probe_families(*, value: Any) -> tuple[ProbeFamily, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("probe_families must be a non-empty list")
+    families = []
+    names: set[str] = set()
+    profile_names: set[str] = set()
+    for index, raw_family in enumerate(value):
+        name = f"probe_families[{index}]"
+        family = _object(value=raw_family, name=name)
+        if set(family) != {"name", "control_mode", "metric", "profiles"}:
+            raise ValueError(f"{name} fields must be name, control_mode, metric, and profiles")
+        family_name = _string(value=family["name"], name=f"{name}.name")
+        if family_name in names:
+            raise ValueError(f"duplicate probe family name {family_name!r}")
+        names.add(family_name)
+        control_mode = _string(value=family["control_mode"], name=f"{name}.control_mode")
+        if control_mode not in ("velocity", "ctbr"):
+            raise ValueError(f"{name}.control_mode must be 'velocity' or 'ctbr'")
+        metric_name = _string(value=family["metric"], name=f"{name}.metric")
+        metric(name=metric_name)
+        profiles = _profiles(
+            value=family["profiles"], family_name=family_name, control_mode=control_mode
+        )
+        duplicates = profile_names & {profile.name for profile in profiles}
+        if duplicates:
+            raise ValueError(f"duplicate probe profile names {sorted(duplicates)!r}")
+        profile_names.update(profile.name for profile in profiles)
+        families.append(
+            ProbeFamily(
+                name=family_name,
+                control_mode=control_mode,
+                metric=metric_name,
+                profiles=profiles,
+            )
+        )
+    return tuple(families)
 
 
 def _candidate(*, value: Any, template: SettingValue, name: str) -> SettingValue:
@@ -497,6 +528,8 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     time = trace["time_s"]
     commands = trace["command_velocity_body_flu_mps"]
     yaw_commands = trace["command_yaw_rate_radps"]
+    collective_commands = trace["command_collective_thrust_normalized"]
+    body_rate_commands = trace["command_body_rate_flu_radps"]
     positions = trace["position_enu_m"]
     attitudes = trace["attitude_flu_enu_wxyz"]
     velocities = trace["velocity_body_flu_mps"]
@@ -506,6 +539,8 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         not isinstance(time, list)
         or not isinstance(commands, list)
         or not isinstance(yaw_commands, list)
+        or not isinstance(collective_commands, list)
+        or not isinstance(body_rate_commands, list)
         or not isinstance(positions, list)
         or not isinstance(attitudes, list)
         or not isinstance(velocities, list)
@@ -516,6 +551,8 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     sample_lengths = (
         len(commands),
         len(yaw_commands),
+        len(collective_commands),
+        len(body_rate_commands),
         len(positions),
         len(attitudes),
         len(velocities),
@@ -530,6 +567,41 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         for current, next_time in zip(parsed_time, parsed_time[1:], strict=False)
     ):
         raise ValueError(f"{name}.time_s must be strictly increasing")
+    control_mode = _string(value=trace["control_mode"], name=f"{name}.control_mode")
+    if control_mode not in ("velocity", "ctbr"):
+        raise ValueError(f"{name}.control_mode must be 'velocity' or 'ctbr'")
+    parsed_velocity_commands = tuple(
+        _vector(value=item, name=f"{name}.command_velocity_body_flu_mps") for item in commands
+    )
+    parsed_yaw_commands = tuple(
+        _finite(value=item, name=f"{name}.command_yaw_rate_radps") for item in yaw_commands
+    )
+    parsed_collective_commands = tuple(
+        _finite(
+            value=item,
+            name=f"{name}.command_collective_thrust_normalized",
+            nonnegative=True,
+        )
+        for item in collective_commands
+    )
+    if any(value > 1.0 for value in parsed_collective_commands):
+        raise ValueError(f"{name}.command_collective_thrust_normalized must not exceed 1")
+    parsed_body_rate_commands = tuple(
+        _vector(value=item, name=f"{name}.command_body_rate_flu_radps")
+        for item in body_rate_commands
+    )
+    if control_mode == "velocity" and any(
+        collective != 0.0 or body_rate != (0.0, 0.0, 0.0)
+        for collective, body_rate in zip(
+            parsed_collective_commands, parsed_body_rate_commands, strict=True
+        )
+    ):
+        raise ValueError(f"{name} velocity trace has active CTBR commands")
+    if control_mode == "ctbr" and any(
+        velocity != (0.0, 0.0, 0.0) or yaw_rate != 0.0
+        for velocity, yaw_rate in zip(parsed_velocity_commands, parsed_yaw_commands, strict=True)
+    ):
+        raise ValueError(f"{name} CTBR trace has active velocity commands")
     initial_hover_thrust_normalized = _finite(
         value=trace["initial_hover_thrust_normalized"],
         name=f"{name}.initial_hover_thrust_normalized",
@@ -551,16 +623,17 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     if set(source_age) != expected_source_age:
         raise ValueError(f"{name}.initial_controller_state_source_age_us fields mismatch")
     return ProbeTrace(
+        family=_string(value=trace["family"], name=f"{name}.family"),
+        control_mode=control_mode,
+        family_metric=_string(value=trace["family_metric"], name=f"{name}.family_metric"),
         profile=_string(value=trace["profile"], name=f"{name}.profile"),
         split=_string(value=trace["split"], name=f"{name}.split"),
         axis=_string(value=trace["axis"], name=f"{name}.axis"),
         time_s=parsed_time,
-        command_velocity_body_flu_mps=tuple(
-            _vector(value=item, name=f"{name}.command_velocity_body_flu_mps") for item in commands
-        ),
-        command_yaw_rate_radps=tuple(
-            _finite(value=item, name=f"{name}.command_yaw_rate_radps") for item in yaw_commands
-        ),
+        command_velocity_body_flu_mps=parsed_velocity_commands,
+        command_yaw_rate_radps=parsed_yaw_commands,
+        command_collective_thrust_normalized=parsed_collective_commands,
+        command_body_rate_flu_radps=parsed_body_rate_commands,
         position_enu_m=tuple(
             _vector(value=item, name=f"{name}.position_enu_m") for item in positions
         ),
@@ -923,12 +996,8 @@ def load_controller_definition(path: str | Path, /) -> ControllerDefinition:
             name="command_rate_hz",
             positive=True,
         ),
-        command_interface=_interface(
-            value=definition.get("command_interface"),
-            name="command_interface",
-        ),
         base_settings=base_settings,
-        probes=_profiles(value=definition.get("probes")),
+        probe_families=_probe_families(value=definition.get("probe_families")),
         parameters=_parameters(
             value=definition.get("parameters", []),
             base_settings=base_settings,

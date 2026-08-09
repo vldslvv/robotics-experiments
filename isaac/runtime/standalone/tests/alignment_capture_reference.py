@@ -19,6 +19,7 @@ from _runtime import SceneTestContext, run_scene_test
 from robotics_experiments.alignment import load_controller_definition
 from robotics_experiments.alignment._models import ControllerDefinition
 from robotics_experiments.commanding import (
+    AttitudeRateSetpoint,
     PolicyAdapter,
     PolicyInput,
     PolicyResult,
@@ -45,10 +46,15 @@ class _InitialState:
 
 @dataclass(frozen=True)
 class _Sample:
+    family: str
+    control_mode: str
+    family_metric: str
     profile: str
     sim_time_us: int
     command_velocity_body_flu_mps: tuple[float, float, float]
     command_yaw_rate_radps: float
+    command_collective_thrust_normalized: float
+    command_body_rate_flu_radps: tuple[float, float, float]
     position_enu_m: tuple[float, float, float]
     attitude_flu_enu_wxyz: tuple[float, float, float, float]
     velocity_body_flu_mps: tuple[float, float, float]
@@ -111,7 +117,10 @@ def _is_stable(*, policy_input: PolicyInput, config: ExperimentConfig) -> bool:
 
 
 def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
-    profiles = definition.probes
+    profiles = definition.profiles
+    families_by_profile = {
+        profile.name: family for family in definition.probe_families for profile in family.profiles
+    }
 
     def advance(*, policy_input: PolicyInput, state: object) -> PolicyResult:
         if not isinstance(state, _ProbeState):
@@ -214,14 +223,20 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
                 complete=True,
             )
         probe_command = profiles[profile_index].commands[command_index]
+        family = families_by_profile[profiles[profile_index].name]
         command = probe_command.velocity_body_flu_mps
         vehicle = policy_input.vehicle_state
         velocity = body_velocity_flu_from_state(policy_input.vehicle_state)
         sample = _Sample(
+            family=family.name,
+            control_mode=family.control_mode,
+            family_metric=family.metric,
             profile=profiles[profile_index].name,
             sim_time_us=policy_input.sim_time_us,
             command_velocity_body_flu_mps=command,
             command_yaw_rate_radps=probe_command.yaw_rate_radps,
+            command_collective_thrust_normalized=(probe_command.collective_thrust_normalized),
+            command_body_rate_flu_radps=probe_command.body_rate_flu_radps,
             position_enu_m=_float3(vehicle.position_enu),
             attitude_flu_enu_wxyz=_float4(vehicle.orientation_flu_enu_wxyz),
             velocity_body_flu_mps=_float3(velocity),
@@ -239,15 +254,22 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
             samples=(*state.samples, sample),
             complete=False,
         )
-        return PolicyResult(
-            state=successor,
-            setpoint=VelocitySetpoint(
+        if family.control_mode == "ctbr":
+            roll_rate, pitch_rate, yaw_rate = probe_command.body_rate_flu_radps
+            setpoint = AttitudeRateSetpoint(
+                thrust=probe_command.collective_thrust_normalized,
+                roll_rate_radps=roll_rate,
+                pitch_rate_radps=-pitch_rate,
+                yaw_rate_radps=-yaw_rate,
+            )
+        else:
+            setpoint = VelocitySetpoint(
                 forward_mps=command[0],
                 right_mps=-command[1],
                 down_mps=-command[2],
                 yaw_rate_radps=-probe_command.yaw_rate_radps,
-            ),
-        )
+            )
+        return PolicyResult(state=successor, setpoint=setpoint)
 
     return advance
 
@@ -298,30 +320,38 @@ def _deploy_pusher(context: SceneTestContext, host, /) -> None:
     context.report(f"alignment plant pusher deployed to {upper_limit:.6f} m")
 
 
-def _assert_yaw_response_sign(*, samples: tuple[_Sample, ...]) -> None:
+def _assert_rotational_response_sign(*, samples: tuple[_Sample, ...]) -> None:
     segment: list[_Sample] = []
-    previous_command = 0.0
+    previous_command = (0.0, 0.0, 0.0)
+    previous_profile = ""
 
-    def validate(values: list[_Sample], command: float) -> None:
-        if not values or abs(command) < 1e-9:
-            return
+    def validate(values: list[_Sample], command: tuple[float, float, float]) -> None:
         settled = values[len(values) // 2 :]
-        mean_rate = sum(sample.angular_velocity_body_flu_radps[2] for sample in settled) / len(
-            settled
-        )
-        if command * mean_rate <= 0.0:
-            raise AssertionError(
-                "PX4 alignment yaw response sign disagrees with the body-FLU "
-                f"command: command={command:.3f}rad/s response={mean_rate:.3f}rad/s"
-            )
+        for axis, commanded_rate in enumerate(command):
+            if not values or abs(commanded_rate) < 1e-9:
+                continue
+            mean_rate = sum(
+                sample.angular_velocity_body_flu_radps[axis] for sample in settled
+            ) / len(settled)
+            if commanded_rate * mean_rate <= 0.0:
+                raise AssertionError(
+                    "PX4 alignment rotational response sign disagrees with the body-FLU "
+                    f"command on axis {axis}: command={commanded_rate:.3f}rad/s "
+                    f"response={mean_rate:.3f}rad/s"
+                )
 
     for sample in samples:
-        command = sample.command_yaw_rate_radps
-        if segment and not math.isclose(command, previous_command, abs_tol=1e-9):
+        command = (
+            sample.command_body_rate_flu_radps
+            if sample.control_mode == "ctbr"
+            else (0.0, 0.0, sample.command_yaw_rate_radps)
+        )
+        if segment and (command != previous_command or sample.profile != previous_profile):
             validate(segment, previous_command)
             segment = []
         segment.append(sample)
         previous_command = command
+        previous_profile = sample.profile
     validate(segment, previous_command)
 
 
@@ -332,16 +362,19 @@ def _write_capture(
     run_dir: Path,
     state: _ProbeState,
 ) -> None:
-    if not state.complete or len(state.initials) != len(definition.probes):
+    if not state.complete or len(state.initials) != len(definition.profiles):
         raise AssertionError("PX4 alignment probe adapter did not complete every profile")
-    _assert_yaw_response_sign(samples=state.samples)
+    _assert_rotational_response_sign(samples=state.samples)
     traces = []
-    for profile, initial in zip(definition.probes, state.initials, strict=True):
+    for profile, initial in zip(definition.profiles, state.initials, strict=True):
         samples = tuple(sample for sample in state.samples if sample.profile == profile.name)
         if not samples:
             raise AssertionError(f"PX4 alignment profile {profile.name!r} produced no samples")
         traces.append(
             {
+                "family": samples[0].family,
+                "control_mode": samples[0].control_mode,
+                "family_metric": samples[0].family_metric,
                 "profile": profile.name,
                 "split": profile.split,
                 "axis": profile.axis,
@@ -351,6 +384,12 @@ def _write_capture(
                     list(sample.command_velocity_body_flu_mps) for sample in samples
                 ],
                 "command_yaw_rate_radps": [sample.command_yaw_rate_radps for sample in samples],
+                "command_collective_thrust_normalized": [
+                    sample.command_collective_thrust_normalized for sample in samples
+                ],
+                "command_body_rate_flu_radps": [
+                    list(sample.command_body_rate_flu_radps) for sample in samples
+                ],
                 "position_enu_m": [list(sample.position_enu_m) for sample in samples],
                 "attitude_flu_enu_wxyz": [list(sample.attitude_flu_enu_wxyz) for sample in samples],
                 "velocity_body_flu_mps": [list(sample.velocity_body_flu_mps) for sample in samples],

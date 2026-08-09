@@ -7,11 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Protocol
 
-from robotics_experiments.controller import (
-    CommandInterface,
-    ControllerArtifact,
-    ControllerSettings,
-)
+from robotics_experiments.controller import ControllerArtifact, ControllerSettings
 
 __all__: list[str] = []
 
@@ -22,10 +18,16 @@ SettingValue = Scalar | Vector3
 
 @dataclass(frozen=True)
 class ProbeCommand:
-    """One held body-FLU velocity/yaw-rate command and its exact duration."""
+    """One held physical command and its exact duration.
+
+    The owning :class:`ProbeFamily` selects which pair of command fields is
+    active. Inactive fields are required to be zero by the definition loader.
+    """
 
     velocity_body_flu_mps: Vector3
     yaw_rate_radps: float
+    collective_thrust_normalized: float
+    body_rate_flu_radps: Vector3
     duration_s: float
 
 
@@ -37,6 +39,16 @@ class ProbeProfile:
     split: str
     axis: str
     commands: tuple[ProbeCommand, ...]
+
+
+@dataclass(frozen=True)
+class ProbeFamily:
+    """Minimal extensible contract for one required alignment capability."""
+
+    name: str
+    control_mode: str
+    metric: str
+    profiles: tuple[ProbeProfile, ...]
 
 
 @dataclass(frozen=True)
@@ -76,12 +88,17 @@ class ControllerStateSourceAge:
 class ProbeTrace:
     """One backend response sampled at the exact command-update times."""
 
+    family: str
+    control_mode: str
+    family_metric: str
     profile: str
     split: str
     axis: str
     time_s: tuple[float, ...]
     command_velocity_body_flu_mps: tuple[Vector3, ...]
     command_yaw_rate_radps: tuple[float, ...]
+    command_collective_thrust_normalized: tuple[float, ...]
+    command_body_rate_flu_radps: tuple[Vector3, ...]
     position_enu_m: tuple[Vector3, ...]
     attitude_flu_enu_wxyz: tuple[tuple[float, float, float, float], ...]
     velocity_body_flu_mps: tuple[Vector3, ...]
@@ -132,9 +149,8 @@ class ControllerDefinition:
     vehicle: str
     airframe: str
     command_rate_hz: float
-    command_interface: CommandInterface
     base_settings: ControllerSettings
-    probes: tuple[ProbeProfile, ...]
+    probe_families: tuple[ProbeFamily, ...]
     parameters: tuple[ParameterSpec, ...]
     search: SearchSpec
     selection_metric: str
@@ -142,6 +158,11 @@ class ControllerDefinition:
     evaluator: BackendEvaluator = field(compare=False, repr=False)
     definition_fingerprint: str
     image: str
+
+    @property
+    def profiles(self) -> tuple[ProbeProfile, ...]:
+        """Return every family profile in deterministic authored order."""
+        return tuple(profile for family in self.probe_families for profile in family.profiles)
 
 
 @dataclass(frozen=True)
@@ -181,6 +202,16 @@ class MetricResult:
     validation_metrics: Mapping[str, float]
     beam_values: tuple[float, ...] = ()
     quality_passed: bool = True
+    gates: tuple[QualityGateResult, ...] = ()
+
+
+@dataclass(frozen=True)
+class QualityGateResult:
+    """One explicit family-owned acceptance comparison."""
+
+    name: str
+    value: float
+    limit: float
 
 
 MetricFunction = Callable[

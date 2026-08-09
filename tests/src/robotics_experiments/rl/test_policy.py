@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.commanding import PolicyInput
-from robotics_experiments.controller import CommandInterface, ControllerArtifact, ControllerSettings
+from robotics_experiments.controller import ControllerArtifact, ControllerSettings
 from robotics_experiments.rl import (
     HOVER_OBSERVATION_DIM,
     METADATA_FILENAME,
@@ -107,13 +107,7 @@ def _controller_artifact() -> ControllerArtifact:
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
-        command_interface=CommandInterface(
-            kind="body-flu-velocity-yaw-rate",
-            dimension=4,
-            frame="body-flu",
-            linear_scale_mps=3.0,
-            yaw_rate_scale_radps=1.5,
-        ),
+        certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(

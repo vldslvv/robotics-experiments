@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from robotics_experiments.alignment import load_controller_definition
-from robotics_experiments.alignment._models import ProbeCommand, ProbeProfile
+from robotics_experiments.alignment._models import ProbeCommand, ProbeFamily, ProbeProfile
 from robotics_experiments.commanding import PolicyInput
 from robotics_experiments.config import load_config
 from robotics_experiments.px4_bridge import VehicleState
@@ -59,12 +59,27 @@ def _yaw_definition():
     )
     return replace(
         source,
-        probes=(
-            ProbeProfile(
-                name="yaw",
-                split="fit",
-                axis="yaw",
-                commands=(ProbeCommand((0.0, 0.0, 0.0), 0.2, 1.0),),
+        probe_families=(
+            ProbeFamily(
+                name="velocity",
+                control_mode="velocity",
+                metric="translational-controller-quality",
+                profiles=(
+                    ProbeProfile(
+                        name="yaw",
+                        split="fit",
+                        axis="yaw",
+                        commands=(
+                            ProbeCommand(
+                                (0.0, 0.0, 0.0),
+                                0.2,
+                                0.0,
+                                (0.0, 0.0, 0.0),
+                                1.0,
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -230,13 +245,36 @@ def test_capture_rejects_wrong_body_flu_yaw_response_sign(monkeypatch: pytest.Mo
     module = _load_script(monkeypatch)
     samples = tuple(
         SimpleNamespace(
+            control_mode="velocity",
+            profile="yaw",
             command_yaw_rate_radps=0.2,
+            command_body_rate_flu_radps=(0.0, 0.0, 0.0),
             angular_velocity_body_flu_radps=(0.0, 0.0, -0.1),
         )
         for _index in range(4)
     )
 
     with pytest.raises(AssertionError, match="sign disagrees"):
-        module._assert_yaw_response_sign(  # noqa: SLF001 - focused validation test
+        module._assert_rotational_response_sign(  # noqa: SLF001 - focused validation test
             samples=samples
         )
+
+
+def test_capture_checks_ctbr_roll_pitch_and_yaw_response_signs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_script(monkeypatch)
+    samples = tuple(
+        SimpleNamespace(
+            control_mode="ctbr",
+            profile="rates",
+            command_yaw_rate_radps=0.0,
+            command_body_rate_flu_radps=(0.2, -0.3, 0.4),
+            angular_velocity_body_flu_radps=(0.1, -0.1, 0.2),
+        )
+        for _index in range(4)
+    )
+
+    module._assert_rotational_response_sign(  # noqa: SLF001 - focused validation test
+        samples=samples
+    )

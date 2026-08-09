@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from robotics_experiments.config import RlTrainingPhaseConfig
-from robotics_experiments.controller import CommandInterface, ControllerArtifact, ControllerSettings
+from robotics_experiments.controller import ControllerArtifact, ControllerSettings
 from tests.support.paths import REPO_ROOT
 
 
@@ -82,13 +82,7 @@ def _controller_artifact() -> ControllerArtifact:
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
-        command_interface=CommandInterface(
-            kind="body-flu-velocity-yaw-rate",
-            dimension=4,
-            frame="body-flu",
-            linear_scale_mps=3.0,
-            yaw_rate_scale_radps=1.5,
-        ),
+        certified_control_modes=("velocity", "ctbr"),
         probe_suite_fingerprint="probes",
         selected_settings=settings,
         settings_fingerprint=hashlib.sha256(
@@ -146,12 +140,7 @@ def test_training_alignment_keeps_normalized_action_scales_task_owned(
         vehicle="x500_01",
         airframe="holybro_x500_v2.usda",
         command_rate_hz=20.0,
-        command_interface=SimpleNamespace(
-            kind="body-flu-velocity-yaw-rate",
-            dimension=4,
-            linear_scale_mps=3.0,
-            yaw_rate_scale_radps=1.5,
-        ),
+        certified_control_modes=("velocity", "ctbr"),
         advisory_quality_passed=True,
     )
     monkeypatch.setattr(train_rl, "load_controller_artifact", lambda _path: artifact)

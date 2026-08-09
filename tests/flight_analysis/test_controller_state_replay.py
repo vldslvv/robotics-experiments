@@ -249,6 +249,9 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                 "schema_version": 1,
                 "traces": [
                     {
+                        "family": "velocity",
+                        "control_mode": "velocity",
+                        "family_metric": "translational-controller-quality",
                         "profile": "validation-combined",
                         "split": "validation",
                         "axis": "combined",
@@ -260,6 +263,8 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                             [0.0, 0.0, 0.0],
                         ],
                         "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                        "command_collective_thrust_normalized": [0.0, 0.0, 0.0],
+                        "command_body_rate_flu_radps": [[0.0, 0.0, 0.0]] * 3,
                         "attitude_flu_enu_wxyz": [
                             [1.0, 0.0, 0.0, 0.0],
                             [1.0, 0.0, 0.0, 0.0],
@@ -283,6 +288,9 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
 
     assert _profile_windows(reference_path=reference) == [
         {
+            "family": "velocity",
+            "control_mode": "velocity",
+            "family_metric": "translational-controller-quality",
             "profile": "validation-combined",
             "split": "validation",
             "axis": "combined",
@@ -296,6 +304,9 @@ def test_profile_windows_use_recorded_absolute_start_and_trace_duration(tmp_path
                     [0.0, 0.0, 0.0],
                 ],
                 "command_yaw_rate_radps": [0.0, 0.2, 0.0],
+                "command_collective_thrust_normalized": [0.0, 0.0, 0.0],
+                "command_body_rate_flu_radps": [[0.0, 0.0, 0.0]] * 3,
+                "control_mode": "velocity",
                 "attitude_flu_enu_wxyz": [
                     [1.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 0.0],

@@ -851,9 +851,12 @@ def _report(
             velocity_filter_hz=0.0,
             angular_velocity_filter_hz=0.0,
         )
+    control_mode = (
+        str(command_trace["control_mode"]) if command_trace is not None else config.rl.action.kind
+    )
     params = build_actuation_params(
         geometry=geometry,
-        action_cfg=config.rl.action,
+        action_cfg=replace(config.rl.action, kind=control_mode),
         controller_settings=controller_settings,
         mass=mass,
     )
@@ -896,7 +899,7 @@ def _report(
             ]
         )
         yaw_speed = np.asarray(trajectory["yawspeed"], dtype=np.float64)[trajectory_index]
-    else:
+    elif control_mode == "velocity":
         command_time = np.asarray(command_trace["time_s"], dtype=np.float64)
         command_velocity = np.asarray(
             command_trace["command_velocity_body_flu_mps"], dtype=np.float64
@@ -926,6 +929,32 @@ def _report(
         velocity_ned = np.zeros_like(commanded_body_velocity)
         velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
         yaw_speed = -command_yaw_rate[command_index]
+    elif control_mode == "ctbr":
+        command_time = np.asarray(command_trace["time_s"], dtype=np.float64)
+        command_collective = np.asarray(
+            command_trace["command_collective_thrust_normalized"], dtype=np.float64
+        )
+        command_body_rate = np.asarray(
+            command_trace["command_body_rate_flu_radps"], dtype=np.float64
+        )
+        if (
+            command_time.ndim != 1
+            or command_collective.shape != (len(command_time),)
+            or command_body_rate.shape != (len(command_time), 3)
+        ):
+            raise ValueError("CTBR profile command trace fields have inconsistent lengths")
+        command_index = _hold_indices(source_t=command_time, query_t=replay_relative_t)
+        replay_actions = np.column_stack(
+            [
+                command_collective[command_index] / controller_settings.hover_thrust_normalized
+                - 1.0,
+                command_body_rate[command_index] / config.rl.action.max_body_rate_radps,
+            ]
+        )
+        velocity_ned = np.zeros((len(replay_t), 3), dtype=np.float64)
+        yaw_speed = np.zeros(len(replay_t), dtype=np.float64)
+    else:
+        raise ValueError(f"unsupported profile control mode {control_mode!r}")
     local_velocity_ned = _linear_interpolate(
         source_t=relative_time(local_position),
         values=np.column_stack(
@@ -1247,6 +1276,9 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
         start_s = int(raw_profile["start_sim_time_us"]) / 1_000_000.0
         windows.append(
             {
+                "family": raw_profile["family"],
+                "control_mode": raw_profile["control_mode"],
+                "family_metric": raw_profile["family_metric"],
                 "profile": raw_profile["profile"],
                 "split": raw_profile["split"],
                 "axis": raw_profile["axis"],
@@ -1256,6 +1288,11 @@ def _profile_windows(*, reference_path: Path) -> list[dict]:
                     "time_s": relative_time_s,
                     "command_velocity_body_flu_mps": raw_profile["command_velocity_body_flu_mps"],
                     "command_yaw_rate_radps": raw_profile["command_yaw_rate_radps"],
+                    "command_collective_thrust_normalized": raw_profile[
+                        "command_collective_thrust_normalized"
+                    ],
+                    "command_body_rate_flu_radps": raw_profile["command_body_rate_flu_radps"],
+                    "control_mode": raw_profile["control_mode"],
                     "attitude_flu_enu_wxyz": raw_profile["attitude_flu_enu_wxyz"],
                     "velocity_enu_mps": raw_profile["velocity_enu_mps"],
                     "angular_velocity_body_flu_radps": raw_profile[
@@ -1330,6 +1367,9 @@ def _profile_replay_report(
             )
         profiles.append(
             {
+                "family": window["family"],
+                "control_mode": window["control_mode"],
+                "family_metric": window["family_metric"],
                 "profile": window["profile"],
                 "split": window["split"],
                 "axis": window["axis"],

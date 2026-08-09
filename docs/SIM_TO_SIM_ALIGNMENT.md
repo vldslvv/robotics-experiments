@@ -1,9 +1,9 @@
 # Controller alignment
 
 Controller alignment makes the high-throughput Isaac Lab controller reproduce
-PX4 SITL for identical body-FLU velocity and yaw-rate commands. It is upstream
-of reinforcement learning. Waypoint navigation, policy rewards, policy actions,
-and domain randomization are not fitting inputs.
+PX4 SITL for identical physical commands. It is upstream of reinforcement
+learning. Waypoint navigation, policy rewards, policy actions, and domain
+randomization are not fitting inputs.
 
 ## Architecture and contracts
 
@@ -49,6 +49,14 @@ setpoint while the 125 Hz velocity loop and 250 Hz rate, allocator, actuator,
 and physics loops advance. This mirrors PX4's `MAV_FRAME_BODY_NED` receiver:
 body-to-world conversion occurs for each received message, independently of the
 slower policy cadence.
+
+Alignment receives an ordered list of probe families. A family contract is
+only a stable name, a control mode, a registered metric, and physical command
+profiles. The current required families are `velocity`, covering body-FLU X/Y/Z
+velocity plus velocity-path yaw, and `ctbr`, covering normalized collective
+thrust plus body-FLU roll/pitch/yaw rates. Capture, Lab replay, search, evidence,
+and publication iterate this list generically. Adding a control capability does
+not require another alignment engine or a policy dependency.
 
 ## Search
 
@@ -127,17 +135,27 @@ them and therefore audits the deployment boundary.
 
 ## Quality and acceptance
 
-The registered `controller-quality` metric ranks exact-action response and
-applies these hard validation limits:
+The registered `controller-quality` aggregate resolves each family's registered
+metric, keeps every axis visible, and ranks first by failed-gate count and
+normalized excess. The translational family applies the following limits to
+each of X, Y, and Z independently:
 
+- direct velocity NRMSE <= 0.10;
+- envelope velocity NRMSE <= 0.10;
 - braking-distance error <= 0.005 m;
 - residual-speed error <= 0.01 m/s;
-- stop-time error <= 0.10 s;
-- worst-axis velocity NRMSE <= 0.10;
-- vertical policy-envelope velocity NRMSE <= 0.10;
-- yaw-rate NRMSE <= 0.10;
-- heading error <= 3 degrees;
-- combined endpoint error <= 0.01 m.
+- stop-time error <= 0.10 s.
+
+Its combined endpoint error remains <= 0.01 m. The CTBR family applies these
+limits to roll, pitch, and yaw independently:
+
+- direct body-rate NRMSE <= 0.10;
+- envelope body-rate NRMSE <= 0.10;
+- attitude error <= 3 degrees.
+
+The CTBR collective probe additionally requires vertical-velocity and
+vertical-acceleration NRMSE <= 0.10. There is no worst-axis substitute: every
+declared axis gate must pass.
 
 Braking distance and stop time apply only when the PX4 reference has reached
 at least half of the preceding nonzero command at the transition. This keeps
@@ -145,9 +163,9 @@ the exact-action gates tied to genuine braking responses; a short reversal
 that never establishes the commanded motion remains covered by velocity,
 acceleration, residual, settling, and endpoint metrics.
 
-The vertical policy envelope is an independent ascent, descent, neutral-return
-profile using commands through 0.8 m/s. It prevents a low-speed aggregate from
-hiding the wrong climb/descend correction observed during policy execution.
+Each translational axis has an independent envelope profile through 0.8 m/s.
+The Z profile specifically prevents a low-speed aggregate from hiding the wrong
+climb/descend correction observed during policy execution.
 
 A run cannot finalize or publish unless all metric gates pass, every stability
 trace completes with finite values, the actuator audit passes, and the
@@ -168,7 +186,9 @@ The campaign runs the authoritative integration gate against its run-local
 `controller.json` after replay and before finalization. A failure therefore
 preserves diagnostic evidence without advancing `latest` or `best`.
 
-`controller.json` is the downstream product. Candidate traces and ULogs are
+`controller.json` is the downstream product. It contains complete controller
+settings and the control modes certified by the accepted probe-family list;
+policy-owned normalized action scales are not alignment fields. Candidate traces and ULogs are
 valuable reproducibility evidence, but policy training consumes only the
 controller artifact. `latest` and comparable `best` links advance only for a
 fully accepted bundle.

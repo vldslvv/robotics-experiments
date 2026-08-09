@@ -9249,3 +9249,30 @@ acceptance gates passing in one run, without checkpoint initialization,
 fine-tuning, post-capture edits, or manual candidate promotion. Stop at the
 controller boundary as requested; policy training remains a separate future
 step that consumes this accepted schema-1 controller artifact.
+
+### 272. Predeclare uniform six-axis probe-family acceptance
+
+Date: 2026-08-09.
+
+The Entry 271 artifact passed the then-current aggregate velocity/yaw gates,
+but those gates could hide an individual translational or rotational axis and
+did not certify the direct collective/body-rate controller path. Replace the
+flat velocity-only probe contract with an ordered list of minimal probe
+families. The initial list contains `velocity` and `ctbr`; each family declares
+only its physical control mode, profiles, and registered metric. Capture,
+batched target replay, generic search, evidence, and controller-boundary replay
+must consume that list without policy imports or family-specific orchestration.
+
+Require direct and envelope NRMSE independently for X, Y, Z, roll, pitch, and
+yaw. Retain per-axis translation braking, residual-speed, and stop-time limits;
+retain per-axis rotational attitude limits; add collective vertical-velocity
+and vertical-acceleration limits. Remove the worst-axis substitute. A published
+controller records the modes certified by this accepted family list, while
+policy-owned normalized action scales remain outside alignment.
+
+This changes the probe suite, metric definition, controller artifact shape, and
+comparison fingerprint. Run a new clean scratch capture, audit, target search,
+fit, complete family replay, and live integration gate. Do not reuse or promote
+the Entry 271 artifact under the new criteria. If the new family gates expose a
+boundary, expand only declarative settings supported by its trace and repeat
+until one unchanged scratch invocation passes.

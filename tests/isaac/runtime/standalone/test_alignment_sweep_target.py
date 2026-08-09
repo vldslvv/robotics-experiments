@@ -82,12 +82,17 @@ def test_target_candidates_are_streamed_to_atomic_json(tmp_path):
     first = _settings(1)[0]
     second = replace(first, command_delay_s=first.command_delay_s + 0.001)
     trace = module.ProbeTrace(
+        family="velocity",
+        control_mode="velocity",
+        family_metric="translational-controller-quality",
         profile="fit_x",
         split="fit",
         axis="x",
         time_s=(0.0,),
         command_velocity_body_flu_mps=((0.0, 0.0, 0.0),),
         command_yaw_rate_radps=(0.0,),
+        command_collective_thrust_normalized=(0.0,),
+        command_body_rate_flu_radps=((0.0, 0.0, 0.0),),
         position_enu_m=((0.0, 0.0, 0.0),),
         attitude_flu_enu_wxyz=((1.0, 0.0, 0.0, 0.0),),
         velocity_body_flu_mps=((0.0, 0.0, 0.0),),

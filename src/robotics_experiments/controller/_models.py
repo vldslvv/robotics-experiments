@@ -48,17 +48,6 @@ class ControllerSettings:
 
 
 @dataclass(frozen=True)
-class CommandInterface:
-    """Policy-facing velocity command contract used by aligned controllers."""
-
-    kind: str
-    dimension: int
-    frame: str
-    linear_scale_mps: float
-    yaw_rate_scale_radps: float
-
-
-@dataclass(frozen=True)
 class ControllerArtifact:
     """Strict v1 controller contract consumed by training and runtime."""
 
@@ -78,7 +67,7 @@ class ControllerArtifact:
     vehicle: str
     airframe: str
     command_rate_hz: float
-    command_interface: CommandInterface
+    certified_control_modes: tuple[str, ...]
     probe_suite_fingerprint: str
     selected_settings: ControllerSettings
     settings_fingerprint: str

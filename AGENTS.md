@@ -219,7 +219,7 @@ the current contents and the intended home for that kind of code.
   `robotics_experiments.controller.ControllerSettings`. Training must load and
   validate a quality-passing schema-1 controller artifact before building Isaac
   Lab, embed its complete
-  settings/digest/fingerprints before PPO, and selection/evaluation must reuse
+  settings, certified control modes, digest, and fingerprints before PPO, and selection/evaluation must reuse
   that embedded record. Policy artifacts without alignment provenance are
   unsupported. Controller and policy artifacts are strict v1 contracts; older
   schemas and compatibility migrations are unsupported. A training invocation

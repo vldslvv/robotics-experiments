@@ -228,9 +228,7 @@ def _load_training_controller(
         )
     if artifact.command_rate_hz != config.rl.policy_rate_hz:
         mismatches.append(f"cadence {artifact.command_rate_hz} != {config.rl.policy_rate_hz}")
-    if artifact.command_interface.kind != "body-flu-velocity-yaw-rate":
-        mismatches.append(f"interface {artifact.command_interface.kind!r}")
-    if action.kind != "velocity" or action.action_dim != artifact.command_interface.dimension:
+    if action.kind not in artifact.certified_control_modes or action.action_dim != 4:
         mismatches.append(f"action contract {(action.kind, action.action_dim)!r} is incompatible")
     if mismatches:
         raise ValueError("controller artifact is incompatible: " + "; ".join(mismatches))
