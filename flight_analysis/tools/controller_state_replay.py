@@ -20,7 +20,6 @@ from pathlib import Path
 
 import numpy as np
 
-from robotics_experiments._cadence import _CadenceState, _next_interval_steps
 from robotics_experiments.config import load_config
 from robotics_experiments.controller import (
     ActuationState,
@@ -112,6 +111,21 @@ def _delay_velocity_actions(
     if delay_steps < len(actions):
         delayed[delay_steps:] = actions[: len(actions) - delay_steps]
     return delayed
+
+
+def _delay_transmitted_actions(*, actions: np.ndarray) -> np.ndarray:
+    """Apply a recorded setpoint after the publishing physics tick.
+
+    Alignment samples contain the command returned by the policy observation at
+    that timestamp. PX4 consumes the newly published setpoint on the following
+    4 ms controller tick. The first recorded command is already active for the
+    first complete replay interval, so it is also the concrete boundary value
+    before that first interval.
+    """
+    values = np.asarray(actions, dtype=np.float64)
+    if values.ndim != 2 or not len(values):
+        raise ValueError("transmitted actions must be a non-empty matrix")
+    return np.concatenate([values[:1], values[:-1]], axis=0)
 
 
 def _linear_interpolate(
@@ -991,6 +1005,7 @@ def _report(
             actions=replay_actions,
             delay_steps=round(controller_settings.command_delay_s * config.sim.physics_hz),
         )
+        replay_actions = _delay_transmitted_actions(actions=replay_actions)
         velocity_ned = np.zeros_like(commanded_body_velocity)
         velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
         yaw_speed = -command_yaw_rate[command_index]
@@ -1016,6 +1031,7 @@ def _report(
                 command_body_rate[command_index] / config.rl.action.max_body_rate_radps,
             ]
         )
+        replay_actions = _delay_transmitted_actions(actions=replay_actions)
         velocity_ned = np.zeros((len(replay_t), 3), dtype=np.float64)
         yaw_speed = np.zeros(len(replay_t), dtype=np.float64)
     else:
@@ -1152,10 +1168,6 @@ def _report(
     isaac_collective_setpoint_grid: list[float] = []
     isaac_angular_velocity_grid: list[np.ndarray] = []
     isaac_angular_acceleration_grid: list[np.ndarray] = []
-    command_refresh_cadence = _CadenceState(previous_time_ns=0)
-    command_refresh_steps_remaining = 0
-    held_controller_command = np.zeros(4, dtype=np.float64)
-
     for (
         replay_action,
         velocity_setpoint_ned,
@@ -1207,19 +1219,11 @@ def _report(
         if replay_actions is None:
             command = np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
         else:
-            if command_refresh_steps_remaining == 0:
-                held_controller_command = normalized_action_to_controller_command(
-                    params,
-                    np.clip(replay_action, -1.0, 1.0),
-                    quaternion_flu_enu,
-                )
-                command_refresh_cadence, command_refresh_steps_remaining = _next_interval_steps(
-                    state=command_refresh_cadence,
-                    source_period_ns=round(controller_dt_s * 1_000_000_000),
-                    rate_hz=config.driver.offboard_setpoint_rate_hz,
-                )
-            command_refresh_steps_remaining -= 1
-            command = held_controller_command
+            command = normalized_action_to_controller_command(
+                params,
+                np.clip(replay_action, -1.0, 1.0),
+                quaternion_flu_enu,
+            )
         controller_state, isaac_omega = controller_command_to_rotor_omega(
             params,
             controller_state,

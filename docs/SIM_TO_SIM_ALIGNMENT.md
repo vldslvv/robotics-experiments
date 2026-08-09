@@ -134,7 +134,11 @@ log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
-and recorded command cadence. The seed phase is derived per profile from the
+and recorded command cadence. A recorded policy sample contains the setpoint
+published after observing that timestamp; replay therefore applies a changed
+setpoint on the following 4 ms controller tick. It holds the exact recorded
+40/60 ms intervals and does not quantize them through a second synthetic 20 Hz
+cadence. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
 includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update

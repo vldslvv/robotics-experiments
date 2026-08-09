@@ -13,6 +13,7 @@ from flight_analysis.tools.controller_state_replay import (
     _bridge_actuator_samples,
     _bridge_state_samples,
     _controller_setpoint_metrics,
+    _delay_transmitted_actions,
     _delay_velocity_actions,
     _hold_indices,
     _interpolate_quaternions,
@@ -75,6 +76,24 @@ def test_velocity_action_delay_shifts_the_complete_command():
         [8.0, 9.0, 10.0],
     ]
     assert delayed[:, 3].tolist() == [0.0, 0.0, 3.0, 7.0, 11.0]
+
+
+def test_recorded_command_takes_effect_after_its_publishing_tick() -> None:
+    _, relative_time = _replay_time_grid(
+        start_s=12.0,
+        end_s=12.048,
+        controller_dt_s=0.004,
+    )
+    command_index = _hold_indices(
+        source_t=np.array([0.0, 0.04]),
+        query_t=relative_time,
+    )
+    sampled_actions = np.array([[0.1], [0.7]])[command_index]
+
+    delayed = _delay_transmitted_actions(actions=sampled_actions)
+
+    assert relative_time[10:12].tolist() == pytest.approx([0.04, 0.044])
+    assert delayed[10:12, 0].tolist() == pytest.approx([0.1, 0.7])
 
 
 def test_linear_interpolation_resamples_controller_state():

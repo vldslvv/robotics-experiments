@@ -10138,3 +10138,24 @@ explicitly and test it with timestamped synthetic topics. Do not change
 controller settings, plant mapping, probe gates, or acceptance limits. Then
 rerun replay against this preserved high-rate campaign before deciding whether
 any residual controller boundary requires another scratch fit.
+
+### 310. Reproduce recorded command publication phase exactly
+
+Date: 2026-08-09.
+
+The capture trace is already the output of the 20 Hz policy/setpoint publisher:
+its alternating 40/60 ms timestamps are the actual physics-representable
+publication cadence. Controller replay was incorrectly passing that trace
+through a second independently phased synthetic 20 Hz cadence. This could hold
+a changed command for another 40-60 ms, while the target sweep applies each
+recorded command over its exact next trace interval.
+
+Remove the second cadence. Hold the recorded command directly on the 250 Hz
+replay grid and apply each change after its publishing physics tick, matching
+the observation-to-setpoint ordering used by capture and target sweep. Preserve
+the separate fitted `command_delay_s` behavior before this mandatory one-tick
+publication phase. Add a synthetic timestamp test proving that a command
+recorded at 40 ms first affects the 44 ms controller tick. Keep every
+controller setting, ULog input, gate, and acceptance limit unchanged, run the
+full host suite, and commit before replaying Entry 309's preserved high-rate
+campaign.
