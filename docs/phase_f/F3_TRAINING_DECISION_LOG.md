@@ -9608,3 +9608,29 @@ proportional basin around 1.1. Keep `kp_vel.x/z`, integral gains and limits,
 filters, actuator, plant, profiles, and all gates unchanged. Reuse Entry 286's
 fresh reference for a diagnostic; require quality, replay, and live gates before
 another clean publishable campaign.
+
+### 288. The planar crossing needs higher damping, not lower proportional gain
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-planar-response-diagnostic`
+reused the Entry 286 capture and evaluated 2,907 unique candidates in 32 GPU
+batches and 1,121.8 seconds. Average sampled GPU utilization was 24.3%.
+Candidate 2749 selected 0.01125 Hz decay, observation bias
+`[-0.02, -0.005, -0.0039]` m/s, and Y scale 0.985. It failed Y braking at
+9.566 mm and combined endpoint at 20.056 mm.
+
+The wider bias grid materially crossed the endpoint gate: candidate 1085
+reached 1.859 mm with bias `[-0.02, 0.025, -0.0039]` m/s, but retained
+15.353 mm Y braking, 13.336 mm/s residual speed, and 0.14 s stop-time error.
+The selected ranking frontier still used X bias -0.02, the new lower edge.
+The earlier X trend predicts the endpoint crossing near -0.03 to -0.04 m/s.
+
+Lower proportional gain is the wrong correction. Along the endpoint champion,
+reducing `kp_vel.y` from 1.75 toward 0.8 increased Y braking from about 15.34
+to 23.77 mm and increased residual speed. Remove that disproved parameter from
+the fit. The declared damping range stopped at 0.2; higher damping is the direct
+unevaluated direction for shortening the long braking transient. Expand
+`kd_vel.y` above 0.2 and X observation bias below -0.02, retain the physical
+scale range, and rerun the target diagnostic without changing gates or plant.
