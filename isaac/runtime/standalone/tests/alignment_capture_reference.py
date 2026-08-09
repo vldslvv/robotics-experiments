@@ -361,7 +361,8 @@ def _assert_rotational_response_sign(*, samples: tuple[_Sample, ...]) -> None:
             if commanded_rate * mean_rate <= 0.0:
                 raise AssertionError(
                     "PX4 alignment rotational response sign disagrees with the body-FLU "
-                    f"command on axis {axis}: command={commanded_rate:.3f}rad/s "
+                    f"command in profile {values[0].profile!r} on axis {axis}: "
+                    f"command={commanded_rate:.3f}rad/s "
                     f"response={mean_rate:.3f}rad/s"
                 )
 

@@ -287,6 +287,6 @@ probe_families:
         axis: combined
         commands:
           - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
-          - {collective_thrust_normalized: 0.60, body_rate_flu_radps: [0.40, -0.30, 0.20], duration_s: 0.25}
-          - {collective_thrust_normalized: 0.54, body_rate_flu_radps: [-0.40, 0.30, -0.20], duration_s: 0.25}
-          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.0}
+          - {collective_thrust_normalized: 0.60, body_rate_flu_radps: [0.40, -0.30, 0.20], duration_s: 0.4}
+          - {collective_thrust_normalized: 0.54, body_rate_flu_radps: [-0.40, 0.30, -0.20], duration_s: 0.4}
+          - {collective_thrust_normalized: 0.57, body_rate_flu_radps: [0.0, 0.0, 0.0], duration_s: 1.2}

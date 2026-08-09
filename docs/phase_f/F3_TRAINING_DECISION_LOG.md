@@ -9356,3 +9356,22 @@ each with an independent recenter and stability hold.
 Increase only the alignment-capture policy-step timeout to 300 seconds. This is
 an execution allowance, not a controller, excitation, safety, or acceptance
 threshold. Commit it before repeating the full clean campaign.
+
+### 277. Give the combined yaw reversal time to cross zero
+
+Date: 2026-08-09.
+
+The extended-timeout campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-complete-capture-scratch`
+completed all 22 profiles inside the unchanged flight envelope. The final
+post-capture sign audit rejected only the -0.20 rad/s yaw segment in the
+combined CTBR stability profile: its 0.25-second segment ended while the
+settled-half mean was still +0.023 rad/s from the preceding positive command.
+The ULog shows the reversal crossing zero about 0.15 seconds after the command
+change and then continuing with the requested sign.
+
+Restore only the paired combined-stability pulses to 0.4 seconds. They remain
+equal and opposite with no zero-rate attitude hold between them, so their
+commanded rotation is still zero and their lateral excursion remains bounded.
+Also include the profile name in future sign-audit failures. Retain every
+acceptance threshold and repeat the full campaign from a clean commit.
