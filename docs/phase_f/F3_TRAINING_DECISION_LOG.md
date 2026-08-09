@@ -10188,3 +10188,28 @@ the joined hover estimate recover vertical acceleration. Keep runtime
 controller equations and every acceptance limit unchanged. Test frame signs,
 vertical inversion, and source-age reporting before replaying the preserved
 campaign again.
+
+### 312. Desired attitude is exact only for the vertical seed
+
+Date: 2026-08-09.
+
+Full-vector acceleration reconstruction from desired attitude reduced
+fit-forward collective RMSE from 0.0525 N to 0.0374 N, but increased total
+failures from 11 to 19. It introduced motor failures on the lateral, yaw, and
+stage-1 profiles because desired attitude contains the tilt-limited thrust
+direction, not the exact pre-limit horizontal acceleration emitted by the
+velocity PID. Even small inverse differences become persistent horizontal
+velocity-integral offsets over a complete profile.
+
+The vertical inversion remains exact: PX4 publishes thrust NED-Z through the
+desired attitude's body-Z direction and collective magnitude, and vertical
+acceleration follows directly from thrust Z and the joined hover estimate. The
+large Z-envelope and moderate-envelope errors remained effectively unchanged,
+so the seed is not their primary cause, but the forward-profile improvement
+shows that it removes a real marginal collective bias.
+
+Restore `vehicle_local_position_setpoint.acceleration` as the horizontal seed
+and replace only its stale Z component with the full-rate attitude/thrust
+inversion. Report both source ages. This retains the exact upstream horizontal
+PID output, preserves the evidenced vertical improvement, and changes no
+production controller setting, equation, or limit.
