@@ -10335,3 +10335,26 @@ This is material progress and validates the three-stage controller structure.
 Preserve the 187.5 Hz report, sweep the declared 166.6667, 187.5, 200, and 250
 Hz candidates against the same high-rate evidence, then use the best evidenced
 rate as the base for a fresh scratch target fit and capture.
+
+### 318. Attitude-rate sweep advances the replay frontier
+
+Date: 2026-08-09.
+
+The four declared attitude-rate candidates were replayed against identical
+preserved high-rate evidence. At 187.5 Hz, 7 failures remain; 200 and 250 Hz
+each regress to 9. The lower edge, 166.6667 Hz, leaves 6 failures and is the new
+frontier. Z-envelope collective falls to 0.514393 N, 45.2% below the original
+0.938942 N, while core and physical Z motor RMSE now pass at 0.007479 and
+0.007620. Moderate collective falls to 0.214633 N and core motor passes at
+0.008221.
+
+The remaining failures at 166.6667 Hz are fit-forward collective at 0.052523 N,
+vertical-ramp collective at 0.064601 N, physical Y motor at 0.013373,
+Z-envelope collective at 0.514393 N, and moderate collective/physical motor at
+0.214633 N and 0.011049. Body-rate error begins to increase at the lower rate,
+but no passed replay gate regresses yet.
+
+The collective frontier is monotonic toward the tested lower boundary, so a
+second evidence-routed sweep is justified. Add only 125, 142.8571, 150, and 160
+Hz to the same declarative parameter. Stop expanding when collective ceases to
+improve or a previously passed core motor gate regresses.
