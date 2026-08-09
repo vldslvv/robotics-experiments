@@ -9915,3 +9915,20 @@ motion gates with only 0.0125 Hz decay and observation bias
 controller authority past a passing controller boundary. Retain estimator
 decay, bias, per-axis filter, scale, all probes, and all gates, then rerun on
 this fresh audited reference.
+
+### 301. Keep controller authority pinned after motion acceptance
+
+Date: 2026-08-09.
+
+Remove `kp_vel`, `ki_vel`, and `kd_vel` from the declarative fit. The strict
+controller still carries the pinned PX4-like values, but alignment no longer
+searches them: Entry 300 demonstrates 64 motion-quality-passing candidates at
+the exact base gains, while the selected gain changes introduce the sole replay
+failure. This reduces both controller/alignment coupling and scratch search
+cost.
+
+Renumber the remaining per-axis velocity-filter, observation-scale, and fixed
+integral-limit stages after estimator decay and bias. Retain the complete probe
+families, every quality and replay limit, actuator and plant contracts, and the
+fresh Entry 300 PX4 capture. Require motion quality, replay, and live integration
+before finalization.
