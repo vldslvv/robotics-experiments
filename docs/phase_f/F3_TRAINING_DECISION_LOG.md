@@ -10029,3 +10029,22 @@ source age as evidence. Then inject each timestamp-joined PX4 angular
 derivative into the core replay's rate-state boundary while leaving the
 physical-state replay and production controller unchanged. The physical replay
 continues to audit target-side derivative reconstruction.
+
+### 306. Replay PX4's complete published rate state
+
+Date: 2026-08-09.
+
+For core replay only, join both fields consumed by pinned PX4 rate control:
+`vehicle_angular_velocity.xyz` and `xyz_derivative`. Seed the target rate-loop
+state on each physics tick so its next PID evaluation consumes that exact
+published angular derivative after the existing controller filter ordering.
+Do not change the production NumPy or Torch controller; the physical-state
+replay continues to derive angular acceleration from articulation rates and is
+the deployment-boundary audit.
+
+Join `vehicle_rates_setpoint` with hold semantics and report its maximum source
+age. Report the nearest angular-state sample distance as diagnostic evidence,
+but do not fail either for exceeding one physics tick: these are source cadence
+and logging-age properties, not joins between two representations of the same
+timestamp. Retain the one-tick failure for physical bridge-state joins and all
+motor and collective acceptance limits.

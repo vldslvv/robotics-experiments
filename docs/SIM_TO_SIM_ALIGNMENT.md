@@ -122,9 +122,12 @@ controller-boundary replay applies the selected controller to every fit,
 validation, and stability profile. Its core replay uses PX4-estimated state and
 reports the per-axis body-rate setpoint and collective setpoint errors before
 the rate controller and the per-axis angular-velocity and derivative errors at
-the rate-controller input, then enforces the same motor and collective limits.
-A second replay starts from the physics-rate physical articulation state in the
-bridge log, seeds the recorded
+the rate-controller input. It consumes PX4's independently published angular
+derivative rather than attempting to derive it again from logged rate samples;
+held-setpoint source ages and rate-sample interpolation errors remain visible.
+The core replay then enforces the same motor and collective limits. A second
+replay starts from the physics-rate physical articulation state in the bridge
+log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,

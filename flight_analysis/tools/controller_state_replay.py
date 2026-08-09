@@ -1056,6 +1056,17 @@ def _report(
         ),
         query_t=replay_t,
     )
+    angular_acceleration_frd = _linear_interpolate(
+        source_t=relative_time(angular_velocity),
+        values=np.column_stack(
+            [
+                np.asarray(angular_velocity[f"xyz_derivative[{index}]"], dtype=np.float64)
+                for index in range(3)
+            ]
+        ),
+        query_t=replay_t,
+    )
+    replay_angular_acceleration_flu = angular_acceleration_frd @ _FLU_TO_FRD
     if not physical_state:
         replay_velocity_enu = local_velocity_ned @ _NED_TO_ENU
         replay_quaternion_flu_enu = np.asarray(
@@ -1136,11 +1147,11 @@ def _report(
             controller_source_age_us["vehicle_local_position"] / 1e6 - controller_dt_s
         ),
     )
-    isaac_omega_grid = []
-    isaac_rate_setpoint_grid = []
-    isaac_collective_setpoint_grid = []
-    isaac_angular_velocity_grid = []
-    isaac_angular_acceleration_grid = []
+    isaac_omega_grid: list[np.ndarray] = []
+    isaac_rate_setpoint_grid: list[np.ndarray] = []
+    isaac_collective_setpoint_grid: list[float] = []
+    isaac_angular_velocity_grid: list[np.ndarray] = []
+    isaac_angular_acceleration_grid: list[np.ndarray] = []
     command_refresh_cadence = _CadenceState(previous_time_ns=0)
     command_refresh_steps_remaining = 0
     held_controller_command = np.zeros(4, dtype=np.float64)
@@ -1184,6 +1195,15 @@ def _report(
             controller_state=controller_state,
             hover_thrust_normalized=float(hover_thrust_normalized),
         )
+        if not physical_state:
+            px4_angular_acceleration = replay_angular_acceleration_flu[len(isaac_omega_grid)]
+            controller_state = replace(
+                controller_state,
+                previous_angular_velocity_body_flu=(
+                    rates_flu - px4_angular_acceleration * controller_dt_s
+                ),
+                angular_acceleration_body_flu=px4_angular_acceleration,
+            )
         if replay_actions is None:
             command = np.array([*velocity_setpoint_enu, -float(yaw_setpoint_rate)])
         else:
@@ -1294,7 +1314,7 @@ def _report(
             for index in range(3)
         ]
     )
-    rates_setpoint_index = _nearest_indices(
+    rates_setpoint_index = _hold_indices(
         source_t=relative_time(rates_setpoint),
         query_t=np.asarray(used_t),
     )
@@ -1383,13 +1403,10 @@ def _report(
             if physical_state and bridge_state is not None
             else 0
         ),
-        "controller_setpoint_timestamp_join_error_us": int(
-            np.max(
-                np.abs(relative_time(rates_setpoint)[rates_setpoint_index] - np.asarray(used_t))
-                * 1e6
-            )
+        "controller_setpoint_max_source_age_us": int(
+            np.max((np.asarray(used_t) - relative_time(rates_setpoint)[rates_setpoint_index]) * 1e6)
         ),
-        "rate_input_timestamp_join_error_us": int(
+        "rate_input_nearest_sample_error_us": int(
             np.max(
                 np.abs(relative_time(angular_velocity)[angular_velocity_index] - np.asarray(used_t))
                 * 1e6
@@ -1515,17 +1532,8 @@ def _profile_replay_report(
                 f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
             )
         physical_join_error_us = physical_replay["physical_state_timestamp_join_error_us"]
-        setpoint_join_error_us = core_replay["controller_setpoint_timestamp_join_error_us"]
-        rate_input_join_error_us = core_replay["rate_input_timestamp_join_error_us"]
-        for boundary_name, join_error_us in (
-            ("controller-setpoint", setpoint_join_error_us),
-            ("rate-input", rate_input_join_error_us),
-        ):
-            if join_error_us > _PHYSICS_TICK_US:
-                failures.append(
-                    f"{profile_name}: {boundary_name} timestamp join error "
-                    f"{join_error_us} us exceeds {_PHYSICS_TICK_US} us"
-                )
+        setpoint_source_age_us = core_replay["controller_setpoint_max_source_age_us"]
+        rate_input_sample_error_us = core_replay["rate_input_nearest_sample_error_us"]
         if physical_join_error_us > _PHYSICS_TICK_US:
             failures.append(
                 f"{profile_name}: physical-state timestamp join error "
@@ -1545,8 +1553,8 @@ def _profile_replay_report(
                 "controller_sample_count": core_replay["controller_sample_count"],
                 "controller_state_source": core_replay["controller_state_source"],
                 "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
-                "controller_setpoint_timestamp_join_error_us": setpoint_join_error_us,
-                "rate_input_timestamp_join_error_us": rate_input_join_error_us,
+                "controller_setpoint_max_source_age_us": setpoint_source_age_us,
+                "rate_input_nearest_sample_error_us": rate_input_sample_error_us,
                 "sample_time_s": core_replay["sample_time_s"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,
