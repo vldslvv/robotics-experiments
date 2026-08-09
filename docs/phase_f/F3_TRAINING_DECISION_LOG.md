@@ -9432,3 +9432,25 @@ Remove those mode guards and run the existing controller-boundary and initial
 rotor-thrust seed tests for both `velocity` and `ctbr`. Keep the seed math and
 state shape identical across twins. Commit, then repeat the target-only
 diagnostic against the preserved capture before another full campaign.
+
+### 281. Prime target rotor thrust from the captured physical command
+
+Date: 2026-08-09.
+
+The post-Entry 280 target diagnostic evaluated 1,287 unique candidates in 16
+physical batches and 541.2 seconds. Candidate 1234 passed every per-axis
+translation and rotation gate plus collective acceleration. Only collective
+vertical-velocity NRMSE failed at 0.106735 against 0.10; collective acceleration
+NRMSE was 0.050839. The selected trace diverged immediately: at 40 ms its
+vertical velocity was -0.02265 m/s while PX4 was -0.00024 m/s, and that impulse
+persisted through the profile.
+
+Controller-boundary replay showed that the same collective profile already
+passes the intermediate boundary limits with 0.000561 normalized motor RMSE and
+0.036127 N collective-force RMSE. The motion failure therefore does not support
+an allocator or plant parameter. Target initialization instead reconstructed
+rotor thrust from normalized action zero. In CTBR, zero maps through the
+candidate hover setting (0.54), whereas the captured first physical collective
+command is 0.57. Prime each target environment from the first authored physical
+command in its trace, for both control modes, and add a CTBR regression test.
+Commit and repeat the target-only diagnostic before a new full campaign.

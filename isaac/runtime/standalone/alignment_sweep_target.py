@@ -517,7 +517,11 @@ def _make_env(
             self._thruster.curr_thrust[:] = _initial_rotor_thrust_from_controller_state(
                 params=self.actuation_params,
                 state=self._controller_state,
-                action=torch.zeros_like(self.actions),
+                action=_initial_trace_actions(
+                    traces=traces,
+                    params=self.actuation_params,
+                    device=self.device,
+                ),
                 attitude_wxyz=quaternion,
                 linear_velocity_world=linear_velocity_world,
                 angular_velocity_body=angular_body,
@@ -589,6 +593,34 @@ def _make_env(
     )
     env.actuation_params = replace(env.actuation_params, kind=control_mode)
     return env
+
+
+def _initial_trace_actions(*, traces: list[dict[str, Any]], params, device) -> torch.Tensor:
+    actions = torch.zeros((len(traces), 4), dtype=torch.float32, device=device)
+    if params.kind == "ctbr":
+        collective = torch.as_tensor(
+            [trace["command_collective_thrust_normalized"][0] for trace in traces],
+            dtype=torch.float32,
+            device=device,
+        )
+        actions[:, 0] = collective / params.hover_thrust_normalized - 1.0
+        actions[:, 1:4] = torch.as_tensor(
+            [trace["command_body_rate_flu_radps"][0] for trace in traces],
+            dtype=torch.float32,
+            device=device,
+        ) / float(params.max_body_rate_radps)
+        return actions
+    actions[:, :3] = torch.as_tensor(
+        [trace["command_velocity_body_flu_mps"][0] for trace in traces],
+        dtype=torch.float32,
+        device=device,
+    ) / float(params.max_body_velocity_mps)
+    actions[:, 3] = torch.as_tensor(
+        [trace["command_yaw_rate_radps"][0] for trace in traces],
+        dtype=torch.float32,
+        device=device,
+    ) / float(params.max_yaw_rate_radps)
+    return actions
 
 
 def _assert_flight_envelope(

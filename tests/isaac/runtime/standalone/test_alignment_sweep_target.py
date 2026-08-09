@@ -3,7 +3,7 @@
 import importlib.util
 import json
 from dataclasses import replace
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -72,6 +72,35 @@ def test_smaller_probe_family_reuses_one_fixed_environment_stride():
             environment_traces_per_candidate=1,
             candidate_capacity=2,
         )
+
+
+def test_ctbr_initial_rotor_state_uses_first_physical_trace_command():
+    torch = pytest.importorskip("torch")
+    module = _load_script()
+    traces = [
+        {
+            "command_collective_thrust_normalized": [0.57],
+            "command_body_rate_flu_radps": [[0.2, -0.4, 0.1]],
+        },
+        {
+            "command_collective_thrust_normalized": [0.60],
+            "command_body_rate_flu_radps": [[0.0, 0.0, 0.0]],
+        },
+    ]
+    params = SimpleNamespace(
+        kind="ctbr",
+        hover_thrust_normalized=torch.tensor([0.54, 0.60]),
+        max_body_rate_radps=2.0,
+    )
+
+    actions = module._initial_trace_actions(  # noqa: SLF001 - replay boundary contract
+        traces=traces,
+        params=params,
+        device="cpu",
+    )
+
+    assert actions[:, 0].tolist() == pytest.approx([0.57 / 0.54 - 1.0, 0.0], abs=1e-6)
+    assert actions[0, 1:4].tolist() == pytest.approx([0.1, -0.2, 0.05])
 
 
 def test_worker_results_merge_in_candidate_order():
