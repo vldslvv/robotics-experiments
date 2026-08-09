@@ -134,7 +134,10 @@ log, seeds the recorded
 initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
-the measured fractional attitude-loop cadence, and recorded command cadence. A recorded policy sample contains the setpoint
+the target's fitted fractional attitude-loop cadence, and recorded command
+cadence. Boundary replay triggers the attitude stage from the exact full-rate
+`vehicle_attitude` publication schedule in the ULog so PX4 module scheduling is
+an observed input rather than a fitted controller gain. A recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
 setpoint on the following 4 ms controller tick. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.

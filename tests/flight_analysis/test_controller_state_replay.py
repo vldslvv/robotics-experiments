@@ -27,6 +27,7 @@ from flight_analysis.tools.controller_state_replay import (
     _px4_attitude_to_isaac,
     _px4_vertical_velocity_state,
     _rate_input_metrics,
+    _recorded_update_mask,
     _replay_time_grid,
     _vertical_acceleration_setpoint_enu,
 )
@@ -60,6 +61,15 @@ def test_replay_grid_preserves_exact_relative_command_ticks() -> None:
     assert relative_time[250] == 1.0
     assert absolute_time[250] == pytest.approx(44.884)
     assert command_index[249:251].tolist() == [0, 1]
+
+
+def test_recorded_update_mask_preserves_irregular_physics_ticks() -> None:
+    result = _recorded_update_mask(
+        source_time_s=np.array([12.000, 12.004, 12.012]),
+        replay_time_s=np.array([12.000, 12.004, 12.008, 12.012]),
+    )
+
+    assert result.tolist() == [True, True, False, True]
 
 
 def test_velocity_action_delay_shifts_the_complete_command():
