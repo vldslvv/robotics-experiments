@@ -412,6 +412,42 @@ def _controller_setpoint_metrics(
     }
 
 
+def _controller_setpoint_delay_scan(
+    *,
+    target_body_rate_grid_flu: np.ndarray,
+    target_collective_grid: np.ndarray,
+    replay_indices: np.ndarray,
+    px4_body_rate_flu: np.ndarray,
+    px4_collective: np.ndarray,
+    maximum_delay_steps: int,
+) -> list[dict]:
+    """Measure deterministic target handoff delays against PX4 rate setpoints."""
+    if maximum_delay_steps < 0:
+        raise ValueError("maximum delay steps must be non-negative")
+    indices = np.asarray(replay_indices, dtype=np.int64)
+    if indices.ndim != 1 or np.any(indices < 0):
+        raise ValueError("replay indices must be a non-negative vector")
+    target_rates = np.asarray(target_body_rate_grid_flu, dtype=np.float64)
+    target_collective = np.asarray(target_collective_grid, dtype=np.float64)
+    if target_rates.ndim != 2 or target_rates.shape[1] != 3:
+        raise ValueError("target body-rate grid must have shape (samples, 3)")
+    if target_collective.shape != (len(target_rates),):
+        raise ValueError("target collective grid must match target body-rate grid")
+    if indices.size and int(np.max(indices)) >= len(target_rates):
+        raise ValueError("replay index exceeds the target setpoint grid")
+    results = []
+    for delay_steps in range(maximum_delay_steps + 1):
+        delayed_indices = np.maximum(indices - delay_steps, 0)
+        metrics = _controller_setpoint_metrics(
+            target_body_rate_flu=target_rates[delayed_indices],
+            px4_body_rate_flu=px4_body_rate_flu,
+            target_collective=target_collective[delayed_indices],
+            px4_collective=px4_collective,
+        )
+        results.append({"delay_steps": delay_steps, **metrics})
+    return results
+
+
 def _rate_input_metrics(
     *,
     target_angular_velocity_flu: np.ndarray,
@@ -1164,6 +1200,7 @@ def _report(
     isaac_angular_velocity_rows: list[np.ndarray] = []
     isaac_angular_acceleration_rows: list[np.ndarray] = []
     used_t: list[float] = []
+    used_replay_indices: list[int] = []
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
         local_setpoint=local_setpoint,
@@ -1306,6 +1343,7 @@ def _report(
         )
         isaac_omega = isaac_omega_grid[replay_sample_index]
         used_t.append(float(time_s))
+        used_replay_indices.append(int(replay_sample_index))
         px4_motor_rows.append(controls)
         isaac_motor_rows.append(
             (isaac_omega - np.asarray(bridge.zero_position_armed))
@@ -1421,6 +1459,18 @@ def _report(
         target_collective=isaac_collective_setpoint_array,
         px4_collective=px4_collective_setpoint,
     )
+    handoff_delay_scan = (
+        _controller_setpoint_delay_scan(
+            target_body_rate_grid_flu=np.stack(isaac_rate_setpoint_grid),
+            target_collective_grid=np.asarray(isaac_collective_setpoint_grid),
+            replay_indices=np.asarray(used_replay_indices),
+            px4_body_rate_flu=px4_rate_setpoint_flu,
+            px4_collective=px4_collective_setpoint,
+            maximum_delay_steps=3,
+        )
+        if control_mode == "velocity"
+        else []
+    )
     rate_input_metrics = _rate_input_metrics(
         target_angular_velocity_flu=isaac_angular_velocity_array,
         px4_angular_velocity_flu=px4_angular_velocity_flu,
@@ -1525,6 +1575,7 @@ def _report(
             )
         ),
         "sample_time_s": [min(used_t), max(used_t)],
+        "outer_loop_handoff_delay_scan": handoff_delay_scan,
         "metrics": {
             **boundary_metrics,
             **setpoint_metrics,

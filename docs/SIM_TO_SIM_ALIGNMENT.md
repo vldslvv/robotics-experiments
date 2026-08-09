@@ -154,7 +154,10 @@ velocity-only vertical state blending and applies logged hover-estimate updates
 at their source timestamps. For velocity profiles it also reconstructs PX4's
 exact vertical acceleration setpoint from the full-rate desired attitude,
 collective thrust, and hover estimate, then reports acceleration-setpoint and
-inferred velocity-integral error before the thrust conversion boundary. The
+inferred velocity-integral error before the thrust conversion boundary. A
+zero-through-three-tick delay scan compares the target attitude-loop output to
+PX4's downstream rates setpoint so asynchronous module handoff error remains
+separate from controller gains. The
 target-only `velocity_observation_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
 `velocity_estimator_bias_decay_hz`, per-axis `velocity_filter_hz`, and

@@ -12,6 +12,7 @@ from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
+    _controller_setpoint_delay_scan,
     _controller_setpoint_metrics,
     _delay_transmitted_actions,
     _delay_velocity_actions,
@@ -165,6 +166,25 @@ def test_rate_output_scale_fit_separates_constant_torque_bias():
     assert math.isclose(scale, 6.5)
     assert math.isclose(intercept, -0.08)
     assert rmse < 1e-12
+
+
+def test_controller_setpoint_delay_scan_finds_one_tick_handoff() -> None:
+    target_rates = np.array([[0.0, 0.0, 0.0], [0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+    target_collective = np.array([0.5, 0.6, 0.7, 0.8])
+    replay_indices = np.array([1, 2, 3])
+
+    result = _controller_setpoint_delay_scan(
+        target_body_rate_grid_flu=target_rates,
+        target_collective_grid=target_collective,
+        replay_indices=replay_indices,
+        px4_body_rate_flu=target_rates[[0, 1, 2]],
+        px4_collective=target_collective[[0, 1, 2]],
+        maximum_delay_steps=2,
+    )
+
+    assert result[0]["collective_setpoint_rmse"] > 0.0
+    assert result[1]["collective_setpoint_rmse"] == 0.0
+    assert result[1]["body_rate_setpoint_rmse_radps"] == [0.0, 0.0, 0.0]
 
 
 def test_normalized_boundary_reconstructs_unsaturated_collective_and_torque():
