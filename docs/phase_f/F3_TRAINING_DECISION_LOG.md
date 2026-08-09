@@ -10090,3 +10090,51 @@ the runtime graph as the single source of truth and prevents an alignment-only
 shell override from bypassing configuration fingerprints. Run all host gates,
 commit before capture, then execute a wholly fresh capture, audit, sweep, fit,
 and replay because the prior ULog cannot be densified after the fact.
+
+### 309. Fresh high-rate scratch fit passes motion and exposes scheduler phase
+
+Date: 2026-08-09.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-high-rate-scratch`
+ran from clean commit `79c4ea4`. The 89.2 MB ULog captured actuator motors,
+vehicle thrust, and vehicle torque at approximately 250 Hz. The actuator audit
+passed every profile with zero timestamp-join error; representative motor RMSE
+was about 0.0003 and collective RMSE remained below 0.01 N.
+
+The staged target sweep evaluated 3,658 unique candidates in 37 GPU batches
+and 1,375.2 seconds. Average sampled GPU utilization was 24.7%, again limited
+by deterministic simulation work rather than insufficient batch population.
+Candidate 2841 passed every per-axis and combined motion gate from scratch. It
+selected 0.011875 Hz estimator-bias decay, observation bias
+`[0.0, -0.01, -0.0039]` m/s, Y velocity filtering at 1.0 Hz, and retained the
+pinned controller gains. Held-out errors included 4.528 mm X braking, 0.117 mm
+Y braking, 1.440 mm Z braking, 9.980 mm combined endpoint error, X/Y/Z envelope
+velocity NRMSE 0.02052/0.06995/0.01347, and CTBR collective-velocity NRMSE
+0.07945. The live hover+goto gate also passed with 4.5 cm final hover error,
+2.9 cm final goto error, and a ready handoff at 0.453 m wall-normal range.
+
+Finalization correctly rejected the artifact because controller-boundary
+replay did not pass. High-rate evidence removes the prior decimation ambiguity:
+the largest reported failures were Z-envelope collective RMSE 1.221 N,
+moderate-envelope collective RMSE 0.595 N, CTBR collective-envelope RMSE
+0.308 N, and corresponding motor failures on the Z and moderate profiles.
+
+The first unresolved boundary is now replay scheduler phase, not the plant
+mapping. `vehicle_rates_setpoint` is a held upstream controller output, while
+`vehicle_thrust_setpoint`, `vehicle_torque_setpoint`, and `actuator_motors` are
+published by the downstream rate/allocation work item at the next controller
+tick. The replay currently evaluates the target controller at an actuator
+timestamp and compares that new result with PX4's already-published actuator
+result at the same timestamp. This combines different scheduler ticks. On the
+CTBR collective and combined profiles, comparing the downstream output with
+the held upstream input from one 4 ms tick earlier reduces normalized
+collective discrepancy from 0.004517/0.002750 to 0.000242/0.000123. The direct
+actuator audit independently proves that downstream PX4 thrust and motor
+topics agree at identical timestamps.
+
+Correct the replay to express this one-tick rate-to-allocation pipeline
+explicitly and test it with timestamped synthetic topics. Do not change
+controller settings, plant mapping, probe gates, or acceptance limits. Then
+rerun replay against this preserved high-rate campaign before deciding whether
+any residual controller boundary requires another scratch fit.
