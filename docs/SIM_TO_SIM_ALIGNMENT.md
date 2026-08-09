@@ -136,19 +136,18 @@ closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
 and recorded command cadence. A recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
-setpoint on the following 4 ms controller tick. It holds the exact recorded
-40/60 ms intervals and does not quantize them through a second synthetic 20 Hz
-cadence. The seed phase is derived per profile from the
+setpoint on the following 4 ms controller tick. The controller command and
+PX4's vertical velocity-state blending both consume that same delayed setpoint.
+Replay holds the exact recorded 40/60 ms intervals and does not quantize them
+through a second synthetic 20 Hz cadence. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
 includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
 whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
 transitions. The velocity-integral seed reconstructs the current acceleration
-setpoint with the exact upstream horizontal components from
-`vehicle_local_position_setpoint` and a contemporaneous vertical component
-inverted from the full-rate desired attitude, collective thrust, and joined
-hover estimate. Replay builds relative command time from integer physics steps so
+setpoint from the recorded `vehicle_local_position_setpoint` output and reports
+its source age. Replay builds relative command time from integer physics steps so
 large absolute profile start times cannot delay an exact command boundary by a
 floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates

@@ -35,7 +35,6 @@ from robotics_experiments.drone._airframe import (
     compute_body_mass_properties,
     load_builder_config,
 )
-from robotics_experiments.px4_bridge import GRAVITY_M_S2
 
 __all__ = ["main"]
 
@@ -234,37 +233,6 @@ def _px4_attitude_to_isaac(*, quaternion_frd_ned_wxyz: np.ndarray) -> tuple[np.n
     rotation_enu_flu = _NED_TO_ENU @ rotation_ned_frd @ _FLU_TO_FRD
     yaw = math.atan2(rotation_enu_flu[1, 0], rotation_enu_flu[0, 0])
     return _matrix_to_quat(rotation=rotation_enu_flu), yaw
-
-
-def _acceleration_setpoint_from_attitude(
-    *,
-    quaternion_frd_ned_wxyz: np.ndarray,
-    thrust_body_z: float,
-    hover_thrust_normalized: float,
-) -> np.ndarray:
-    """Invert PX4's decoupled acceleration-to-attitude conversion."""
-    if not math.isfinite(thrust_body_z) or thrust_body_z > 0.0:
-        raise ValueError("attitude thrust_body_z must be finite and non-positive")
-    if (
-        not math.isfinite(hover_thrust_normalized)
-        or hover_thrust_normalized <= 0.0
-        or hover_thrust_normalized > 1.0
-    ):
-        raise ValueError("hover thrust estimate must be finite and in (0, 1]")
-    body_z_ned = _quat_to_matrix(
-        quaternion_wxyz=np.asarray(quaternion_frd_ned_wxyz, dtype=np.float64)
-    )[:, 2]
-    if body_z_ned[2] <= np.finfo(np.float64).eps:
-        raise ValueError("desired attitude must keep body Z in the NED lower hemisphere")
-    thrust_ned_z = float(body_z_ned[2]) * thrust_body_z
-    return np.array(
-        [
-            -body_z_ned[0] / body_z_ned[2] * GRAVITY_M_S2,
-            -body_z_ned[1] / body_z_ned[2] * GRAVITY_M_S2,
-            (thrust_ned_z + hover_thrust_normalized) * (GRAVITY_M_S2 / hover_thrust_normalized),
-        ],
-        dtype=np.float64,
-    )
 
 
 def _geometry_and_mass(*, airframe_name: str) -> tuple[MixerGeometry, float]:
@@ -551,7 +519,6 @@ def _profile_topic(
 
 def _controller_boundary(
     *,
-    attitude_setpoint: dict,
     local_setpoint: dict,
     local_position: dict,
     angular_velocity: dict,
@@ -573,7 +540,6 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
 
-    attitude_setpoint_age_us = held_age_us(topic=attitude_setpoint)
     local_setpoint_age_us = held_age_us(topic=local_setpoint)
     rate_age_us = held_age_us(topic=rate_status)
     acceleration_setpoint_ned = interpolated_vector(
@@ -611,26 +577,6 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
     )
-    desired_attitude_frd_ned = _interpolate_quaternions(
-        source_t=_topic_time_us(topic=attitude_setpoint).astype(np.float64),
-        quaternions_wxyz=np.column_stack(
-            [np.asarray(attitude_setpoint[f"q_d[{index}]"], dtype=np.float64) for index in range(4)]
-        ),
-        query_t=np.array([timestamp_us], dtype=np.float64),
-    )[0]
-    thrust_body_z = float(
-        _linear_interpolate(
-            source_t=_topic_time_us(topic=attitude_setpoint).astype(np.float64),
-            values=np.asarray(attitude_setpoint["thrust_body[2]"], dtype=np.float64),
-            query_t=np.array([timestamp_us], dtype=np.float64),
-        )[0]
-    )
-    attitude_acceleration_setpoint_ned = _acceleration_setpoint_from_attitude(
-        quaternion_frd_ned_wxyz=desired_attitude_frd_ned,
-        thrust_body_z=thrust_body_z,
-        hover_thrust_normalized=hover_thrust_normalized,
-    )
-    acceleration_setpoint_ned[2] = attitude_acceleration_setpoint_ned[2]
     vectors = {
         "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
         "initial_estimated_angular_velocity_body_flu_radps": (
@@ -649,7 +595,6 @@ def _controller_boundary(
     return (
         vectors,
         {
-            "vehicle_attitude_setpoint": attitude_setpoint_age_us,
             "vehicle_local_position_setpoint": local_setpoint_age_us,
             "vehicle_local_position": held_age_us(topic=local_position),
             "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
@@ -671,7 +616,6 @@ def _augment_reference_controller_state(
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ValueError(f"{reference_path} has no alignment traces")
 
-    attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
@@ -682,7 +626,6 @@ def _augment_reference_controller_state(
     for raw_profile in raw_profiles:
         start_us = int(raw_profile["start_sim_time_us"])
         controller_vectors, source_age_us = _controller_boundary(
-            attitude_setpoint=attitude_setpoint,
             local_setpoint=local_setpoint,
             local_position=local_position,
             angular_velocity=angular_velocity,
@@ -1001,7 +944,6 @@ def _report(
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     attitude = _dataset(ulog=ulog, name="vehicle_attitude")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
-    attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
@@ -1065,7 +1007,7 @@ def _report(
         )
         replay_actions = _delay_transmitted_actions(actions=replay_actions)
         velocity_ned = np.zeros_like(commanded_body_velocity)
-        velocity_ned[:, 2] = -commanded_body_velocity[:, 2]
+        velocity_ned[:, 2] = -(replay_actions[:, 2] * config.rl.action.max_body_velocity_mps)
         yaw_speed = -command_yaw_rate[command_index]
     elif control_mode == "ctbr":
         command_time = np.asarray(command_trace["time_s"], dtype=np.float64)
@@ -1191,7 +1133,6 @@ def _report(
     used_t: list[float] = []
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
-        attitude_setpoint=attitude_setpoint,
         local_setpoint=local_setpoint,
         local_position=local_position,
         angular_velocity=angular_velocity,
