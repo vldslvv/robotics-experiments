@@ -10256,3 +10256,30 @@ integral Z against the full-rate value reconstructed from desired attitude,
 collective thrust, and hover estimate over each profile. Use that boundary to
 distinguish an outer-loop update/seed defect from a later thrust-conversion
 defect before adding any candidates.
+
+### 315. The remaining vertical error is the PX4 module handoff
+
+Date: 2026-08-09.
+
+The full-rate vertical boundary diagnostic shows that target acceleration is
+already close to PX4 before thrust conversion. Acceleration-setpoint RMSE is
+0.03878 m/s2 on `validation-z-envelope` and 0.01765 m/s2 on
+`stability-moderate-envelope`, despite collective-setpoint RMSE of 0.01313 and
+0.00602 respectively. The inferred integral has isolated transition spikes,
+but its profile-wide RMSE remains 0.1441 m/s2 and 0.07984 m/s2.
+
+Directly comparing two PX4 topics localizes the discrepancy further. The
+collective in `vehicle_attitude_setpoint`, published by the 125 Hz position
+controller, differs from the downstream `vehicle_rates_setpoint` collective by
+0.01258 normalized on the Z envelope and 0.00578 on the moderate envelope.
+Those values nearly account for the target-to-rates errors. At the first Z
+transition, position control publishes the new collective at 127.692 s, while
+rates and motors first reflect it at 127.700 s. Later handoffs take either one
+or two 4 ms physics ticks because the PX4 modules run asynchronously.
+
+The first failed boundary is therefore the collapsed target
+position-to-attitude handoff, not velocity gains, hover thrust, or the plant.
+Measure target collective and body-rate error for deterministic one- and
+two-tick handoff delays on every profile. If one delay materially dominates,
+add that delay through the strict controller settings and fit it declaratively
+in the next scratch campaign; do not absorb it into controller gains.
