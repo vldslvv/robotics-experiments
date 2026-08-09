@@ -9588,3 +9588,23 @@ declared Y bias of 0.01 m/s, while lower scale still left Y braking at 10.605 mm
 Extend Y bias upward for endpoint authority and add lateral proportional gain
 as the independent transient control; do not reinterpret estimator scale as an
 arbitrary gain or alter the plant and gates.
+
+### 287. Expand the measured planar endpoint and response crossing
+
+Date: 2026-08-09.
+
+Extend the declarative planar observation-bias grid to X values from -0.02
+through +0.04 m/s and Y values from -0.03 through +0.03 m/s in 0.01 m/s broad
+steps. The Entry 286 endpoint trend predicts the X crossing near -0.005 m/s
+and the Y endpoint crossing above +0.01 m/s; generated midpoint refinement
+provides the needed precision without a dense fine grid.
+
+Add one independent `kp_vel.y` stage at `[0.8, 1.0, 1.2, 1.4, 1.6, 1.8]`
+after damping and before the narrow physical estimator-scale stage. The fresh
+upper-bias candidates need Y braking reduced from 10.605 mm to 5 mm, while
+changing derivative damping across its entire range moved that error by less
+than 0.3 mm. Prior fresh alignment evidence also located the useful lateral
+proportional basin around 1.1. Keep `kp_vel.x/z`, integral gains and limits,
+filters, actuator, plant, profiles, and all gates unchanged. Reuse Entry 286's
+fresh reference for a diagnostic; require quality, replay, and live gates before
+another clean publishable campaign.
