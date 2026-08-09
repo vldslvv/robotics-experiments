@@ -9766,3 +9766,21 @@ independent, evidenced seam. Search lower lateral velocity-derivative cutoff
 frequencies to soften the transition while retaining D authority later in the
 stop. Keep the measured P/D/I ranges, integral limit, estimator ranges, plant,
 probe families, metrics, and limits unchanged.
+
+### 295. Fit the derivative transient independently of authority
+
+Date: 2026-08-09.
+
+Add `velocity_derivative_filter_hz` candidates `[0.5, 1.0, 2.0, 3.0, 4.0,
+5.0]` after the P/D/I stages and before physical observation-scale polishing.
+Generated midpoint refinement supplies local cutoff resolution without a dense
+cartesian sweep. Unlike more P, D, or integral authority, lowering this cutoff
+attenuates the immediate acceleration estimate at the zero-command transition;
+the Entry 294 population shows that transient shape is the missing degree of
+freedom between independently passing braking and endpoint candidates.
+
+Keep the complete measured P/D/I and estimator ranges so the staged beam can
+re-optimize around the new cutoff. Do not change controller structure, actuator
+or plant contracts, probe families, metrics, or acceptance limits. Reuse Entry
+286's fresh capture for the diagnostic and require exact quality before replay
+or live validation.
