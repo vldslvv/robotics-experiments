@@ -38,10 +38,15 @@ def _load_script(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def _input(*, sim_time_us: int, linear_velocity=(0.0, 0.0, 0.0)) -> PolicyInput:
+def _input(
+    *,
+    sim_time_us: int,
+    position=(0.0, 0.0, 2.5),
+    linear_velocity=(0.0, 0.0, 0.0),
+) -> PolicyInput:
     return PolicyInput(
         vehicle_state=VehicleState(
-            position_enu=np.array([0.0, 0.0, 2.5]),
+            position_enu=np.asarray(position, dtype=np.float64),
             orientation_flu_enu_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
             linear_velocity_enu=np.asarray(linear_velocity, dtype=np.float64),
             angular_velocity_flu=np.zeros(3),
@@ -131,6 +136,35 @@ def test_capture_stability_hold_restarts_after_motion(monkeypatch: pytest.Monkey
 
     assert restarted.setpoint.yaw_rate_radps == 0.0
     assert active.setpoint.yaw_rate_radps == pytest.approx(-0.2)
+
+
+def test_capture_recenters_to_reference_between_profiles(monkeypatch: pytest.MonkeyPatch):
+    module = _load_script(monkeypatch)
+    config = load_config(REPO_ROOT / "configs/alignment_px4_x500_velocity.yaml")
+    adapter = module._policy_factory(  # noqa: SLF001 - focused capture transition test
+        definition=_yaw_definition(),
+        config=config,
+    )(
+        artifact="alignment-probe",
+        hold_s=None,
+    )
+
+    displaced = adapter.advance(
+        policy_input=_input(sim_time_us=0, position=(2.0, -2.0, 3.5)),
+        state=adapter.initial_state,
+    )
+
+    velocity = np.array(
+        [
+            displaced.setpoint.forward_mps,
+            -displaced.setpoint.right_mps,
+            -displaced.setpoint.down_mps,
+        ]
+    )
+    assert np.linalg.norm(velocity) == pytest.approx(
+        config.alignment.capture.recenter_max_speed_mps
+    )
+    assert np.dot(velocity, np.array([-2.0, 2.0, -1.0])) > 0.0
 
 
 def test_capture_reports_preconditioning_timeout(monkeypatch: pytest.MonkeyPatch):

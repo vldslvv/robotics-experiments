@@ -9296,3 +9296,25 @@ rotational profile so its commanded angular impulse is zero. Add a configuration
 regression test for that invariant. Do not weaken the routine's 2.00 m safety
 envelope. Start a new clean scratch campaign because the corrected probe suite
 has a new comparison fingerprint.
+
+### 274. Make profile capture position-independent
+
+Date: 2026-08-09.
+
+The clean balanced-pulse campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-balanced-scratch` again
+stopped during capture before producing a reference, this time at 2.02 m of
+lateral drift. The rotational pulses now have zero commanded angular impulse.
+Inspection of the capture transition exposed a separate sequence contract: the
+three-second precondition sent zero velocity and stabilized at the endpoint of
+the prior profile, while the routine safety envelope remained relative to the
+original hover position. The existing velocity family therefore consumed
+nearly all of the 2.00 m budget cumulatively before CTBR began.
+
+During profile preconditioning, command a bounded velocity back to the routine's
+reference position before applying the unchanged stability hold. Keep the gain
+and speed bound in the alignment capture Hydra configuration and retain the
+global 2.00 m routine safety envelope. This makes profiles and families
+sequence-independent without changing recorded excitation or any acceptance
+limit. Commit the capture contract and repeat the entire campaign from clean
+source.

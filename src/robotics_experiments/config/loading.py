@@ -199,6 +199,8 @@ def _validate_alignment(experiment: ExperimentConfig) -> None:
         "minimum_neutral_s": capture.minimum_neutral_s,
         "stable_hold_s": capture.stable_hold_s,
         "timeout_s": capture.timeout_s,
+        "recenter_gain_hz": capture.recenter_gain_hz,
+        "recenter_max_speed_mps": capture.recenter_max_speed_mps,
         "max_linear_speed_mps": capture.max_linear_speed_mps,
         "max_angular_speed_radps": capture.max_angular_speed_radps,
         "max_tilt_deg": capture.max_tilt_deg,

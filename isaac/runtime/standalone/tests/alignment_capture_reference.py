@@ -26,7 +26,10 @@ from robotics_experiments.commanding import (
     VelocitySetpoint,
 )
 from robotics_experiments.config import ExperimentConfig
-from robotics_experiments.px4_bridge import body_velocity_flu_from_state
+from robotics_experiments.px4_bridge import (
+    body_velocity_flu_from_state,
+    world_enu_to_body_flu,
+)
 
 _REFERENCE_ENV = "ALIGNMENT_REFERENCE"
 _RUN_DIR_ENV = "ROBOTICS_ALIGNMENT_RUN_DIR"
@@ -116,6 +119,28 @@ def _is_stable(*, policy_input: PolicyInput, config: ExperimentConfig) -> bool:
     )
 
 
+def _recenter_setpoint(*, policy_input: PolicyInput, config: ExperimentConfig) -> VelocitySetpoint:
+    vehicle = policy_input.vehicle_state
+    error_enu = np.asarray(policy_input.reference_position_enu, dtype=np.float64) - np.asarray(
+        vehicle.position_enu, dtype=np.float64
+    )
+    desired_enu = error_enu * config.alignment.capture.recenter_gain_hz
+    speed = float(np.linalg.norm(desired_enu))
+    max_speed = config.alignment.capture.recenter_max_speed_mps
+    if speed > max_speed:
+        desired_enu *= max_speed / speed
+    desired_body = world_enu_to_body_flu(
+        vehicle.orientation_flu_enu_wxyz,
+        desired_enu,
+    )
+    return VelocitySetpoint(
+        forward_mps=float(desired_body[0]),
+        right_mps=-float(desired_body[1]),
+        down_mps=-float(desired_body[2]),
+        yaw_rate_radps=0.0,
+    )
+
+
 def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConfig):
     profiles = definition.profiles
     families_by_profile = {
@@ -134,7 +159,7 @@ def _advance_factory(*, definition: ControllerDefinition, config: ExperimentConf
         initials = state.initials
         now_us = policy_input.sim_time_us
         capture = config.alignment.capture
-        neutral = VelocitySetpoint(0.0, 0.0, 0.0, 0.0)
+        neutral = _recenter_setpoint(policy_input=policy_input, config=config)
         if phase == "precondition":
             if phase_started_us < 0:
                 phase_started_us = now_us

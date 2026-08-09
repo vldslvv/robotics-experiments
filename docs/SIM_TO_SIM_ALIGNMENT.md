@@ -93,7 +93,11 @@ adapter. Its configured pusher is deployed after takeoff and before probe
 preconditioning so the reference plant matches Lab training and press-policy
 deployment. The Lab target also consumes the Hydra-owned rigid-body gyroscopic
 force setting, which is disabled to match the standalone PX4 plant. Each
-profile records its absolute PX4 simulation start time and the complete initial
+profile precondition uses a bounded velocity command to return to the routine
+reference position before applying the configured stability hold. The recenter
+gain and speed bound live in `alignment.capture`, so profile order cannot
+accumulate displacement against the routine safety envelope. Each profile then
+records its absolute PX4 simulation start time and the complete initial
 controller state required for replay. One run directory keeps:
 
 - the ULog and bridge log;
