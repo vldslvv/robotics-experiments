@@ -10235,3 +10235,24 @@ different setpoints. Restore the original acceleration seed and derive the NED
 vertical command used for PX4 blending from the same delayed action array that
 feeds the controller. Add a transition test covering both values before
 replaying the preserved campaign.
+
+### 314. Vertical command phase is correct but not the remaining boundary
+
+Date: 2026-08-09.
+
+The delayed vertical command is now shared by target controller input and the
+PX4 velocity-only estimator blending model, and the full host and pre-commit
+suites pass. Replaying the preserved high-rate campaign leaves the same 11
+failures. The dominant Z-envelope collective RMSE changes only from 0.939145 N
+to 0.938942 N, and the moderate-envelope collective RMSE changes only from
+0.419974 N to 0.419923 N. Fit-forward returns to 0.052544 N after restoring the
+exact recorded acceleration seed. The hypothesis therefore fixes a real phase
+contract but does not materially advance acceptance.
+
+Keep the correction because both consumers must observe one published command,
+but do not tune around this result. Inspect PX4's vertical controller update
+state directly: compare the replayed acceleration setpoint and velocity
+integral Z against the full-rate value reconstructed from desired attitude,
+collective thrust, and hover estimate over each profile. Use that boundary to
+distinguish an outer-loop update/seed defect from a later thrust-conversion
+defect before adding any candidates.
