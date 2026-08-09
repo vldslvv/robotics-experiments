@@ -1720,6 +1720,7 @@ def _profile_replay_report(
                 "controller_setpoint_max_source_age_us": setpoint_source_age_us,
                 "rate_input_nearest_sample_error_us": rate_input_sample_error_us,
                 "sample_time_s": core_replay["sample_time_s"],
+                "outer_loop_handoff_delay_scan": core_replay["outer_loop_handoff_delay_scan"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,
                 "physical_state_timestamp_join_error_us": physical_join_error_us,
