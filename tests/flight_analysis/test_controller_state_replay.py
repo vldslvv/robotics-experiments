@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from flight_analysis.tools.controller_state_replay import (
+    _acceleration_setpoint_from_attitude,
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
@@ -134,6 +135,21 @@ def test_identity_ned_frd_attitude_becomes_north_facing_enu_flu():
 
     assert yaw == math.pi / 2.0
     assert np.allclose(quaternion, [math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)])
+
+
+def test_attitude_and_thrust_recover_decoupled_acceleration_setpoint() -> None:
+    tilt = 0.2
+    hover = 0.57
+    vertical_acceleration = 1.5
+    thrust_ned_z = hover * (vertical_acceleration / 9.81 - 1.0)
+
+    acceleration = _acceleration_setpoint_from_attitude(
+        quaternion_frd_ned_wxyz=np.array([math.cos(tilt / 2.0), 0.0, math.sin(tilt / 2.0), 0.0]),
+        thrust_body_z=thrust_ned_z / math.cos(tilt),
+        hover_thrust_normalized=hover,
+    )
+
+    assert acceleration == pytest.approx([-math.tan(tilt) * 9.81, 0.0, vertical_acceleration])
 
 
 def test_rate_output_scale_fit_separates_constant_torque_bias():
@@ -405,12 +421,14 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     ulog = SimpleNamespace(
         data_list=[
             dataset(
-                "vehicle_local_position_setpoint",
+                "vehicle_attitude_setpoint",
                 {
                     "timestamp": np.array([100_000, 108_000]),
-                    "acceleration[0]": np.array([1.0, 3.0]),
-                    "acceleration[1]": np.array([2.0, 4.0]),
-                    "acceleration[2]": np.array([3.0, 5.0]),
+                    "q_d[0]": np.array([1.0, 1.0]),
+                    "q_d[1]": np.array([0.0, 0.0]),
+                    "q_d[2]": np.array([0.0, 0.0]),
+                    "q_d[3]": np.array([0.0, 0.0]),
+                    "thrust_body[2]": np.array([0.572 * (4.0 / 9.81 - 1.0)] * 2),
                 },
             ),
             dataset(
@@ -470,7 +488,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
         [0.2, -0.3, -0.4]
     )
-    assert trace["initial_acceleration_setpoint_enu_mps2"] == [3.0, 2.0, -4.0]
+    assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([0.0, 0.0, -4.0])
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
         2.0,
@@ -480,7 +498,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.2, -0.3, -0.4])
     assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
     assert trace["initial_controller_state_source_age_us"] == {
-        "vehicle_local_position_setpoint": 4000,
+        "vehicle_attitude_setpoint": 4000,
         "vehicle_local_position": 4000,
         "vehicle_angular_velocity": 4000,
         "rate_ctrl_status": 4000,
