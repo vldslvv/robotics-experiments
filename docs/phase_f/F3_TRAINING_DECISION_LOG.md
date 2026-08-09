@@ -10358,3 +10358,22 @@ The collective frontier is monotonic toward the tested lower boundary, so a
 second evidence-routed sweep is justified. Add only 125, 142.8571, 150, and 160
 Hz to the same declarative parameter. Stop expanding when collective ceases to
 improve or a previously passed core motor gate regresses.
+
+### 319. Seven-millisecond attitude period is the new frontier
+
+Date: 2026-08-09.
+
+The lower cadence sweep is non-monotonic. At 125 Hz, Z and moderate collective
+return to 0.672205 N and 0.300848 N. At 150 and 160 Hz, Z remains near 0.567 N
+and moderate near 0.302 N. The 142.8571 Hz candidate, an exact 7 ms fractional
+period on the 4 ms physics grid, is substantially better: Z collective is
+0.233732 N, moderate collective is 0.057749 N, and both core and physical Z
+motor RMSE pass at 0.004266 and 0.004521. Moderate physical motor also passes
+at 0.009966.
+
+Six collective/physical-boundary failures remain. The next change is a narrow
+rate-only refinement around the 7 ms resonance; no gain or plant change is
+supported. Add 138.8889, 140.8451, 144.9275, and 147.0588 Hz, corresponding to
+7.2, 7.1, 6.9, and 6.8 ms periods. If none improves the Z collective frontier,
+stop rate expansion and reproduce the recorded attitude-publication schedule
+as an explicit controller input boundary.
