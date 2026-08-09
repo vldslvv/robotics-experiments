@@ -10310,3 +10310,28 @@ rate/allocator stage. Implement the same deterministic fractional cadence in
 NumPy and Torch, add it through `ParameterSpec`, and preserve strict schema 1.
 Then rerun the preserved high-rate replay before paying for a new scratch
 capture and fit.
+
+### 317. Separated attitude cadence materially improves replay
+
+Date: 2026-08-09.
+
+The strict schema-1 controller now separates its 125 Hz velocity stage,
+fractional attitude stage, and 250 Hz rate/allocation stage in both NumPy and
+Torch. Full host verification passes with 754 tests and one skip, and the
+complete pre-commit suite passes. The 187.5 Hz diagnostic reused only the
+preserved ULog/bridge trace and inserted the new setting into a copy of the old
+selected artifact; it is evidence, not a publishable artifact.
+
+Failures fall from 11 to 7. `validation-z-envelope` collective improves from
+0.938942 N to 0.672205 N, a 28.4% reduction, and core motor RMSE improves from
+0.014325 to 0.010474. `stability-moderate-envelope` collective improves from
+0.419923 N to 0.300914 N, a 28.3% reduction, while core motor RMSE now passes at
+0.008931. Both `fit-vertical-low-speed` and
+`validation-vertical-ramp-reversal` clear their collective gates. Remaining
+failures are marginal fit-forward collective, physical Y motor, core/physical
+Z motor and collective, and physical moderate motor.
+
+This is material progress and validates the three-stage controller structure.
+Preserve the 187.5 Hz report, sweep the declared 166.6667, 187.5, 200, and 250
+Hz candidates against the same high-rate evidence, then use the best evidenced
+rate as the base for a fresh scratch target fit and capture.
