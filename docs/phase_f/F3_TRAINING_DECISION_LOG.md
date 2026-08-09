@@ -10213,3 +10213,25 @@ and replace only its stale Z component with the full-rate attitude/thrust
 inversion. Report both source ages. This retains the exact upstream horizontal
 PID output, preserves the evidenced vertical improvement, and changes no
 production controller setting, equation, or limit.
+
+### 313. Vertical-only seed moves rather than removes the bias
+
+Date: 2026-08-09.
+
+Using the high-rate attitude/thrust inversion only for acceleration Z restored
+the prior lateral motor behavior and kept fit-forward collective passing at
+0.0376 N, but total failures remained 11. Fit-lateral collective moved from a
+pass at 0.0449 N to a failure at 0.0678 N, while Z-envelope stayed at 0.939 N
+and moderate-envelope stayed at 0.420 N. The mixed seed therefore does not
+provide material progress and should not replace the exact upstream
+`vehicle_local_position_setpoint.acceleration` seed.
+
+Code inspection found a more direct phase defect. Replay delays the recorded
+action by one 4 ms tick before the target controller consumes it, matching the
+capture publication order. The PX4 vertical velocity-state blending path still
+uses `commanded_body_velocity` before that delay. During every vertical command
+transition, target command generation and estimator blending therefore consume
+different setpoints. Restore the original acceleration seed and derive the NED
+vertical command used for PX4 blending from the same delayed action array that
+feeds the controller. Add a transition test covering both values before
+replaying the preserved campaign.
