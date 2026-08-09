@@ -10283,3 +10283,30 @@ Measure target collective and body-rate error for deterministic one- and
 two-tick handoff delays on every profile. If one delay materially dominates,
 add that delay through the strict controller settings and fit it declaratively
 in the next scratch campaign; do not absorb it into controller gains.
+
+### 316. A distinct attitude cadence is required
+
+Date: 2026-08-09.
+
+The deterministic handoff scan rejects a single fixed-delay approximation.
+Two 4 ms ticks are best for collective: `validation-z-envelope` falls from
+0.01313 to 0.00583 normalized and `stability-moderate-envelope` falls from
+0.00602 to 0.00242. Those residuals still exceed the 0.05 N physical gate by a
+wide margin. One tick is better for most X/Y/yaw body-rate profiles, while the
+sharp vertical profiles prefer two. Do not add a fixed delay candidate.
+
+The high-rate ULog exposes the actual scheduler boundary. Over the capture,
+`vehicle_attitude` has 30,875 intervals of 4 ms and 14,335 intervals of 8 ms,
+an average publication rate close to 187.5 Hz. `vehicle_rates_setpoint` follows
+that attitude-driven module schedule. The target controller currently computes
+desired attitude, body-rate setpoint, and collective only inside its 125 Hz
+velocity-loop update, then runs the rate loop at 250 Hz. It therefore collapses
+three distinct PX4 module cadences into two.
+
+Separate the shared controller into a 125 Hz velocity stage that holds desired
+attitude and collective, a declarative attitude stage initially measured at
+187.5 Hz that holds body-rate and collective output, and the existing 250 Hz
+rate/allocator stage. Implement the same deterministic fractional cadence in
+NumPy and Torch, add it through `ParameterSpec`, and preserve strict schema 1.
+Then rerun the preserved high-rate replay before paying for a new scratch
+capture and fit.
