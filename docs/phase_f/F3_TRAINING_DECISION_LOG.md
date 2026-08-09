@@ -9414,3 +9414,21 @@ initial and stage-wide unusable errors, with a host regression test. This is an
 evidence-reporting correction and does not change candidate generation, scoring,
 ranking, or acceptance. Commit it and repeat the target-only diagnostic against
 the preserved capture.
+
+### 280. Seed the shared controller state for CTBR replay
+
+Date: 2026-08-09.
+
+With Entry 279 diagnostics, the next target-only run reported the exact base
+candidate failure: `controller-state seeding requires velocity actuation`. The
+strict controller state is shared by both modes and already carries the angular
+velocity estimate, angular acceleration, rate integral, hover estimate,
+collective setpoint, and body-rate setpoint required to begin CTBR from the
+captured PX4 boundary. The velocity-loop fields are harmless retained state that
+the CTBR path does not consume. Only legacy guards in the NumPy and Torch twins
+prevented the complete state from being restored.
+
+Remove those mode guards and run the existing controller-boundary and initial
+rotor-thrust seed tests for both `velocity` and `ctbr`. Keep the seed math and
+state shape identical across twins. Commit, then repeat the target-only
+diagnostic against the preserved capture before another full campaign.

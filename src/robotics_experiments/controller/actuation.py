@@ -869,8 +869,6 @@ def seed_actuation_controller_state(
     outer_loop_elapsed_s: float,
 ) -> ActuationControllerState:
     """Match a neutral-command PX4 controller boundary for one replay."""
-    if params.kind != "velocity":
-        raise ValueError("controller-state seeding requires velocity actuation")
     if not math.isfinite(controller_dt_s) or controller_dt_s <= 0.0:
         raise ValueError("controller_dt_s must be finite and positive")
     if not math.isfinite(outer_loop_elapsed_s):

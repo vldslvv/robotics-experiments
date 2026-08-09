@@ -1119,8 +1119,6 @@ def seed_flight_controller_state(
     valid: torch.Tensor,
 ) -> _FlightControllerState:
     """Restore per-environment neutral-command PX4 controller boundaries."""
-    if params.kind != "velocity":
-        raise ValueError("controller-state seeding requires velocity actuation")
     expected = state.filtered_velocity_world.shape
     vectors = {
         "physical_linear_velocity_world": physical_linear_velocity_world,

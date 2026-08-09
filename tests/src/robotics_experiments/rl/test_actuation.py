@@ -625,8 +625,9 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
     assert updated.hover_thrust_normalized == 0.56
 
 
-def test_seed_controller_state_matches_neutral_acceleration_boundary():
-    params = _params("velocity")
+@pytest.mark.parametrize("kind", ["velocity", "ctbr"])
+def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
+    params = _params(kind)
     filtered_velocity = np.array([0.08, -0.18, 0.04])
     acceleration = np.array([0.3, -0.4, 0.2])
     acceleration_setpoint = np.array([0.7, -0.8, 0.9])
@@ -839,7 +840,8 @@ def test_airborne_thruster_reset_primes_hover_and_preserves_fitted_time_constant
     assert torch.equal(thruster.curr_thrust, torch.tensor([[5.75], [1.0], [5.75]]))
 
 
-def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state():
+@pytest.mark.parametrize("kind", ["velocity", "ctbr"])
+def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(kind: str):
     torch = pytest.importorskip("torch")
     from robotics_experiments.workflows.isaac_lab.tasks.flight import (
         _initial_rotor_thrust_from_controller_state,
@@ -864,7 +866,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
         horizontal_velocity_error_gain_full_mps=0.3,
     )
     params = build_flight_actuation_params(
-        kind="velocity",
+        kind=kind,
         positions_body=geometry.positions_body,
         rot_dir=geometry.rot_dir,
         rotor_constant=geometry.rotor_constant,
@@ -874,7 +876,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state()
         input_offset=geometry.input_offset,
         input_scaling=geometry.input_scaling,
         zero_position_armed=geometry.zero_position_armed,
-        action_cfg=_action_cfg("velocity"),
+        action_cfg=_action_cfg(kind),
         controller_settings=settings,
         policy_contract=None,
         mass=_MASS_KG,
