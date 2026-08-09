@@ -9784,3 +9784,38 @@ re-optimize around the new cutoff. Do not change controller structure, actuator
 or plant contracts, probe families, metrics, or acceptance limits. Reuse Entry
 286's fresh capture for the diagnostic and require exact quality before replay
 or live validation.
+
+### 296. Derivative cutoff is inactive at the accepted frontier
+
+Date: 2026-08-09.
+
+Target diagnostic
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-derivative-filter-diagnostic`
+reused the Entry 286 capture and evaluated 5,005 unique candidates in 54 GPU
+batches and 1,914.8 seconds. Average sampled GPU utilization was 24.2%.
+Candidate 4610 retained the original 5 Hz derivative cutoff and otherwise
+selected the same response basin as Entry 294. It failed only Y braking at
+8.006 mm while combined endpoint passed at 7.937 mm.
+
+No candidate passed both coupled gates. There were 694 endpoint-passing/Y-
+braking-failing candidates, 243 braking-passing/endpoint-failing candidates,
+and 4,068 that failed both. The best endpoint-passing braking error was
+7.764 mm, unchanged from Entry 294. Lower derivative cutoffs therefore do not
+move the frontier and are not a supported expansion.
+
+Controller-boundary replay on the selected diagnostic provides the next
+boundary. The failing low-speed lateral profile passed with 0.004728 normalized
+motor RMSE and 0.00609 N collective RMSE. Its controller-to-motor boundary is
+already aligned; the residual appears when each backend evolves its own state.
+Joining the ULog velocity estimate to the bridge physical state shows that the
+lateral estimator error starts at +0.010437 m/s, crosses -0.010162 m/s, and
+ends at +0.001269 m/s. The validation combined profile starts at -0.010257 m/s
+and ends at +0.003733 m/s. The current constant observation correction plus
+one exponentially decaying initial bias cannot reproduce these sign-changing
+dynamics.
+
+Fit the existing measured-velocity low-pass as the minimal stateful estimator
+adapter. It starts from the captured PX4 estimate and can reproduce both decay
+and command-correlated lag without changing controller or plant structure.
+Keep the disproved derivative cutoff at 5 Hz and retain the measured P/D/I,
+observation, actuator, plant, probe, metric, and gate contracts.
