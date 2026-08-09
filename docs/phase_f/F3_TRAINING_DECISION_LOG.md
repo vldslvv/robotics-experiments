@@ -9454,3 +9454,33 @@ candidate hover setting (0.54), whereas the captured first physical collective
 command is 0.57. Prime each target environment from the first authored physical
 command in its trace, for both control modes, and add a CTBR regression test.
 Commit and repeat the target-only diagnostic before a new full campaign.
+
+### 282. Trace priming clears CTBR and exposes a lateral transient crossing
+
+Date: 2026-08-09.
+
+Fresh clean-source campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-trace-primed-scratch`
+captured all 22 velocity and CTBR profiles in 352.7 seconds, passed the actuator
+audit, and evaluated 1,464 unique settings in 16 GPU batches and 520.9 seconds.
+Candidate 1180 was selected from source commit `92f5c76`; average sampled GPU
+utilization was 23.0%, with deterministic single-environment PhysX stepping
+remaining the measured bottleneck.
+
+Priming from the first physical trace command resolved the Entry 281 boundary.
+Collective vertical-velocity NRMSE fell from 0.106735 to 0.079188 and collective
+acceleration NRMSE fell from 0.050839 to 0.029969. Every roll, pitch, yaw, X, and
+Z gate passed. Complete 22-profile controller replay also passed, as did the
+live hover, goto, and handoff integration gate: hover last-window maximum was
+0.094 m, goto last-window maximum was 0.031 m, and final handoff range was
+0.452 m.
+
+Finalization correctly rejected the run because the remaining Y braking-distance
+error was 0.006481 m against 0.005 m. Candidate-wide evidence shows a narrow
+translational crossing rather than a CTBR, allocator, actuator, or live-stability
+failure: 237 candidates failed exactly one gate, including 17 that failed only
+Y braking distance and 220 that failed only combined endpoint error. No setting
+in the declared decay-and-bias population passed both. The selected endpoint
+error was already 0.009826 m against 0.010 m, leaving only 0.174 mm of margin.
+The next diagnostic must therefore add an independently evidenced lateral
+transient parameter rather than extend steady observation bias farther.
