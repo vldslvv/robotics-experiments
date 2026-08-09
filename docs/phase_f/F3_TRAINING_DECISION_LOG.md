@@ -9882,3 +9882,36 @@ Retain all P/D/I, observation offset/scale/decay, derivative filter, actuator,
 plant, probe, metric, and acceptance contracts. Reuse Entry 286's fresh capture
 for the diagnostic; a quality-passing candidate must still pass controller
 replay and live integration before a fresh scratch campaign.
+
+### 300. Fresh scratch motion passes; replay favors pinned PX4 gains
+
+Date: 2026-08-09.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-per-axis-filter-scratch`
+captured and timestamp-joined all 22 profiles from clean commit `f06beec`.
+Actuator audit passed with zero maximum timestamp error; representative
+normalized motor RMSE was about 0.0003 and every collective RMSE remained below
+0.05 N. The target sweep evaluated 4,826 unique candidates in 51 GPU batches
+and 1,804.8 seconds, averaging 24.2% sampled GPU utilization.
+
+Candidate 4727 passed every X/Y/Z, roll/pitch/yaw, collective, and combined
+endpoint motion gate. It selected no velocity filter, `kp_vel.y=1.9`,
+`ki_vel.y=0.35`, the pinned `kd_vel.y=0.2`, 0.0125 Hz estimator-bias decay,
+observation bias `[0.005, -0.020, -0.0039]` m/s, and Y scale 1.0125.
+Its principal motion metrics included 2.298 mm Y braking, 9.062 mm endpoint,
+0.01647 Y envelope NRMSE, and 0.07884 CTBR collective-velocity NRMSE.
+
+Mandatory replay rejected only `validation-y-envelope`: normalized motor RMSE
+was 0.011343 against 0.010, while its physical-state replay passed at 0.009627
+and collective RMSE passed at 0.02629 N. The mismatch is dominated by roll and
+pitch torque at the PX4-estimated-state boundary, not plant collective or
+timestamp joining.
+
+The population contains 444 motion-quality-passing candidates, including 64
+that retain the exact pinned PX4 lateral P/I/D gains. Candidate 1387 passes all
+motion gates with only 0.0125 Hz decay and observation bias
+`[0.005, -0.020, -0.0039]` m/s. Remove P/I/D from the fit rather than tuning
+controller authority past a passing controller boundary. Retain estimator
+decay, bias, per-axis filter, scale, all probes, and all gates, then rerun on
+this fresh audited reference.
