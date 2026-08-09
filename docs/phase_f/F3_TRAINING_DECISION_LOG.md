@@ -9819,3 +9819,21 @@ adapter. It starts from the captured PX4 estimate and can reproduce both decay
 and command-correlated lag without changing controller or plant structure.
 Keep the disproved derivative cutoff at 5 Hz and retain the measured P/D/I,
 observation, actuator, plant, probe, metric, and gate contracts.
+
+### 297. Fit the measured-velocity state dynamics
+
+Date: 2026-08-09.
+
+Replace the disproved derivative-cutoff stage with `velocity_filter_hz`
+candidates `[0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0]`. Zero retains the
+current unfiltered behavior, while the positive range covers long estimator
+settling through near-controller-bandwidth response. Generated midpoint
+refinement supplies the crossing precision after the broad sweep.
+
+The filter is initialized from each profile's timestamp-joined PX4 velocity
+estimate, so it models the evidenced estimator-to-physical convergence and
+phase lag rather than inventing an arbitrary initial condition. Keep the
+derivative filter fixed at its selected 5 Hz base and retain all measured
+P/D/I, estimator offset/scale/decay, actuator, plant, probe, metric, and gate
+contracts. Reuse Entry 286's fresh capture for the diagnostic; require exact
+quality before replay and live validation.

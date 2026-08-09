@@ -401,7 +401,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "kd_vel",
         "kp_vel",
         "ki_vel",
-        "velocity_derivative_filter_hz",
+        "velocity_filter_hz",
         "velocity_observation_scale",
         "velocity_integral_limit_mps2",
     )
@@ -415,7 +415,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[3].candidates[-1] == pytest.approx((1.8, 3.8, 4.2))
     assert target.parameters[4].candidates[0] == pytest.approx((0.4, 0.2, 2.1))
     assert target.parameters[4].candidates[-1] == pytest.approx((0.4, 1.2, 2.1))
-    assert target.parameters[5].candidates == pytest.approx((0.5, 1.0, 2.0, 3.0, 4.0, 5.0))
+    assert target.parameters[5].candidates == pytest.approx(
+        (0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0)
+    )
     assert target.parameters[6].candidates[0] == pytest.approx((0.98, 0.9800, 1.0))
     assert target.parameters[6].candidates[-1] == pytest.approx((0.98, 1.0425, 1.0))
     assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)

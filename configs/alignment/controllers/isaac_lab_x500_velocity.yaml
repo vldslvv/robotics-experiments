@@ -168,12 +168,12 @@ parameters:
       - [0.4, 0.8, 2.1]
       - [0.4, 1.0, 2.1]
       - [0.4, 1.2, 2.1]
-  # The retained high-D frontier over-brakes immediately after the zero-command
-  # transition. Fit the derivative cutoff to shape that impulse independently
-  # of the already measured P/D/I authority.
-  - field: velocity_derivative_filter_hz
+  # PX4's captured estimator error changes sign during the low-speed profiles;
+  # a measured-velocity low-pass can reproduce that stateful lag while starting
+  # from the exact captured estimator boundary.
+  - field: velocity_filter_hz
     stage: 6
-    candidates: [0.5, 1.0, 2.0, 3.0, 4.0, 5.0]
+    candidates: [0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0]
   # Lower lateral estimator scale lengthens the measured braking transient.
   # Search the narrow crossing only after the response stages create margin.
   - field: velocity_observation_scale
