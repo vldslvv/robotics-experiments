@@ -9318,3 +9318,25 @@ global 2.00 m routine safety envelope. This makes profiles and families
 sequence-independent without changing recorded excitation or any acceptance
 limit. Commit the capture contract and repeat the entire campaign from clean
 source.
+
+### 275. Bound CTBR attitude excursion during rate identification
+
+Date: 2026-08-09.
+
+The recentered clean campaign
+`.build/alignment/x500-px4-v1/20260809T-uniform-6dof-recenter-scratch` proved
+that profile preconditioning returned the vehicle to the policy-step reference,
+then stopped in the first CTBR roll profile at 2.01 m of lateral drift. ULog
+samples isolate the cause: the vehicle began CTBR about 0.1 m from the baseline;
+the +0.35 rad/s pulse reached approximately 10 degrees of roll, and the
+following zero-rate interval held that attitude. Horizontal speed grew to about
+1.5 m/s before the balanced negative pulse leveled the vehicle, consuming the
+full safety envelope despite correct rate tracking.
+
+Shorten the direct and envelope body-rate pulses while retaining both signs,
+zero net commanded rotation, and dozens of 250 Hz controller samples per active
+segment. The revised direct profile peaks near six degrees of commanded
+excursion and the validation envelope near ten degrees, then returns level.
+Keep amplitudes, axis coverage, metric limits, recentering, and the 2.00 m
+routine safety envelope unchanged. Commit the new probe fingerprint and repeat
+the clean campaign.
