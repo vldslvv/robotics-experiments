@@ -75,7 +75,7 @@ def _settings(
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_estimator_bias_decay_hz=0.0,
-        velocity_filter_hz=10.0,
+        velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
         hover_thrust_normalized=0.57,
@@ -415,9 +415,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[3].candidates[-1] == pytest.approx((1.8, 3.8, 4.2))
     assert target.parameters[4].candidates[0] == pytest.approx((0.4, 0.2, 2.1))
     assert target.parameters[4].candidates[-1] == pytest.approx((0.4, 1.2, 2.1))
-    assert target.parameters[5].candidates == pytest.approx(
-        (0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0)
-    )
+    assert target.parameters[5].candidates[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert target.parameters[5].candidates[3] == pytest.approx((0.0, 0.375, 0.0))
+    assert target.parameters[5].candidates[-1] == pytest.approx((0.0, 1.0, 0.0))
     assert target.parameters[6].candidates[0] == pytest.approx((0.98, 0.9800, 1.0))
     assert target.parameters[6].candidates[-1] == pytest.approx((0.98, 1.0425, 1.0))
     assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
@@ -807,7 +807,7 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
                     ranking, beam = 0.0, (0.0, 0.0)
                 elif delay == 1.0:
                     ranking, beam = 1.0, (5.0, 5.0)
-                elif delay == 2.0 and velocity_filter == 20.0:
+                elif delay == 2.0 and velocity_filter == (20.0, 20.0, 20.0):
                     ranking, beam = 9.0, (0.0, 0.0)
                 elif delay == 2.0:
                     ranking, beam = 10.0, (0.0, 10.0)
@@ -832,7 +832,11 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
             evaluator=ArchiveEvaluator(),
             parameters=(
                 ParameterSpec("command_delay_s", 1, (1.0, 2.0, 3.0)),
-                ParameterSpec("velocity_filter_hz", 1, (10.0, 20.0)),
+                ParameterSpec(
+                    "velocity_filter_hz",
+                    1,
+                    ((10.0, 10.0, 10.0), (20.0, 20.0, 20.0)),
+                ),
                 ParameterSpec("max_tilt_cmd_deg", 1, (30.0, 40.0)),
             ),
         ),
@@ -851,7 +855,7 @@ def test_coarse_to_fine_search_reseeds_from_global_archive() -> None:
 
 def test_coarse_to_fine_search_expands_each_initial_setting() -> None:
     base = _settings(delay=0.0)
-    seed = replace(base, command_delay_s=0.1, velocity_filter_hz=20.0)
+    seed = replace(base, command_delay_s=0.1, velocity_filter_hz=(20.0, 20.0, 20.0))
     target = replace(
         _definition(
             backend="isaac-lab",
@@ -872,7 +876,7 @@ def test_coarse_to_fine_search_expands_each_initial_setting() -> None:
 
     assert any(
         score.settings.command_delay_s == 0.1
-        and score.settings.velocity_filter_hz == 20.0
+        and score.settings.velocity_filter_hz == (20.0, 20.0, 20.0)
         and score.settings.max_tilt_cmd_deg == 40.0
         for score in outcome.candidate_scores
     )
@@ -1242,6 +1246,17 @@ def test_controller_loader_is_strict_and_rejects_legacy(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     controller_path, _selection_path = write_alignment_result(result=result, run_dir=run_dir)
     payload = json.loads(controller_path.read_text())
+    scalar_filter_payload = {
+        **payload,
+        "selected_settings": {
+            **payload["selected_settings"],
+            "velocity_filter_hz": 10.0,
+        },
+    }
+    controller_path.write_text(json.dumps(scalar_filter_payload))
+    with pytest.raises(ValueError, match="must contain three finite values"):
+        load_controller_artifact(run_dir)
+
     payload["unexpected"] = True
     controller_path.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="fields mismatch"):

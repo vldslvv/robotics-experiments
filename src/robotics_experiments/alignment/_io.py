@@ -135,10 +135,9 @@ def _settings(
             name=f"{name}.velocity_estimator_bias_decay_hz",
             nonnegative=True,
         ),
-        velocity_filter_hz=_finite(
+        velocity_filter_hz=_vector(
             value=settings["velocity_filter_hz"],
             name=f"{name}.velocity_filter_hz",
-            nonnegative=True,
         ),
         velocity_derivative_filter_hz=_finite(
             value=settings["velocity_derivative_filter_hz"],
@@ -223,6 +222,7 @@ def _settings(
         "kp_vel",
         "ki_vel",
         "kd_vel",
+        "velocity_filter_hz",
         "velocity_integral_limit_mps2",
         "kp_att",
         "kp_rate",

@@ -137,11 +137,12 @@ floating-point tick. The replay also reproduces PX4's
 velocity-only vertical state blending and applies logged hover-estimate updates
 at their source timestamps. The target-only `velocity_observation_scale`,
 steady world-ENU `velocity_observation_bias_mps`,
-`velocity_estimator_bias_decay_hz`, and `angular_velocity_filter_hz` model the
-evidenced physical-to-estimated state boundary without changing the pinned PX4
-controller gains. The core replay bypasses these target-only adapters because
-its inputs are already PX4-estimated state; the physical-state replay retains
-them and therefore audits the deployment boundary.
+`velocity_estimator_bias_decay_hz`, per-axis `velocity_filter_hz`, and
+`angular_velocity_filter_hz` model the evidenced physical-to-estimated state
+boundary without changing the pinned PX4 controller gains. The core replay
+bypasses these target-only adapters because its inputs are already
+PX4-estimated state; the physical-state replay retains them and therefore
+audits the deployment boundary.
 
 ## Quality and acceptance
 

@@ -45,7 +45,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_estimator_bias_decay_hz=0.0,
-        velocity_filter_hz=10.0,
+        velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_normalized=0.57,

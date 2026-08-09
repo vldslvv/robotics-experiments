@@ -25,7 +25,7 @@ settings:
   # PX4 supplies the estimator signal directly; these target-side adapters are inactive.
   velocity_estimator_bias_decay_hz: 0.0
   # Pinned MPC_VEL_LP=0 disables the position controller's velocity low-pass.
-  velocity_filter_hz: 0.0
+  velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
   # Seed for the normalized PX4 thrust boundary.

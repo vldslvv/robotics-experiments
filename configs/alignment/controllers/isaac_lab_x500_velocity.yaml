@@ -21,7 +21,7 @@ settings:
   # Steady world-ENU physical-to-estimator offset measured from the reference.
   velocity_observation_bias_mps: [0.006, -0.030, 0.0]
   velocity_estimator_bias_decay_hz: 0.0
-  velocity_filter_hz: 0.0
+  velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
@@ -173,7 +173,15 @@ parameters:
   # from the exact captured estimator boundary.
   - field: velocity_filter_hz
     stage: 6
-    candidates: [0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0]
+    candidates:
+      - [0.0, 0.0000, 0.0]
+      - [0.0, 0.2500, 0.0]
+      - [0.0, 0.3125, 0.0]
+      - [0.0, 0.3750, 0.0]
+      - [0.0, 0.4375, 0.0]
+      - [0.0, 0.5000, 0.0]
+      - [0.0, 0.7500, 0.0]
+      - [0.0, 1.0000, 0.0]
   # Lower lateral estimator scale lengthens the measured braking transient.
   # Search the narrow crossing only after the response stages create margin.
   - field: velocity_observation_scale

@@ -126,7 +126,7 @@ class _FlightActuationParams:
     velocity_observation_scale: torch.Tensor
     velocity_observation_bias_mps: torch.Tensor
     velocity_estimator_bias_decay_hz: float | torch.Tensor
-    velocity_filter_hz: float | torch.Tensor
+    velocity_filter_hz: torch.Tensor
     velocity_derivative_filter_hz: float | torch.Tensor
     velocity_integral_limit_mps2: torch.Tensor
     kp_att: torch.Tensor
@@ -668,8 +668,6 @@ def _velocity(
         cutoff_hz=params.velocity_filter_hz,
         dt_s=outer_loop_period_s,
     )
-    if isinstance(velocity_alpha, torch.Tensor):
-        velocity_alpha = velocity_alpha.unsqueeze(-1)
     observed_velocity_world = (
         params.velocity_observation_scale * linear_velocity_world
         + params.velocity_observation_bias_mps
@@ -937,7 +935,7 @@ def build_flight_actuation_params(
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
         ),
-        velocity_filter_hz=float(controller_settings.velocity_filter_hz),
+        velocity_filter_hz=_tensor(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_tensor(controller_settings.velocity_integral_limit_mps2),
         kp_att=_tensor(controller_settings.kp_att),
@@ -1009,7 +1007,7 @@ def _replace_controller_settings_batch(
         velocity_observation_scale=_vectors("velocity_observation_scale"),
         velocity_observation_bias_mps=_vectors("velocity_observation_bias_mps"),
         velocity_estimator_bias_decay_hz=_scalars("velocity_estimator_bias_decay_hz"),
-        velocity_filter_hz=_scalars("velocity_filter_hz"),
+        velocity_filter_hz=_vectors("velocity_filter_hz"),
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
         hover_thrust_normalized=_scalars("hover_thrust_normalized"),

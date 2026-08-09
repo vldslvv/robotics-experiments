@@ -24,7 +24,7 @@ class ControllerSettings:
     velocity_observation_scale: Vector3
     velocity_observation_bias_mps: Vector3
     velocity_estimator_bias_decay_hz: float
-    velocity_filter_hz: float
+    velocity_filter_hz: Vector3
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: Vector3
     hover_thrust_normalized: float

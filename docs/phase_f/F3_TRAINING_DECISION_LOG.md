@@ -9864,3 +9864,21 @@ and fit only its Y component around the measured crossing. Keep X/Z unfiltered,
 retain the complete P/D/I and estimator ranges, and make no other structural or
 plant change. This is a strict schema-1 contract replacement; scalar artifacts
 are invalid and receive no compatibility path.
+
+### 299. Isolate the measured estimator lag to the lateral axis
+
+Date: 2026-08-09.
+
+Replace scalar `velocity_filter_hz` with a strict three-element X/Y/Z setting
+in the shared controller contract, normalized NumPy controller, batched Torch
+twin, alignment loader, artifact loader, replay diagnostic, and both controller
+definitions. Scalar schema-1 artifacts fail strict loading; no migration or
+compatibility path is provided.
+
+Keep X and Z cutoffs at zero and search only Y at `[0.0, 0.25, 0.3125, 0.375,
+0.4375, 0.5, 0.75, 1.0]` Hz. This brackets Entry 298's coupled-gate crossing
+and the nearby Y-envelope boundary while avoiding a repeated wide scalar sweep.
+Retain all P/D/I, observation offset/scale/decay, derivative filter, actuator,
+plant, probe, metric, and acceptance contracts. Reuse Entry 286's fresh capture
+for the diagnostic; a quality-passing candidate must still pass controller
+replay and live integration before a fresh scratch campaign.

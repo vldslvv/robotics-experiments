@@ -155,7 +155,7 @@ class ActuationParams:
     velocity_observation_scale: np.ndarray
     velocity_observation_bias_mps: np.ndarray
     velocity_estimator_bias_decay_hz: float
-    velocity_filter_hz: float
+    velocity_filter_hz: np.ndarray
     velocity_derivative_filter_hz: float
     velocity_integral_limit_mps2: np.ndarray
     kp_att: np.ndarray
@@ -382,6 +382,12 @@ def _low_pass_alpha(*, cutoff_hz: float, dt_s: float) -> float:
     return float(scaled / (1.0 + scaled))
 
 
+def _low_pass_alpha_vector(*, cutoff_hz: np.ndarray, dt_s: float) -> np.ndarray:
+    scaled = 2.0 * np.pi * cutoff_hz * dt_s
+    filtered = scaled / (1.0 + scaled)
+    return np.where(cutoff_hz > 0.0, filtered, np.ones_like(filtered))
+
+
 def _normalized_thrust_world(
     *,
     params: ActuationParams,
@@ -579,7 +585,7 @@ def _velocity_command_to_omega(
     )
     measured_velocity = physical_velocity + controller_state.velocity_estimator_bias_enu
     if controller_state.initialized:
-        velocity_alpha = _low_pass_alpha(
+        velocity_alpha = _low_pass_alpha_vector(
             cutoff_hz=params.velocity_filter_hz,
             dt_s=outer_dt_s,
         )
@@ -810,7 +816,7 @@ def build_actuation_params(
         velocity_estimator_bias_decay_hz=float(
             controller_settings.velocity_estimator_bias_decay_hz
         ),
-        velocity_filter_hz=float(controller_settings.velocity_filter_hz),
+        velocity_filter_hz=_readonly_copy(controller_settings.velocity_filter_hz),
         velocity_derivative_filter_hz=float(controller_settings.velocity_derivative_filter_hz),
         velocity_integral_limit_mps2=_readonly_copy(
             controller_settings.velocity_integral_limit_mps2

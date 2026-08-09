@@ -120,9 +120,7 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.velocity_estimator_bias_decay_hz",
             nonnegative=True,
         ),
-        velocity_filter_hz=_finite(
-            value=payload["velocity_filter_hz"], name=f"{name}.velocity_filter_hz", nonnegative=True
-        ),
+        velocity_filter_hz=_vector(payload["velocity_filter_hz"], f"{name}.velocity_filter_hz"),
         velocity_derivative_filter_hz=_finite(
             value=payload["velocity_derivative_filter_hz"],
             name=f"{name}.velocity_derivative_filter_hz",

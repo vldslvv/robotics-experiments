@@ -132,7 +132,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
         velocity_estimator_bias_decay_hz=0.0,
-        velocity_filter_hz=10.0,
+        velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_normalized=0.57,
@@ -552,7 +552,7 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
         controller_settings=replace(
             _controller_settings(),
             velocity_controller_rate_hz=250.0,
-            velocity_filter_hz=0.0,
+            velocity_filter_hz=(0.0, 0.0, 0.0),
         ),
         mass=_MASS_KG,
     )
@@ -576,6 +576,40 @@ def test_zero_velocity_filter_cutoff_disables_filtering():
     )
 
     assert controller.filtered_velocity_enu[0] == pytest.approx(1.0)
+
+
+def test_velocity_filter_cutoff_is_applied_per_axis():
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            _controller_settings(),
+            velocity_controller_rate_hz=250.0,
+            velocity_filter_hz=(0.0, 10.0, 0.0),
+        ),
+        mass=_MASS_KG,
+    )
+    controller, _omega = _step_controller(
+        params,
+        initial_actuation_controller_state(),
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+    moving = replace(
+        _level_rest_state(),
+        linear_velocity_enu=np.ones(3),
+    )
+    controller, _omega = _step_controller(
+        params,
+        controller,
+        np.zeros(4),
+        moving,
+        0.004,
+    )
+
+    assert controller.filtered_velocity_enu[[0, 2]] == pytest.approx((1.0, 1.0))
+    assert 0.0 < controller.filtered_velocity_enu[1] < 1.0
 
 
 def test_velocity_outer_loop_holds_between_declared_rate_updates():
