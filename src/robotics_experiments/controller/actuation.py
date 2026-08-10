@@ -610,8 +610,8 @@ def _velocity_command_to_omega(
         return _rate_to_omega(
             params,
             held_state,
-            controller_state.collective_thrust_setpoint,
-            controller_state.body_rate_setpoint,
+            held_state.collective_thrust_setpoint,
+            held_state.body_rate_setpoint,
             state,
             dt_s,
         )
@@ -723,16 +723,8 @@ def _velocity_command_to_omega(
     return _rate_to_omega(
         params,
         outer_successor,
-        (
-            controller_state.collective_thrust_setpoint
-            if controller_state.initialized
-            else outer_successor.collective_thrust_setpoint
-        ),
-        (
-            controller_state.body_rate_setpoint
-            if controller_state.initialized
-            else outer_successor.body_rate_setpoint
-        ),
+        outer_successor.collective_thrust_setpoint,
+        outer_successor.body_rate_setpoint,
         state,
         dt_s,
     )

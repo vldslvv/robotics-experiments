@@ -649,48 +649,6 @@ def test_attitude_loop_uses_fractional_declared_cadence() -> None:
     assert elapsed == pytest.approx([0.0, 0.004, 0.0026666667, 0.0013333333, 0.0])
 
 
-def test_velocity_rate_loop_consumes_attitude_output_on_the_next_tick() -> None:
-    params = _params("velocity")
-    seeded = seed_actuation_controller_state(
-        params=params,
-        controller_dt_s=0.004,
-        physical_linear_velocity_enu=np.zeros(3),
-        filtered_linear_velocity_enu=np.zeros(3),
-        angular_velocity_body_flu=np.zeros(3),
-        acceleration_setpoint_enu_mps2=np.zeros(3),
-        linear_acceleration_enu_mps2=np.zeros(3),
-        angular_acceleration_body_flu_radps2=np.zeros(3),
-        rate_integral_body_flu=np.zeros(3),
-        hover_thrust_normalized=0.57,
-        outer_loop_elapsed_s=0.0,
-    )
-    held = replace(
-        seeded,
-        attitude_loop_elapsed_s=0.004,
-        desired_collective_thrust_setpoint=0.57,
-        collective_thrust_setpoint=0.57,
-    )
-    changed = replace(held, desired_collective_thrust_setpoint=0.70)
-
-    changed_successor, changed_omega = _step_controller(
-        params,
-        changed,
-        np.zeros(4),
-        _level_rest_state(),
-        0.004,
-    )
-    _held_successor, held_omega = _step_controller(
-        params,
-        held,
-        np.zeros(4),
-        _level_rest_state(),
-        0.004,
-    )
-
-    assert changed_successor.collective_thrust_setpoint == pytest.approx(0.70)
-    assert changed_omega == pytest.approx(held_omega)
-
-
 def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
     params = _params("velocity")
     state = seed_actuation_controller_state(

@@ -878,21 +878,11 @@ def _velocity(
         attitude_wxyz=attitude_wxyz,
         dt_s=dt_s,
     )
-    rate_collective = torch.where(
-        controller_state.initialized,
-        controller_state.collective_thrust_setpoint,
-        outer_successor.collective_thrust_setpoint,
-    )
-    rate_setpoint = torch.where(
-        controller_state.initialized.unsqueeze(-1),
-        controller_state.body_rate_setpoint,
-        outer_successor.body_rate_setpoint,
-    )
     return _rate_to_omega(
         params,
         outer_successor,
-        rate_collective,
-        rate_setpoint,
+        outer_successor.collective_thrust_setpoint,
+        outer_successor.body_rate_setpoint,
         angular_velocity_body,
         dt_s,
     )
