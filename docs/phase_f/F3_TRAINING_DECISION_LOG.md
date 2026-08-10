@@ -11706,6 +11706,31 @@ the pinned X derivative 0.20. Keep the unfiltered X branch, existing Y filter,
 pinned P/I/D gains, controller structure, all probes, replay limits, and
 quality gates unchanged. Replay every motion pass before live evaluation.
 
+### 379. The configured gain window is inactive at the limiting brake
+
+Date: 2026-08-10.
+
+The signed-braking gain search evaluated 135 unique candidates in five GPU
+batches and 142.8 seconds at 30.8% average sampled GPU utilization. No
+candidate passes motion. Horizontal gain scales 1.00-1.19 change limiting X
+braking by less than one micrometre; selected candidate 71 remains at 5.321 mm.
+
+The limiting trace explains the fixed point. At the approach-to-zero command
+transition, the target's scaled and biased X velocity produces only 0.0724 m/s
+error. The current gain schedule starts at 0.15 m/s, so none of the searched
+scale values can affect the event. The Lab stopping distance is 4.605 mm
+shorter than PX4, requiring attenuation rather than the boost-only validation
+currently imposed by the strict settings loader.
+
+Correct the strict-v1 controller contract to accept any positive horizontal
+gain scale; the existing equation already supports both attenuation below 1
+and boost above 1. Add host coverage for attenuation and strict artifact
+loading. Move the declarative schedule to start/full/end 0.02/0.07/0.15 m/s
+and search scales 0.70/0.80/0.90/1.00 with decay 0.070/0.075 Hz, X bias
+0.0045/0.0050 m/s, and X observation scale 0.90/0.91. Keep the unfiltered X
+branch, existing Y filter, pinned P/I/D gains, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
