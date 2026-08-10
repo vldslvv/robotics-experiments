@@ -11406,3 +11406,27 @@ five X scales from 0.86 through 0.94, X bias 0.022 through 0.030 m/s, and Y bias
 0.018 through 0.030 m/s. Preserve the full 800-point Cartesian grid with beam
 width 160. Keep controller structure, all other settings, probes, replay
 limits, and acceptance gates unchanged.
+
+### 362. Estimator decay makes material progress and isolates X PID response
+
+Date: 2026-08-10.
+
+The decay/scale/bias search evaluated 968 unique candidates in 11 GPU batches
+and 396.5 seconds at 26.6% average sampled GPU utilization. Candidate 575 at
+decay 0.0125 Hz, bias `[0.022, 0.018, -0.0039]` m/s, and X scale 0.90 passed
+every dynamic and CTBR gate; only combined endpoint remained at 21.408 mm. This
+is a 24% reduction in largest normalized excess from 2.81 to 2.14 without a
+passed-gate regression, so the attempt is material progress.
+
+Candidate 165 at the same decay, bias `[0.030, 0.022, -0.0039]` m/s, and the
+original X scale 0.98 establishes the complementary boundary. Endpoint passes
+at 3.258 mm while only X braking at 10.096 mm, X residual at 10.621 mm/s, and X
+stop-time at 0.14 s fail. Raw combined traces show only 2.09 mm X and -0.85 mm
+Y endpoint residual, so yaw/frame behavior is not the first boundary.
+
+Fit X proportional gain 0.8 through 1.8, integral gain 0.1 through 0.6, and
+derivative gain 0 through 0.4 around candidate 165. Lower P and D are evidenced
+to lengthen the target's too-short braking response; I controls the remaining
+settling error. Keep Y/Z gains, estimator settings, controller structure,
+probes, replay limits, and all gates unchanged. Replay every motion pass before
+running the live acceptance gate.

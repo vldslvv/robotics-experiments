@@ -50,7 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the complete targeted decay/scale/bias grid before fine refinement.
+  # Retain the complete targeted X PID grid before fine refinement.
   beam_width: 160
   passes_per_stage: 1
   refinement_levels: 0
@@ -62,88 +62,82 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Fit how quickly the captured initial estimator correction yields to the
-  # endpoint-correcting static bias during each fresh profile.
+  # Retain the decay of the endpoint-passing frontier point.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.0025, 0.0050, 0.0075, 0.0100, 0.0125, 0.0150, 0.0200, 0.0300]
-  # Refine the endpoint-passing positive planar estimator offset.
+    candidates: [0.0125]
+  # Retain the endpoint-passing positive planar estimator offset.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.022, 0.018, -0.0039]
-      - [0.022, 0.022, -0.0039]
-      - [0.022, 0.026, -0.0039]
-      - [0.022, 0.030, -0.0039]
-      - [0.024, 0.018, -0.0039]
-      - [0.024, 0.022, -0.0039]
-      - [0.024, 0.026, -0.0039]
-      - [0.024, 0.030, -0.0039]
-      - [0.026, 0.018, -0.0039]
-      - [0.026, 0.022, -0.0039]
-      - [0.026, 0.026, -0.0039]
-      - [0.026, 0.030, -0.0039]
-      - [0.028, 0.018, -0.0039]
-      - [0.028, 0.022, -0.0039]
-      - [0.028, 0.026, -0.0039]
-      - [0.028, 0.030, -0.0039]
-      - [0.030, 0.018, -0.0039]
       - [0.030, 0.022, -0.0039]
-      - [0.030, 0.026, -0.0039]
-      - [0.030, 0.030, -0.0039]
   # Filtering worsened stop time on the fresh reference; retain the unfiltered
   # path while velocity-dependent observation scale supplies the braking fit.
   - field: velocity_filter_hz
     stage: 4
     candidates:
       - [0.0, 1.50, 0.0]
-  # Decouple nonzero-speed X braking from the zero-speed endpoint correction.
+  # Retain the endpoint-passing observation scale.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.86, 0.8975, 1.0]
-      - [0.88, 0.8975, 1.0]
-      - [0.90, 0.8975, 1.0]
-      - [0.92, 0.8975, 1.0]
-      - [0.94, 0.8975, 1.0]
-  # Retain the motion- and replay-passing integral point selected by the planar
-  # buildup diagnostic.
+      - [0.98, 0.8975, 1.0]
+  # Fit X integral authority jointly with the braking response.
   - field: ki_vel
     stage: 6
     candidates:
+      - [0.10, 0.20, 2.0]
+      - [0.20, 0.20, 2.0]
+      - [0.30, 0.20, 2.0]
       - [0.40, 0.20, 2.0]
+      - [0.50, 0.20, 2.0]
+      - [0.60, 0.20, 2.0]
+  # PX4's velocity derivative term opposes deceleration while the measured
+  # velocity falls; fit X damping without changing Y/Z.
+  - field: kd_vel
+    stage: 7
+    candidates:
+      - [0.00, 0.20, 0.0]
+      - [0.10, 0.20, 0.0]
+      - [0.20, 0.20, 0.0]
+      - [0.30, 0.20, 0.0]
+      - [0.40, 0.20, 0.0]
   # Retain the replay-safe moderate-error response that passes the live return.
   - field: horizontal_velocity_error_gain_scale
-    stage: 7
+    stage: 8
     candidates: [1.19]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
-    stage: 8
+    stage: 9
     candidates: [0.50]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
-    stage: 9
-    candidates: [24.0]
-  # Higher Y proportional gains shorten the already-short target braking
-  # distance, so retain the pinned PX4 gain.
-  - field: kp_vel
     stage: 10
+    candidates: [24.0]
+  # Lower X proportional gain lengthens the currently short target brake.
+  - field: kp_vel
+    stage: 11
     candidates:
+      - [0.8, 1.8, 4.0]
+      - [1.0, 1.8, 4.0]
+      - [1.2, 1.8, 4.0]
+      - [1.4, 1.8, 4.0]
+      - [1.6, 1.8, 4.0]
       - [1.8, 1.8, 4.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 11
+    stage: 12
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 12
+    stage: 13
     candidates: [1.0005]
 
 selection_metric: controller-quality
