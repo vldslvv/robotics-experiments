@@ -11332,3 +11332,31 @@ the completed diagnostic ranges. Run a wholly new clean-source reference
 capture, actuator audit, target evaluation, fit, controller-boundary replay,
 live integration, and finalization. Only that independent run may demonstrate
 that accepted alignment can be regenerated from scratch.
+
+### 359. First scratch proof preserves live and actuator acceptance but shifts motion
+
+Date: 2026-08-10.
+
+Clean-source run
+`.build/alignment/x500-px4-v1/20260810T-accepted-scratch-proof` recaptured all
+22 profiles from commit `ca68ac7`. The actuator audit passed with complete topic
+coverage, zero timestamp-join error, about 0.00030 normalized-motor RMSE, and
+collective RMSE below 0.01 N. The promoted candidate also passed all 22 replay
+profiles and reproduced the accepted live result: 0.100 m hover final-window
+maximum, 0.037 m goto final-window maximum, and ready handoff at 0.498 m.
+
+Finalization rejected only fresh-reference motion: X braking was 7.699 mm
+against 5 mm, X stop-time error was 0.14 s against 0.10 s, and the combined
+endpoint was 18.482 mm against 10 mm. Raw traces show the target X braking
+distance was 44.766 mm versus PX4 at 52.465 mm; the combined endpoint residual
+was +13.370 mm X, +12.541 mm Y, and +2.354 mm Z. The target initial state is
+seeded from each new PX4 capture, so the shifted target trajectory is expected
+capture-dependent evidence rather than candidate/environment assignment.
+
+Run a coarse 140-point Cartesian sweep on this preserved reference: five X
+biases, four Y biases, and seven X measured-velocity filter cutoffs. The filter
+is the evidenced control for lengthening braking response, while independent
+planar biases correct the endpoint. Keep the accepted moderate-error gain,
+vertical settings, CTBR settings, probes, and gates unchanged. Refine only the
+best passing neighborhood, replay every motion pass, then repeat the complete
+clean-source proof.

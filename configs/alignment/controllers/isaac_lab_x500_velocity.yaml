@@ -50,7 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # The accepted point is regenerated from every fresh reference capture.
+  # Retain the complete coarse endpoint/filter grid before targeted refinement.
   beam_width: 128
   passes_per_stage: 1
   refinement_levels: 0
@@ -67,17 +67,43 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # Retain the accepted fresh-reference endpoint and braking correction.
+  # Refit the capture-dependent planar estimator offset on a coarse grid.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.0180, 0.008, -0.0039]
-  # Retain the 1.5 Hz joint motion/replay crossing.
+      - [-0.030, -0.004, -0.0039]
+      - [-0.030, 0.004, -0.0039]
+      - [-0.030, 0.008, -0.0039]
+      - [-0.030, 0.012, -0.0039]
+      - [-0.010, -0.004, -0.0039]
+      - [-0.010, 0.004, -0.0039]
+      - [-0.010, 0.008, -0.0039]
+      - [-0.010, 0.012, -0.0039]
+      - [0.010, -0.004, -0.0039]
+      - [0.010, 0.004, -0.0039]
+      - [0.010, 0.008, -0.0039]
+      - [0.010, 0.012, -0.0039]
+      - [0.018, -0.004, -0.0039]
+      - [0.018, 0.004, -0.0039]
+      - [0.018, 0.008, -0.0039]
+      - [0.018, 0.012, -0.0039]
+      - [0.026, -0.004, -0.0039]
+      - [0.026, 0.004, -0.0039]
+      - [0.026, 0.008, -0.0039]
+      - [0.026, 0.012, -0.0039]
+  # Match the fresh X braking distance and stop time with the same measured-
+  # velocity lag that closed the equivalent Y boundary.
   - field: velocity_filter_hz
     stage: 4
     candidates:
       - [0.0, 1.50, 0.0]
+      - [0.75, 1.50, 0.0]
+      - [1.0, 1.50, 0.0]
+      - [1.5, 1.50, 0.0]
+      - [2.0, 1.50, 0.0]
+      - [5.0, 1.50, 0.0]
+      - [30.0, 1.50, 0.0]
   # Retain the joint motion/replay observation scale.
   - field: velocity_observation_scale
     stage: 5
