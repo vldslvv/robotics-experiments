@@ -11482,3 +11482,28 @@ braking/residual crossing between I=0.3963 and 0.3968. Search X I from 0.3950
 through 0.3970 in 0.00025 steps, with Y bias 0.0134/0.0135/0.0136, X D
 0.195/0.200/0.205, and X P 1.39/1.40/1.41. Keep every other setting,
 controller structure, probe, replay limit, and gate unchanged.
+
+### 366. Motion crossing passes but lacks high-error replay authority
+
+Date: 2026-08-10.
+
+The sub-millistep search evaluated 480 unique candidates in seven GPU batches
+and 235.3 seconds at 27.4% average sampled GPU utilization. Fourteen candidates
+pass every velocity and CTBR motion gate. Selected candidate 247 uses Y bias
+0.0134 m/s and X P/I/D 1.4/0.39675/0.2; its combined endpoint is 9.840 mm,
+X braking error is 4.994 mm, and X residual error is 9.952 mm/s.
+
+Controller-boundary replay rejected all fourteen motion passes with the same
+first failed boundary. Best replay candidate 229 has four failures:
+validation-X collective RMSE 0.071628 N, validation-X physical-state motor
+RMSE 0.010692, stability-moderate motor RMSE 0.011219, and its physical-state
+counterpart 0.010182. This is worse than the replay-safe controller only after
+low-speed X P was reduced from 1.8 to 1.4. The fixed high-error multiplier 1.19
+therefore produces only 1.666 effective proportional response instead of the
+previous replay-safe 2.142.
+
+Keep the motion-passing X P=1.4 seam and fit the already-declarative
+`horizontal_velocity_error_gain_scale` over 1.19, 1.30, 1.40, 1.50, 1.53,
+1.55, and 1.60. Retain X I 0.3965/0.39675, X D 0.195, and Y bias
+0.0135/0.0136. Keep controller structure, all probes, replay limits, and gates
+unchanged. Replay every motion pass before live evaluation.
