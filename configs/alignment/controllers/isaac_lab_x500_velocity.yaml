@@ -67,76 +67,64 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # The first independent sweep crossed the endpoint near X=-0.030.  Lower Y
-  # bias improved residual speed and braking together, so extend only that
-  # evidenced boundary while retaining the endpoint-crossing X neighborhood.
+  # Preserve the endpoint-passing bias while fitting the evidenced lateral
+  # derivative tradeoff independently.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.025, -0.004, -0.0039]
-      - [-0.025, -0.002, -0.0039]
-      - [-0.025, 0.000, -0.0039]
-      - [-0.025, 0.002, -0.0039]
-      - [-0.025, 0.004, -0.0039]
-      - [-0.025, 0.006, -0.0039]
-      - [-0.025, 0.008, -0.0039]
-      - [-0.030, -0.004, -0.0039]
-      - [-0.030, -0.002, -0.0039]
-      - [-0.030, 0.000, -0.0039]
-      - [-0.030, 0.002, -0.0039]
-      - [-0.030, 0.004, -0.0039]
-      - [-0.030, 0.006, -0.0039]
       - [-0.030, 0.008, -0.0039]
-      - [-0.035, -0.004, -0.0039]
-      - [-0.035, -0.002, -0.0039]
-      - [-0.035, 0.000, -0.0039]
-      - [-0.035, 0.002, -0.0039]
-      - [-0.035, 0.004, -0.0039]
-      - [-0.035, 0.006, -0.0039]
-      - [-0.035, 0.008, -0.0039]
   # The measured-velocity path remains unfiltered because low-pass candidates
   # regress the physical-state motor boundary.
   - field: velocity_filter_hz
     stage: 4
     candidates: [[0.0, 0.0, 0.0]]
-  # Fresh-capture Y residual speed improves monotonically at the former 0.900
-  # upper boundary.  Search toward unity, which also reduces the physical-state
-  # replay correction rather than absorbing it in controller gains.
+  # Scale above 0.94 crosses residual speed but lengthens braking; fit it jointly
+  # with the derivative gain below.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.98, 0.9000, 1.0]
-      - [0.98, 0.9100, 1.0]
-      - [0.98, 0.9200, 1.0]
-      - [0.98, 0.9300, 1.0]
       - [0.98, 0.9400, 1.0]
+      - [0.98, 0.9500, 1.0]
+      - [0.98, 0.9600, 1.0]
+      - [0.98, 0.9700, 1.0]
+  # PX4's D term opposes deceleration while the measured velocity is falling.
+  # Reduce only Y derivative authority to recover braking at the residual-speed
+  # scale crossing; X and Z retain their pinned values.
+  - field: kd_vel
+    stage: 6
+    candidates:
+      - [0.2, 0.00, 0.0]
+      - [0.2, 0.05, 0.0]
+      - [0.2, 0.10, 0.0]
+      - [0.2, 0.15, 0.0]
+      - [0.2, 0.20, 0.0]
   # The physical-state Y replay crossing is minimized near the evidenced
   # 23.75 Hz rate-input filter while preserving every motion gate.
   - field: angular_velocity_filter_hz
-    stage: 6
+    stage: 7
     candidates: [23.75]
   # The pinned PX4 vertical proportional gain clears the full-rate
   # acceleration and collective replay boundaries at the refined cadence.
   - field: kp_vel
-    stage: 7
+    stage: 8
     candidates: [[1.8, 1.8, 4.0]]
   # The complete velocity-setpoint boundary uses the pinned PX4 integral gain.
   - field: ki_vel
-    stage: 8
+    stage: 9
     candidates: [[0.4, 0.4, 2.0]]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 9
+    stage: 10
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 10
+    stage: 11
     candidates: [1.0005]
 
 selection_metric: controller-quality

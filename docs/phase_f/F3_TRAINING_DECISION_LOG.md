@@ -10980,3 +10980,26 @@ bias reduces both Y residual speed and Y braking error; the lowest tested value
 was 0.008 m/s.  Search Y bias down through -0.004 m/s at X biases -0.025,
 -0.030, and -0.035, retaining scales 0.90 through 0.94.  Do not change gains or
 filters unless this declarative boundary fails to produce a joint motion pass.
+
+### 344. Lateral bias cannot independently close the crossing
+
+Date: 2026-08-10.
+
+The lower-Y-bias diagnostic evaluated 132 candidates in three GPU batches and
+89.3 seconds at 28.8% average sampled GPU utilization.  It selected the same
+endpoint-passing bias neighborhood and did not improve the frontier: one gate
+and 0.204 normalized excess remain.  The closest joint point used Y bias 0.006
+and scale 0.93, but missed residual speed, braking, and endpoint by 3.5%, 6.0%,
+and 6.1%, respectively.  The boundary has opposite steady and endpoint effects,
+so extending bias again is unsupported.
+
+Mandatory replay also found the selected larger X offset raises the physical-
+state normalized motor RMSE for the vertical reversal to 0.010490, just over
+0.01.  This candidate is diagnostic evidence only.
+
+At the endpoint-passing Y bias of 0.008, increasing Y observation scale reduces
+residual speed while increasing braking distance.  PX4's velocity D term
+opposes deceleration while measured velocity falls.  Search Y D from 0 through
+the pinned 0.2 jointly with scales 0.94 through 0.97, keeping X/Z D and every
+other controller field unchanged.  Replay any motion pass before revisiting the
+independent angular-filter motor boundary.
