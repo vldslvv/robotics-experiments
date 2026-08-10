@@ -11186,3 +11186,30 @@ Search gain scales 1.0 through 1.10 jointly with angular-velocity filtering
 crossing between 22.5 and 23.75 Hz. Keep all remaining controller settings,
 probes, thresholds, and live-gate behavior unchanged. Replay every motion pass
 and run live acceptance on joint passes in descending scale order.
+
+### 353. Replay-safe large-error gain approaches live acceptance
+
+Date: 2026-08-10.
+
+The 49-point gain/filter diagnostic completed in three GPU batches and 80.7
+seconds at 34.4% average sampled GPU utilization. All candidates passed every
+motion gate. Parallel replay of the 24 live-promising candidates found that all
+scale-1.04 settings pass every boundary, with the best physical Y motor RMSE
+0.009767 at 24 Hz. Every scale-1.05 candidate narrowly failed that same motor
+boundary; 24 Hz was closest at 0.010108. Larger scales added collective
+failures.
+
+The joint scale-1.04/24 Hz candidate improved the live hover window to 0.110 m
+but did not pass. A scale-1.10/24 Hz feasibility diagnostic crossed the live
+response boundary: hover reached 0.100 m and goto passed at 0.098 m. It stopped
+95 mm beyond the goto target, leaving 0.385 m switch range and failing the
+handoff as too close. Its replay failures are X/Y/stability collective RMSE and
+physical Y motor RMSE, all first introduced by the high large-error gain.
+
+Search scales 1.075 through 1.10 jointly with X observation offset -0.010
+through -0.025 m/s and X/Y observation scales approaching one. The offset is
+the evidenced live endpoint control; the observation scales reduce the
+high-gain physical-state error that drives motor and collective replay. Retain
+24 Hz, the 1.5 Hz Y observation filter, integral gains, limits, controller
+structure, probes, and thresholds. Replay all motion passes, then evaluate
+joint replay passes live in descending scale and ascending X-offset magnitude.
