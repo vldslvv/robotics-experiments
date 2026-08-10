@@ -11655,6 +11655,30 @@ live handoff correction. Keep the unfiltered X branch, existing Y filter,
 pinned PX4 gains, controller structure, all probes, replay limits, and quality
 gates unchanged. Replay every motion pass before live evaluation.
 
+### 377. Derivative authority improves both remaining boundaries
+
+Date: 2026-08-10.
+
+The live-stable estimator search evaluated 100 unique candidates in four GPU
+batches and 115.3 seconds at 32.2% average sampled GPU utilization. Twenty-four
+candidates pass every motion gate, but none passes replay. Candidate 46 is the
+closest: decay 0.070 Hz, X bias 0.0040 m/s, X scale 0.90, motion braking
+4.997 mm, and one replay failure at physical-state motor RMSE 0.010017.
+
+The higher-bias live-correction branch at decay 0.070 Hz, bias 0.0045 m/s, and
+scale 0.90 passes replay at the pinned X derivative 0.20 with worst motor RMSE
+0.009919 when evaluated as a boundary diagnostic, but its motion braking needs
+more damping. Increasing only X derivative monotonically improves replay:
+0.205, 0.210, and 0.215 produce worst motor RMSE 0.009876, 0.009836, and
+0.009798 respectively. This is the correct signed change for motion braking as
+well, unlike the rejected X-integral increase, which immediately worsened
+replay.
+
+Search decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X scale 0.90/0.91, and
+X derivative 0.205-0.225 in 0.005 steps. Keep the unfiltered X branch, existing
+Y filter, pinned P/I gains, controller structure, all probes, replay limits,
+and quality gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
