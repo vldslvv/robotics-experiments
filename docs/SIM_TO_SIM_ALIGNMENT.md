@@ -139,6 +139,9 @@ cadence. A recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
 setpoint on the following 4 ms controller tick. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.
+The velocity cascade also preserves PX4's one-physics-tick publication handoff
+from the attitude-loop output to the rate controller; CTBR remains the direct
+rate-controller contract.
 Replay holds the exact recorded 40/60 ms intervals and does not quantize them
 through a second synthetic 20 Hz cadence. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
