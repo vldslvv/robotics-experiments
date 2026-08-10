@@ -10467,3 +10467,27 @@ complete the replay's initial scheduler state by seeding the attitude-stage
 elapsed time from the last full-rate `vehicle_rates_setpoint` publication at
 each absolute profile boundary. This is captured controller state, not a
 fitted setting or another timing model.
+
+### 324. Rate-setpoint age is not the missing attitude phase
+
+Date: 2026-08-10.
+
+Seeding the attitude-stage elapsed time from the most recent
+`vehicle_rates_setpoint` publication regresses the preserved replay from six
+failures to eight. The affected profiles are exactly those whose boundary has
+a 4 ms rate-setpoint age. `validation-z-envelope` collective RMSE rises from
+0.233732 N to 0.676248 N and gains core and physical motor failures at
+0.010535 and 0.010579. `stability-moderate-envelope` collective rises from
+0.057749 N to 0.302611 N and physical motor RMSE rises from a pass to
+0.011452. The physical Y motor improves only marginally from 0.013343 to
+0.012910 and remains failed.
+
+The rate-setpoint output timestamp is therefore not a sufficient scheduler
+state: it does not encode the relative execution order of position, attitude,
+and rate-control modules on the shared tick. Preserve the negative report as
+`controller_boundary_replay-attitude-phase-seed.json`, remove the phase seed,
+and return to the six-failure deterministic frontier. The next diagnostic must
+decompose the vertical chain within the replay itself: reconstructed PX4
+acceleration, target desired collective, PX4 attitude-setpoint collective,
+PX4 rate-setpoint collective, and final motors/thrust. Change only the first
+boundary whose full-rate residual accounts for the failed collective gate.
