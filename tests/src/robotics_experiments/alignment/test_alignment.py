@@ -411,9 +411,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "ctbr_effective_collective_scale",
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert len(target.parameters[2].candidates) == 24
-    assert target.parameters[2].candidates[0] == pytest.approx((-0.020, 0.008, -0.0039))
-    assert target.parameters[2].candidates[-1] == pytest.approx((-0.045, 0.014, -0.0039))
+    assert len(target.parameters[2].candidates) == 21
+    assert target.parameters[2].candidates[0] == pytest.approx((-0.025, -0.004, -0.0039))
+    assert target.parameters[2].candidates[-1] == pytest.approx((-0.035, 0.008, -0.0039))
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[3].candidates == (pytest.approx((0.0, 0.0, 0.0)),)
     assert target.parameters[4].candidates[0] == pytest.approx((0.98, 0.9, 1.0))

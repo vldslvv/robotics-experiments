@@ -10959,3 +10959,24 @@ controller fields pinned.  Fixed-capacity batching should evaluate the roughly
 150 unique settings in two GPU batches.  Replay every motion-passing candidate,
 then promote only a joint motion/replay pass into another completely fresh
 campaign.
+
+### 343. Independent endpoint correction leaves one lateral gate
+
+Date: 2026-08-10.
+
+The preserved-reference diagnostic evaluated 150 unique settings in three GPU
+batches and 90.9 seconds.  Average sampled GPU utilization was 27.7%; the fixed
+scene was fully populated in the large batch, so simulation stepping and trace
+serialization remain the measured limit rather than missing candidate work.
+
+Candidate 46 used observation bias `[-0.030, 0.008, -0.0039]` m/s and Y scale
+0.91.  It passed the combined endpoint at 8.624 mm and every gate except Y
+residual speed at 0.012031 m/s.  This is material progress from the fresh
+campaign's two failures and 1.310 largest normalized excess: one failure and
+0.203 excess remain, with no passed-gate regression in the selection.
+
+The grid gives a consistent next boundary.  At fixed X and scale, decreasing Y
+bias reduces both Y residual speed and Y braking error; the lowest tested value
+was 0.008 m/s.  Search Y bias down through -0.004 m/s at X biases -0.025,
+-0.030, and -0.035, retaining scales 0.90 through 0.94.  Do not change gains or
+filters unless this declarative boundary fails to produce a joint motion pass.
