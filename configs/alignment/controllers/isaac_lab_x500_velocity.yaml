@@ -56,7 +56,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the complete axis-scale/braking/bias/gating grid before selection.
+  # Retain the complete replay-safe X-scale/braking-band grid before selection.
   beam_width: 512
   passes_per_stage: 1
   refinement_levels: 0
@@ -72,29 +72,26 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.075]
-  # Search the signed X correction for the remaining live TOO_CLOSE endpoint;
-  # Y/Z stay at their motion-passing zero correction.
+  # Pin the sole motion-passing command-gated bias while recovering replay.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
       - [0.008, 0.0, 0.0]
-      - [0.011, 0.0, 0.0]
-      - [0.014, 0.0, 0.0]
   # Preserve the unfiltered X branch and existing Y filter.
   - field: velocity_filter_hz
     stage: 4
     candidates:
       - [0.0, 1.5, 0.0]
-  # Fit only the X observation scale at the isolated X/Y braking tradeoff;
-  # retain the already-passing Y/Z scales.
+  # Recover physical-state replay margin at the X observation boundary while
+  # retaining the already-passing Y/Z scales.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.85, 1.0, 1.0]
-      - [0.87, 1.0, 1.0]
-      - [0.89, 1.0, 1.0]
       - [0.91, 1.0, 1.0]
+      - [0.92, 1.0, 1.0]
+      - [0.93, 1.0, 1.0]
+      - [0.94, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
@@ -112,21 +109,20 @@ parameters:
   - field: horizontal_velocity_error_gain_start_mps
     stage: 9
     candidates: [0.09]
-  # Refit the independent low-error braking lobe after the fresh reference
-  # shifted X braking outside its per-axis gate. This broad first pass precedes
-  # any narrower interpolation around the passing frontier.
+  # Refit the independent low-error braking band against isolated X and Y
+  # probes as X observation scale moves back into the replay-safe region.
   - field: horizontal_velocity_braking_gain_scale
     stage: 10
-    candidates: [0.70, 0.80, 0.85, 0.90]
+    candidates: [0.50, 0.60, 0.70, 0.80]
   - field: horizontal_velocity_braking_gain_start_mps
     stage: 11
-    candidates: [0.055]
+    candidates: [0.050, 0.055, 0.060]
   - field: horizontal_velocity_braking_gain_full_mps
     stage: 12
-    candidates: [0.070]
+    candidates: [0.065, 0.070, 0.075]
   - field: horizontal_velocity_braking_gain_end_mps
     stage: 13
-    candidates: [0.075]
+    candidates: [0.075, 0.080, 0.085]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
     stage: 14
@@ -153,10 +149,10 @@ parameters:
   # zero-command ringdown, with one smooth componentwise transition for XYZ.
   - field: velocity_observation_bias_command_start_mps
     stage: 18
-    candidates: [0.0, 0.002, 0.005]
+    candidates: [0.005]
   - field: velocity_observation_bias_command_full_mps
     stage: 19
-    candidates: [0.020, 0.030, 0.040]
+    candidates: [0.030]
 
 selection_metric: controller-quality
 publication_metrics:

@@ -12115,3 +12115,31 @@ one. Cross it with braking scales 0.70/0.80/0.85/0.90, the evidenced bias values
 grid before selection. This is the minimal axis-local parameter seam supported
 by the isolated X/Y probe evidence; recovery, CTBR, allocation, plant, gates,
 and replay remain unchanged.
+
+### 390. Axis-local motion passes; replay requires the higher-scale side
+
+Date: 2026-08-10.
+
+The X-scale/braking fit evaluated 432 unique candidates in eight GPU batches
+and 254.3 seconds at 28.9% average sampled GPU utilization. Candidate 85 is the
+sole candidate that passes every motion gate. It uses X observation scale 0.87,
+braking scale 0.85, +0.008 m/s X bias, and a 0.005-0.030 m/s command transition.
+X and Y braking are 4.592 mm and 4.943 mm, and the combined endpoint is
+9.961 mm. All remaining X/Y/Z and CTBR gates pass.
+
+Controller-boundary replay rejects that motion pass only at the physical-state
+observer boundary: normalized-motor RMSE is 0.013504 on the X validation
+profile and 0.010785 on moderate combined stability, against 0.01. Estimated-
+state replay, allocation, collective, timestamps, and CTBR profiles pass.
+Diagnostic replay establishes a monotonic X-scale frontier: scale 0.89 reduces
+worst motor RMSE to 0.011710 and 0.91 reduces it to 0.010608. At scale 0.91,
+the closest motion candidate passes X braking and endpoint and misses only Y
+braking by 0.286 mm.
+
+Move X observation scale into the replay-safe 0.91/0.92/0.93/0.94 region and
+fit the existing low-error braking lobe over scale 0.50/0.60/0.70/0.80, start
+0.050/0.055/0.060 m/s, full 0.065/0.070/0.075 m/s, and end
+0.075/0.080/0.085 m/s. Pin the sole motion-passing +0.008 m/s bias and
+0.005-0.030 m/s command gate. This uses the distinct error ranges exposed by
+the isolated X and Y probes while avoiding new controller structure. Replay
+every motion pass before live evaluation.
