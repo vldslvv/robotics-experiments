@@ -11041,3 +11041,27 @@ authority and steady correction without increasing retained integral.  Search
 Y P from 1.8 through 2.2 and Y I from 0.1 through 0.3 across Y scales 0.8975,
 0.900, and 0.910.  Keep X/Z gains and every other controller field fixed, then
 replay every motion-passing candidate.
+
+### 347. P/I frontier passes replay; braking needs observation lag
+
+Date: 2026-08-10.
+
+The joint P/I/scale diagnostic evaluated 180 candidates in six GPU batches and
+171.1 seconds at 32.0% average sampled GPU utilization.  Candidate 24 used Y
+scale 0.8975, Y P=1.8, and Y I=0.25.  It passed residual speed at 0.009593 m/s,
+the combined endpoint at 5.238 mm, and every motion gate except Y braking at
+5.809 mm.  Higher Y P shortened the target's already-short braking distance and
+therefore moved away from the boundary.
+
+Mandatory replay of candidate 24 passes all 22 profiles.  In particular, the
+vertical-reversal physical-state motor boundary that previously reached
+0.01048 now passes below 0.01.  This is the first fresh-reference candidate in
+the endpoint-correcting neighborhood to pass the complete internal controller
+boundary.
+
+Signed braking evidence shows PX4 travels 53.45 mm after the positive-to-zero Y
+transition while candidate 24 travels 47.64 mm.  Add only Y measured-velocity
+low-pass candidates from 1 through 30 Hz, retaining no-filter as the control.
+The intended effect is transition lag, not a steady gain change.  Prior 1 Hz
+evidence warns that low cutoff can regress physical motor replay, so replay
+every motion pass and select the highest-cutoff joint pass.
