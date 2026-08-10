@@ -11024,3 +11024,20 @@ The lateral reversal trace ends at -0.01373 m/s for candidate 3 versus PX4 at
 consistent with integral accumulation.  Search Y integral gain from 0.05
 through the pinned 0.4 jointly with Y scale 0.94 through 0.97.  Keep X/Z
 integral gains and every other controller field fixed.
+
+### 346. Integral sweep exposes a proportional-braking seam
+
+Date: 2026-08-10.
+
+The integral diagnostic evaluated 50 candidates in four GPU batches and 101.5
+seconds at 33.5% average sampled GPU utilization.  Candidate 20, using the
+original Y scale 0.8975 and Y integral gain 0.2, passed residual speed at
+0.008432 m/s and endpoint at 3.845 mm.  Its only failure was Y braking at 6.410
+mm.  At Y integral gain 0.3, residual and braking approached their gates from
+opposite sides; integral authority alone cannot close the boundary.
+
+Increasing Y proportional gain is the evidenced next control: it adds braking
+authority and steady correction without increasing retained integral.  Search
+Y P from 1.8 through 2.2 and Y I from 0.1 through 0.3 across Y scales 0.8975,
+0.900, and 0.910.  Keep X/Z gains and every other controller field fixed, then
+replay every motion-passing candidate.
