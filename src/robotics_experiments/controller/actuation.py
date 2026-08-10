@@ -156,6 +156,7 @@ class ActuationParams:
     horizontal_velocity_error_gain_scale: float
     horizontal_velocity_error_gain_start_mps: float
     horizontal_velocity_error_gain_full_mps: float
+    horizontal_velocity_error_gain_end_mps: float
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_observation_scale: np.ndarray
@@ -462,7 +463,18 @@ def _effective_velocity_proportional_gain(
         0.0,
         1.0,
     )
-    blend = transition * transition * (3.0 - 2.0 * transition)
+    rise = transition * transition * (3.0 - 2.0 * transition)
+    fall_transition = np.clip(
+        (horizontal_error - params.horizontal_velocity_error_gain_full_mps)
+        / (
+            params.horizontal_velocity_error_gain_end_mps
+            - params.horizontal_velocity_error_gain_full_mps
+        ),
+        0.0,
+        1.0,
+    )
+    fall = fall_transition * fall_transition * (3.0 - 2.0 * fall_transition)
+    blend = rise * (1.0 - fall)
     scale = 1.0 + (params.horizontal_velocity_error_gain_scale - 1.0) * blend
     gain = np.array(params.kp_vel, copy=True)
     gain[:2] *= scale
@@ -857,6 +869,9 @@ def build_actuation_params(
         ),
         horizontal_velocity_error_gain_full_mps=float(
             controller_settings.horizontal_velocity_error_gain_full_mps
+        ),
+        horizontal_velocity_error_gain_end_mps=float(
+            controller_settings.horizontal_velocity_error_gain_end_mps
         ),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),

@@ -71,6 +71,7 @@ def _settings(
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
+        horizontal_velocity_error_gain_end_mps=0.80,
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
@@ -406,6 +407,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_scale",
         "ki_vel",
         "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_end_mps",
         "angular_velocity_filter_hz",
         "kp_vel",
         "velocity_integral_limit_mps2",
@@ -417,13 +419,13 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
-    assert target.parameters[4].candidates[0] == pytest.approx((0.98, 0.90, 1.0))
-    assert target.parameters[4].candidates[-1] == pytest.approx((1.00, 0.96, 1.0))
+    assert target.parameters[4].candidates == (pytest.approx((0.98, 0.8975, 1.0)),)
     assert target.parameters[5].candidates == (pytest.approx((0.4, 0.20, 2.0)),)
-    assert target.parameters[6].candidates == pytest.approx((1.075, 1.09, 1.10))
-    assert target.parameters[7].candidates == pytest.approx((24.0,))
-    assert target.parameters[8].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[8].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[6].candidates == pytest.approx((1.0, 1.10, 1.15, 1.20, 1.25, 1.30))
+    assert target.parameters[7].candidates == pytest.approx((0.50, 0.60, 0.70, 0.80, 1.00))
+    assert target.parameters[8].candidates == pytest.approx((24.0,))
+    assert target.parameters[9].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[9].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     assert target.parameters[-1].candidates == pytest.approx((1.0005,))
     extended = replace(
@@ -780,6 +782,7 @@ def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> 
             _settings(),
             horizontal_velocity_error_gain_start_mps=0.1,
             horizontal_velocity_error_gain_full_mps=0.3,
+            horizontal_velocity_error_gain_end_mps=0.8,
         ),
     )
     reference_traces = _response_traces(
@@ -793,6 +796,7 @@ def test_search_rejects_invalid_cross_field_combinations_before_evaluation() -> 
     assert all(
         candidate.settings.horizontal_velocity_error_gain_start_mps
         < candidate.settings.horizontal_velocity_error_gain_full_mps
+        < candidate.settings.horizontal_velocity_error_gain_end_mps
         for candidate in outcome.candidate_scores
     )
 

@@ -11213,3 +11213,31 @@ high-gain physical-state error that drives motor and collective replay. Retain
 24 Hz, the 1.5 Hz Y observation filter, integral gains, limits, controller
 structure, probes, and thresholds. Replay all motion passes, then evaluate
 joint replay passes live in descending scale and ascending X-offset magnitude.
+
+### 354. Monotonic high-error gain cannot satisfy replay and live ranges together
+
+Date: 2026-08-10.
+
+The 208-candidate observation-scale/endpoint diagnostic completed in five GPU
+batches and 150.2 seconds at 30.4% average sampled GPU utilization. Twelve
+high-scale candidates passed every motion gate, but replay rejected all of
+them. Moving X/Y observation scale toward one slightly increased physical Y
+motor error and did not change the estimated-state collective failures. The
+first failed boundary is therefore the scheduled acceleration setpoint,
+upstream of the physical-state adapter.
+
+The evidence exposes a representational conflict in the existing monotonic
+schedule. Live hover commands peak around 0.45 m/s and need approximately 1.10
+gain scale, while every new replay failure belongs to the 0.6-0.8 m/s envelope
+profiles. A monotonic schedule must apply at least as much gain to the replay
+envelope as to live hover, so no further scale, filter, bias, or observation
+grid can close both boundaries.
+
+Add one strict-v1 controller setting,
+`horizontal_velocity_error_gain_end_mps`, and make the existing smooth gain
+schedule return to the base PX4 gain above its evidenced moderate-error band.
+The ordering contract is `start < full < end`, shared exactly by NumPy and
+Torch. Search scales 1.0 through 1.30 and end boundaries 0.50 through 1.00 m/s,
+jointly with the evidenced X endpoint offsets. Keep the base gain, integral,
+filters, allocator, actuator, probe families, metrics, and thresholds
+unchanged. This is the single structural change for the next attempt.

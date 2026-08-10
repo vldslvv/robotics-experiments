@@ -128,6 +128,7 @@ def _controller_settings() -> ControllerSettings:
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
+        horizontal_velocity_error_gain_end_mps=0.80,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
@@ -235,12 +236,13 @@ def test_velocity_normalized_hover_sets_collective_feed_forward():
     assert np.allclose(torque_body, 0.0, atol=1e-9)
 
 
-def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_saturating():
+def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_bounded():
     settings = replace(
         _controller_settings(),
         horizontal_velocity_error_gain_scale=2.0,
         horizontal_velocity_error_gain_start_mps=0.1,
         horizontal_velocity_error_gain_full_mps=0.3,
+        horizontal_velocity_error_gain_end_mps=0.8,
     )
     params = build_actuation_params(
         geometry=_quad_geometry(),
@@ -252,10 +254,14 @@ def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_saturating():
     start = _effective_velocity_proportional_gain(params, np.array([0.1, 0.0, 1.0]))
     midpoint = _effective_velocity_proportional_gain(params, np.array([0.2, 0.0, 1.0]))
     full = _effective_velocity_proportional_gain(params, np.array([0.3, 0.0, 1.0]))
+    falling = _effective_velocity_proportional_gain(params, np.array([0.55, 0.0, 1.0]))
+    ended = _effective_velocity_proportional_gain(params, np.array([0.8, 0.0, 1.0]))
 
     assert start == pytest.approx([4.0, 4.0, 5.0])
     assert midpoint == pytest.approx([6.0, 6.0, 5.0])
     assert full == pytest.approx([8.0, 8.0, 5.0])
+    assert falling == pytest.approx([6.0, 6.0, 5.0])
+    assert ended == pytest.approx([4.0, 4.0, 5.0])
 
 
 def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
@@ -509,6 +515,7 @@ def test_velocity_integral_back_calculates_against_thrust_saturation():
         horizontal_velocity_error_gain_scale=8.0 / 7.0,
         horizontal_velocity_error_gain_start_mps=0.1,
         horizontal_velocity_error_gain_full_mps=0.3,
+        horizontal_velocity_error_gain_end_mps=0.8,
         max_collective_thrust_fraction=0.4,
         horizontal_thrust_margin_fraction=0.1,
     )
@@ -1035,6 +1042,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(k
         horizontal_velocity_error_gain_scale=8.0 / 7.0,
         horizontal_velocity_error_gain_start_mps=0.1,
         horizontal_velocity_error_gain_full_mps=0.3,
+        horizontal_velocity_error_gain_end_mps=0.8,
     )
     params = build_flight_actuation_params(
         kind=kind,

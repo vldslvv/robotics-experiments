@@ -123,6 +123,7 @@ class _FlightActuationParams:
     horizontal_velocity_error_gain_scale: float | torch.Tensor
     horizontal_velocity_error_gain_start_mps: float | torch.Tensor
     horizontal_velocity_error_gain_full_mps: float | torch.Tensor
+    horizontal_velocity_error_gain_end_mps: float | torch.Tensor
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_observation_scale: torch.Tensor
@@ -530,7 +531,14 @@ def _effective_velocity_proportional_gain(
         horizontal_error,
     )
     transition = torch.clamp((horizontal_error - start) / (full - start), 0.0, 1.0)
-    blend = transition.square() * (3.0 - 2.0 * transition)
+    rise = transition.square() * (3.0 - 2.0 * transition)
+    end = _environment_values(
+        params.horizontal_velocity_error_gain_end_mps,
+        horizontal_error,
+    )
+    fall_transition = torch.clamp((horizontal_error - full) / (end - full), 0.0, 1.0)
+    fall = fall_transition.square() * (3.0 - 2.0 * fall_transition)
+    blend = rise * (1.0 - fall)
     maximum_scale = _environment_values(
         params.horizontal_velocity_error_gain_scale,
         horizontal_error,
@@ -1014,6 +1022,9 @@ def build_flight_actuation_params(
         horizontal_velocity_error_gain_full_mps=float(
             controller_settings.horizontal_velocity_error_gain_full_mps
         ),
+        horizontal_velocity_error_gain_end_mps=float(
+            controller_settings.horizontal_velocity_error_gain_end_mps
+        ),
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_observation_scale=_tensor(controller_settings.velocity_observation_scale),
@@ -1088,6 +1099,7 @@ def _replace_controller_settings_batch(
             "horizontal_velocity_error_gain_start_mps"
         ),
         horizontal_velocity_error_gain_full_mps=_scalars("horizontal_velocity_error_gain_full_mps"),
+        horizontal_velocity_error_gain_end_mps=_scalars("horizontal_velocity_error_gain_end_mps"),
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_observation_scale=_vectors("velocity_observation_scale"),

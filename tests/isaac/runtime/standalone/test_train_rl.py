@@ -35,6 +35,7 @@ def _controller_settings() -> ControllerSettings:
         horizontal_velocity_error_gain_scale=1.0,
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
+        horizontal_velocity_error_gain_end_mps=0.80,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(1.5, 1.5, 1.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),

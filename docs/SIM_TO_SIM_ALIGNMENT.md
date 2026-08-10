@@ -45,6 +45,15 @@ these estimator states, the held outer-loop setpoints, and the acceleration
 setpoint needed for PX4's thrust-preserving hover-estimate integrator
 correction. Sequential NumPy/Torch parity is a host-test requirement.
 
+Horizontal velocity proportional gain may use a bounded error schedule. The
+base gain is unchanged below `horizontal_velocity_error_gain_start_mps`, rises
+smoothly to the configured scale at `horizontal_velocity_error_gain_full_mps`,
+then returns smoothly to the base gain at
+`horizontal_velocity_error_gain_end_mps`. Settings validation requires
+`start < full < end`. This confines a fitted moderate-error response to its
+evidenced range without changing either low-speed precision or large-envelope
+authority.
+
 The latest body-FLU policy action is held across its 20 Hz inference interval.
 The configured 50 Hz OFFBOARD stream converts that retained action with the
 attitude at each wire transmission, then holds the resulting world-ENU velocity
