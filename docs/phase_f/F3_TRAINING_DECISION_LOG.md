@@ -11447,3 +11447,21 @@ gain fitting would be unsupported. Keep candidate 133's X gains and original X
 bias, then search only Y observation bias from 0.008 through 0.040 m/s. This
 directly targets the signed lateral endpoint while preserving controller
 structure, every other setting, probes, replay limits, and gates.
+
+### 364. Y bias reaches a narrow endpoint/braking crossing
+
+Date: 2026-08-10.
+
+The focused Y-bias diagnostic evaluated 36 unique candidates in four GPU
+batches and 105.4 seconds at 34.2% average sampled GPU utilization. No candidate
+passed motion, but two candidates bracket the remaining crossing. At Y bias
+0.012 m/s and X D=0.30, endpoint passes at 9.642 mm and X residual passes at
+9.979 mm/s, while X braking narrowly fails at 5.397 mm. At the same bias with X
+D=0.20, braking and residual pass at 4.861 mm and 9.936 mm/s, while endpoint
+narrowly fails at 11.084 mm.
+
+Interpolate Y bias 0.012 through 0.016 m/s and X D 0.18 through 0.30. Add only
+fine X P candidates 1.35/1.40/1.45 and X I candidates 0.35/0.40/0.45 to create
+margin around the crossing. Keep all other controller settings, structure,
+probes, replay limits, and gates unchanged. Replay every motion pass before
+live evaluation.
