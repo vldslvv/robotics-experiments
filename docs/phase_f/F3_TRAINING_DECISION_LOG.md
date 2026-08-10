@@ -11508,6 +11508,31 @@ Keep the motion-passing X P=1.4 seam and fit the already-declarative
 0.0135/0.0136. Keep controller structure, all probes, replay limits, and gates
 unchanged. Replay every motion pass before live evaluation.
 
+### 371. Positive bias has the right live sign; low scale breaks replay
+
+Date: 2026-08-10.
+
+The live-margin search evaluated 588 unique candidates in eight GPU batches
+and 275.5 seconds at 28.5% average sampled GPU utilization. Sixty-seven
+candidates pass every motion gate. Selected candidate 131 uses decay 0.075 Hz,
+X bias 0.001 m/s, a 30 Hz X filter, and X scale 0.92. It passes all 22 replay
+profiles, but the live gate settles at 0.422 m and remains `TOO_CLOSE`.
+
+Candidate 323 increases only X bias to 0.002 m/s on the same scale and passes
+both motion and all 22 replay profiles, with worst motor RMSE 0.008733. Its live
+range improves to 0.430 m, confirming the correction sign, but remains below
+the handoff band. Motion-passing candidates at bias 0.005-0.006 require scale
+0.86-0.88 in this grid; replay rejects them at the physical-state boundary,
+with validation-X motor RMSE 0.0112-0.0125.
+
+Do not lower observation scale further. Search X bias 0.003-0.010 m/s against
+the replay-safe 0.92-0.98 scale range, and use the already-evidenced 0.5-2 Hz X
+filter to recover the low-speed braking/stop gates. Include slower decay down
+to the replay-safe 0.0125 Hz frontier so positive steady bias does not distort
+short captured profiles while still changing the long live goto. Keep Y/Z,
+pinned PX4 gains, controller structure, all probes, replay limits, and quality
+gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
