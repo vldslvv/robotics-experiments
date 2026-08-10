@@ -11267,3 +11267,22 @@ direction. Fix scale 1.15 and end 0.50 m/s, then search X bias -0.010 through
 +0.030 m/s across zero. Keep every other setting, probe, metric, replay limit,
 and live threshold unchanged. Require motion, replay, hover, goto, and handoff
 before promoting the point into another complete scratch campaign.
+
+### 356. Endpoint passes at a narrow bias but live hover needs bounded-gain margin
+
+Date: 2026-08-10.
+
+The nine-point fresh-reference X-bias sweep completed in two GPU batches and
+51.2 seconds at 34.7% average sampled GPU utilization. Candidate 6 at +0.020
+m/s is the only motion pass. Its endpoint is 8.795 mm, X braking 4.242 mm, X
+residual speed 2.724 mm/s, and every other translational and CTBR gate passes.
+Complete controller-boundary replay also passes all 22 profiles.
+
+The exact candidate narrowly fails live hover at 0.103 m against 0.100 m.
+Adjacent +0.015 m/s misses only endpoint at 12.244 mm, while +0.025 m/s first
+misses X braking at 5.061 mm. Refine bias from +0.017 through +0.020 m/s and
+jointly search bounded gain scale 1.15 through 1.25 at the fixed 0.50 m/s end
+boundary. Higher bounded gain is already isolated from the large replay
+envelope and directly addresses the 3 mm live excess. Require motion, replay,
+hover, goto, and handoff together; do not change the controller structure or
+any gate.

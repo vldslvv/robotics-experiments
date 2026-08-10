@@ -21,7 +21,7 @@ settings:
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [-0.010, 0.008, -0.0039]
+  velocity_observation_bias_mps: [0.020, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
@@ -68,21 +68,18 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # Fresh-reference endpoint error and live handoff both improve as the X
-  # observation offset moves through zero.
+  # Refine the narrow fresh-reference endpoint/braking crossing around the only
+  # motion pass while bounded gain recovers live hover margin.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.010, 0.008, -0.0039]
-      - [-0.005, 0.008, -0.0039]
-      - [0.000, 0.008, -0.0039]
-      - [0.005, 0.008, -0.0039]
-      - [0.010, 0.008, -0.0039]
-      - [0.015, 0.008, -0.0039]
-      - [0.020, 0.008, -0.0039]
-      - [0.025, 0.008, -0.0039]
-      - [0.030, 0.008, -0.0039]
+      - [0.0170, 0.008, -0.0039]
+      - [0.0180, 0.008, -0.0039]
+      - [0.0185, 0.008, -0.0039]
+      - [0.0190, 0.008, -0.0039]
+      - [0.0195, 0.008, -0.0039]
+      - [0.0200, 0.008, -0.0039]
   # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
@@ -103,7 +100,7 @@ parameters:
   # large-error schedule used by the randomized live return trajectory.
   - field: horizontal_velocity_error_gain_scale
     stage: 7
-    candidates: [1.15]
+    candidates: [1.15, 1.175, 1.20, 1.225, 1.25]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
