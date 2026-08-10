@@ -12196,3 +12196,25 @@ start 0/0.002/0.005 m/s and full 0.020/0.030/0.040 m/s. Replay every motion
 pass and rerun the live gate before selecting the final fresh-reference
 artifact. This is an axis-local fit supported by the isolated probe margins and
 does not change controller structure or any gate.
+
+### 393. Paused after fresh-reference sweep, before held-out fitting
+
+Date: 2026-08-10.
+
+Work is paused at a complete, resumable stage on clean source commit `b93eafa`.
+The active run directory is
+`.build/alignment/x500-px4-v1/20260810T-accepted-reproduction`. Its second fresh
+PX4 capture and 22-profile actuator audit pass. The horizontal-bias sweep also
+finished writing 135 unique candidates with no candidate-evaluation failures,
+although the outer harness exited with status 130 after the requested interrupt.
+`target_candidates.json`, `gpu_utilization.json`, and
+`search_realization.json` are complete; no held-out fit has been run and no
+canonical `controller.json` or `selection.json.zst` exists at the run root.
+
+Resume without recapturing or resweeping by running
+`make alignment-fit ALIGNMENT_RUN_ID=20260810T-accepted-reproduction`. Report
+the selected settings and all failed gates immediately after that fit. If the
+fit passes, replay every motion-passing candidate against all 22 controller
+boundaries, choose a replay pass, and run the authoritative live hover/goto/
+handoff gate. Do not start policy training. Preserve `fit-attempt-01/`, which
+contains the failed fixed-controller reproduction evidence.
