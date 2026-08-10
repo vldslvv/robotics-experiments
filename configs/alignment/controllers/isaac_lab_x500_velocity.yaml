@@ -20,7 +20,7 @@ settings:
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [-0.030, 0.008, -0.0039]
+  velocity_observation_bias_mps: [-0.025, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
@@ -67,17 +67,12 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # The joint motion/replay pass overshoots the live X target by 69 mm.  Reduce
-  # only X offset while retaining the Y motion crossing.
+  # Retain the replay-passing X offset selected by the live-return diagnostic.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.015, 0.008, -0.0039]
-      - [-0.020, 0.008, -0.0039]
       - [-0.025, 0.008, -0.0039]
-      - [-0.0275, 0.008, -0.0039]
-      - [-0.030, 0.008, -0.0039]
   # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
@@ -88,11 +83,30 @@ parameters:
     stage: 5
     candidates:
       - [0.98, 0.8975, 1.0]
-  # Retain the replay-valid lateral integral correction.
+  # The live multi-environment trace passes the motion and replay boundaries
+  # but retains a long horizontal return transient. Fit planar integral buildup
+  # around the replay-valid Y correction while retaining the PX4 gain control.
   - field: ki_vel
     stage: 6
     candidates:
-      - [0.4, 0.25, 2.0]
+      - [0.15, 0.15, 2.0]
+      - [0.15, 0.20, 2.0]
+      - [0.15, 0.25, 2.0]
+      - [0.20, 0.15, 2.0]
+      - [0.20, 0.20, 2.0]
+      - [0.20, 0.25, 2.0]
+      - [0.25, 0.15, 2.0]
+      - [0.25, 0.20, 2.0]
+      - [0.25, 0.25, 2.0]
+      - [0.30, 0.15, 2.0]
+      - [0.30, 0.20, 2.0]
+      - [0.30, 0.25, 2.0]
+      - [0.35, 0.15, 2.0]
+      - [0.35, 0.20, 2.0]
+      - [0.35, 0.25, 2.0]
+      - [0.40, 0.15, 2.0]
+      - [0.40, 0.20, 2.0]
+      - [0.40, 0.25, 2.0]
   # The physical-state Y replay crossing is minimized near the evidenced
   # 23.75 Hz rate-input filter while preserving every motion gate.
   - field: angular_velocity_filter_hz

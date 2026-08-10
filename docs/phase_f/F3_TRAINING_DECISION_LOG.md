@@ -11110,3 +11110,31 @@ Search only X observation bias from -0.015 through -0.030 m/s around candidate
 3.  A smaller magnitude should reduce both live X return overshoot and goto
 steady offset.  Require motion, replay, 16-environment hover, goto, and handoff
 to pass before launching the fresh scratch campaign.
+
+### 350. X offset passes internal boundaries but leaves the planar return transient
+
+Date: 2026-08-10.
+
+The five-point X-offset diagnostic retained quality-passing candidate 3 at
+`[-0.025, 0.008, -0.0039]` m/s. It passed every per-axis motion gate, including
+2.205 mm X braking error, 2.595 mm/s X residual speed, 4.038 mm Y braking error,
+7.222 mm/s Y residual speed, and 6.396 mm combined endpoint error. Complete
+controller-boundary replay also passed all 22 profiles with no coverage,
+timestamp, normalized-motor, or collective-thrust failures.
+
+The 16-environment live gate improved only from 0.124 m to 0.119 m during the
+final hover window and still failed its 0.100 m limit. Diagnostics at 3.0 s
+localized the worst error to +0.088 m X, -0.078 m Y, and -0.042 m Z. The error
+falls below 0.100 m around 3.23 s and finishes at 0.037 m, so the unresolved
+boundary is a planar return transient rather than vertical authority or an
+actuator-boundary mismatch. Alternate joint replay passes at 1.75 Hz and at
+1.25 Hz produced 0.126 m and 0.118 m respectively, ruling out filter cutoff as
+an independent solution.
+
+Prior live-gate evidence identifies horizontal velocity-integral buildup as the
+matching controller boundary. Search an 18-point Cartesian grid with X integral
+gain 0.15 through 0.40 and Y integral gain 0.15 through 0.25. Keep the selected
+X/Y observation offsets, Y filter and scale, integral limits, controller
+structure, probes, metrics, and gates unchanged. Replay every motion pass and
+run the live gate only for replay-passing candidates before opening another
+parameter boundary.
