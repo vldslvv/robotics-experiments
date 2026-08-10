@@ -22,7 +22,7 @@ settings:
   # Steady world-ENU physical-to-estimator offset measured from the reference.
   velocity_observation_bias_mps: [-0.030, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
-  velocity_filter_hz: [0.0, 1.0, 0.0]
+  velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
@@ -67,36 +67,27 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # Preserve the endpoint-passing bias while fitting the evidenced lateral
-  # derivative tradeoff independently.
+  # The joint motion/replay pass overshoots the live X target by 69 mm.  Reduce
+  # only X offset while retaining the Y motion crossing.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
+      - [-0.015, 0.008, -0.0039]
+      - [-0.020, 0.008, -0.0039]
+      - [-0.025, 0.008, -0.0039]
+      - [-0.0275, 0.008, -0.0039]
       - [-0.030, 0.008, -0.0039]
-  # The 1 Hz crossing creates ample motion margin.  Search its immediate cutoff
-  # neighborhood jointly with scale toward unity to recover physical replay.
+  # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.0, 0.75, 0.0]
-      - [0.0, 1.0, 0.0]
-      - [0.0, 1.25, 0.0]
       - [0.0, 1.50, 0.0]
-      - [0.0, 1.75, 0.0]
-      - [0.0, 2.00, 0.0]
-  # Scale toward one reduces the estimator-to-physical-state correction that
-  # now dominates Y-envelope motor replay.
+  # Retain the 1.5 Hz replay-passing scale.
   - field: velocity_observation_scale
     stage: 5
     candidates:
       - [0.98, 0.8975, 1.0]
-      - [0.98, 0.9000, 1.0]
-      - [0.98, 0.9200, 1.0]
-      - [0.98, 0.9400, 1.0]
-      - [0.98, 0.9600, 1.0]
-      - [0.98, 0.9800, 1.0]
-      - [0.98, 1.0000, 1.0]
   # Retain the replay-valid lateral integral correction.
   - field: ki_vel
     stage: 6

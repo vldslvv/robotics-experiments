@@ -11086,3 +11086,27 @@ Use the motion margin to search filter cutoff 0.75 through 2 Hz jointly with Y
 observation scale 0.8975 through 1.0.  Scale toward one reduces the estimator
 correction at the failed physical boundary.  Replay all motion passes and
 promote only a combined motion/replay pass into a new scratch campaign.
+
+### 349. Joint motion/replay crossing exposes live horizontal return
+
+Date: 2026-08-10.
+
+The joint filter/scale diagnostic evaluated 42 candidates in three GPU batches
+and 79.7 seconds at 34.6% average sampled GPU utilization.  Four candidates
+pass every motion gate and all 22 mandatory replay profiles.  The balanced
+candidate 3 uses 1.5 Hz Y filtering and Y scale 0.8975.  It passes Y braking at
+4.257 mm, residual speed at 0.007670 m/s, endpoint at 3.593 mm, worst normalized
+motor RMSE at 0.009613, and worst collective RMSE at 0.048923 N.
+
+The live 16-environment hover remains rejected at 0.124 m during the first
+sample of its final one-second window, though it falls to 0.074 m by 3.5 s and
+finishes at 0.039 m.  Axis diagnostics show this is not the previously suspected
+vertical behavior: at 3.0 s the worst environment is +0.094 m X, -0.078 m Y,
+and -0.042 m Z.  A one-environment run passes hover at 0.060 m last-window max
+and goto at 0.088 m, but the X offset settles 0.069 m beyond target and places
+the drone 0.411 m from the switch, inside the handoff minimum.
+
+Search only X observation bias from -0.015 through -0.030 m/s around candidate
+3.  A smaller magnitude should reduce both live X return overshoot and goto
+steady offset.  Require motion, replay, 16-environment hover, goto, and handoff
+to pass before launching the fresh scratch campaign.
