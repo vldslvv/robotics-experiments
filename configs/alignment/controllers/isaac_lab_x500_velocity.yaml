@@ -94,15 +94,11 @@ parameters:
   - field: kd_vel
     stage: 7
     candidates:
-      - [0.205, 0.20, 0.0]
-      - [0.210, 0.20, 0.0]
-      - [0.215, 0.20, 0.0]
-      - [0.220, 0.20, 0.0]
-      - [0.225, 0.20, 0.0]
-  # Retain the replay-safe bounded moderate-error response.
+      - [0.20, 0.20, 0.0]
+  # Lengthen the signed-short Lab braking response while preserving replay.
   - field: horizontal_velocity_error_gain_scale
     stage: 8
-    candidates: [1.19]
+    candidates: [1.00, 1.05, 1.10, 1.15, 1.19]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
