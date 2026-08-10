@@ -11581,6 +11581,30 @@ Hz. This is an evidenced boundary refinement: keep Y/Z, pinned PX4 gains,
 controller structure, all probes, replay limits, and quality gates unchanged.
 Replay every motion pass before live evaluation.
 
+### 374. Motion passes; physical replay misses by 0.000106
+
+Date: 2026-08-10.
+
+The fine bias/scale crossing evaluated 378 unique candidates in seven GPU
+batches and 227.9 seconds at 29.2% average sampled GPU utilization. Eight
+candidates pass every velocity and CTBR motion gate. Selected candidate 122
+uses decay 0.05 Hz, X bias 0.0050 m/s, no X filter, and X scale 0.904; X
+braking is 4.925 mm and combined endpoint is 9.817 mm.
+
+All eight motion passes fail exactly one replay boundary: validation-X-envelope
+physical-state normalized motor RMSE. Candidate 176 is closest at 0.010106
+against the 0.010000 limit. It uses bias 0.0052 m/s and scale 0.904; its motion
+braking is 4.950 mm and endpoint is 9.306 mm. Every other replay profile,
+timestamp join, collective limit, and core-state boundary passes.
+
+At fixed bias, each +0.002 scale step improves physical-state motor RMSE by
+approximately 0.00015 while increasing braking error by approximately 0.00006
+m. Refine X scale 0.9050-0.9070 in 0.0005 steps, X bias 0.0050-0.0052 m/s in
+0.00005 steps, and decay 0.045/0.050/0.055 Hz. Retain the unfiltered X branch
+and the existing Y filter. Keep pinned PX4 gains, controller structure, all
+probes, replay limits, and quality gates unchanged. Replay every motion pass
+before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
