@@ -12033,3 +12033,32 @@ seam retained by entries 372-374. Search 0/10/20/30 Hz X cutoff with decay
 Z unfiltered, and every other candidate-483 setting fixed. Low-cutoff filters
 remain excluded by their evidenced stop-time regression. Preserve all probe
 families, gates, replay tolerances, and the live acceptance contract.
+
+### 387. High-cutoff filtering cannot separate ringdown from live recovery
+
+Date: 2026-08-10.
+
+The high-cutoff search evaluated 24 candidates in four GPU batches and 118.7
+seconds at 37.1% average sampled GPU utilization. Its first launch crashed one
+Isaac worker before evaluation; the empty stale spool was preserved and the
+unchanged clean-source retry completed normally. No candidate passes all motion
+gates. The best candidate uses decay 0.050 Hz, +0.008 m/s X bias, and a 20 Hz X
+filter. It passes every individual velocity and CTBR gate but improves the sole
+combined endpoint failure only from 13.206 to 12.914 mm.
+
+A diagnostic live run of that non-publishable candidate passes hover at 0.096 m
+and goto at 0.068 m final-window maxima, but remains `TOO_CLOSE` at 0.431 m.
+The combined-turn trace localizes its [-12.4, -2.6, -2.5] mm endpoint error:
+X divergence accumulates during the 3.0-5.74 second interval where the commanded
+velocity is exactly zero. The live position supervisor instead continues to
+command approximately 0.05 m/s after overshoot. High-cutoff filtering affects
+both regimes and is therefore rejected as the separating seam.
+
+Add one strict-v1, componentwise command-magnitude transition around the
+existing velocity observation bias. Bias is zero at exact zero command, rises
+smoothly between declarative start/full thresholds, and remains fully active
+outside the band. Implement the same equation in NumPy, Torch, batch settings,
+and seeded controller reconstruction. Fit X bias 0.008/0.011/0.014/0.017 m/s,
+start 0/0.002/0.005 m/s, and full 0.020/0.030/0.040 m/s. Restore candidate 483's
+0.075 Hz decay and unfiltered X branch; keep every other setting, probe family,
+gate, replay tolerance, and live acceptance condition unchanged.

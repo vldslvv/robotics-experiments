@@ -145,6 +145,16 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             f"{name}.velocity_observation_bias_mps",
             False,
         ),
+        velocity_observation_bias_command_start_mps=_finite(
+            value=payload["velocity_observation_bias_command_start_mps"],
+            name=f"{name}.velocity_observation_bias_command_start_mps",
+            nonnegative=True,
+        ),
+        velocity_observation_bias_command_full_mps=_finite(
+            value=payload["velocity_observation_bias_command_full_mps"],
+            name=f"{name}.velocity_observation_bias_command_full_mps",
+            positive=True,
+        ),
         velocity_estimator_bias_decay_hz=_finite(
             value=payload["velocity_estimator_bias_decay_hz"],
             name=f"{name}.velocity_estimator_bias_decay_hz",
@@ -241,6 +251,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         < result.horizontal_velocity_braking_gain_end_mps
     ):
         raise ValueError(f"{name} horizontal braking transition must satisfy start < full < end")
+    if (
+        result.velocity_observation_bias_command_start_mps
+        >= result.velocity_observation_bias_command_full_mps
+    ):
+        raise ValueError(f"{name} observation-bias command transition must satisfy start < full")
     if (
         not 0.0
         <= result.min_collective_thrust_fraction

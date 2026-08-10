@@ -69,6 +69,8 @@ def _controller_settings() -> ControllerSettings:
         kd_vel=(1.5, 1.5, 1.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_observation_bias_command_start_mps=0.0,
+        velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,

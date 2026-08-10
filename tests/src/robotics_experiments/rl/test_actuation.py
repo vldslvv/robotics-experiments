@@ -137,6 +137,8 @@ def _controller_settings() -> ControllerSettings:
         kd_vel=(0.5, 0.5, 0.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_observation_bias_command_start_mps=0.0,
+        velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
@@ -865,7 +867,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
         controller_dt_s=0.004,
         physical_linear_velocity_enu=zero,
         filtered_linear_velocity_enu=np.array([0.1, -0.2, 0.3]),
-        velocity_setpoint_enu_mps=zero,
+        velocity_setpoint_enu_mps=np.array([0.1, -0.1, 0.1]),
         angular_velocity_body_flu=zero,
         acceleration_setpoint_enu_mps2=zero,
         linear_acceleration_enu_mps2=zero,
@@ -893,6 +895,47 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
 
     expected_decay = math.exp(-2.0 * math.pi * 2.0 / 125.0)
     assert controller.velocity_estimator_bias_enu == pytest.approx(initial_bias * expected_decay)
+
+
+def test_seeded_observation_bias_is_gated_componentwise_by_velocity_setpoint():
+    steady_bias = np.array([0.01, -0.02, 0.03])
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            _controller_settings(),
+            velocity_observation_bias_mps=tuple(steady_bias),
+            velocity_observation_bias_command_start_mps=0.01,
+            velocity_observation_bias_command_full_mps=0.03,
+        ),
+        mass=_MASS_KG,
+    )
+    zero = np.zeros(3)
+    controller = seed_actuation_controller_state(
+        params=params,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=zero,
+        filtered_linear_velocity_enu=zero,
+        velocity_setpoint_enu_mps=np.array([0.0, -0.02, 0.03]),
+        angular_velocity_body_flu=zero,
+        acceleration_setpoint_enu_mps2=zero,
+        linear_acceleration_enu_mps2=zero,
+        angular_acceleration_body_flu_radps2=zero,
+        rate_integral_body_flu=zero,
+        hover_thrust_normalized=0.57,
+        outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.57,
+        collective_thrust_setpoint=0.57,
+        body_rate_setpoint=zero,
+        filtered_yaw_torque=0.0,
+    )
+
+    assert controller.velocity_estimator_bias_enu == pytest.approx(
+        np.array([0.0, -0.5 * steady_bias[1], -steady_bias[2]])
+    )
 
 
 def test_body_rate_input_filter_uses_the_seeded_estimator_state():

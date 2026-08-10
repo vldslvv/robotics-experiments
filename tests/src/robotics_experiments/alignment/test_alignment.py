@@ -80,6 +80,8 @@ def _settings(
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
         velocity_observation_bias_mps=(0.0, 0.0, 0.0),
+        velocity_observation_bias_command_start_mps=0.0,
+        velocity_observation_bias_command_full_mps=0.01,
         velocity_estimator_bias_decay_hz=0.0,
         velocity_filter_hz=(10.0, 10.0, 10.0),
         velocity_derivative_filter_hz=5.0,
@@ -382,6 +384,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.horizontal_velocity_braking_gain_scale == pytest.approx(0.90)
     assert target.base_settings.horizontal_velocity_braking_gain_full_mps == pytest.approx(0.070)
     assert target.base_settings.horizontal_velocity_braking_gain_end_mps == pytest.approx(0.075)
+    assert target.base_settings.velocity_observation_bias_command_start_mps == pytest.approx(0.002)
+    assert target.base_settings.velocity_observation_bias_command_full_mps == pytest.approx(0.030)
     assert target.base_settings.ki_vel == pytest.approx((0.4, 0.20, 2.0))
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
@@ -425,14 +429,16 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "kp_vel",
         "velocity_integral_limit_mps2",
         "ctbr_effective_collective_scale",
+        "velocity_observation_bias_command_start_mps",
+        "velocity_observation_bias_command_full_mps",
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert target.parameters[1].candidates == pytest.approx((0.04, 0.05, 0.06))
+    assert target.parameters[1].candidates == pytest.approx((0.075,))
     assert target.parameters[2].candidates[0] == pytest.approx((0.008, 0.0, 0.0))
-    assert target.parameters[2].candidates[-1] == pytest.approx((0.0095, 0.0, 0.0))
+    assert target.parameters[2].candidates[-1] == pytest.approx((0.017, 0.0, 0.0))
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
-    assert target.parameters[3].candidates[-1] == pytest.approx((30.0, 1.5, 0.0))
+    assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[4].candidates[0] == pytest.approx((0.91, 1.0, 1.0))
     assert target.parameters[4].candidates[-1] == pytest.approx((0.91, 1.0, 1.0))
     assert target.parameters[5].candidates[0] == pytest.approx((0.4, 0.20, 2.0))
@@ -448,8 +454,10 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[13].candidates == pytest.approx((24.0,))
     assert target.parameters[14].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[14].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
-    assert target.parameters[-1].candidates == pytest.approx((1.0005,))
+    assert target.parameters[15].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
+    assert target.parameters[16].candidates == pytest.approx((1.0005,))
+    assert target.parameters[17].candidates == pytest.approx((0.0, 0.002, 0.005))
+    assert target.parameters[18].candidates == pytest.approx((0.020, 0.030, 0.040))
     extended = replace(
         target,
         parameters=(
@@ -1303,6 +1311,18 @@ def test_controller_loader_is_strict_and_rejects_legacy(tmp_path: Path) -> None:
     }
     controller_path.write_text(json.dumps(scalar_filter_payload))
     with pytest.raises(ValueError, match="must contain three finite values"):
+        load_controller_artifact(run_dir)
+
+    invalid_bias_transition = {
+        **payload,
+        "selected_settings": {
+            **payload["selected_settings"],
+            "velocity_observation_bias_command_start_mps": 0.02,
+            "velocity_observation_bias_command_full_mps": 0.02,
+        },
+    }
+    controller_path.write_text(json.dumps(invalid_bias_transition))
+    with pytest.raises(ValueError, match="observation-bias command transition"):
         load_controller_artifact(run_dir)
 
     payload["unexpected"] = True
