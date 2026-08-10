@@ -11565,3 +11565,31 @@ physical-to-estimated boundary: decay 0.10-1.00 Hz, X/Y steady biases
 or high-cutoff Y filtering 0/5/15/30 Hz. Keep Z, controller structure, all
 probes, replay limits, and every quality gate unchanged. Replay every motion
 pass before live evaluation.
+
+### 369. Evidenced observer dynamics isolate X braking and Z endpoint
+
+Date: 2026-08-10.
+
+The evidence-centered estimator search evaluated 1,420 unique candidates in 14
+GPU batches and 529.4 seconds at 25.4% average sampled GPU utilization. No
+candidate passed motion, but the best candidate reduced the largest normalized
+excess from 2.810 to 2.132 without regressing a passed gate, which is material
+progress. Candidate 879 uses decay 0.10 Hz, bias [-0.005, 0.0, -0.0039] m/s,
+no velocity filter, and unit X/Y scale. Every per-axis velocity, braking,
+residual, stop-time, envelope, and CTBR gate passes; only the combined endpoint
+remains at 21.320 mm.
+
+The selected endpoint vector is [+15.331, -3.805, +14.319] mm. Candidate 837
+changes only the X observer bias to zero and moves that vector to
+[-0.425, -3.713, +14.320] mm, proving that the remaining endpoint components
+are separable. Candidate 837 has 14.799 mm endpoint magnitude but misses X
+braking at 7.199 mm and lands exactly on the 0.10 s stop-time limit. Earlier
+captured searches show that reduced X observation scale moves braking back
+inside its limit. The Z endpoint component is invariant across the planar
+observer grid because Z bias remained fixed at -0.0039 m/s.
+
+Preserve decay near 0.10 Hz and zero Y bias/filter with unit Y scale. Search X
+bias around zero together with the already-evidenced lower X scale, and search
+Z steady bias independently to remove the signed +14.3 mm vertical endpoint.
+Keep the pinned PX4 gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
