@@ -1221,9 +1221,16 @@ def seed_flight_controller_state(
     rate_integral_body: torch.Tensor,
     hover_thrust_normalized: torch.Tensor,
     outer_loop_elapsed_s: torch.Tensor,
+    attitude_loop_elapsed_s: torch.Tensor,
+    desired_rotation_world_body: torch.Tensor,
+    desired_yaw_rate_radps: torch.Tensor,
+    desired_collective_thrust_setpoint: torch.Tensor,
+    collective_thrust_setpoint: torch.Tensor,
+    body_rate_setpoint: torch.Tensor,
+    filtered_yaw_torque: torch.Tensor,
     valid: torch.Tensor,
 ) -> _FlightControllerState:
-    """Restore per-environment neutral-command PX4 controller boundaries."""
+    """Restore complete per-environment PX4 controller boundaries."""
     expected = state.filtered_velocity_world.shape
     vectors = {
         "physical_linear_velocity_world": physical_linear_velocity_world,
@@ -1233,6 +1240,7 @@ def seed_flight_controller_state(
         "linear_acceleration_world": linear_acceleration_world,
         "angular_acceleration_body": angular_acceleration_body,
         "rate_integral_body": rate_integral_body,
+        "body_rate_setpoint": body_rate_setpoint,
     }
     for name, value in vectors.items():
         if value.shape != expected:
@@ -1253,14 +1261,33 @@ def seed_flight_controller_state(
             f"{tuple(outer_loop_elapsed_s.shape)}, expected "
             f"{tuple(state.outer_loop_elapsed_s.shape)}"
         )
-    if (
-        not torch.all(torch.isfinite(hover_thrust_normalized))
-        or torch.any(hover_thrust_normalized < 0.0)
-        or torch.any(hover_thrust_normalized > 1.0)
+    scalar_states = {
+        "hover_thrust_normalized": hover_thrust_normalized,
+        "outer_loop_elapsed_s": outer_loop_elapsed_s,
+        "attitude_loop_elapsed_s": attitude_loop_elapsed_s,
+        "desired_yaw_rate_radps": desired_yaw_rate_radps,
+        "desired_collective_thrust_setpoint": desired_collective_thrust_setpoint,
+        "collective_thrust_setpoint": collective_thrust_setpoint,
+        "filtered_yaw_torque": filtered_yaw_torque,
+    }
+    for name, value in scalar_states.items():
+        if value.shape != state.initialized.shape or not torch.all(torch.isfinite(value)):
+            raise ValueError(f"{name} must be one finite value per environment")
+    if torch.any(hover_thrust_normalized < 0.0) or torch.any(hover_thrust_normalized > 1.0):
+        raise ValueError("hover_thrust_normalized must be between 0 and 1")
+    if any(
+        torch.any(value < 0.0) or torch.any(value > 1.0)
+        for value in (
+            desired_collective_thrust_setpoint,
+            collective_thrust_setpoint,
+        )
     ):
-        raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
-    if not torch.all(torch.isfinite(outer_loop_elapsed_s)):
-        raise ValueError("outer_loop_elapsed_s must be finite")
+        raise ValueError("collective thrust setpoints must be between 0 and 1")
+    if (
+        desired_rotation_world_body.shape != state.desired_rotation_world_body.shape
+        or not torch.all(torch.isfinite(desired_rotation_world_body))
+    ):
+        raise ValueError("desired_rotation_world_body must be one finite matrix per environment")
     selected = valid.unsqueeze(-1)
     velocity_error = -filtered_linear_velocity_world
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
@@ -1319,11 +1346,7 @@ def seed_flight_controller_state(
             clipped_rate_integral,
             state.rate_integral_body,
         ),
-        filtered_yaw_torque=torch.where(
-            valid,
-            torch.zeros_like(state.filtered_yaw_torque),
-            state.filtered_yaw_torque,
-        ),
+        filtered_yaw_torque=torch.where(valid, filtered_yaw_torque, state.filtered_yaw_torque),
         hover_thrust_normalized=torch.where(
             valid,
             hover_thrust_normalized,
@@ -1336,36 +1359,32 @@ def seed_flight_controller_state(
         ),
         attitude_loop_elapsed_s=torch.where(
             valid,
-            torch.zeros_like(state.attitude_loop_elapsed_s),
+            attitude_loop_elapsed_s,
             state.attitude_loop_elapsed_s,
         ),
         desired_rotation_world_body=torch.where(
             valid[:, None, None],
-            torch.eye(
-                3,
-                dtype=state.desired_rotation_world_body.dtype,
-                device=state.desired_rotation_world_body.device,
-            ),
+            desired_rotation_world_body,
             state.desired_rotation_world_body,
         ),
         desired_yaw_rate_radps=torch.where(
             valid,
-            torch.zeros_like(state.desired_yaw_rate_radps),
+            desired_yaw_rate_radps,
             state.desired_yaw_rate_radps,
         ),
         desired_collective_thrust_setpoint=torch.where(
             valid,
-            hover_thrust_normalized,
+            desired_collective_thrust_setpoint,
             state.desired_collective_thrust_setpoint,
         ),
         collective_thrust_setpoint=torch.where(
             valid,
-            hover_thrust_normalized,
+            collective_thrust_setpoint,
             state.collective_thrust_setpoint,
         ),
         body_rate_setpoint=torch.where(
             selected,
-            torch.zeros_like(state.body_rate_setpoint),
+            body_rate_setpoint,
             state.body_rate_setpoint,
         ),
         initialized=state.initialized | valid,

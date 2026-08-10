@@ -508,6 +508,47 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                attitude_loop_elapsed_s=torch.as_tensor(
+                    [
+                        trace["initial_controller_state_source_age_us"]["vehicle_rates_setpoint"]
+                        / 1e6
+                        for trace in traces
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                desired_rotation_world_body=math_utils.matrix_from_quat(
+                    torch.as_tensor(
+                        [trace["initial_desired_attitude_flu_enu_wxyz"] for trace in traces],
+                        dtype=torch.float32,
+                        device=self.device,
+                    )
+                ),
+                desired_yaw_rate_radps=torch.as_tensor(
+                    [trace["initial_desired_yaw_rate_radps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                desired_collective_thrust_setpoint=torch.as_tensor(
+                    [trace["initial_desired_collective_thrust_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                collective_thrust_setpoint=torch.as_tensor(
+                    [trace["initial_collective_thrust_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                body_rate_setpoint=torch.as_tensor(
+                    [trace["initial_body_rate_setpoint_flu_radps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                filtered_yaw_torque=torch.as_tensor(
+                    [trace["initial_filtered_yaw_torque_normalized"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 valid=torch.as_tensor(
                     [trace.get("initial_controller_state_valid", False) for trace in traces],
                     dtype=torch.bool,

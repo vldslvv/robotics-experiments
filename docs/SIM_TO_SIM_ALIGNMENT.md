@@ -107,7 +107,13 @@ reference position before applying the configured stability hold. The recenter
 gain and speed bound live in `alignment.capture`, so profile order cannot
 accumulate displacement against the routine safety envelope. Each profile then
 records its absolute PX4 simulation start time and the complete initial
-controller state required for replay. One run directory keeps:
+controller state required for replay. That boundary includes both loop phases,
+the desired attitude and yaw rate, the desired and held collective setpoints,
+the held body-rate setpoint, the filtered yaw-torque state, velocity and rate
+integrals, estimator filters, and the hover estimate. Resetting any held state
+to a neutral value makes a profile's result depend on where capture happened to
+land in PX4's asynchronous controller schedule and is therefore invalid. One
+run directory keeps:
 
 - the ULog and bridge log;
 - reference and target traces;

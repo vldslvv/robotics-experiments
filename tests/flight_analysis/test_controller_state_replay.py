@@ -501,6 +501,37 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                 },
             ),
             dataset(
+                "vehicle_attitude_setpoint",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "q_d[0]": np.array([1.0, 1.0]),
+                    "q_d[1]": np.array([0.0, 0.0]),
+                    "q_d[2]": np.array([0.0, 0.0]),
+                    "q_d[3]": np.array([0.0, 0.0]),
+                    "yaw_sp_move_rate": np.array([0.2, 0.4]),
+                    "thrust_body[2]": np.array([-0.56, -0.58]),
+                },
+            ),
+            dataset(
+                "vehicle_rates_setpoint",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "roll": np.array([0.1, 0.3]),
+                    "pitch": np.array([0.2, 0.4]),
+                    "yaw": np.array([0.3, 0.5]),
+                    "thrust_body[2]": np.array([-0.55, -0.57]),
+                },
+            ),
+            dataset(
+                "vehicle_torque_setpoint",
+                {
+                    "timestamp": np.array([100_000, 108_000]),
+                    "xyz[0]": np.array([0.02, 0.04]),
+                    "xyz[1]": np.array([0.03, 0.05]),
+                    "xyz[2]": np.array([0.04, 0.06]),
+                },
+            ),
+            dataset(
                 "vehicle_angular_velocity",
                 {
                     "timestamp": np.array([100_000, 108_000]),
@@ -554,9 +585,20 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     ]
     assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.2, -0.3, -0.4])
     assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
+    assert trace["initial_desired_attitude_flu_enu_wxyz"] == pytest.approx(
+        [2**-0.5, 0.0, 0.0, 2**-0.5]
+    )
+    assert trace["initial_desired_yaw_rate_radps"] == pytest.approx(-0.2)
+    assert trace["initial_desired_collective_thrust_normalized"] == pytest.approx(0.56)
+    assert trace["initial_collective_thrust_normalized"] == pytest.approx(0.55)
+    assert trace["initial_body_rate_setpoint_flu_radps"] == pytest.approx([0.1, -0.2, -0.3])
+    assert trace["initial_filtered_yaw_torque_normalized"] == pytest.approx(-0.04)
     assert trace["initial_controller_state_source_age_us"] == {
         "vehicle_local_position_setpoint": 4000,
         "vehicle_local_position": 4000,
+        "vehicle_attitude_setpoint": 4000,
+        "vehicle_rates_setpoint": 4000,
+        "vehicle_torque_setpoint": 4000,
         "vehicle_angular_velocity": 4000,
         "rate_ctrl_status": 4000,
         "hover_thrust_estimate": 4000,

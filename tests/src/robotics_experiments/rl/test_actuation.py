@@ -663,6 +663,13 @@ def test_velocity_rate_loop_consumes_attitude_output_on_the_next_tick() -> None:
         rate_integral_body_flu=np.zeros(3),
         hover_thrust_normalized=0.57,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.57,
+        collective_thrust_setpoint=0.57,
+        body_rate_setpoint=np.zeros(3),
+        filtered_yaw_torque=0.0,
     )
     held = replace(
         seeded,
@@ -705,6 +712,13 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
         rate_integral_body_flu=np.zeros(3),
         hover_thrust_normalized=0.55,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.55,
+        collective_thrust_setpoint=0.55,
+        body_rate_setpoint=np.zeros(3),
+        filtered_yaw_torque=0.0,
     )
 
     updated = update_hover_thrust_estimate(
@@ -742,6 +756,13 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
         rate_integral_body_flu=rate_integral,
         hover_thrust_normalized=0.572,
         outer_loop_elapsed_s=-0.004,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.572,
+        collective_thrust_setpoint=0.572,
+        body_rate_setpoint=np.zeros(3),
+        filtered_yaw_torque=0.0,
     )
     reconstructed = (
         params.kp_vel * -filtered_velocity
@@ -784,6 +805,13 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
         rate_integral_body_flu=zero,
         hover_thrust_normalized=0.57,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.57,
+        collective_thrust_setpoint=0.57,
+        body_rate_setpoint=np.zeros(3),
+        filtered_yaw_torque=0.0,
     )
     initial_bias = np.array(controller.velocity_estimator_bias_enu)
     assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
@@ -822,6 +850,13 @@ def test_body_rate_input_filter_uses_the_seeded_estimator_state():
         rate_integral_body_flu=zero,
         hover_thrust_normalized=0.57,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
+        desired_rotation_enu_flu=np.eye(3),
+        desired_yaw_rate_radps=0.0,
+        desired_collective_thrust_setpoint=0.57,
+        collective_thrust_setpoint=0.57,
+        body_rate_setpoint=np.zeros(3),
+        filtered_yaw_torque=0.0,
     )
     rotating = replace(
         _level_rest_state(),
@@ -859,6 +894,13 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
             rate_integral_body_flu=zero,
             hover_thrust_normalized=hover,
             outer_loop_elapsed_s=0.0,
+            attitude_loop_elapsed_s=0.0,
+            desired_rotation_enu_flu=np.eye(3),
+            desired_yaw_rate_radps=0.0,
+            desired_collective_thrust_setpoint=hover,
+            collective_thrust_setpoint=hover,
+            body_rate_setpoint=np.zeros(3),
+            filtered_yaw_torque=0.0,
         )
         _successor, omega = _step_controller(
             params,
@@ -991,6 +1033,13 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(k
         rate_integral_body=zero,
         hover_thrust_normalized=torch.tensor([0.572]),
         outer_loop_elapsed_s=torch.tensor([-0.004]),
+        attitude_loop_elapsed_s=torch.tensor([0.0]),
+        desired_rotation_world_body=torch.eye(3).reshape(1, 3, 3),
+        desired_yaw_rate_radps=torch.tensor([0.0]),
+        desired_collective_thrust_setpoint=torch.tensor([0.572]),
+        collective_thrust_setpoint=torch.tensor([0.572]),
+        body_rate_setpoint=zero,
+        filtered_yaw_torque=torch.tensor([0.0]),
         valid=torch.tensor([True]),
     )
     assert state.outer_loop_elapsed_s.item() == pytest.approx(-0.004)
@@ -1067,6 +1116,15 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     seed_acceleration = np.array([0.05, -0.04, 0.03])
     seed_angular_acceleration = np.array([0.1, -0.2, 0.3])
     seed_rate_integral = np.array([0.01, -0.02, 0.03])
+    seed_yaw = 0.08
+    seed_desired_rotation = np.array(
+        [
+            [np.cos(seed_yaw), -np.sin(seed_yaw), 0.0],
+            [np.sin(seed_yaw), np.cos(seed_yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    seed_body_rate_setpoint = np.array([0.04, -0.03, 0.02])
     numpy_controller = seed_actuation_controller_state(
         params=numpy_params,
         controller_dt_s=0.004,
@@ -1079,6 +1137,13 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         rate_integral_body_flu=seed_rate_integral,
         hover_thrust_normalized=0.572,
         outer_loop_elapsed_s=-0.004,
+        attitude_loop_elapsed_s=0.002,
+        desired_rotation_enu_flu=seed_desired_rotation,
+        desired_yaw_rate_radps=0.07,
+        desired_collective_thrust_setpoint=0.61,
+        collective_thrust_setpoint=0.60,
+        body_rate_setpoint=seed_body_rate_setpoint,
+        filtered_yaw_torque=0.04,
     )
     torch_controller = seed_flight_controller_state(
         state=initial_flight_controller_state(num_envs=1, device="cpu"),
@@ -1113,8 +1178,28 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         ).reshape(1, 3),
         hover_thrust_normalized=torch.tensor([0.572]),
         outer_loop_elapsed_s=torch.tensor([-0.004]),
+        attitude_loop_elapsed_s=torch.tensor([0.002]),
+        desired_rotation_world_body=torch.as_tensor(
+            seed_desired_rotation,
+            dtype=torch.float32,
+        ).reshape(1, 3, 3),
+        desired_yaw_rate_radps=torch.tensor([0.07]),
+        desired_collective_thrust_setpoint=torch.tensor([0.61]),
+        collective_thrust_setpoint=torch.tensor([0.60]),
+        body_rate_setpoint=torch.as_tensor(
+            seed_body_rate_setpoint,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        filtered_yaw_torque=torch.tensor([0.04]),
         valid=torch.tensor([True]),
     )
+    assert numpy_controller.attitude_loop_elapsed_s == pytest.approx(0.002)
+    assert np.array_equal(numpy_controller.desired_rotation_enu_flu, seed_desired_rotation)
+    assert numpy_controller.desired_yaw_rate_radps == pytest.approx(0.07)
+    assert numpy_controller.desired_collective_thrust_setpoint == pytest.approx(0.61)
+    assert numpy_controller.collective_thrust_setpoint == pytest.approx(0.60)
+    assert np.array_equal(numpy_controller.body_rate_setpoint, seed_body_rate_setpoint)
+    assert numpy_controller.filtered_yaw_torque == pytest.approx(0.04)
     actions = (
         np.array([0.0, 0.0, 0.0, 0.0]),
         np.array([0.4, -0.2, 0.1, 0.3]),

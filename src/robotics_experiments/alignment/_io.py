@@ -614,6 +614,19 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     )
     if initial_hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.initial_hover_thrust_normalized must not exceed 1")
+    initial_collectives = {
+        field: _finite(
+            value=trace[field],
+            name=f"{name}.{field}",
+            nonnegative=True,
+        )
+        for field in (
+            "initial_desired_collective_thrust_normalized",
+            "initial_collective_thrust_normalized",
+        )
+    }
+    if any(value > 1.0 for value in initial_collectives.values()):
+        raise ValueError(f"{name} initial collective thrust must not exceed 1")
     source_age = _object(
         value=trace["initial_controller_state_source_age_us"],
         name=f"{name}.initial_controller_state_source_age_us",
@@ -621,6 +634,9 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
     expected_source_age = {
         "vehicle_local_position_setpoint",
         "vehicle_local_position",
+        "vehicle_attitude_setpoint",
+        "vehicle_rates_setpoint",
+        "vehicle_torque_setpoint",
         "vehicle_angular_velocity",
         "rate_ctrl_status",
         "hover_thrust_estimate",
@@ -698,6 +714,20 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
                 value=source_age["vehicle_local_position"],
                 name=f"{name}.initial_controller_state_source_age_us.vehicle_local_position",
             ),
+            vehicle_attitude_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_attitude_setpoint"],
+                name=(
+                    f"{name}.initial_controller_state_source_age_us." "vehicle_attitude_setpoint"
+                ),
+            ),
+            vehicle_rates_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_rates_setpoint"],
+                name=(f"{name}.initial_controller_state_source_age_us." "vehicle_rates_setpoint"),
+            ),
+            vehicle_torque_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_torque_setpoint"],
+                name=(f"{name}.initial_controller_state_source_age_us." "vehicle_torque_setpoint"),
+            ),
             vehicle_angular_velocity=_nonnegative_integer(
                 value=source_age["vehicle_angular_velocity"],
                 name=f"{name}.initial_controller_state_source_age_us.vehicle_angular_velocity",
@@ -727,6 +757,29 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         initial_rate_integral_body_flu=_vector(
             value=trace["initial_rate_integral_body_flu"],
             name=f"{name}.initial_rate_integral_body_flu",
+        ),
+        initial_desired_attitude_flu_enu_wxyz=_vector(
+            value=trace["initial_desired_attitude_flu_enu_wxyz"],
+            name=f"{name}.initial_desired_attitude_flu_enu_wxyz",
+            length=4,
+        ),
+        initial_desired_yaw_rate_radps=_finite(
+            value=trace["initial_desired_yaw_rate_radps"],
+            name=f"{name}.initial_desired_yaw_rate_radps",
+        ),
+        initial_desired_collective_thrust_normalized=initial_collectives[
+            "initial_desired_collective_thrust_normalized"
+        ],
+        initial_collective_thrust_normalized=initial_collectives[
+            "initial_collective_thrust_normalized"
+        ],
+        initial_body_rate_setpoint_flu_radps=_vector(
+            value=trace["initial_body_rate_setpoint_flu_radps"],
+            name=f"{name}.initial_body_rate_setpoint_flu_radps",
+        ),
+        initial_filtered_yaw_torque_normalized=_finite(
+            value=trace["initial_filtered_yaw_torque_normalized"],
+            name=f"{name}.initial_filtered_yaw_torque_normalized",
         ),
         start_sim_time_us=_nonnegative_integer(
             value=trace["start_sim_time_us"],

@@ -10703,3 +10703,33 @@ declarative `[4.0, 4.1, 4.2]` Z proportional-gain range into the scratch
 definition. The mechanically modified preserved artifact remains diagnostic;
 run a complete fresh capture, audit, sweep, fit, replay, live motion gate, and
 finalization from a clean source commit before publication.
+
+### 335. Fresh scratch exposes an incomplete controller-state boundary
+
+Date: 2026-08-10.
+
+The clean `20260810T-replay-passing-scratch` campaign captured and audited a
+new PX4 reference, evaluated 4,575 unique candidates, and selected candidate
+4460. All structurally usable candidates still failed the combined endpoint
+gate; the selected value was 0.022140 m against the 0.010000 m limit. The
+selected controller replay then failed five profiles, including a 0.302316 N Z
+collective error, and the live hover gate missed only its last-window bound at
+0.105 m/s against 0.100 m/s. Nothing was published.
+
+This result invalidates the assumption that the earlier replay-passing settings
+were sufficient by themselves. Profile traces seeded velocity and rate
+integrals but reset the held attitude-controller output, rate-controller input,
+yaw filter, and attitude-loop phase to neutral values. Comparing preserved and
+fresh captures showed that the same settings could move the Z collective error
+from 0.040919 N to 0.479081 N solely through profile-boundary schedule phase.
+
+Extend the strict schema-1 trace boundary with the held
+`vehicle_attitude_setpoint`, `vehicle_rates_setpoint`, and
+`vehicle_torque_setpoint` state and their source ages. Restore the desired
+attitude and yaw rate, desired and held collective, held body-rate setpoint,
+filtered yaw torque, and attitude-loop elapsed time in both NumPy and Torch.
+The preserved-reference diagnostic after this structural correction reduces Z
+collective from 0.479081 N to a pass and leaves only three narrow failures:
+forward collective 0.057753 N, lateral-ramp motor 0.010227, and combined motor
+0.011384. Commit this boundary correction before acquiring another reference;
+all target evidence produced with the incomplete seed is diagnostic only.

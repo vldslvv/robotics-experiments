@@ -934,12 +934,21 @@ def seed_actuation_controller_state(
     rate_integral_body_flu: np.ndarray,
     hover_thrust_normalized: float,
     outer_loop_elapsed_s: float,
+    attitude_loop_elapsed_s: float,
+    desired_rotation_enu_flu: np.ndarray,
+    desired_yaw_rate_radps: float,
+    desired_collective_thrust_setpoint: float,
+    collective_thrust_setpoint: float,
+    body_rate_setpoint: np.ndarray,
+    filtered_yaw_torque: float,
 ) -> ActuationControllerState:
-    """Match a neutral-command PX4 controller boundary for one replay."""
+    """Restore one complete PX4 controller boundary for a replay."""
     if not math.isfinite(controller_dt_s) or controller_dt_s <= 0.0:
         raise ValueError("controller_dt_s must be finite and positive")
     if not math.isfinite(outer_loop_elapsed_s):
         raise ValueError("outer_loop_elapsed_s must be finite")
+    if not math.isfinite(attitude_loop_elapsed_s):
+        raise ValueError("attitude_loop_elapsed_s must be finite")
 
     def vector(values: np.ndarray, name: str) -> np.ndarray:
         result = np.asarray(values, dtype=np.float64)
@@ -973,12 +982,24 @@ def seed_actuation_controller_state(
         "angular_acceleration_body_flu_radps2",
     )
     rate_integral = vector(rate_integral_body_flu, "rate_integral_body_flu")
+    desired_rotation = np.asarray(desired_rotation_enu_flu, dtype=np.float64)
+    if desired_rotation.shape != (3, 3) or not np.all(np.isfinite(desired_rotation)):
+        raise ValueError("desired_rotation_enu_flu must be a finite 3 x 3 matrix")
+    body_rate = vector(body_rate_setpoint, "body_rate_setpoint")
     if (
         not math.isfinite(hover_thrust_normalized)
         or hover_thrust_normalized <= 0.0
         or hover_thrust_normalized > 1.0
     ):
         raise ValueError("hover_thrust_normalized must be finite and in (0, 1]")
+    collective_values = (
+        desired_collective_thrust_setpoint,
+        collective_thrust_setpoint,
+    )
+    if any(not math.isfinite(value) or value < 0.0 or value > 1.0 for value in collective_values):
+        raise ValueError("collective thrust setpoints must be finite and in [0, 1]")
+    if not math.isfinite(desired_yaw_rate_radps) or not math.isfinite(filtered_yaw_torque):
+        raise ValueError("yaw-rate and filtered-yaw-torque state must be finite")
     velocity_error = -filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
@@ -1001,15 +1022,15 @@ def seed_actuation_controller_state(
                 params.rate_integral_limit,
             )
         ),
-        filtered_yaw_torque=0.0,
+        filtered_yaw_torque=float(filtered_yaw_torque),
         hover_thrust_normalized=float(hover_thrust_normalized),
         outer_loop_elapsed_s=outer_loop_elapsed_s,
-        attitude_loop_elapsed_s=0.0,
-        desired_rotation_enu_flu=_readonly_copy(np.eye(3)),
-        desired_yaw_rate_radps=0.0,
-        desired_collective_thrust_setpoint=float(hover_thrust_normalized),
-        collective_thrust_setpoint=float(hover_thrust_normalized),
-        body_rate_setpoint=_readonly_copy(np.zeros(3)),
+        attitude_loop_elapsed_s=attitude_loop_elapsed_s,
+        desired_rotation_enu_flu=_readonly_copy(desired_rotation),
+        desired_yaw_rate_radps=float(desired_yaw_rate_radps),
+        desired_collective_thrust_setpoint=float(desired_collective_thrust_setpoint),
+        collective_thrust_setpoint=float(collective_thrust_setpoint),
+        body_rate_setpoint=_readonly_copy(body_rate),
         initialized=True,
     )
 

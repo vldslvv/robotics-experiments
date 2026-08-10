@@ -649,6 +649,9 @@ def _controller_boundary(
     *,
     local_setpoint: dict,
     local_position: dict,
+    attitude_setpoint: dict,
+    rates_setpoint: dict,
+    torque_setpoint: dict,
     angular_velocity: dict,
     rate_status: dict,
     hover: dict,
@@ -667,6 +670,11 @@ def _controller_boundary(
             ),
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
+
+    def held_vector(*, topic: dict, fields: tuple[str, ...]) -> np.ndarray:
+        time_us = _topic_time_us(topic=topic)
+        index = int(_hold_indices(source_t=time_us, query_t=np.array([timestamp_us]))[0])
+        return np.asarray([topic[field][index] for field in fields], dtype=np.float64)
 
     local_setpoint_age_us = held_age_us(topic=local_setpoint)
     rate_age_us = held_age_us(topic=rate_status)
@@ -705,6 +713,26 @@ def _controller_boundary(
             query_t=np.array([timestamp_us], dtype=np.float64),
         )[0]
     )
+    desired_attitude_frd_ned = held_vector(
+        topic=attitude_setpoint,
+        fields=("q_d[0]", "q_d[1]", "q_d[2]", "q_d[3]"),
+    )
+    desired_attitude_flu_enu, _desired_yaw = _px4_attitude_to_isaac(
+        quaternion_frd_ned_wxyz=desired_attitude_frd_ned
+    )
+    desired_yaw_rate_radps = -float(
+        held_vector(topic=attitude_setpoint, fields=("yaw_sp_move_rate",))[0]
+    )
+    desired_collective = -float(held_vector(topic=attitude_setpoint, fields=("thrust_body[2]",))[0])
+    body_rate_setpoint_frd = held_vector(
+        topic=rates_setpoint,
+        fields=("roll", "pitch", "yaw"),
+    )
+    collective = -float(held_vector(topic=rates_setpoint, fields=("thrust_body[2]",))[0])
+    torque_setpoint_frd = held_vector(
+        topic=torque_setpoint,
+        fields=("xyz[0]", "xyz[1]", "xyz[2]"),
+    )
     vectors = {
         "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
         "initial_estimated_angular_velocity_body_flu_radps": (
@@ -715,6 +743,12 @@ def _controller_boundary(
         "initial_angular_acceleration_body_flu_radps2": _FLU_TO_FRD @ angular_acceleration_frd,
         "initial_rate_integral_body_flu": _FLU_TO_FRD @ rate_integral_frd,
         "initial_hover_thrust_normalized": hover_thrust_normalized,
+        "initial_desired_attitude_flu_enu_wxyz": desired_attitude_flu_enu,
+        "initial_desired_yaw_rate_radps": desired_yaw_rate_radps,
+        "initial_desired_collective_thrust_normalized": desired_collective,
+        "initial_collective_thrust_normalized": collective,
+        "initial_body_rate_setpoint_flu_radps": _FLU_TO_FRD @ body_rate_setpoint_frd,
+        "initial_filtered_yaw_torque_normalized": -float(torque_setpoint_frd[2]),
     }
     if not all(np.all(np.isfinite(values)) for values in vectors.values()):
         raise ValueError("initial controller boundary contains non-finite values")
@@ -725,6 +759,9 @@ def _controller_boundary(
         {
             "vehicle_local_position_setpoint": local_setpoint_age_us,
             "vehicle_local_position": held_age_us(topic=local_position),
+            "vehicle_attitude_setpoint": held_age_us(topic=attitude_setpoint),
+            "vehicle_rates_setpoint": held_age_us(topic=rates_setpoint),
+            "vehicle_torque_setpoint": held_age_us(topic=torque_setpoint),
             "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
             "rate_ctrl_status": rate_age_us,
             "hover_thrust_estimate": held_age_us(topic=hover),
@@ -746,6 +783,9 @@ def _augment_reference_controller_state(
 
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
+    attitude_setpoint = _dataset(ulog=ulog, name="vehicle_attitude_setpoint")
+    rates_setpoint = _dataset(ulog=ulog, name="vehicle_rates_setpoint")
+    torque_setpoint = _dataset(ulog=ulog, name="vehicle_torque_setpoint")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
@@ -756,6 +796,9 @@ def _augment_reference_controller_state(
         controller_vectors, source_age_us = _controller_boundary(
             local_setpoint=local_setpoint,
             local_position=local_position,
+            attitude_setpoint=attitude_setpoint,
+            rates_setpoint=rates_setpoint,
+            torque_setpoint=torque_setpoint,
             angular_velocity=angular_velocity,
             rate_status=rate_status,
             hover=hover,
@@ -1271,6 +1314,9 @@ def _report(
     controller_vectors, controller_source_age_us = _controller_boundary(
         local_setpoint=local_setpoint,
         local_position=local_position,
+        attitude_setpoint=attitude_setpoint,
+        rates_setpoint=rates_setpoint,
+        torque_setpoint=torque_setpoint,
         angular_velocity=angular_velocity,
         rate_status=rate_status,
         hover=hover,
@@ -1298,6 +1344,22 @@ def _report(
         outer_loop_elapsed_s=(
             controller_source_age_us["vehicle_local_position"] / 1e6 - controller_dt_s
         ),
+        attitude_loop_elapsed_s=(controller_source_age_us["vehicle_rates_setpoint"] / 1e6),
+        desired_rotation_enu_flu=_quat_to_matrix(
+            quaternion_wxyz=np.asarray(
+                controller_vectors["initial_desired_attitude_flu_enu_wxyz"],
+                dtype=np.float64,
+            )
+        ),
+        desired_yaw_rate_radps=float(controller_vectors["initial_desired_yaw_rate_radps"]),
+        desired_collective_thrust_setpoint=float(
+            controller_vectors["initial_desired_collective_thrust_normalized"]
+        ),
+        collective_thrust_setpoint=float(
+            controller_vectors["initial_collective_thrust_normalized"]
+        ),
+        body_rate_setpoint=controller_vectors["initial_body_rate_setpoint_flu_radps"],
+        filtered_yaw_torque=float(controller_vectors["initial_filtered_yaw_torque_normalized"]),
     )
     isaac_omega_grid: list[np.ndarray] = []
     isaac_rate_setpoint_grid: list[np.ndarray] = []
