@@ -11994,3 +11994,23 @@ this result. Pin candidate 483 and search only the signed X observation bias at
 0.008/0.011/0.014/0.017/0.020 m/s. This coarse five-point sweep brackets the
 earlier live-ready +0.018 m/s setting while preserving the current reference,
 probe families, motion gates, replay limits, and live acceptance contract.
+
+### 385. Bias-only correction breaks short-profile motion
+
+Date: 2026-08-10.
+
+The coarse signed-bias sweep evaluated five candidates in two GPU batches and
+52.7 seconds at 45.0% average sampled GPU utilization. None passes every motion
+gate. The closest candidate uses +0.008 m/s X bias: X braking is 5.264 mm,
+residual-speed error is 10.158 mm/s, stop-time error is 0.14 seconds, and
+combined endpoint error is 14.261 mm. Larger bias monotonically worsens the
+short-profile braking and endpoint metrics, so a bias-only expansion cannot be
+accepted even though the live handoff needs its positive signed correction.
+
+Fit the existing estimator bias build-up/decay dimension jointly with bias.
+Search decay 0.040/0.050/0.060/0.070/0.075 Hz and X bias
+0.0080/0.0095/0.0110/0.0125/0.0140 m/s. Prior retained traces establish this
+as the seam that separates short captured motion from the longer live goto;
+the new 1.23 recovery lobe must independently preserve live hover. Keep all
+other candidate-483 settings, probe families, gates, replay tolerances, and the
+live acceptance contract unchanged.

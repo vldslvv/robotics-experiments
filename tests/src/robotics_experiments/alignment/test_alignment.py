@@ -386,7 +386,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
     assert target.search.strategy == "coarse-to-fine-beam"
-    assert target.search.beam_width == 16
+    assert target.search.beam_width == 32
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 0
     assert target.search.initial_settings == ()
@@ -427,9 +427,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "ctbr_effective_collective_scale",
     )
     assert target.parameters[0].candidates == pytest.approx((204.0,))
-    assert target.parameters[1].candidates == pytest.approx((0.075,))
+    assert target.parameters[1].candidates == pytest.approx((0.04, 0.05, 0.06, 0.07, 0.075))
     assert target.parameters[2].candidates[0] == pytest.approx((0.008, 0.0, 0.0))
-    assert target.parameters[2].candidates[-1] == pytest.approx((0.020, 0.0, 0.0))
+    assert target.parameters[2].candidates[-1] == pytest.approx((0.014, 0.0, 0.0))
     assert target.parameters[2].selection_regularization_scale == pytest.approx(1.0)
     assert target.parameters[3].candidates[0] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
