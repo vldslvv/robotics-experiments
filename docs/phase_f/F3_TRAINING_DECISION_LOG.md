@@ -11384,3 +11384,25 @@ Jointly refine X bias 0.026 through 0.042 m/s and Y bias 0.012 through 0.018
 m/s, retaining no X filter. This 140-point targeted grid changes only two
 already-declarative estimator settings; controller structure and every gate
 remain unchanged.
+
+### 361. Scale-bias sweep reaches the dynamic frontier without crossing it
+
+Date: 2026-08-10.
+
+The targeted scale/bias sweep evaluated 147 unique candidates in three GPU
+batches and 94.5 seconds at 30.8% average sampled GPU utilization. No candidate
+passed motion. The base-bias scale 0.90 candidate passed every dynamic gate but
+left 28.104 mm endpoint error. At X/Y bias 0.026/0.014 m/s, scale 0.90 reached
+5.310 mm X braking, 0.10 s stop-time error, 10.50 mm/s residual speed, and
+18.58 mm endpoint error. Scale 0.98 at the same bias passed residual and
+endpoint but retained 9.159 mm braking and 0.14 s stop-time errors.
+
+Scale and static bias therefore approach braking, residual, and endpoint from
+opposite sides without a joint crossing. The seeded target controller state
+contains PX4's captured initial estimator correction, and
+`velocity_estimator_bias_decay_hz` controls when that correction yields to the
+authored static bias. Search eight decay rates from 0.0025 through 0.03 Hz,
+five X scales from 0.86 through 0.94, X bias 0.022 through 0.030 m/s, and Y bias
+0.018 through 0.030 m/s. Preserve the full 800-point Cartesian grid with beam
+width 160. Keep controller structure, all other settings, probes, replay
+limits, and acceptance gates unchanged.

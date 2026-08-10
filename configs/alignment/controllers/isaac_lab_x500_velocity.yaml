@@ -50,8 +50,8 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the complete targeted scale/bias grid before fine refinement.
-  beam_width: 128
+  # Retain the complete targeted decay/scale/bias grid before fine refinement.
+  beam_width: 160
   passes_per_stage: 1
   refinement_levels: 0
   min_refinement_survivors: 2
@@ -62,36 +62,36 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # PX4's captured residual persisted across the fresh combined profile; fit
-  # only the measured low-decay region and refine around its gate champions.
+  # Fit how quickly the captured initial estimator correction yields to the
+  # endpoint-correcting static bias during each fresh profile.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.0125]
+    candidates: [0.0025, 0.0050, 0.0075, 0.0100, 0.0125, 0.0150, 0.0200, 0.0300]
   # Refine the endpoint-passing positive planar estimator offset.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.026, 0.012, -0.0039]
-      - [0.026, 0.014, -0.0039]
-      - [0.026, 0.016, -0.0039]
+      - [0.022, 0.018, -0.0039]
+      - [0.022, 0.022, -0.0039]
+      - [0.022, 0.026, -0.0039]
+      - [0.022, 0.030, -0.0039]
+      - [0.024, 0.018, -0.0039]
+      - [0.024, 0.022, -0.0039]
+      - [0.024, 0.026, -0.0039]
+      - [0.024, 0.030, -0.0039]
       - [0.026, 0.018, -0.0039]
-      - [0.030, 0.012, -0.0039]
-      - [0.030, 0.014, -0.0039]
-      - [0.030, 0.016, -0.0039]
+      - [0.026, 0.022, -0.0039]
+      - [0.026, 0.026, -0.0039]
+      - [0.026, 0.030, -0.0039]
+      - [0.028, 0.018, -0.0039]
+      - [0.028, 0.022, -0.0039]
+      - [0.028, 0.026, -0.0039]
+      - [0.028, 0.030, -0.0039]
       - [0.030, 0.018, -0.0039]
-      - [0.034, 0.012, -0.0039]
-      - [0.034, 0.014, -0.0039]
-      - [0.034, 0.016, -0.0039]
-      - [0.034, 0.018, -0.0039]
-      - [0.038, 0.012, -0.0039]
-      - [0.038, 0.014, -0.0039]
-      - [0.038, 0.016, -0.0039]
-      - [0.038, 0.018, -0.0039]
-      - [0.042, 0.012, -0.0039]
-      - [0.042, 0.014, -0.0039]
-      - [0.042, 0.016, -0.0039]
-      - [0.042, 0.018, -0.0039]
+      - [0.030, 0.022, -0.0039]
+      - [0.030, 0.026, -0.0039]
+      - [0.030, 0.030, -0.0039]
   # Filtering worsened stop time on the fresh reference; retain the unfiltered
   # path while velocity-dependent observation scale supplies the braking fit.
   - field: velocity_filter_hz
@@ -102,13 +102,11 @@ parameters:
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.60, 0.8975, 1.0]
-      - [0.70, 0.8975, 1.0]
-      - [0.80, 0.8975, 1.0]
-      - [0.85, 0.8975, 1.0]
+      - [0.86, 0.8975, 1.0]
+      - [0.88, 0.8975, 1.0]
       - [0.90, 0.8975, 1.0]
+      - [0.92, 0.8975, 1.0]
       - [0.94, 0.8975, 1.0]
-      - [0.98, 0.8975, 1.0]
   # Retain the motion- and replay-passing integral point selected by the planar
   # buildup diagnostic.
   - field: ki_vel
