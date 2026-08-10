@@ -11679,6 +11679,33 @@ X derivative 0.205-0.225 in 0.005 steps. Keep the unfiltered X branch, existing
 Y filter, pinned P/I gains, controller structure, all probes, replay limits,
 and quality gates unchanged. Replay every motion pass before live evaluation.
 
+### 378. Signed braking rejects derivative; lower gain passes replay
+
+Date: 2026-08-10.
+
+The derivative-authority search evaluated 162 unique candidates in six GPU
+batches and 174.7 seconds at 33.2% average sampled GPU utilization. No
+candidate passes motion. Selected candidate 17 uses decay 0.070 Hz, X bias
+0.0045 m/s, X scale 0.90, and the unchanged X derivative 0.20; only X braking
+fails at 5.322 mm. Increasing derivative monotonically worsens braking through
+5.603 mm at 0.225.
+
+A signed trace diagnostic shows why: the target stopping distance is 4.605 mm
+shorter than PX4 for the limiting validation approach/brake event. More damping
+therefore moves in the wrong direction. Lowering the already-declarative
+moderate-error gain is the evidenced correction because it lengthens the Lab
+stop without changing low-error hover behavior.
+
+Replay confirms the boundary is safe: at decay 0.070 Hz, bias 0.0045 m/s, and
+scale 0.90, horizontal gain scales 1.00, 1.05, 1.10, 1.15, and 1.19 all pass
+all 22 profiles. The best worst-motor RMSE is 0.009538 at scale 1.15.
+
+Search decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X observation scale
+0.90/0.91, and horizontal error-gain scale 1.00/1.05/1.10/1.15/1.19. Restore
+the pinned X derivative 0.20. Keep the unfiltered X branch, existing Y filter,
+pinned P/I/D gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
