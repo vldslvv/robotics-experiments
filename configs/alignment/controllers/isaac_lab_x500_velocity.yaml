@@ -50,8 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the motion-passing low-speed crossing while restoring high-error
-  # authority against the controller-boundary replay.
+  # Retain the complete evidence-centered estimator grid before selection.
   beam_width: 160
   passes_per_stage: 1
   refinement_levels: 0
@@ -63,45 +62,71 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Retain the decay of the endpoint-passing frontier point.
+  # PX4's captured physical-to-estimated offset returns near zero within about
+  # one second; search the evidenced rate rather than the earlier slow decay.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.0125]
-  # Keep the motion-passing X bias and remove the remaining signed Y endpoint.
+    candidates: [0.10, 0.20, 0.30, 0.50, 1.00]
+  # Center the steady adapter around the near-zero captured estimator error.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.018, 0.0135, -0.0039]
-      - [0.018, 0.0136, -0.0039]
-  # Filtering worsened stop time on the fresh reference; retain the unfiltered
-  # path while velocity-dependent observation scale supplies the braking fit.
+      - [-0.010, -0.010, -0.0039]
+      - [-0.010, -0.005, -0.0039]
+      - [-0.010, 0.000, -0.0039]
+      - [-0.010, 0.005, -0.0039]
+      - [-0.010, 0.010, -0.0039]
+      - [-0.005, -0.010, -0.0039]
+      - [-0.005, -0.005, -0.0039]
+      - [-0.005, 0.000, -0.0039]
+      - [-0.005, 0.005, -0.0039]
+      - [-0.005, 0.010, -0.0039]
+      - [0.000, -0.010, -0.0039]
+      - [0.000, -0.005, -0.0039]
+      - [0.000, 0.000, -0.0039]
+      - [0.000, 0.005, -0.0039]
+      - [0.000, 0.010, -0.0039]
+      - [0.005, -0.010, -0.0039]
+      - [0.005, -0.005, -0.0039]
+      - [0.005, 0.000, -0.0039]
+      - [0.005, 0.005, -0.0039]
+      - [0.005, 0.010, -0.0039]
+      - [0.010, -0.010, -0.0039]
+      - [0.010, -0.005, -0.0039]
+      - [0.010, 0.000, -0.0039]
+      - [0.010, 0.005, -0.0039]
+      - [0.010, 0.010, -0.0039]
+  # Compare an immediate observation with only evidenced high-cutoff smoothing.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.0, 1.50, 0.0]
-  # Retain the endpoint-passing observation scale.
+      - [0.0, 0.0, 0.0]
+      - [0.0, 5.0, 0.0]
+      - [0.0, 15.0, 0.0]
+      - [0.0, 30.0, 0.0]
+  # Captured velocity estimates regress near unit physical scale on both axes.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.98, 0.8975, 1.0]
-  # Retain the evidenced motion-passing integral margin.
+      - [0.98, 0.98, 1.0]
+      - [0.98, 1.00, 1.0]
+      - [1.00, 0.98, 1.0]
+      - [1.00, 1.00, 1.0]
+  # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
+  # physical-state correction and core replay must remain exact.
   - field: ki_vel
     stage: 6
     candidates:
-      - [0.39650, 0.20, 2.0]
-      - [0.39675, 0.20, 2.0]
-  # The 0.195 derivative branch contains the replay-nearest motion passes.
+      - [0.40, 0.20, 2.0]
   - field: kd_vel
     stage: 7
     candidates:
-      - [0.195, 0.20, 0.0]
-  # Preserve low-speed X P=1.4 and fit the separate high-error multiplier. The
-  # earlier replay-safe effective X response was 1.8*1.19=2.142, which maps to
-  # a multiplier near 1.53 with the motion-passing X P.
+      - [0.20, 0.20, 0.0]
+  # Retain the replay-safe bounded moderate-error response.
   - field: horizontal_velocity_error_gain_scale
     stage: 8
-    candidates: [1.19, 1.30, 1.40, 1.50, 1.53, 1.55, 1.60]
+    candidates: [1.19]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
@@ -111,11 +136,11 @@ parameters:
   - field: angular_velocity_filter_hz
     stage: 10
     candidates: [24.0]
-  # Retain the motion-passing low-speed proportional response.
+  # Preserve the pinned PX4 proportional gains.
   - field: kp_vel
     stage: 11
     candidates:
-      - [1.40, 1.8, 4.0]
+      - [1.8, 1.8, 4.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.

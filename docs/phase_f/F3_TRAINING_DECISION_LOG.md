@@ -11533,3 +11533,35 @@ It must retain X P=1.4 below the low-speed probe range, smoothly restore the
 replay-safe X P=1.8 by the envelope-command range, leave Y/Z at unit scale, and
 remain an explicit strict-v1 controller setting with NumPy/Torch parity. Keep
 all probes, replay limits, and quality gates unchanged.
+
+### 368. Correct the route to the evidenced estimator seam
+
+Date: 2026-08-10.
+
+Do not implement the command-magnitude gain hypothesis proposed in entry 367.
+The core controller-boundary failure already proves that changing the pinned
+PX4 proportional gain is the wrong seam. Conversely, the pinned X P=1.8
+controller passes all 22 core and physical-state replay profiles, so its
+remaining motion rejection must be diagnosed downstream of that boundary.
+
+A force-law regression over the fresh X/Y envelope and stability traces rules
+out the plant drag seam. The inferred Lab coefficients are 0.486 and 0.286 N
+per m/s, versus 0.486 and 0.288 for the PX4/Isaac reference, consistent with
+the configured 0.50/0.30 after numerical differentiation. Mass, gravity,
+rotor mapping, actuator audit, and wrench reduction remain unchanged and
+independently tested.
+
+The captured estimator boundary provides a stronger lead. PX4 estimated-minus-
+physical velocity generally returns near zero within about one second of each
+profile seed. The current target adapter instead uses decay 0.0125 Hz, X/Y
+steady biases +0.018/+0.008 m/s, Y scale 0.8975, and a 1.5 Hz Y filter. On the
+captured physical profiles this produces sustained signed errors and up to
+0.079 m/s Y estimator RMSE on the Y envelope, even though the resulting motor
+error remains just inside the replay tolerance.
+
+Restore the pinned X P/I/D 1.8/0.4/0.2 and search only the target-owned
+physical-to-estimated boundary: decay 0.10-1.00 Hz, X/Y steady biases
+-0.010 through +0.010 m/s, unit-centered X/Y scales 0.98/1.00, and immediate
+or high-cutoff Y filtering 0/5/15/30 Hz. Keep Z, controller structure, all
+probes, replay limits, and every quality gate unchanged. Replay every motion
+pass before live evaluation.
