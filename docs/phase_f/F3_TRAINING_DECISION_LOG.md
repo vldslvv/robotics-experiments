@@ -10862,3 +10862,27 @@ instead of one capacity-sized batch. Include the base plus all initial settings
 when sizing the fixed scene. This directly implements the coarse-then-targeted
 search contract and removes the single-environment fallback before the next
 diagnostic.
+
+### 340. Joint motion and actuator-boundary candidate passes
+
+Date: 2026-08-10.
+
+The fixed-capacity implementation evaluated a 240-point angular-filter,
+lateral-scale, and offset grid in two GPU batches and 79.6 seconds. Twenty-nine
+candidates passed every motion gate. Mandatory replay of the full passing set
+found one combined pass at 22.5 Hz, but its Y motor margin was only 0.000006.
+
+A second 300-point local sweep widened the X offset and narrowed the lateral
+crossing. It completed 301 evaluations in three GPU batches and 111.3 seconds,
+or 2.70 useful candidates/s. Average GPU utilization remained 22.8%, with 45%
+p95 and 52% peak; fixed scene stepping and trace handling, rather than missing
+candidate concurrency, remain the measured limit.
+
+Candidate 200 passes all motion and controller-boundary gates with 23.75 Hz
+angular-velocity filtering, Y observation scale 0.8975, observation bias
+`[-0.005, 0.011, -0.0039]` m/s, and effective CTBR collective scale 1.0005.
+Its X/Y/Z braking errors are 1.664/4.986/0.983 mm, combined endpoint error is
+9.704 mm, physical-state Y motor RMSE is 0.009953, and worst collective replay
+error is 0.048683 N. Promote this point and only its evidenced local basin into
+the canonical scratch definition. A completely fresh capture, fit, replay, and
+live acceptance run is still required before publication.

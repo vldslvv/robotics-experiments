@@ -18,24 +18,24 @@ settings:
   horizontal_velocity_error_gain_full_mps: 0.30
   ki_vel: [0.4, 0.4, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
-  velocity_observation_scale: [0.98, 0.98, 1.0]
+  velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.0, -0.030, -0.0039]
-  velocity_estimator_bias_decay_hz: 0.0
+  velocity_observation_bias_mps: [-0.005, 0.011, -0.0039]
+  velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: [0.0, 0.0, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.54
   # Effective rate-controller collective per streamed raw CTBR collective.
-  ctbr_effective_collective_scale: 1.0
+  ctbr_effective_collective_scale: 1.0005
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
   ki_rate: [0.20, 0.20, 0.10]
   kd_rate: [0.003, 0.003, 0.0]
   kff_rate: [0.0, 0.0, 0.0]
-  angular_velocity_filter_hz: 13.125
+  angular_velocity_filter_hz: 23.75
   rate_derivative_filter_hz: 20.0
   yaw_torque_filter_hz: 2.0
   rate_integral_limit: [0.30, 0.30, 0.30]
@@ -49,11 +49,10 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Evaluate broad, physically meaningful steps once, then generate midpoint
-  # candidates only around retained candidates and per-gate champions.
+  # Retain the accepted evidence point while checking its immediate local basin.
   beam_width: 32
   passes_per_stage: 1
-  refinement_levels: 2
+  refinement_levels: 0
   min_refinement_survivors: 2
 
 parameters:
@@ -61,152 +60,61 @@ parameters:
   # fractional cadence distinct from both position and rate control.
   - field: attitude_controller_rate_hz
     stage: 1
-    candidates:
-      - 125.0
-      - 138.8889
-      - 140.8451
-      - 142.8571
-      - 144.9275
-      - 147.0588
-      - 150.0
-      - 160.0
-      - 166.6667
-      - 187.5
-      - 200.0
-      - 204.0
-      - 208.333333
-      - 250.0
+    candidates: [204.0]
   # PX4's captured residual persisted across the fresh combined profile; fit
   # only the measured low-decay region and refine around its gate champions.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.0, 0.0025, 0.005, 0.0075, 0.01, 0.0125]
-  # Fresh endpoint champions crossed X=-0.020 and Y=+0.025 m/s, with the X
-  # trend continuing beyond the tested edge. Cover the crossing broadly, then
-  # refine only around retained gate champions.
+    candidates: [0.0125]
+  # Search only the measured lateral braking/endpoint crossing around the
+  # accepted seed; broader offsets fail one of those motion boundaries.
   - field: velocity_observation_bias_mps
     stage: 3
-    # Once response gates pass, prefer the least estimator correction so the
-    # aligned controller retains return-to-hover margin outside short probes.
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.040, -0.030, -0.0039]
-      - [-0.040, -0.020, -0.0039]
-      - [-0.040, -0.010, -0.0039]
-      - [-0.040, 0.000, -0.0039]
-      - [-0.040, 0.010, -0.0039]
-      - [-0.040, 0.020, -0.0039]
-      - [-0.040, 0.030, -0.0039]
-      - [-0.030, -0.030, -0.0039]
-      - [-0.030, -0.020, -0.0039]
-      - [-0.030, -0.010, -0.0039]
-      - [-0.030, 0.000, -0.0039]
-      - [-0.030, 0.010, -0.0039]
-      - [-0.030, 0.020, -0.0039]
-      - [-0.030, 0.030, -0.0039]
-      - [-0.020, -0.030, -0.0039]
-      - [-0.020, -0.020, -0.0039]
-      - [-0.020, -0.010, -0.0039]
-      - [-0.020, 0.000, -0.0039]
-      - [-0.020, 0.010, -0.0039]
-      - [-0.020, 0.020, -0.0039]
-      - [-0.020, 0.030, -0.0039]
-      - [-0.010, -0.030, -0.0039]
-      - [-0.010, -0.020, -0.0039]
-      - [-0.010, -0.010, -0.0039]
-      - [-0.010, 0.000, -0.0039]
-      - [-0.010, 0.010, -0.0039]
-      - [-0.010, 0.020, -0.0039]
-      - [-0.010, 0.030, -0.0039]
-      - [0.000, -0.030, -0.0039]
-      - [0.000, -0.020, -0.0039]
-      - [0.000, -0.010, -0.0039]
-      - [0.000, 0.000, -0.0039]
-      - [0.000, 0.010, -0.0039]
-      - [0.000, 0.020, -0.0039]
-      - [0.000, 0.030, -0.0039]
-      - [0.010, -0.030, -0.0039]
-      - [0.010, -0.020, -0.0039]
-      - [0.010, -0.010, -0.0039]
-      - [0.010, 0.000, -0.0039]
-      - [0.010, 0.010, -0.0039]
-      - [0.010, 0.020, -0.0039]
-      - [0.010, 0.030, -0.0039]
-      - [0.020, -0.030, -0.0039]
-      - [0.020, -0.020, -0.0039]
-      - [0.020, -0.010, -0.0039]
-      - [0.020, 0.000, -0.0039]
-      - [0.020, 0.010, -0.0039]
-      - [0.020, 0.020, -0.0039]
-      - [0.020, 0.030, -0.0039]
-      - [0.030, -0.030, -0.0039]
-      - [0.030, -0.020, -0.0039]
-      - [0.030, -0.010, -0.0039]
-      - [0.030, 0.000, -0.0039]
-      - [0.030, 0.010, -0.0039]
-      - [0.030, 0.020, -0.0039]
-      - [0.030, 0.030, -0.0039]
-      - [0.040, -0.030, -0.0039]
-      - [0.040, -0.020, -0.0039]
-      - [0.040, -0.010, -0.0039]
-      - [0.040, 0.000, -0.0039]
-      - [0.040, 0.010, -0.0039]
-      - [0.040, 0.020, -0.0039]
-      - [0.040, 0.030, -0.0039]
-  # PX4's captured estimator error changes sign during the low-speed profiles;
-  # a measured-velocity low-pass can reproduce that stateful lag while starting
-  # from the exact captured estimator boundary.
+      - [-0.0075, 0.0100, -0.0039]
+      - [-0.0050, 0.0110, -0.0039]
+      - [-0.0025, 0.0120, -0.0039]
+  # The measured-velocity path remains unfiltered because low-pass candidates
+  # regress the physical-state motor boundary.
   - field: velocity_filter_hz
     stage: 4
-    candidates:
-      - [0.0, 0.0000, 0.0]
-      - [0.0, 0.2500, 0.0]
-      - [0.0, 0.3125, 0.0]
-      - [0.0, 0.3750, 0.0]
-      - [0.0, 0.4375, 0.0]
-      - [0.0, 0.5000, 0.0]
-      - [0.0, 0.7500, 0.0]
-      - [0.0, 1.0000, 0.0]
-  # Lower lateral estimator scale lengthens the measured braking transient.
-  # Search the narrow crossing only after the response stages create margin.
+    candidates: [[0.0, 0.0, 0.0]]
+  # Lower lateral estimator scale lengthens the measured braking transient;
+  # the local range brackets the joint motion and motor-replay crossing.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.98, 0.9800, 1.0]
-      - [0.98, 1.0000, 1.0]
-      - [0.98, 1.0100, 1.0]
-      - [0.98, 1.0200, 1.0]
-      - [0.98, 1.0300, 1.0]
-      - [0.98, 1.0425, 1.0]
+      - [0.98, 0.8950, 1.0]
+      - [0.98, 0.8975, 1.0]
+      - [0.98, 0.9000, 1.0]
+  # The physical-state Y replay crossing is minimized near the evidenced
+  # 23.75 Hz rate-input filter while preserving every motion gate.
+  - field: angular_velocity_filter_hz
+    stage: 6
+    candidates: [22.5, 23.75, 25.0]
   # The pinned PX4 vertical proportional gain clears the full-rate
   # acceleration and collective replay boundaries at the refined cadence.
   - field: kp_vel
-    stage: 6
-    candidates:
-      - [1.8, 1.8, 4.0]
-      - [1.8, 1.8, 4.1]
-      - [1.8, 1.8, 4.2]
-  # The complete velocity-setpoint boundary isolates the pinned PX4 integral
-  # gain. Retain the former value as diagnostic range evidence.
-  - field: ki_vel
     stage: 7
-    candidates:
-      - [0.4, 0.4, 2.0]
-      - [0.4, 0.4, 2.05]
-      - [0.4, 0.4, 2.1]
+    candidates: [[1.8, 1.8, 4.0]]
+  # The complete velocity-setpoint boundary uses the pinned PX4 integral gain.
+  - field: ki_vel
+    stage: 8
+    candidates: [[0.4, 0.4, 2.0]]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 8
+    stage: 9
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 9
-    candidates: [1.0000, 1.0005, 1.0010, 1.0015, 1.0020]
+    stage: 10
+    candidates: [1.0005]
 
 selection_metric: controller-quality
 publication_metrics:
