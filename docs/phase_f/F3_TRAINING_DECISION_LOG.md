@@ -11065,3 +11065,24 @@ low-pass candidates from 1 through 30 Hz, retaining no-filter as the control.
 The intended effect is transition lag, not a steady gain change.  Prior 1 Hz
 evidence warns that low cutoff can regress physical motor replay, so replay
 every motion pass and select the highest-cutoff joint pass.
+
+### 348. Observation lag passes motion and isolates Y motor replay
+
+Date: 2026-08-10.
+
+The focused filter sweep evaluated nine candidates in two GPU batches and 51.5
+seconds at 35.0% average sampled GPU utilization.  The 1 Hz Y filter is the only
+motion pass in that coarse grid.  It passes Y braking at 2.182 mm, Y residual
+speed at 0.006240 m/s, combined endpoint at 2.331 mm, and every other motion and
+CTBR gate.  No gate is close to its limit except Y envelope NRMSE at 0.0753
+against 0.10.
+
+Mandatory replay fails only `validation-y-envelope` physical-state normalized
+motor RMSE at 0.011470 against 0.01.  Core estimated-state replay and every
+other profile pass.  This is the expected filter-induced physical-state seam,
+not an allocator or plant mapping failure.
+
+Use the motion margin to search filter cutoff 0.75 through 2 Hz jointly with Y
+observation scale 0.8975 through 1.0.  Scale toward one reduces the estimator
+correction at the failed physical boundary.  Replay all motion passes and
+promote only a combined motion/replay pass into a new scratch campaign.

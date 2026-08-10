@@ -22,7 +22,7 @@ settings:
   # Steady world-ENU physical-to-estimator offset measured from the reference.
   velocity_observation_bias_mps: [-0.030, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
-  velocity_filter_hz: [0.0, 0.0, 0.0]
+  velocity_filter_hz: [0.0, 1.0, 0.0]
   velocity_derivative_filter_hz: 5.0
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
@@ -74,26 +74,29 @@ parameters:
     selection_regularization_scale: 1.0
     candidates:
       - [-0.030, 0.008, -0.0039]
-  # PX4 travels 53.45 mm after the positive-to-zero Y transition while the
-  # replay-valid target travels 47.64 mm.  Search only Y observation lag to
-  # delay that braking transition without changing steady scale or integral.
+  # The 1 Hz crossing creates ample motion margin.  Search its immediate cutoff
+  # neighborhood jointly with scale toward unity to recover physical replay.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.0, 0.0, 0.0]
+      - [0.0, 0.75, 0.0]
       - [0.0, 1.0, 0.0]
-      - [0.0, 2.0, 0.0]
-      - [0.0, 3.0, 0.0]
-      - [0.0, 5.0, 0.0]
-      - [0.0, 8.0, 0.0]
-      - [0.0, 12.0, 0.0]
-      - [0.0, 20.0, 0.0]
-      - [0.0, 30.0, 0.0]
-  # Retain the replay-valid steady scale.
+      - [0.0, 1.25, 0.0]
+      - [0.0, 1.50, 0.0]
+      - [0.0, 1.75, 0.0]
+      - [0.0, 2.00, 0.0]
+  # Scale toward one reduces the estimator-to-physical-state correction that
+  # now dominates Y-envelope motor replay.
   - field: velocity_observation_scale
     stage: 5
     candidates:
       - [0.98, 0.8975, 1.0]
+      - [0.98, 0.9000, 1.0]
+      - [0.98, 0.9200, 1.0]
+      - [0.98, 0.9400, 1.0]
+      - [0.98, 0.9600, 1.0]
+      - [0.98, 0.9800, 1.0]
+      - [0.98, 1.0000, 1.0]
   # Retain the replay-valid lateral integral correction.
   - field: ki_vel
     stage: 6
