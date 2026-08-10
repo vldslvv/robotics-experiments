@@ -11605,6 +11605,29 @@ and the existing Y filter. Keep pinned PX4 gains, controller structure, all
 probes, replay limits, and quality gates unchanged. Replay every motion pass
 before live evaluation.
 
+### 375. Decay crosses the final replay boundary
+
+Date: 2026-08-10.
+
+The motion/replay micro-refinement evaluated 144 unique candidates in four GPU
+batches and 120.9 seconds at 32.8% average sampled GPU utilization. Five
+candidates pass every motion gate. Selected candidate 55 uses decay 0.05 Hz,
+X bias 0.0050 m/s, and X scale 0.9055; X braking is 4.947 mm and combined
+endpoint is 9.529 mm. It misses only validation-X-envelope physical-state
+motor RMSE at 0.010027.
+
+A replay-only boundary diagnostic changed only candidate 55's estimator decay.
+Decay 0.051 Hz passes all 22 replay profiles with worst motor RMSE 0.009990;
+decay 0.052 Hz also passes at 0.009954. The response is monotonic across the
+tested 0.048-0.052 Hz interval, so controller and plant changes remain
+unwarranted.
+
+Confirm the joint motion/replay region in the simulator with decay
+0.051/0.052/0.053 Hz, X bias 0.0047-0.0050 m/s in 0.0001 steps, and X scale
+0.9045/0.9050/0.9055. Retain the unfiltered X branch and existing Y filter.
+Keep pinned PX4 gains, controller structure, all probes, replay limits, and
+quality gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
