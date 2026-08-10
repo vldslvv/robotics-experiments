@@ -373,7 +373,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.kp_vel == pytest.approx((1.8, 1.8, 4.0))
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.0)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
-    assert target.base_settings.ki_vel == pytest.approx((0.4, 0.25, 2.0))
+    assert target.base_settings.ki_vel == pytest.approx((0.4, 0.20, 2.0))
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
     assert target.search.strategy == "coarse-to-fine-beam"
@@ -405,6 +405,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_filter_hz",
         "velocity_observation_scale",
         "ki_vel",
+        "horizontal_velocity_error_gain_scale",
         "angular_velocity_filter_hz",
         "kp_vel",
         "velocity_integral_limit_mps2",
@@ -417,11 +418,11 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[3].candidates[-1] == pytest.approx((0.0, 1.5, 0.0))
     assert target.parameters[4].candidates[0] == pytest.approx((0.98, 0.8975, 1.0))
     assert target.parameters[4].candidates[-1] == pytest.approx((0.98, 0.8975, 1.0))
-    assert target.parameters[5].candidates[0] == pytest.approx((0.15, 0.15, 2.0))
-    assert target.parameters[5].candidates[-1] == pytest.approx((0.4, 0.25, 2.0))
-    assert target.parameters[6].candidates == pytest.approx((23.75,))
-    assert target.parameters[7].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[7].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[5].candidates == (pytest.approx((0.4, 0.20, 2.0)),)
+    assert target.parameters[6].candidates == pytest.approx((1.0, 1.05, 1.10, 1.15, 1.20, 1.25))
+    assert target.parameters[7].candidates == pytest.approx((23.75,))
+    assert target.parameters[8].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[8].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     assert target.parameters[-1].candidates == pytest.approx((1.0005,))
     extended = replace(

@@ -11138,3 +11138,29 @@ X/Y observation offsets, Y filter and scale, integral limits, controller
 structure, probes, metrics, and gates unchanged. Replay every motion pass and
 run the live gate only for replay-passing candidates before opening another
 parameter boundary.
+
+### 351. Integral buildup passes every internal boundary but does not close live return
+
+Date: 2026-08-10.
+
+The 18-point planar integral diagnostic completed in two GPU batches and 51.9
+seconds at 34.8% average sampled GPU utilization. Seven candidates passed every
+motion gate, and parallel replay confirmed that all seven pass every one of the
+22 controller-boundary profiles. Candidate 11 at X/Y integral gains 0.30/0.20
+had the widest replay margin, with 0.008625 worst normalized-motor RMSE and
+0.048919 N worst collective RMSE. Candidate 17 at 0.40/0.20 was selected by the
+registered motion ranking and also passed replay at 0.009048 motor RMSE and
+0.048921 N collective RMSE.
+
+Live checks falsified integral buildup as the independent solution. Candidate
+11 reached 0.118 m in the hover final window, while the lowest-integral
+motion-pass at 0.25/0.25 reached 0.119 m. Both remain well above the unchanged
+0.100 m gate and differ by only 1 mm from the 0.40/0.25 control.
+
+The existing controller contract already provides a smooth horizontal
+large-error gain schedule for this exact randomized return trajectory. Keep
+the fitted low-error gain 1.8 unchanged below 0.15 m/s error, retain the
+motion-selected 0.40/0.20 integral gains, and search only gain scale 1.0 through
+1.25 at the existing 0.30 m/s full-gain boundary. Require motion and replay
+before live acceptance. Expand the schedule transition boundaries only if the
+scale direction produces material progress.

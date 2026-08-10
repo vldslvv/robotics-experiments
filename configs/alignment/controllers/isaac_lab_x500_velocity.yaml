@@ -16,7 +16,7 @@ settings:
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  ki_vel: [0.4, 0.25, 2.0]
+  ki_vel: [0.4, 0.20, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
@@ -83,53 +83,40 @@ parameters:
     stage: 5
     candidates:
       - [0.98, 0.8975, 1.0]
-  # The live multi-environment trace passes the motion and replay boundaries
-  # but retains a long horizontal return transient. Fit planar integral buildup
-  # around the replay-valid Y correction while retaining the PX4 gain control.
+  # Retain the motion- and replay-passing integral point selected by the planar
+  # buildup diagnostic.
   - field: ki_vel
     stage: 6
     candidates:
-      - [0.15, 0.15, 2.0]
-      - [0.15, 0.20, 2.0]
-      - [0.15, 0.25, 2.0]
-      - [0.20, 0.15, 2.0]
-      - [0.20, 0.20, 2.0]
-      - [0.20, 0.25, 2.0]
-      - [0.25, 0.15, 2.0]
-      - [0.25, 0.20, 2.0]
-      - [0.25, 0.25, 2.0]
-      - [0.30, 0.15, 2.0]
-      - [0.30, 0.20, 2.0]
-      - [0.30, 0.25, 2.0]
-      - [0.35, 0.15, 2.0]
-      - [0.35, 0.20, 2.0]
-      - [0.35, 0.25, 2.0]
-      - [0.40, 0.15, 2.0]
       - [0.40, 0.20, 2.0]
-      - [0.40, 0.25, 2.0]
+  # Keep the low-error PX4 gain unchanged and fit only the existing smooth
+  # large-error schedule used by the randomized live return trajectory.
+  - field: horizontal_velocity_error_gain_scale
+    stage: 7
+    candidates: [1.0, 1.05, 1.10, 1.15, 1.20, 1.25]
   # The physical-state Y replay crossing is minimized near the evidenced
   # 23.75 Hz rate-input filter while preserving every motion gate.
   - field: angular_velocity_filter_hz
-    stage: 7
+    stage: 8
     candidates: [23.75]
   # Higher Y proportional gains shorten the already-short target braking
   # distance, so retain the pinned PX4 gain.
   - field: kp_vel
-    stage: 8
+    stage: 9
     candidates:
       - [1.8, 1.8, 4.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 9
+    stage: 10
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 10
+    stage: 11
     candidates: [1.0005]
 
 selection_metric: controller-quality
