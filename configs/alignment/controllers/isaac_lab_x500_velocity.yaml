@@ -11,7 +11,7 @@ command_rate_hz: 20.0
 settings:
   command_delay_s: 0.0
   velocity_controller_rate_hz: 125.0
-  attitude_controller_rate_hz: 142.8571
+  attitude_controller_rate_hz: 200.0
   kp_vel: [1.8, 1.8, 4.20]
   horizontal_velocity_error_gain_scale: 1.0
   horizontal_velocity_error_gain_start_mps: 0.15

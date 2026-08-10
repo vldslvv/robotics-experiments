@@ -10553,3 +10553,30 @@ publication mixture measures that mean cadence, then cover 166.6667, 200, 250,
 already-declared parameter. Retain the pair only if the sweep improves the
 six-failure frontier without regressing a passed boundary; otherwise remove
 the handoff again.
+
+### 328. Handoff-aware cadence fitting reduces failures to four
+
+Date: 2026-08-10.
+
+The preserved high-rate sweep confirms that the structural handoff must be
+fitted jointly with attitude cadence. At 200 Hz, failed replay gates fall from
+six to four. Low-speed vertical collective improves from 0.066303 N to
+0.025788 N, vertical-ramp collective improves from 0.070762 N to 0.037626 N,
+and the moderate physical motor gate remains passed at 0.009877. The limiting
+Z collective improves 26.8 percent from 0.233732 N to 0.170968 N. Remaining
+failures are marginal forward collective at 0.052481 N, physical Y motor at
+0.013051, Z collective, and moderate collective at 0.073508 N.
+
+The measured 187.5 Hz candidate gives the lowest tested Z error at 0.152817 N
+but leaves six failures. The other handoff-aware candidates are inferior:
+166.6667 Hz leaves five failures with Z at 0.456567 N; 250 Hz leaves five with
+Z at 0.152822 N and regresses the moderate physical motor; 142.8571 Hz and
+125 Hz regress the prior frontier. Select 200 Hz as the new deterministic base
+because failed-gate count remains the primary ranking dimension. Preserve all
+reports under the run directory.
+
+This is material progress but not acceptance. The residual is still dominated
+by PX4's irregular 4/8 ms shared-tick schedule. Before adding controller gain
+candidates, replay the exact recorded `vehicle_attitude` update mask together
+with the now-evidenced one-tick rate handoff. The earlier exact-mask diagnostic
+lacked that handoff and therefore tested an incomplete execution order.
