@@ -1211,7 +1211,6 @@ def seed_flight_controller_state(
     rate_integral_body: torch.Tensor,
     hover_thrust_normalized: torch.Tensor,
     outer_loop_elapsed_s: torch.Tensor,
-    attitude_loop_elapsed_s: torch.Tensor,
     valid: torch.Tensor,
 ) -> _FlightControllerState:
     """Restore per-environment neutral-command PX4 controller boundaries."""
@@ -1244,12 +1243,6 @@ def seed_flight_controller_state(
             f"{tuple(outer_loop_elapsed_s.shape)}, expected "
             f"{tuple(state.outer_loop_elapsed_s.shape)}"
         )
-    if attitude_loop_elapsed_s.shape != state.attitude_loop_elapsed_s.shape:
-        raise ValueError(
-            "attitude_loop_elapsed_s has shape "
-            f"{tuple(attitude_loop_elapsed_s.shape)}, expected "
-            f"{tuple(state.attitude_loop_elapsed_s.shape)}"
-        )
     if (
         not torch.all(torch.isfinite(hover_thrust_normalized))
         or torch.any(hover_thrust_normalized < 0.0)
@@ -1258,8 +1251,6 @@ def seed_flight_controller_state(
         raise ValueError("hover_thrust_normalized must be finite and between 0 and 1")
     if not torch.all(torch.isfinite(outer_loop_elapsed_s)):
         raise ValueError("outer_loop_elapsed_s must be finite")
-    if not torch.all(torch.isfinite(attitude_loop_elapsed_s)):
-        raise ValueError("attitude_loop_elapsed_s must be finite")
     selected = valid.unsqueeze(-1)
     velocity_error = -filtered_linear_velocity_world
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
@@ -1335,7 +1326,7 @@ def seed_flight_controller_state(
         ),
         attitude_loop_elapsed_s=torch.where(
             valid,
-            attitude_loop_elapsed_s,
+            torch.zeros_like(state.attitude_loop_elapsed_s),
             state.attitude_loop_elapsed_s,
         ),
         desired_rotation_world_body=torch.where(

@@ -506,12 +506,6 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                 },
             ),
             dataset(
-                "vehicle_rates_setpoint",
-                {
-                    "timestamp": np.array([100_000, 108_000]),
-                },
-            ),
-            dataset(
                 "hover_thrust_estimate",
                 {
                     "timestamp": np.array([100_000, 108_000]),
@@ -548,7 +542,6 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
         "vehicle_local_position_setpoint": 4000,
         "vehicle_local_position": 4000,
         "vehicle_angular_velocity": 4000,
-        "vehicle_rates_setpoint": 4000,
         "rate_ctrl_status": 4000,
         "hover_thrust_estimate": 4000,
     }

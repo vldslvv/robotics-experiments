@@ -508,16 +508,6 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
-                attitude_loop_elapsed_s=torch.as_tensor(
-                    [
-                        trace["initial_controller_state_source_age_us"]["vehicle_rates_setpoint"]
-                        / 1e6
-                        - 1.0 / config.sim.physics_hz
-                        for trace in traces
-                    ],
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
                 valid=torch.as_tensor(
                     [trace.get("initial_controller_state_valid", False) for trace in traces],
                     dtype=torch.bool,

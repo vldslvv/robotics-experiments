@@ -144,10 +144,7 @@ through a second synthetic 20 Hz cadence. The seed phase is derived per profile 
 recorded age of its `vehicle_local_position` sample. Because the replay grid
 includes the profile boundary, its initial accrued outer-loop time is the
 sample age minus one 4 ms physics tick; this preserves the next 125 Hz update
-whether the boundary lands on or between estimator publications. Replay seeds
-the attitude-stage phase from `vehicle_rates_setpoint` by the same
-inclusive-grid convention, so independent profile windows retain the PX4
-scheduler state that existed at their absolute start time. ULog
+whether the boundary lands on or between estimator publications. ULog
 rate-limited `trajectory_setpoint` samples are not used to infer command
 transitions. The velocity-integral seed reconstructs the current acceleration
 setpoint from the recorded `vehicle_local_position_setpoint` output and reports
