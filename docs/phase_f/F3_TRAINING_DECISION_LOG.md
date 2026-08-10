@@ -11968,3 +11968,29 @@ scale preserves braking. Search positive X bias 0.001-0.006 m/s against X
 scale 0.82-0.92 and decay 0.05-0.10 Hz. Keep Y/Z observer correction, pinned
 PX4 gains, controller structure, all probes, replay limits, and quality gates
 unchanged. Replay every motion pass before live evaluation.
+
+### 384. Recovery passes live motion; handoff is the remaining boundary
+
+Date: 2026-08-10.
+
+The recovery-lobe search evaluated 1,124 unique candidates in 16 GPU batches
+and 573.5 seconds at 30.5% average sampled GPU utilization. Seven hundred
+thirty-four candidates pass every motion gate. Exhaustive controller-boundary
+replay checked all 734 in 1,248.8 seconds with eight host workers; 261 pass all
+22 profiles. Candidate 483 retains the evidenced 0.075 Hz estimator-bias decay,
++0.005 m/s X observation bias, 0.91 X observation scale, and 0.90 braking lobe
+at 0.055/0.070/0.075 m/s. It moves the recovery lobe to scale 1.23 beginning at
+0.09 m/s. Its X and Y braking errors are 2.874 mm and 3.864 mm, combined
+endpoint error is 8.821 mm, and worst normalized-motor replay RMSE is 0.009881.
+
+The authoritative live gate materially advances beyond the prior first failed
+boundary. Hover passes with 0.095 m last-second maximum against 0.100 m, and
+goto passes with 0.081 m against the same limit. The sole failure is now the
+downstream handoff range: the drone settles 0.423 m from the switch against the
+configured 0.45-0.50 m window and reports `TOO_CLOSE`.
+
+No controller-structure, allocator, plant, or recovery change is supported by
+this result. Pin candidate 483 and search only the signed X observation bias at
+0.008/0.011/0.014/0.017/0.020 m/s. This coarse five-point sweep brackets the
+earlier live-ready +0.018 m/s setting while preserving the current reference,
+probe families, motion gates, replay limits, and live acceptance contract.
