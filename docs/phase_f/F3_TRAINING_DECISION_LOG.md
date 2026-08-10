@@ -12169,3 +12169,30 @@ handoff is ready with no failure reason. Pin candidate 241 exactly and execute
 one clean-source reproduction with a fresh PX4 capture, actuator audit, target
 evaluation, held-out fit, controller-boundary replay, and live gate before
 finalization and publication.
+
+### 392. Fixed-controller reproduction exposes fresh combined X/Y offset
+
+Date: 2026-08-10.
+
+The exact candidate-241 controller was committed and evaluated from a clean
+source commit against a second fresh PX4 capture. The capture completed all 22
+profiles, and the actuator audit passed with complete topic coverage, zero
+timestamp-join error, motor RMSE near 0.0003, and collective RMSE below 0.05 N.
+The pinned target evaluation completed normally, but held-out fitting rejects
+the controller only on combined endpoint error: 15.512 mm against 10 mm.
+
+Every isolated X/Y/Z velocity gate and every CTBR gate still passes. X and Y
+braking have increased margin at 3.211 mm and 1.281 mm. The signed combined
+endpoint error is [+10.56, -11.21, -1.89] mm, which localizes the fresh-capture
+variation to coupled horizontal offset rather than vertical response, CTBR,
+allocation, or the plant boundary. The fixed controller is therefore not
+robust enough to publish unchanged, but the alignment search still has an
+evidenced parameter seam.
+
+Keep the replay-safe X observation scale and braking band fixed. Fit the
+existing command-gated observation-bias vector over X 0.008/0.011/0.014 m/s,
+Y -0.006/-0.003/0/0.003/0.006 m/s, and Z zero, crossed with command transition
+start 0/0.002/0.005 m/s and full 0.020/0.030/0.040 m/s. Replay every motion
+pass and rerun the live gate before selecting the final fresh-reference
+artifact. This is an axis-local fit supported by the isolated probe margins and
+does not change controller structure or any gate.
