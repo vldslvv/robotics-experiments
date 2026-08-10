@@ -10833,3 +10833,32 @@ effective inner-loop collective, retaining the raw policy/OFFBOARD command.
 Search 1.0000 through 1.0020, and search Y filter, scale, and offset jointly
 around the motion crossing. These diagnostics remain preserved evidence; a
 passing candidate still requires a fresh clean-source campaign.
+
+### 339. Effective CTBR mapping passes; focused seed batching was undersized
+
+Date: 2026-08-10.
+
+Preserved-reference replay confirms the declarative CTBR mapping. Scale
+1.0005 reduces pitch collective from 0.052504 N to 0.047987 N; every
+collective boundary passes, and the remaining failure is independent Y
+physical-state motor replay.
+
+A 1,740-candidate filter/scale/offset diagnostic found 347 motion-passing
+candidates, but the selected 1 Hz Y filter worsened physical Y motor RMSE to
+0.014106. Do not promote the filter. The no-filter, Y-scale 0.90 frontier is
+closer to the controller boundary: physical Y motor RMSE is 0.010100, only
+0.000100 above the limit, while Y braking misses by 0.000389 m.
+
+A compact explicit Y-gain grid found two motion-passing candidates. Both need
+Y P=1.7; the selected scale 0.9025 result passes Y braking at 0.004569 m and
+the endpoint at 0.009619 m, but gain deviation raises physical Y motor RMSE to
+0.010545. Continue with the pinned P=1.8 and lower Y offsets around scale
+0.9025, using X offset only to retain endpoint margin.
+
+The compact run also exposed a concrete performance bug: with no staged
+parameters, fixed scene capacity ignored 36 explicit `initial_settings` and
+fell back to one candidate. It therefore ran 36 GPU batches in 429.6 seconds
+instead of one capacity-sized batch. Include the base plus all initial settings
+when sizing the fixed scene. This directly implements the coarse-then-targeted
+search contract and removes the single-environment fallback before the next
+diagnostic.

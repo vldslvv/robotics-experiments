@@ -47,6 +47,23 @@ def test_candidate_expansions_are_chunked_to_fixed_scene_capacity():
     assert [len(chunk) for chunk in chunks] == [4, 4, 2]
 
 
+def test_initial_settings_size_fixed_scene_when_no_staged_parameters():
+    module = _load_script()
+    definition = load_controller_definition(
+        REPO_ROOT / "configs/alignment/controllers/isaac_lab_x500_velocity.yaml"
+    )
+    seeds = tuple(
+        replace(definition.base_settings, command_delay_s=offset * 0.001) for offset in range(1, 10)
+    )
+    definition = replace(
+        definition,
+        parameters=(),
+        search=replace(definition.search, initial_settings=seeds),
+    )
+
+    assert module._maximum_candidate_expansion(definition) == 10  # noqa: SLF001
+
+
 def test_smaller_probe_family_reuses_one_fixed_environment_stride():
     module = _load_script()
     traces = [{"profile": "roll"}, {"profile": "pitch"}]

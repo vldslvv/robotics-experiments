@@ -88,6 +88,9 @@ increase PhysX contention. The target coordinator reports candidates per
 second, padding, cache hits, batches, and sampled GPU utilization. The 95% GPU
 target remains diagnostic; deterministic useful throughput is the optimization
 objective.
+Explicit initial candidate settings participate in the same fixed-scene
+capacity calculation as staged beam expansions, so a focused seeded grid is
+evaluated in GPU-sized batches rather than one environment at a time.
 
 Each worker owns one persistent Isaac Lab environment for the entire ordered
 probe-family list. Families execute sequentially by switching the controller

@@ -220,6 +220,16 @@ def _chunk_settings(
     )
 
 
+def _maximum_candidate_expansion(definition: ControllerDefinition, /) -> int:
+    """Size the fixed scene for both seeded and staged candidate batches."""
+    expansions = [1 + len(definition.search.initial_settings)]
+    expansions.extend(
+        definition.search.beam_width * len(parameter.candidates)
+        for parameter in definition.parameters
+    )
+    return max(expansions)
+
+
 def _merge_indexed_results(
     *,
     result_count: int,
@@ -1235,10 +1245,7 @@ def _run(
     reference_traces = payload.get("traces")
     if not isinstance(reference_traces, list):
         raise ValueError(f"{reference_path} has no traces list")
-    maximum_expansion = max(
-        (target.search.beam_width * len(parameter.candidates) for parameter in target.parameters),
-        default=1,
-    )
+    maximum_expansion = _maximum_candidate_expansion(target)
     worker_count = min(config.alignment.execution.worker_count, maximum_expansion)
     candidate_capacity = min(
         config.alignment.execution.candidate_capacity,
