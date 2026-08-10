@@ -11628,6 +11628,33 @@ Confirm the joint motion/replay region in the simulator with decay
 Keep pinned PX4 gains, controller structure, all probes, replay limits, and
 quality gates unchanged. Replay every motion pass before live evaluation.
 
+### 376. Motion and replay pass; live hover exposes estimator settling
+
+Date: 2026-08-10.
+
+The decay-confirmation search evaluated 80 unique candidates in four GPU
+batches and 115.9 seconds at 32.7% average sampled GPU utilization. Twenty
+candidates pass every motion gate, and three also pass all 22 replay profiles:
+candidates 49, 67, and 72. Candidate 72 has the largest live-correcting X bias
+at 0.0049 m/s, decay 0.053 Hz, and X scale 0.905. Its motion endpoint is
+8.172 mm and worst replay motor RMSE is 0.009973.
+
+The authoritative live test rejects candidates 72 and 49 at the same first
+boundary before goto: hover final error is 0.044 m, but last-second maximum
+error is 0.103 m against the 0.100 m limit. The identical result across bias
+0.0047/0.0049 m/s and scale 0.9050/0.9055 indicates that the narrow bias/scale
+spacing is not the live discriminator. Earlier decay 0.075 Hz candidates pass
+this hover boundary, including the replay-safe candidate 323 and zero-bias
+candidate 500.
+
+Route the next search through the evidenced settling dimension: decay
+0.060/0.065/0.070/0.075 Hz, X bias 0.0040/0.0045/0.0050 m/s, and X scale
+0.88/0.89/0.90/0.91. Higher decay increases replay margin; lower scale recovers
+the braking error it introduces, while bias 0.0045-0.0050 retains the measured
+live handoff correction. Keep the unfiltered X branch, existing Y filter,
+pinned PX4 gains, controller structure, all probes, replay limits, and quality
+gates unchanged. Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
