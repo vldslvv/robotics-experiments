@@ -12143,3 +12143,29 @@ fit the existing low-error braking lobe over scale 0.50/0.60/0.70/0.80, start
 0.005-0.030 m/s command gate. This uses the distinct error ranges exposed by
 the isolated X and Y probes while avoiding new controller structure. Replay
 every motion pass before live evaluation.
+
+### 391. Replay-safe braking frontier passes the authoritative live gate
+
+Date: 2026-08-10.
+
+The replay-safe braking-band search evaluated 1,232 unique candidates in 14 GPU
+batches and 506.9 seconds at 25.8% average sampled GPU utilization. It produced
+66 candidates that pass every velocity and CTBR motion gate. Exhaustive replay
+evaluated all 66 over all 22 profiles in 120.9 seconds with eight host workers;
+45 pass every estimated-state, physical-state, motor, collective, and timestamp
+boundary.
+
+Candidate 241 provides the largest replay margin. It uses X observation scale
+0.94, braking scale 0.50 with a 0.050/0.070/0.085 m/s band, +0.008 m/s X bias,
+and the 0.002-0.030 m/s command gate. Its X and Y braking errors are 2.386 mm
+and 4.251 mm, combined endpoint is 9.368 mm, worst replay motor RMSE is
+0.009108, and worst collective RMSE is 0.04122 N. It passes every replay
+profile.
+
+The authoritative 16-environment live gate also passes. Hover last-second
+maximum error is 0.092 m and goto is 0.034 m against 0.100 m limits. The final
+wall-normal handoff range is 0.451 m inside the 0.45-0.50 m window, and the
+handoff is ready with no failure reason. Pin candidate 241 exactly and execute
+one clean-source reproduction with a fresh PX4 capture, actuator audit, target
+evaluation, held-out fit, controller-boundary replay, and live gate before
+finalization and publication.
