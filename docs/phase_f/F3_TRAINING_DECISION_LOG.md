@@ -10534,3 +10534,22 @@ frontier. The remaining vertical discrepancy is PX4's variable shared-tick
 execution order; investigate a deterministic schedule that matches the
 observed downstream rate-setpoint publications directly, without driving it
 from upstream attitude timestamps or adding a universal delay.
+
+### 327. Refit cadence with the evidenced rate handoff
+
+Date: 2026-08-10.
+
+The failed 142.8571 Hz fixed-handoff control does not falsify PX4's observed
+attitude-to-rate pipeline; it falsifies composing that handoff with a cadence
+that was fitted while the handoff was absent. The current rate is a surrogate
+for the downstream schedule and cannot remain fixed when the structural seam
+changes.
+
+Restore the evidenced velocity-only one-tick handoff and replay the existing
+declared attitude-rate candidates against the same preserved ULog, changing no
+other setting. Start with 187.5 Hz because the ULog's 4/8 ms attitude
+publication mixture measures that mean cadence, then cover 166.6667, 200, 250,
+142.8571, and 125 Hz. This is one structural correction plus refitting one
+already-declared parameter. Retain the pair only if the sweep improves the
+six-failure frontier without regressing a passed boundary; otherwise remove
+the handoff again.
