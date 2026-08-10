@@ -10491,3 +10491,46 @@ decompose the vertical chain within the replay itself: reconstructed PX4
 acceleration, target desired collective, PX4 attitude-setpoint collective,
 PX4 rate-setpoint collective, and final motors/thrust. Change only the first
 boundary whose full-rate residual accounts for the failed collective gate.
+
+### 325. The rate controller consumes the previous attitude publication
+
+Date: 2026-08-10.
+
+The collective decomposition returns the unchanged six-failure frontier and
+identifies two distinct vertical handoffs. On `validation-z-envelope`, target
+desired collective differs from PX4 attitude-setpoint collective by only
+0.002257 normalized, while PX4 attitude-to-rate error is 0.012583 and
+rate-to-allocator error is 0.005170. On `stability-moderate-envelope`, the
+corresponding values are 0.000991, 0.005780, and 0.002126. The allocator seam
+is not a timestamp-join artifact: at the 129.692 s transition the attitude
+setpoint changes to 0.379500, the rate setpoint observes it at 129.696 s, and
+the thrust setpoint plus motors observe it at 129.700 s.
+
+The target currently updates its held attitude output and consumes that new
+value in the rate controller on the same physics tick. Preserve the explicit
+fractional attitude cadence, but test the velocity path's rate controller
+consuming the prior held attitude output for exactly one 4 ms tick. Keep CTBR's
+direct rate-controller contract unchanged because its replay boundaries
+already pass. Retain this structural correction only if it materially improves
+the six-failure frontier without regressing a passed gate.
+
+### 326. A fixed rate-controller handoff double-counts delay
+
+Date: 2026-08-10.
+
+The one-tick velocity-only attitude-to-rate handoff reduces the raw failure
+count from six to five by clearing the marginal low-speed vertical and vertical
+ramp collective gates, but it severely regresses the limiting profiles.
+`validation-z-envelope` collective rises from 0.233732 N to 0.631210 N;
+`stability-moderate-envelope` rises from 0.057749 N to 0.294502 N and its
+previously passed physical motor RMSE becomes 0.011113. The largest normalized
+excess grows by about 170 percent. Physical Y remains failed at 0.013135.
+
+Preserve `controller_boundary_replay-fixed-rate-handoff.json` as negative
+evidence and remove the fixed delay. The fitted 142.8571 Hz attitude-output
+cadence already approximates PX4's downstream rate-setpoint timing, so adding a
+second fixed handoff double-counts it. Restore the deterministic six-failure
+frontier. The remaining vertical discrepancy is PX4's variable shared-tick
+execution order; investigate a deterministic schedule that matches the
+observed downstream rate-setpoint publications directly, without driving it
+from upstream attitude timestamps or adding a universal delay.
