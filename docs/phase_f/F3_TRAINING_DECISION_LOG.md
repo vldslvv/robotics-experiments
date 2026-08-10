@@ -11465,3 +11465,20 @@ fine X P candidates 1.35/1.40/1.45 and X I candidates 0.35/0.40/0.45 to create
 margin around the crossing. Keep all other controller settings, structure,
 probes, replay limits, and gates unchanged. Replay every motion pass before
 live evaluation.
+
+### 365. Fine interpolation misses only X residual by 0.057 mm/s
+
+Date: 2026-08-10.
+
+The fine X PID/Y-bias search evaluated 690 unique candidates in nine GPU
+batches and 311.3 seconds at 27.5% average sampled GPU utilization. Candidate
+508 at Y bias 0.0135 m/s, X P/I/D 1.4/0.4/0.2 passes every gate except X
+residual speed. Endpoint is 9.953 mm, X braking is 4.933 mm, and residual is
+0.0100568 m/s against 0.010 m/s. Largest normalized excess is only 1.00568.
+
+At the same bias/P/D, X I=0.35 passes residual at 9.168 mm/s and endpoint at
+8.312 mm but misses braking at 5.841 mm. Linear interpolation places the joint
+braking/residual crossing between I=0.3963 and 0.3968. Search X I from 0.3950
+through 0.3970 in 0.00025 steps, with Y bias 0.0134/0.0135/0.0136, X D
+0.195/0.200/0.205, and X P 1.39/1.40/1.41. Keep every other setting,
+controller structure, probe, replay limit, and gate unchanged.
