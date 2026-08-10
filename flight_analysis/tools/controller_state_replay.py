@@ -682,6 +682,10 @@ def _controller_boundary(
         topic=local_setpoint,
         fields=("acceleration[0]", "acceleration[1]", "acceleration[2]"),
     )
+    velocity_setpoint_ned = interpolated_vector(
+        topic=local_setpoint,
+        fields=("vx", "vy", "vz"),
+    )
     linear_acceleration_ned = interpolated_vector(
         topic=local_position,
         fields=("ax", "ay", "az"),
@@ -735,6 +739,7 @@ def _controller_boundary(
     )
     vectors = {
         "initial_estimated_linear_velocity_enu_mps": _NED_TO_ENU @ estimated_velocity_ned,
+        "initial_velocity_setpoint_enu_mps": _NED_TO_ENU @ velocity_setpoint_ned,
         "initial_estimated_angular_velocity_body_flu_radps": (
             _FLU_TO_FRD @ estimated_angular_velocity_frd
         ),
@@ -1331,6 +1336,7 @@ def _report(
             if physical_state
             else replay_velocity_enu[0]
         ),
+        velocity_setpoint_enu_mps=controller_vectors["initial_velocity_setpoint_enu_mps"],
         angular_velocity_body_flu=controller_vectors[
             "initial_estimated_angular_velocity_body_flu_radps"
         ],

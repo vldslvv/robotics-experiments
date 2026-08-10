@@ -1214,6 +1214,7 @@ def seed_flight_controller_state(
     params: _FlightActuationParams,
     physical_linear_velocity_world: torch.Tensor,
     filtered_linear_velocity_world: torch.Tensor,
+    velocity_setpoint_world: torch.Tensor,
     filtered_angular_velocity_body: torch.Tensor,
     acceleration_setpoint_world: torch.Tensor,
     linear_acceleration_world: torch.Tensor,
@@ -1235,6 +1236,7 @@ def seed_flight_controller_state(
     vectors = {
         "physical_linear_velocity_world": physical_linear_velocity_world,
         "filtered_linear_velocity_world": filtered_linear_velocity_world,
+        "velocity_setpoint_world": velocity_setpoint_world,
         "filtered_angular_velocity_body": filtered_angular_velocity_body,
         "acceleration_setpoint_world": acceleration_setpoint_world,
         "linear_acceleration_world": linear_acceleration_world,
@@ -1289,7 +1291,7 @@ def seed_flight_controller_state(
     ):
         raise ValueError("desired_rotation_world_body must be one finite matrix per environment")
     selected = valid.unsqueeze(-1)
-    velocity_error = -filtered_linear_velocity_world
+    velocity_error = velocity_setpoint_world - filtered_linear_velocity_world
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = torch.clamp(
         acceleration_setpoint_world

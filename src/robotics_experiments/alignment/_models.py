@@ -118,6 +118,7 @@ class ProbeTrace:
     initial_controller_state_source_age_us: ControllerStateSourceAge = ControllerStateSourceAge(
         0, 0, 0, 0, 0, 0, 0, 0
     )
+    initial_velocity_setpoint_enu_mps: Vector3 = (0.0, 0.0, 0.0)
     initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)
     initial_linear_acceleration_enu_mps2: Vector3 = (0.0, 0.0, 0.0)

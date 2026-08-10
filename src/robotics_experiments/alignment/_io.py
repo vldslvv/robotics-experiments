@@ -741,6 +741,10 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
                 name=f"{name}.initial_controller_state_source_age_us.hover_thrust_estimate",
             ),
         ),
+        initial_velocity_setpoint_enu_mps=_vector(
+            value=trace["initial_velocity_setpoint_enu_mps"],
+            name=f"{name}.initial_velocity_setpoint_enu_mps",
+        ),
         initial_hover_thrust_normalized=initial_hover_thrust_normalized,
         initial_acceleration_setpoint_enu_mps2=_vector(
             value=trace["initial_acceleration_setpoint_enu_mps2"],

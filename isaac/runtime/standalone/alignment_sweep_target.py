@@ -441,6 +441,11 @@ def _make_env(
                     dtype=torch.float32,
                     device=self.device,
                 ),
+                velocity_setpoint_world=torch.as_tensor(
+                    [trace["initial_velocity_setpoint_enu_mps"] for trace in traces],
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
                 filtered_angular_velocity_body=torch.as_tensor(
                     [
                         trace["initial_estimated_angular_velocity_body_flu_radps"]

@@ -927,6 +927,7 @@ def seed_actuation_controller_state(
     controller_dt_s: float,
     physical_linear_velocity_enu: np.ndarray,
     filtered_linear_velocity_enu: np.ndarray,
+    velocity_setpoint_enu_mps: np.ndarray,
     angular_velocity_body_flu: np.ndarray,
     acceleration_setpoint_enu_mps2: np.ndarray,
     linear_acceleration_enu_mps2: np.ndarray,
@@ -960,6 +961,7 @@ def seed_actuation_controller_state(
         filtered_linear_velocity_enu,
         "filtered_linear_velocity_enu",
     )
+    velocity_setpoint = vector(velocity_setpoint_enu_mps, "velocity_setpoint_enu_mps")
     physical_velocity = (
         params.velocity_observation_scale
         * vector(
@@ -1000,7 +1002,7 @@ def seed_actuation_controller_state(
         raise ValueError("collective thrust setpoints must be finite and in [0, 1]")
     if not math.isfinite(desired_yaw_rate_radps) or not math.isfinite(filtered_yaw_torque):
         raise ValueError("yaw-rate and filtered-yaw-torque state must be finite")
-    velocity_error = -filtered_velocity
+    velocity_error = velocity_setpoint - filtered_velocity
     effective_kp_vel = _effective_velocity_proportional_gain(params, velocity_error)
     velocity_integral = np.clip(
         acceleration_setpoint - effective_kp_vel * velocity_error + params.kd_vel * acceleration,

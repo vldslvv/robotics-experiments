@@ -656,6 +656,7 @@ def test_velocity_rate_loop_consumes_attitude_output_on_the_next_tick() -> None:
         controller_dt_s=0.004,
         physical_linear_velocity_enu=np.zeros(3),
         filtered_linear_velocity_enu=np.zeros(3),
+        velocity_setpoint_enu_mps=np.zeros(3),
         angular_velocity_body_flu=np.zeros(3),
         acceleration_setpoint_enu_mps2=np.zeros(3),
         linear_acceleration_enu_mps2=np.zeros(3),
@@ -705,6 +706,7 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
         controller_dt_s=0.004,
         physical_linear_velocity_enu=np.zeros(3),
         filtered_linear_velocity_enu=np.zeros(3),
+        velocity_setpoint_enu_mps=np.zeros(3),
         angular_velocity_body_flu=np.zeros(3),
         acceleration_setpoint_enu_mps2=np.array([0.0, 0.0, 0.9]),
         linear_acceleration_enu_mps2=np.zeros(3),
@@ -735,9 +737,10 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
 
 
 @pytest.mark.parametrize("kind", ["velocity", "ctbr"])
-def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
+def test_seed_controller_state_matches_held_velocity_setpoint_boundary(kind: str):
     params = _params(kind)
     filtered_velocity = np.array([0.08, -0.18, 0.04])
+    velocity_setpoint = np.array([0.03, 0.02, -0.01])
     acceleration = np.array([0.3, -0.4, 0.2])
     acceleration_setpoint = np.array([0.7, -0.8, 0.9])
     angular_velocity = np.array([0.01, -0.02, 0.03])
@@ -749,6 +752,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
         controller_dt_s=0.004,
         physical_linear_velocity_enu=filtered_velocity,
         filtered_linear_velocity_enu=filtered_velocity,
+        velocity_setpoint_enu_mps=velocity_setpoint,
         angular_velocity_body_flu=angular_velocity,
         acceleration_setpoint_enu_mps2=acceleration_setpoint,
         linear_acceleration_enu_mps2=acceleration,
@@ -765,7 +769,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
         filtered_yaw_torque=0.0,
     )
     reconstructed = (
-        params.kp_vel * -filtered_velocity
+        params.kp_vel * (velocity_setpoint - filtered_velocity)
         + state.velocity_integral_enu
         - params.kd_vel * acceleration
     )
@@ -798,6 +802,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
         controller_dt_s=0.004,
         physical_linear_velocity_enu=zero,
         filtered_linear_velocity_enu=np.array([0.1, -0.2, 0.3]),
+        velocity_setpoint_enu_mps=zero,
         angular_velocity_body_flu=zero,
         acceleration_setpoint_enu_mps2=zero,
         linear_acceleration_enu_mps2=zero,
@@ -843,6 +848,7 @@ def test_body_rate_input_filter_uses_the_seeded_estimator_state():
         controller_dt_s=0.004,
         physical_linear_velocity_enu=zero,
         filtered_linear_velocity_enu=zero,
+        velocity_setpoint_enu_mps=zero,
         angular_velocity_body_flu=zero,
         acceleration_setpoint_enu_mps2=zero,
         linear_acceleration_enu_mps2=zero,
@@ -887,6 +893,7 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
             controller_dt_s=0.004,
             physical_linear_velocity_enu=zero,
             filtered_linear_velocity_enu=zero,
+            velocity_setpoint_enu_mps=zero,
             angular_velocity_body_flu=zero,
             acceleration_setpoint_enu_mps2=zero,
             linear_acceleration_enu_mps2=zero,
@@ -1026,6 +1033,7 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(k
         params=params,
         physical_linear_velocity_world=zero,
         filtered_linear_velocity_world=zero,
+        velocity_setpoint_world=zero,
         filtered_angular_velocity_body=zero,
         acceleration_setpoint_world=zero,
         linear_acceleration_world=zero,
@@ -1111,6 +1119,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
     )
     physical_seed_velocity = np.array([0.16, -0.11, 0.015])
     seed_velocity = np.array([0.18, -0.12, 0.01])
+    seed_velocity_setpoint = np.array([0.03, -0.02, 0.015])
     seed_angular_velocity = np.array([0.01, -0.015, 0.02])
     seed_acceleration_setpoint = np.array([0.04, -0.03, 0.02])
     seed_acceleration = np.array([0.05, -0.04, 0.03])
@@ -1130,6 +1139,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         controller_dt_s=0.004,
         physical_linear_velocity_enu=physical_seed_velocity,
         filtered_linear_velocity_enu=seed_velocity,
+        velocity_setpoint_enu_mps=seed_velocity_setpoint,
         angular_velocity_body_flu=seed_angular_velocity,
         acceleration_setpoint_enu_mps2=seed_acceleration_setpoint,
         linear_acceleration_enu_mps2=seed_acceleration,
@@ -1154,6 +1164,10 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         ).reshape(1, 3),
         filtered_linear_velocity_world=torch.as_tensor(
             seed_velocity,
+            dtype=torch.float32,
+        ).reshape(1, 3),
+        velocity_setpoint_world=torch.as_tensor(
+            seed_velocity_setpoint,
             dtype=torch.float32,
         ).reshape(1, 3),
         filtered_angular_velocity_body=torch.as_tensor(

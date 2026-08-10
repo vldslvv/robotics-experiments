@@ -10733,3 +10733,37 @@ collective from 0.479081 N to a pass and leaves only three narrow failures:
 forward collective 0.057753 N, lateral-ramp motor 0.010227, and combined motor
 0.011384. Commit this boundary correction before acquiring another reference;
 all target evidence produced with the incomplete seed is diagnostic only.
+
+### 336. Complete velocity-setpoint boundary clears controller replay
+
+Date: 2026-08-10.
+
+The corrected `20260810T-complete-boundary-scratch` campaign captured and
+audited a fresh PX4 reference, then evaluated 4,681 unique candidates in 47 GPU
+batches. Candidate 4506 passed all six-axis motion gates, but controller replay
+failed four collective profiles and the live hover gate missed its last-window
+limit at 0.109 m against 0.100 m. The sweep averaged 23.4% GPU utilization; its
+GPU work completed in 1,590 seconds, while writing and reparsing 3.8 GB of full
+candidate traces remained the major host-side bottleneck. Nothing was
+published.
+
+Reranking the 200 motion-passing candidates by distance to the replay frontier
+identified candidate 3292. It reduced replay to two narrow collective failures:
+0.053017 N forward and 0.056694 N on the Z envelope. A 25-point cadence/Z-gain
+sweep and a 45-point pinned Z-integral sweep showed that 204 Hz, Z P=4.0, and Z
+I=2.0 clear the Z boundary but leave the forward profile at 0.052289 N.
+
+The remaining error was not a gain residual. The profile starts while PX4 still
+holds the small nonzero recenter velocity setpoint that generated its seeded
+acceleration and integrator state. For the forward profile, the omitted
+-0.002816 m/s NED Z setpoint times the pinned gain accounts for 0.0113 m/s2,
+nearly the complete observed 0.0133 m/s2 boundary error. Extend the strict trace
+with `initial_velocity_setpoint_enu_mps` from
+`vehicle_local_position_setpoint`, and use it when reconstructing the velocity
+integral in both NumPy and Torch.
+
+With that complete boundary, the 204 Hz / pinned-gain diagnostic passes every
+controller replay gate. Forward collective falls to 0.008163 N, with zero
+replay failures. Promote 204 Hz and the declarative Z-integral range
+`[2.0, 2.05, 2.1]`; reacquire and refit from a clean commit because all earlier
+target traces used the incomplete seed.

@@ -486,6 +486,9 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
                     "acceleration[0]": np.array([1.0, 3.0]),
                     "acceleration[1]": np.array([2.0, 4.0]),
                     "acceleration[2]": np.array([3.0, 5.0]),
+                    "vx": np.array([0.01, 0.03]),
+                    "vy": np.array([0.02, 0.04]),
+                    "vz": np.array([0.03, 0.05]),
                 },
             ),
             dataset(
@@ -573,6 +576,7 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
     assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
+    assert trace["initial_velocity_setpoint_enu_mps"] == pytest.approx([0.03, 0.02, -0.04])
     assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
         [0.2, -0.3, -0.4]
     )
