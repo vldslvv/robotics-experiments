@@ -11557,6 +11557,30 @@ unchanged. Replay every motion pass before live evaluation, prioritizing X bias
 0.005 m/s because the measured live response improved approximately 8 mm per
 0.001 m/s across the prior two replay-safe candidates.
 
+### 373. Filter transition exposes a narrow bias/scale crossing
+
+Date: 2026-08-10.
+
+The 3-30 Hz filter-transition search evaluated 588 unique candidates in eight
+GPU batches and 278.9 seconds at 27.2% average sampled GPU utilization. No
+candidate passes every motion gate. Selected candidate 309 uses decay 0.05 Hz,
+X bias 0.0045 m/s, a 30 Hz X filter, and X scale 0.92. Every gate except X
+braking passes; braking is 5.411 mm and combined endpoint is 9.850 mm.
+
+The local response is smooth and identifies a feasible joint crossing. At the
+selected bias and filter, changing X scale from 0.94 to 0.92 improves braking
+from 6.504 mm to 5.411 mm while increasing endpoint error from 7.984 mm to
+9.850 mm. At scale 0.92, raising bias from 0.0045 to 0.0050 m/s improves the
+endpoint to 8.936 mm while braking changes to 5.697 mm. Linear interpolation
+therefore places the joint braking/endpoint pass near bias 0.0052-0.0054 m/s
+and scale 0.902-0.908.
+
+Search that narrow region with X scale 0.900-0.910 in 0.002 steps, X bias
+0.0050-0.0058 m/s in 0.0002 steps, 20/30 Hz X filtering, and decay 0.05/0.075
+Hz. This is an evidenced boundary refinement: keep Y/Z, pinned PX4 gains,
+controller structure, all probes, replay limits, and quality gates unchanged.
+Replay every motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
