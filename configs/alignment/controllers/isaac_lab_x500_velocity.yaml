@@ -80,7 +80,7 @@ parameters:
     stage: 4
     candidates: [[0.0, 0.0, 0.0]]
   # Scale above 0.94 crosses residual speed but lengthens braking; fit it jointly
-  # with the derivative gain below.
+  # with lateral integral authority below.
   - field: velocity_observation_scale
     stage: 5
     candidates:
@@ -88,17 +88,17 @@ parameters:
       - [0.98, 0.9500, 1.0]
       - [0.98, 0.9600, 1.0]
       - [0.98, 0.9700, 1.0]
-  # PX4's D term opposes deceleration while the measured velocity is falling.
-  # Reduce only Y derivative authority to recover braking at the residual-speed
-  # scale crossing; X and Z retain their pinned values.
-  - field: kd_vel
+  # The lateral trace retains excessive negative velocity after the reversal.
+  # Reduce only Y integral accumulation to recover both residual speed and
+  # braking; X and Z retain their pinned values.
+  - field: ki_vel
     stage: 6
     candidates:
-      - [0.2, 0.00, 0.0]
-      - [0.2, 0.05, 0.0]
-      - [0.2, 0.10, 0.0]
-      - [0.2, 0.15, 0.0]
-      - [0.2, 0.20, 0.0]
+      - [0.4, 0.05, 2.0]
+      - [0.4, 0.10, 2.0]
+      - [0.4, 0.20, 2.0]
+      - [0.4, 0.30, 2.0]
+      - [0.4, 0.40, 2.0]
   # The physical-state Y replay crossing is minimized near the evidenced
   # 23.75 Hz rate-input filter while preserving every motion gate.
   - field: angular_velocity_filter_hz
@@ -109,22 +109,18 @@ parameters:
   - field: kp_vel
     stage: 8
     candidates: [[1.8, 1.8, 4.0]]
-  # The complete velocity-setpoint boundary uses the pinned PX4 integral gain.
-  - field: ki_vel
-    stage: 9
-    candidates: [[0.4, 0.4, 2.0]]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 10
+    stage: 9
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 11
+    stage: 10
     candidates: [1.0005]
 
 selection_metric: controller-quality

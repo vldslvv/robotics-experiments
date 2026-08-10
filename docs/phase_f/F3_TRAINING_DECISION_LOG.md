@@ -11003,3 +11003,24 @@ opposes deceleration while measured velocity falls.  Search Y D from 0 through
 the pinned 0.2 jointly with scales 0.94 through 0.97, keeping X/Z D and every
 other controller field unchanged.  Replay any motion pass before revisiting the
 independent angular-filter motor boundary.
+
+### 345. Derivative authority is not the lateral crossing
+
+Date: 2026-08-10.
+
+The derivative diagnostic evaluated 50 unique candidates in four GPU batches
+and 101.9 seconds at 33.2% average sampled GPU utilization.  Candidate 3 at Y
+scale 0.95 and pinned Y D=0.2 passed residual speed at 0.009972 m/s and endpoint
+at 8.738 mm, but missed Y braking at 6.516 mm.  Reducing Y D lengthened braking
+and moved the combined endpoint away; it is not the required correction.
+
+The selected diagnostic point retained one motion failure.  Mandatory replay
+again failed only the vertical reversal physical-state normalized motor RMSE,
+at 0.010478 against 0.01.  The repeated motor failure is tied to the larger
+endpoint-correcting X observation offset and remains queued behind motion.
+
+The lateral reversal trace ends at -0.01373 m/s for candidate 3 versus PX4 at
+-0.00344 m/s.  Excess retained negative velocity after the negative command is
+consistent with integral accumulation.  Search Y integral gain from 0.05
+through the pinned 0.4 jointly with Y scale 0.94 through 0.97.  Keep X/Z
+integral gains and every other controller field fixed.
