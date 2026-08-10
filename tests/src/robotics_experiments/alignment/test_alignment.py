@@ -80,6 +80,7 @@ def _settings(
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 2.0),
         hover_thrust_normalized=0.57,
+        ctbr_effective_collective_scale=1.0,
         kp_att=(6.0, 6.0, 2.0),
         attitude_yaw_weight=0.4,
         kp_rate=(1.2, 1.2, 0.4),
@@ -406,6 +407,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "kp_vel",
         "ki_vel",
         "velocity_integral_limit_mps2",
+        "ctbr_effective_collective_scale",
     )
     assert target.parameters[0].candidates == pytest.approx(
         (
@@ -444,7 +446,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         pytest.approx((0.4, 0.4, 2.05)),
         pytest.approx((0.4, 0.4, 2.1)),
     )
-    assert target.parameters[-1].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
+    assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
+    assert target.parameters[-1].candidates == pytest.approx((1.0, 1.0005, 1.001, 1.0015, 1.002))
     extended = replace(
         target,
         parameters=(

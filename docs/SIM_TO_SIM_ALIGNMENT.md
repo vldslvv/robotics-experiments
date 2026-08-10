@@ -30,6 +30,9 @@ scale, armed-zero position, quadratic rotor curve, and actuator rise/fall model.
 The composed Holybro X500 mapping is `omega = 50 + 475*u`; its physical hover
 input is approximately 0.375. Controller hover is represented only by
 `hover_thrust_normalized` at the PX4 controller boundary.
+For CTBR, `ctbr_effective_collective_scale` maps the raw streamed collective
+to the effective inner-loop collective observed at PX4's motor boundary; it
+does not change the raw normalized-action or OFFBOARD command contract.
 
 NumPy is the single-environment reference and the Isaac Lab Torch seam is its
 batched twin. Both apply the same filter, saturation, anti-windup, reset, and

@@ -10804,3 +10804,32 @@ Mandatory replay on the rejected selection passed the forward boundary at
 envelope at 0.374102 N, moderate stability at 0.206445 N, and pitch collective
 at 0.052504 N. The live gate also failed hover last-window error at 0.115 m
 against 0.100 m. Nothing was finalized or published.
+
+### 338. Motion crossing exposes two narrow replay boundaries
+
+Date: 2026-08-10.
+
+Two preserved-reference diagnostics followed the failed scratch selection.
+The first pinned the replay-valid 204 Hz cadence and Z P/I gains and searched
+lateral derivative gain, observation scale, and offset. It reduced Y braking
+error from 9.115 mm to 5.389 mm while retaining the endpoint pass. The second
+extended Y observation scale through the evidenced crossing and found 54
+candidates that passed every motion gate. Candidate 447 used Y scale 0.87 and
+passed Y braking at 3.771 mm and the combined endpoint at 9.911 mm.
+
+Mandatory replay narrowed that motion pass to two failures. Physical-state Y
+motor RMSE was 0.011947 against 0.01, while the core estimated-state replay was
+0.000634. A parallel 55-point replay over eleven motion-passing candidates and
+five attitude cadences found the best Y value at 0.010583; cadence did not
+remove it. This supports searching a stateful Y observation filter with scale
+closer to one rather than extending the static scale correction farther.
+
+The second failure was the pitch CTBR collective at 0.052504 N against 0.05 N.
+ULog inspection shows the raw 0.57 MAVLink command interleaved with PX4's
+slightly higher effective rate-controller collective between 20 Hz command
+updates. The target modeled a perfect pass-through. Add one declarative
+`ctbr_effective_collective_scale` field which changes only the simulator-side
+effective inner-loop collective, retaining the raw policy/OFFBOARD command.
+Search 1.0000 through 1.0020, and search Y filter, scale, and offset jointly
+around the motion crossing. These diagnostics remain preserved evidence; a
+passing candidate still requires a fresh clean-source campaign.

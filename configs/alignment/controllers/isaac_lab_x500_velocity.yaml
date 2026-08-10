@@ -27,6 +27,8 @@ settings:
   velocity_integral_limit_mps2: [0.35, 0.35, 4.0]
   # PX4-normalized hover-thrust boundary used before control allocation.
   hover_thrust_normalized: 0.54
+  # Effective rate-controller collective per streamed raw CTBR collective.
+  ctbr_effective_collective_scale: 1.0
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]
@@ -199,6 +201,12 @@ parameters:
     stage: 8
     candidates:
       - [0.35, 0.35, 4.0]
+  # The streamed CTBR collective is intermittently interleaved with PX4's
+  # prior attitude-controller output. Fit the effective inner-loop collective
+  # observed at the motor boundary while retaining the raw command contract.
+  - field: ctbr_effective_collective_scale
+    stage: 9
+    candidates: [1.0000, 1.0005, 1.0010, 1.0015, 1.0020]
 
 selection_metric: controller-quality
 publication_metrics:

@@ -137,6 +137,7 @@ def _controller_settings() -> ControllerSettings:
         velocity_derivative_filter_hz=5.0,
         velocity_integral_limit_mps2=(2.0, 2.0, 4.0),
         hover_thrust_normalized=0.57,
+        ctbr_effective_collective_scale=1.0,
         kp_att=(8.0, 8.0, 3.0),
         attitude_yaw_weight=0.4,
         kp_rate=(0.3, 0.3, 0.1),
@@ -403,6 +404,32 @@ def test_ctbr_hover_action_uses_normalized_controller_collective():
     )
     assert force_body[2] == pytest.approx(expected, rel=1e-6)
     assert np.allclose(torque_body, 0.0, atol=1e-9)
+
+
+def test_ctbr_effective_collective_scale_preserves_raw_command_boundary():
+    settings = replace(_controller_settings(), ctbr_effective_collective_scale=1.001)
+    params = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("ctbr"),
+        controller_settings=settings,
+        mass=_MASS_KG,
+    )
+    command = normalized_action_to_controller_command(
+        params,
+        np.zeros(4),
+        _level_rest_state().attitude_flu_enu_wxyz,
+    )
+    _controller, omega = controller_command_to_rotor_omega(
+        params,
+        initial_actuation_controller_state(),
+        command,
+        _level_rest_state(),
+        0.004,
+    )
+
+    assert command[0] == pytest.approx(params.hover_thrust_normalized)
+    expected_control = params.hover_thrust_normalized * settings.ctbr_effective_collective_scale
+    assert omega == pytest.approx(params.geometry.input_scaling * expected_control)
 
 
 def test_velocity_forward_command_tilts_toward_plus_x():

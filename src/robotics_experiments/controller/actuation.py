@@ -151,6 +151,7 @@ class ActuationParams:
     velocity_controller_rate_hz: float
     attitude_controller_rate_hz: float
     hover_thrust_normalized: float
+    ctbr_effective_collective_scale: float
     kp_vel: np.ndarray
     horizontal_velocity_error_gain_scale: float
     horizontal_velocity_error_gain_start_mps: float
@@ -757,7 +758,7 @@ def _ctbr_command_to_omega(
     loops are the policy's job. Command conversion maps the normalized action to
     hover-centered collective thrust and physical body rates at ingestion.
     """
-    collective = float(command[0])
+    collective = float(np.clip(command[0] * params.ctbr_effective_collective_scale, 0.0, 1.0))
     body_rate_setpoint = command[1:4]
     return _rate_to_omega(
         params,
@@ -854,6 +855,7 @@ def build_actuation_params(
         velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
         attitude_controller_rate_hz=float(controller_settings.attitude_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
+        ctbr_effective_collective_scale=float(controller_settings.ctbr_effective_collective_scale),
         kp_vel=_readonly_copy(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
             controller_settings.horizontal_velocity_error_gain_scale

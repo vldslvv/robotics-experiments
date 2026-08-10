@@ -32,6 +32,7 @@ settings:
   velocity_integral_limit_mps2: [2.0, 2.0, 4.0]
   # Seed for the normalized PX4 thrust boundary.
   hover_thrust_normalized: 0.57
+  ctbr_effective_collective_scale: 1.0
   kp_att: [4.0, 4.0, 2.8]
   attitude_yaw_weight: 0.4
   kp_rate: [0.15, 0.15, 0.20]

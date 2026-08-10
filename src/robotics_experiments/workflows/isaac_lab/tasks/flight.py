@@ -118,6 +118,7 @@ class _FlightActuationParams:
     velocity_controller_rate_hz: float
     attitude_controller_rate_hz: float | torch.Tensor
     hover_thrust_normalized: float | torch.Tensor
+    ctbr_effective_collective_scale: float | torch.Tensor
     kp_vel: torch.Tensor
     horizontal_velocity_error_gain_scale: float | torch.Tensor
     horizontal_velocity_error_gain_start_mps: float | torch.Tensor
@@ -640,7 +641,11 @@ def _ctbr(
     dt_s: float,
     /,
 ) -> tuple[_FlightControllerState, torch.Tensor]:
-    collective = command[:, 0]
+    effective_scale = _environment_values(
+        params.ctbr_effective_collective_scale,
+        command[:, 0],
+    )
+    collective = torch.clamp(command[:, 0] * effective_scale, 0.0, 1.0)
     body_rate_setpoint = command[:, 1:4]
     return _rate_to_omega(
         params,
@@ -1008,6 +1013,7 @@ def build_flight_actuation_params(
         velocity_controller_rate_hz=float(controller_settings.velocity_controller_rate_hz),
         attitude_controller_rate_hz=float(controller_settings.attitude_controller_rate_hz),
         hover_thrust_normalized=float(controller_settings.hover_thrust_normalized),
+        ctbr_effective_collective_scale=float(controller_settings.ctbr_effective_collective_scale),
         kp_vel=_tensor(controller_settings.kp_vel),
         horizontal_velocity_error_gain_scale=float(
             controller_settings.horizontal_velocity_error_gain_scale
@@ -1101,6 +1107,7 @@ def _replace_controller_settings_batch(
         velocity_derivative_filter_hz=_scalars("velocity_derivative_filter_hz"),
         velocity_integral_limit_mps2=_vectors("velocity_integral_limit_mps2"),
         hover_thrust_normalized=_scalars("hover_thrust_normalized"),
+        ctbr_effective_collective_scale=_scalars("ctbr_effective_collective_scale"),
         kp_att=_vectors("kp_att"),
         attitude_yaw_weight=_scalars("attitude_yaw_weight"),
         attitude_controller_rate_hz=_scalars("attitude_controller_rate_hz"),

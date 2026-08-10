@@ -139,6 +139,11 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.hover_thrust_normalized",
             positive=True,
         ),
+        ctbr_effective_collective_scale=_finite(
+            value=payload["ctbr_effective_collective_scale"],
+            name=f"{name}.ctbr_effective_collective_scale",
+            positive=True,
+        ),
         kp_att=_vector(payload["kp_att"], f"{name}.kp_att"),
         attitude_yaw_weight=_finite(
             value=payload["attitude_yaw_weight"],

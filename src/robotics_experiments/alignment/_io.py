@@ -158,6 +158,11 @@ def _settings(
             name=f"{name}.hover_thrust_normalized",
             positive=True,
         ),
+        ctbr_effective_collective_scale=_finite(
+            value=settings["ctbr_effective_collective_scale"],
+            name=f"{name}.ctbr_effective_collective_scale",
+            positive=True,
+        ),
         kp_att=_vector(value=settings["kp_att"], name=f"{name}.kp_att"),
         attitude_yaw_weight=_finite(
             value=settings["attitude_yaw_weight"],
