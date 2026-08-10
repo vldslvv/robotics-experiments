@@ -12,6 +12,7 @@ from flight_analysis.tools.controller_state_replay import (
     _augment_reference_controller_state,
     _bridge_actuator_samples,
     _bridge_state_samples,
+    _collective_boundary_metrics,
     _controller_setpoint_delay_scan,
     _controller_setpoint_metrics,
     _delay_transmitted_actions,
@@ -277,6 +278,21 @@ def test_controller_setpoint_metrics_keep_each_rate_axis_visible():
             [np.sqrt(0.01 / 2.0), 0.2, 0.2 / np.sqrt(2.0)]
         ),
         "collective_setpoint_rmse": pytest.approx(0.05 / np.sqrt(2.0)),
+    }
+
+
+def test_collective_boundary_metrics_keep_each_handoff_visible() -> None:
+    metrics = _collective_boundary_metrics(
+        target_desired_collective=np.array([0.50, 0.60]),
+        px4_attitude_collective=np.array([0.50, 0.62]),
+        px4_rate_collective=np.array([0.51, 0.62]),
+        px4_allocator_collective=np.array([0.51, 0.65]),
+    )
+
+    assert metrics == {
+        "desired_to_attitude_collective_rmse": pytest.approx(0.02 / np.sqrt(2.0)),
+        "attitude_to_rate_collective_rmse": pytest.approx(0.01 / np.sqrt(2.0)),
+        "rate_to_allocator_collective_rmse": pytest.approx(0.03 / np.sqrt(2.0)),
     }
 
 

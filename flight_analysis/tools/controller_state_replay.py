@@ -412,6 +412,38 @@ def _controller_setpoint_metrics(
     }
 
 
+def _collective_boundary_metrics(
+    *,
+    target_desired_collective: np.ndarray,
+    px4_attitude_collective: np.ndarray,
+    px4_rate_collective: np.ndarray,
+    px4_allocator_collective: np.ndarray,
+) -> dict[str, float]:
+    """Keep the velocity controller's collective handoffs independently visible."""
+    boundaries = tuple(
+        np.asarray(values, dtype=np.float64)
+        for values in (
+            target_desired_collective,
+            px4_attitude_collective,
+            px4_rate_collective,
+            px4_allocator_collective,
+        )
+    )
+    if (
+        any(values.ndim != 1 for values in boundaries)
+        or len({len(values) for values in boundaries}) != 1
+    ):
+        raise ValueError("collective boundary samples must be equally sized vectors")
+    if not all(np.all(np.isfinite(values)) for values in boundaries):
+        raise ValueError("collective boundary samples must be finite")
+    desired, attitude, rate, allocator = boundaries
+    return {
+        "desired_to_attitude_collective_rmse": _root_mean_square(values=desired - attitude),
+        "attitude_to_rate_collective_rmse": _root_mean_square(values=attitude - rate),
+        "rate_to_allocator_collective_rmse": _root_mean_square(values=rate - allocator),
+    }
+
+
 def _controller_setpoint_delay_scan(
     *,
     target_body_rate_grid_flu: np.ndarray,
@@ -1224,6 +1256,7 @@ def _report(
     px4_wrench_rows: list[np.ndarray] = []
     isaac_wrench_rows: list[np.ndarray] = []
     isaac_rate_setpoint_rows: list[np.ndarray] = []
+    isaac_desired_collective_rows: list[float] = []
     isaac_collective_setpoint_rows: list[float] = []
     isaac_acceleration_setpoint_rows: list[np.ndarray] = []
     isaac_velocity_integral_rows: list[np.ndarray] = []
@@ -1268,6 +1301,7 @@ def _report(
     )
     isaac_omega_grid: list[np.ndarray] = []
     isaac_rate_setpoint_grid: list[np.ndarray] = []
+    isaac_desired_collective_grid: list[float] = []
     isaac_collective_setpoint_grid: list[float] = []
     isaac_acceleration_setpoint_grid: list[np.ndarray] = []
     isaac_velocity_integral_grid: list[np.ndarray] = []
@@ -1343,6 +1377,11 @@ def _report(
         isaac_rate_setpoint_grid.append(
             command[1:4] if control_mode == "ctbr" else controller_state.body_rate_setpoint
         )
+        isaac_desired_collective_grid.append(
+            float(command[0])
+            if control_mode == "ctbr"
+            else controller_state.desired_collective_thrust_setpoint
+        )
         isaac_collective_setpoint_grid.append(
             float(command[0])
             if control_mode == "ctbr"
@@ -1388,6 +1427,7 @@ def _report(
         px4_wrench_rows.append(_wrench(geometry=geometry, omega=px4_omega))
         isaac_wrench_rows.append(_wrench(geometry=geometry, omega=isaac_omega))
         isaac_rate_setpoint_rows.append(isaac_rate_setpoint_grid[replay_sample_index])
+        isaac_desired_collective_rows.append(isaac_desired_collective_grid[replay_sample_index])
         isaac_collective_setpoint_rows.append(isaac_collective_setpoint_grid[replay_sample_index])
         isaac_acceleration_setpoint_rows.append(
             isaac_acceleration_setpoint_grid[replay_sample_index]
@@ -1409,6 +1449,10 @@ def _report(
     px4_wrench_array = np.stack(px4_wrench_rows)
     isaac_wrench_array = np.stack(isaac_wrench_rows)
     isaac_rate_setpoint_array = np.stack(isaac_rate_setpoint_rows)
+    isaac_desired_collective_array = np.asarray(
+        isaac_desired_collective_rows,
+        dtype=np.float64,
+    )
     isaac_collective_setpoint_array = np.asarray(
         isaac_collective_setpoint_rows,
         dtype=np.float64,
@@ -1550,6 +1594,11 @@ def _report(
             + params.kd_vel[2] * isaac_acceleration_array[:, 2]
         )
         velocity_integral_z_error = isaac_velocity_integral_array[:, 2] - px4_velocity_integral_z
+        px4_attitude_collective = -np.asarray(
+            attitude_setpoint["thrust_body[2]"],
+            dtype=np.float64,
+        )[attitude_setpoint_index]
+        px4_allocator_collective = np.linalg.norm(thrust_setpoint_body, axis=1)
         vertical_setpoint_delay_scan = _vertical_setpoint_delay_scan(
             target_acceleration_setpoint_grid_enu=np.stack(isaac_acceleration_setpoint_grid),
             replay_indices=np.asarray(used_replay_indices),
@@ -1557,6 +1606,12 @@ def _report(
             maximum_delay_steps=3,
         )
         outer_loop_metrics = {
+            **_collective_boundary_metrics(
+                target_desired_collective=isaac_desired_collective_array,
+                px4_attitude_collective=px4_attitude_collective,
+                px4_rate_collective=px4_collective_setpoint,
+                px4_allocator_collective=px4_allocator_collective,
+            ),
             "vertical_acceleration_setpoint_rmse_mps2": _root_mean_square(
                 values=acceleration_setpoint_z_error
             ),

@@ -156,6 +156,9 @@ at their source timestamps. For velocity profiles it also reconstructs PX4's
 exact vertical acceleration setpoint from the full-rate desired attitude,
 collective thrust, and hover estimate, then reports acceleration-setpoint and
 inferred velocity-integral error before the thrust conversion boundary. It
+keeps desired-collective to attitude-setpoint, attitude-setpoint to
+rate-setpoint, and rate-setpoint to allocator-thrust error separate so the
+first divergent vertical boundary is explicit. It
 scans that upstream vertical setpoint over zero through three physics ticks so
 outer-loop phase error remains separate from controller gains. A
 zero-through-three-tick delay scan compares the target attitude-loop output to
