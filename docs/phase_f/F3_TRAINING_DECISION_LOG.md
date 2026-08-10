@@ -11593,3 +11593,30 @@ bias around zero together with the already-evidenced lower X scale, and search
 Z steady bias independently to remove the signed +14.3 mm vertical endpoint.
 Keep the pinned PX4 gains, controller structure, all probes, replay limits, and
 quality gates unchanged. Replay every motion pass before live evaluation.
+
+### 370. Pinned controller passes motion and replay; live handoff is too close
+
+Date: 2026-08-10.
+
+The focused X-braking/Z-endpoint search evaluated 1,540 unique candidates in
+15 GPU batches and 570.2 seconds at 25.2% average sampled GPU utilization.
+Eleven candidates pass every motion gate with pinned PX4 velocity gains.
+Selected candidate 500 uses decay 0.075 Hz, zero steady observation bias and
+filter, X scale 0.94, and unit Y/Z scale. X braking is 4.714 mm, X stop time is
+exactly 0.10 s, and combined endpoint is 9.982 mm. All 22 core and
+physical-state controller-boundary replay profiles pass with zero failures.
+
+The authoritative live gate passes hover and goto stability but rejects the
+handoff endpoint. Hover final error is 0.041 m; goto final error is 0.046 m.
+The vehicle settles 0.434 m from the switch and the handoff predicate reports
+`TOO_CLOSE`. The earlier replay-safe positive-X-bias controller settled at
+0.498 m, so the signed live response supports a small positive X observer bias
+rather than a controller or plant change.
+
+The selected motion endpoint vector is [+9.781, +0.460, -1.941] mm. Nearby
+scale 0.92 candidate 702 moves it to [+7.759, -3.499, -1.939] mm, leaving room
+for a positive X bias to reduce forward endpoint displacement while a lower X
+scale preserves braking. Search positive X bias 0.001-0.006 m/s against X
+scale 0.82-0.92 and decay 0.05-0.10 Hz. Keep Y/Z observer correction, pinned
+PX4 gains, controller structure, all probes, replay limits, and quality gates
+unchanged. Replay every motion pass before live evaluation.
