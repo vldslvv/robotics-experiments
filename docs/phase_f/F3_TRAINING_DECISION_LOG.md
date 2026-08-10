@@ -10596,3 +10596,22 @@ setting or a policy-training input. The deployable NumPy and Torch controller
 retains its deterministic 200 Hz cadence. Keep the mask only if the complete
 execution order reduces the four-failure frontier without regressing a passed
 boundary; otherwise remove it and continue deterministic schedule fitting.
+
+### 330. Upstream attitude timestamps remain the wrong replay trigger
+
+Date: 2026-08-10.
+
+The exact `vehicle_attitude` update mask plus the evidenced one-tick handoff
+regresses the selected 200 Hz deterministic frontier from four failures to
+six. Z collective rises from 0.170968 N to 0.325336 N, moderate collective
+rises from 0.073508 N to 0.253126 N, moderate physical motor regresses from a
+pass to 0.011483, and vertical-ramp collective fails again at 0.061899 N.
+
+Preserve `controller_boundary_replay-attitude-schedule-with-handoff.json` as
+negative evidence. As before, `vehicle_attitude` publication timestamps do not
+identify the downstream controller output schedule reliably. The remaining
+bounded schedule diagnostic is to trigger the replay attitude output from the
+recorded `vehicle_rates_setpoint` publication ticks and retain the one-tick
+rate-to-allocator handoff. This directly joins the boundary being compared;
+it must remain replay-only while the deployable controller continues to use
+the selected deterministic cadence.
