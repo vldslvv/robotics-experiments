@@ -124,6 +124,10 @@ class _FlightActuationParams:
     horizontal_velocity_error_gain_start_mps: float | torch.Tensor
     horizontal_velocity_error_gain_full_mps: float | torch.Tensor
     horizontal_velocity_error_gain_end_mps: float | torch.Tensor
+    horizontal_velocity_braking_gain_scale: float | torch.Tensor
+    horizontal_velocity_braking_gain_start_mps: float | torch.Tensor
+    horizontal_velocity_braking_gain_full_mps: float | torch.Tensor
+    horizontal_velocity_braking_gain_end_mps: float | torch.Tensor
     ki_vel: torch.Tensor
     kd_vel: torch.Tensor
     velocity_observation_scale: torch.Tensor
@@ -518,32 +522,43 @@ def _normalized_thrust_world(
     )
 
 
+def _horizontal_gain_lobe(
+    *,
+    horizontal_error: torch.Tensor,
+    scale: float | torch.Tensor,
+    start: float | torch.Tensor,
+    full: float | torch.Tensor,
+    end: float | torch.Tensor,
+) -> torch.Tensor:
+    start = _environment_values(start, horizontal_error)
+    full = _environment_values(full, horizontal_error)
+    transition = torch.clamp((horizontal_error - start) / (full - start), 0.0, 1.0)
+    rise = transition.square() * (3.0 - 2.0 * transition)
+    end = _environment_values(end, horizontal_error)
+    fall_transition = torch.clamp((horizontal_error - full) / (end - full), 0.0, 1.0)
+    fall = fall_transition.square() * (3.0 - 2.0 * fall_transition)
+    blend = rise * (1.0 - fall)
+    maximum_scale = _environment_values(scale, horizontal_error)
+    return 1.0 + (maximum_scale - 1.0) * blend
+
+
 def _effective_velocity_proportional_gain(
     params: _FlightActuationParams, velocity_error: torch.Tensor, /
 ) -> torch.Tensor:
     horizontal_error = velocity_error[:, :2].norm(dim=-1)
-    start = _environment_values(
-        params.horizontal_velocity_error_gain_start_mps,
-        horizontal_error,
+    scale = _horizontal_gain_lobe(
+        horizontal_error=horizontal_error,
+        scale=params.horizontal_velocity_error_gain_scale,
+        start=params.horizontal_velocity_error_gain_start_mps,
+        full=params.horizontal_velocity_error_gain_full_mps,
+        end=params.horizontal_velocity_error_gain_end_mps,
+    ) * _horizontal_gain_lobe(
+        horizontal_error=horizontal_error,
+        scale=params.horizontal_velocity_braking_gain_scale,
+        start=params.horizontal_velocity_braking_gain_start_mps,
+        full=params.horizontal_velocity_braking_gain_full_mps,
+        end=params.horizontal_velocity_braking_gain_end_mps,
     )
-    full = _environment_values(
-        params.horizontal_velocity_error_gain_full_mps,
-        horizontal_error,
-    )
-    transition = torch.clamp((horizontal_error - start) / (full - start), 0.0, 1.0)
-    rise = transition.square() * (3.0 - 2.0 * transition)
-    end = _environment_values(
-        params.horizontal_velocity_error_gain_end_mps,
-        horizontal_error,
-    )
-    fall_transition = torch.clamp((horizontal_error - full) / (end - full), 0.0, 1.0)
-    fall = fall_transition.square() * (3.0 - 2.0 * fall_transition)
-    blend = rise * (1.0 - fall)
-    maximum_scale = _environment_values(
-        params.horizontal_velocity_error_gain_scale,
-        horizontal_error,
-    )
-    scale = 1.0 + (maximum_scale - 1.0) * blend
     xyz_scale = torch.stack([scale, scale, torch.ones_like(scale)], dim=-1)
     return params.kp_vel * xyz_scale
 
@@ -1025,6 +1040,18 @@ def build_flight_actuation_params(
         horizontal_velocity_error_gain_end_mps=float(
             controller_settings.horizontal_velocity_error_gain_end_mps
         ),
+        horizontal_velocity_braking_gain_scale=float(
+            controller_settings.horizontal_velocity_braking_gain_scale
+        ),
+        horizontal_velocity_braking_gain_start_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_start_mps
+        ),
+        horizontal_velocity_braking_gain_full_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_full_mps
+        ),
+        horizontal_velocity_braking_gain_end_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_end_mps
+        ),
         ki_vel=_tensor(controller_settings.ki_vel),
         kd_vel=_tensor(controller_settings.kd_vel),
         velocity_observation_scale=_tensor(controller_settings.velocity_observation_scale),
@@ -1100,6 +1127,16 @@ def _replace_controller_settings_batch(
         ),
         horizontal_velocity_error_gain_full_mps=_scalars("horizontal_velocity_error_gain_full_mps"),
         horizontal_velocity_error_gain_end_mps=_scalars("horizontal_velocity_error_gain_end_mps"),
+        horizontal_velocity_braking_gain_scale=_scalars("horizontal_velocity_braking_gain_scale"),
+        horizontal_velocity_braking_gain_start_mps=_scalars(
+            "horizontal_velocity_braking_gain_start_mps"
+        ),
+        horizontal_velocity_braking_gain_full_mps=_scalars(
+            "horizontal_velocity_braking_gain_full_mps"
+        ),
+        horizontal_velocity_braking_gain_end_mps=_scalars(
+            "horizontal_velocity_braking_gain_end_mps"
+        ),
         ki_vel=_vectors("ki_vel"),
         kd_vel=_vectors("kd_vel"),
         velocity_observation_scale=_vectors("velocity_observation_scale"),

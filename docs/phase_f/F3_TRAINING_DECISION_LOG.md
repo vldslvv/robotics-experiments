@@ -11873,6 +11873,38 @@ branch, test the remaining error-only separation: search gain scale
 observation scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and
 quality gates. Replay every motion pass before live evaluation.
 
+### 382. One gain lobe cannot preserve braking and live recovery
+
+Date: 2026-08-10.
+
+The sharp error-band search evaluated 676 unique candidates in 11 GPU batches
+and 365.5 seconds at 28.5% average sampled GPU utilization. Exact caching
+removed 1,172 of 1,848 attempted settings. One hundred seventy-five candidates
+pass every motion gate, and exhaustive replay shows that 72 also pass all 22
+controller-boundary profiles.
+
+Candidate 570 uses decay 0.075 Hz, X bias 0.0045 m/s, X observation scale 0.91,
+gain scale 0.90, and schedule 0.055/0.070/0.075 m/s. Its X braking error is
+4.757 mm, endpoint error is 2.965 mm, and worst replay motor RMSE is 0.009960.
+The authoritative 16-environment live gate nevertheless reproduces the exact
+prior rejection: final hover error is 0.049 m and last-second maximum is 0.107
+m. Moving the falling edge below the measured 0.076 m/s recovery error does not
+alter the state at the beginning of the final hover window.
+
+The retained evidence separates two required responses. The earlier high-error
+1.19 gain lobe passes live hover and goto, but its 0.15 m/s start cannot affect
+the 0.0724 m/s zero-command braking boundary. Replacing that lobe with
+low-error attenuation fixes braking and replay but removes the recovery boost.
+Represent both evidenced ranges explicitly: retain the existing
+`horizontal_velocity_error_gain_*` lobe at 1.19 and 0.15/0.30/0.50 m/s, and add
+a disjoint `horizontal_velocity_braking_gain_*` lobe. Fit the new braking scale
+0.70/0.80/0.90 and start/full/end candidates 0.055/0.060,
+0.065/0.070, and 0.075/0.080 m/s. Add all four fields through declarative
+`ParameterSpec` candidates, strict artifact validation, and NumPy/Torch parity
+coverage. Retain decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X observation
+scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and quality
+gates unchanged.
+
 ### 370. Pinned controller passes motion and replay; live handoff is too close
 
 Date: 2026-08-10.

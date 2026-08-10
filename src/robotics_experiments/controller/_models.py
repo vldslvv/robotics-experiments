@@ -21,6 +21,10 @@ class ControllerSettings:
     horizontal_velocity_error_gain_start_mps: float
     horizontal_velocity_error_gain_full_mps: float
     horizontal_velocity_error_gain_end_mps: float
+    horizontal_velocity_braking_gain_scale: float
+    horizontal_velocity_braking_gain_start_mps: float
+    horizontal_velocity_braking_gain_full_mps: float
+    horizontal_velocity_braking_gain_end_mps: float
     ki_vel: Vector3
     kd_vel: Vector3
     velocity_observation_scale: Vector3

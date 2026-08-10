@@ -129,6 +129,10 @@ def _controller_settings() -> ControllerSettings:
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
         horizontal_velocity_error_gain_end_mps=0.80,
+        horizontal_velocity_braking_gain_scale=1.0,
+        horizontal_velocity_braking_gain_start_mps=0.05,
+        horizontal_velocity_braking_gain_full_mps=0.07,
+        horizontal_velocity_braking_gain_end_mps=0.10,
         ki_vel=(0.4, 0.4, 2.0),
         kd_vel=(0.5, 0.5, 0.5),
         velocity_observation_scale=(1.0, 1.0, 1.0),
@@ -271,6 +275,22 @@ def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_bounded():
     )
     attenuated_full = _effective_velocity_proportional_gain(attenuated, np.array([0.3, 0.0, 1.0]))
     assert attenuated_full == pytest.approx([2.0, 2.0, 5.0])
+
+    braking = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(
+            settings,
+            horizontal_velocity_error_gain_scale=1.0,
+            horizontal_velocity_braking_gain_scale=0.5,
+            horizontal_velocity_braking_gain_start_mps=0.02,
+            horizontal_velocity_braking_gain_full_mps=0.05,
+            horizontal_velocity_braking_gain_end_mps=0.08,
+        ),
+        mass=_MASS_KG,
+    )
+    braking_full = _effective_velocity_proportional_gain(braking, np.array([0.05, 0.0, 1.0]))
+    assert braking_full == pytest.approx([2.0, 2.0, 5.0])
 
 
 def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
@@ -1135,6 +1155,8 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         _controller_settings(),
         hover_thrust_normalized=0.57,
         velocity_observation_bias_mps=(0.001, -0.003, 0.002),
+        horizontal_velocity_error_gain_scale=1.19,
+        horizontal_velocity_braking_gain_scale=0.8,
     )
     action_cfg = _action_cfg("velocity")
     numpy_params = build_actuation_params(

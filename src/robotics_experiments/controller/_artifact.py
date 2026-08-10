@@ -114,6 +114,26 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
             name=f"{name}.horizontal_velocity_error_gain_end_mps",
             positive=True,
         ),
+        horizontal_velocity_braking_gain_scale=_finite(
+            value=payload["horizontal_velocity_braking_gain_scale"],
+            name=f"{name}.horizontal_velocity_braking_gain_scale",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_start_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_start_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_start_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_full_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_full_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_full_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_end_mps=_finite(
+            value=payload["horizontal_velocity_braking_gain_end_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_end_mps",
+            positive=True,
+        ),
         ki_vel=_vector(payload["ki_vel"], f"{name}.ki_vel"),
         kd_vel=_vector(payload["kd_vel"], f"{name}.kd_vel"),
         velocity_observation_scale=_vector(
@@ -215,6 +235,12 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         < result.horizontal_velocity_error_gain_end_mps
     ):
         raise ValueError(f"{name} horizontal gain transition must satisfy start < full < end")
+    if (
+        not result.horizontal_velocity_braking_gain_start_mps
+        < result.horizontal_velocity_braking_gain_full_mps
+        < result.horizontal_velocity_braking_gain_end_mps
+    ):
+        raise ValueError(f"{name} horizontal braking transition must satisfy start < full < end")
     if (
         not 0.0
         <= result.min_collective_thrust_fraction

@@ -72,6 +72,10 @@ def _settings(
         horizontal_velocity_error_gain_start_mps=0.15,
         horizontal_velocity_error_gain_full_mps=0.30,
         horizontal_velocity_error_gain_end_mps=0.80,
+        horizontal_velocity_braking_gain_scale=1.0,
+        horizontal_velocity_braking_gain_start_mps=0.05,
+        horizontal_velocity_braking_gain_full_mps=0.07,
+        horizontal_velocity_braking_gain_end_mps=0.10,
         ki_vel=(0.4, 0.4, 0.4),
         kd_vel=kd,
         velocity_observation_scale=(1.0, 1.0, 1.0),
@@ -375,6 +379,9 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.horizontal_velocity_error_gain_scale == pytest.approx(1.19)
     assert target.base_settings.horizontal_velocity_error_gain_full_mps == pytest.approx(0.30)
     assert target.base_settings.horizontal_velocity_error_gain_end_mps == pytest.approx(0.50)
+    assert target.base_settings.horizontal_velocity_braking_gain_scale == pytest.approx(0.80)
+    assert target.base_settings.horizontal_velocity_braking_gain_full_mps == pytest.approx(0.070)
+    assert target.base_settings.horizontal_velocity_braking_gain_end_mps == pytest.approx(0.075)
     assert target.base_settings.ki_vel == pytest.approx((0.4, 0.20, 2.0))
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
@@ -408,10 +415,10 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_scale",
         "ki_vel",
         "kd_vel",
-        "horizontal_velocity_error_gain_scale",
-        "horizontal_velocity_error_gain_start_mps",
-        "horizontal_velocity_error_gain_full_mps",
-        "horizontal_velocity_error_gain_end_mps",
+        "horizontal_velocity_braking_gain_scale",
+        "horizontal_velocity_braking_gain_start_mps",
+        "horizontal_velocity_braking_gain_full_mps",
+        "horizontal_velocity_braking_gain_end_mps",
         "angular_velocity_filter_hz",
         "kp_vel",
         "velocity_integral_limit_mps2",

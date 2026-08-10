@@ -157,6 +157,10 @@ class ActuationParams:
     horizontal_velocity_error_gain_start_mps: float
     horizontal_velocity_error_gain_full_mps: float
     horizontal_velocity_error_gain_end_mps: float
+    horizontal_velocity_braking_gain_scale: float
+    horizontal_velocity_braking_gain_start_mps: float
+    horizontal_velocity_braking_gain_full_mps: float
+    horizontal_velocity_braking_gain_end_mps: float
     ki_vel: np.ndarray
     kd_vel: np.ndarray
     velocity_observation_scale: np.ndarray
@@ -450,32 +454,47 @@ def _normalized_thrust_world(
     return limited, adjusted_error
 
 
-def _effective_velocity_proportional_gain(
-    params: ActuationParams, velocity_error: np.ndarray, /
-) -> np.ndarray:
-    horizontal_error = float(np.linalg.norm(velocity_error[:2]))
+def _horizontal_gain_lobe(
+    horizontal_error: float,
+    scale: float,
+    start: float,
+    full: float,
+    end: float,
+    /,
+) -> float:
     transition = np.clip(
-        (horizontal_error - params.horizontal_velocity_error_gain_start_mps)
-        / (
-            params.horizontal_velocity_error_gain_full_mps
-            - params.horizontal_velocity_error_gain_start_mps
-        ),
+        (horizontal_error - start) / (full - start),
         0.0,
         1.0,
     )
     rise = transition * transition * (3.0 - 2.0 * transition)
     fall_transition = np.clip(
-        (horizontal_error - params.horizontal_velocity_error_gain_full_mps)
-        / (
-            params.horizontal_velocity_error_gain_end_mps
-            - params.horizontal_velocity_error_gain_full_mps
-        ),
+        (horizontal_error - full) / (end - full),
         0.0,
         1.0,
     )
     fall = fall_transition * fall_transition * (3.0 - 2.0 * fall_transition)
     blend = rise * (1.0 - fall)
-    scale = 1.0 + (params.horizontal_velocity_error_gain_scale - 1.0) * blend
+    return float(1.0 + (scale - 1.0) * blend)
+
+
+def _effective_velocity_proportional_gain(
+    params: ActuationParams, velocity_error: np.ndarray, /
+) -> np.ndarray:
+    horizontal_error = float(np.linalg.norm(velocity_error[:2]))
+    scale = _horizontal_gain_lobe(
+        horizontal_error,
+        params.horizontal_velocity_error_gain_scale,
+        params.horizontal_velocity_error_gain_start_mps,
+        params.horizontal_velocity_error_gain_full_mps,
+        params.horizontal_velocity_error_gain_end_mps,
+    ) * _horizontal_gain_lobe(
+        horizontal_error,
+        params.horizontal_velocity_braking_gain_scale,
+        params.horizontal_velocity_braking_gain_start_mps,
+        params.horizontal_velocity_braking_gain_full_mps,
+        params.horizontal_velocity_braking_gain_end_mps,
+    )
     gain = np.array(params.kp_vel, copy=True)
     gain[:2] *= scale
     return gain
@@ -872,6 +891,18 @@ def build_actuation_params(
         ),
         horizontal_velocity_error_gain_end_mps=float(
             controller_settings.horizontal_velocity_error_gain_end_mps
+        ),
+        horizontal_velocity_braking_gain_scale=float(
+            controller_settings.horizontal_velocity_braking_gain_scale
+        ),
+        horizontal_velocity_braking_gain_start_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_start_mps
+        ),
+        horizontal_velocity_braking_gain_full_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_full_mps
+        ),
+        horizontal_velocity_braking_gain_end_mps=float(
+            controller_settings.horizontal_velocity_braking_gain_end_mps
         ),
         ki_vel=_readonly_copy(controller_settings.ki_vel),
         kd_vel=_readonly_copy(controller_settings.kd_vel),

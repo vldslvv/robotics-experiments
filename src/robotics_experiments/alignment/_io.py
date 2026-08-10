@@ -130,6 +130,26 @@ def _settings(
             name=f"{name}.horizontal_velocity_error_gain_end_mps",
             positive=True,
         ),
+        horizontal_velocity_braking_gain_scale=_finite(
+            value=settings["horizontal_velocity_braking_gain_scale"],
+            name=f"{name}.horizontal_velocity_braking_gain_scale",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_start_mps=_finite(
+            value=settings["horizontal_velocity_braking_gain_start_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_start_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_full_mps=_finite(
+            value=settings["horizontal_velocity_braking_gain_full_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_full_mps",
+            positive=True,
+        ),
+        horizontal_velocity_braking_gain_end_mps=_finite(
+            value=settings["horizontal_velocity_braking_gain_end_mps"],
+            name=f"{name}.horizontal_velocity_braking_gain_end_mps",
+            positive=True,
+        ),
         ki_vel=_vector(value=settings["ki_vel"], name=f"{name}.ki_vel"),
         kd_vel=_vector(value=settings["kd_vel"], name=f"{name}.kd_vel"),
         velocity_observation_scale=_vector(
@@ -259,6 +279,14 @@ def _settings(
     ):
         raise ValueError(
             f"{name} horizontal velocity error gain transition must satisfy start < full < end"
+        )
+    if (
+        not parsed.horizontal_velocity_braking_gain_start_mps
+        < parsed.horizontal_velocity_braking_gain_full_mps
+        < parsed.horizontal_velocity_braking_gain_end_mps
+    ):
+        raise ValueError(
+            f"{name} horizontal velocity braking gain transition must satisfy start < full < end"
         )
     if not (
         0.0 <= parsed.min_collective_thrust_fraction < parsed.max_collective_thrust_fraction <= 1.0

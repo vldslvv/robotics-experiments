@@ -45,14 +45,16 @@ these estimator states, the held outer-loop setpoints, and the acceleration
 setpoint needed for PX4's thrust-preserving hover-estimate integrator
 correction. Sequential NumPy/Torch parity is a host-test requirement.
 
-Horizontal velocity proportional gain may use a bounded error schedule. The
-base gain is unchanged below `horizontal_velocity_error_gain_start_mps`, moves
-smoothly to the configured positive scale at
-`horizontal_velocity_error_gain_full_mps`, then returns smoothly to the base gain at
-`horizontal_velocity_error_gain_end_mps`. Settings validation requires
-`scale > 0` and `start < full < end`; scales below one attenuate the bounded
-error range and scales above one boost it. This confines a fitted response to
-its evidenced range without changing either lower- or higher-error authority.
+Horizontal velocity proportional gain has two bounded error schedules. The
+`horizontal_velocity_braking_gain_*` lobe owns low-error braking attenuation;
+the `horizontal_velocity_error_gain_*` lobe owns higher-error recovery
+authority. Each leaves the base gain unchanged below its `start_mps`, moves
+smoothly to its positive scale at `full_mps`, and returns smoothly to the base
+gain at `end_mps`. The disjoint lobe scales multiply. Settings validation
+requires each `scale > 0` and `start < full < end`; scales below one attenuate
+their bounded range and scales above one boost it. This lets alignment correct
+zero-command stopping without removing the independently evidenced live
+recovery authority.
 
 The latest body-FLU policy action is held across its 20 Hz inference interval.
 The configured 50 Hz OFFBOARD stream converts that retained action with the
