@@ -419,8 +419,12 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[4].candidates[0] == pytest.approx((0.98, 0.8975, 1.0))
     assert target.parameters[4].candidates[-1] == pytest.approx((0.98, 0.8975, 1.0))
     assert target.parameters[5].candidates == (pytest.approx((0.4, 0.20, 2.0)),)
-    assert target.parameters[6].candidates == pytest.approx((1.0, 1.05, 1.10, 1.15, 1.20, 1.25))
-    assert target.parameters[7].candidates == pytest.approx((23.75,))
+    assert target.parameters[6].candidates == pytest.approx(
+        (1.0, 1.025, 1.04, 1.05, 1.06, 1.075, 1.10)
+    )
+    assert target.parameters[7].candidates == pytest.approx(
+        (21.5, 22.0, 22.5, 23.0, 23.5, 23.75, 24.0)
+    )
     assert target.parameters[8].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[8].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)

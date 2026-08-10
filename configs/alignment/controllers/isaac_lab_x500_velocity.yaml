@@ -93,12 +93,12 @@ parameters:
   # large-error schedule used by the randomized live return trajectory.
   - field: horizontal_velocity_error_gain_scale
     stage: 7
-    candidates: [1.0, 1.05, 1.10, 1.15, 1.20, 1.25]
-  # The physical-state Y replay crossing is minimized near the evidenced
-  # 23.75 Hz rate-input filter while preserving every motion gate.
+    candidates: [1.0, 1.025, 1.04, 1.05, 1.06, 1.075, 1.10]
+  # Jointly recover the narrow physical-state Y motor replay margin around the
+  # previously evidenced angular-filter crossing.
   - field: angular_velocity_filter_hz
     stage: 8
-    candidates: [23.75]
+    candidates: [21.5, 22.0, 22.5, 23.0, 23.5, 23.75, 24.0]
   # Higher Y proportional gains shorten the already-short target braking
   # distance, so retain the pinned PX4 gain.
   - field: kp_vel

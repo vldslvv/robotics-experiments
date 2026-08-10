@@ -11164,3 +11164,25 @@ motion-selected 0.40/0.20 integral gains, and search only gain scale 1.0 through
 1.25 at the existing 0.30 m/s full-gain boundary. Require motion and replay
 before live acceptance. Expand the schedule transition boundaries only if the
 scale direction produces material progress.
+
+### 352. Large-error gain produces live progress at the replay boundary
+
+Date: 2026-08-10.
+
+The six-scale diagnostic completed in two GPU batches and 51.0 seconds at
+35.5% average sampled GPU utilization. Scales 1.0 through 1.20 passed every
+motion gate; 1.25 first failed the Y envelope NRMSE at 0.10370 against 0.10.
+Replay retained only the 1.0 control. Scale 1.05 narrowly failed the physical Y
+motor boundary at 0.010122 against 0.01, while scale 1.10 also crossed
+collective limits and is not a useful replay frontier.
+
+The scale-1.05 live diagnostic materially improved the hover final-window
+error from 0.118 m to 0.108 m. Largest normalized excess fell from 0.18 to
+0.08 without a motion-gate regression, supporting a targeted replay-margin
+recovery rather than abandoning the schedule.
+
+Search gain scales 1.0 through 1.10 jointly with angular-velocity filtering
+21.5 through 24 Hz. Prior replay evidence placed the same physical Y motor
+crossing between 22.5 and 23.75 Hz. Keep all remaining controller settings,
+probes, thresholds, and live-gate behavior unchanged. Replay every motion pass
+and run live acceptance on joint passes in descending scale order.
