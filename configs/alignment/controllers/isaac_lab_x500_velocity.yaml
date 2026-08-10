@@ -50,7 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the complete evidence-centered estimator grid before selection.
+  # Retain the focused X-braking/Z-endpoint grid before selection.
   beam_width: 160
   passes_per_stage: 1
   refinement_levels: 0
@@ -62,57 +62,55 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # PX4's captured physical-to-estimated offset returns near zero within about
-  # one second; search the evidenced rate rather than the earlier slow decay.
+  # Add local margin around the best evidenced 0.10 Hz decay.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.10, 0.20, 0.30, 0.50, 1.00]
-  # Center the steady adapter around the near-zero captured estimator error.
+    candidates: [0.075, 0.10, 0.125]
+  # Cross the near-zero X bias with the independent signed Z correction.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.010, -0.010, -0.0039]
-      - [-0.010, -0.005, -0.0039]
-      - [-0.010, 0.000, -0.0039]
-      - [-0.010, 0.005, -0.0039]
-      - [-0.010, 0.010, -0.0039]
-      - [-0.005, -0.010, -0.0039]
-      - [-0.005, -0.005, -0.0039]
-      - [-0.005, 0.000, -0.0039]
-      - [-0.005, 0.005, -0.0039]
-      - [-0.005, 0.010, -0.0039]
-      - [0.000, -0.010, -0.0039]
-      - [0.000, -0.005, -0.0039]
-      - [0.000, 0.000, -0.0039]
-      - [0.000, 0.005, -0.0039]
-      - [0.000, 0.010, -0.0039]
-      - [0.005, -0.010, -0.0039]
-      - [0.005, -0.005, -0.0039]
-      - [0.005, 0.000, -0.0039]
-      - [0.005, 0.005, -0.0039]
-      - [0.005, 0.010, -0.0039]
-      - [0.010, -0.010, -0.0039]
-      - [0.010, -0.005, -0.0039]
-      - [0.010, 0.000, -0.0039]
-      - [0.010, 0.005, -0.0039]
-      - [0.010, 0.010, -0.0039]
-  # Compare an immediate observation with only evidenced high-cutoff smoothing.
+      - [-0.003, 0.0, 0.0000]
+      - [-0.003, 0.0, 0.0025]
+      - [-0.003, 0.0, 0.0050]
+      - [-0.003, 0.0, 0.0075]
+      - [-0.003, 0.0, 0.0100]
+      - [-0.002, 0.0, 0.0000]
+      - [-0.002, 0.0, 0.0025]
+      - [-0.002, 0.0, 0.0050]
+      - [-0.002, 0.0, 0.0075]
+      - [-0.002, 0.0, 0.0100]
+      - [-0.001, 0.0, 0.0000]
+      - [-0.001, 0.0, 0.0025]
+      - [-0.001, 0.0, 0.0050]
+      - [-0.001, 0.0, 0.0075]
+      - [-0.001, 0.0, 0.0100]
+      - [0.000, 0.0, 0.0000]
+      - [0.000, 0.0, 0.0025]
+      - [0.000, 0.0, 0.0050]
+      - [0.000, 0.0, 0.0075]
+      - [0.000, 0.0, 0.0100]
+  # Retain immediate X observation plus the previously evidenced braking
+  # filters; Y/Z remain immediate.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.0, 0.0, 0.0]
-      - [0.0, 5.0, 0.0]
-      - [0.0, 15.0, 0.0]
-      - [0.0, 30.0, 0.0]
-  # Captured velocity estimates regress near unit physical scale on both axes.
+      - [0.00, 0.0, 0.0]
+      - [0.75, 0.0, 0.0]
+      - [5.00, 0.0, 0.0]
+      - [30.0, 0.0, 0.0]
+  # Interpolate the earlier X braking response while preserving unit Y/Z.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.98, 0.98, 1.0]
-      - [0.98, 1.00, 1.0]
-      - [1.00, 0.98, 1.0]
-      - [1.00, 1.00, 1.0]
+      - [0.88, 1.0, 1.0]
+      - [0.90, 1.0, 1.0]
+      - [0.92, 1.0, 1.0]
+      - [0.94, 1.0, 1.0]
+      - [0.96, 1.0, 1.0]
+      - [0.98, 1.0, 1.0]
+      - [1.00, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
