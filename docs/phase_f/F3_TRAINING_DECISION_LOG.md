@@ -11507,3 +11507,29 @@ Keep the motion-passing X P=1.4 seam and fit the already-declarative
 1.55, and 1.60. Retain X I 0.3965/0.39675, X D 0.195, and Y bias
 0.0135/0.0136. Keep controller structure, all probes, replay limits, and gates
 unchanged. Replay every motion pass before live evaluation.
+
+### 367. Error-based high-authority scaling does not repair replay
+
+Date: 2026-08-10.
+
+The high-error multiplier search evaluated 252 unique candidates in six GPU
+batches and 184.0 seconds at 29.3% average sampled GPU utilization. Twenty-two
+candidates pass every motion gate. Selected candidate 160 uses multiplier 1.30,
+X I 0.39675, and Y bias 0.0135 m/s.
+
+Replaying all twenty-two motion passes disproved the hypothesis. The best
+replay remains multiplier 1.19 candidate 177 with the same four failures as the
+prior attempt: validation-X collective RMSE 0.071626 N, validation-X
+physical-state motor RMSE 0.010691, stability-moderate motor RMSE 0.011221, and
+stability-moderate physical-state motor RMSE 0.010183. Larger multipliers add
+Y-envelope and stability failures; at 1.30 the replay has six failures and at
+1.40 or above it has eight.
+
+The error-based schedule is not the relevant discriminator: a high commanded
+speed may have a small instantaneous tracking error, while the low-speed
+approach and braking profiles deliberately use small commands. The next
+structural hypothesis is a per-axis, command-magnitude proportional-gain scale.
+It must retain X P=1.4 below the low-speed probe range, smoothly restore the
+replay-safe X P=1.8 by the envelope-command range, leave Y/Z at unit scale, and
+remain an explicit strict-v1 controller setting with NumPy/Torch parity. Keep
+all probes, replay limits, and quality gates unchanged.
