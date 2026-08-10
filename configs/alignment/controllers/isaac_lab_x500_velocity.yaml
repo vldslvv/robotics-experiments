@@ -65,14 +65,13 @@ parameters:
   # Search the previously live-stable estimator settling range.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.060, 0.065, 0.070, 0.075]
+    candidates: [0.070, 0.075]
   # Positive X bias is the signed correction for the live TOO_CLOSE endpoint;
   # Y/Z remain at the motion-passing zero correction.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.0040, 0.0, 0.0]
       - [0.0045, 0.0, 0.0]
       - [0.0050, 0.0, 0.0]
   # Preserve the unfiltered X branch and the existing Y filter.
@@ -84,8 +83,6 @@ parameters:
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.88, 1.0, 1.0]
-      - [0.89, 1.0, 1.0]
       - [0.90, 1.0, 1.0]
       - [0.91, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
@@ -97,7 +94,11 @@ parameters:
   - field: kd_vel
     stage: 7
     candidates:
-      - [0.20, 0.20, 0.0]
+      - [0.205, 0.20, 0.0]
+      - [0.210, 0.20, 0.0]
+      - [0.215, 0.20, 0.0]
+      - [0.220, 0.20, 0.0]
+      - [0.225, 0.20, 0.0]
   # Retain the replay-safe bounded moderate-error response.
   - field: horizontal_velocity_error_gain_scale
     stage: 8
