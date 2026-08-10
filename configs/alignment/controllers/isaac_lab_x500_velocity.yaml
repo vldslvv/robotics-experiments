@@ -13,7 +13,7 @@ settings:
   velocity_controller_rate_hz: 125.0
   attitude_controller_rate_hz: 204.0
   kp_vel: [1.8, 1.8, 4.0]
-  horizontal_velocity_error_gain_scale: 1.175
+  horizontal_velocity_error_gain_scale: 1.19
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
   horizontal_velocity_error_gain_end_mps: 0.50
@@ -50,8 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the complete independent X/Y bias grid until the lateral-scale
-  # crossing is evaluated; this is a two-batch targeted diagnostic.
+  # The accepted point is regenerated from every fresh reference capture.
   beam_width: 128
   passes_per_stage: 1
   refinement_levels: 0
@@ -68,16 +67,12 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # Refine the narrow fresh-reference endpoint/braking crossing around the only
-  # motion pass while bounded gain recovers live hover margin.
+  # Retain the accepted fresh-reference endpoint and braking correction.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
       - [0.0180, 0.008, -0.0039]
-      - [0.01825, 0.008, -0.0039]
-      - [0.0185, 0.008, -0.0039]
-      - [0.0190, 0.008, -0.0039]
   # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
@@ -94,11 +89,10 @@ parameters:
     stage: 6
     candidates:
       - [0.40, 0.20, 2.0]
-  # Keep the low-error PX4 gain unchanged and fit only the existing smooth
-  # large-error schedule used by the randomized live return trajectory.
+  # Retain the replay-safe moderate-error response that passes the live return.
   - field: horizontal_velocity_error_gain_scale
     stage: 7
-    candidates: [1.175, 1.180, 1.185, 1.190, 1.1925]
+    candidates: [1.19]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps

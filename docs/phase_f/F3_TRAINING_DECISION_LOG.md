@@ -11309,3 +11309,26 @@ through 1.1925 with X bias +0.018 through +0.019 m/s at the fixed 0.50 m/s end
 boundary. The motor crossing is estimated near scale 1.193, so the range stays
 inside measured replay feasibility while adding the small live-response margin.
 Keep all remaining settings, probes, metrics, and thresholds unchanged.
+
+### 358. The interpolated setting crosses every acceptance boundary
+
+Date: 2026-08-10.
+
+The 20-point gain/bias interpolation completed in three GPU batches and 77.1
+seconds at 36.3% average sampled GPU utilization. Every candidate passed all
+six-axis motion gates. Complete replay of the full frontier found that scales
+through 1.1925 pass all 22 profiles, with the physical Y-envelope motor RMSE
+increasing predictably toward the 0.01 limit.
+
+The registered fitter selected gain scale 1.19 and X bias +0.018 m/s. Its
+mandatory replay passes with 0.009945 worst normalized-motor RMSE and 0.041711 N
+worst collective RMSE. The exact artifact also passes the live integration
+gate: hover finishes at 0.052 m with a 0.100 m final-window maximum, goto
+finishes at 0.032 m with a 0.037 m final-window maximum, and handoff is ready at
+0.498 m wall-normal range.
+
+Promote this exact setting to the declarative controller definition and remove
+the completed diagnostic ranges. Run a wholly new clean-source reference
+capture, actuator audit, target evaluation, fit, controller-boundary replay,
+live integration, and finalization. Only that independent run may demonstrate
+that accepted alignment can be regenerated from scratch.
