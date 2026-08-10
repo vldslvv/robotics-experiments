@@ -65,7 +65,7 @@ parameters:
   # Retain the motion-near and replay-safe decay frontier.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.05, 0.075]
+    candidates: [0.045, 0.050, 0.055]
   # Positive X bias is the signed correction for the live TOO_CLOSE endpoint;
   # Y/Z remain at the motion-passing zero correction.
   - field: velocity_observation_bias_mps
@@ -73,26 +73,24 @@ parameters:
     selection_regularization_scale: 1.0
     candidates:
       - [0.005, 0.0, 0.0]
-      - [0.0052, 0.0, 0.0]
-      - [0.0054, 0.0, 0.0]
-      - [0.0056, 0.0, 0.0]
-      - [0.0058, 0.0, 0.0]
-  # Retain the two best high-cutoff branches around the crossing.
+      - [0.00505, 0.0, 0.0]
+      - [0.00510, 0.0, 0.0]
+      - [0.00515, 0.0, 0.0]
+      - [0.00520, 0.0, 0.0]
+  # Preserve the unfiltered X branch and the existing Y filter.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [20.0, 0.0, 0.0]
-      - [30.0, 0.0, 0.0]
-  # Refine the interpolated joint braking/endpoint crossing.
+      - [0.0, 1.5, 0.0]
+  # Refine the joint motion/replay crossing.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.900, 1.0, 1.0]
-      - [0.902, 1.0, 1.0]
-      - [0.904, 1.0, 1.0]
-      - [0.906, 1.0, 1.0]
-      - [0.908, 1.0, 1.0]
-      - [0.910, 1.0, 1.0]
+      - [0.9050, 1.0, 1.0]
+      - [0.9055, 1.0, 1.0]
+      - [0.9060, 1.0, 1.0]
+      - [0.9065, 1.0, 1.0]
+      - [0.9070, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
