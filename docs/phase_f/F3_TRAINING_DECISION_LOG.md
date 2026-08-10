@@ -11360,3 +11360,27 @@ planar biases correct the endpoint. Keep the accepted moderate-error gain,
 vertical settings, CTBR settings, probes, and gates unchanged. Refine only the
 best passing neighborhood, replay every motion pass, then repeat the complete
 clean-source proof.
+
+### 360. Coarse planar/filter sweep exposes a scale-bias separation
+
+Date: 2026-08-10.
+
+The preserved-reference coarse sweep evaluated 140 unique candidates in three
+GPU batches and 93.4 seconds at 29.2% average sampled GPU utilization. No
+candidate passed motion. Every candidate failed the combined endpoint; 67 also
+failed X braking and 86 also failed X stop time.
+
+At bias `[0.026, 0.012, -0.0039]` m/s with no X filter, the endpoint reached
+10.707 mm, only 0.707 mm above its gate, but X braking was 9.074 mm and target
+stop preceded PX4 by 0.14 s. The 0.75 Hz X filter reduced braking error to 4.486
+mm but made the target stop 0.20 s early and moved endpoint to 14.742 mm.
+Conversely, X bias -0.010 m/s passed braking and stop time but left endpoint
+above 40 mm. Extending either bias or filtering independently is unsupported.
+
+PX4-estimate emulation applies `scale * physical_velocity + bias`. Keep the
+positive zero-speed bias that nearly passes endpoint and search X observation
+scale 0.60 through 0.98 to reduce the nonzero-speed estimate during braking.
+Jointly refine X bias 0.026 through 0.042 m/s and Y bias 0.012 through 0.018
+m/s, retaining no X filter. This 140-point targeted grid changes only two
+already-declarative estimator settings; controller structure and every gate
+remain unchanged.
