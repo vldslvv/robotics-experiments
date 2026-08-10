@@ -10648,3 +10648,29 @@ to override the controller's update decision. Remove the replay-only mask and
 restore the deterministic 200 Hz, one-tick-handoff frontier. Continue with a
 narrow fractional-cadence refinement around its 5 ms period; the preserved
 coarse sweep has not yet tested the neighboring deterministic schedules.
+
+### 333. Deterministic cadence refinement is exhausted
+
+Date: 2026-08-10.
+
+The optimized host refinement evaluated 20 unique deterministic schedules with
+four workers. The first eight-candidate sweep completed in 25.5 seconds and the
+12-candidate fine sweep in 38.2 seconds. No duplicate tick schedules occurred
+over the longest profile horizon.
+
+A 4.8 ms period (`208.333333` Hz) is the best deterministic candidate. It
+retains four failures while improving Z collective from the 200 Hz value of
+0.170968 N to 0.152818 N and moderate collective from 0.073508 N to
+0.065262 N. Finer 4.625-4.9 ms periods either regress Z or add failures; the
+next best four-failure Z value is 0.167437 N. Select 208.333333 Hz and stop
+cadence expansion.
+
+The physical Y failure is independent. A 12-candidate scalar
+`angular_velocity_filter_hz` sweep from 0 through 25 Hz leaves it failed in
+every case. The best value, 20 Hz, changes physical motor RMSE only from
+0.013439 to 0.013335 and does not affect the vertical metrics. The Y profile's
+dominant body-X rate-setpoint RMSE is 0.074402 rad/s versus 0.024335 in the
+estimated-state replay, upstream of the rate-input filter. Do not add that
+filter range or replace it with a vector merely because a scalar candidate hit
+an edge. Measure the physical-to-estimated attitude boundary and its tick-delay
+scan before adding an attitude-state adapter.
