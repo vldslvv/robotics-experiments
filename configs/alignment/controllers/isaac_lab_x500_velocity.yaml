@@ -56,8 +56,8 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain every member of the focused signed-bias/decay grid before selection.
-  beam_width: 32
+  # Retain the complete broad braking/bias/gating grid before selection.
+  beam_width: 256
   passes_per_stage: 1
   refinement_levels: 0
   min_refinement_survivors: 2
@@ -109,10 +109,12 @@ parameters:
   - field: horizontal_velocity_error_gain_start_mps
     stage: 9
     candidates: [0.09]
-  # Pin the independent low-error braking lobe from the same passing candidate.
+  # Refit the independent low-error braking lobe after the fresh reference
+  # shifted X braking outside its per-axis gate. This broad first pass precedes
+  # any narrower interpolation around the passing frontier.
   - field: horizontal_velocity_braking_gain_scale
     stage: 10
-    candidates: [0.90]
+    candidates: [0.60, 0.70, 0.80, 0.85, 0.90]
   - field: horizontal_velocity_braking_gain_start_mps
     stage: 11
     candidates: [0.055]

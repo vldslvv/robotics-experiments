@@ -12062,3 +12062,33 @@ and seeded controller reconstruction. Fit X bias 0.008/0.011/0.014/0.017 m/s,
 start 0/0.002/0.005 m/s, and full 0.020/0.030/0.040 m/s. Restore candidate 483's
 0.075 Hz decay and unfiltered X branch; keep every other setting, probe family,
 gate, replay tolerance, and live acceptance condition unchanged.
+
+### 388. Command gating fixes ringdown coupling; fresh X braking needs refitting
+
+Date: 2026-08-10.
+
+The strict-v1 componentwise command gate passed 761 host tests, the complete
+pre-commit suite, and NumPy/Torch seeded-state parity before execution. A fresh
+clean-source PX4 capture recorded all 22 velocity and CTBR profiles with their
+absolute simulation start times. The actuator audit passed every profile with
+complete topic coverage, zero timestamp-join error, normalized-motor RMSE near
+0.0003 against the 0.01 limit, and collective RMSE no greater than about
+0.012 N against the 0.05 N limit.
+
+The first command-gating fit evaluated 36 unique candidates in four GPU batches
+and 103.8 seconds at 33.3% average sampled GPU utilization. Candidate 14 uses
++0.008 m/s X observation bias with a 0-0.020 m/s command transition. Every
+X/Y/Z velocity NRMSE, residual-speed and stop-time gate passes, as do all CTBR
+roll/pitch/yaw/collective gates. The remaining failures are X braking at
+6.160 mm against 5 mm and the combined endpoint at 13.430 mm against 10 mm.
+Across the grid, wider transitions reduce the endpoint below 10 mm, but every
+candidate still misses X braking by at least 1.16 mm. The first failed boundary
+is therefore the existing low-error horizontal braking response, not command
+gating, allocation, rotor response, or CTBR control.
+
+Keep the evidenced command gate and run a broad fit of the existing braking
+scale at 0.60/0.70/0.80/0.85/0.90, crossed with the retained bias and command
+threshold candidates. Preserve the recovery lobe, estimator decay, filters,
+probe families, gates, replay tolerances, and live contract. Retain the complete
+grid before selection; if a passing frontier appears, interpolate only around
+that region before controller-boundary replay and the live gate.

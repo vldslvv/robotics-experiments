@@ -390,7 +390,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.base_settings.kd_vel == pytest.approx((0.2, 0.2, 0.0))
     assert target.base_settings.velocity_integral_limit_mps2 == pytest.approx((0.35, 0.35, 4.0))
     assert target.search.strategy == "coarse-to-fine-beam"
-    assert target.search.beam_width == 32
+    assert target.search.beam_width == 256
     assert target.search.passes_per_stage == 1
     assert target.search.refinement_levels == 0
     assert target.search.initial_settings == ()
@@ -447,7 +447,7 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[6].candidates[-1] == pytest.approx((0.2, 0.20, 0.0))
     assert target.parameters[7].candidates == pytest.approx((1.23,))
     assert target.parameters[8].candidates == pytest.approx((0.09,))
-    assert target.parameters[9].candidates == pytest.approx((0.9,))
+    assert target.parameters[9].candidates == pytest.approx((0.6, 0.7, 0.8, 0.85, 0.9))
     assert target.parameters[10].candidates == pytest.approx((0.055,))
     assert target.parameters[11].candidates == pytest.approx((0.070,))
     assert target.parameters[12].candidates == pytest.approx((0.075,))
