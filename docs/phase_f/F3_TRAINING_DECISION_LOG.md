@@ -12092,3 +12092,26 @@ threshold candidates. Preserve the recovery lobe, estimator decay, filters,
 probe families, gates, replay tolerances, and live contract. Retain the complete
 grid before selection; if a passing frontier appears, interpolate only around
 that region before controller-boundary replay and the live gate.
+
+### 389. Broad braking fit isolates a small X/Y scalar tradeoff
+
+Date: 2026-08-10.
+
+The broad braking fit evaluated 180 unique candidates in five GPU batches and
+148.1 seconds at 31.4% average sampled GPU utilization. Candidate 40 uses a
+0.70 braking scale, +0.008 m/s X bias, and a 0-0.030 m/s command transition.
+It passes X braking at 4.898 mm and the combined endpoint at 7.317 mm. Every
+other velocity and CTBR gate also passes except Y braking, which is 5.286 mm
+against 5 mm. This reduces the campaign from two failures with 34.3% largest
+excess to one failure with 5.72% excess without regressing a passed gate, so it
+is material progress.
+
+The complete frontier shows opposing behavior under the shared horizontal
+braking scalar: lower scale clears X while higher scale clears Y. Before
+introducing axis-specific controller structure, fit the existing per-axis
+velocity observation scale at X values 0.85/0.87/0.89/0.91 with Y/Z pinned at
+one. Cross it with braking scales 0.70/0.80/0.85/0.90, the evidenced bias values
+0.008/0.011/0.014 m/s, and the existing command thresholds. Retain the complete
+grid before selection. This is the minimal axis-local parameter seam supported
+by the isolated X/Y probe evidence; recovery, CTBR, allocation, plant, gates,
+and replay remain unchanged.
