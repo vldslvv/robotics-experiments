@@ -11430,3 +11430,20 @@ to lengthen the target's too-short braking response; I controls the remaining
 settling error. Keep Y/Z gains, estimator settings, controller structure,
 probes, replay limits, and all gates unchanged. Replay every motion pass before
 running the live acceptance gate.
+
+### 363. X PID passes its axis and reveals a signed Y endpoint residual
+
+Date: 2026-08-10.
+
+The endpoint-safe X PID search evaluated 360 unique candidates in seven GPU
+batches and 219.9 seconds at 28.9% average sampled GPU utilization. Candidate
+133 at X P/I/D 1.4/0.4/0.3 passed every per-axis velocity gate and every CTBR
+gate. Only combined endpoint remained at 13.224 mm, reducing largest normalized
+excess from 2.14 to 1.32 without regressing a passed gate.
+
+Raw endpoint comparison localizes the remaining error: +1.922 mm X, +12.871 mm
+Y, and +2.346 mm Z. The X controller boundary is therefore passed; further X
+gain fitting would be unsupported. Keep candidate 133's X gains and original X
+bias, then search only Y observation bias from 0.008 through 0.040 m/s. This
+directly targets the signed lateral endpoint while preserving controller
+structure, every other setting, probes, replay limits, and gates.
