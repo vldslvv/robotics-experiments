@@ -50,7 +50,7 @@ settings:
 
 search:
   strategy: coarse-to-fine-beam
-  # Retain the focused X-braking/Z-endpoint grid before selection.
+  # Retain the focused live handoff-margin grid before selection.
   beam_width: 160
   passes_per_stage: 1
   refinement_levels: 0
@@ -62,55 +62,38 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Add local margin around the best evidenced 0.10 Hz decay.
+  # Retain the motion frontier and add a slightly slower live-response margin.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.075, 0.10, 0.125]
-  # Cross the near-zero X bias with the independent signed Z correction.
+    candidates: [0.05, 0.075, 0.10]
+  # Positive X bias is the signed correction for the live TOO_CLOSE endpoint;
+  # Y/Z remain at the motion-passing zero correction.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [-0.003, 0.0, 0.0000]
-      - [-0.003, 0.0, 0.0025]
-      - [-0.003, 0.0, 0.0050]
-      - [-0.003, 0.0, 0.0075]
-      - [-0.003, 0.0, 0.0100]
-      - [-0.002, 0.0, 0.0000]
-      - [-0.002, 0.0, 0.0025]
-      - [-0.002, 0.0, 0.0050]
-      - [-0.002, 0.0, 0.0075]
-      - [-0.002, 0.0, 0.0100]
-      - [-0.001, 0.0, 0.0000]
-      - [-0.001, 0.0, 0.0025]
-      - [-0.001, 0.0, 0.0050]
-      - [-0.001, 0.0, 0.0075]
-      - [-0.001, 0.0, 0.0100]
-      - [0.000, 0.0, 0.0000]
-      - [0.000, 0.0, 0.0025]
-      - [0.000, 0.0, 0.0050]
-      - [0.000, 0.0, 0.0075]
-      - [0.000, 0.0, 0.0100]
-  # Retain immediate X observation plus the previously evidenced braking
-  # filters; Y/Z remain immediate.
+      - [0.001, 0.0, 0.0]
+      - [0.002, 0.0, 0.0]
+      - [0.003, 0.0, 0.0]
+      - [0.004, 0.0, 0.0]
+      - [0.005, 0.0, 0.0]
+      - [0.006, 0.0, 0.0]
+  # Retain immediate observation and the motion-passing high-cutoff branch.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.00, 0.0, 0.0]
-      - [0.75, 0.0, 0.0]
-      - [5.00, 0.0, 0.0]
+      - [0.0, 0.0, 0.0]
       - [30.0, 0.0, 0.0]
-  # Interpolate the earlier X braking response while preserving unit Y/Z.
+  # Lower X scale preserves braking as positive bias adds live stopping margin.
   - field: velocity_observation_scale
     stage: 5
     candidates:
+      - [0.82, 1.0, 1.0]
+      - [0.84, 1.0, 1.0]
+      - [0.86, 1.0, 1.0]
       - [0.88, 1.0, 1.0]
       - [0.90, 1.0, 1.0]
       - [0.92, 1.0, 1.0]
-      - [0.94, 1.0, 1.0]
-      - [0.96, 1.0, 1.0]
-      - [0.98, 1.0, 1.0]
-      - [1.00, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
