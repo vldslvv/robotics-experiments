@@ -10444,3 +10444,26 @@ as a separate plant-boundary issue. The current preserved controller artifact
 was mechanically updated for diagnostics and is not publishable; a fresh
 scratch target fit and capture under the new comparison fingerprint are still
 required before policy training.
+
+### 323. Upstream vertical phase is already correct
+
+Date: 2026-08-10.
+
+The checkpointed zero-through-three-tick scan was run against the preserved
+high-rate campaign with the deterministic 142.8571 Hz attitude cadence. Zero
+added delay is decisively best on every vertical transition that limits replay.
+`validation-z-envelope` acceleration-setpoint RMSE is 0.03878 m/s2 at zero
+ticks and 0.17370 m/s2 at one tick; `stability-moderate-envelope` is 0.01765
+m/s2 at zero ticks and 0.07870 m/s2 at one tick. The low-speed and vertical
+ramp profiles show the same direction. Do not add an outer-loop delay or
+continue the cadence sweep.
+
+The deterministic replay returns to the six-failure frontier: marginal
+collective failures on forward, low-speed vertical, and vertical reversal;
+physical-state Y motor RMSE 0.013343; Z-envelope collective RMSE 0.233732 N;
+and moderate-envelope collective RMSE 0.057749 N. The upstream acceleration is
+not the first failed vertical boundary. Before changing thrust conversion,
+complete the replay's initial scheduler state by seeding the attitude-stage
+elapsed time from the last full-rate `vehicle_rates_setpoint` publication at
+each absolute profile boundary. This is captured controller state, not a
+fitted setting or another timing model.
