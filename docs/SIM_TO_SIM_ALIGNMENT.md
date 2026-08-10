@@ -135,7 +135,11 @@ initial estimator state, and requires normalized motor RMSE below 0.01;
 closed-loop motion gates cover the remaining estimator residual. It uses each
 profile's absolute PX4 boot time, the pinned 125 Hz PX4 velocity-loop cadence,
 the target's fitted fractional attitude-loop cadence, and recorded command
-cadence. A recorded policy sample contains the setpoint
+cadence. For boundary replay, the ULog's physics-representable
+`vehicle_attitude` publications trigger the attitude stage and its output enters
+the rate controller on the following physics tick. The deployable controller
+uses the artifact's deterministic cadence without a replay dependency. A
+recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
 setpoint on the following 4 ms controller tick. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.

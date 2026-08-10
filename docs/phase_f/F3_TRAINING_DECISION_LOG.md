@@ -10580,3 +10580,19 @@ by PX4's irregular 4/8 ms shared-tick schedule. Before adding controller gain
 candidates, replay the exact recorded `vehicle_attitude` update mask together
 with the now-evidenced one-tick rate handoff. The earlier exact-mask diagnostic
 lacked that handoff and therefore tested an incomplete execution order.
+
+### 329. Re-test the exact attitude schedule with complete execution order
+
+Date: 2026-08-10.
+
+The earlier exact `vehicle_attitude` update-mask replay forced the target's
+attitude output and rate controller to execute on the same tick. PX4 evidence
+now proves that the rate controller consumes that output on the following
+physics tick. Reintroduce the replay-only update mask together with the
+structural one-tick handoff and rerun the selected 200 Hz artifact unchanged.
+
+This schedule is recorded controller-boundary evidence, not an artifact
+setting or a policy-training input. The deployable NumPy and Torch controller
+retains its deterministic 200 Hz cadence. Keep the mask only if the complete
+execution order reduces the four-failure frontier without regressing a passed
+boundary; otherwise remove it and continue deterministic schedule fitting.
