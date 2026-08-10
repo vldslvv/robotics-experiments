@@ -10767,3 +10767,40 @@ controller replay gate. Forward collective falls to 0.008163 N, with zero
 replay failures. Promote 204 Hz and the declarative Z-integral range
 `[2.0, 2.05, 2.1]`; reacquire and refit from a clean commit because all earlier
 target traces used the incomplete seed.
+
+### 337. Complete-boundary scratch isolates the lateral transient
+
+Date: 2026-08-10.
+
+Fresh campaign
+`.build/alignment/x500-px4-v1/20260810T-complete-velocity-boundary-scratch`
+ran from clean source commit `004866a`. It captured all 22 profiles, and its
+actuator audit passed with zero timestamp-join error, normalized motor RMSE
+near 0.0003, and collective RMSE below 0.01 N. The target search evaluated
+4,796 unique candidates in 49 GPU batches and 1,785 seconds. Average sampled
+GPU utilization was 24.1%, with a 45% p95 and 53% peak. The 4.11 GB target
+trace file and its sequential write/reparse path remain the measured
+performance bottleneck.
+
+Candidate 4692 was selected. It used 140.35605 Hz attitude cadence, 0.0125 Hz
+estimator-bias decay, observation bias `[0.0, 0.015, -0.0039]` m/s, no
+velocity filtering, observation scale `[0.98, 0.98, 1.0]`, Z P=4.125, and Z
+I=2.025. It failed only Y braking distance at 9.115 mm against 5 mm; combined
+endpoint passed at 9.578 mm. No candidate passed every motion gate. Of 4,766
+usable candidates, 1,101 failed exactly one gate: 877 passed Y braking but
+failed endpoint, while 224 passed endpoint but failed Y braking. Candidate-wide
+minima independently passed every gate.
+
+The signed lateral reversal establishes the first failed motion boundary. PX4
+entered the zero-command transition at 0.087951 m/s, stopped at 3.50 s, and
+traveled 56.671 mm. The target entered at 0.080632 m/s, stopped at 3.40 s, and
+traveled 47.556 mm. The target is both slow before the transition and
+over-damped afterward. Search lateral derivative damping, observation scale,
+and steady offset together around the endpoint-passing basin; pin the already
+replay-valid 204 Hz cadence and Z P/I values during that diagnostic.
+
+Mandatory replay on the rejected selection passed the forward boundary at
+0.000809 N collective RMSE but failed vertical low speed at 0.054522 N, Z
+envelope at 0.374102 N, moderate stability at 0.206445 N, and pitch collective
+at 0.052504 N. The live gate also failed hover last-window error at 0.115 m
+against 0.100 m. Nothing was finalized or published.
