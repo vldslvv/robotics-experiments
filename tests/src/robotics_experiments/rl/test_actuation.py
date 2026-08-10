@@ -263,6 +263,15 @@ def test_horizontal_velocity_gain_schedule_is_neutral_smooth_and_bounded():
     assert falling == pytest.approx([6.0, 6.0, 5.0])
     assert ended == pytest.approx([4.0, 4.0, 5.0])
 
+    attenuated = build_actuation_params(
+        geometry=_quad_geometry(),
+        action_cfg=_action_cfg("velocity"),
+        controller_settings=replace(settings, horizontal_velocity_error_gain_scale=0.5),
+        mass=_MASS_KG,
+    )
+    attenuated_full = _effective_velocity_proportional_gain(attenuated, np.array([0.3, 0.0, 1.0]))
+    assert attenuated_full == pytest.approx([2.0, 2.0, 5.0])
+
 
 def test_normalized_hover_maps_through_bridge_affine_rotor_curve():
     geometry = replace(

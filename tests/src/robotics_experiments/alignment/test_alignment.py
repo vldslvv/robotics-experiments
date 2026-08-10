@@ -409,6 +409,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "ki_vel",
         "kd_vel",
         "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
+        "horizontal_velocity_error_gain_full_mps",
         "horizontal_velocity_error_gain_end_mps",
         "angular_velocity_filter_hz",
         "kp_vel",
@@ -428,11 +430,13 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[5].candidates[-1] == pytest.approx((0.4, 0.20, 2.0))
     assert target.parameters[6].candidates[0] == pytest.approx((0.2, 0.20, 0.0))
     assert target.parameters[6].candidates[-1] == pytest.approx((0.2, 0.20, 0.0))
-    assert target.parameters[7].candidates == pytest.approx((1.0, 1.05, 1.1, 1.15, 1.19))
-    assert target.parameters[8].candidates == pytest.approx((0.50,))
-    assert target.parameters[9].candidates == pytest.approx((24.0,))
-    assert target.parameters[10].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[10].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[7].candidates == pytest.approx((0.7, 0.8, 0.9, 1.0))
+    assert target.parameters[8].candidates == pytest.approx((0.02,))
+    assert target.parameters[9].candidates == pytest.approx((0.07,))
+    assert target.parameters[10].candidates == pytest.approx((0.15,))
+    assert target.parameters[11].candidates == pytest.approx((24.0,))
+    assert target.parameters[12].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[12].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     assert target.parameters[-1].candidates == pytest.approx((1.0005,))
     extended = replace(
@@ -1262,6 +1266,23 @@ def test_controller_loader_is_strict_and_rejects_legacy(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     controller_path, _selection_path = write_alignment_result(result=result, run_dir=run_dir)
     payload = json.loads(controller_path.read_text())
+    attenuated_settings = {
+        **payload["selected_settings"],
+        "horizontal_velocity_error_gain_scale": 0.8,
+    }
+    payload["selected_settings"] = attenuated_settings
+    payload["settings_fingerprint"] = hashlib.sha256(
+        json.dumps(
+            attenuated_settings,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    controller_path.write_text(json.dumps(payload))
+    attenuated = load_controller_artifact(run_dir)
+    assert attenuated.selected_settings.horizontal_velocity_error_gain_scale == pytest.approx(0.8)
+
     scalar_filter_payload = {
         **payload,
         "selected_settings": {

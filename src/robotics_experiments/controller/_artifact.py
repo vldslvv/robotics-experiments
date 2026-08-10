@@ -209,8 +209,6 @@ def _settings(value: Any, name: str, /) -> ControllerSettings:
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
     if not 0.0 < result.hover_thrust_normalized <= 1.0:
         raise ValueError(f"{name}.hover_thrust_normalized must be in (0, 1]")
-    if result.horizontal_velocity_error_gain_scale < 1.0:
-        raise ValueError(f"{name}.horizontal_velocity_error_gain_scale must be at least 1")
     if (
         not result.horizontal_velocity_error_gain_start_mps
         < result.horizontal_velocity_error_gain_full_mps

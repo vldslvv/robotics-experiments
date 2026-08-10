@@ -95,36 +95,41 @@ parameters:
     stage: 7
     candidates:
       - [0.20, 0.20, 0.0]
-  # Lengthen the signed-short Lab braking response while preserving replay.
+  # Attenuate the evidenced 0.072 m/s braking-error region while returning to
+  # pinned PX4 authority outside the bounded schedule.
   - field: horizontal_velocity_error_gain_scale
     stage: 8
-    candidates: [1.00, 1.05, 1.10, 1.15, 1.19]
-  # Limit the live-response boost to moderate velocity errors, returning to the
-  # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
-  - field: horizontal_velocity_error_gain_end_mps
+    candidates: [0.70, 0.80, 0.90, 1.00]
+  - field: horizontal_velocity_error_gain_start_mps
     stage: 9
-    candidates: [0.50]
+    candidates: [0.02]
+  - field: horizontal_velocity_error_gain_full_mps
+    stage: 10
+    candidates: [0.07]
+  - field: horizontal_velocity_error_gain_end_mps
+    stage: 11
+    candidates: [0.15]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
-    stage: 10
+    stage: 12
     candidates: [24.0]
   # Preserve the pinned PX4 proportional gains.
   - field: kp_vel
-    stage: 11
+    stage: 13
     candidates:
       - [1.8, 1.8, 4.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 12
+    stage: 14
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 13
+    stage: 15
     candidates: [1.0005]
 
 selection_metric: controller-quality

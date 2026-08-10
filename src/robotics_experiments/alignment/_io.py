@@ -252,8 +252,6 @@ def _settings(
         raise ValueError(f"{name}.attitude_yaw_weight must be in [0, 1]")
     if parsed.hover_thrust_normalized > 1.0:
         raise ValueError(f"{name}.hover_thrust_normalized must not exceed 1")
-    if parsed.horizontal_velocity_error_gain_scale < 1.0:
-        raise ValueError(f"{name}.horizontal_velocity_error_gain_scale must be at least 1")
     if (
         not parsed.horizontal_velocity_error_gain_start_mps
         < parsed.horizontal_velocity_error_gain_full_mps
