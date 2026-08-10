@@ -10886,3 +10886,41 @@ Its X/Y/Z braking errors are 1.664/4.986/0.983 mm, combined endpoint error is
 error is 0.048683 N. Promote this point and only its evidenced local basin into
 the canonical scratch definition. A completely fresh capture, fit, replay, and
 live acceptance run is still required before publication.
+
+### 341. Fresh capture isolates asynchronous controller work queues
+
+Date: 2026-08-10.
+
+The clean-source campaign
+`.build/alignment/x500-px4-v1/20260810T-joint-boundary-scratch` captured all
+22 profiles and passed the actuator audit. Its 27-candidate joint boundary
+sweep completed in four GPU batches and selected candidate 26, which passed
+every motion gate. Mandatory replay failed only the moderate stability
+collective at 0.118280 N, and live acceptance separately missed the hover
+last-window limit at 0.131 m. Nothing was finalized or published.
+
+The replay failure is one 4 ms sample, not a controller-scale residual. At
+157.656 s PX4 collective changes from 23.07 N to 27.32 N while the target
+changes one tick later; removing the held target handoff fixes that event but
+breaks three transitions where PX4 consumes the publication one tick later.
+A 161-point attitude-cadence sweep from 180 through 260 Hz, vertical P/I,
+attitude gain, yaw weight, and lateral-boundary diagnostics did not remove the
+failure. The outer vertical acceleration setpoint already matches to 0.000552
+m/s2 RMSE.
+
+Pinned PX4 source establishes the structural cause: `mc_att_control` runs on
+`nav_and_controllers`, while `mc_rate_control` is triggered on the separate
+`rate_ctrl` work queue. Their same-timestamp publication order can therefore
+be same-tick or next-tick. Make the collapsed NumPy/Torch target consume its
+attitude publication immediately, but make evidence replay recover each
+adjacent PX4 source-age choice from `vehicle_attitude_setpoint`,
+`vehicle_rates_setpoint`, and `vehicle_thrust_setpoint`. The unshifted
+intermediate boundary metrics remain unchanged and the total join must stay
+within one 4 ms physics tick. Also seed controller-owned ULog fields with held,
+not future-interpolated, values.
+
+Applying that rule to the preserved capture passes all 22 controller-boundary
+profiles. Worst core collective RMSE is 0.049430 N, normalized motor RMSE is
+0.007425, and physical-state motor RMSE is 0.008438. Commit the structural
+contract and tests, then run a completely fresh capture, sweep, replay, and
+live gate before publication.

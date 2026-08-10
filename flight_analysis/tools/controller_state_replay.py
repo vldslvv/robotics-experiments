@@ -480,6 +480,43 @@ def _controller_setpoint_delay_scan(
     return results
 
 
+def _controller_handoff_indices(
+    *,
+    replay_indices: np.ndarray,
+    current_attitude_collective: np.ndarray,
+    previous_attitude_collective: np.ndarray,
+    current_rates_collective: np.ndarray,
+    previous_rates_collective: np.ndarray,
+    allocator_collective: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Join asynchronous PX4 controller work queues at adjacent publications."""
+    indices = np.asarray(replay_indices, dtype=np.int64)
+    current_attitude = np.asarray(current_attitude_collective, dtype=np.float64)
+    previous_attitude = np.asarray(previous_attitude_collective, dtype=np.float64)
+    current_rates = np.asarray(current_rates_collective, dtype=np.float64)
+    previous_rates = np.asarray(previous_rates_collective, dtype=np.float64)
+    allocator = np.asarray(allocator_collective, dtype=np.float64)
+    if any(
+        values.shape != indices.shape
+        for values in (
+            current_attitude,
+            previous_attitude,
+            current_rates,
+            previous_rates,
+            allocator,
+        )
+    ):
+        raise ValueError("controller handoff samples must match the replay indices")
+    attitude_delay = (
+        np.abs(current_rates - current_attitude) > np.abs(current_rates - previous_attitude)
+    ).astype(np.int64)
+    allocator_delay = (
+        np.abs(allocator - current_rates) > np.abs(allocator - previous_rates)
+    ).astype(np.int64)
+    joined_indices = np.maximum(indices - attitude_delay - allocator_delay, 0)
+    return joined_indices, attitude_delay, allocator_delay
+
+
 def _vertical_setpoint_delay_scan(
     *,
     target_acceleration_setpoint_grid_enu: np.ndarray,
@@ -678,11 +715,11 @@ def _controller_boundary(
 
     local_setpoint_age_us = held_age_us(topic=local_setpoint)
     rate_age_us = held_age_us(topic=rate_status)
-    acceleration_setpoint_ned = interpolated_vector(
+    acceleration_setpoint_ned = held_vector(
         topic=local_setpoint,
         fields=("acceleration[0]", "acceleration[1]", "acceleration[2]"),
     )
-    velocity_setpoint_ned = interpolated_vector(
+    velocity_setpoint_ned = held_vector(
         topic=local_setpoint,
         fields=("vx", "vy", "vz"),
     )
@@ -702,7 +739,7 @@ def _controller_boundary(
         topic=angular_velocity,
         fields=("xyz[0]", "xyz[1]", "xyz[2]"),
     )
-    rate_integral_frd = interpolated_vector(
+    rate_integral_frd = held_vector(
         topic=rate_status,
         fields=("rollspeed_integ", "pitchspeed_integ", "yawspeed_integ"),
     )
@@ -710,13 +747,7 @@ def _controller_boundary(
         topic=local_position,
         fields=("vx", "vy", "vz"),
     )
-    hover_thrust_normalized = float(
-        _linear_interpolate(
-            source_t=_topic_time_us(topic=hover).astype(np.float64),
-            values=np.asarray(hover["hover_thrust"], dtype=np.float64),
-            query_t=np.array([timestamp_us], dtype=np.float64),
-        )[0]
-    )
+    hover_thrust_normalized = float(held_vector(topic=hover, fields=("hover_thrust",))[0])
     desired_attitude_frd_ned = held_vector(
         topic=attitude_setpoint,
         fields=("q_d[0]", "q_d[1]", "q_d[2]", "q_d[3]"),
@@ -1315,6 +1346,9 @@ def _report(
     isaac_angular_acceleration_rows: list[np.ndarray] = []
     used_t: list[float] = []
     used_replay_indices: list[int] = []
+    used_actuator_replay_indices: list[int] = []
+    used_attitude_handoff_delays: list[int] = []
+    used_allocator_handoff_delays: list[int] = []
     rotor_count = len(bridge.input_scaling)
     controller_vectors, controller_source_age_us = _controller_boundary(
         local_setpoint=local_setpoint,
@@ -1464,10 +1498,68 @@ def _report(
         isaac_angular_acceleration_grid.append(controller_state.angular_acceleration_body_flu)
 
     replay_index = _nearest_indices(source_t=replay_t, query_t=sample_t)
-    for time_s, mi, replay_sample_index in zip(
+    thrust_sample_index = _nearest_indices(
+        source_t=relative_time(thrust_setpoint),
+        query_t=sample_t,
+    )
+    thrust_sample_collective = np.linalg.norm(
+        np.column_stack(
+            [
+                np.asarray(thrust_setpoint[f"xyz[{index}]"], dtype=np.float64)[thrust_sample_index]
+                for index in range(3)
+            ]
+        ),
+        axis=1,
+    )
+    rates_sample_index = _hold_indices(
+        source_t=relative_time(rates_setpoint),
+        query_t=sample_t,
+    )
+    rates_collective = -np.asarray(
+        rates_setpoint["thrust_body[2]"],
+        dtype=np.float64,
+    )
+    current_rates_collective = rates_collective[rates_sample_index]
+    previous_rates_collective = rates_collective[np.maximum(rates_sample_index - 1, 0)]
+    attitude_sample_index = _hold_indices(
+        source_t=relative_time(attitude_setpoint),
+        query_t=sample_t,
+    )
+    attitude_collective = -np.asarray(
+        attitude_setpoint["thrust_body[2]"],
+        dtype=np.float64,
+    )
+    current_attitude_collective = attitude_collective[attitude_sample_index]
+    previous_attitude_collective = attitude_collective[np.maximum(attitude_sample_index - 1, 0)]
+    if control_mode == "velocity":
+        actuator_replay_indices, attitude_handoff_delays, allocator_handoff_delays = (
+            _controller_handoff_indices(
+                replay_indices=replay_index,
+                current_attitude_collective=current_attitude_collective,
+                previous_attitude_collective=previous_attitude_collective,
+                current_rates_collective=current_rates_collective,
+                previous_rates_collective=previous_rates_collective,
+                allocator_collective=thrust_sample_collective,
+            )
+        )
+    else:
+        actuator_replay_indices = replay_index
+        attitude_handoff_delays = np.zeros_like(replay_index)
+        allocator_handoff_delays = np.zeros_like(replay_index)
+    for (
+        time_s,
+        mi,
+        replay_sample_index,
+        actuator_replay_index,
+        attitude_handoff_delay,
+        allocator_handoff_delay,
+    ) in zip(
         sample_t,
         motor_index,
         replay_index,
+        actuator_replay_indices,
+        attitude_handoff_delays,
+        allocator_handoff_delays,
         strict=True,
     ):
         controls = np.array(
@@ -1481,9 +1573,12 @@ def _report(
             + np.asarray(bridge.zero_position_armed)
             + np.asarray(bridge.input_offset) * np.asarray(bridge.input_scaling)
         )
-        isaac_omega = isaac_omega_grid[replay_sample_index]
+        isaac_omega = isaac_omega_grid[int(actuator_replay_index)]
         used_t.append(float(time_s))
         used_replay_indices.append(int(replay_sample_index))
+        used_actuator_replay_indices.append(int(actuator_replay_index))
+        used_attitude_handoff_delays.append(int(attitude_handoff_delay))
+        used_allocator_handoff_delays.append(int(allocator_handoff_delay))
         px4_motor_rows.append(controls)
         isaac_motor_rows.append(
             (isaac_omega - np.asarray(bridge.zero_position_armed))
@@ -1534,6 +1629,10 @@ def _report(
     isaac_angular_acceleration_array = np.stack(isaac_angular_acceleration_rows)
     omega_error = isaac_omega_array - px4_omega_array
     wrench_error = isaac_wrench_array - px4_wrench_array
+    collective_error = wrench_error[:, 0]
+    collective_peak_index = int(np.argmax(np.abs(collective_error)))
+    collective_peak_start = max(collective_peak_index - 2, 0)
+    collective_peak_end = min(collective_peak_index + 3, len(collective_error))
     max_omega = np.asarray(bridge.max_rotor_velocity)
     torque_index = _nearest_indices(
         source_t=relative_time(torque_setpoint),
@@ -1616,6 +1715,20 @@ def _report(
         if control_mode == "velocity"
         else []
     )
+    allocator_handoff_delay_scan = [
+        {
+            "delay_steps": row["delay_steps"],
+            "collective_setpoint_rmse": row["collective_setpoint_rmse"],
+        }
+        for row in _controller_setpoint_delay_scan(
+            target_body_rate_grid_flu=np.zeros((len(isaac_collective_setpoint_grid), 3)),
+            target_collective_grid=np.asarray(isaac_collective_setpoint_grid),
+            replay_indices=np.asarray(used_replay_indices),
+            px4_body_rate_flu=np.zeros((len(used_replay_indices), 3)),
+            px4_collective=np.linalg.norm(thrust_setpoint_body, axis=1),
+            maximum_delay_steps=3,
+        )
+    ]
     rate_input_metrics = _rate_input_metrics(
         target_angular_velocity_flu=isaac_angular_velocity_array,
         px4_angular_velocity_flu=px4_angular_velocity_flu,
@@ -1731,6 +1844,28 @@ def _report(
         "controller_setpoint_max_source_age_us": int(
             np.max((np.asarray(used_t) - relative_time(rates_setpoint)[rates_setpoint_index]) * 1e6)
         ),
+        "actuator_handoff_join_error_us": int(
+            np.max(
+                np.abs(np.asarray(used_actuator_replay_indices) - np.asarray(used_replay_indices))
+            )
+            * controller_dt_s
+            * 1e6
+        ),
+        "attitude_to_rate_handoff_join_error_us": int(
+            np.max(used_attitude_handoff_delays) * controller_dt_s * 1e6
+        ),
+        "rate_to_allocator_handoff_join_error_us": int(
+            np.max(used_allocator_handoff_delays) * controller_dt_s * 1e6
+        ),
+        "actuator_handoff_join_offset_counts": {
+            str(offset): int(
+                np.count_nonzero(
+                    np.asarray(used_actuator_replay_indices) - np.asarray(used_replay_indices)
+                    == offset
+                )
+            )
+            for offset in (-2, -1, 0)
+        },
         "rate_input_nearest_sample_error_us": int(
             np.max(
                 np.abs(relative_time(angular_velocity)[angular_velocity_index] - np.asarray(used_t))
@@ -1738,7 +1873,20 @@ def _report(
             )
         ),
         "sample_time_s": [min(used_t), max(used_t)],
+        "collective_thrust_peak_window": [
+            {
+                "time_s": float(used_t[index]),
+                "px4_collective_thrust_n": float(px4_wrench_array[index, 0]),
+                "target_collective_thrust_n": float(isaac_wrench_array[index, 0]),
+                "target_desired_collective": float(isaac_desired_collective_array[index]),
+                "target_rate_collective": float(isaac_collective_setpoint_array[index]),
+                "px4_rate_collective": float(px4_collective_setpoint[index]),
+                "px4_allocator_collective": float(np.linalg.norm(thrust_setpoint_body[index])),
+            }
+            for index in range(collective_peak_start, collective_peak_end)
+        ],
         "outer_loop_handoff_delay_scan": handoff_delay_scan,
+        "allocator_handoff_delay_scan": allocator_handoff_delay_scan,
         "vertical_setpoint_delay_scan": vertical_setpoint_delay_scan,
         "metrics": {
             **boundary_metrics,
@@ -1749,6 +1897,8 @@ def _report(
             "rotor_omega_normalized_rmse": _root_mean_square(values=omega_error / max_omega),
             "rotor_omega_max_abs_radps": float(np.max(np.abs(omega_error))),
             "collective_thrust_rmse_n": _root_mean_square(values=wrench_error[:, 0]),
+            "collective_thrust_max_abs_n": float(np.abs(collective_error[collective_peak_index])),
+            "collective_thrust_max_abs_time_s": float(used_t[collective_peak_index]),
             "body_torque_rmse_nm": [
                 _root_mean_square(values=wrench_error[:, index]) for index in range(1, 4)
             ],
@@ -1860,12 +2010,20 @@ def _profile_replay_report(
                 f"{_MAX_NORMALIZED_MOTOR_RMSE:.6f}"
             )
         physical_join_error_us = physical_replay["physical_state_timestamp_join_error_us"]
+        actuator_join_error_us = core_replay["actuator_handoff_join_error_us"]
+        attitude_handoff_join_error_us = core_replay["attitude_to_rate_handoff_join_error_us"]
+        allocator_handoff_join_error_us = core_replay["rate_to_allocator_handoff_join_error_us"]
         setpoint_source_age_us = core_replay["controller_setpoint_max_source_age_us"]
         rate_input_sample_error_us = core_replay["rate_input_nearest_sample_error_us"]
         if physical_join_error_us > _PHYSICS_TICK_US:
             failures.append(
                 f"{profile_name}: physical-state timestamp join error "
                 f"{physical_join_error_us} us exceeds {_PHYSICS_TICK_US} us"
+            )
+        if actuator_join_error_us > _PHYSICS_TICK_US:
+            failures.append(
+                f"{profile_name}: actuator handoff join error "
+                f"{actuator_join_error_us} us exceeds {_PHYSICS_TICK_US} us"
             )
         profiles.append(
             {
@@ -1882,9 +2040,17 @@ def _profile_replay_report(
                 "controller_state_source": core_replay["controller_state_source"],
                 "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
                 "controller_setpoint_max_source_age_us": setpoint_source_age_us,
+                "actuator_handoff_join_error_us": actuator_join_error_us,
+                "attitude_to_rate_handoff_join_error_us": attitude_handoff_join_error_us,
+                "rate_to_allocator_handoff_join_error_us": allocator_handoff_join_error_us,
+                "actuator_handoff_join_offset_counts": core_replay[
+                    "actuator_handoff_join_offset_counts"
+                ],
                 "rate_input_nearest_sample_error_us": rate_input_sample_error_us,
                 "sample_time_s": core_replay["sample_time_s"],
+                "collective_thrust_peak_window": core_replay["collective_thrust_peak_window"],
                 "outer_loop_handoff_delay_scan": core_replay["outer_loop_handoff_delay_scan"],
+                "allocator_handoff_delay_scan": core_replay["allocator_handoff_delay_scan"],
                 "vertical_setpoint_delay_scan": core_replay["vertical_setpoint_delay_scan"],
                 "metrics": metrics,
                 "physical_state_metrics": physical_metrics,

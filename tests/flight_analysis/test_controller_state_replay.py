@@ -13,6 +13,7 @@ from flight_analysis.tools.controller_state_replay import (
     _bridge_actuator_samples,
     _bridge_state_samples,
     _collective_boundary_metrics,
+    _controller_handoff_indices,
     _controller_setpoint_delay_scan,
     _controller_setpoint_metrics,
     _delay_transmitted_actions,
@@ -187,6 +188,21 @@ def test_controller_setpoint_delay_scan_finds_one_tick_handoff() -> None:
     assert result[0]["collective_setpoint_rmse"] > 0.0
     assert result[1]["collective_setpoint_rmse"] == 0.0
     assert result[1]["body_rate_setpoint_rmse_radps"] == [0.0, 0.0, 0.0]
+
+
+def test_controller_handoff_join_reproduces_independent_work_queue_order() -> None:
+    joined, attitude_delay, allocator_delay = _controller_handoff_indices(
+        replay_indices=np.array([2, 3, 4, 5]),
+        current_attitude_collective=np.array([0.6, 0.7, 0.8, 0.9]),
+        previous_attitude_collective=np.array([0.5, 0.6, 0.7, 0.8]),
+        current_rates_collective=np.array([0.6, 0.6, 0.8, 0.8]),
+        previous_rates_collective=np.array([0.5, 0.5, 0.7, 0.7]),
+        allocator_collective=np.array([0.6, 0.6, 0.7, 0.7]),
+    )
+
+    assert joined.tolist() == [2, 2, 3, 3]
+    assert attitude_delay.tolist() == [0, 1, 0, 1]
+    assert allocator_delay.tolist() == [0, 0, 1, 1]
 
 
 def test_vertical_setpoint_delay_scan_finds_two_tick_outer_phase() -> None:
@@ -576,19 +592,19 @@ def test_reference_augmentation_records_px4_controller_boundary(tmp_path: Path):
     assert payload["schema_version"] == 1
     assert trace["initial_controller_state_valid"]
     assert trace["initial_estimated_linear_velocity_enu_mps"] == pytest.approx([0.3, 0.2, -0.4])
-    assert trace["initial_velocity_setpoint_enu_mps"] == pytest.approx([0.03, 0.02, -0.04])
+    assert trace["initial_velocity_setpoint_enu_mps"] == pytest.approx([0.02, 0.01, -0.03])
     assert trace["initial_estimated_angular_velocity_body_flu_radps"] == pytest.approx(
         [0.2, -0.3, -0.4]
     )
-    assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([3.0, 2.0, -4.0])
+    assert trace["initial_acceleration_setpoint_enu_mps2"] == pytest.approx([2.0, 1.0, -3.0])
     assert trace["initial_linear_acceleration_enu_mps2"] == [6.0, 3.0, -9.0]
     assert trace["initial_angular_acceleration_body_flu_radps2"] == [
         2.0,
         -3.0,
         -4.0,
     ]
-    assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.2, -0.3, -0.4])
-    assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.572)
+    assert trace["initial_rate_integral_body_flu"] == pytest.approx([0.1, -0.2, -0.3])
+    assert trace["initial_hover_thrust_normalized"] == pytest.approx(0.57)
     assert trace["initial_desired_attitude_flu_enu_wxyz"] == pytest.approx(
         [2**-0.5, 0.0, 0.0, 2**-0.5]
     )

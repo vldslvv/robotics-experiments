@@ -70,7 +70,7 @@ fields. The `coarse-to-fine-beam` strategy:
 1. evaluates the committed base setting;
 2. performs one wide, large-step sweep for each declared field;
 3. retains the global beam plus per-gate champions;
-4. generates midpoints only around retained regions for two refinement levels;
+4. generates midpoints around retained regions for each configured refinement level;
 5. deduplicates settings by their exact float32 controller representation.
 
 A zero-centered fitted field may declare a positive
@@ -91,6 +91,8 @@ objective.
 Explicit initial candidate settings participate in the same fixed-scene
 capacity calculation as staged beam expansions, so a focused seeded grid is
 evaluated in GPU-sized batches rather than one environment at a time.
+The current X500 definition uses an explicit joint boundary grid and disables
+additional midpoint refinement; broad exploratory definitions may enable it.
 
 Each worker owns one persistent Isaac Lab environment for the entire ordered
 probe-family list. Families execute sequentially by switching the controller
@@ -152,9 +154,16 @@ cadence. A recorded policy sample contains the setpoint
 published after observing that timestamp; replay therefore applies a changed
 setpoint on the following 4 ms controller tick. The controller command and
 PX4's vertical velocity-state blending both consume that same delayed setpoint.
-The velocity cascade preserves the one-physics-tick publication handoff from
-the attitude-loop output to the rate controller; CTBR remains the direct
-rate-controller contract.
+The collapsed target cascade consumes an attitude-loop publication in its rate
+controller on the same physics tick. PX4 runs attitude, rate, and allocation on
+independent work queues, so an adjacent subscriber can observe that publication
+on either the same tick or the next one. Replay derives those source-age choices
+from the recorded attitude, rate, and thrust topics, then joins the target motor
+prediction by at most one 4 ms physics tick. It reports both adjacent handoffs,
+the total actuator join offset distribution, and the peak collective window.
+The unshifted intermediate setpoint metrics remain authoritative, so this join
+cannot absorb a controller-value error. CTBR remains the direct rate-controller
+contract.
 Replay holds the exact recorded 40/60 ms intervals and does not quantize them
 through a second synthetic 20 Hz cadence. The seed phase is derived per profile from the
 recorded age of its `vehicle_local_position` sample. Because the replay grid
