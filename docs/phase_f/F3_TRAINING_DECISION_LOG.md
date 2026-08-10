@@ -11241,3 +11241,29 @@ Torch. Search scales 1.0 through 1.30 and end boundaries 0.50 through 1.00 m/s,
 jointly with the evidenced X endpoint offsets. Keep the base gain, integral,
 filters, allocator, actuator, probe families, metrics, and thresholds
 unchanged. This is the single structural change for the next attempt.
+
+### 355. Fresh bounded schedule passes replay and live response, leaving endpoint only
+
+Date: 2026-08-10.
+
+Clean-source run
+`.build/alignment/x500-px4-v1/20260810T-bounded-gain-scratch` captured all 22
+profiles from commit `89d984d`. The actuator audit passed with zero timestamp
+error, about 0.0003 normalized motor RMSE, and 0.008-0.012 N collective RMSE.
+The 120-candidate bounded-schedule sweep completed in four GPU batches and
+114.7 seconds at 33.0% average sampled GPU utilization.
+
+No candidate passed motion quality. Selected candidate 44 uses scale 1.15, end
+boundary 0.50 m/s, and X bias -0.010 m/s. Its only motion failure is combined
+endpoint at 34.365 mm against 10 mm; all X/Y/Z braking, residual, stop-time,
+NRMSE, and all CTBR gates pass. Complete 22-profile replay passes with no motor,
+collective, timestamp, or coverage failures. Live hover passes at 0.085 m and
+goto passes at 0.048 m, proving the bounded schedule closed the response
+boundary. Handoff stops at 0.438 m and remains 12 mm too close.
+
+Across all 120 candidates, endpoint improves monotonically at the least
+negative tested X bias, -0.010 m/s. This is also the required live handoff
+direction. Fix scale 1.15 and end 0.50 m/s, then search X bias -0.010 through
++0.030 m/s across zero. Keep every other setting, probe, metric, replay limit,
+and live threshold unchanged. Require motion, replay, hover, goto, and handoff
+before promoting the point into another complete scratch campaign.

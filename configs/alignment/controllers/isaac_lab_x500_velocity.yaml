@@ -13,15 +13,15 @@ settings:
   velocity_controller_rate_hz: 125.0
   attitude_controller_rate_hz: 204.0
   kp_vel: [1.8, 1.8, 4.0]
-  horizontal_velocity_error_gain_scale: 1.0
+  horizontal_velocity_error_gain_scale: 1.15
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
-  horizontal_velocity_error_gain_end_mps: 0.80
+  horizontal_velocity_error_gain_end_mps: 0.50
   ki_vel: [0.4, 0.20, 2.0]
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [-0.025, 0.008, -0.0039]
+  velocity_observation_bias_mps: [-0.010, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
@@ -52,7 +52,7 @@ search:
   strategy: coarse-to-fine-beam
   # Retain the complete independent X/Y bias grid until the lateral-scale
   # crossing is evaluated; this is a two-batch targeted diagnostic.
-  beam_width: 256
+  beam_width: 128
   passes_per_stage: 1
   refinement_levels: 0
   min_refinement_survivors: 2
@@ -68,16 +68,21 @@ parameters:
   - field: velocity_estimator_bias_decay_hz
     stage: 2
     candidates: [0.0125]
-  # Scale 1.10 passes live hover/goto but overshoots the X handoff endpoint;
-  # search the evidenced smaller-magnitude offset region jointly.
+  # Fresh-reference endpoint error and live handoff both improve as the X
+  # observation offset moves through zero.
   - field: velocity_observation_bias_mps
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
       - [-0.010, 0.008, -0.0039]
-      - [-0.015, 0.008, -0.0039]
-      - [-0.020, 0.008, -0.0039]
-      - [-0.025, 0.008, -0.0039]
+      - [-0.005, 0.008, -0.0039]
+      - [0.000, 0.008, -0.0039]
+      - [0.005, 0.008, -0.0039]
+      - [0.010, 0.008, -0.0039]
+      - [0.015, 0.008, -0.0039]
+      - [0.020, 0.008, -0.0039]
+      - [0.025, 0.008, -0.0039]
+      - [0.030, 0.008, -0.0039]
   # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
@@ -98,12 +103,12 @@ parameters:
   # large-error schedule used by the randomized live return trajectory.
   - field: horizontal_velocity_error_gain_scale
     stage: 7
-    candidates: [1.0, 1.10, 1.15, 1.20, 1.25, 1.30]
+    candidates: [1.15]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
     stage: 8
-    candidates: [0.50, 0.60, 0.70, 0.80, 1.00]
+    candidates: [0.50]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
     stage: 9
