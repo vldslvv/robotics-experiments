@@ -11731,6 +11731,32 @@ and search scales 0.70/0.80/0.90/1.00 with decay 0.070/0.075 Hz, X bias
 branch, existing Y filter, pinned P/I/D gains, all probes, replay limits, and
 quality gates unchanged. Replay every motion pass before live evaluation.
 
+### 380. Attenuation passes motion/replay but starts inside hover recovery
+
+Date: 2026-08-10.
+
+The low-error attenuation search evaluated 387 unique candidates in nine GPU
+batches and 278.4 seconds at 31.1% average sampled GPU utilization. Thirty-three
+candidates pass every motion gate and eight full-schedule candidates also pass
+all 22 replay profiles. The structural strict-v1 change is therefore validated:
+positive sub-unit gain scales load, execute with NumPy/Torch parity, and preserve
+the high-error controller boundary.
+
+Candidate 356 combines decay 0.075 Hz, X bias 0.0045 m/s, X scale 0.91,
+attenuation 0.90, and schedule 0.02/0.07/0.15 m/s. Motion braking is 4.254 mm,
+endpoint is 3.017 mm, and worst replay motor RMSE is 0.009986. The live gate
+rejects hover before goto: final error is 0.050 m and last-second maximum is
+0.108 m. Attenuation beginning at 0.02 m/s therefore weakens the low-velocity
+hover recovery that the earlier base-gain candidates passed.
+
+Narrow the schedule around the measured 0.0724 m/s brake error: start/full/end
+0.05/0.07/0.10 m/s. This preserves base gain for lower-error hover settling and
+returns to base gain before replay envelopes. Retain attenuation candidates
+0.70/0.80/0.90/1.00, decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, and X
+scale 0.90/0.91. Keep the unfiltered X branch, existing Y filter, pinned P/I/D
+gains, all probes, replay limits, and quality gates unchanged. Replay every
+motion pass before live evaluation.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
