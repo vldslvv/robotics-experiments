@@ -415,6 +415,8 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
         "velocity_observation_scale",
         "ki_vel",
         "kd_vel",
+        "horizontal_velocity_error_gain_scale",
+        "horizontal_velocity_error_gain_start_mps",
         "horizontal_velocity_braking_gain_scale",
         "horizontal_velocity_braking_gain_start_mps",
         "horizontal_velocity_braking_gain_full_mps",
@@ -437,13 +439,15 @@ def test_controller_yaml_loads_and_generic_expansion_accepts_another_field() -> 
     assert target.parameters[5].candidates[-1] == pytest.approx((0.4, 0.20, 2.0))
     assert target.parameters[6].candidates[0] == pytest.approx((0.2, 0.20, 0.0))
     assert target.parameters[6].candidates[-1] == pytest.approx((0.2, 0.20, 0.0))
-    assert target.parameters[7].candidates == pytest.approx((0.7, 0.8, 0.9))
-    assert target.parameters[8].candidates == pytest.approx((0.055, 0.060))
-    assert target.parameters[9].candidates == pytest.approx((0.065, 0.070))
-    assert target.parameters[10].candidates == pytest.approx((0.075, 0.080))
-    assert target.parameters[11].candidates == pytest.approx((24.0,))
-    assert target.parameters[12].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
-    assert target.parameters[12].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[7].candidates == pytest.approx((1.19, 1.23, 1.27, 1.31))
+    assert target.parameters[8].candidates == pytest.approx((0.09, 0.12, 0.15))
+    assert target.parameters[9].candidates == pytest.approx((0.7, 0.8, 0.9))
+    assert target.parameters[10].candidates == pytest.approx((0.055, 0.060))
+    assert target.parameters[11].candidates == pytest.approx((0.065, 0.070))
+    assert target.parameters[12].candidates == pytest.approx((0.075, 0.080))
+    assert target.parameters[13].candidates == pytest.approx((24.0,))
+    assert target.parameters[14].candidates[0] == pytest.approx((1.8, 1.8, 4.0))
+    assert target.parameters[14].candidates[-1] == pytest.approx((1.8, 1.8, 4.0))
     assert target.parameters[-2].candidates == (pytest.approx((0.35, 0.35, 4.0)),)
     assert target.parameters[-1].candidates == pytest.approx((1.0005,))
     extended = replace(

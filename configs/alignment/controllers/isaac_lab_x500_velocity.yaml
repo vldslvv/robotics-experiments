@@ -99,41 +99,49 @@ parameters:
     stage: 7
     candidates:
       - [0.20, 0.20, 0.0]
-  # Retain the high-error recovery lobe and independently attenuate the
-  # evidenced 0.072 m/s zero-command braking region.
-  - field: horizontal_velocity_braking_gain_scale
+  # Extend the evidenced high-error recovery lobe toward the 0.102 m live
+  # settling boundary while keeping it disjoint from braking attenuation.
+  - field: horizontal_velocity_error_gain_scale
     stage: 8
+    candidates: [1.19, 1.23, 1.27, 1.31]
+  - field: horizontal_velocity_error_gain_start_mps
+    stage: 9
+    candidates: [0.09, 0.12, 0.15]
+  # Independently attenuate the evidenced 0.072 m/s zero-command braking
+  # region.
+  - field: horizontal_velocity_braking_gain_scale
+    stage: 10
     candidates: [0.70, 0.80, 0.90]
   - field: horizontal_velocity_braking_gain_start_mps
-    stage: 9
+    stage: 11
     candidates: [0.055, 0.060]
   - field: horizontal_velocity_braking_gain_full_mps
-    stage: 10
+    stage: 12
     candidates: [0.065, 0.070]
   - field: horizontal_velocity_braking_gain_end_mps
-    stage: 11
+    stage: 13
     candidates: [0.075, 0.080]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
-    stage: 12
+    stage: 14
     candidates: [24.0]
   # Preserve the pinned PX4 proportional gains.
   - field: kp_vel
-    stage: 13
+    stage: 15
     candidates:
       - [1.8, 1.8, 4.0]
   # Short alignment profiles remain below this evidenced cap, while the longer
   # published-artifact goto is prevented from retaining excessive integral
   # acceleration. Keep it declarative so fit and runtime share the same limit.
   - field: velocity_integral_limit_mps2
-    stage: 14
+    stage: 16
     candidates:
       - [0.35, 0.35, 4.0]
   # The streamed CTBR collective is intermittently interleaved with PX4's
   # prior attitude-controller output. Fit the effective inner-loop collective
   # observed at the motor boundary while retaining the raw command contract.
   - field: ctbr_effective_collective_scale
-    stage: 15
+    stage: 17
     candidates: [1.0005]
 
 selection_metric: controller-quality

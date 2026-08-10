@@ -11905,6 +11905,43 @@ coverage. Retain decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X observation
 scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and quality
 gates unchanged.
 
+### 383. Dual lobes pass motion and replay; recovery needs two millimetres
+
+Date: 2026-08-10.
+
+The strict-v1 dual-lobe implementation passed 760 host tests and the complete
+pre-commit suite before execution. Its first sweep against the prior capture
+was retained as diagnostic evidence only: final fitting correctly rejected the
+changed reference-definition fingerprint. A clean source commit then produced
+a new 22-profile PX4 capture, and the actuator audit passed every profile with
+zero timestamp join error, motor RMSE near 0.0003 against the 0.01 limit, and
+collective RMSE no greater than approximately 0.012 N against the 0.05 N
+limit.
+
+The from-scratch dual-lobe sweep evaluated 482 unique candidates in ten GPU
+batches and 310.0 seconds at 30.4% average sampled GPU utilization. One hundred
+eighty-eight candidates pass every motion gate, and exhaustive replay confirms
+that all 188 also pass all 22 controller-boundary profiles. Candidate 109 uses
+the retained 1.19 recovery lobe, decay 0.075 Hz, X bias 0.005 m/s, X observation
+scale 0.91, and a 0.90 braking lobe at 0.060/0.070/0.075 m/s. Its X and Y
+braking errors are 2.947 mm and 3.358 mm, combined endpoint is 8.608 mm, and
+worst replay motor RMSE is 0.009680.
+
+The authoritative live gate improves materially but still rejects hover before
+goto: final error is 0.045 m and the last-second maximum is 0.102 m. Restoring
+the recovery lobe therefore removes 5 mm of the former 0.107 m excess, while
+the independent braking lobe preserves large motion and replay pass sets. The
+remaining first failed boundary is the same horizontal recovery response, now
+only 2 mm outside its live limit.
+
+Fit the existing recovery lobe rather than changing controller structure:
+search gain scale 1.19/1.23/1.27/1.31 and start 0.09/0.12/0.15 m/s. Keep its
+full/end values at 0.30/0.50 m/s, leaving a gap above the braking lobe's maximum
+0.08 m/s. Retain the braking grid, decay 0.070/0.075 Hz, X bias
+0.0045/0.0050 m/s, X observation scale 0.90/0.91, pinned P/I/D gains, all
+probes, replay limits, and quality gates. Replay every motion pass before live
+evaluation.
+
 ### 370. Pinned controller passes motion and replay; live handoff is too close
 
 Date: 2026-08-10.
