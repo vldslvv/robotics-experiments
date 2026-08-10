@@ -11843,6 +11843,36 @@ Z steady bias independently to remove the signed +14.3 mm vertical endpoint.
 Keep the pinned PX4 gains, controller structure, all probes, replay limits, and
 quality gates unchanged. Replay every motion pass before live evaluation.
 
+### 381. Narrow attenuation still overlaps the live X recovery
+
+Date: 2026-08-10.
+
+The narrowed 0.05/0.07/0.10 m/s attenuation search evaluated 386 unique
+candidates in nine GPU batches and 281.5 seconds at 31.1% average sampled GPU
+utilization. Thirty-two candidates pass every motion gate, and ten of those
+also pass all 22 controller-boundary replay profiles. Candidate 360 uses
+estimator decay 0.075 Hz, X observation bias 0.0045 m/s, X observation scale
+0.91, gain scale 0.90, and the narrowed schedule. Its braking-distance error is
+3.998 mm, endpoint error is 3.638 mm, and worst replay motor RMSE is 0.009962.
+
+The authoritative 16-environment live gate rejects candidate 360 before goto:
+final hover error is 0.049 m and the last-second maximum is 0.107 m. A
+single-environment diagnostic reproduces the same 0.107 m rejection. At 3.00
+seconds the position-error vector is (-0.096, 0.000, -0.051) m, so X dominates
+the 0.109 m norm; by 3.95 seconds it has decayed to (-0.040, 0.000, -0.034) m.
+The first failed live boundary is therefore horizontal settling, not vertical
+control, allocation, or rotor response.
+
+The diagnostic X command and velocity imply approximately 0.076 m/s velocity
+error at the beginning of the final hover window. That still lies inside the
+current schedule's 0.07-0.10 m/s falling edge and overlaps the 0.0724 m/s
+zero-command braking error. Before introducing a command-conditioned controller
+branch, test the remaining error-only separation: search gain scale
+0.70/0.80/0.90 with schedule start 0.055/0.060, full 0.065/0.070, and end
+0.075/0.080 m/s. Retain decay 0.070/0.075 Hz, X bias 0.0045/0.0050 m/s, X
+observation scale 0.90/0.91, pinned P/I/D gains, all probes, replay limits, and
+quality gates. Replay every motion pass before live evaluation.
+
 ### 370. Pinned controller passes motion and replay; live handoff is too close
 
 Date: 2026-08-10.

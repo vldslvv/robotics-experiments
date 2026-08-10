@@ -96,19 +96,19 @@ parameters:
     candidates:
       - [0.20, 0.20, 0.0]
   # Attenuate the evidenced 0.072 m/s braking-error region while returning to
-  # pinned PX4 authority outside the bounded schedule.
+  # pinned PX4 authority before the 0.076 m/s live hover-recovery boundary.
   - field: horizontal_velocity_error_gain_scale
     stage: 8
-    candidates: [0.70, 0.80, 0.90, 1.00]
+    candidates: [0.70, 0.80, 0.90]
   - field: horizontal_velocity_error_gain_start_mps
     stage: 9
-    candidates: [0.05]
+    candidates: [0.055, 0.060]
   - field: horizontal_velocity_error_gain_full_mps
     stage: 10
-    candidates: [0.07]
+    candidates: [0.065, 0.070]
   - field: horizontal_velocity_error_gain_end_mps
     stage: 11
-    candidates: [0.10]
+    candidates: [0.075, 0.080]
   # Retain the best motor-replay side of the angular-filter diagnostic.
   - field: angular_velocity_filter_hz
     stage: 12
