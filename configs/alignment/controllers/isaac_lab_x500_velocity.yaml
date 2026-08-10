@@ -72,30 +72,27 @@ parameters:
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.003, 0.0, 0.0]
-      - [0.004, 0.0, 0.0]
-      - [0.0045, 0.0, 0.0]
       - [0.005, 0.0, 0.0]
-      - [0.0055, 0.0, 0.0]
-      - [0.006, 0.0, 0.0]
-  # Search between the rejected low-cutoff branch and the motion/replay-safe
-  # 30 Hz branch.
+      - [0.0052, 0.0, 0.0]
+      - [0.0054, 0.0, 0.0]
+      - [0.0056, 0.0, 0.0]
+      - [0.0058, 0.0, 0.0]
+  # Retain the two best high-cutoff branches around the crossing.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [3.0, 0.0, 0.0]
-      - [5.0, 0.0, 0.0]
-      - [8.0, 0.0, 0.0]
-      - [12.0, 0.0, 0.0]
       - [20.0, 0.0, 0.0]
       - [30.0, 0.0, 0.0]
-  # Retain the physical-replay-safe X scale range.
+  # Refine the interpolated joint braking/endpoint crossing.
   - field: velocity_observation_scale
     stage: 5
     candidates:
-      - [0.92, 1.0, 1.0]
-      - [0.94, 1.0, 1.0]
-      - [0.96, 1.0, 1.0]
+      - [0.900, 1.0, 1.0]
+      - [0.902, 1.0, 1.0]
+      - [0.904, 1.0, 1.0]
+      - [0.906, 1.0, 1.0]
+      - [0.908, 1.0, 1.0]
+      - [0.910, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
