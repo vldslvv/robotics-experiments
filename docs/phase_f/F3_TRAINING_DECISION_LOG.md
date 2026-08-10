@@ -12014,3 +12014,22 @@ as the seam that separates short captured motion from the longer live goto;
 the new 1.23 recovery lobe must independently preserve live hover. Keep all
 other candidate-483 settings, probe families, gates, replay tolerances, and the
 live acceptance contract unchanged.
+
+### 386. Bias/decay passes axis gates but misses the combined endpoint
+
+Date: 2026-08-10.
+
+The joint bias/decay search evaluated 25 candidates in three GPU batches and
+94.7 seconds at 36.6% average sampled GPU utilization. No candidate passes all
+motion gates. Candidate 21 at decay 0.050 Hz and +0.008 m/s X bias passes every
+individual X/Y/Z velocity, braking, residual-speed, stop-time, envelope, and
+CTBR gate. Its only failure is the combined endpoint at 13.206 mm against
+10 mm. The signed endpoint vector is [-12.751, -2.312, -2.542] mm, which
+isolates X as the remaining component.
+
+Before adding estimator state, test the existing high-cutoff X velocity-filter
+seam retained by entries 372-374. Search 0/10/20/30 Hz X cutoff with decay
+0.040/0.050/0.060 Hz and X bias 0.0080/0.0095 m/s. Keep the Y filter at 1.5 Hz,
+Z unfiltered, and every other candidate-483 setting fixed. Low-cutoff filters
+remain excluded by their evidenced stop-time regression. Preserve all probe
+families, gates, replay tolerances, and the live acceptance contract.
