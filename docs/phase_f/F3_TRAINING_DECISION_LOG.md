@@ -11533,6 +11533,30 @@ short captured profiles while still changing the long live goto. Keep Y/Z,
 pinned PX4 gains, controller structure, all probes, replay limits, and quality
 gates unchanged. Replay every motion pass before live evaluation.
 
+### 372. Low-cutoff filtering does not preserve the stop-time gate
+
+Date: 2026-08-10.
+
+The replay-safe live stopping/filter search evaluated 808 unique candidates in
+ten GPU batches and 357.1 seconds at 26.8% average sampled GPU utilization.
+None passes every motion gate. Selected candidate 316 uses decay 0.075 Hz, X
+bias 0.003 m/s, no X filter, and X scale 0.92. It misses only X braking at
+5.689 mm against the 5 mm limit; its combined endpoint is 3.139 mm.
+
+The 0.5-2 Hz filter hypothesis is rejected. The strongest filtered branches
+move braking inside its limit but delay the detected X stop from the allowed
+0.10 seconds to 0.14 seconds. The unfiltered candidates preserve stop time but
+miss braking by at least 0.689 mm. Since the earlier 30 Hz candidate passes
+motion and replay, the first failed boundary is now isolated to the untested
+2-30 Hz transition rather than controller authority or the plant.
+
+Search the evidenced 3-30 Hz X-filter interval with X bias 0.003-0.006 m/s,
+replay-safe X scale 0.92-0.96, and decay 0.05/0.075 Hz. Keep Y/Z, pinned PX4
+gains, controller structure, all probes, replay limits, and quality gates
+unchanged. Replay every motion pass before live evaluation, prioritizing X bias
+0.005 m/s because the measured live response improved approximately 8 mm per
+0.001 m/s across the prior two replay-safe candidates.
+
 ### 367. Error-based high-authority scaling does not repair replay
 
 Date: 2026-08-10.
