@@ -62,11 +62,10 @@ parameters:
   - field: attitude_controller_rate_hz
     stage: 1
     candidates: [204.0]
-  # Slower decay keeps short replay profiles near their captured seed while
-  # allowing steady positive bias to affect the longer live goto.
+  # Retain the motion-near and replay-safe decay frontier.
   - field: velocity_estimator_bias_decay_hz
     stage: 2
-    candidates: [0.0125, 0.025, 0.05, 0.075]
+    candidates: [0.05, 0.075]
   # Positive X bias is the signed correction for the live TOO_CLOSE endpoint;
   # Y/Z remain at the motion-passing zero correction.
   - field: velocity_observation_bias_mps
@@ -75,19 +74,21 @@ parameters:
     candidates:
       - [0.003, 0.0, 0.0]
       - [0.004, 0.0, 0.0]
+      - [0.0045, 0.0, 0.0]
       - [0.005, 0.0, 0.0]
+      - [0.0055, 0.0, 0.0]
       - [0.006, 0.0, 0.0]
-      - [0.008, 0.0, 0.0]
-      - [0.010, 0.0, 0.0]
-  # Search the evidenced braking filters instead of reducing physical scale.
+  # Search between the rejected low-cutoff branch and the motion/replay-safe
+  # 30 Hz branch.
   - field: velocity_filter_hz
     stage: 4
     candidates:
-      - [0.50, 0.0, 0.0]
-      - [0.75, 0.0, 0.0]
-      - [1.00, 0.0, 0.0]
-      - [1.50, 0.0, 0.0]
-      - [2.00, 0.0, 0.0]
+      - [3.0, 0.0, 0.0]
+      - [5.0, 0.0, 0.0]
+      - [8.0, 0.0, 0.0]
+      - [12.0, 0.0, 0.0]
+      - [20.0, 0.0, 0.0]
+      - [30.0, 0.0, 0.0]
   # Retain the physical-replay-safe X scale range.
   - field: velocity_observation_scale
     stage: 5
@@ -95,7 +96,6 @@ parameters:
       - [0.92, 1.0, 1.0]
       - [0.94, 1.0, 1.0]
       - [0.96, 1.0, 1.0]
-      - [0.98, 1.0, 1.0]
   # Preserve the pinned PX4 velocity gains; the estimator adapter owns the
   # physical-state correction and core replay must remain exact.
   - field: ki_vel
