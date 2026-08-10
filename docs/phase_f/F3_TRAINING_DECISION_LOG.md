@@ -11286,3 +11286,26 @@ boundary. Higher bounded gain is already isolated from the large replay
 envelope and directly addresses the 3 mm live excess. Require motion, replay,
 hover, goto, and handoff together; do not change the controller structure or
 any gate.
+
+### 357. Replay-safe response reaches the live hover rounding boundary
+
+Date: 2026-08-10.
+
+The 30-point bias/gain diagnostic completed in three GPU batches and 79.0
+seconds at 33.9% average sampled GPU utilization. Twenty-three candidates pass
+every motion gate. The fitter selected scale 1.225 and bias +0.018 m/s, with
+9.957 mm endpoint and 3.927 mm X braking, but replay rejected its physical Y
+motor RMSE at 0.010585.
+
+Parallel replay of all 23 motion passes found a clean scale boundary. Every
+1.175 candidate passes all 22 profiles at about 0.00968 worst motor RMSE and
+0.04171 N worst collective RMSE. Scale 1.20 first fails only physical Y motor
+at 0.010124. Exact candidate 10, scale 1.175 and bias +0.018 m/s, then reached a
+live hover value that prints as 0.100 m but remains fractionally above the
+strict 0.100 m comparison.
+
+Interpolate only the evidenced replay-safe interval: search scales 1.175
+through 1.1925 with X bias +0.018 through +0.019 m/s at the fixed 0.50 m/s end
+boundary. The motor crossing is estimated near scale 1.193, so the range stays
+inside measured replay feasibility while adding the small live-response margin.
+Keep all remaining settings, probes, metrics, and thresholds unchanged.

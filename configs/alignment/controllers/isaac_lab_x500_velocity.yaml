@@ -13,7 +13,7 @@ settings:
   velocity_controller_rate_hz: 125.0
   attitude_controller_rate_hz: 204.0
   kp_vel: [1.8, 1.8, 4.0]
-  horizontal_velocity_error_gain_scale: 1.15
+  horizontal_velocity_error_gain_scale: 1.175
   horizontal_velocity_error_gain_start_mps: 0.15
   horizontal_velocity_error_gain_full_mps: 0.30
   horizontal_velocity_error_gain_end_mps: 0.50
@@ -21,7 +21,7 @@ settings:
   kd_vel: [0.2, 0.2, 0.0]
   velocity_observation_scale: [0.98, 0.8975, 1.0]
   # Steady world-ENU physical-to-estimator offset measured from the reference.
-  velocity_observation_bias_mps: [0.020, 0.008, -0.0039]
+  velocity_observation_bias_mps: [0.018, 0.008, -0.0039]
   velocity_estimator_bias_decay_hz: 0.0125
   velocity_filter_hz: [0.0, 1.5, 0.0]
   velocity_derivative_filter_hz: 5.0
@@ -74,12 +74,10 @@ parameters:
     stage: 3
     selection_regularization_scale: 1.0
     candidates:
-      - [0.0170, 0.008, -0.0039]
       - [0.0180, 0.008, -0.0039]
+      - [0.01825, 0.008, -0.0039]
       - [0.0185, 0.008, -0.0039]
       - [0.0190, 0.008, -0.0039]
-      - [0.0195, 0.008, -0.0039]
-      - [0.0200, 0.008, -0.0039]
   # Retain the 1.5 Hz joint motion/replay crossing.
   - field: velocity_filter_hz
     stage: 4
@@ -100,7 +98,7 @@ parameters:
   # large-error schedule used by the randomized live return trajectory.
   - field: horizontal_velocity_error_gain_scale
     stage: 7
-    candidates: [1.15, 1.175, 1.20, 1.225, 1.25]
+    candidates: [1.175, 1.180, 1.185, 1.190, 1.1925]
   # Limit the live-response boost to moderate velocity errors, returning to the
   # PX4-matching gain before the 0.6-0.8 m/s replay envelopes.
   - field: horizontal_velocity_error_gain_end_mps
