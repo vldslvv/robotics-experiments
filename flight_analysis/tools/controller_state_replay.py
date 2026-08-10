@@ -1109,7 +1109,7 @@ def _report(
         controller_dt_s=controller_dt_s,
     )
     attitude_update_mask = _recorded_update_mask(
-        source_time_s=relative_time(attitude),
+        source_time_s=relative_time(rates_setpoint),
         replay_time_s=replay_t,
     )
     if command_trace is None:
@@ -1665,7 +1665,7 @@ def _report(
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
-        "attitude_update_schedule_source": "vehicle_attitude",
+        "attitude_update_schedule_source": "vehicle_rates_setpoint",
         "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
         "physical_state_timestamp_join_error_us": (

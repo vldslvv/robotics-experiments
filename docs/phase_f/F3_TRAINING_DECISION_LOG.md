@@ -10615,3 +10615,19 @@ recorded `vehicle_rates_setpoint` publication ticks and retain the one-tick
 rate-to-allocator handoff. This directly joins the boundary being compared;
 it must remain replay-only while the deployable controller continues to use
 the selected deterministic cadence.
+
+### 331. Join replay to the recorded downstream attitude output
+
+Date: 2026-08-10.
+
+Change the replay-only update mask from upstream `vehicle_attitude` timestamps
+to the full-rate `vehicle_rates_setpoint` publications already used for
+setpoint comparison. On each recorded publication tick the target refreshes
+its held attitude output; the structural rate handoff then delays allocator
+consumption by one 4 ms tick, matching the observed topic and motor ordering.
+
+This does not change `ControllerSettings`, NumPy/Torch deployment cadence, or
+policy training. It makes the replay's asynchronous schedule an observed input
+boundary while continuing to audit the target's setpoint values, rate PID,
+allocator, rotor mapping, and physical wrench. Retain it only if it improves
+the selected four-failure frontier without regressing a passed gate.
