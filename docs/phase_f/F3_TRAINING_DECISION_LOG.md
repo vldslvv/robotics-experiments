@@ -10631,3 +10631,20 @@ policy training. It makes the replay's asynchronous schedule an observed input
 boundary while continuing to audit the target's setpoint values, rate PID,
 allocator, rotor mapping, and physical wrench. Retain it only if it improves
 the selected four-failure frontier without regressing a passed gate.
+
+### 332. Topic publications cannot replace scheduler state
+
+Date: 2026-08-10.
+
+Driving the target attitude output from `vehicle_rates_setpoint` publication
+ticks regresses the selected deterministic frontier from four to six failures.
+Z collective rises from 0.170968 N to 0.593953 N, moderate collective rises to
+0.252581 N, moderate physical motor regresses to 0.011487, and vertical-ramp
+collective fails again at 0.062177 N. Preserve the report as
+`controller_boundary_replay-rates-schedule-with-handoff.json`.
+
+Neither upstream nor downstream topic timestamps encode enough scheduler state
+to override the controller's update decision. Remove the replay-only mask and
+restore the deterministic 200 Hz, one-tick-handoff frontier. Continue with a
+narrow fractional-cadence refinement around its 5 ms period; the preserved
+coarse sweep has not yet tested the neighboring deterministic schedules.

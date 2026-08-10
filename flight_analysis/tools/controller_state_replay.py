@@ -99,17 +99,6 @@ def _replay_time_grid(
     return start_s + relative_time_s, relative_time_s
 
 
-def _recorded_update_mask(
-    *,
-    source_time_s: np.ndarray,
-    replay_time_s: np.ndarray,
-) -> np.ndarray:
-    """Join exact physics-representable module updates onto the replay grid."""
-    source_ticks_us = np.rint(np.asarray(source_time_s, dtype=np.float64) * 1e6).astype(np.int64)
-    replay_ticks_us = np.rint(np.asarray(replay_time_s, dtype=np.float64) * 1e6).astype(np.int64)
-    return np.isin(replay_ticks_us, source_ticks_us)
-
-
 def _delay_velocity_actions(
     *,
     actions: np.ndarray,
@@ -1108,10 +1097,6 @@ def _report(
         end_s=end_s,
         controller_dt_s=controller_dt_s,
     )
-    attitude_update_mask = _recorded_update_mask(
-        source_time_s=relative_time(rates_setpoint),
-        replay_time_s=replay_t,
-    )
     if command_trace is None:
         replay_actions = None
         trajectory_index = _hold_indices(source_t=relative_time(trajectory), query_t=replay_t)
@@ -1333,7 +1318,6 @@ def _report(
         quaternion,
         rates_flu,
         hover_thrust_normalized,
-        attitude_updated,
     ) in zip(
         replay_actions if replay_actions is not None else np.full((len(replay_t), 4), np.nan),
         velocity_ned,
@@ -1342,7 +1326,6 @@ def _report(
         replay_quaternion_flu_enu,
         replay_angular_velocity_flu,
         replay_hover_thrust,
-        attitude_update_mask,
         strict=True,
     ):
         if not (
@@ -1360,13 +1343,6 @@ def _report(
             attitude_flu_enu_wxyz=quaternion_flu_enu,
             linear_velocity_enu=velocity_state_enu,
             angular_velocity_body_flu=rates_flu,
-        )
-        attitude_period_s = 1.0 / params.attitude_controller_rate_hz
-        controller_state = replace(
-            controller_state,
-            attitude_loop_elapsed_s=(
-                attitude_period_s - controller_dt_s if attitude_updated else -controller_dt_s
-            ),
         )
         controller_state = update_hover_thrust_estimate(
             params=params,
@@ -1665,7 +1641,6 @@ def _report(
         "sample_count": len(used_t),
         "controller_sample_count": len(replay_t),
         "controller_rate_hz": config.sim.physics_hz,
-        "attitude_update_schedule_source": "vehicle_rates_setpoint",
         "controller_state_source": replay_state_source,
         "controller_state_source_age_us": controller_source_age_us,
         "physical_state_timestamp_join_error_us": (
@@ -1836,7 +1811,6 @@ def _profile_replay_report(
                 "end_s": window["end_s"],
                 "sample_count": core_replay["sample_count"],
                 "controller_sample_count": core_replay["controller_sample_count"],
-                "attitude_update_schedule_source": core_replay["attitude_update_schedule_source"],
                 "controller_state_source": core_replay["controller_state_source"],
                 "controller_state_source_age_us": core_replay["controller_state_source_age_us"],
                 "controller_setpoint_max_source_age_us": setpoint_source_age_us,
