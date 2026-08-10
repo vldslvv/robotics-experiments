@@ -10924,3 +10924,38 @@ profiles. Worst core collective RMSE is 0.049430 N, normalized motor RMSE is
 0.007425, and physical-state motor RMSE is 0.008438. Commit the structural
 contract and tests, then run a completely fresh capture, sweep, replay, and
 live gate before publication.
+
+### 342. Fresh asynchronous-handoff campaign passes every replay boundary
+
+Date: 2026-08-10.
+
+The clean-source campaign
+`.build/alignment/x500-px4-v1/20260810T-asynchronous-handoff-scratch`
+captured all 22 profiles and passed the actuator audit with zero timestamp-join
+error, about 0.0003 normalized motor RMSE, and collective errors below 0.01 N.
+Its 27-candidate sweep completed in four GPU batches and 84.3 seconds at 37.7%
+average sampled GPU utilization.  Candidate 1 then passed every one of the 22
+mandatory controller-boundary replay profiles.  Worst collective RMSE was
+below 0.05 N and worst normalized motor RMSE was below 0.01.
+
+Motion quality now fails only Y residual speed at 0.011506 m/s against 0.01 and
+the combined endpoint at 0.023101 m against 0.01.  All 27 candidates have the
+same two failures; X/Y/Z braking, every remaining translational gate, and all
+CTBR roll/pitch/yaw/collective gates pass.  The endpoint residual is mostly X:
+the reference finishes at `[0.101327, 0.109580, 2.244173]` m while candidate 1
+finishes at `[0.079308, 0.116404, 2.245667]` m.  More-negative X bias improves
+that endpoint, and Y residual speed improves monotonically at the former 0.900
+Y-scale boundary.
+
+The live analytic hover gate separately ended at 0.038 m error but reached
+0.132 m during its final one-second window, above 0.100 m.  This transient is
+not evidence for weakening a gate: the uniform Z profiles pass, and the motion
+candidate must first pass before the live trace is diagnosed with an accepted
+setting.
+
+Continue on this preserved fresh reference with an independent 24-point X/Y
+bias grid and five Y scales.  Keep the evidenced angular filter and all other
+controller fields pinned.  Fixed-capacity batching should evaluate the roughly
+150 unique settings in two GPU batches.  Replay every motion-passing candidate,
+then promote only a joint motion/replay pass into another completely fresh
+campaign.
