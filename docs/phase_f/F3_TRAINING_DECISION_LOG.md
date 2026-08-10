@@ -10674,3 +10674,32 @@ estimated-state replay, upstream of the rate-input filter. Do not add that
 filter range or replace it with a vector merely because a scalar candidate hit
 an edge. Measure the physical-to-estimated attitude boundary and its tick-delay
 scan before adding an attitude-state adapter.
+
+### 334. Preserved replay passes with pinned vertical gain
+
+Date: 2026-08-10.
+
+The physical-to-estimated attitude scan does not support a new attitude-state
+adapter. On the Y envelope, one tick of physical-attitude delay reduces roll
+error from 0.001142 to 0.000845 rad, far too little to explain the 0.074402
+rad/s body-rate-setpoint error. The first divergent Y boundary is desired tilt
+from the velocity adapter.
+
+Combining three existing declarative candidates clears that boundary:
+Y `velocity_filter_hz=0`, observation scale `0.98`, and observation bias
+`-0.03 m/s` reduce physical Y motor RMSE to 0.007437. Failed replay gates fall
+from four to three without changing vertical metrics.
+
+At that frontier, a parallel one-dimensional vertical gain sweep identifies
+the pinned PX4 proportional gain as the missing upstream correction. Changing
+only Z `kp_vel` from 4.2 to 4.0 reduces acceleration-setpoint RMSE from
+0.038781 to 0.008118 m/s2. All replay gates pass: forward collective is
+0.049668 N, Z collective is 0.040919 N, moderate collective is 0.015720 N,
+and physical Y remains passed. Varying Z `ki_vel` does not produce a comparable
+improvement.
+
+Promote 208.333333 Hz, the passing velocity adapter combination, and the
+declarative `[4.0, 4.1, 4.2]` Z proportional-gain range into the scratch
+definition. The mechanically modified preserved artifact remains diagnostic;
+run a complete fresh capture, audit, sweep, fit, replay, live motion gate, and
+finalization from a clean source commit before publication.
