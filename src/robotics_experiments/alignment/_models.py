@@ -80,6 +80,7 @@ class ControllerStateSourceAge:
     vehicle_local_position_setpoint: int
     vehicle_local_position: int
     vehicle_angular_velocity: int
+    vehicle_rates_setpoint: int
     rate_ctrl_status: int
     hover_thrust_estimate: int
 
@@ -113,7 +114,7 @@ class ProbeTrace:
     completed: bool
     initial_controller_state_valid: bool = False
     initial_controller_state_source_age_us: ControllerStateSourceAge = ControllerStateSourceAge(
-        0, 0, 0, 0, 0
+        0, 0, 0, 0, 0, 0
     )
     initial_hover_thrust_normalized: float = 0.0
     initial_acceleration_setpoint_enu_mps2: Vector3 = (0.0, 0.0, 0.0)

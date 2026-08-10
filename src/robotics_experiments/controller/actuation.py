@@ -926,12 +926,15 @@ def seed_actuation_controller_state(
     rate_integral_body_flu: np.ndarray,
     hover_thrust_normalized: float,
     outer_loop_elapsed_s: float,
+    attitude_loop_elapsed_s: float,
 ) -> ActuationControllerState:
     """Match a neutral-command PX4 controller boundary for one replay."""
     if not math.isfinite(controller_dt_s) or controller_dt_s <= 0.0:
         raise ValueError("controller_dt_s must be finite and positive")
     if not math.isfinite(outer_loop_elapsed_s):
         raise ValueError("outer_loop_elapsed_s must be finite")
+    if not math.isfinite(attitude_loop_elapsed_s):
+        raise ValueError("attitude_loop_elapsed_s must be finite")
 
     def vector(values: np.ndarray, name: str) -> np.ndarray:
         result = np.asarray(values, dtype=np.float64)
@@ -996,7 +999,7 @@ def seed_actuation_controller_state(
         filtered_yaw_torque=0.0,
         hover_thrust_normalized=float(hover_thrust_normalized),
         outer_loop_elapsed_s=outer_loop_elapsed_s,
-        attitude_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=attitude_loop_elapsed_s,
         desired_rotation_enu_flu=_readonly_copy(np.eye(3)),
         desired_yaw_rate_radps=0.0,
         desired_collective_thrust_setpoint=float(hover_thrust_normalized),

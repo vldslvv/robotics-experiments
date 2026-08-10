@@ -649,6 +649,35 @@ def test_attitude_loop_uses_fractional_declared_cadence() -> None:
     assert elapsed == pytest.approx([0.0, 0.004, 0.0026666667, 0.0013333333, 0.0])
 
 
+def test_seeded_attitude_phase_controls_the_next_update() -> None:
+    params = _params("velocity")
+    zero = np.zeros(3)
+    controller = seed_actuation_controller_state(
+        params=params,
+        controller_dt_s=0.004,
+        physical_linear_velocity_enu=zero,
+        filtered_linear_velocity_enu=zero,
+        angular_velocity_body_flu=zero,
+        acceleration_setpoint_enu_mps2=zero,
+        linear_acceleration_enu_mps2=zero,
+        angular_acceleration_body_flu_radps2=zero,
+        rate_integral_body_flu=zero,
+        hover_thrust_normalized=0.57,
+        outer_loop_elapsed_s=-0.004,
+        attitude_loop_elapsed_s=0.002,
+    )
+
+    updated, _omega = _step_controller(
+        params,
+        controller,
+        np.zeros(4),
+        _level_rest_state(),
+        0.004,
+    )
+
+    assert updated.attitude_loop_elapsed_s == pytest.approx(0.0006666667)
+
+
 def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
     params = _params("velocity")
     state = seed_actuation_controller_state(
@@ -663,6 +692,7 @@ def test_hover_estimate_update_preserves_thrust_with_integrator_correction():
         rate_integral_body_flu=np.zeros(3),
         hover_thrust_normalized=0.55,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
     )
 
     updated = update_hover_thrust_estimate(
@@ -700,6 +730,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
         rate_integral_body_flu=rate_integral,
         hover_thrust_normalized=0.572,
         outer_loop_elapsed_s=-0.004,
+        attitude_loop_elapsed_s=-0.002,
     )
     reconstructed = (
         params.kp_vel * -filtered_velocity
@@ -715,6 +746,7 @@ def test_seed_controller_state_matches_neutral_acceleration_boundary(kind: str):
     assert state.rate_integral_body_flu == pytest.approx(rate_integral)
     assert state.hover_thrust_normalized == pytest.approx(0.572)
     assert state.outer_loop_elapsed_s == pytest.approx(-0.004)
+    assert state.attitude_loop_elapsed_s == pytest.approx(-0.002)
 
 
 def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
@@ -742,6 +774,7 @@ def test_seeded_estimator_bias_decays_at_velocity_controller_rate():
         rate_integral_body_flu=zero,
         hover_thrust_normalized=0.57,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
     )
     initial_bias = np.array(controller.velocity_estimator_bias_enu)
     assert initial_bias == pytest.approx(np.array([0.1, -0.2, 0.3]) - steady_bias)
@@ -780,6 +813,7 @@ def test_body_rate_input_filter_uses_the_seeded_estimator_state():
         rate_integral_body_flu=zero,
         hover_thrust_normalized=0.57,
         outer_loop_elapsed_s=0.0,
+        attitude_loop_elapsed_s=0.0,
     )
     rotating = replace(
         _level_rest_state(),
@@ -817,6 +851,7 @@ def test_seeded_hover_estimate_controls_neutral_collective() -> None:
             rate_integral_body_flu=zero,
             hover_thrust_normalized=hover,
             outer_loop_elapsed_s=0.0,
+            attitude_loop_elapsed_s=0.0,
         )
         _successor, omega = _step_controller(
             params,
@@ -949,9 +984,11 @@ def test_seeded_controller_primes_nonzero_rotor_thrust_without_advancing_state(k
         rate_integral_body=zero,
         hover_thrust_normalized=torch.tensor([0.572]),
         outer_loop_elapsed_s=torch.tensor([-0.004]),
+        attitude_loop_elapsed_s=torch.tensor([-0.002]),
         valid=torch.tensor([True]),
     )
     assert state.outer_loop_elapsed_s.item() == pytest.approx(-0.004)
+    assert state.attitude_loop_elapsed_s.item() == pytest.approx(-0.002)
     velocity_integral_before = state.velocity_integral_world.clone()
 
     thrust = _initial_rotor_thrust_from_controller_state(
@@ -1037,6 +1074,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         rate_integral_body_flu=seed_rate_integral,
         hover_thrust_normalized=0.572,
         outer_loop_elapsed_s=-0.004,
+        attitude_loop_elapsed_s=-0.002,
     )
     torch_controller = seed_flight_controller_state(
         state=initial_flight_controller_state(num_envs=1, device="cpu"),
@@ -1071,6 +1109,7 @@ def test_numpy_and_torch_cascades_match_over_a_stateful_sequence():
         ).reshape(1, 3),
         hover_thrust_normalized=torch.tensor([0.572]),
         outer_loop_elapsed_s=torch.tensor([-0.004]),
+        attitude_loop_elapsed_s=torch.tensor([-0.002]),
         valid=torch.tensor([True]),
     )
     actions = (

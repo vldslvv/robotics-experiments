@@ -622,6 +622,7 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
         "vehicle_local_position_setpoint",
         "vehicle_local_position",
         "vehicle_angular_velocity",
+        "vehicle_rates_setpoint",
         "rate_ctrl_status",
         "hover_thrust_estimate",
     }
@@ -701,6 +702,10 @@ def _trace(*, value: Any, name: str) -> ProbeTrace:
             vehicle_angular_velocity=_nonnegative_integer(
                 value=source_age["vehicle_angular_velocity"],
                 name=f"{name}.initial_controller_state_source_age_us.vehicle_angular_velocity",
+            ),
+            vehicle_rates_setpoint=_nonnegative_integer(
+                value=source_age["vehicle_rates_setpoint"],
+                name=f"{name}.initial_controller_state_source_age_us.vehicle_rates_setpoint",
             ),
             rate_ctrl_status=_nonnegative_integer(
                 value=source_age["rate_ctrl_status"],

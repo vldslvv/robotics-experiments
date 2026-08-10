@@ -618,6 +618,7 @@ def _controller_boundary(
     local_setpoint: dict,
     local_position: dict,
     angular_velocity: dict,
+    rates_setpoint: dict,
     rate_status: dict,
     hover: dict,
     timestamp_us: int,
@@ -694,6 +695,7 @@ def _controller_boundary(
             "vehicle_local_position_setpoint": local_setpoint_age_us,
             "vehicle_local_position": held_age_us(topic=local_position),
             "vehicle_angular_velocity": held_age_us(topic=angular_velocity),
+            "vehicle_rates_setpoint": held_age_us(topic=rates_setpoint),
             "rate_ctrl_status": rate_age_us,
             "hover_thrust_estimate": held_age_us(topic=hover),
         },
@@ -715,6 +717,7 @@ def _augment_reference_controller_state(
     local_setpoint = _dataset(ulog=ulog, name="vehicle_local_position_setpoint")
     local_position = _dataset(ulog=ulog, name="vehicle_local_position")
     angular_velocity = _dataset(ulog=ulog, name="vehicle_angular_velocity")
+    rates_setpoint = _dataset(ulog=ulog, name="vehicle_rates_setpoint")
     rate_status = _dataset(ulog=ulog, name="rate_ctrl_status")
     hover = _dataset(ulog=ulog, name="hover_thrust_estimate")
 
@@ -725,6 +728,7 @@ def _augment_reference_controller_state(
             local_setpoint=local_setpoint,
             local_position=local_position,
             angular_velocity=angular_velocity,
+            rates_setpoint=rates_setpoint,
             rate_status=rate_status,
             hover=hover,
             timestamp_us=start_us,
@@ -1239,6 +1243,7 @@ def _report(
         local_setpoint=local_setpoint,
         local_position=local_position,
         angular_velocity=angular_velocity,
+        rates_setpoint=rates_setpoint,
         rate_status=rate_status,
         hover=hover,
         timestamp_us=round(time_origin + start_s * 1e6),
@@ -1264,6 +1269,9 @@ def _report(
         hover_thrust_normalized=float(controller_vectors["initial_hover_thrust_normalized"]),
         outer_loop_elapsed_s=(
             controller_source_age_us["vehicle_local_position"] / 1e6 - controller_dt_s
+        ),
+        attitude_loop_elapsed_s=(
+            controller_source_age_us["vehicle_rates_setpoint"] / 1e6 - controller_dt_s
         ),
     )
     isaac_omega_grid: list[np.ndarray] = []
