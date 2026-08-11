@@ -1,7 +1,7 @@
 # Press policy training decision log
 
-Status: ELEVENTH SCRATCH SELECTION REJECTED; EXTENDED PREDICTIVE CONSOLIDATION
-PREDECLARED (2026-08-11).
+Status: TWELFTH SCRATCH SELECTION REJECTED; PREDICTIVE VELOCITY REFERENCE NEXT
+(2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -26,6 +26,7 @@ are unsupported.
 | `20260811T073726Z-scratch-closing300-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; closing-speed weight 300 | Iteration 140 selected; score -0.580549, 94.0% success, advisory rejected | Increase the evidenced but underpowered one-sided term by one coarse decade |
 | `20260811T080541Z-scratch-closing3000-coarse` | `20260810T-accepted-reproduction` | Same scratch schedule; closing-speed weight 3000 | Iteration 125 selected; score -0.639254, 93.0% success, advisory rejected | Stop fitting the state-only term and add predictive braking evidence |
 | `20260811T083710Z-scratch-predictive400ms-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; predictive horizon 0.4 s at weight 10 | Iteration 150 selected; score -0.527009, 95.33% success, advisory rejected | Extend the still-improving low-rate phase in a new scratch lineage |
+| `20260811T090631Z-scratch-predictive-extended61` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 61 at `3e-5`; predictive horizon 0.4 s at weight 10 | Iteration 160 selected; score -0.472188, 96.67% success, advisory rejected | Stop extending and move prediction into the dense velocity reference |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -759,3 +760,45 @@ range failures fall to zero, accept and run independent evaluation. If the
 frontier regresses after model 150, reduce the predictive weight rather than
 adding more updates, because the 0.4-second structure has already demonstrated
 the intended safety effect.
+
+### 28. Extended consolidation reaches and leaves its best frontier
+
+Date: 2026-08-11.
+
+Plain-language view: More updates improve the policy for ten steps, then the
+result oscillates and finally collapses. The best policy is safer than every
+earlier scratch run, but it still crosses the boundary in ten of 300 episodes.
+Stop extending the schedule. The actor needs a direct negative braking target,
+not more exposure to a state-only warning.
+
+Technical view: Run
+`20260811T090631Z-scratch-predictive-extended61` started from clean source
+commit `b9a851f`, a new network, and a new optimizer. Training completed 182
+updates in 1106.3 seconds. Checkpoints through model 150 were byte-identical to
+the preceding scratch run; the content-addressed selector reused all 11 and
+evaluated only six new checkpoints in 251.1 seconds.
+
+Model 160 was selected with score -0.472188, 96.67% success, 3.33% other
+flight failure, zero collision and timeout, 0.41557 m mean closest range, and
+0.39860 m minimum closest range. Fresh independent evaluation reproduced the
+rates with a 0.41547 m mean and 0.39822 m minimum; traces are preserved under
+`.build/docker/integration/eval-press.20260811T093121Z.447015`. This reduces
+the original four-failure-percent frontier by 16.7% relative and is the best
+scratch result so far, but exact acceptance still rejects range undershoot and
+flight failure.
+
+The extension is exhausted: models 165, 170, and 175 alternate between 3.67%
+and 4.0% failure, then model 180 collapses to 22.33% failure. In the independent
+worst traces, positive wall-normal speed remains 0.014-0.039 m/s at the final
+crossing while the actor requests only about -0.0014 to -0.0024 normalized
+wall-normal action. The controller follows that small braking request; it is
+not reversing or creating the command.
+
+The predictive reward is already substantial at mean -0.22541, roughly 2.5
+times the current-range barrier. Lowering its weight would mostly restore the
+pre-predictive frontier without correcting the indirect credit assignment.
+Instead, route the same 0.4-second projection through the existing dense
+velocity target so a projected undershoot requests negative wall-normal
+velocity directly. Remove the separate predictive reward term to keep the
+task contract minimal, return to the shorter 121-plus-31 schedule, and retain
+the controller, reset mixture, held-out distribution, and exact gates.
