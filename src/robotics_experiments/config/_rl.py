@@ -173,7 +173,8 @@ class PressApproachRewardConfig(_FreezableConfig):
     range_progress_weight: float
     range_barrier_margin_m: float
     range_barrier_weight: float
-    range_closing_speed_weight: float
+    range_prediction_horizon_s: float
+    range_prediction_weight: float
     alignment_error_weight: float
     velocity_tracking_weight: float
     upright_error_weight: float

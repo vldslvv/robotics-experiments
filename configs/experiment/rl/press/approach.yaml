@@ -56,9 +56,10 @@ reward:
   # and acceptance range unchanged.
   range_barrier_margin_m: 0.02
   range_barrier_weight: 10.0
-  # Optional one-sided stopping-envelope penalty. Training enables it only
-  # after retained traces show unsafe residual closing speed.
-  range_closing_speed_weight: 0.0
+  # Project positive wall-normal speed through the measured controller braking
+  # horizon and penalize only the added predicted range-barrier cost.
+  range_prediction_horizon_s: 0.4
+  range_prediction_weight: 0.0
   alignment_error_weight: 50.0
   velocity_tracking_weight: 100.0
   upright_error_weight: 5.0

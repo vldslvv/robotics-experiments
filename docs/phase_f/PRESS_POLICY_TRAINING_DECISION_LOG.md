@@ -667,3 +667,29 @@ state-only excess-speed term with a predictive range barrier based on current
 range, positive wall-normal speed, and an evidenced stopping horizon. Keep the
 controller, current-range barrier, held-out distribution, and acceptance gates
 unchanged.
+
+### 25. Predict range through the observed braking horizon
+
+Date: 2026-08-11.
+
+Plain-language view: Reward the drone for leaving enough room to stop, not just
+for being slow at its current location. At every training step, project its
+forward motion 0.4 seconds ahead and warn only about the extra range risk that
+motion creates.
+
+Technical view: Replace the exhausted `range_closing_speed` term with
+`range_prediction`. Project only positive actual wall-normal speed over a
+0.4-second horizon, then compute how much this projected position increases the
+existing normalized range-barrier cost relative to the current position. This
+difference is exactly zero for retreat, zero wall-normal speed, and projected
+positions outside the barrier. It therefore does not duplicate the current
+position penalty or suppress a safe approach.
+
+The 0.4-second coarse horizon comes directly from retained failures that travel
+from about 0.420 m to below 0.400 m while decelerating. Use weight 10, equal to
+the current-range barrier, so a 0.050 m/s approach at 0.420 m receives the same
+penalty as already being at the 0.400 m hard boundary. Remove the failed
+closing-speed field rather than preserving an unused training interface.
+Increment the evaluator revision because reward diagnostics change. Keep the
+controller, network, PPO schedule, 40% difficult-reset phase, held-out set, and
+acceptance gates fixed for a new scratch run.

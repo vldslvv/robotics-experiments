@@ -95,8 +95,8 @@ learning with low-rate difficult-boundary consolidation.
 The press configuration currently runs:
 
 1. 121 iterations at `1e-4`, fixed schedule, `1e-4` entropy, full handoff reset;
-2. 31 iterations at `3e-5`, fixed schedule, zero entropy, 50% difficult resets,
-   with checkpoints every five updates for the upper safety-bracket sweep.
+2. 31 iterations at `3e-5`, fixed schedule, zero entropy, 40% difficult resets,
+   with checkpoints every five updates for boundary consolidation.
 
 Run training with:
 
@@ -114,11 +114,11 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id
 and is served at `http://127.0.0.1:6006` by default.
 
 The press-approach reward has eleven named signed terms. In addition to the
-range barrier and three-axis velocity tracking, `range_closing_speed` applies a
-one-sided quadratic penalty only when forward wall-normal speed exceeds the
-distance-scaled stopping envelope. Its allowed speed uses the goal's existing
-wall-normal gain and remaining distance to `range_min_m`; retreat and safe slow
-approach are unpenalized. The term's weight remains task-owned Hydra data.
+current-range barrier and three-axis velocity tracking, `range_prediction`
+projects positive wall-normal speed through the configured controller braking
+horizon and applies only the resulting increase in normalized range-barrier
+cost. Retreat, zero speed, and predicted motion outside the barrier remain
+unpenalized. Its horizon and weight remain task-owned Hydra data.
 
 ## Selection, artifact, and acceptance
 

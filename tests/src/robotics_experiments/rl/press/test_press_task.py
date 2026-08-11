@@ -46,7 +46,8 @@ _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
     range_barrier_margin_m=0.02,
     range_barrier_weight=10.0,
-    range_closing_speed_weight=100.0,
+    range_prediction_horizon_s=0.4,
+    range_prediction_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
     upright_error_weight=5.0,
@@ -116,7 +117,7 @@ def test_reward_record_has_exactly_eleven_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
         "range_barrier",
-        "range_closing_speed",
+        "range_prediction",
         "alignment_error",
         "velocity_tracking",
         "upright_error",
@@ -171,18 +172,19 @@ def test_range_barrier_penalizes_approach_to_lower_boundary(
     ("range_m", "closing_speed_mps", "expected"),
     [
         (0.45, 0.05, 0.0),
-        (0.43, 0.05, -0.015625),
-        (0.41, 0.04, -0.075625),
+        (0.43, 0.05, -2.5),
+        (0.42, 0.05, -10.0),
+        (0.41, 0.04, -14.4),
         (0.41, -0.04, 0.0),
     ],
 )
-def test_range_closing_speed_penalizes_only_unsafe_forward_excess(
+def test_range_prediction_penalizes_only_added_forward_risk(
     range_m: float,
     closing_speed_mps: float,
     expected: float,
 ) -> None:
     result = _step(sample=_sample(range_m=range_m, closing_speed_mps=closing_speed_mps))
-    assert result.rewards.range_closing_speed[0] == pytest.approx(expected)
+    assert result.rewards.range_prediction[0] == pytest.approx(expected)
 
 
 def test_alignment_and_upright_errors_are_quadratic() -> None:

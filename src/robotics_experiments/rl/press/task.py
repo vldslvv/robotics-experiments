@@ -74,7 +74,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
 
     range_progress: ArrayT
     range_barrier: ArrayT
-    range_closing_speed: ArrayT
+    range_prediction: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
     upright_error: ArrayT
@@ -90,7 +90,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         return (
             self.range_progress
             + self.range_barrier
-            + self.range_closing_speed
+            + self.range_prediction
             + self.alignment_error
             + self.velocity_tracking
             + self.upright_error
@@ -311,6 +311,21 @@ def step_press_approach(
     current_range = sample.relative_switch_pos_m[..., 0]
     alignment_error = _norm(sample.relative_switch_pos_m[..., 1:3])
     upright_alignment = _clip(sample.body_z_world_z, 0.0, 1.0)
+    range_barrier_start = goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m
+    range_barrier_deficit = _clip(
+        (range_barrier_start - current_range) / reward_cfg.range_barrier_margin_m,
+        0.0,
+        float("inf"),
+    )
+    predicted_range = current_range - (
+        reward_cfg.range_prediction_horizon_s
+        * _clip(sample.linear_velocity_mps[..., 0], 0.0, float("inf"))
+    )
+    predicted_range_deficit = _clip(
+        (range_barrier_start - predicted_range) / reward_cfg.range_barrier_margin_m,
+        0.0,
+        float("inf"),
+    )
     target_velocity = press_approach_target_velocity(
         relative_switch_pos_m=sample.relative_switch_pos_m,
         reference_cfg=goal_cfg.velocity_reference,
@@ -361,28 +376,10 @@ def step_press_approach(
         range_progress=(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
-        range_barrier=(
-            -reward_cfg.range_barrier_weight
-            * _square(
-                _clip(
-                    (goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m - current_range)
-                    / reward_cfg.range_barrier_margin_m,
-                    0.0,
-                    float("inf"),
-                )
-            )
-        ),
-        range_closing_speed=(
-            -reward_cfg.range_closing_speed_weight
-            * _square(
-                _clip(
-                    sample.linear_velocity_mps[..., 0]
-                    - goal_cfg.velocity_reference.wall_normal_gain_per_s
-                    * _clip(current_range - goal_cfg.range_min_m, 0.0, float("inf")),
-                    0.0,
-                    float("inf"),
-                )
-            )
+        range_barrier=(-reward_cfg.range_barrier_weight * _square(range_barrier_deficit)),
+        range_prediction=(
+            -reward_cfg.range_prediction_weight
+            * (_square(predicted_range_deficit) - _square(range_barrier_deficit))
         ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
         velocity_tracking=(
