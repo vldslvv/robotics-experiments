@@ -31,7 +31,7 @@ rl:
     # One scratch run keeps a single optimizer lineage while changing the
     # learning schedule and reset mixture at an explicit curriculum boundary.
     phases:
-      - iterations: 121
+      - iterations: 241
         save_interval: 30
         learning_rate: 1.0e-4
         schedule: fixed
