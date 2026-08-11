@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: THIRTEENTH SCRATCH SELECTION REJECTED; DENSE TRACKING WEIGHT SWEEP NEXT
+Status: FOURTEENTH SCRATCH SELECTION REJECTED; TRACKING MIDPOINT NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -28,6 +28,7 @@ are unsupported.
 | `20260811T083710Z-scratch-predictive400ms-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; predictive horizon 0.4 s at weight 10 | Iteration 150 selected; score -0.527009, 95.33% success, advisory rejected | Extend the still-improving low-rate phase in a new scratch lineage |
 | `20260811T090631Z-scratch-predictive-extended61` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 61 at `3e-5`; predictive horizon 0.4 s at weight 10 | Iteration 160 selected; score -0.472188, 96.67% success, advisory rejected | Stop extending and move prediction into the dense velocity reference |
 | `20260811T093944Z-scratch-predictive-reference400ms` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5`; 0.4 s predictive velocity reference | Iteration 135 selected; score -0.471879, 97.0% success, advisory rejected | Strengthen the evidenced but underweighted dense tracking target |
+| `20260811T100846Z-scratch-predictive-reference-vtrack900` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 900 | Iteration 145 selected; score -1.447104, 67.7% success, advisory rejected | Refine the overbraking bracket at weight 600 |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -869,3 +870,38 @@ Keep the 121-plus-31 schedule, reset mixture, controller, all other rewards,
 held-out distribution, and exact gates fixed. If 900 overbrakes into timeout,
 refine the bracket at 600; if it reduces failures without timeout, retain it
 and refine only if exact acceptance still fails.
+
+### 31. Threefold tracking weight overbrakes without closing the boundary
+
+Date: 2026-08-11.
+
+Plain-language view: Tripling the tracking lesson makes the early policy too
+cautious, but the later policy still crosses the range boundary after it learns
+to approach. The useful setting lies between the original and tripled weights.
+
+Technical view: Run
+`20260811T100846Z-scratch-predictive-reference-vtrack900` started from clean
+source commit `2e845aa`, a new network, and a new optimizer. It kept the fixed
+controller, 0.4-second predictive velocity reference, 121-plus-31 schedule,
+40% difficult-reset fraction, held-out seeds, and exact gates. Training
+completed 152 updates in 926.7 seconds; evaluator revision 4 evaluated all 11
+checkpoints fresh in 497.7 seconds. A representative GPU sample measured 77%
+utilization and 15.7/24.6 GB allocated, with environment stepping and PPO
+synchronization still limiting useful throughput.
+
+Model 145 was selected with score -1.447104, 67.67% success, 8.67% other
+flight failure, 23.67% timeout, zero collision, 0.41220 m mean closest range,
+and 0.39873 m minimum closest range. Model 90 demonstrates the overbraking side
+of the tradeoff at 10.67% success, 3.67% failure, and 85.67% timeout. Later
+updates exchange timeout for unsafe completion: model 150 collapses to 46.0%
+success and 39.67% failure. The attempt is substantially worse than the
+weight-300 frontier of 97.0% success and 3.0% failure, so weight 900 is
+rejected rather than extended.
+
+Preserve the predictive reference and all other settings, then test the
+predeclared midpoint `velocity_tracking_weight: 600`. This is a targeted
+bracket refinement between the high-success weight-300 result and the
+overbraking weight-900 result. If 600 restores high success but leaves the
+same three deterministic crossings, stop fitting this scalar and inspect the
+action/reference boundary for a structural training target. If it materially
+reduces failures, refine only the supported side of the bracket.
