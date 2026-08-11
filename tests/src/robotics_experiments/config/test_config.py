@@ -253,8 +253,9 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert policy.critic.hidden_dims == (256, 256, 128)
     assert policy.activation == "elu"
     assert reward.range_progress_weight == 50.0
-    assert reward.range_barrier_margin_m == 0.04
+    assert reward.range_barrier_margin_m == 0.02
     assert reward.range_barrier_weight == 10.0
+    assert reward.range_closing_speed_weight == 300.0
     assert reward.velocity_tracking_weight == 300.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0

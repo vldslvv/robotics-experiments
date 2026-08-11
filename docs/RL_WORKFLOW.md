@@ -113,6 +113,13 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id
 
 and is served at `http://127.0.0.1:6006` by default.
 
+The press-approach reward has eleven named signed terms. In addition to the
+range barrier and three-axis velocity tracking, `range_closing_speed` applies a
+one-sided quadratic penalty only when forward wall-normal speed exceeds the
+distance-scaled stopping envelope. Its allowed speed uses the goal's existing
+wall-normal gain and remaining distance to `range_min_m`; retreat and safe slow
+approach are unpenalized. The term's weight remains task-owned Hydra data.
+
 ## Selection, artifact, and acceptance
 
 Training saves checkpoints throughout both phases. The selection step evaluates

@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SEVENTH SCRATCH SELECTION REJECTED; EARLIER BRAKING SWEEP PREDECLARED
+Status: EIGHTH SCRATCH SELECTION REJECTED; CLOSING-SPEED SWEEP PREDECLARED
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -22,6 +22,7 @@ are unsupported.
 | `20260811T052107Z-scratch-hard40-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with every-update saves near the 40% peak | Iteration 142 selected; score -0.516978, 96.0% success, advisory rejected | Cache identical held-out evaluations, then expand to the evidenced upper reset bracket |
 | `20260811T060552Z-scratch-hard50-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 50% difficult resets | Iteration 150 selected; score -0.527187, 95.7% success, advisory rejected | Preserve the stronger 40% learning path, then introduce 50% difficult resets only after its peak |
 | `20260811T063515Z-scratch-late-hard50` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with 40% difficult resets and 12 at 50% | Iteration 150 selected; score -0.507785, 96.0% success, advisory rejected | Preserve independent worst traces, then strengthen the evidenced braking objective |
+| `20260811T070651Z-scratch-barrier40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; 0.040 m range barrier | Iteration 145 selected; score -1.579391, 65.0% success, advisory rejected | Restore the 0.020 m barrier and fit a one-sided unsafe closing-speed term |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -530,3 +531,54 @@ held-out seeds, and acceptance gates unchanged. If the broader barrier reduces
 range failures but causes timeouts, target the margin between 0.020 and 0.040 m;
 if the first failed boundary does not improve, add a distinct one-sided
 closing-speed signal instead of increasing the barrier again.
+
+### 20. A four-centimeter barrier suppresses useful approach learning
+
+Date: 2026-08-11.
+
+Plain-language view: Starting the full range penalty earlier makes the policy
+too reluctant without making its completed approaches safe. Restore the
+original barrier and teach only the specific mistake: carrying more forward
+speed than the remaining stopping distance permits.
+
+Technical view: Run `20260811T070651Z-scratch-barrier40-coarse` started from
+clean source commit `c9f42ab`, a new network, and a new optimizer. Training
+completed 152 updates in 927.1 seconds. The changed reward produced a new
+scratch trajectory, so the selector evaluated all 11 checkpoints fresh in
+501.4 seconds.
+
+Model 145 was selected with score -1.579391, 65.0% success, 13.67% other
+flight failure, 21.33% timeout, zero collision, 0.41415 m mean closest range,
+and 0.39940 m minimum closest range. Model 150 regressed to 59.67% success,
+15.67% flight failure, and 24.67% timeout. The original 0.020 m barrier's
+frontier was 96.0% success with 4.0% flight failure, so doubling the margin is
+a large regression in every behavioral boundary and does not improve exact
+range safety. Do not target an intermediate barrier margin: the broad signal
+penalizes position in the valid 0.400-0.420 m goal region regardless of whether
+the vehicle is moving safely.
+
+### 21. Penalize only closing speed above a stopping envelope
+
+Date: 2026-08-11.
+
+Plain-language view: A vehicle moving slowly near the switch is safe; a vehicle
+moving quickly at the same range is not. Add a penalty for only the excess
+forward speed, while leaving retreat, slow approach, and the original goal
+reward untouched.
+
+Technical view: Restore `range_barrier_margin_m` to 0.020 m. Add one signed
+`range_closing_speed` reward contribution. Its allowed forward speed is
+`wall_normal_gain_per_s * max(range - range_min, 0)`; only positive actual
+wall-normal speed above that envelope is penalized quadratically. Negative
+speed and forward speed below the distance-scaled envelope receive zero. This
+uses the existing goal gain and adds one declarative
+`range_closing_speed_weight`, set to 300 for the first coarse scratch run.
+
+At 0.450 m the envelope permits 0.0625 m/s, so the handoff distribution is not
+suppressed. At 0.420 m it permits 0.025 m/s, directly penalizing the retained
+0.045-0.052 m/s traces; at 0.400 m it requires zero forward speed. Keep the
+121-plus-31 update 40% schedule, controller, all other rewards, PPO values,
+held-out distribution, and gates fixed. Host tests cover one-sided behavior
+and NumPy/Torch parity. Increment the selection evaluator revision because its
+reported reward-term schema gains a field; independent acceptance remains
+uncached.

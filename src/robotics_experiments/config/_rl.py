@@ -168,11 +168,12 @@ class PressHandoffConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Parameters for the ten signed approach-stage reward contributions."""
+    """Parameters for the eleven signed approach-stage reward contributions."""
 
     range_progress_weight: float
     range_barrier_margin_m: float
     range_barrier_weight: float
+    range_closing_speed_weight: float
     alignment_error_weight: float
     velocity_tracking_weight: float
     upright_error_weight: float

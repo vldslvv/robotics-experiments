@@ -70,10 +70,11 @@ class PressApproachInput(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The ten signed per-step Stage 1 reward contributions."""
+    """The eleven signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
     range_barrier: ArrayT
+    range_closing_speed: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
     upright_error: ArrayT
@@ -89,6 +90,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         return (
             self.range_progress
             + self.range_barrier
+            + self.range_closing_speed
             + self.alignment_error
             + self.velocity_tracking
             + self.upright_error
@@ -365,6 +367,18 @@ def step_press_approach(
                 _clip(
                     (goal_cfg.range_min_m + reward_cfg.range_barrier_margin_m - current_range)
                     / reward_cfg.range_barrier_margin_m,
+                    0.0,
+                    float("inf"),
+                )
+            )
+        ),
+        range_closing_speed=(
+            -reward_cfg.range_closing_speed_weight
+            * _square(
+                _clip(
+                    sample.linear_velocity_mps[..., 0]
+                    - goal_cfg.velocity_reference.wall_normal_gain_per_s
+                    * _clip(current_range - goal_cfg.range_min_m, 0.0, float("inf")),
                     0.0,
                     float("inf"),
                 )

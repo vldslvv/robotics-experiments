@@ -17,7 +17,8 @@ rl:
         range_center_m: 0.415
         wall_normal_max_mps: 0.04
     reward:
-      range_barrier_margin_m: 0.04
+      range_barrier_margin_m: 0.02
+      range_closing_speed_weight: 300.0
       flight_failure_weight: 300.0
       velocity_tracking_weight: 300.0
   training:
