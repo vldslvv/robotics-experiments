@@ -693,3 +693,43 @@ closing-speed field rather than preserving an unused training interface.
 Increment the evaluator revision because reward diagnostics change. Keep the
 controller, network, PPO schedule, 40% difficult-reset phase, held-out set, and
 acceptance gates fixed for a new scratch run.
+
+### 26. Predictive braking improves safety but has not converged
+
+Date: 2026-08-11.
+
+Plain-language view: The predictive warning helps: the final policy succeeds
+slightly more than 95% of the time and reduces unsafe approaches. It begins
+learning the useful tradeoff only at the end of the run, however, and stops
+before eliminating the remaining range crossings. Give the same scratch
+training procedure more low-rate consolidation updates; do not weaken the gate
+or fine-tune its checkpoint.
+
+Technical view: Run
+`20260811T083710Z-scratch-predictive400ms-w10` started from clean source commit
+`cc67ba8`, a new network, and a new optimizer. Training completed 152 updates
+in 925.2 seconds. Evaluator revision 3 evaluated all 11 checkpoints fresh in
+502.3 seconds.
+
+Model 150 was selected with score -0.527009, 95.33% success, 3.67% other flight
+failure, 1.0% timeout, zero collision, 0.41560 m mean closest range, and
+0.39859 m minimum closest range. Independent evaluation reproduced every
+aggregate metric and preserved traces under
+`.build/docker/integration/eval-press.20260811T090143Z.409191`. The predictive
+term is material at a mean -0.18620 versus -0.07405 for the current-range
+barrier and -1.10805 for velocity tracking.
+
+This is a small exact-frontier improvement over the 96.0% success and 4.0%
+flight-failure baseline without predictive braking: flight failures decrease
+by 8.3% relative while the success gate remains passed. More importantly, the
+learning frontier is still rising at the terminal checkpoint. Model 140 has
+21.33% success and 67.67% timeout, model 145 jumps to 88.67% success and 8.33%
+timeout, and model 150 reaches 95.33% success and 1.0% timeout. The run ended
+during rapid consolidation rather than after a plateau.
+
+Worst traces confirm the same residual-action boundary: at the final crossing,
+actual forward speed remains approximately 0.030-0.039 m/s while the actor
+requests only a small negative normalized wall-normal action. The controller
+responds in the correct direction; the policy has not yet learned enough
+braking command. Preserve the predictive structure and extend the second phase
+inside a new scratch invocation.
