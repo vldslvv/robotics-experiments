@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SEVENTEENTH SCRATCH SELECTION REJECTED; WALL-NORMAL COMMAND TARGET NEXT
+Status: EIGHTEENTH SCRATCH SELECTION REJECTED; WALL-NORMAL WEIGHT BRACKET NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -32,6 +32,7 @@ are unsupported.
 | `20260811T103705Z-scratch-predictive-reference-vtrack600` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 600 | Iteration 135 selected; score -0.518753, 95.7% success, advisory rejected | Stop the scalar sweep and teach the physical velocity command directly |
 | `20260811T111012Z-scratch-command-target-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 100 | Iteration 150 selected; score -1.884269, 53.0% success, advisory rejected | Reduce the direct command weight by one coarse decade |
 | `20260811T113819Z-scratch-command-target-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 10 | Iteration 150 selected; score -0.636139, 93.3% success, advisory rejected | Restrict the direct target to the evidenced wall-normal boundary |
+| `20260811T120750Z-scratch-wall-normal-command-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 10 | Iteration 140 selected; score -0.509376, 96.0% success, advisory rejected | Coarse-test wall-normal weight 30 before changing the target or curriculum |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1018,3 +1019,50 @@ weight 10 for the first scoped test: at the crossing it contributes about 0.012
 per step, while no longer constraining lateral or vertical command strategy.
 Keep actual three-axis state tracking at 300 and preserve every other setting
 and gate.
+
+### 35. Wall-normal-only imitation preserves completion but remains too weak
+
+Date: 2026-08-11.
+
+Plain-language view: Teaching only the forward/backward command avoids the
+large regression caused by imitating all three axes, but the lesson is still
+too faint to make the actor brake before the exact range limit. Test one
+stronger wall-normal weight before changing the target or curriculum.
+
+Technical view: Run
+`20260811T120750Z-scratch-wall-normal-command-w10` started from clean source
+commit `2fd0706`, a new network, and a new optimizer. It retained the accepted
+controller, predictive 0.4-second velocity reference, actual-state velocity
+tracking weight 300, 121-plus-31 schedule, 40% difficult-reset fraction,
+held-out seeds, and exact gates. The only learned-command target was the
+physical contact-frame wall-normal velocity at weight 10. Training completed
+152 updates in 933.5 seconds and evaluator revision 6 scored all 11 checkpoints
+fresh in 455.1 seconds.
+
+Model 140 was selected with score -0.509376, 96.0% success, 4.0% other flight
+failure, zero collision and timeout, 0.41451 m mean closest range, and
+0.39935 m minimum closest range. Models 125 through 145 form a stable plateau
+from 95.0% to 96.0% success and 4.0% to 5.0% failure; model 150 regresses to
+93.7% success and 6.3% failure. The selected mean wall-normal command reward is
+only -0.002258 per active step. This is substantially better than three-axis
+imitation at the same weight, but it does not beat the state-only frontier of
+97.0% success and 3.0% failure, so it is not material progress.
+
+Independent evaluation reproduced the selected metrics and retained the worst
+traces under
+`.build/docker/integration/eval-press.20260811T123222Z.678351`. At the seed-202
+crossing, range moves from 0.40057 m to 0.39935 m with 0.0264 m/s residual
+forward speed while normalized wall-normal action is positive 0.00165. The
+0.4-second reference at that state requests approximately -0.032 m/s. The
+seed-101 and seed-303 traces show the same sign error. The first failed boundary
+therefore remains actor wall-normal command, not controller response,
+collision, tangential alignment, or vertical control.
+
+Preserve the scoped target and coarse-test
+`wall_normal_command_tracking_weight: 30`. This is the geometric midpoint
+between the underpowered weight-10 signal and the earlier weight-100 command
+scale, without reintroducing tangential or vertical imitation. If 30 lowers
+the exact failure count without losing the success gate, refine the supported
+side. If it overbrakes or leaves the plateau unchanged, stop fitting this
+weight and reshape the single-run hard-case curriculum or braking target from
+the retained traces.
