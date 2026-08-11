@@ -64,7 +64,7 @@ _TRAINING_REWARD_TERMS = (
     "range_barrier",
     "alignment_error",
     "velocity_tracking",
-    "command_tracking",
+    "wall_normal_command_tracking",
     "upright_error",
     "action_delta",
     "success",
@@ -391,9 +391,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
                 relative_quat_wxyz,
                 self.drone.data.root_lin_vel_b,
             ),
-            velocity_command_mps=math_utils.quat_apply_inverse(
+            wall_normal_velocity_command_mps=math_utils.quat_apply_inverse(
                 self._contact_frame_quat(), velocity_command_world
-            ),
+            )[:, 0],
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,
             altitude_m=self.drone.data.root_pos_w[:, 2],

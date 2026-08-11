@@ -59,7 +59,7 @@ class PressApproachInput(Generic[ArrayT]):
 
     relative_switch_pos_m: ArrayT
     linear_velocity_mps: ArrayT
-    velocity_command_mps: ArrayT
+    wall_normal_velocity_command_mps: ArrayT
     angular_velocity_radps: ArrayT
     body_z_world_z: ArrayT
     altitude_m: ArrayT
@@ -77,7 +77,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
     range_barrier: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
-    command_tracking: ArrayT
+    wall_normal_command_tracking: ArrayT
     upright_error: ArrayT
     action_delta: ArrayT
     success: ArrayT
@@ -93,7 +93,7 @@ class PressApproachRewardTerms(Generic[ArrayT]):
             + self.range_barrier
             + self.alignment_error
             + self.velocity_tracking
-            + self.command_tracking
+            + self.wall_normal_command_tracking
             + self.upright_error
             + self.action_delta
             + self.success
@@ -382,9 +382,9 @@ def step_press_approach(
             -reward_cfg.velocity_tracking_weight
             * _sum_square(sample.linear_velocity_mps - target_velocity)
         ),
-        command_tracking=(
-            -reward_cfg.command_tracking_weight
-            * _sum_square(sample.velocity_command_mps - target_velocity)
+        wall_normal_command_tracking=(
+            -reward_cfg.wall_normal_command_tracking_weight
+            * _square(sample.wall_normal_velocity_command_mps - target_velocity[..., 0])
         ),
         upright_error=(-reward_cfg.upright_error_weight * _square(1.0 - upright_alignment)),
         action_delta=(
