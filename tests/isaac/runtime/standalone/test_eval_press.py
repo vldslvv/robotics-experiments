@@ -262,7 +262,8 @@ def _config():
                 curriculum_stage="approach",
                 goal=_goal(),
                 evaluation=SimpleNamespace(
-                    seeds=(101, 202, 303),
+                    validation_seeds=(101, 202, 303),
+                    test_seeds=(404, 505, 606),
                     episodes_per_seed=1,
                     success_rate_min=0.95,
                     collision_rate_max=0.01,
@@ -348,19 +349,35 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
         return result
 
     monkeypatch.setattr(workflow, "evaluate_press_approach_policy", fake_evaluate)
+    policy_bytes = b"policy"
+    import hashlib
+
+    digest = hashlib.sha256(policy_bytes).hexdigest()
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
-            values={"selected_checkpoint_iteration": 10},
+            values={
+                "selected_checkpoint_iteration": 10,
+                "selected_policy_digest": digest,
+                "test_evaluation": {
+                    "policy_digest": digest,
+                    "workload": {
+                        "role": "test",
+                        "seeds": [404, 505, 606],
+                        "episodes_per_seed": 1,
+                        "episode_count": 3,
+                    },
+                },
+            },
         ),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
-    (artifact_dir / "policy.pt").write_bytes(b"policy")
+    (artifact_dir / "policy.pt").write_bytes(policy_bytes)
 
     observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
         config=_config(),
@@ -368,7 +385,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: 
     )
     assert observed == result
     assert len(factory_calls) == 1
-    assert evaluation_calls[0]["seeds"] == (101, 202, 303)
+    assert evaluation_calls[0]["seeds"] == (404, 505, 606)
     assert evaluation_calls[0]["env"] is env
     assert policy.eval_count == 1
     assert env.close_count == 1

@@ -13,8 +13,8 @@ RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
 
-# One process trains, evaluates at phase cadence, selects the lowest-cost
-# checkpoint, applies final acceptance, and publishes the completed run.
+# One campaign validates up to three scratch attempts, freshly tests the first
+# eligible immutable actor, and publishes only after final acceptance.
 .PHONY: train-rl
 train-rl: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)
 train-rl: generate-drone-usd
@@ -57,7 +57,8 @@ tensorboard-rl:
 	    -m tensorboard.main \
 	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
 	    --host '$(RL_TENSORBOARD_HOST)' \
-	    --port '$(RL_TENSORBOARD_PORT)'
+	    --port '$(RL_TENSORBOARD_PORT)' \
+	    --reload_interval 5
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

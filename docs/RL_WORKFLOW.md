@@ -82,26 +82,31 @@ Collision is privileged training/evaluation state and is not added to the actor
 observation. Success, collision, other flight failure, and timeout remain
 mutually exclusive terminal classifications.
 
-## Scratch training
+## Training campaign
 
-Every `make train-rl` invocation starts a new runner, actor, critic, optimizer,
-and environment. There is no checkpoint initialization, resume mode, actor-only
-copy, or post-run fine-tuning workflow.
+Every `make train-rl` invocation owns one campaign ID and tries the configured
+`rl.training.attempt_seeds` in order. Each attempt constructs a fresh training
+environment, actor, critic, runner, and optimizer. The default seeds are 42, 43,
+and 44; the campaign stops after the first completed attempt with a
+validation-passing checkpoint. External checkpoint initialization, process
+resume, actor-only copy, and post-run fine-tuning remain unsupported.
 
-Hydra `rl.training.phases` defines an ordered schedule inside that one optimizer
-lineage. Each phase declares maximum iterations, complete held-out evaluation
-cadence, learning rate, schedule, entropy coefficient, and difficult-reset
-fraction. A phase boundary updates those values in place; it does not reload a
-checkpoint or recreate the optimizer.
+Hydra `rl.training.phases` defines an ordered schedule within each attempt. Each
+phase declares maximum iterations, validation cadence, learning rate, schedule,
+entropy coefficient, and difficult-reset fraction. The first phase starts from
+the new scratch actor. Before every later phase, the campaign restores the
+attempt-wide best checkpoint's actor, critic, optimizer, and learner iteration,
+then applies the new phase settings and resets every training environment. This
+is a validation-selected fine-tuning branch with reset environment state, not an
+exact process resume. An earlier checkpoint remains selectable if refinement
+regresses.
 
-The evaluator and phase driver have separate contracts. Evaluation receives an
-exact exported actor and returns raw named metrics plus
-`held_out_task_cost`. The plateau detector reads only the configured metric,
-direction, minimum delta, and patience. It never reads the PPO reward or any
-acceptance gate. The current uniform rule minimizes raw task cost, requires a
-`0.003` reduction from the phase reference, and declares a plateau after 30
-consecutive stale evaluations. This intentionally relaxed initial value can be
-tightened from recorded curves without changing evaluator code.
+The evaluator and phase driver have separate contracts. Validation receives an
+exact exported actor and returns raw named metrics plus `held_out_task_cost`.
+The plateau detector reads only the configured metric, direction, minimum delta,
+and patience. It never reads the PPO reward or any gate. The uniform rule
+minimizes raw task cost, requires a `0.003` reduction from the phase reference,
+and declares a plateau after 10 consecutive stale evaluations.
 
 The press configuration currently runs:
 
@@ -119,14 +124,26 @@ Run training with:
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml
 ```
 
-Use the run-scoped TensorBoard log directory under
+The GPU procedural gate keeps every phase/restore boundary, performs one update
+per phase on the first attempt seed, and deliberately stops before reserved test
+seeds are used:
+
+```bash
+make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
+  TRAIN_ARGS=--procedural-smoke
+```
+
+Use the campaign-scoped TensorBoard log directory under
 `.build/training/press-approach/<run-id>/logs`. The standard monitor is:
 
 ```bash
 make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id>/logs
 ```
 
-and is served at `http://127.0.0.1:6006` by default.
+and is served at `http://127.0.0.1:6006` by default. The Make target passes
+`--reload_interval 5`. Use browser smoothing zero for `Validation/*`,
+`Acceptance/*`, and safety rates. PPO and cumulative rollout diagnostics use
+`Training/*`; all rate metrics are fractions in `[0, 1]`.
 
 The press-approach reward has eleven named signed terms, including the
 current-range barrier, three-axis state-velocity tracking, and physical
@@ -142,32 +159,39 @@ computing that target. A projected approach past the neutral range therefore
 requests retreat directly, while retreating motion is never projected farther
 inward. The horizon and reward weights remain task-owned Hydra data.
 
-## Evaluation, artifact, and acceptance
+## Validation, final test, artifact, and acceptance
 
-`make train-rl` trains and evaluates in one process-level workflow. On the first
-cache miss, a persistent worker starts exactly 100 evaluation environments and
-evaluates three configured seeds; the same worker handles later misses after
-each training chunk. A fully cached run never starts the second simulator. The
-trainer retains one runner and optimizer throughout. It exports the
-deterministic actor first, so the evaluation digest identifies the exact
-`policy.pt` bytes rather than an in-memory approximation.
+Every checkpoint in every phase and attempt uses the same validation workload:
+100 episodes for each of seeds 101, 202, and 303. A persistent worker serves
+validation cache misses; cache identity includes the `validation` role, exact
+seeds, and episode count. The actor is exported before evaluation, so every
+record identifies exact `policy.pt` bytes.
 
 The raw held-out task cost is the untransformed weighted sum of collision,
 flight failure, timeout, non-success, terminal range, trajectory alignment,
 velocity tracking, upright error, action change, and completion time costs.
 Lower is better. This cost is independent of the per-step PPO reward. After all
-phases end, the lowest-cost evaluated checkpoint is selected, with the earlier
-checkpoint winning an exact tie. Only then are the unchanged press acceptance
-gates applied to its already-recorded metrics; no duplicate automatic
-evaluation stage follows training.
+phases end, validation-passing checkpoints rank ahead of failures. Within each
+group the lower task cost wins, with the earlier checkpoint winning an exact
+tie. A validation pass only makes the candidate eligible for the final test.
 
-Evaluations are cached by executable TorchScript content digest, comparison
-fingerprint, controller digest, and evaluator revision. The content digest
+Validation evaluations are cached by workload identity, executable TorchScript
+content digest, comparison fingerprint, controller digest, and evaluator
+revision. The content digest
 excludes only PyTorch's generated archive serialization ID; the raw SHA-256 of
 the exact exported `policy.pt` remains in every evaluation and published
-artifact record. `training_report.json` is updated after every evaluation and
-records phase progress, raw metrics, cache source, plateau state, phase
-termination, final selection, and final acceptance.
+artifact record. `training_report.json` schema 2 records every attempt, phase
+parent, raw validation metrics, cache source, plateau state, phase termination,
+selection, final test, and gate-by-gate acceptance.
+
+After selection, the exported actor is immutable. A new uncached worker runs the
+disjoint final workload: 100 episodes for each of seeds 404, 505, and 606. The
+resulting raw `PolicyEvaluation` is the sole input to
+`evaluate_press_acceptance`. Every gate is independently binding: finite traces,
+at least 0.95 success, at most 0.01 collision, at least 0.40 m minimum closest
+range, and exactly zero other flight failures. Test data cannot affect training,
+phase advancement, checkpoint selection, or retries. A test failure ends the
+command immediately and preserves evidence without publishing.
 
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
@@ -176,15 +200,19 @@ digest, comparison fingerprint, source commit, dirty state, and training phase
 provenance. Older policy schemas and policies without complete controller
 provenance are unsupported.
 
-`latest` advances after each completed run. `best` advances only for a strictly
-lower raw task cost within the same comparison fingerprint. Optional independent
-diagnostic reproduction remains available with:
+On acceptance, publication copies the already-tested actor bytes and verifies
+their digest. Metadata and the report record both workloads, selected and tested
+digests, raw metrics, gate thresholds, individual results, overall status, and
+failure reasons. Only accepted campaigns advance `latest`; `best` advances only
+for a strictly lower validation cost within the same comparison fingerprint.
+Independent audit remains available with:
 
 ```bash
 make eval-press HYDRA_CONFIG=configs/train_press_approach_quad.yaml
 ```
 
-Final integration uses:
+`make eval-press` reloads the published digest and reruns the same 300 test
+episodes without participating in selection. Final integration uses:
 
 ```bash
 make test-integration-press-policy-transfer

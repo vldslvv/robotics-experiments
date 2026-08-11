@@ -223,16 +223,19 @@ the current contents and the intended home for that kind of code.
   that embedded record. Policy artifacts without alignment provenance are
   unsupported. Controller and policy artifacts are strict v1 contracts; older
   schemas and compatibility migrations are unsupported. A training invocation
-  always starts one new runner and optimizer. Ordered Hydra phases may change
-  the learning schedule and reset mixture inside that single scratch lineage;
-  checkpoint initialization, resume, and post-run fine-tuning are unsupported.
-  `make train-rl` is one merged phase/evaluation loop. Each phase declares its
-  maximum updates and held-out cadence; one persistent evaluator returns raw
-  named metrics, while the Hydra-owned plateau rule reads exactly one named
-  scalar and never reads acceptance gates. After all phases end, the run-wide
-  best scalar selects the policy and the existing press gates are applied once
-  to that stored evaluation. `latest` always advances, while `best` advances
-  only for a strictly better comparable metric within one fingerprint.
+  is one campaign of configured independent attempt seeds; every attempt starts
+  a new environment, runner, actor, critic, and optimizer. Later Hydra phases
+  restore that attempt's complete validation-selected learner checkpoint,
+  apply the new schedule/reset mixture, and reset the environments before
+  collecting rollouts. External checkpoint initialization, process resume, and
+  post-run fine-tuning are unsupported. Every checkpoint uses one fixed
+  validation workload. The evaluator returns raw named metrics, the Hydra-owned
+  plateau rule reads exactly one named scalar, and validation gates establish
+  selection eligibility only. A completed validation-passing attempt freezes
+  its exact exported actor and runs one fresh, uncached, disjoint test workload.
+  Acceptance reads only that test `PolicyEvaluation`; failure ends the campaign
+  without retry or publication. `latest` and comparable `best` advance only
+  after acceptance and always point to the exact tested actor bytes.
 - Alignment invariants: read `docs/SIM_TO_SIM_ALIGNMENT.md` before touching
   `src/robotics_experiments/controller/`,
   `src/robotics_experiments/alignment/`, controller definitions, alignment Make

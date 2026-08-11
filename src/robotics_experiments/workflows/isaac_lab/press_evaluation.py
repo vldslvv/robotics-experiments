@@ -20,6 +20,7 @@ from robotics_experiments.rl.press import (
 from robotics_experiments.rl.training.progress import (
     AcceptanceResult,
     EvaluationMetric,
+    GateResult,
     PolicyEvaluation,
     RewardMean,
 )
@@ -565,16 +566,54 @@ def evaluate_press_acceptance(
     evaluation_config: PressApproachEvaluationConfig,
     minimum_range_m: float,
 ) -> AcceptanceResult:
-    """Apply press gates once to the run-wide selected evaluator result."""
-    reasons = []
-    if evaluation.metric("traces_finite") != 1.0:
-        reasons.append("non-finite traces")
-    if evaluation.metric("approach_success_rate") < evaluation_config.success_rate_min:
-        reasons.append("approach success")
-    if evaluation.metric("collision_rate") > evaluation_config.collision_rate_max:
-        reasons.append("simulated collisions")
-    if evaluation.metric("min_closest_range_m") < minimum_range_m:
-        reasons.append("range undershoot")
-    if evaluation.metric("other_flight_failure_rate") > 0.0:
-        reasons.append("flight-envelope failure")
-    return AcceptanceResult(passed=not reasons, reasons=tuple(reasons))
+    """Apply every fixed press gate to one completed raw evaluation."""
+    predicates = (
+        (
+            "trace finiteness",
+            evaluation.metric("traces_finite"),
+            "==",
+            1.0,
+        ),
+        (
+            "approach success rate",
+            evaluation.metric("approach_success_rate"),
+            ">=",
+            float(evaluation_config.success_rate_min),
+        ),
+        (
+            "collision rate",
+            evaluation.metric("collision_rate"),
+            "<=",
+            float(evaluation_config.collision_rate_max),
+        ),
+        (
+            "minimum closest range",
+            evaluation.metric("min_closest_range_m"),
+            ">=",
+            float(minimum_range_m),
+        ),
+        (
+            "other flight-failure rate",
+            evaluation.metric("other_flight_failure_rate"),
+            "==",
+            0.0,
+        ),
+    )
+    gates = tuple(
+        GateResult(
+            name=name,
+            passed=(
+                actual == threshold
+                if comparison == "=="
+                else actual >= threshold
+                if comparison == ">="
+                else actual <= threshold
+            ),
+            actual=actual,
+            comparison=comparison,
+            threshold=threshold,
+        )
+        for name, actual, comparison, threshold in predicates
+    )
+    reasons = tuple(gate.name for gate in gates if not gate.passed)
+    return AcceptanceResult(passed=not reasons, gates=gates, reasons=reasons)

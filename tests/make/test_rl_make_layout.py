@@ -30,6 +30,14 @@ def test_rl_targets_are_defined_only_in_rl_makefile() -> None:
     assert definitions == {target: ["rl.mk"] for target in _MOVED_TARGETS}
 
 
+def test_tensorboard_uses_five_second_reload_interval() -> None:
+    makefile = (REPO_ROOT / "make" / "rl.mk").read_text()
+    tensorboard = makefile.split("tensorboard-rl:", maxsplit=1)[1].split(
+        ".PHONY: test-integration-press-hover-goto", maxsplit=1
+    )[0]
+    assert "--reload_interval 5" in tensorboard
+
+
 def test_root_makefile_includes_rl_makefile_and_training_makefile_is_removed() -> None:
     root_makefile = (REPO_ROOT / "Makefile").read_text()
 

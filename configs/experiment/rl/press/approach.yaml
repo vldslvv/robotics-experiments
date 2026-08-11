@@ -98,7 +98,8 @@ termination:
   contact_force_threshold_n: 0.25
 
 evaluation:
-  seeds: [101, 202, 303]
+  validation_seeds: [101, 202, 303]
+  test_seeds: [404, 505, 606]
   episodes_per_seed: 100
   success_rate_min: 0.95
   collision_rate_max: 0.01

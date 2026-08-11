@@ -438,23 +438,27 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._timeout_episode_count += (ended & result.termination.time_out).count_nonzero()
         episode_denominator = self._completed_episode_count.clamp_min(1.0)
         self.extras["log"] = {
-            "Press/completed_episodes": self._completed_episode_count,
-            "Press/success_percent": 100.0 * self._successful_episode_count / episode_denominator,
-            "Press/collision_percent": 100.0 * self._collision_episode_count / episode_denominator,
-            "Press/body_collision_percent": 100.0
-            * self._body_collision_episode_count
-            / episode_denominator,
-            "Press/pusher_collision_percent": 100.0
-            * self._pusher_collision_episode_count
-            / episode_denominator,
-            "Press/flight_failure_percent": 100.0
-            * self._flight_failure_episode_count
-            / episode_denominator,
-            "Press/timeout_percent": 100.0 * self._timeout_episode_count / episode_denominator,
+            "Training/cumulative_completed_episodes": self._completed_episode_count,
+            "Training/cumulative_success_rate": (
+                self._successful_episode_count / episode_denominator
+            ),
+            "Training/cumulative_collision_rate": (
+                self._collision_episode_count / episode_denominator
+            ),
+            "Training/cumulative_body_collision_rate": (
+                self._body_collision_episode_count / episode_denominator
+            ),
+            "Training/cumulative_pusher_collision_rate": (
+                self._pusher_collision_episode_count / episode_denominator
+            ),
+            "Training/cumulative_flight_failure_rate": (
+                self._flight_failure_episode_count / episode_denominator
+            ),
+            "Training/cumulative_timeout_rate": (self._timeout_episode_count / episode_denominator),
         }
         self.extras["log"].update(
             {
-                f"Reward/{name}": getattr(result.rewards, name).mean()
+                f"Training/reward_{name}": getattr(result.rewards, name).mean()
                 for name in _TRAINING_REWARD_TERMS
             }
         )

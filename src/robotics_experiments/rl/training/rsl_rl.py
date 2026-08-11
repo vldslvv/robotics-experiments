@@ -5,7 +5,7 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
 ``build_runner`` / ``configure_phase`` / ``train_chunk`` / ``save_checkpoint`` /
-``load_checkpoint`` / ``deterministic_actor`` / ``initialize_actor_output`` /
+``restore_checkpoint`` / ``deterministic_actor`` / ``initialize_actor_output`` /
 ``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
@@ -35,7 +35,7 @@ __all__ = [
     "deterministic_actor",
     "export_policy",
     "initialize_actor_output",
-    "load_checkpoint",
+    "restore_checkpoint",
     "save_checkpoint",
     "train_chunk",
 ]
@@ -193,8 +193,14 @@ def train_chunk(
     )
 
 
-def save_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path) -> None:
+def save_checkpoint(
+    *,
+    runner: _PolicyRunner,
+    checkpoint_path: Path,
+    iteration: int,
+) -> None:
     """Persist one evaluation checkpoint without external-logger side effects."""
+    runner.current_learning_iteration = iteration
     torch.save(
         {
             "model_state_dict": _policy_module(runner).state_dict(),
@@ -206,13 +212,17 @@ def save_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path) -> None:
     )
 
 
-def load_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> None:
-    """Restore policy weights for export without resuming optimizer state."""
+def restore_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path, device: str) -> int:
+    """Restore actor, critic, optimizer, and learner iteration for refinement."""
     runner.load(
         str(checkpoint_path),
-        load_optimizer=False,
+        load_optimizer=True,
         map_location=device,
     )
+    payload = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    iteration = int(payload["iter"])
+    runner.current_learning_iteration = iteration
+    return iteration
 
 
 def _policy_module(runner: _PolicyRunner) -> _ActorCritic:

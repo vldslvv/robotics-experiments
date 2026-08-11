@@ -20,7 +20,7 @@ from robotics_experiments.rl.training.selection import publish_policy_labels
 from tests.support.paths import REPO_ROOT
 
 
-def _criteria(*, patience: int = 30) -> RlPlateauCriteriaConfig:
+def _criteria(*, patience: int = 10) -> RlPlateauCriteriaConfig:
     return RlPlateauCriteriaConfig(
         metric_name="held_out_task_cost",
         direction="minimize",
@@ -153,7 +153,33 @@ def test_acceptance_is_separate_from_evaluation_cost() -> None:
         minimum_range_m=config.rl.press.goal.range_min_m,
     )
     assert not acceptance.passed
-    assert acceptance.reasons == ("range undershoot",)
+    assert acceptance.reasons == ("minimum closest range",)
+    assert len(acceptance.gates) == 5
+
+
+@pytest.mark.parametrize(
+    ("overrides", "failed_gate"),
+    [
+        ({"median_completion_time_s": float("nan")}, "trace finiteness"),
+        ({"approach_success_rate": 0.94}, "approach success rate"),
+        ({"collision_rate": 0.02}, "collision rate"),
+        ({"min_closest_range_m": 0.399}, "minimum closest range"),
+        ({"other_flight_failure_rate": 0.01}, "other flight-failure rate"),
+    ],
+)
+def test_every_acceptance_gate_is_individually_binding(overrides, failed_gate: str) -> None:
+    from robotics_experiments.config import load_config
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    acceptance = evaluate_press_acceptance(
+        evaluation=_scored(**overrides),
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.goal.range_min_m,
+    )
+    assert not acceptance.passed
+    assert failed_gate in acceptance.reasons
+    assert {gate.name for gate in acceptance.gates if not gate.passed} == set(acceptance.reasons)
 
 
 def test_plateau_accumulates_small_improvements_against_material_reference() -> None:
@@ -174,9 +200,9 @@ def test_plateau_accumulates_small_improvements_against_material_reference() -> 
     assert second.state == PlateauState(reference_value=0.997, stale_evaluations=0)
 
 
-def test_plateau_requires_all_thirty_consecutive_stale_evaluations() -> None:
+def test_plateau_requires_all_ten_consecutive_stale_evaluations() -> None:
     state = PlateauState(reference_value=1.0, stale_evaluations=0)
-    for iteration in range(1, 30):
+    for iteration in range(1, 10):
         update = advance_plateau(
             criteria=_criteria(),
             state=state,
@@ -187,7 +213,7 @@ def test_plateau_requires_all_thirty_consecutive_stale_evaluations() -> None:
     update = advance_plateau(
         criteria=_criteria(),
         state=state,
-        evaluation=_evaluation(iteration=30, cost=1.0),
+        evaluation=_evaluation(iteration=10, cost=1.0),
     )
     assert update.plateau_reached
 
@@ -200,8 +226,19 @@ def test_run_selection_minimizes_cost_and_prefers_earlier_exact_tie() -> None:
             _evaluation(iteration=20, cost=0.4),
             _evaluation(iteration=30, cost=0.4),
         ),
+        eligible_policy_digests=frozenset(),
     )
     assert selected.iteration == 20
+
+
+def test_validation_passing_candidate_ranks_ahead_of_lower_cost_failure() -> None:
+    passing = _evaluation(iteration=20, cost=0.5)
+    selected = select_best_evaluation(
+        criteria=_criteria(),
+        evaluations=(_evaluation(iteration=10, cost=0.1), passing),
+        eligible_policy_digests=frozenset({passing.policy_digest}),
+    )
+    assert selected is passing
 
 
 def _report(*, fingerprint: str, value: float) -> str:

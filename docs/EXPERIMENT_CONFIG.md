@@ -123,18 +123,24 @@ three-axis velocity reference, including its positive-motion alignment gate;
 `reward` owns the ten reward-term parameters,
 including the positive lower-range barrier margin; `reset` owns only the
 physical scene; `termination` owns contact
-sensing and flight envelopes; and `evaluation` owns deterministic seeds/count
-plus the 95% success and 1% maximum-contact gates. Independent reset
+sensing and flight envelopes; and `evaluation` owns disjoint validation/test
+seeds, 100 episodes per seed, cost weights, and the 95% success and 1%
+maximum-contact gates. Training-attempt, validation, and test seed sets must be
+nonempty, internally unique, and mutually disjoint; the final test set contains
+exactly three seeds. Independent reset
 velocity/range tunables are intentionally absent so training and deployment
 cannot resolve different entry bounds. Invalid handoff/goal/velocity-reference
 bounds, negative or non-finite reward weights, invalid rates, and unknown
 stages fail during `load_config`.
 
-`rl.training` owns the ordered phases in one scratch PPO optimizer lineage,
-rollout settings, task selection, artifact namespace, seed, and
+`rl.training` owns the ordered phases in each PPO attempt, rollout settings,
+task selection, artifact namespace, ordered `attempt_seeds`, and
 `controller_artifact`. Each phase owns its iteration count, checkpoint cadence,
-learning rate, schedule, entropy, and difficult-reset fraction. Checkpoint
-initialization and resume are unsupported. The controller artifact defaults to
+learning rate, schedule, entropy, and difficult-reset fraction. Each later phase
+restores the attempt-wide validation-selected actor, critic, optimizer, and
+iteration before applying its configuration and resetting the environments.
+External checkpoint initialization and process resume are unsupported. The
+controller artifact defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact
 run for reproduction.
@@ -143,13 +149,11 @@ run for reproduction.
 dimension, and scales. Controller gains, command delay, maximum tilt, and
 thruster response are not Hydra RL tunables; they are complete
 `ControllerSettings` loaded from the controller artifact and embedded in policy metadata.
-New runs capture both the task contract and alignment provenance before PPO,
-then automatically evaluate every checkpoint and publish the chosen actor.
-`rl.press.evaluation` owns the held-out metric name, penalties, continuous
-quality weights, seeds, workload size, and advisory thresholds. `latest`
-always advances after successful selection; `best` advances only for a
-strictly higher comparable score. Manual export reloads the stored contract
-without optimizer state and publishes neither label. Only the actor is
-exported.
+New campaigns capture both the task contract and alignment provenance before
+PPO, validate every checkpoint on seeds 101/202/303, and test the first eligible
+attempt's immutable selected actor on seeds 404/505/606. `rl.press.evaluation`
+owns the held-out cost weights, both workload seed sets, workload size, and gate
+thresholds. `latest` and comparable `best` advance only after the fresh test
+passes. Only the tested actor is exported.
 `configs/train_press_approach_quad.yaml` selects the press task, the
 `press-approach` artifact namespace, ten-second episodes, and its PPO settings.

@@ -639,7 +639,7 @@ def _make_env(
             ]
 
     cfg = make_drone_hover_env_cfg(experiment_config=config)
-    cfg.seed = config.rl.training.seed
+    cfg.seed = config.rl.training.attempt_seeds[0]
     cfg.scene.num_envs = num_envs
     cfg.episode_length_s = 120.0
     env = _AlignmentReplayEnv(

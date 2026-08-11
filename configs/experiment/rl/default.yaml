@@ -40,7 +40,7 @@ training:
     metric_name: held_out_task_cost
     direction: minimize
     minimum_delta: 0.003
-    patience_evaluations: 30
+    patience_evaluations: 10
   evaluation_worker_timeout_s: 600.0
   num_steps_per_env: 24
   gamma: 0.99
@@ -51,7 +51,7 @@ training:
   num_mini_batches: 4
   desired_kl: 0.01
   max_grad_norm: 1.0
-  seed: 42
+  attempt_seeds: [42, 43, 44]
 
 # Hover task definition and task-owned ActorCritic topology.
 hover:

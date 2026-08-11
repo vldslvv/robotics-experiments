@@ -247,6 +247,9 @@ def _validate_rl_policies(experiment: ExperimentConfig) -> None:
         raise ValueError("rl.training.controller_artifact must be non-empty")
     if not training.phases:
         raise ValueError("rl.training.phases must contain at least one phase")
+    attempt_seeds = tuple(training.attempt_seeds)
+    if not attempt_seeds or len(set(attempt_seeds)) != len(attempt_seeds):
+        raise ValueError("rl.training.attempt_seeds must be nonempty and unique")
     for index, phase in enumerate(training.phases):
         path = f"rl.training.phases[{index}]"
         if phase.max_iterations <= 0 or phase.evaluation_interval <= 0:
@@ -417,8 +420,26 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
                 f"rl.press.reward.{name} must be finite and non-negative, got {value!r}"
             )
     evaluation = press.evaluation
-    if evaluation.episodes_per_seed <= 0 or not evaluation.seeds:
-        raise ValueError("rl.press.evaluation requires seeds and positive episodes_per_seed")
+    validation_seeds = tuple(evaluation.validation_seeds)
+    test_seeds = tuple(evaluation.test_seeds)
+    if not validation_seeds or len(set(validation_seeds)) != len(validation_seeds):
+        raise ValueError("rl.press.evaluation.validation_seeds must be nonempty and unique")
+    if len(test_seeds) != 3 or len(set(test_seeds)) != len(test_seeds):
+        raise ValueError("rl.press.evaluation.test_seeds must contain exactly three unique seeds")
+    if evaluation.episodes_per_seed != 100:
+        raise ValueError("rl.press.evaluation.episodes_per_seed must equal 100")
+    seed_groups = {
+        "training": set(experiment.rl.training.attempt_seeds),
+        "validation": set(validation_seeds),
+        "test": set(test_seeds),
+    }
+    for left, right in (("training", "validation"), ("training", "test"), ("validation", "test")):
+        overlap = seed_groups[left] & seed_groups[right]
+        if overlap:
+            raise ValueError(
+                f"rl training, validation, and test seeds must be mutually disjoint; "
+                f"{left}/{right} overlap={sorted(overlap)}"
+            )
     for name, value in {
         "success_rate_min": evaluation.success_rate_min,
         "collision_rate_max": evaluation.collision_rate_max,

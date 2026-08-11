@@ -131,9 +131,9 @@ to a safe 0.59 m staging point at a requested 0.5 m/s, settle, make the short
 move into the 0.48 m handoff range at 0.08 m/s, execute the `press-approach` /
 `approach` artifact through the generic `policy` step, return at 0.5 m/s, land,
 and disarm. The strict hook requires stable contact-free completion and no lamp
-transition. Run it only after selection
-within `make train-rl` publishes `.build/training/press-approach/latest` and
-`make eval-press` independently accepts it; it is excluded from
+transition. Run it only after the fresh final test within `make train-rl`
+publishes `.build/training/press-approach/latest` and `make eval-press`
+independently reproduces that exact digest and test workload; it is excluded from
 `test-integration-all`.
 
 `make test-integration-press-policy-transfer` is the separate post-training PX4

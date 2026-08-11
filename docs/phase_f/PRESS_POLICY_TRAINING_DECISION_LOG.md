@@ -1420,3 +1420,77 @@ run. The pre-smoke `latest` and `best` publication labels were restored after
 each diagnostic. Host gates must be rerun after the final cache change; after
 they pass, the merged-loop implementation is ready for the next full scratch
 policy attempt.
+
+### 45. Replace single-lineage selection with a validation-test campaign
+
+Date: 2026-08-11.
+
+Plain-language view: Model 150 was the best point in one run, but it failed four
+safety/reliability gates and later training collapsed. It is canceled as a
+deployable candidate. Training now keeps the best behavior within each attempt,
+tries independent seeds when validation fails, and reserves a separate final
+exam that can only approve or reject the frozen selected actor.
+
+Technical view: The fixed-endpoint evidence in entry 42 is decisive: model 150
+reached only 87.67% success with collision, flight-envelope, and range failures;
+model 210 timed out in every episode; and the refinement endpoint fell to about
+26-27% success. A lower learning rate is therefore a validation-selected branch
+from the attempt-wide best complete learner checkpoint, not a continuation from
+the latest weights. Actor, critic, optimizer, and iteration are restored;
+training environments are intentionally reset before the new phase settings are
+used.
+
+One campaign now tries fresh PPO seeds 42, 43, and 44, stopping after the first
+completed attempt with an eligible validation checkpoint. All checkpoints use
+the same 300 validation episodes from seeds 101, 202, and 303. Gate-passing
+validation candidates rank ahead of failures, then raw held-out task cost is
+minimized with the earlier exact tie retained. This multi-attempt evidence is
+reported in full rather than hiding failed seeds, following the motivation in
+[empirical design guidance for deep RL](https://papers.nips.cc/paper/2021/hash/f514cec81cb148559cf475e7426eed5e-Abstract.html).
+
+The selected actor bytes are then frozen and evaluated freshly, without cache,
+over 100 episodes each for seeds 404, 505, and 606. The resulting raw
+`PolicyEvaluation` alone enters the five binding acceptance gates. Test failure
+ends the command without another attempt or fine-tuning. Acceptance publishes a
+byte-for-byte copy of the tested actor and advances labels only after digest
+equality is checked. Report schema 2 preserves attempts, phase parents,
+validation/test workloads, raw metrics, thresholds, individual gates, reasons,
+and selected/tested/published digests. `make eval-press` is now a post-training
+audit of that published digest and exact test workload, never a selection step.
+
+The optimizer restoration follows the normal complete checkpoint pattern in
+[PyTorch checkpoint guidance](https://docs.pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training).
+No new policy result is claimed by this contract change; GPU smoke and the first
+full campaign remain qualification evidence to be recorded separately.
+
+### 46. Three-phase GPU smoke proves restoration and reserved-test isolation
+
+Date: 2026-08-11.
+
+Plain-language view: The new smoke caught a real reset bug at the first
+refinement boundary, then proved the corrected campaign crosses both boundaries
+without touching the final-exam seeds or changing deployment labels.
+
+Technical view: Diagnostic runs `20260811T-campaign-contract-smoke` and
+`20260811T-campaign-contract-smoke2` each trained model 1 and restored its full
+learner checkpoint successfully, but failed while explicitly resetting the
+32,768 training environments. Isaac Lab's live training buffers were inference
+tensors after RSL-RL collection, so the direct reset attempted an in-place
+update outside inference mode. The phase branch now performs the intentional
+environment reset under `torch.inference_mode()` after checkpoint restore,
+phase optimizer configuration, and reset-mixture configuration. A host test
+locks down that order and context.
+
+Run `20260811T-campaign-contract-smoke3` then completed one update in each of
+the three configured phases in 230.9 seconds. Phase 2 restored model 1 at
+iteration 1, applied `3e-5` and 20% difficult resets, and reset every
+environment. Phase 3 restored model 2 at iteration 2, applied `1e-5` and 40%
+difficult resets, and reset again. Report schema 2 records all three parent
+checkpoints, exact parent digests, restored iterations, applied phase configs,
+and reset confirmations under status `procedural_smoke_complete`.
+
+The smoke evaluated only validation seeds 101, 202, and 303. It did not start a
+test worker, its `test_evaluation` and `acceptance` fields remain null, and logs
+contain no execution of seeds 404, 505, or 606. Existing `latest` and `best`
+links were unchanged. This qualifies phase restoration and campaign reporting;
+it is not policy acceptance and does not spend the reserved final workload.

@@ -39,7 +39,7 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     )
 
     evaluation = config.rl.press.evaluation
-    seeds = tuple(int(seed) for seed in evaluation.seeds)
+    seeds = tuple(int(seed) for seed in evaluation.test_seeds)
     metadata = validate_policy_artifact(artifact_dir=artifact_dir)
     contract = metadata.contract
     if contract.curriculum_stage != config.rl.press.curriculum_stage:
@@ -103,6 +103,21 @@ def _run(*, config: ExperimentConfig, artifact_dir: Path) -> PressApproachEvalua
     for reward in result.reward_means:
         _report(f"reward_mean {reward.name}={reward.mean:.6f}")
     digest = hashlib.sha256((artifact_dir / POLICY_FILENAME).read_bytes()).hexdigest()
+    if metadata.values.get("selected_policy_digest") != digest:
+        raise ValueError("published actor digest does not match policy metadata")
+    recorded_test = metadata.values.get("test_evaluation")
+    expected_workload = {
+        "role": "test",
+        "seeds": list(seeds),
+        "episodes_per_seed": evaluation.episodes_per_seed,
+        "episode_count": len(seeds) * evaluation.episodes_per_seed,
+    }
+    if (
+        not isinstance(recorded_test, dict)
+        or recorded_test.get("policy_digest") != digest
+        or recorded_test.get("workload") != expected_workload
+    ):
+        raise ValueError("published policy does not record the configured test workload")
     evaluated = press_policy_evaluation(
         iteration=int(metadata.values["selected_checkpoint_iteration"]),
         checkpoint_path=artifact_dir / POLICY_FILENAME,

@@ -74,8 +74,9 @@ fit/publication, and the alignment target-envelope gate.
   lamp transition. Like the hover artifact gate, it is excluded from
   `test-integration-all` because it needs an independently accepted artifact
   declaring `policy_interface: press-approach` and `curriculum_stage: approach`.
-  Advisory selection failure does not block `latest` publication, but this
-  integration target remains an independent workflow gate.
+  Training advances `latest` only after the immutable selected actor passes the
+  disjoint final test; this integration target remains an independent workflow
+  gate.
 - `make test-integration-alignment-target` runs the analytic hover/goto
   stability envelope with the selected alignment `best` artifact. It is owned
   by `make/alignment.mk` and excluded from `test-integration-all` because it

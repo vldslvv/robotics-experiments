@@ -66,6 +66,15 @@ def test_phase_cap_preserves_order_and_reduces_terminal_evaluation_interval() ->
     assert tuple(phase.evaluation_interval for phase in phases) == (10, 5)
 
 
+def test_procedural_smoke_keeps_every_phase_boundary_at_one_update() -> None:
+    train_rl = _load_train_rl_module()
+    phases = train_rl._procedural_smoke_phases(  # noqa: SLF001
+        phases=(_phase(maximum=20, interval=10), _phase(maximum=30, interval=5))
+    )
+    assert tuple(phase.max_iterations for phase in phases) == (1, 1)
+    assert tuple(phase.evaluation_interval for phase in phases) == (1, 1)
+
+
 def test_evaluation_cache_round_trip_rebinds_candidate_identity(tmp_path: Path) -> None:
     train_rl = _load_train_rl_module()
     original = PolicyEvaluation(
@@ -96,6 +105,73 @@ def test_evaluation_cache_round_trip_rebinds_candidate_identity(tmp_path: Path) 
     assert loaded.policy_digest == "new-raw-policy-digest"
     assert loaded.source == "cache"
     assert loaded.metric("held_out_task_cost") == 0.4
+
+
+def test_validation_cache_identity_includes_role_and_exact_workload(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    common = {
+        "cache_dir": tmp_path,
+        "policy_content_digest": "content",
+        "comparison_fingerprint": "fingerprint",
+        "controller_digest": "controller",
+        "episodes_per_seed": 100,
+    }
+    validation = train_rl._cache_path(  # noqa: SLF001
+        **common,
+        workload_role="validation",
+        seeds=(101, 202, 303),
+    )
+    test = train_rl._cache_path(  # noqa: SLF001
+        **common,
+        workload_role="test",
+        seeds=(404, 505, 606),
+    )
+    assert validation != test
+
+
+def test_report_schema_records_disjoint_300_episode_workloads(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    report = train_rl._training_report(  # noqa: SLF001
+        run_dir=tmp_path,
+        config=config,
+        phases=tuple(config.rl.training.phases),
+        comparison_fingerprint="fingerprint",
+        attempts=[],
+        selected=None,
+        selected_attempt_index=None,
+        selected_policy_path=None,
+        test_evaluation=None,
+        acceptance=None,
+        status="training",
+    )
+    assert report["schema_version"] == 2
+    assert report["workloads"] == {
+        "validation": {
+            "role": "validation",
+            "seeds": [101, 202, 303],
+            "episodes_per_seed": 100,
+            "episode_count": 300,
+        },
+        "test": {
+            "role": "test",
+            "seeds": [404, 505, 606],
+            "episodes_per_seed": 100,
+            "episode_count": 300,
+        },
+    }
+
+
+def test_training_tensorboard_rates_are_fraction_valued_and_namespaced() -> None:
+    source = (
+        REPO_ROOT / "src/robotics_experiments/workflows/isaac_lab/tasks/switch_press_env.py"
+    ).read_text()
+    assert '"Training/cumulative_collision_rate"' in source
+    assert '"Training/cumulative_flight_failure_rate"' in source
+    assert "_percent" not in source
+    assert "100.0 * self._" not in source
 
 
 def test_policy_content_digest_ignores_only_generated_serialization_id(
@@ -131,18 +207,124 @@ def test_git_metadata_marks_mounted_repository_safe(monkeypatch, tmp_path: Path)
     assert metadata == {"source_commit": "abc123", "source_dirty": True}
 
 
-def test_checkpoint_load_skips_optimizer_state(tmp_path: Path) -> None:
+def test_checkpoint_restore_loads_optimizer_and_iteration(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
     from robotics_experiments.rl.training import rsl_rl
 
     calls = []
-    runner = SimpleNamespace(load=lambda *args, **kwargs: calls.append((args, kwargs)))
+    runner = SimpleNamespace(
+        current_learning_iteration=99,
+        load=lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
     checkpoint = tmp_path / "model_299.pt"
-    rsl_rl.load_checkpoint(
+    torch.save({"iter": 17}, checkpoint)
+    restored = rsl_rl.restore_checkpoint(
         runner=runner,
         checkpoint_path=checkpoint,
-        device="cuda:0",
+        device="cpu",
     )
-    assert calls == [((str(checkpoint),), {"load_optimizer": False, "map_location": "cuda:0"})]
+    assert restored == 17
+    assert runner.current_learning_iteration == 17
+    assert calls == [((str(checkpoint),), {"load_optimizer": True, "map_location": "cpu"})]
+
+
+def test_publication_copies_the_exact_tested_actor_and_only_then_labels(tmp_path: Path) -> None:
+    import hashlib
+
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl.training.progress import AcceptanceResult
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    run_dir = tmp_path / "campaign"
+    selected_dir = run_dir / "attempt_01_seed_42" / "evaluated" / "candidate_001"
+    selected_dir.mkdir(parents=True)
+    selected_policy = selected_dir / "policy.pt"
+    selected_policy.write_bytes(b"immutable actor bytes")
+    digest = hashlib.sha256(selected_policy.read_bytes()).hexdigest()
+    selected = PolicyEvaluation(
+        iteration=10,
+        checkpoint_path=run_dir / "attempt_01_seed_42" / "checkpoints" / "model.pt",
+        policy_digest=digest,
+        metrics=(EvaluationMetric("held_out_task_cost", 0.25),),
+        reward_means=(),
+        source="fresh-validation",
+    )
+    tested = PolicyEvaluation(
+        iteration=10,
+        checkpoint_path=selected.checkpoint_path,
+        policy_digest=digest,
+        metrics=(EvaluationMetric("held_out_task_cost", 0.3),),
+        reward_means=(),
+        source="fresh-test",
+    )
+    acceptance = AcceptanceResult(passed=True, gates=(), reasons=())
+    report = {
+        "comparison_fingerprint": "fingerprint",
+        "selected_policy_digest": digest,
+        "test_evaluation": {"policy_digest": digest},
+        "selected_metric": {
+            "name": "held_out_task_cost",
+            "direction": "minimize",
+            "value": 0.25,
+        },
+    }
+    train_rl._publish_selected(  # noqa: SLF001
+        run_dir=run_dir,
+        policy_root=tmp_path,
+        metadata={},
+        report=report,
+        selected=selected,
+        selected_policy=selected_policy,
+        test_evaluation=tested,
+        acceptance=acceptance,
+        comparison_fingerprint="fingerprint",
+        config=config,
+    )
+    assert (run_dir / "policy.pt").read_bytes() == b"immutable actor bytes"
+    assert hashlib.sha256((run_dir / "policy.pt").read_bytes()).hexdigest() == digest
+    published_metadata = json.loads((run_dir / "policy_meta.json").read_text())
+    published_report = json.loads((run_dir / "training_report.json").read_text())
+    assert published_metadata["selected_policy_digest"] == digest
+    assert published_metadata["test_evaluation"]["policy_digest"] == digest
+    assert published_report["selected_policy_digest"] == digest
+    assert published_report["test_evaluation"]["policy_digest"] == digest
+    assert (tmp_path / "latest").resolve() == run_dir
+
+
+def test_failed_test_cannot_publish_any_label(tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    from robotics_experiments.config import load_config
+    from robotics_experiments.rl.training.progress import AcceptanceResult
+
+    config = load_config(REPO_ROOT / "configs" / "train_press_approach_quad.yaml")
+    run_dir = tmp_path / "campaign"
+    run_dir.mkdir()
+    policy = run_dir / "candidate.pt"
+    policy.write_bytes(b"actor")
+    selected = PolicyEvaluation(
+        iteration=1,
+        checkpoint_path=run_dir / "model.pt",
+        policy_digest="irrelevant",
+        metrics=(EvaluationMetric("held_out_task_cost", 1.0),),
+        reward_means=(),
+        source="fresh-validation",
+    )
+    with pytest.raises(ValueError, match="failed test"):
+        train_rl._publish_selected(  # noqa: SLF001
+            run_dir=run_dir,
+            policy_root=tmp_path,
+            metadata={},
+            report={},
+            selected=selected,
+            selected_policy=policy,
+            test_evaluation=selected,
+            acceptance=AcceptanceResult(passed=False, gates=(), reasons=("gate",)),
+            comparison_fingerprint="fingerprint",
+            config=config,
+        )
+    assert not (tmp_path / "latest").exists()
+    assert not (tmp_path / "best").exists()
 
 
 def test_initial_checkpoint_has_rsl_state_without_calling_runner_logger(tmp_path: Path) -> None:
@@ -156,7 +338,7 @@ def test_initial_checkpoint_has_rsl_state_without_calling_runner_logger(tmp_path
         current_learning_iteration=0,
     )
     checkpoint = tmp_path / "model_0.pt"
-    rsl_rl.save_checkpoint(runner=runner, checkpoint_path=checkpoint)
+    rsl_rl.save_checkpoint(runner=runner, checkpoint_path=checkpoint, iteration=0)
     payload = torch.load(checkpoint, weights_only=True)
     assert payload["iter"] == 0
     assert payload["infos"] is None
@@ -185,6 +367,50 @@ def test_phase_configuration_preserves_optimizer_and_updates_values() -> None:
     assert runner.alg.optimizer.param_groups[0]["lr"] == phase.learning_rate
     assert runner.alg.schedule == "fixed"
     assert runner.alg.entropy_coef == 0.0
+
+
+def test_refinement_restores_then_configures_then_resets(monkeypatch, tmp_path: Path) -> None:
+    train_rl = _load_train_rl_module()
+    torch = pytest.importorskip("torch")
+    calls = []
+    runner = object()
+
+    class FakeEnv:
+        def set_training_hard_case_fraction(self, value):
+            calls.append(("mixture", value))
+
+        def reset(self):
+            calls.append(("reset", torch.is_inference_mode_enabled()))
+
+    checkpoint = tmp_path / "model.pt"
+
+    def restore_checkpoint(**kwargs):
+        calls.append(("restore", kwargs))
+        return 17
+
+    monkeypatch.setattr(
+        train_rl.training,
+        "restore_checkpoint",
+        restore_checkpoint,
+    )
+    monkeypatch.setattr(
+        train_rl.training,
+        "configure_phase",
+        lambda **kwargs: calls.append(("configure", kwargs)),
+    )
+    phase = _phase()
+    restored = train_rl._restore_phase_branch(  # noqa: SLF001
+        runner=runner,
+        env=FakeEnv(),
+        parent_checkpoint=checkpoint,
+        phase=phase,
+        device="cuda:0",
+    )
+    assert restored == 17
+    assert [call[0] for call in calls] == ["restore", "configure", "mixture", "reset"]
+    assert calls[0][1]["checkpoint_path"] == checkpoint
+    assert calls[1][1]["phase"] is phase
+    assert calls[-1] == ("reset", True)
 
 
 def test_training_chunks_do_not_repeat_boundary_iteration_numbers() -> None:

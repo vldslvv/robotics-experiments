@@ -252,9 +252,10 @@ class PressApproachTerminationConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachEvaluationConfig(_FreezableConfig):
-    """Deterministic approach-policy workload, advisory gates, and ranking."""
+    """Disjoint deterministic validation/test workloads, gates, and ranking."""
 
-    seeds: List[int]
+    validation_seeds: List[int]
+    test_seeds: List[int]
     episodes_per_seed: int
     success_rate_min: float
     collision_rate_max: float
@@ -282,7 +283,7 @@ class RlPlateauCriteriaConfig(_FreezableConfig):
 
 @dataclass
 class RlTrainingPhaseConfig(_FreezableConfig):
-    """One phase in a single scratch PPO optimizer lineage."""
+    """One phase in an attempt's validation-selected PPO branch."""
 
     max_iterations: int
     evaluation_interval: int
@@ -306,8 +307,7 @@ class RlTrainingConfig(_FreezableConfig):
             ``latest`` symlink.
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
-        phases: Ordered curriculum phases executed by one fresh runner. No
-            checkpoint initialization or resume path is supported.
+        phases: Ordered curriculum phases executed by each fresh attempt.
         num_steps_per_env: On-policy rollout length per env per iteration.
         gamma: Discount factor.
         lam: GAE lambda.
@@ -317,7 +317,7 @@ class RlTrainingConfig(_FreezableConfig):
         num_mini_batches: Minibatches per epoch.
         desired_kl: Adaptive-schedule KL target.
         max_grad_norm: Gradient clipping norm.
-        seed: Training seed (env reset + torch).
+        attempt_seeds: Independent training seeds (env reset + torch).
     """
 
     task_id: str
@@ -336,7 +336,7 @@ class RlTrainingConfig(_FreezableConfig):
     num_mini_batches: int
     desired_kl: float
     max_grad_norm: float
-    seed: int
+    attempt_seeds: List[int]
 
 
 @dataclass

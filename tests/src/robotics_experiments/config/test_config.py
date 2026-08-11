@@ -254,7 +254,8 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert training.plateau.metric_name == "held_out_task_cost"
     assert training.plateau.direction == "minimize"
     assert training.plateau.minimum_delta == 0.003
-    assert training.plateau.patience_evaluations == 30
+    assert training.plateau.patience_evaluations == 10
+    assert training.attempt_seeds == (42, 43, 44)
     assert tuple(phase.hard_case_fraction for phase in training.phases) == (
         0.0,
         0.2,
@@ -299,9 +300,52 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
+    assert config.rl.press.evaluation.validation_seeds == (101, 202, 303)
+    assert config.rl.press.evaluation.test_seeds == (404, 505, 606)
+    assert config.rl.press.evaluation.episodes_per_seed == 100
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new", "message"),
+    [
+        (
+            "train_press_approach_quad.yaml",
+            "attempt_seeds: [42, 43, 44]",
+            "attempt_seeds: [42, 42, 44]",
+            "attempt_seeds must be nonempty and unique",
+        ),
+        (
+            "experiment/rl/press/approach.yaml",
+            "validation_seeds: [101, 202, 303]",
+            "validation_seeds: [42, 202, 303]",
+            "mutually disjoint",
+        ),
+        (
+            "experiment/rl/press/approach.yaml",
+            "test_seeds: [404, 505, 606]",
+            "test_seeds: [404, 505]",
+            "exactly three unique seeds",
+        ),
+    ],
+)
+def test_press_campaign_rejects_invalid_seed_workloads(
+    tmp_path,
+    relative_path: str,
+    old: str,
+    new: str,
+    message: str,
+):
+    from robotics_experiments.config import load_config
+
+    root = tmp_path / "configs"
+    shutil.copytree(_ROOT, root)
+    path = root / relative_path
+    path.write_text(path.read_text().replace(old, new))
+    with pytest.raises(ValueError, match=message):
+        load_config(root / "train_press_approach_quad.yaml")
 
 
 def test_training_and_manual_press_configs_share_one_actor_entry_contract():

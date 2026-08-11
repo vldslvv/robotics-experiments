@@ -28,8 +28,8 @@ rl:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
     policy_name: press-approach
-    # One scratch run keeps a single optimizer lineage while changing the
-    # learning schedule and reset mixture at an explicit curriculum boundary.
+    # Each attempt starts from scratch. Refinement phases restore the
+    # attempt-wide validation-selected checkpoint before changing curriculum.
     phases:
       - max_iterations: 241
         evaluation_interval: 10
@@ -53,7 +53,7 @@ rl:
       metric_name: held_out_task_cost
       direction: minimize
       minimum_delta: 0.003
-      patience_evaluations: 30
+      patience_evaluations: 10
     evaluation_worker_timeout_s: 600.0
     num_steps_per_env: 32
     gamma: 0.995
@@ -64,7 +64,7 @@ rl:
     num_mini_batches: 8
     desired_kl: 0.01
     max_grad_norm: 1.0
-    seed: 42
+    attempt_seeds: [42, 43, 44]
 
 vehicles:
   x500_01:

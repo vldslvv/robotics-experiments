@@ -11,6 +11,7 @@ from robotics_experiments.config import RlPlateauCriteriaConfig
 __all__ = [
     "AcceptanceResult",
     "EvaluationMetric",
+    "GateResult",
     "PolicyEvaluation",
     "PlateauState",
     "PlateauUpdate",
@@ -25,7 +26,19 @@ class AcceptanceResult:
     """Final acceptance decision made from one selected evaluation record."""
 
     passed: bool
+    gates: tuple[GateResult, ...]
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GateResult:
+    """One independently binding policy-acceptance predicate."""
+
+    name: str
+    passed: bool
+    actual: float
+    comparison: str
+    threshold: float
 
 
 @dataclass(frozen=True)
@@ -130,15 +143,16 @@ def select_best_evaluation(
     *,
     criteria: RlPlateauCriteriaConfig,
     evaluations: tuple[PolicyEvaluation, ...],
+    eligible_policy_digests: frozenset[str],
 ) -> PolicyEvaluation:
-    """Select the run-wide best scalar, preferring the earlier exact tie."""
+    """Rank gate-passing candidates first, then scalar, preserving exact ties."""
     if not evaluations:
         raise ValueError("policy selection requires at least one evaluation")
     multiplier = -1.0 if criteria.direction == "minimize" else 1.0
     return max(
         evaluations,
         key=lambda evaluation: (
+            evaluation.policy_digest in eligible_policy_digests,
             multiplier * evaluation.metric(criteria.metric_name),
-            -evaluation.iteration,
         ),
     )
