@@ -210,3 +210,23 @@ accepted-policy evidence brackets hard-case exposure between 30% and 50% for
 eliminating undershoots. Change only that training reset mixture in the next
 scratch lineage; retain the controller, reward, optimizer, cadence, full-reset
 held-out distribution, and acceptance gates.
+
+### 8. Coarse-sweep the reset-mixture bracket from scratch
+
+Date: 2026-08-11.
+
+Plain-language view: Increase the share of difficult starts halfway from 30%
+to the historical 50% upper bracket. Save at broad intervals first so a long
+held-out sweep is not spent measuring nearly identical policies. A later
+scratch run will add every-update precision only if this run exposes a narrow
+promising interval without passing directly.
+
+Technical view: Keep phase 1, the accepted controller, reward, policy network,
+PPO parameters, optimizer lineage, full-distribution held-out evaluation, and
+all acceptance thresholds unchanged. Replace the 30% consolidation mixture
+with the bracket midpoint of 40%. Run 31 consolidation iterations at the same
+fixed `3e-5` learning rate and zero entropy, saving every five updates. This
+produces a six-candidate coarse response after model 120 while taking four
+fewer total updates than the rejected fine run and avoiding nine low-value
+every-update evaluations. The only behavioral training change is the reset
+mixture supported by the persistent undershoot traces.

@@ -95,10 +95,8 @@ learning with low-rate difficult-boundary consolidation.
 The press configuration currently runs:
 
 1. 121 iterations at `1e-4`, fixed schedule, `1e-4` entropy, full handoff reset;
-2. 25 iterations at `3e-5`, fixed schedule, zero entropy, 30% difficult resets,
-   with checkpoints every five updates;
-3. 10 iterations with the same optimization and reset settings, saving every
-   update across the evidenced consolidation interval.
+2. 31 iterations at `3e-5`, fixed schedule, zero entropy, 40% difficult resets,
+   with checkpoints every five updates for a coarse safety-bracket sweep.
 
 Run training with:
 
