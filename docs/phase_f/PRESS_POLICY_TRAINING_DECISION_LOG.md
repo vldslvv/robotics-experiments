@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FIFTEENTH SCRATCH SELECTION REJECTED; DIRECT COMMAND TARGET NEXT
+Status: SIXTEENTH SCRATCH SELECTION REJECTED; COMMAND-WEIGHT COARSE SWEEP NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -30,6 +30,7 @@ are unsupported.
 | `20260811T093944Z-scratch-predictive-reference400ms` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5`; 0.4 s predictive velocity reference | Iteration 135 selected; score -0.471879, 97.0% success, advisory rejected | Strengthen the evidenced but underweighted dense tracking target |
 | `20260811T100846Z-scratch-predictive-reference-vtrack900` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 900 | Iteration 145 selected; score -1.447104, 67.7% success, advisory rejected | Refine the overbraking bracket at weight 600 |
 | `20260811T103705Z-scratch-predictive-reference-vtrack600` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 600 | Iteration 135 selected; score -0.518753, 95.7% success, advisory rejected | Stop the scalar sweep and teach the physical velocity command directly |
+| `20260811T111012Z-scratch-command-target-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 100 | Iteration 150 selected; score -1.884269, 53.0% success, advisory rejected | Reduce the direct command weight by one coarse decade |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -948,3 +949,37 @@ pure task remains independent of policy action scaling. Start the new term at
 weight 100; at the evidenced crossing this contributes roughly 0.12 per step
 and, unlike the state term, has a direct action gradient. Keep every other
 reward, controller, schedule, reset, held-out metric, and gate unchanged.
+
+### 33. Direct command target is structurally valid but overweighted
+
+Date: 2026-08-11.
+
+Plain-language view: The new lesson keeps the actor cautious for too long. It
+does not eliminate the final unsafe cases, and the policy learns to finish only
+at the end of the run. Keep the direct lesson but make it much lighter.
+
+Technical view: Run `20260811T111012Z-scratch-command-target-w100` started from
+clean source commit `315df06`, a new network, and a new optimizer. The task
+mapped normalized actions through the production Lab velocity-command seam,
+rotated the resulting physical command into the contact frame, and compared it
+with the predictive velocity reference at weight 100. Actual state-velocity
+tracking returned to the strongest weight-300 frontier. The controller,
+121-plus-31 schedule, reset mixture, held-out seeds, and gates stayed fixed.
+Training completed 152 updates in 929.5 seconds and evaluator revision 5 scored
+all 11 checkpoints fresh in 503.5 seconds.
+
+Model 150 was selected with score -1.884269, 53.0% success, 3.33% other flight
+failure, 43.67% timeout, zero collision, 0.42012 m mean closest range, and
+0.39894 m minimum closest range. Success rises only from 20.0% at model 135 to
+53.0% at model 150, while the failure floor remains comparable to the original
+weight-300 state-only frontier. The selected mean command-tracking contribution
+is -0.28232 per active step, so the new term is not merely diagnostic; at
+weight 100 it materially dominates the completion tradeoff.
+
+Do not extend this schedule: the first phase is already suppressed and the
+final checkpoint remains far below the success gate. Preserve the structural
+term and perform a coarse decade step to `command_tracking_weight: 10`. This
+tests whether a direct sign-correction signal can coexist with the proven
+high-success learning path. If weight 10 reproduces the state-only frontier
+without reducing failures, refine upward at 30; if it improves the boundary,
+refine the supported interval. Keep every other value unchanged.
