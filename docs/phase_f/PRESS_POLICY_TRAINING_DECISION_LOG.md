@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: EIGHTH SCRATCH SELECTION REJECTED; CLOSING-SPEED SWEEP PREDECLARED
+Status: NINTH SCRATCH SELECTION REJECTED; STRONG CLOSING-SPEED SWEEP PREDECLARED
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -23,6 +23,7 @@ are unsupported.
 | `20260811T060552Z-scratch-hard50-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 50% difficult resets | Iteration 150 selected; score -0.527187, 95.7% success, advisory rejected | Preserve the stronger 40% learning path, then introduce 50% difficult resets only after its peak |
 | `20260811T063515Z-scratch-late-hard50` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with 40% difficult resets and 12 at 50% | Iteration 150 selected; score -0.507785, 96.0% success, advisory rejected | Preserve independent worst traces, then strengthen the evidenced braking objective |
 | `20260811T070651Z-scratch-barrier40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; 0.040 m range barrier | Iteration 145 selected; score -1.579391, 65.0% success, advisory rejected | Restore the 0.020 m barrier and fit a one-sided unsafe closing-speed term |
+| `20260811T073726Z-scratch-closing300-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets; closing-speed weight 300 | Iteration 140 selected; score -0.580549, 94.0% success, advisory rejected | Increase the evidenced but underpowered one-sided term by one coarse decade |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -582,3 +583,55 @@ held-out distribution, and gates fixed. Host tests cover one-sided behavior
 and NumPy/Torch parity. Increment the selection evaluator revision because its
 reported reward-term schema gains a field; independent acceptance remains
 uncached.
+
+### 22. The first closing-speed weight is too weak
+
+Date: 2026-08-11.
+
+Plain-language view: The selective braking idea does not suppress approach
+learning like the wide barrier, but its first weight is too small to change the
+unsafe final motion. Increase the same signal substantially before rejecting
+the structure.
+
+Technical view: Run `20260811T073726Z-scratch-closing300-coarse` started from
+clean source commit `5f5a893`, a new network, and a new optimizer. Training
+completed 152 updates in 931.4 seconds. Evaluator revision 2 intentionally
+invalidated old diagnostic records, so all 11 checkpoints were evaluated fresh
+in 433.6 seconds.
+
+Model 140 was selected with score -0.580549, 94.0% success, 6.0% other flight
+failure, zero collision and timeout, 0.41363 m mean closest range, and 0.39857 m
+minimum closest range. Model 125 reached 92.67% success and 7.33% failure;
+models 135 and 140 reached the best 94.0%/6.0% split before later regression.
+This avoids the wide barrier's timeout failure, but it regresses the original
+96.0%/4.0% frontier and does not improve minimum range.
+
+Fresh independent evaluation reproduced model 140 exactly and preserved its
+traces under `.build/docker/integration/eval-press.20260811T080140Z.334113`.
+All three worst profiles still cross 0.400 m with approximately 0.027-0.032 m/s
+forward speed; no collision or different flight-envelope boundary appears.
+The mean `range_closing_speed` reward is only -0.00473, compared with -0.24769
+for the range barrier and -1.25904 for velocity tracking. The signal is
+correctly localized but underpowered.
+
+### 23. Coarse-sweep one decade of closing-speed authority
+
+Date: 2026-08-11.
+
+Plain-language view: Make the selective stopping lesson ten times stronger.
+It will still be zero for safe approach and retreat, so this tests braking
+authority without reintroducing the wide barrier's position-only penalty.
+
+Technical view: Increase only `range_closing_speed_weight` from 300 to 3000.
+Retain the same stopping envelope, 0.020 m range barrier, reward terms,
+controller, network, 121-plus-31 update 40% schedule, optimizer values,
+held-out distribution, and acceptance gates. This order-of-magnitude step is
+supported by the retained reward telemetry; it should raise the localized term
+toward a meaningful fraction of the existing barrier while remaining far below
+the global velocity-tracking contribution on average.
+
+If range failure falls materially, target the passing interval between 300 and
+3000 with a narrower weight sweep. If the failure is unchanged or worsens,
+stop fitting this reward term and inspect whether the policy action-to-velocity
+controller delay requires an explicit predictive target rather than a
+state-only penalty.
