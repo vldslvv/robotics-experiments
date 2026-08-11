@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SECOND SCRATCH SELECTION REJECTED; TARGETED FINE SWEEP PENDING
+Status: THIRD SCRATCH SELECTION REJECTED; RESET-MIXTURE EXPANSION PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -16,7 +16,8 @@ are unsupported.
 | Run ID | Controller run | Scratch schedule | Held-out result | Decision |
 | --- | --- | --- | --- | --- |
 | `20260811T030638Z-scratch-aligned` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 11 at `3e-5` | Iteration 126 selected; score -1.604688, 63.0% success, advisory rejected | Diagnose the timeout/failure boundary before the next scratch run |
-| `20260811T034512Z-scratch-hard30-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 51 at `3e-5` | Iteration 150 selected; score -0.566693, 94.7% success, advisory rejected | Fine-sweep updates 146-154 from scratch |
+| `20260811T034512Z-scratch-hard30-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 51 at `3e-5` | Iteration 150 selected; score -0.566693, 94.7% success, advisory rejected | Fine-sweep updates 145-153 from scratch |
+| `20260811T041833Z-scratch-hard30-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 33 at `3e-5` with every-update saves near the peak | Iteration 149 selected; score -0.566482, 94.7% success, advisory rejected | Expand the evidenced hard-case reset mixture in the next scratch lineage |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -147,8 +148,8 @@ from 145 onward. Relative to the first run's 63.0% frontier, checkpoint 150
 reduces success-gate shortfall by about 98.4% and is material progress.
 
 The coarse five-update spacing brackets the best interval but cannot show
-whether updates 146-149 or 151-154 pass. Reproduce the same scratch path, keep
-coarse checkpoints through 145, and save every update from 146 through 155.
+whether updates 145-149 or 151-153 pass. Reproduce the same scratch path, keep
+coarse checkpoints through 144, and save every update from 145 through 153.
 Do not change controller, task, reward, PPO values, reset mixture, acceptance
 gates, or initialization. This is the targeted precision stage justified by
 the broad sweep.
@@ -165,9 +166,47 @@ unpromising checkpoints.
 Technical view: Keep phase 1 at 121 updates and split the unchanged difficult
 curriculum into 25 coarse updates followed immediately by 10 fine updates on
 the same runner, optimizer, environment, rate, entropy, and 30% reset mixture.
-The coarse phase saves every five updates through model 145. The fine phase
-saves models 146 through 155 individually. Total training falls from 172 to
+The coarse phase saves every five updates through model 140, followed by the
+shared phase-boundary model 144. The fine phase saves models 145 through 153
+individually. Total training falls from 172 to
 156 updates, while the selector still evaluates 15 candidates and adds exact
 resolution only in the evidenced interval. Because the split does not reload
-state or change any optimization value, checkpoints through 145 must reproduce
+state or change any optimization value, checkpoints through 144 must reproduce
 the coarse run before the new candidates can be trusted.
+
+### 7. The exact checkpoint sweep confirms a reset-boundary failure
+
+Date: 2026-08-11.
+
+Plain-language view: The every-update sweep found no hidden passing policy.
+The best policy is repeatable, but it still carries too much forward momentum
+in a small set of difficult handoffs. Training longer makes that behavior
+worse, so the next run should expose the policy to more of those hard starts
+instead of adding epochs.
+
+Technical view: Run `20260811T041833Z-scratch-hard30-fine` started from clean
+source commit `b4a5b53`, a new network, and a new optimizer. It completed its
+configured 156-iteration schedule in 952.2 seconds at approximately 175k-178k
+frames/s and produced terminal model 153. The
+phase-boundary checkpoint numbering is one lower than the initial estimate:
+model 144 exactly reproduced coarse model 145, and model 149 reproduced the
+coarse peak. Selection evaluated 19 total checkpoints in 814.2 seconds.
+
+Checkpoint 149 was selected with score -0.566482, 94.67% success, 5.33% other
+flight failure, zero collision and timeout, 0.41414 m mean closest range, and
+0.39874 m minimum closest range. Models 145-148 progressed from 85.67% to
+94.0% success, but model 150 fell to 93.67%; models 151-153 then degraded to
+88.67%, 80.67%, and 80.33%. Every candidate from model 144 onward had zero
+timeouts, so the post-peak loss is entirely additional range-undershoot flight
+failure. The exact sweep therefore rejects checkpoint spacing and insufficient
+duration as explanations.
+
+Relative to the first scratch run's 63.0% frontier, this remains material and
+repeatable progress, but it misses all three coupled acceptance boundaries:
+95% success, zero other flight failure, and 0.400 m minimum closest range. The
+first failed behavioral boundary remains learned braking on the difficult
+0.45-0.47 m handoff range with 0.06-0.08 m tangential error. Historical
+accepted-policy evidence brackets hard-case exposure between 30% and 50% for
+eliminating undershoots. Change only that training reset mixture in the next
+scratch lineage; retain the controller, reward, optimizer, cadence, full-reset
+held-out distribution, and acceptance gates.
