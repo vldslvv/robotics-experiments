@@ -18,7 +18,6 @@ rl:
         wall_normal_max_mps: 0.04
     reward:
       range_barrier_margin_m: 0.02
-      range_prediction_weight: 10.0
       flight_failure_weight: 300.0
       velocity_tracking_weight: 300.0
   training:
@@ -34,7 +33,7 @@ rl:
         schedule: fixed
         entropy_coef: 0.0001
         hard_case_fraction: 0.0
-      - iterations: 61
+      - iterations: 31
         save_interval: 5
         learning_rate: 3.0e-5
         schedule: fixed

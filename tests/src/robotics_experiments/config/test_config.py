@@ -239,7 +239,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.iterations for phase in training.phases) == (121, 61)
+    assert tuple(phase.iterations for phase in training.phases) == (121, 31)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,
@@ -255,8 +255,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert reward.range_progress_weight == 50.0
     assert reward.range_barrier_margin_m == 0.02
     assert reward.range_barrier_weight == 10.0
-    assert reward.range_prediction_horizon_s == 0.4
-    assert reward.range_prediction_weight == 10.0
     assert reward.velocity_tracking_weight == 300.0
     assert reward.success_weight == 150.0
     assert reward.collision_weight == 300.0
@@ -264,6 +262,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.goal.stable_steps == 5
     reference = config.rl.press.goal.velocity_reference
     assert reference.range_center_m == 0.415
+    assert reference.wall_normal_prediction_horizon_s == 0.4
     assert reference.wall_normal_alignment_gate_m == 0.03
     assert reference.wall_normal_gain_per_s == 1.25
     assert reference.wall_normal_min_mps == -0.04
@@ -494,8 +493,18 @@ def test_task_policy_validation(tmp_path, override, match):
             "range_barrier_margin_m must be finite and positive",
         ),
         (
-            {"rl": {"press": {"reward": {"range_prediction_horizon_s": 0.0}}}},
-            "range_prediction_horizon_s must be finite and positive",
+            {
+                "rl": {
+                    "press": {
+                        "goal": {
+                            "velocity_reference": {
+                                "wall_normal_prediction_horizon_s": 0.0,
+                            }
+                        }
+                    }
+                }
+            },
+            "wall_normal_prediction_horizon_s must be finite and positive",
         ),
         (
             {

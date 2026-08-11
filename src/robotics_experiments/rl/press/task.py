@@ -70,11 +70,10 @@ class PressApproachInput(Generic[ArrayT]):
 
 @dataclass(frozen=True)
 class PressApproachRewardTerms(Generic[ArrayT]):
-    """The eleven signed per-step Stage 1 reward contributions."""
+    """The ten signed per-step Stage 1 reward contributions."""
 
     range_progress: ArrayT
     range_barrier: ArrayT
-    range_prediction: ArrayT
     alignment_error: ArrayT
     velocity_tracking: ArrayT
     upright_error: ArrayT
@@ -90,7 +89,6 @@ class PressApproachRewardTerms(Generic[ArrayT]):
         return (
             self.range_progress
             + self.range_barrier
-            + self.range_prediction
             + self.alignment_error
             + self.velocity_tracking
             + self.upright_error
@@ -230,13 +228,17 @@ def reset_press_approach_state(
 def press_approach_target_velocity(
     *,
     relative_switch_pos_m: ArrayT,
+    linear_velocity_mps: ArrayT,
     reference_cfg: PressApproachVelocityReferenceConfig,
 ) -> ArrayT:
-    """Return the clipped three-axis contact-frame approach velocity."""
+    """Return the predictive clipped contact-frame approach velocity."""
     if isinstance(relative_switch_pos_m, torch.Tensor):
+        projected_range = relative_switch_pos_m[..., 0] - (
+            reference_cfg.wall_normal_prediction_horizon_s
+            * linear_velocity_mps[..., 0].clamp_min(0.0)
+        )
         wall_normal = (
-            reference_cfg.wall_normal_gain_per_s
-            * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m)
+            reference_cfg.wall_normal_gain_per_s * (projected_range - reference_cfg.range_center_m)
         ).clamp(
             reference_cfg.wall_normal_min_mps,
             reference_cfg.wall_normal_max_mps,
@@ -252,9 +254,12 @@ def press_approach_target_velocity(
         denominator = tangential_norm.clamp_min(reference_cfg.tangential_speed_max_mps)
         scale = reference_cfg.tangential_speed_max_mps / denominator
         return torch.cat((wall_normal[..., None], tangential * scale[..., None]), dim=-1)
+    projected_range = relative_switch_pos_m[..., 0] - (
+        reference_cfg.wall_normal_prediction_horizon_s
+        * np.maximum(linear_velocity_mps[..., 0], 0.0)
+    )
     wall_normal = np.clip(
-        reference_cfg.wall_normal_gain_per_s
-        * (relative_switch_pos_m[..., 0] - reference_cfg.range_center_m),
+        reference_cfg.wall_normal_gain_per_s * (projected_range - reference_cfg.range_center_m),
         reference_cfg.wall_normal_min_mps,
         reference_cfg.wall_normal_max_mps,
     )
@@ -317,17 +322,9 @@ def step_press_approach(
         0.0,
         float("inf"),
     )
-    predicted_range = current_range - (
-        reward_cfg.range_prediction_horizon_s
-        * _clip(sample.linear_velocity_mps[..., 0], 0.0, float("inf"))
-    )
-    predicted_range_deficit = _clip(
-        (range_barrier_start - predicted_range) / reward_cfg.range_barrier_margin_m,
-        0.0,
-        float("inf"),
-    )
     target_velocity = press_approach_target_velocity(
         relative_switch_pos_m=sample.relative_switch_pos_m,
+        linear_velocity_mps=sample.linear_velocity_mps,
         reference_cfg=goal_cfg.velocity_reference,
     )
 
@@ -377,10 +374,6 @@ def step_press_approach(
             reward_cfg.range_progress_weight * (state.previous_range_m - current_range)
         ),
         range_barrier=(-reward_cfg.range_barrier_weight * _square(range_barrier_deficit)),
-        range_prediction=(
-            -reward_cfg.range_prediction_weight
-            * (_square(predicted_range_deficit) - _square(range_barrier_deficit))
-        ),
         alignment_error=(-reward_cfg.alignment_error_weight * _square(alignment_error)),
         velocity_tracking=(
             -reward_cfg.velocity_tracking_weight

@@ -168,13 +168,11 @@ class PressHandoffConfig(_FreezableConfig):
 
 @dataclass
 class PressApproachRewardConfig(_FreezableConfig):
-    """Parameters for the eleven signed approach-stage reward contributions."""
+    """Parameters for the ten signed approach-stage reward contributions."""
 
     range_progress_weight: float
     range_barrier_margin_m: float
     range_barrier_weight: float
-    range_prediction_horizon_s: float
-    range_prediction_weight: float
     alignment_error_weight: float
     velocity_tracking_weight: float
     upright_error_weight: float
@@ -190,6 +188,7 @@ class PressApproachVelocityReferenceConfig(_FreezableConfig):
     """Dense contact-frame velocity reference for the approach stage."""
 
     range_center_m: float
+    wall_normal_prediction_horizon_s: float
     wall_normal_alignment_gate_m: float
     wall_normal_gain_per_s: float
     wall_normal_min_mps: float

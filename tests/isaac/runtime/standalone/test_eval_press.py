@@ -98,6 +98,7 @@ def _goal():
         body_z_alignment_min=0.965926,
         velocity_reference=SimpleNamespace(
             range_center_m=0.41,
+            wall_normal_prediction_horizon_s=0.4,
             wall_normal_alignment_gate_m=0.03,
             wall_normal_gain_per_s=1.25,
             wall_normal_min_mps=-0.04,

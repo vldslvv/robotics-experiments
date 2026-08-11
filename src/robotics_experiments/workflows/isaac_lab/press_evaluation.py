@@ -175,6 +175,7 @@ def _trajectory_costs(
     )
     target_velocity = press_approach_target_velocity(
         relative_switch_pos_m=relative_position,
+        linear_velocity_mps=contact_velocity,
         reference_cfg=goal_config.velocity_reference,
     )
     velocity_tracking_cost = (

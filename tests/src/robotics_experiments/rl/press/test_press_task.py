@@ -34,6 +34,7 @@ _GOAL = PressApproachGoalConfig(
     stable_steps=5,
     velocity_reference=PressApproachVelocityReferenceConfig(
         range_center_m=0.41,
+        wall_normal_prediction_horizon_s=0.4,
         wall_normal_alignment_gate_m=0.03,
         wall_normal_gain_per_s=1.25,
         wall_normal_min_mps=-0.04,
@@ -46,8 +47,6 @@ _REWARD = PressApproachRewardConfig(
     range_progress_weight=50.0,
     range_barrier_margin_m=0.02,
     range_barrier_weight=10.0,
-    range_prediction_horizon_s=0.4,
-    range_prediction_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
     upright_error_weight=5.0,
@@ -113,11 +112,10 @@ def _step(*, state=None, sample=None):
     )
 
 
-def test_reward_record_has_exactly_eleven_signed_terms() -> None:
+def test_reward_record_has_exactly_ten_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
         "range_barrier",
-        "range_prediction",
         "alignment_error",
         "velocity_tracking",
         "upright_error",
@@ -168,25 +166,6 @@ def test_range_barrier_penalizes_approach_to_lower_boundary(
     assert result.rewards.range_barrier[0] == pytest.approx(expected)
 
 
-@pytest.mark.parametrize(
-    ("range_m", "closing_speed_mps", "expected"),
-    [
-        (0.45, 0.05, 0.0),
-        (0.43, 0.05, -2.5),
-        (0.42, 0.05, -10.0),
-        (0.41, 0.04, -14.4),
-        (0.41, -0.04, 0.0),
-    ],
-)
-def test_range_prediction_penalizes_only_added_forward_risk(
-    range_m: float,
-    closing_speed_mps: float,
-    expected: float,
-) -> None:
-    result = _step(sample=_sample(range_m=range_m, closing_speed_mps=closing_speed_mps))
-    assert result.rewards.range_prediction[0] == pytest.approx(expected)
-
-
 def test_alignment_and_upright_errors_are_quadratic() -> None:
     result = _step(
         sample=_sample(
@@ -209,9 +188,40 @@ def test_wall_normal_velocity_target_is_linear_and_clipped(
 ) -> None:
     target = press_approach_target_velocity(
         relative_switch_pos_m=np.array([[range_m, 0.0, 0.0]]),
+        linear_velocity_mps=np.zeros((1, 3)),
         reference_cfg=_GOAL.velocity_reference,
     )
     assert target[0].tolist() == pytest.approx([target_mps, 0.0, 0.0])
+
+
+def test_wall_normal_velocity_target_predicts_forward_motion() -> None:
+    for relative_position, braking_position, velocity in (
+        (
+            np.asarray([[0.43, 0.04, 0.0]]),
+            np.asarray([[0.42, 0.04, 0.0]]),
+            np.asarray([[0.05, 0.0, 0.0]]),
+        ),
+        (
+            torch.asarray([[0.43, 0.04, 0.0]]),
+            torch.asarray([[0.42, 0.04, 0.0]]),
+            torch.asarray([[0.05, 0.0, 0.0]]),
+        ),
+    ):
+        target = press_approach_target_velocity(
+            relative_switch_pos_m=relative_position,
+            linear_velocity_mps=velocity,
+            reference_cfg=_GOAL.velocity_reference,
+        )
+        braking = press_approach_target_velocity(
+            relative_switch_pos_m=braking_position,
+            linear_velocity_mps=velocity,
+            reference_cfg=_GOAL.velocity_reference,
+        )
+        if isinstance(target, torch.Tensor):
+            target = target.cpu().numpy()
+            braking = braking.cpu().numpy()
+        assert target[0].tolist() == pytest.approx([-0.0, 0.08, 0.0], abs=1.0e-7)
+        assert braking[0].tolist() == pytest.approx([-0.0125, 0.08, 0.0], abs=1.0e-7)
 
 
 def test_wall_normal_velocity_waits_for_alignment_but_retreat_remains_available() -> None:
@@ -219,6 +229,7 @@ def test_wall_normal_velocity_waits_for_alignment_but_retreat_remains_available(
     for relative_position in (np.asarray(values), torch.asarray(values)):
         target = press_approach_target_velocity(
             relative_switch_pos_m=relative_position,
+            linear_velocity_mps=relative_position * 0.0,
             reference_cfg=_GOAL.velocity_reference,
         )
         if isinstance(target, torch.Tensor):
@@ -229,6 +240,7 @@ def test_wall_normal_velocity_waits_for_alignment_but_retreat_remains_available(
 def test_tangential_velocity_target_is_radially_limited() -> None:
     target = press_approach_target_velocity(
         relative_switch_pos_m=np.array([[0.41, 0.03, 0.04], [0.41, 0.06, 0.08]]),
+        linear_velocity_mps=np.zeros((2, 3)),
         reference_cfg=_GOAL.velocity_reference,
     )
     np.testing.assert_allclose(
@@ -250,7 +262,7 @@ def test_velocity_tracking_penalizes_three_axis_error_in_both_directions() -> No
         ),
     )
     assert matched.rewards.velocity_tracking[0] == pytest.approx(0.0)
-    for wall_normal_error in (-0.1, 0.1):
+    for wall_normal_error, expected in ((-0.1, -1.13), (0.1, -2.09)):
         mismatched = _step(
             state=_state(range_m=0.41),
             sample=_sample(
@@ -260,7 +272,7 @@ def test_velocity_tracking_penalizes_three_axis_error_in_both_directions() -> No
                 vertical_speed_mps=-0.03,
             ),
         )
-        assert mismatched.rewards.velocity_tracking[0] == pytest.approx(-1.13)
+        assert mismatched.rewards.velocity_tracking[0] == pytest.approx(expected)
 
 
 def test_action_delta_uses_mean_square() -> None:

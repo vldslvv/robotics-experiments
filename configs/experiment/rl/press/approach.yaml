@@ -40,6 +40,7 @@ goal:
   stable_steps: 5
   velocity_reference:
     range_center_m: 0.41
+    wall_normal_prediction_horizon_s: 0.4
     wall_normal_alignment_gate_m: 0.03
     wall_normal_gain_per_s: 1.25
     wall_normal_min_mps: -0.04
@@ -56,10 +57,6 @@ reward:
   # and acceptance range unchanged.
   range_barrier_margin_m: 0.02
   range_barrier_weight: 10.0
-  # Project positive wall-normal speed through the measured controller braking
-  # horizon and penalize only the added predicted range-barrier cost.
-  range_prediction_horizon_s: 0.4
-  range_prediction_weight: 0.0
   alignment_error_weight: 50.0
   velocity_tracking_weight: 100.0
   upright_error_weight: 5.0

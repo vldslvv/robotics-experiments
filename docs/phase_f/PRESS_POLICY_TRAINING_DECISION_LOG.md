@@ -802,3 +802,29 @@ velocity target so a projected undershoot requests negative wall-normal
 velocity directly. Remove the separate predictive reward term to keep the
 task contract minimal, return to the shorter 121-plus-31 schedule, and retain
 the controller, reset mixture, held-out distribution, and exact gates.
+
+### 29. Make predictive braking the dense velocity reference
+
+Date: 2026-08-11.
+
+Plain-language view: Tell the policy how fast it should be moving after
+accounting for stopping distance. If its current forward motion projects past
+the neutral hover range, the target now asks for retreat instead of merely
+adding another penalty to the same unsafe state.
+
+Technical view: Add a required 0.4-second prediction horizon to the strict-v1
+wall-normal velocity-reference contract. Project only positive contact-frame
+wall-normal speed, use that projected range in the existing proportional and
+clipped reference, and retain the alignment gate: unsafe projected motion can
+request retreat even while tangentially misaligned, while positive approach
+still waits for alignment. Evaluation uses the same contact-frame velocity and
+reference, so its trajectory cost remains definitionally identical to
+training.
+
+Remove `range_prediction` and its two reward settings rather than retaining a
+redundant or disabled compatibility path. The task returns ten named reward
+terms again, and evaluator revision 4 prevents stale diagnostic-cache reuse.
+Return to 121 full-reset updates plus 31 low-rate updates with 40% difficult
+starts. Keep the aligned controller, network, remaining rewards, PPO values,
+held-out seeds, and exact gates unchanged. Start a new actor, critic, runner,
+and optimizer.

@@ -369,6 +369,9 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         "alignment_error_max_m": goal.alignment_error_max_m,
         "linear_speed_max_mps": goal.linear_speed_max_mps,
         "angular_speed_max_radps": goal.angular_speed_max_radps,
+        "velocity_reference.wall_normal_prediction_horizon_s": (
+            reference.wall_normal_prediction_horizon_s
+        ),
         "velocity_reference.wall_normal_alignment_gate_m": (reference.wall_normal_alignment_gate_m),
         "velocity_reference.wall_normal_gain_per_s": (reference.wall_normal_gain_per_s),
         "velocity_reference.tangential_gain_per_s": reference.tangential_gain_per_s,
@@ -390,11 +393,6 @@ def _validate_press_approach(experiment: ExperimentConfig) -> None:
         or press.reward.range_barrier_margin_m <= 0.0
     ):
         raise ValueError("rl.press.reward.range_barrier_margin_m must be finite and positive")
-    if (
-        not math.isfinite(press.reward.range_prediction_horizon_s)
-        or press.reward.range_prediction_horizon_s <= 0.0
-    ):
-        raise ValueError("rl.press.reward.range_prediction_horizon_s must be finite and positive")
     for field in fields(press.reward):
         name = field.name
         value = getattr(press.reward, name)
