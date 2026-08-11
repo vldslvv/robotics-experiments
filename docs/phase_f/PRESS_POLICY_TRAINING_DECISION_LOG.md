@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: EIGHTEENTH SCRATCH SELECTION REJECTED; WALL-NORMAL WEIGHT BRACKET NEXT
+Status: NINETEENTH SCRATCH SELECTION REJECTED; ONE-SIDED BRAKING TARGET NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -33,6 +33,7 @@ are unsupported.
 | `20260811T111012Z-scratch-command-target-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 100 | Iteration 150 selected; score -1.884269, 53.0% success, advisory rejected | Reduce the direct command weight by one coarse decade |
 | `20260811T113819Z-scratch-command-target-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 10 | Iteration 150 selected; score -0.636139, 93.3% success, advisory rejected | Restrict the direct target to the evidenced wall-normal boundary |
 | `20260811T120750Z-scratch-wall-normal-command-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 10 | Iteration 140 selected; score -0.509376, 96.0% success, advisory rejected | Coarse-test wall-normal weight 30 before changing the target or curriculum |
+| `20260811T123932Z-scratch-wall-normal-command-w30` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus wall-normal command tracking 30 | Iteration 140 selected; score -0.796698, 89.3% success, advisory rejected | Stop the symmetric-weight sweep and supervise only evidenced retreat commands |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1066,3 +1067,43 @@ the exact failure count without losing the success gate, refine the supported
 side. If it overbrakes or leaves the plateau unchanged, stop fitting this
 weight and reshape the single-run hard-case curriculum or braking target from
 the retained traces.
+
+### 36. Stronger symmetric command tracking increases unsafe momentum
+
+Date: 2026-08-11.
+
+Plain-language view: A stronger forward/backward lesson makes the drone follow
+the fast approach request more closely before it reaches the braking zone. It
+then carries more momentum through the range limit. The policy only needs the
+retreat half of this lesson, so remove the reward for imitating approach
+commands.
+
+Technical view: Run
+`20260811T123932Z-scratch-wall-normal-command-w30` started from clean source
+commit `0af5bb6`, a new network, and a new optimizer. It changed only the
+wall-normal command-tracking weight from 10 to 30. Training completed 152
+updates in 928.3 seconds and evaluator revision 6 scored all 11 checkpoints
+fresh in 497.7 seconds.
+
+Model 140 was selected with score -0.796698, 89.33% success, 10.67% other
+flight failure, zero collision and timeout, 0.41408 m mean closest range, and
+0.39888 m minimum closest range. Its median completion time increased to
+6.125 seconds and its mean wall-normal command reward was -0.007995 per active
+step. Model 120 begins at 86.0% success and 13.67% failure; models 125 through
+145 remain between 84.67% and 89.33% success, and model 150 collapses to 70.67%
+success with 27.0% failure. The stronger symmetric target is decisively worse
+than both weight 10 and the state-only frontier, so this scalar sweep is
+exhausted.
+
+The first failed boundary remains the actor's wall-normal command, but the
+symmetric squared target also rewards matching the positive approach reference
+through most of a rollout. That changes momentum before the evidenced braking
+boundary and explains why a larger weight can increase both completion time
+and undershoot. Replace symmetric command tracking with a one-sided braking
+term: it is active only when the predictive wall-normal reference is negative
+and penalizes commanded velocity above that retreat reference. Keep the
+physical command input and every controller, observation, state reward,
+schedule, held-out distribution, and gate fixed. Start the scoped braking term
+at weight 100 because it has no gradient during ordinary approach; if it
+preserves the high-success path but remains weak, fit its weight. If it causes
+timeouts, reduce it before changing the curriculum.
