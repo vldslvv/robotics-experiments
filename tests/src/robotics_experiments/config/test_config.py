@@ -239,14 +239,26 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.iterations for phase in training.phases) == (121, 31)
+    assert tuple(phase.iterations for phase in training.phases) == (121, 16, 8, 12)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,
+        3.0e-5,
+        3.0e-5,
     )
-    assert tuple(phase.entropy_coef for phase in training.phases) == (0.0001, 0.0)
-    assert tuple(phase.save_interval for phase in training.phases) == (30, 5)
-    assert tuple(phase.hard_case_fraction for phase in training.phases) == (0.0, 0.5)
+    assert tuple(phase.entropy_coef for phase in training.phases) == (
+        0.0001,
+        0.0,
+        0.0,
+        0.0,
+    )
+    assert tuple(phase.save_interval for phase in training.phases) == (30, 5, 1, 1)
+    assert tuple(phase.hard_case_fraction for phase in training.phases) == (
+        0.0,
+        0.4,
+        0.4,
+        0.5,
+    )
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)

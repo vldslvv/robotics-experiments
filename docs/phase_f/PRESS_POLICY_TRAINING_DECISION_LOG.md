@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SIXTH SCRATCH SELECTION REJECTED; LATE HARD-CASE CURRICULUM PENDING
+Status: SIXTH SCRATCH SELECTION REJECTED; LATE HARD-CASE CURRICULUM PREDECLARED
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -419,3 +419,29 @@ model-142 peak, then increase difficult starts to 50% for a short final phase
 without resetting the runner or optimizer. This tests whether stronger late
 braking exposure can remove the remaining undershoots without paying the early
 learning penalty observed when 50% is active for the whole consolidation.
+
+### 16. Increase hard-case exposure only after the 40% peak
+
+Date: 2026-08-11.
+
+Plain-language view: Learn the broadly successful approach with 40% difficult
+starts first, then spend the final updates concentrating on the unsafe corner.
+This remains one training run from new weights; no checkpoint is loaded and the
+optimizer is never replaced.
+
+Technical view: Reproduce the byte-identical phase-1 prefix and the prior 40%
+fine-sweep schedule through model 142: 121 full-distribution updates at `1e-4`,
+16 coarse 40% updates at `3e-5`, then eight every-update 40% updates at the same
+rate. Continue the same runner and optimizer for 12 every-update iterations
+with only `hard_case_fraction` increased from 0.4 to 0.5. Keep the accepted
+controller, reward, network, optimizer values, held-out distribution, and
+acceptance gates unchanged.
+
+The first three phases deliberately reproduce the selected 40% frontier before
+the new intervention. Cached identical checkpoints make that reproduction
+cheap to select. Every-update saves in the 50% phase will show whether late
+hard exposure monotonically improves braking, exposes a narrow passing policy,
+or immediately regresses. If it does not improve the zero-flight-failure and
+minimum-range gates, reset-mixture scheduling is exhausted and the next change
+must directly strengthen the already identified zero wall-normal velocity
+boundary in the task objective.
