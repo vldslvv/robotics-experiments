@@ -264,3 +264,21 @@ scratch sweep only across that bracket with all training and evaluation values
 unchanged. If none passes, checkpoint resolution is exhausted and the next
 attempt must address the remaining braking boundary structurally or with the
 already evidenced upper reset-mixture bracket.
+
+### 10. Resolve the 40% coarse peak at every update
+
+Date: 2026-08-11.
+
+Plain-language view: Repeat the improving scratch recipe from new weights, but
+save every policy update only between the last weak model and the first
+regressing model. This is the least expensive way to determine whether the
+coarse sweep skipped a policy that obeys the exact range boundary.
+
+Technical view: Keep phase 1 and every optimization, controller, task, reward,
+reset, held-out, and acceptance value identical to run
+`20260811T045313Z-scratch-hard40-coarse`. Split the unchanged 40% difficult
+phase after 16 iterations. Its first segment retains five-update checkpoints
+through model 135; its second segment immediately continues the same runner and
+optimizer for ten configured iterations, saving models 136-144 individually.
+This lowers training from 152 to 147 configured iterations and evaluates 13
+checkpoints while adding exact resolution only inside the evidenced bracket.
