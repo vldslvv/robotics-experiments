@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: SIXTEENTH SCRATCH SELECTION REJECTED; COMMAND-WEIGHT COARSE SWEEP NEXT
+Status: SEVENTEENTH SCRATCH SELECTION REJECTED; WALL-NORMAL COMMAND TARGET NEXT
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -31,6 +31,7 @@ are unsupported.
 | `20260811T100846Z-scratch-predictive-reference-vtrack900` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 900 | Iteration 145 selected; score -1.447104, 67.7% success, advisory rejected | Refine the overbraking bracket at weight 600 |
 | `20260811T103705Z-scratch-predictive-reference-vtrack600` | `20260810T-accepted-reproduction` | Same scratch schedule and predictive reference; velocity-tracking weight 600 | Iteration 135 selected; score -0.518753, 95.7% success, advisory rejected | Stop the scalar sweep and teach the physical velocity command directly |
 | `20260811T111012Z-scratch-command-target-w100` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 100 | Iteration 150 selected; score -1.884269, 53.0% success, advisory rejected | Reduce the direct command weight by one coarse decade |
+| `20260811T113819Z-scratch-command-target-w10` | `20260810T-accepted-reproduction` | Same scratch schedule; velocity tracking 300 plus direct physical command tracking 10 | Iteration 150 selected; score -0.636139, 93.3% success, advisory rejected | Restrict the direct target to the evidenced wall-normal boundary |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -983,3 +984,37 @@ tests whether a direct sign-correction signal can coexist with the proven
 high-success learning path. If weight 10 reproduces the state-only frontier
 without reducing failures, refine upward at 30; if it improves the boundary,
 refine the supported interval. Keep every other value unchanged.
+
+### 34. Lighter three-axis command imitation still regresses the frontier
+
+Date: 2026-08-11.
+
+Plain-language view: A ten-times lighter command lesson lets the policy learn
+to finish again, but it makes both completion and safety worse than the policy
+without that lesson. The evidence only calls for correcting forward/backward
+braking, not imitating all three command axes.
+
+Technical view: Run `20260811T113819Z-scratch-command-target-w10` started from
+clean source commit `ab517be`, a new network, and a new optimizer. It changed
+only the physical command-tracking weight from 100 to 10. Training completed
+152 updates in 930.3 seconds and evaluator revision 5 scored all 11 checkpoints
+fresh in 499.5 seconds.
+
+Model 150 was selected with score -0.636139, 93.33% success, 6.67% other
+flight failure, zero collision and timeout, 0.41456 m mean closest range, and
+0.39853 m minimum closest range. Model 120 briefly reaches 92.33% success and
+7.33% failure before the hard-start phase oscillates. The selected mean
+command-tracking contribution is only -0.04183 per active step, yet the run is
+worse than the state-only 97.0% success and 3.0% failure frontier. Refining the
+same three-axis scalar upward is contradicted; reducing it toward zero merely
+returns to the already rejected state-only behavior.
+
+The trace-supported first failed boundary is exclusively wall-normal range and
+command sign. Tangential imitation was not evidenced, and it competes with the
+policy's alignment strategy across most of each rollout. Narrow the structural
+term to the contact-frame wall-normal command and rename its input, reward, and
+Hydra setting so the strict-v1 contract states that scope explicitly. Retain
+weight 10 for the first scoped test: at the crossing it contributes about 0.012
+per step, while no longer constraining lateral or vertical command strategy.
+Keep actual three-axis state tracking at 300 and preserve every other setting
+and gate.
