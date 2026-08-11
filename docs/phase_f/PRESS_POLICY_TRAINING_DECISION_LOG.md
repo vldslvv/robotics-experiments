@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FIFTH SCRATCH SELECTION REJECTED; 50% COARSE SWEEP PENDING
+Status: SIXTH SCRATCH SELECTION REJECTED; LATE HARD-CASE CURRICULUM PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -20,6 +20,7 @@ are unsupported.
 | `20260811T041833Z-scratch-hard30-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 33 at `3e-5` with every-update saves near the peak | Iteration 149 selected; score -0.566482, 94.7% success, advisory rejected | Expand the evidenced hard-case reset mixture in the next scratch lineage |
 | `20260811T045313Z-scratch-hard40-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 40% difficult resets | Iteration 140 selected; score -0.519048, 96.0% success, advisory rejected | Fine-sweep updates 136-144 from scratch |
 | `20260811T052107Z-scratch-hard40-fine` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 24 at `3e-5` with every-update saves near the 40% peak | Iteration 142 selected; score -0.516978, 96.0% success, advisory rejected | Cache identical held-out evaluations, then expand to the evidenced upper reset bracket |
+| `20260811T060552Z-scratch-hard50-coarse` | `20260810T-accepted-reproduction` | 121 updates at `1e-4`, then 31 at `3e-5` with 50% difficult resets | Iteration 150 selected; score -0.527187, 95.7% success, advisory rejected | Preserve the stronger 40% learning path, then introduce 50% difficult resets only after its peak |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -384,3 +385,37 @@ checkpoints cover models 125-150. Content-addressed cache hits cover the five
 byte-identical phase-1 checkpoints, reducing the expected held-out workload
 from eleven fresh candidates to six. Fine resolution is justified only if the
 coarse response exposes a new promising interval without passing directly.
+
+### 15. The upper bracket does not remove the range undershoot
+
+Date: 2026-08-11.
+
+Plain-language view: Starting the whole consolidation phase with half difficult
+starts is slightly worse than the 40% recipe. It still learns a high-success
+approach, but it does not eliminate the unsafe final centimeters. Keep the
+stronger 40% path and apply the harder mixture only after that path reaches its
+best region.
+
+Technical view: Run `20260811T060552Z-scratch-hard50-coarse` started from clean
+source commit `698069a`, a new network, and a new optimizer. Training completed
+its 152-update schedule in 927.4 seconds at approximately 175k-178k frames/s.
+Model 150 was selected with score -0.527187, 95.67% success, 4.33% other flight
+failure, zero collision and timeout, 0.41510 m mean closest range, and 0.39872 m
+minimum closest range. Model 145 reached 95.33% success with 4.67% other flight
+failure. Both pass the success threshold but remain below the 0.400 m hard
+range boundary. Relative to the 40% model-142 frontier, the selected score
+regresses by 2.0% and the first failed boundary does not improve.
+
+Selection took 319.5 seconds. Models 0, 30, 60, and 90 were content-addressed
+cache hits; model 120 was fresh because the checkpoint serialization differed,
+even though its policy metrics remained comparable. The cache correctly reused
+only identical bytes and reduced the fresh simulator workload from eleven to
+seven candidates.
+
+Do not fine-sweep a static 50% mixture: its coarse curve exposes no better
+boundary. The two completed brackets instead support an ordered curriculum in
+one scratch lineage. Reproduce the 40% consolidation through its evidenced
+model-142 peak, then increase difficult starts to 50% for a short final phase
+without resetting the runner or optimizer. This tests whether stronger late
+braking exposure can remove the remaining undershoots without paying the early
+learning penalty observed when 50% is active for the whole consolidation.
