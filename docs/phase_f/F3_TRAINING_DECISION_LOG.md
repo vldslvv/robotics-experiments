@@ -12218,3 +12218,30 @@ fit passes, replay every motion-passing candidate against all 22 controller
 boundaries, choose a replay pass, and run the authoritative live hover/goto/
 handoff gate. Do not start policy training. Preserve `fit-attempt-01/`, which
 contains the failed fixed-controller reproduction evidence.
+
+### 394. Fresh-reference alignment passes motion, replay, and live acceptance
+
+Date: 2026-08-11.
+
+The preserved 135-candidate horizontal-bias sweep completed held-out fitting.
+Four candidates pass every velocity and CTBR motion gate; the remaining 131
+each fail exactly one gate. Candidate 22 is the regularized selection. It uses
+velocity observation bias `[0.008, -0.003, 0.0]` m/s and a 0.005-0.030 m/s
+command transition. Its combined endpoint error is 9.132 mm, X/Y/Z braking
+errors are 3.105/0.992/1.555 mm, and all per-axis velocity, body-rate,
+attitude, collective, residual, stop-time, and stability gates pass.
+
+Exhaustive controller-boundary replay confirms all four motion passes across
+all 22 profiles. Candidate 22 has the best replay margin: worst normalized
+motor RMSE is 0.008965 against 0.01, worst collective RMSE is 0.04185 N
+against 0.05 N, and physical-state timestamp join error is zero. The
+authoritative live gate also passes: hover last-second maximum error is
+0.092 m, goto is 0.034 m, final wall-normal range is 0.451 m, and handoff is
+ready.
+
+The accepted bundle is finalized at
+`.build/alignment/x500-px4-v1/20260810T-accepted-reproduction`. Publication
+alone is pending because the pre-v1 `best` label is unsupported by the strict
+controller loader. Replace unsupported labels atomically without loading or
+migrating their contents, publish this accepted bundle, then proceed to the
+controller/RL/deployment dependency audit before scratch policy training.
