@@ -239,7 +239,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.num_envs == 32768
     assert training.policy_name == "press-approach"
     assert config.rl.press.curriculum_stage == "approach"
-    assert tuple(phase.iterations for phase in training.phases) == (241, 11, 31)
+    assert tuple(phase.max_iterations for phase in training.phases) == (241, 11, 31)
     assert tuple(phase.learning_rate for phase in training.phases) == (
         1.0e-4,
         3.0e-5,
@@ -250,7 +250,11 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
         0.0,
         0.0,
     )
-    assert tuple(phase.save_interval for phase in training.phases) == (30, 5, 5)
+    assert tuple(phase.evaluation_interval for phase in training.phases) == (10, 5, 5)
+    assert training.plateau.metric_name == "held_out_task_cost"
+    assert training.plateau.direction == "minimize"
+    assert training.plateau.minimum_delta == 0.003
+    assert training.plateau.patience_evaluations == 30
     assert tuple(phase.hard_case_fraction for phase in training.phases) == (
         0.0,
         0.2,
@@ -295,7 +299,6 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     assert config.rl.press.training_reset.tangential_error_max_m == 0.08
     assert config.rl.press.evaluation.success_rate_min == 0.95
     assert config.rl.press.evaluation.collision_rate_max == 0.01
-    assert config.rl.press.evaluation.selection_metric == "held-out-press-task-quality"
     assert config.rl.press.evaluation.collision_penalty == 4.0
     assert config.rl.press.evaluation.completion_time_weight == 0.15
     assert config.rl.hover.policy.actor.hidden_dims == (128, 128)
@@ -413,8 +416,8 @@ def test_old_rl_config_paths_fail_strict_composition(tmp_path, override):
                     "training": {
                         "phases": [
                             {
-                                "iterations": 1,
-                                "save_interval": 1,
+                                "max_iterations": 1,
+                                "evaluation_interval": 1,
                                 "learning_rate": 1.0e-4,
                                 "schedule": "unknown",
                                 "entropy_coef": 0.0,
@@ -527,18 +530,6 @@ def test_task_policy_validation(tmp_path, override, match):
                 }
             },
             "between 0 and 1",
-        ),
-        (
-            {
-                "rl": {
-                    "press": {
-                        "evaluation": {
-                            "selection_metric": "unknown",
-                        }
-                    }
-                }
-            },
-            "selection_metric",
         ),
         (
             {

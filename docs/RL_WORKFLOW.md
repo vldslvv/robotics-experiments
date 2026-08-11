@@ -1,7 +1,7 @@
 # Reinforcement-learning workflow
 
 This document defines the Isaac Lab tasks, scratch PPO workflow, policy
-artifacts, checkpoint selection, and deployment contract. Routine execution is
+artifacts, in-loop checkpoint evaluation/selection, and deployment contract. Routine execution is
 defined in `docs/COMMAND_ROUTINE_CONTRACT.md`; controller fitting is defined in
 `docs/SIM_TO_SIM_ALIGNMENT.md`. Chronological press-policy training decisions
 and measurements are recorded in
@@ -89,11 +89,19 @@ and environment. There is no checkpoint initialization, resume mode, actor-only
 copy, or post-run fine-tuning workflow.
 
 Hydra `rl.training.phases` defines an ordered schedule inside that one optimizer
-lineage. Each phase declares iterations, checkpoint cadence, learning rate,
-schedule, entropy coefficient, and difficult-reset fraction. A phase boundary
-updates those values in place; it does not reload a checkpoint or recreate the
-optimizer. This lets one reproducible scratch command combine broad task
-learning with low-rate difficult-boundary consolidation.
+lineage. Each phase declares maximum iterations, complete held-out evaluation
+cadence, learning rate, schedule, entropy coefficient, and difficult-reset
+fraction. A phase boundary updates those values in place; it does not reload a
+checkpoint or recreate the optimizer.
+
+The evaluator and phase driver have separate contracts. Evaluation receives an
+exact exported actor and returns raw named metrics plus
+`held_out_task_cost`. The plateau detector reads only the configured metric,
+direction, minimum delta, and patience. It never reads the PPO reward or any
+acceptance gate. The current uniform rule minimizes raw task cost, requires a
+`0.003` reduction from the phase reference, and declares a plateau after 30
+consecutive stale evaluations. This intentionally relaxed initial value can be
+tightened from recorded curves without changing evaluator code.
 
 The press configuration currently runs:
 
@@ -101,9 +109,9 @@ The press configuration currently runs:
 2. 11 iterations at `3e-5`, fixed schedule, zero entropy, 20% difficult resets;
 3. 31 iterations at `1e-5`, fixed schedule, zero entropy, 40% difficult resets.
 
-The final two phases checkpoint every five updates. The short middle phase
-introduces difficult boundary starts before the full hard-case mixture, while
-the lower final learning rate limits destructive updates during consolidation.
+The broad phase evaluates every ten updates and both refinement phases evaluate
+every five. Model zero and every phase boundary are also evaluated. Training
+advances after a phase reaches its maximum or the same plateau rule fires.
 
 Run training with:
 
@@ -134,21 +142,32 @@ computing that target. A projected approach past the neutral range therefore
 requests retreat directly, while retreating motion is never projected farther
 inward. The horizon and reward weights remain task-owned Hydra data.
 
-## Selection, artifact, and acceptance
+## Evaluation, artifact, and acceptance
 
-Training saves checkpoints throughout all phases. The selection step evaluates
-every checkpoint on the configured held-out seeds and publishes the best one by
-`held-out-press-task-quality`. The score combines success with configured
-penalties for collision, flight failure, timeout, non-success, terminal range,
-trajectory alignment, velocity tracking, upright error, action change, and
-completion time.
+`make train-rl` trains and evaluates in one process-level workflow. On the first
+cache miss, a persistent worker starts exactly 100 evaluation environments and
+evaluates three configured seeds; the same worker handles later misses after
+each training chunk. A fully cached run never starts the second simulator. The
+trainer retains one runner and optimizer throughout. It exports the
+deterministic actor first, so the evaluation digest identifies the exact
+`policy.pt` bytes rather than an in-memory approximation.
 
-Held-out selection caches an evaluation by checkpoint content, comparison
-fingerprint, controller digest, and evaluator revision. Reports mark every
-candidate as `fresh` or `cache`; same-contract reports can seed the transient
-cache under `.build/training/<policy>/.evaluation-cache`. This avoids rerunning
-byte-identical scratch prefixes. Independent policy evaluation never uses this
-cache and remains the fresh acceptance proof.
+The raw held-out task cost is the untransformed weighted sum of collision,
+flight failure, timeout, non-success, terminal range, trajectory alignment,
+velocity tracking, upright error, action change, and completion time costs.
+Lower is better. This cost is independent of the per-step PPO reward. After all
+phases end, the lowest-cost evaluated checkpoint is selected, with the earlier
+checkpoint winning an exact tie. Only then are the unchanged press acceptance
+gates applied to its already-recorded metrics; no duplicate automatic
+evaluation stage follows training.
+
+Evaluations are cached by executable TorchScript content digest, comparison
+fingerprint, controller digest, and evaluator revision. The content digest
+excludes only PyTorch's generated archive serialization ID; the raw SHA-256 of
+the exact exported `policy.pt` remains in every evaluation and published
+artifact record. `training_report.json` is updated after every evaluation and
+records phase progress, raw metrics, cache source, plateau state, phase
+termination, final selection, and final acceptance.
 
 A policy artifact is exactly `policy.pt` plus `policy_meta.json`. Metadata uses
 the strict schema-1 `robotics-experiments-policy` contract and records policy
@@ -157,9 +176,9 @@ digest, comparison fingerprint, source commit, dirty state, and training phase
 provenance. Older policy schemas and policies without complete controller
 provenance are unsupported.
 
-`latest` advances after each successfully selected run. `best` advances only
-for a strictly better held-out score within the same comparison fingerprint.
-Run independent evaluation with:
+`latest` advances after each completed run. `best` advances only for a strictly
+lower raw task cost within the same comparison fingerprint. Optional independent
+diagnostic reproduction remains available with:
 
 ```bash
 make eval-press HYDRA_CONFIG=configs/train_press_approach_quad.yaml
@@ -173,7 +192,7 @@ make test-integration-press-approach-routine
 ```
 
 The transfer gate is downstream evidence. It must never mutate alignment,
-controller settings, policy weights, or the held-out selector.
+controller settings, policy weights, or the held-out evaluator.
 
 ## Deployment
 

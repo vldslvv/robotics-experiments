@@ -266,16 +266,26 @@ def _config():
                     episodes_per_seed=1,
                     success_rate_min=0.95,
                     collision_rate_max=0.01,
+                    collision_penalty=4.0,
+                    flight_failure_penalty=3.0,
+                    timeout_penalty=2.0,
+                    non_success_penalty=1.0,
+                    terminal_range_weight=0.25,
+                    trajectory_alignment_weight=0.2,
+                    velocity_tracking_weight=0.2,
+                    upright_error_weight=0.1,
+                    action_delta_weight=0.1,
+                    completion_time_weight=0.15,
                 ),
             ),
         )
     )
 
 
-def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
+def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch, tmp_path: Path) -> None:
     evaluator = _load_eval_press_module()
     import robotics_experiments.workflows.isaac_lab as workflow
-    from robotics_experiments.rl.training.selection import RewardMean
+    from robotics_experiments.rl.training.progress import RewardMean
 
     class FakeEnv:
         device = "cpu"
@@ -307,7 +317,7 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        evaluator,
+        workflow,
         "make_isaac_lab_env",
         fake_factory,
     )
@@ -337,20 +347,24 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
         evaluation_calls.append(kwargs)
         return result
 
-    monkeypatch.setattr(evaluator, "evaluate_press_approach_policy", fake_evaluate)
+    monkeypatch.setattr(workflow, "evaluate_press_approach_policy", fake_evaluate)
     monkeypatch.setattr(
         evaluator,
         "validate_policy_artifact",
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
+            values={"selected_checkpoint_iteration": 10},
         ),
     )
     monkeypatch.setattr(evaluator.torch.jit, "load", lambda *_args, **_kwargs: policy)
+    artifact_dir = tmp_path / "artifact"
+    artifact_dir.mkdir()
+    (artifact_dir / "policy.pt").write_bytes(b"policy")
 
     observed = evaluator._run(  # noqa: SLF001 - standalone entrypoint seam
         config=_config(),
-        artifact_dir=Path("artifact"),
+        artifact_dir=artifact_dir,
     )
     assert observed == result
     assert len(factory_calls) == 1
@@ -362,10 +376,12 @@ def test_evaluation_reuses_one_environment_for_all_seeds(monkeypatch) -> None:
 
 def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
     evaluator = _load_eval_press_module()
+    import robotics_experiments.workflows.isaac_lab as workflow
+
     close_calls: list[bool] = []
     env = SimpleNamespace(device="cpu", close=lambda: close_calls.append(True))
     monkeypatch.setattr(
-        evaluator,
+        workflow,
         "make_isaac_lab_env",
         lambda **_kwargs: (
             env,
@@ -382,6 +398,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda **_kwargs: SimpleNamespace(
             contract=_contract(),
             controller_settings=_controller_settings(),
+            values={"selected_checkpoint_iteration": 10},
         ),
     )
     monkeypatch.setattr(
@@ -390,7 +407,7 @@ def test_evaluation_closes_environment_when_rollout_fails(monkeypatch) -> None:
         lambda *_args, **_kwargs: SimpleNamespace(eval=lambda: None),
     )
     monkeypatch.setattr(
-        evaluator,
+        workflow,
         "evaluate_press_approach_policy",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("rollout failed")),
     )

@@ -4,8 +4,9 @@ Runs inside the Isaac Lab image (rsl_rl and isaaclab_rl ship with
 ``isaaclab.sh --install``); it is never imported on the core path. The ordinary
 ``rsl_rl`` and torch dependencies are eager, while the Isaac Lab adapter stays
 deferred until the application is running. The package-root contract --
-``build_runner`` / ``train_phase`` / ``load_checkpoint`` / ``deterministic_actor`` /
-``initialize_actor_output`` / ``export_policy`` plus ``TrainingResult``
+``build_runner`` / ``configure_phase`` / ``train_chunk`` / ``save_checkpoint`` /
+``load_checkpoint`` / ``deterministic_actor`` / ``initialize_actor_output`` /
+``export_policy`` plus ``TrainingResult``
 over a private runner Protocol -- is what a future ``skrl.py`` / ``rl_games.py``
 re-implements.
 """
@@ -30,16 +31,22 @@ if TYPE_CHECKING:
 __all__ = [
     "TrainingResult",
     "build_runner",
+    "configure_phase",
     "deterministic_actor",
     "export_policy",
     "initialize_actor_output",
     "load_checkpoint",
-    "train_phase",
+    "save_checkpoint",
+    "train_chunk",
 ]
 
 
 class _ActorCritic(Protocol):
     actor: torch.nn.Module
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return the complete actor-critic parameter state."""
+        ...
 
 
 class _Algorithm(Protocol):
@@ -57,6 +64,7 @@ class _PolicyRunner(Protocol):
     alg: _Algorithm
     log_dir: str
     save_interval: int
+    current_learning_iteration: int
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = ...) -> None:
         """Run the training loop for the given number of iterations."""
@@ -93,7 +101,9 @@ def _train_cfg(
         # critic shares it (no privileged observations yet).
         "obs_groups": {"policy": ["policy"], "critic": ["policy"]},
         "num_steps_per_env": int(training_config.num_steps_per_env),
-        "save_interval": int(phase.save_interval),
+        # The orchestration loop owns checkpoint cadence. RSL-RL still writes
+        # the terminal model at the end of every learn() chunk.
+        "save_interval": 2**31 - 1,
         "empirical_normalization": False,
         "policy": {
             "class_name": "ActorCritic",
@@ -149,26 +159,50 @@ def build_runner(
     )
 
 
-def train_phase(
+def configure_phase(
     *,
     runner: _PolicyRunner,
     phase: RlTrainingPhaseConfig,
-    first_phase: bool,
-) -> TrainingResult:
-    """Apply one declarative phase without replacing runner or optimizer state."""
+) -> None:
+    """Apply declarative optimizer values without replacing optimizer state."""
     runner.alg.learning_rate = float(phase.learning_rate)
     runner.alg.entropy_coef = float(phase.entropy_coef)
     runner.alg.schedule = str(phase.schedule)
-    runner.save_interval = int(phase.save_interval)
     for parameter_group in runner.alg.optimizer.param_groups:
         parameter_group["lr"] = float(phase.learning_rate)
+
+
+def train_chunk(
+    *,
+    runner: _PolicyRunner,
+    completed_iterations: int,
+    iterations: int,
+    randomize_initial_episode_lengths: bool,
+) -> TrainingResult:
+    """Train exact new updates and number the terminal model by completed updates."""
+    if completed_iterations < 0 or iterations <= 0:
+        raise ValueError("completed_iterations must be non-negative and iterations positive")
+    runner.current_learning_iteration = completed_iterations + 1
     runner.learn(
-        num_learning_iterations=int(phase.iterations),
-        init_at_random_ep_len=first_phase,
+        num_learning_iterations=iterations,
+        init_at_random_ep_len=randomize_initial_episode_lengths,
     )
     return TrainingResult(
-        iterations=int(phase.iterations),
+        iterations=iterations,
         log_dir=str(getattr(runner, "log_dir", "")),
+    )
+
+
+def save_checkpoint(*, runner: _PolicyRunner, checkpoint_path: Path) -> None:
+    """Persist one evaluation checkpoint without external-logger side effects."""
+    torch.save(
+        {
+            "model_state_dict": _policy_module(runner).state_dict(),
+            "optimizer_state_dict": runner.alg.optimizer.state_dict(),
+            "iter": runner.current_learning_iteration,
+            "infos": None,
+        },
+        checkpoint_path,
     )
 
 

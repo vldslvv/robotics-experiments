@@ -20,6 +20,7 @@ __all__ = [
     "RlPolicyActorConfig",
     "RlPolicyConfig",
     "RlPolicyCriticConfig",
+    "RlPlateauCriteriaConfig",
     "RlTrainingPhaseConfig",
     "RlTrainingConfig",
 ]
@@ -257,7 +258,6 @@ class PressApproachEvaluationConfig(_FreezableConfig):
     episodes_per_seed: int
     success_rate_min: float
     collision_rate_max: float
-    selection_metric: str
     collision_penalty: float
     flight_failure_penalty: float
     timeout_penalty: float
@@ -271,11 +271,21 @@ class PressApproachEvaluationConfig(_FreezableConfig):
 
 
 @dataclass
+class RlPlateauCriteriaConfig(_FreezableConfig):
+    """Phase-local progress definition for deterministic policy evaluation."""
+
+    metric_name: str
+    direction: str
+    minimum_delta: float
+    patience_evaluations: int
+
+
+@dataclass
 class RlTrainingPhaseConfig(_FreezableConfig):
     """One phase in a single scratch PPO optimizer lineage."""
 
-    iterations: int
-    save_interval: int
+    max_iterations: int
+    evaluation_interval: int
     learning_rate: float
     schedule: str
     entropy_coef: float
@@ -292,7 +302,7 @@ class RlTrainingConfig(_FreezableConfig):
     Attributes:
         task_id: Gymnasium task id the entrypoint trains.
         policy_name: Required artifact namespace under ``.build/training``;
-            selection publishes accepted artifacts to that namespace's
+            completed runs publish their selected artifacts to that namespace's
             ``latest`` symlink.
         controller_artifact: Controller artifact, run directory, or publication
             link resolved before an environment is constructed.
@@ -315,6 +325,8 @@ class RlTrainingConfig(_FreezableConfig):
     policy_name: str
     controller_artifact: str
     phases: List[RlTrainingPhaseConfig]
+    plateau: RlPlateauCriteriaConfig
+    evaluation_worker_timeout_s: float
     num_steps_per_env: int
     gamma: float
     lam: float

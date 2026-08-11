@@ -176,7 +176,7 @@ def _write_torch_artifact(path: Path, metadata: dict) -> Path:
 
 
 def test_missing_artifact_raises_with_hint(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="train and select one first"):
+    with pytest.raises(ValueError, match="run make train-rl first"):
         validate_policy_artifact(artifact_dir=tmp_path)
 
 

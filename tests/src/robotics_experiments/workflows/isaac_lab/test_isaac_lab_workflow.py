@@ -86,10 +86,12 @@ def test_isaac_lab_package_imports_without_isaac_lab(monkeypatch):
         "SwitchPressEnv",
         "SwitchPressEnvCfg",
         "compute_lab_rotor_omega",
+        "evaluate_press_acceptance",
         "evaluate_press_approach_policy",
         "make_drone_hover_env_cfg",
         "make_isaac_lab_env",
         "make_switch_press_env_cfg",
+        "press_policy_evaluation",
         "register_isaac_lab_tasks",
         "summarize_press_approach_episodes",
     ]

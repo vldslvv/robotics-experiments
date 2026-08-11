@@ -56,7 +56,6 @@ help:
 		'RL, Isaac Lab, and press workflow targets:' \
 		'' \
 		'  make train-rl              Train, select, and publish latest/best policy labels' \
-		'  make select-rl-checkpoint  Re-evaluate and republish an existing checkpoint run' \
 		'  make eval-press            Independently evaluate the selected press artifact' \
 		'  make test-integration-press-hover-goto Run the in-Lab hover/goto gate' \
 		'  make test-integration-press-contact-chain Run the real switch contact/latch gate' \

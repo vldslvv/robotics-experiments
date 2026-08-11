@@ -9,7 +9,6 @@ from tests.support.paths import REPO_ROOT
 
 _MOVED_TARGETS = (
     "train-rl",
-    "select-rl-checkpoint",
     "eval-press",
     "test-integration-press-hover-goto",
     "test-integration-press-contact-chain",
@@ -120,7 +119,7 @@ def test_integration_aggregate_retains_moved_lab_targets_and_make_resolves_them(
     assert "run_isaac_integration_test.sh" in result.stdout
 
 
-def test_training_automatically_runs_checkpoint_selection_with_one_run_id() -> None:
+def test_training_uses_one_merged_container_invocation() -> None:
     result = subprocess.run(
         [
             "make",
@@ -138,11 +137,9 @@ def test_training_automatically_runs_checkpoint_selection_with_one_run_id() -> N
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("run_isaac_integration_test.sh") == 2
+    assert result.stdout.count("run_isaac_integration_test.sh") == 1
     assert "ISAAC_TEST_SCRIPT='/isaac-sim/proj/isaac/runtime/standalone/train_rl.py'" in (
         result.stdout
     )
-    assert (
-        "ISAAC_TEST_SCRIPT=" "'/isaac-sim/proj/isaac/runtime/standalone/select_rl_checkpoint.py'"
-    ) in result.stdout
-    assert result.stdout.count('RL_RUN_ID="$run_id"') == 2
+    assert "select_rl_checkpoint.py" not in result.stdout
+    assert result.stdout.count('RL_RUN_ID="$run_id"') == 1

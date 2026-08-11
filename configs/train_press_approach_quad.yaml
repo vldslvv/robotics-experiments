@@ -31,24 +31,30 @@ rl:
     # One scratch run keeps a single optimizer lineage while changing the
     # learning schedule and reset mixture at an explicit curriculum boundary.
     phases:
-      - iterations: 241
-        save_interval: 30
+      - max_iterations: 241
+        evaluation_interval: 10
         learning_rate: 1.0e-4
         schedule: fixed
         entropy_coef: 0.0001
         hard_case_fraction: 0.0
-      - iterations: 11
-        save_interval: 5
+      - max_iterations: 11
+        evaluation_interval: 5
         learning_rate: 3.0e-5
         schedule: fixed
         entropy_coef: 0.0
         hard_case_fraction: 0.2
-      - iterations: 31
-        save_interval: 5
+      - max_iterations: 31
+        evaluation_interval: 5
         learning_rate: 1.0e-5
         schedule: fixed
         entropy_coef: 0.0
         hard_case_fraction: 0.4
+    plateau:
+      metric_name: held_out_task_cost
+      direction: minimize
+      minimum_delta: 0.003
+      patience_evaluations: 30
+    evaluation_worker_timeout_s: 600.0
     num_steps_per_env: 32
     gamma: 0.995
     lam: 0.95

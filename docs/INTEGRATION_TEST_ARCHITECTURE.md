@@ -18,10 +18,10 @@ The standalone Isaac test scripts these targets run live under
 scenario-specific notes.
 
 `make/integration-tests.mk` owns the general integration harness variables,
-aggregate suite, and non-RL target definitions. `make/rl.mk` owns training,
-checkpoint selection, independent press evaluation, and all press/Isaac Lab
-task targets. `make/alignment.mk` exclusively owns controller capture, target
-sweep, fit/publication, and the alignment target-envelope gate.
+aggregate suite, and non-RL target definitions. `make/rl.mk` owns merged
+training/evaluation, independent press evaluation, and all press/Isaac Lab task
+targets. `make/alignment.mk` exclusively owns controller capture, target sweep,
+fit/publication, and the alignment target-envelope gate.
 `INTEGRATION_TEST_TARGETS` deliberately remains in
 `make/integration-tests.mk`; GNU Make resolves the included definitions from
 `make/rl.mk` when the aggregate runs.

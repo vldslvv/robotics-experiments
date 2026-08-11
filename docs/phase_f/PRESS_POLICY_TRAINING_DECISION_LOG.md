@@ -1,7 +1,7 @@
 # Press policy training decision log
 
-Status: TWENTY-FOURTH SCRATCH SELECTION REJECTED; LONGER SCALE-AWARE SCRATCH RUN NEXT
-(2026-08-11).
+Status: TWENTY-FIFTH SCRATCH REJECTED; MERGED TRAINING/EVALUATION LOOP
+PROCEDURALLY VALIDATED; NEXT SCRATCH NOT STARTED (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
 selection, acceptance, and deployment decisions. Controller fitting and its
@@ -39,6 +39,9 @@ are unsupported.
 | `20260811T140551Z-scratch-early-hard10-braking-w30` | `20260810T-accepted-reproduction` | 121 updates at `1e-4` with 10% difficult resets, then 31 at `3e-5` with 40%; one-sided braking weight 30 | Iteration 130 selected; score -0.632643, 93.3% success, advisory rejected | Restore the proven easy phase and introduce difficult resets through a short graduated transition |
 | `20260811T143832Z-scratch-graduated-hard20-40-braking-w30` | `20260810T-accepted-reproduction` | 121 easy updates at `1e-4`, 11 at `3e-5` with 20% difficult resets, then 31 at `1e-5` with 40% | Iteration 160 selected; score -0.528887, 95.3% success, advisory rejected | Stop fitting the unstable schedule and narrow the task-owned velocity action scale |
 | `20260811T150929Z-scratch-action-scale050-noise012` | `20260810T-accepted-reproduction` | Same graduated schedule; 0.5 m/s translation scale and 0.12 normalized exploration noise | Iteration 160 selected; score -1.715155, 59.3% success, advisory rejected | Preserve the late improvement and double the high-rate learning phase in one new scratch run |
+| `20260811T154439Z-scratch-action050-main241` | `20260810T-accepted-reproduction` | 241 easy updates at `1e-4`, then the unchanged 20% and 40% refinement phases | Iteration 150 selected; cost 0.870737, 87.7% success, advisory rejected | Stop extending the fixed high-rate phase; merge full evaluation into training before the next attempt |
+| `20260811T-merged-loop-smoke2` | `20260810T-accepted-reproduction` | One-update procedural smoke at the representative 32,768 environments | Iteration 1 selected from two fresh exact evaluations; cost 4.006851, intentionally rejected | Merged loop passes; verify stable cache identity across equivalent TorchScript exports |
+| `20260811T-merged-loop-content-cache-replay` | `20260810T-accepted-reproduction` | Deterministic replay of the one-update smoke | Both evaluations reused by executable-content digest; identical cost and selection in 34.3 s | Procedure and cache optimization validated; next execution is a full scratch attempt |
 
 ### 1. Start one scratch lineage from the jointly certified controller
 
@@ -1308,3 +1311,112 @@ and evaluate the extended learning frontier fresh. If the longer phase restores
 high success and improves safety, refine only the supported training-length
 side. If it plateaus far below the old action contract, restore 2.0 m/s and
 implement the evidenced task-owned braking projection.
+
+### 42. Doubling the high-rate phase finds a better checkpoint, then collapses
+
+Date: 2026-08-11.
+
+Plain-language view: More high-rate learning recovered much of the performance
+lost when the action range was narrowed, but the best behavior appeared early
+and then disappeared. A fixed training endpoint therefore wastes computation
+and cannot reliably represent the best policy produced during the run.
+
+Technical view: Run `20260811T154439Z-scratch-action050-main241` started from a
+new network and optimizer with the 0.5 m/s translation action scale, 0.12
+normalized exploration noise, 241-update easy phase, and unchanged 11-update
+20% plus 31-update 40% refinement phases. The held-out evaluator selected model
+150 with raw task cost 0.870737 (the previous report's negated score was
+-0.870737), 87.67% success, 1.0% body collision, 11.33% other flight failure,
+zero timeout, and 0.398361 m minimum range. It remains rejected by success,
+collision, flight-envelope, and range gates.
+
+The later trajectory is materially worse: model 180 falls to 84.67% success,
+model 210 times out in every episode, and the refinement checkpoints finish
+near 26-27% success with roughly 19-20% body collision and 50-51% timeout. The
+run disproves the assumption that a longer fixed phase or the terminal
+checkpoint is sufficient. Preserve the learning configuration while replacing
+the disconnected train-then-select workflow with complete held-out evaluation
+inside the scratch loop. Use the resulting curve to advance phases formally and
+retain the run-wide best exact actor bytes.
+
+### 43. Merge training and exact held-out evaluation behind explicit contracts
+
+Date: 2026-08-11.
+
+Plain-language view: Training now checks the real held-out task at regular
+intervals, records every result immediately, and moves on only after a declared
+maximum or a formal plateau. Acceptance remains a final yes/no decision and
+cannot distort the learning-progress rule.
+
+Technical view: Replace the checkpoint-selector process with one scratch
+orchestrator owning a single runner and optimizer across all configured phases.
+Each phase declares `max_iterations`, `evaluation_interval`, optimizer values,
+and reset mixture. A persistent spawned worker owns the exact three-seed by
+100-episode evaluator. At each boundary the trainer exports `policy.pt`, hashes
+those exact bytes, evaluates or reuses the content-addressed result, writes raw
+metrics and phase state to `training_report.json`, and emits TensorBoard
+scalars. The worker returns only `PolicyEvaluation`; `advance_plateau` owns
+phase progress, `select_best_evaluation` owns run-wide selection, and
+`evaluate_press_acceptance` applies the unchanged gates once to the selected
+stored metrics. No second automatic evaluation stage remains.
+
+The configured progress scalar is the raw weighted `held_out_task_cost`, lower
+being better. It is not an absolute value, a negated quality score, or the PPO
+reward, so changing the reward does not require changing the plateau threshold.
+A material step is a cumulative 0.003 cost reduction from the phase reference.
+The same rule and patience of 30 consecutive stale evaluations apply to every
+phase; the broad phase evaluates every 10 updates and both refinement phases
+every five. A retrospective replay over 70 preserved checkpoint curves showed
+that patience 6 would have stopped before a known later best in six runs,
+patience 8 in three, and patience 10 in none. The deliberately more relaxed
+value 30 therefore avoids making an aggressive early-stopping claim while the
+new procedure gathers higher-resolution curves.
+
+Do not launch the next policy attempt until host checks and a GPU procedural
+smoke prove checkpoint numbering, persistent-worker lifetime, exact-byte cache
+identity, incremental reporting, final selection, and publication. The next
+full attempt must start from scratch and is the first evidence for whether this
+merged procedure can reach acceptance without post-run fine-tuning.
+
+### 44. Representative smoke validates the merged procedure and stable deduplication
+
+Date: 2026-08-11.
+
+Plain-language view: The new procedure works at the real training scale. It
+keeps the exact best actor it evaluated, and a deterministic replay now skips
+all repeated held-out flights. The next run can focus on learning rather than
+training/evaluation plumbing.
+
+Technical view: The first smoke exposed that RSL-RL's public checkpoint save
+writes model zero and then accesses an external-logger field that does not exist
+until learning starts. The adapter now writes the same model, optimizer,
+iteration, and info state directly, without invoking the logger. Run
+`20260811T-merged-loop-smoke2` then completed at 32,768 training environments:
+it evaluated model 0 fresh at cost 4.290002, trained and numbered exactly one
+new update as model 1, evaluated model 1 fresh at cost 4.006851, selected model
+1, applied acceptance once, and published the exact already-evaluated bytes.
+The final policy SHA-256 matched the evaluated model-1 SHA-256. Both
+`training_report.json` records and the phase terminal reason were present.
+Peak sampled GPU memory with trainer and evaluator alive was approximately
+18.5/24.6 GB, with 52% utilization at that sample; the short smoke is not a
+throughput benchmark, but it proves the representative memory footprint fits.
+The complete fresh container run took 134.1 seconds.
+
+A direct replay initially saved evaluation time but still paid for the second
+simulator. Making the evaluator lazy removed that startup on a full cache hit.
+The next replay revealed that equivalent TorchScript files can differ only in
+PyTorch's generated `.data/serialization_id`; raw whole-file SHA-256 is
+therefore too strict for useful deduplication even when every executable archive
+member and tensor is identical. Cache schema 2 now keys the sorted executable
+archive content while excluding only that generated identifier. The raw
+whole-file SHA-256 remains attached to each current `PolicyEvaluation` and
+published artifact, so exact-byte provenance is unchanged.
+
+Run `20260811T-merged-loop-content-cache-replay` then reused both model 0 and
+model 1 evaluations, reproduced costs 4.290002 and 4.006851 and the model-1
+selection exactly, never launched the evaluator simulator, and completed in
+34.3 seconds. This is a 74% wall-time reduction from the corresponding fresh
+run. The pre-smoke `latest` and `best` publication labels were restored after
+each diagnostic. Host gates must be rerun after the final cache change; after
+they pass, the merged-loop implementation is ready for the next full scratch
+policy attempt.
