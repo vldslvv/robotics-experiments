@@ -59,7 +59,7 @@ reward:
   range_barrier_weight: 10.0
   alignment_error_weight: 50.0
   velocity_tracking_weight: 100.0
-  wall_normal_command_tracking_weight: 0.0
+  wall_normal_braking_command_weight: 0.0
   upright_error_weight: 5.0
   action_delta_weight: 0.004
   success_weight: 150.0

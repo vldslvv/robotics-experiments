@@ -49,7 +49,7 @@ _REWARD = PressApproachRewardConfig(
     range_barrier_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
-    wall_normal_command_tracking_weight=100.0,
+    wall_normal_braking_command_weight=100.0,
     upright_error_weight=5.0,
     action_delta_weight=0.004,
     success_weight=150.0,
@@ -121,7 +121,7 @@ def test_reward_record_has_exactly_eleven_signed_terms() -> None:
         "range_barrier",
         "alignment_error",
         "velocity_tracking",
-        "wall_normal_command_tracking",
+        "wall_normal_braking_command",
         "upright_error",
         "action_delta",
         "success",
@@ -280,27 +280,34 @@ def test_velocity_tracking_penalizes_three_axis_error_in_both_directions() -> No
         assert mismatched.rewards.velocity_tracking[0] == pytest.approx(expected)
 
 
-def test_wall_normal_command_tracking_penalizes_physical_command_error() -> None:
-    matched = _step(
+def test_wall_normal_braking_command_is_one_sided_and_retreat_only() -> None:
+    approaching = _step(
         state=_state(range_m=0.41),
         sample=_sample(
-            range_m=0.41,
-            lateral_m=0.03,
-            vertical_m=0.04,
+            range_m=0.50,
+            closing_speed_mps=0.0,
+            wall_normal_command_mps=-0.04,
+        ),
+    )
+    assert approaching.rewards.wall_normal_braking_command[0] == pytest.approx(0.0)
+    conservative = _step(
+        state=_state(range_m=0.40),
+        sample=_sample(
+            range_m=0.40,
+            closing_speed_mps=0.0,
+            wall_normal_command_mps=-0.02,
+        ),
+    )
+    assert conservative.rewards.wall_normal_braking_command[0] == pytest.approx(0.0)
+    unsafe = _step(
+        state=_state(range_m=0.40),
+        sample=_sample(
+            range_m=0.40,
             closing_speed_mps=0.0,
             wall_normal_command_mps=0.0,
         ),
     )
-    assert matched.rewards.wall_normal_command_tracking[0] == pytest.approx(0.0)
-    mismatched = _step(
-        state=_state(range_m=0.41),
-        sample=_sample(
-            range_m=0.41,
-            closing_speed_mps=0.0,
-            wall_normal_command_mps=0.01,
-        ),
-    )
-    assert mismatched.rewards.wall_normal_command_tracking[0] == pytest.approx(-0.01)
+    assert unsafe.rewards.wall_normal_braking_command[0] == pytest.approx(-0.015625)
 
 
 def test_action_delta_uses_mean_square() -> None:

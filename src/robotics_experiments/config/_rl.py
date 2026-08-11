@@ -175,7 +175,7 @@ class PressApproachRewardConfig(_FreezableConfig):
     range_barrier_weight: float
     alignment_error_weight: float
     velocity_tracking_weight: float
-    wall_normal_command_tracking_weight: float
+    wall_normal_braking_command_weight: float
     upright_error_weight: float
     action_delta_weight: float
     success_weight: float

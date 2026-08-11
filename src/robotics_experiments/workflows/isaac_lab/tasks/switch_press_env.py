@@ -64,7 +64,7 @@ _TRAINING_REWARD_TERMS = (
     "range_barrier",
     "alignment_error",
     "velocity_tracking",
-    "wall_normal_command_tracking",
+    "wall_normal_braking_command",
     "upright_error",
     "action_delta",
     "success",
