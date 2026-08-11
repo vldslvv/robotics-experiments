@@ -28,6 +28,7 @@ from robotics_experiments.alignment._artifact import (
     _require_passed_diagnostic,
     finalize_alignment_bundle,
     load_selection,
+    publish_controller,
     validate_alignment_bundle,
     write_alignment_result,
 )
@@ -1424,6 +1425,51 @@ def test_bundle_finalization_compresses_and_inventories_every_payload(
     (run_dir / "diagnostics" / "untracked.log").write_text("untracked")
     with pytest.raises(ValueError, match="inventory every payload"):
         validate_alignment_bundle(run_dir)
+
+
+def test_publication_replaces_unsupported_existing_label(tmp_path: Path) -> None:
+    known = _settings(kp=(1.0, 1.0, 1.0))
+    result = align(
+        _definition(backend="isaac-lab", evaluator=_Evaluator()),
+        _definition(
+            backend="px4-sitl",
+            evaluator=_Evaluator(reference_settings=known),
+        ),
+    )
+    result = replace(
+        result,
+        controller=replace(
+            result.controller,
+            advisory_quality_passed=True,
+            advisory_quality_reasons=(),
+        ),
+    )
+    run_dir = tmp_path / "run"
+    write_alignment_result(result=result, run_dir=run_dir)
+    for name, payload in {
+        "reference.json": "{}\n",
+        "reference.ulg": "ulog",
+        "bridge.log": "bridge",
+        "target_candidates.json": "{}\n",
+        "actuator_audit.json": '{"schema_version":1,"passed":true}\n',
+        "controller_boundary_replay.json": '{"schema_version":1,"passed":true}\n',
+        "gpu_utilization.json": "{}\n",
+    }.items():
+        (run_dir / name).write_text(payload)
+    finalize_alignment_bundle(run_dir=run_dir)
+
+    obsolete = tmp_path / "obsolete"
+    obsolete.mkdir()
+    (obsolete / "controller.json").write_text(
+        '{"schema_version":1,"command_interface":"velocity"}\n'
+    )
+    (tmp_path / "best").symlink_to(obsolete.name, target_is_directory=True)
+
+    with pytest.warns(RuntimeWarning, match="replacing unsupported controller publication"):
+        publish_controller(run_dir=run_dir)
+
+    assert (tmp_path / "best").resolve() == run_dir
+    assert (tmp_path / "latest").resolve() == run_dir
 
 
 def test_failed_boundary_diagnostic_blocks_acceptance(tmp_path: Path) -> None:

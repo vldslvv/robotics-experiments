@@ -20,7 +20,10 @@ The dependency direction is:
 The only supported controller and alignment artifact contract is schema 1.
 There are no artifact migrations, compatibility sentinels, alternate plant
 mappings, or physical-force controller paths. Older files under `.build/` are
-inert evidence and cannot be loaded by current production code.
+inert evidence and cannot be loaded by current production code. If an existing
+`latest` or `best` label names an unsupported artifact, the next accepted
+publication replaces that label atomically without loading or migrating the
+obsolete payload.
 
 The X500 normalized controller carries velocity, attitude, and rate state into
 PX4-style normalized thrust and torque. The generated X500 effectiveness matrix
