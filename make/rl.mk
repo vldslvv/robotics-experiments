@@ -12,6 +12,7 @@ RL_TENSORBOARD_HOST ?= 127.0.0.1
 RL_TENSORBOARD_PORT ?= 6006
 RL_TENSORBOARD_CONTAINER_NAME ?= vv-rl-tensorboard
 RL_TENSORBOARD_LOGDIR ?= .build/training
+RL_TENSORBOARD_SCALAR_SAMPLES ?= 1000000
 
 # One campaign validates up to three scratch attempts, freshly tests the first
 # eligible immutable actor, and publishes only after final acceptance.
@@ -58,7 +59,8 @@ tensorboard-rl:
 	    --logdir '$(ISAAC_PROJECT_DIR)/$(RL_TENSORBOARD_LOGDIR)' \
 	    --host '$(RL_TENSORBOARD_HOST)' \
 	    --port '$(RL_TENSORBOARD_PORT)' \
-	    --reload_interval 5
+	    --reload_interval 5 \
+	    --samples_per_plugin 'scalars=$(RL_TENSORBOARD_SCALAR_SAMPLES)'
 
 .PHONY: test-integration-press-hover-goto
 test-integration-press-hover-goto: ISAAC_IMAGE = $(ISAAC_LAB_IMAGE)

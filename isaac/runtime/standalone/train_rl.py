@@ -1,9 +1,10 @@
 """Run a deterministic multi-attempt policy-training campaign.
 
-Each attempt owns a fresh environment, runner, and optimizer. Validation ranks
-exact exported actors on one fixed workload. Later phases restore the
-attempt-wide best resumable checkpoint before refinement. One disjoint, fresh
-test workload accepts the immutable selected actor before publication.
+Each attempt owns a fresh Isaac process, environment, runner, and optimizer.
+Validation ranks exact exported actors on one fixed workload. Later phases
+restore the attempt-wide best resumable checkpoint before refinement. One
+disjoint, fresh test workload accepts the immutable selected actor before
+publication.
 
 Run inside the Isaac Lab container (make train-rl):
     /isaac-sim/python.sh /isaac-sim/proj/isaac/runtime/standalone/train_rl.py
@@ -12,6 +13,7 @@ Run inside the Isaac Lab container (make train-rl):
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import math
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import zipfile
 from dataclasses import asdict, dataclass, replace
@@ -49,7 +52,9 @@ from robotics_experiments.controller import (
 from robotics_experiments.rl import METADATA_FILENAME, POLICY_FILENAME
 from robotics_experiments.rl.training._fingerprint import _press_comparison_fingerprint
 from robotics_experiments.rl.training.progress import (
+    AcceptanceResult,
     EvaluationMetric,
+    GateResult,
     PlateauState,
     PolicyEvaluation,
     RewardMean,
@@ -63,6 +68,7 @@ _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CONFIG_PATH_ENV = "ROBOTICS_EXPERIMENT_CONFIG_PATH"
 _RUN_ID_ENV = "RL_RUN_ID"
 _CONTROLLER_ARTIFACT_ENV = "CONTROLLER_ARTIFACT"
+_CAMPAIGN_RUN_DIR_ENV = "RL_CAMPAIGN_RUN_DIR"
 _REPORT_FILENAME = "training_report.json"
 _REPORT_SCHEMA_VERSION = 2
 _CACHE_SCHEMA_VERSION = 3
@@ -551,9 +557,7 @@ def _report_evaluation(
     evaluation: PolicyEvaluation,
     phase_index: int,
     phase_iteration: int,
-    made_progress: bool,
     plateau_state: PlateauState,
-    plateau_reached: bool,
     run_dir: Path,
     artifact_dir: Path,
     validation,
@@ -563,8 +567,6 @@ def _report_evaluation(
         f"evaluation phase={phase_index + 1} phase_iteration={phase_iteration} "
         f"iteration={evaluation.iteration} source={evaluation.source} "
         f"cost={metrics['held_out_task_cost']:.6f} "
-        f"progress={str(made_progress).lower()} "
-        f"stale={plateau_state.stale_evaluations} "
         f"success={metrics['approach_success_rate']:.3f} "
         f"collision={metrics['collision_rate']:.3f} "
         f"other_flight_failure={metrics['other_flight_failure_rate']:.3f} "
@@ -584,12 +586,28 @@ def _report_evaluation(
         "gates": [asdict(gate) for gate in validation.gates],
         "validation_passed": validation.passed,
         "plateau": {
-            "made_progress": made_progress,
+            "made_progress": False,
             "reference_value": plateau_state.reference_value,
             "stale_evaluations": plateau_state.stale_evaluations,
-            "reached": plateau_reached,
+            "reached": False,
         },
     }
+
+
+def _report_plateau(
+    *,
+    evaluation: PolicyEvaluation,
+    made_progress: bool,
+    plateau_state: PlateauState,
+    plateau_reached: bool,
+) -> None:
+    _report(
+        f"plateau iteration={evaluation.iteration} "
+        f"progress={str(made_progress).lower()} "
+        f"reference={plateau_state.reference_value:.6f} "
+        f"stale={plateau_state.stale_evaluations} "
+        f"reached={str(plateau_reached).lower()}"
+    )
 
 
 def _workload_payload(*, role: str, config: ExperimentConfig) -> dict[str, Any]:
@@ -609,6 +627,78 @@ def _acceptance_payload(*, acceptance) -> dict[str, Any]:
         "gates": [asdict(gate) for gate in acceptance.gates],
         "reasons": list(acceptance.reasons),
     }
+
+
+def _acceptance_from_payload(*, payload: dict[str, Any]) -> AcceptanceResult:
+    gates = payload.get("gates")
+    reasons = payload.get("reasons")
+    if not isinstance(gates, list) or not isinstance(reasons, list):
+        raise ValueError("attempt acceptance payload is incomplete")
+    return AcceptanceResult(
+        passed=bool(payload.get("passed")),
+        gates=tuple(
+            GateResult(
+                name=str(gate["name"]),
+                passed=bool(gate["passed"]),
+                actual=float(gate["actual"]),
+                comparison=str(gate["comparison"]),
+                threshold=float(gate["threshold"]),
+            )
+            for gate in gates
+        ),
+        reasons=tuple(str(reason) for reason in reasons),
+    )
+
+
+def _selection_from_report(
+    *,
+    run_dir: Path,
+    report: dict[str, Any],
+) -> tuple[int, _AttemptSelection]:
+    attempts = report.get("attempts")
+    selected_attempt_index = report.get("selected_attempt_index")
+    selected_iteration = report.get("selected_iteration")
+    selected_checkpoint = report.get("selected_checkpoint")
+    selected_policy = report.get("selected_policy")
+    selected_digest = report.get("selected_policy_digest")
+    if (
+        not isinstance(attempts, list)
+        or len(attempts) != 1
+        or not isinstance(selected_attempt_index, int)
+        or not isinstance(selected_iteration, int)
+        or not isinstance(selected_checkpoint, str)
+        or not isinstance(selected_policy, str)
+        or not isinstance(selected_digest, str)
+    ):
+        raise ValueError("attempt worker report has no unique selected policy")
+    attempt = attempts[0]
+    evaluations = attempt.get("evaluations")
+    validation = attempt.get("validation")
+    if not isinstance(evaluations, list) or not isinstance(validation, dict):
+        raise ValueError("attempt worker report is missing evaluation evidence")
+    selected_record = next(
+        (
+            record
+            for record in evaluations
+            if record.get("iteration") == selected_iteration
+            and record.get("policy_digest") == selected_digest
+        ),
+        None,
+    )
+    if not isinstance(selected_record, dict):
+        raise ValueError("attempt worker selected policy has no evaluation record")
+    evaluation = _evaluation_from_payload(
+        payload=selected_record,
+        iteration=selected_iteration,
+        checkpoint_path=run_dir / selected_checkpoint,
+        policy_digest=selected_digest,
+        source=str(selected_record.get("source")),
+    )
+    return selected_attempt_index, _AttemptSelection(
+        evaluation=evaluation,
+        artifact_dir=(run_dir / selected_policy).parent,
+        validation=_acceptance_from_payload(payload=validation),
+    )
 
 
 def _training_report(
@@ -634,6 +724,7 @@ def _training_report(
         "comparison_fingerprint": comparison_fingerprint,
         "phases": [asdict(phase) for phase in phases],
         "plateau_criteria": asdict(criteria),
+        "attempt_execution": "isolated_process",
         "training_attempt_seeds": list(config.rl.training.attempt_seeds),
         "workloads": {
             "validation": _workload_payload(role="validation", config=config),
@@ -803,6 +894,93 @@ def _restore_phase_branch(
     return restored_iteration
 
 
+def _finalize_campaign(
+    *,
+    run_dir: Path,
+    policy_root: Path,
+    config_path: Path,
+    config: ExperimentConfig,
+    phases: tuple[RlTrainingPhaseConfig, ...],
+    attempts: list[dict[str, Any]],
+    selection: _AttemptSelection,
+    selected_attempt_index: int,
+    comparison_fingerprint: str,
+    metadata: dict[str, Any],
+    writer,
+) -> None:
+    from robotics_experiments.workflows.isaac_lab import evaluate_press_acceptance
+
+    selected = selection.evaluation
+    selected_policy = selection.artifact_dir / POLICY_FILENAME
+    if _file_sha256(selected_policy) != selected.policy_digest:
+        raise RuntimeError("validation-selected actor changed before final test")
+    test_worker = _EvaluationWorker(
+        config_path=config_path,
+        run_dir=selection.artifact_dir,
+        timeout_s=config.rl.training.evaluation_worker_timeout_s,
+        workload_role="test",
+    )
+    try:
+        test_evaluation = test_worker.evaluate(
+            iteration=selected.iteration,
+            checkpoint_path=selected.checkpoint_path,
+            artifact_dir=selection.artifact_dir,
+            policy_digest=selected.policy_digest,
+        )
+    finally:
+        test_worker.close()
+    if test_evaluation.source != "fresh-test":
+        raise RuntimeError("final test evaluation was not executed freshly")
+    if test_evaluation.policy_digest != selected.policy_digest:
+        raise RuntimeError("final test evaluated a different actor digest")
+    acceptance = evaluate_press_acceptance(
+        evaluation=test_evaluation,
+        evaluation_config=config.rl.press.evaluation,
+        minimum_range_m=config.rl.press.goal.range_min_m,
+    )
+    for metric in test_evaluation.metrics:
+        if metric.value is not None and math.isfinite(metric.value):
+            writer.add_scalar(f"Acceptance/{metric.name}", metric.value, 0)
+    for gate in acceptance.gates:
+        writer.add_scalar(f"Acceptance/gate_{gate.name.replace(' ', '_')}", gate.passed, 0)
+    writer.flush()
+    final_report = _training_report(
+        run_dir=run_dir,
+        config=config,
+        phases=phases,
+        comparison_fingerprint=comparison_fingerprint,
+        attempts=attempts,
+        selected=selected,
+        selected_attempt_index=selected_attempt_index,
+        selected_policy_path=selected_policy,
+        test_evaluation=test_evaluation,
+        acceptance=acceptance,
+        status="accepted" if acceptance.passed else "test_failed",
+    )
+    _write_json(path=run_dir / _REPORT_FILENAME, payload=final_report)
+    if not acceptance.passed:
+        raise RuntimeError("final policy test failed: " + ", ".join(acceptance.reasons))
+    best_updated = _publish_selected(
+        run_dir=run_dir,
+        policy_root=policy_root,
+        metadata=metadata,
+        report=final_report,
+        selected=selected,
+        selected_policy=selected_policy,
+        test_evaluation=test_evaluation,
+        acceptance=acceptance,
+        comparison_fingerprint=comparison_fingerprint,
+        config=config,
+    )
+    _report(
+        f"train-rl COMPLETE run={run_dir} attempts={len(attempts)} "
+        f"selected={selected.iteration} cost="
+        f"{selected.metric(config.rl.training.plateau.metric_name):.6f} "
+        f"acceptance=true latest={policy_root / 'latest'} "
+        f"best_updated={str(best_updated).lower()}"
+    )
+
+
 def _run_new_training(
     *,
     args: argparse.Namespace,
@@ -814,7 +992,11 @@ def _run_new_training(
     device: str,
     controller_artifact: ControllerArtifact,
     controller_digest: str,
+    run_dir: Path,
+    attempt_index_offset: int = 0,
 ) -> None:
+    if not args.attempt_worker or len(attempt_seeds) != 1:
+        raise ValueError("a training worker must own exactly one isolated attempt")
     training_config = config.rl.training
     phases = (
         _procedural_smoke_phases(phases=tuple(training_config.phases))
@@ -825,7 +1007,8 @@ def _run_new_training(
         )
     )
     total_maximum = sum(phase.max_iterations for phase in phases)
-    run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
+    if not run_dir.is_dir():
+        raise ValueError(f"campaign run directory does not exist: {run_dir}")
     _report(
         f"training {training_config.task_id} for at most {len(attempt_seeds)} attempts "
         f"and {total_maximum} updates per attempt "
@@ -841,13 +1024,13 @@ def _run_new_training(
     metadata: dict[str, Any] | None = None
     comparison_fingerprint: str | None = None
     attempts: list[dict[str, Any]] = []
-    campaign_selection: _AttemptSelection | None = None
-    selected_attempt_index: int | None = None
     try:
-        for attempt_index, seed in enumerate(attempt_seeds):
+        for attempt_index, seed in enumerate(attempt_seeds, start=attempt_index_offset):
             _seed_everything(seed)
             attempt_dir = run_dir / f"attempt_{attempt_index + 1:02d}_seed_{seed}"
             attempt_dir.mkdir()
+            setup_started = time.monotonic()
+            _report(f"attempt setup START attempt={attempt_index + 1} seed={seed}")
             env, env_cfg = _build_env(
                 task_id=training_config.task_id,
                 seed=seed,
@@ -856,6 +1039,9 @@ def _run_new_training(
                 controller_settings=controller_artifact.selected_settings,
                 use_training_reset_distribution=True,
             )
+            runner: Any = None
+            evaluate_candidate: Any = None
+            write_training_progress: Any = None
             try:
                 if metadata is None:
                     metadata = _artifact_metadata(
@@ -916,6 +1102,7 @@ def _run_new_training(
                 attempt_record: dict[str, Any] = {
                     "attempt_index": attempt_index,
                     "training_seed": seed,
+                    "worker_pid": os.getpid(),
                     "evaluations": evaluation_records,
                     "phase_results": phase_results,
                     "selected_policy_digest": None,
@@ -925,6 +1112,11 @@ def _run_new_training(
                 attempts.append(attempt_record)
                 evaluation_index = 0
 
+                _report(
+                    f"attempt setup COMPLETE attempt={attempt_index + 1} seed={seed} "
+                    f"elapsed_s={time.monotonic() - setup_started:.1f}"
+                )
+
                 def evaluate_candidate(
                     *,
                     iteration: int,
@@ -932,8 +1124,6 @@ def _run_new_training(
                     phase_index: int,
                     phase_iteration: int,
                     plateau_state: PlateauState,
-                    made_progress: bool,
-                    plateau_reached: bool,
                     attempt_dir: Path = attempt_dir,
                     runner=runner,
                     metadata: dict[str, Any] = attempt_metadata,
@@ -941,7 +1131,6 @@ def _run_new_training(
                     comparison_fingerprint: str = fingerprint,
                     candidates: list[_AttemptSelection] = candidates,
                     evaluation_records: list[dict[str, Any]] = evaluation_records,
-                    attempt_record: dict[str, Any] = attempt_record,
                     attempt_index: int = attempt_index,
                 ) -> PolicyEvaluation:
                     nonlocal evaluation_index, validation_worker
@@ -1011,9 +1200,7 @@ def _run_new_training(
                             evaluation=evaluation,
                             phase_index=phase_index,
                             phase_iteration=phase_iteration,
-                            made_progress=made_progress,
                             plateau_state=reporting_plateau_state,
-                            plateau_reached=plateau_reached,
                             run_dir=run_dir,
                             artifact_dir=artifact_dir,
                             validation=validation,
@@ -1031,6 +1218,17 @@ def _run_new_training(
                         tensorboard_step,
                     )
                     writer.flush()
+
+                    evaluation_index += 1
+                    return evaluation
+
+                def write_training_progress(
+                    *,
+                    candidates: list[_AttemptSelection] = candidates,
+                    attempt_record: dict[str, Any] = attempt_record,
+                    comparison_fingerprint: str = fingerprint,
+                    attempt_index: int = attempt_index,
+                ) -> None:
                     current_selection = _select_attempt_candidate(
                         criteria=training_config.plateau,
                         candidates=tuple(candidates),
@@ -1062,8 +1260,6 @@ def _run_new_training(
                             status="training",
                         ),
                     )
-                    evaluation_index += 1
-                    return evaluation
 
                 initial_plateau = PlateauState(reference_value=math.nan, stale_evaluations=0)
                 initial = evaluate_candidate(
@@ -1072,8 +1268,6 @@ def _run_new_training(
                     phase_index=0,
                     phase_iteration=0,
                     plateau_state=initial_plateau,
-                    made_progress=True,
-                    plateau_reached=False,
                 )
                 evaluation_records[-1]["plateau"] = {
                     "made_progress": True,
@@ -1081,6 +1275,16 @@ def _run_new_training(
                     "stale_evaluations": 0,
                     "reached": False,
                 }
+                _report_plateau(
+                    evaluation=initial,
+                    made_progress=True,
+                    plateau_state=PlateauState(
+                        reference_value=initial.metric(training_config.plateau.metric_name),
+                        stale_evaluations=0,
+                    ),
+                    plateau_reached=False,
+                )
+                write_training_progress()
                 branch_iteration = 0
                 randomize_episode_lengths = True
                 for phase_index, phase in enumerate(phases):
@@ -1144,8 +1348,6 @@ def _run_new_training(
                             phase_index=phase_index,
                             phase_iteration=phase_iteration,
                             plateau_state=provisional,
-                            made_progress=False,
-                            plateau_reached=False,
                         )
                         plateau = advance_plateau(
                             criteria=training_config.plateau,
@@ -1159,6 +1361,13 @@ def _run_new_training(
                             "stale_evaluations": plateau.state.stale_evaluations,
                             "reached": plateau.plateau_reached,
                         }
+                        _report_plateau(
+                            evaluation=evaluation,
+                            made_progress=plateau.made_progress,
+                            plateau_state=plateau.state,
+                            plateau_reached=plateau.plateau_reached,
+                        )
+                        write_training_progress()
                         if plateau.plateau_reached:
                             phase_reason = "plateau"
                             break
@@ -1207,130 +1416,281 @@ def _run_new_training(
                         else "training",
                     ),
                 )
-                if args.procedural_smoke:
-                    smoke_report = _training_report(
-                        run_dir=run_dir,
-                        config=config,
-                        phases=phases,
-                        comparison_fingerprint=comparison_fingerprint,
-                        attempts=attempts,
-                        selected=attempt_selection.evaluation,
-                        selected_attempt_index=attempt_index,
-                        selected_policy_path=attempt_selection.artifact_dir / POLICY_FILENAME,
-                        test_evaluation=None,
-                        acceptance=None,
-                        status="procedural_smoke_complete",
-                    )
-                    _write_json(path=run_dir / _REPORT_FILENAME, payload=smoke_report)
-                    _report(
-                        "procedural smoke COMPLETE: all phase restores and reporting passed; "
-                        "final test was not run"
-                    )
-                    return
-                if attempt_selection.validation.passed:
-                    campaign_selection = attempt_selection
-                    selected_attempt_index = attempt_index
-                    break
             finally:
+                teardown_started = time.monotonic()
+                _report(f"attempt teardown START attempt={attempt_index + 1} seed={seed}")
+                evaluate_candidate = None
+                write_training_progress = None
+                runner = None
+                gc.collect()
                 env.close()
+                env = None
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                _report(
+                    f"attempt teardown COMPLETE attempt={attempt_index + 1} seed={seed} "
+                    f"elapsed_s={time.monotonic() - teardown_started:.1f}"
+                )
 
         if validation_worker is not None:
             validation_worker.close()
             validation_worker = None
-        if campaign_selection is None or selected_attempt_index is None:
-            failed_report = _training_report(
-                run_dir=run_dir,
-                config=config,
-                phases=phases,
-                comparison_fingerprint=comparison_fingerprint or "",
-                attempts=attempts,
-                selected=None,
-                selected_attempt_index=None,
-                selected_policy_path=None,
-                test_evaluation=None,
-                acceptance=None,
-                status="validation_failed",
-            )
-            _write_json(path=run_dir / _REPORT_FILENAME, payload=failed_report)
-            raise RuntimeError("all training attempts failed the validation gates")
-
-        selected = campaign_selection.evaluation
-        selected_policy = campaign_selection.artifact_dir / POLICY_FILENAME
-        if metadata is None or comparison_fingerprint is None:
-            raise RuntimeError("accepted campaign is missing artifact provenance")
-        if _file_sha256(selected_policy) != selected.policy_digest:
-            raise RuntimeError("validation-selected actor changed before final test")
-        test_worker = _EvaluationWorker(
-            config_path=config_path,
-            run_dir=campaign_selection.artifact_dir,
-            timeout_s=training_config.evaluation_worker_timeout_s,
-            workload_role="test",
-        )
-        try:
-            test_evaluation = test_worker.evaluate(
-                iteration=selected.iteration,
-                checkpoint_path=selected.checkpoint_path,
-                artifact_dir=campaign_selection.artifact_dir,
-                policy_digest=selected.policy_digest,
-            )
-        finally:
-            test_worker.close()
-        if test_evaluation.source != "fresh-test":
-            raise RuntimeError("final test evaluation was not executed freshly")
-        if test_evaluation.policy_digest != selected.policy_digest:
-            raise RuntimeError("final test evaluated a different actor digest")
-        acceptance = evaluate_press_acceptance(
-            evaluation=test_evaluation,
-            evaluation_config=config.rl.press.evaluation,
-            minimum_range_m=config.rl.press.goal.range_min_m,
-        )
-        for metric in test_evaluation.metrics:
-            if metric.value is not None and math.isfinite(metric.value):
-                writer.add_scalar(f"Acceptance/{metric.name}", metric.value, 0)
-        for gate in acceptance.gates:
-            writer.add_scalar(f"Acceptance/gate_{gate.name.replace(' ', '_')}", gate.passed, 0)
-        writer.flush()
-        final_status = "accepted" if acceptance.passed else "test_failed"
-        final_report = _training_report(
+        worker_report = _training_report(
             run_dir=run_dir,
             config=config,
             phases=phases,
-            comparison_fingerprint=comparison_fingerprint,
+            comparison_fingerprint=comparison_fingerprint or "",
             attempts=attempts,
-            selected=selected,
-            selected_attempt_index=selected_attempt_index,
-            selected_policy_path=selected_policy,
-            test_evaluation=test_evaluation,
-            acceptance=acceptance,
-            status=final_status,
+            selected=attempt_selection.evaluation,
+            selected_attempt_index=attempt_index,
+            selected_policy_path=attempt_selection.artifact_dir / POLICY_FILENAME,
+            test_evaluation=None,
+            acceptance=None,
+            status=(
+                "procedural_smoke_complete"
+                if args.procedural_smoke
+                else (
+                    "validation_passed"
+                    if attempt_selection.validation.passed
+                    else "validation_failed"
+                )
+            ),
         )
-        _write_json(path=run_dir / _REPORT_FILENAME, payload=final_report)
-        if not acceptance.passed:
-            raise RuntimeError("final policy test failed: " + ", ".join(acceptance.reasons))
-        best_updated = _publish_selected(
-            run_dir=run_dir,
-            policy_root=policy_root,
-            metadata=metadata,
-            report=final_report,
-            selected=selected,
-            selected_policy=selected_policy,
-            test_evaluation=test_evaluation,
-            acceptance=acceptance,
-            comparison_fingerprint=comparison_fingerprint,
-            config=config,
+        _write_json(path=run_dir / _REPORT_FILENAME, payload=worker_report)
+        _report(
+            f"attempt worker COMPLETE attempt={attempt_index + 1} "
+            f"validation={str(attempt_selection.validation.passed).lower()}"
         )
     finally:
         writer.close()
         if validation_worker is not None:
             validation_worker.close()
 
-    _report(
-        f"train-rl COMPLETE run={run_dir} attempts={len(attempts)} "
-        f"selected={selected.iteration} cost="
-        f"{selected.metric(training_config.plateau.metric_name):.6f} "
-        f"acceptance={str(acceptance.passed).lower()} "
-        f"latest={policy_root / 'latest'} best_updated={str(best_updated).lower()}"
+
+def _attempt_worker_command(
+    *,
+    args: argparse.Namespace,
+    attempt_index: int,
+    seed: int,
+) -> list[str]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--attempt-worker",
+        "--attempt-index",
+        str(attempt_index),
+        "--seed",
+        str(seed),
+    ]
+    if args.procedural_smoke:
+        command.append("--procedural-smoke")
+    if args.max_iterations is not None:
+        command.extend(("--max-iterations", str(args.max_iterations)))
+    if args.num_envs is not None:
+        command.extend(("--num-envs", str(args.num_envs)))
+    if args.controller_artifact is not None:
+        command.extend(("--controller-artifact", str(args.controller_artifact)))
+    if args.scene is not None:
+        command.extend(("--scene", str(args.scene)))
+    if args.strict:
+        command.append("--strict")
+    return command
+
+
+def _run_isolated_campaign(
+    *,
+    args: argparse.Namespace,
+    config: ExperimentConfig,
+    config_path: Path,
+    attempt_seeds: tuple[int, ...],
+    policy_root: Path,
+    repo_root: Path,
+) -> None:
+    training_config = config.rl.training
+    phases = (
+        _procedural_smoke_phases(phases=tuple(training_config.phases))
+        if args.procedural_smoke
+        else _capped_phases(
+            phases=tuple(training_config.phases),
+            maximum_iterations=args.max_iterations,
+        )
     )
+    run_dir = _make_run_dir(out_root=policy_root, run_id=os.environ.get(_RUN_ID_ENV))
+    attempts: list[dict[str, Any]] = []
+    selections: list[tuple[int, _AttemptSelection]] = []
+    comparison_fingerprint = ""
+    worker_pids: set[int] = set()
+    _write_json(
+        path=run_dir / _REPORT_FILENAME,
+        payload=_training_report(
+            run_dir=run_dir,
+            config=config,
+            phases=phases,
+            comparison_fingerprint=comparison_fingerprint,
+            attempts=attempts,
+            selected=None,
+            selected_attempt_index=None,
+            selected_policy_path=None,
+            test_evaluation=None,
+            acceptance=None,
+            status="training",
+        ),
+    )
+    _report(
+        f"campaign START run={run_dir} attempts={len(attempt_seeds)} " "execution=isolated_process"
+    )
+    selected_attempt_index: int | None = None
+    campaign_selection: _AttemptSelection | None = None
+    for attempt_index, seed in enumerate(attempt_seeds):
+        worker_environment = os.environ.copy()
+        worker_environment[_CAMPAIGN_RUN_DIR_ENV] = str(run_dir)
+        worker_environment[_RUN_ID_ENV] = run_dir.name
+        started = time.monotonic()
+        _report(
+            f"attempt process START attempt={attempt_index + 1} seed={seed} "
+            f"completed_attempts={len(attempts)}"
+        )
+        subprocess.run(
+            _attempt_worker_command(args=args, attempt_index=attempt_index, seed=seed),
+            cwd=repo_root,
+            env=worker_environment,
+            check=True,
+        )
+        payload = json.loads((run_dir / _REPORT_FILENAME).read_text())
+        if not isinstance(payload, dict) or payload.get("schema_version") != _REPORT_SCHEMA_VERSION:
+            raise ValueError("attempt worker wrote an invalid campaign report")
+        attempt_payloads = payload.get("attempts")
+        if not isinstance(attempt_payloads, list) or len(attempt_payloads) != 1:
+            raise ValueError("attempt worker did not report exactly one isolated attempt")
+        attempt = attempt_payloads[0]
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("attempt_index") != attempt_index
+            or attempt.get("training_seed") != seed
+        ):
+            raise ValueError("attempt worker report identity does not match its launch")
+        worker_pid = attempt.get("worker_pid")
+        if (
+            not isinstance(worker_pid, int)
+            or worker_pid == os.getpid()
+            or worker_pid in worker_pids
+        ):
+            raise ValueError("training attempts did not execute in distinct worker processes")
+        worker_pids.add(worker_pid)
+        reported_index, selection = _selection_from_report(run_dir=run_dir, report=payload)
+        if reported_index != attempt_index:
+            raise ValueError("attempt worker selected index does not match its launch")
+        worker_fingerprint = payload.get("comparison_fingerprint")
+        if not isinstance(worker_fingerprint, str) or not worker_fingerprint:
+            raise ValueError("attempt worker report has no comparison fingerprint")
+        if comparison_fingerprint and worker_fingerprint != comparison_fingerprint:
+            raise ValueError("training attempt changed the comparison fingerprint")
+        comparison_fingerprint = worker_fingerprint
+        attempts.append(attempt)
+        selections.append((attempt_index, selection))
+        current_selection = _select_attempt_candidate(
+            criteria=training_config.plateau,
+            candidates=tuple(candidate for _, candidate in selections),
+        )
+        current_index = next(
+            index for index, candidate in selections if candidate is current_selection
+        )
+        status = "validation_passed" if selection.validation.passed else "training"
+        _write_json(
+            path=run_dir / _REPORT_FILENAME,
+            payload=_training_report(
+                run_dir=run_dir,
+                config=config,
+                phases=phases,
+                comparison_fingerprint=comparison_fingerprint,
+                attempts=attempts,
+                selected=current_selection.evaluation,
+                selected_attempt_index=current_index,
+                selected_policy_path=current_selection.artifact_dir / POLICY_FILENAME,
+                test_evaluation=None,
+                acceptance=None,
+                status=status,
+            ),
+        )
+        _report(
+            f"attempt process COMPLETE attempt={attempt_index + 1} seed={seed} "
+            f"worker_pid={worker_pid} validation="
+            f"{str(selection.validation.passed).lower()} "
+            f"elapsed_s={time.monotonic() - started:.1f}"
+        )
+        if not args.procedural_smoke and selection.validation.passed:
+            selected_attempt_index = attempt_index
+            campaign_selection = selection
+            break
+
+    if args.procedural_smoke:
+        smoke_selection = _select_attempt_candidate(
+            criteria=training_config.plateau,
+            candidates=tuple(selection for _, selection in selections),
+        )
+        smoke_attempt_index = next(
+            index for index, selection in selections if selection is smoke_selection
+        )
+        smoke_report = _training_report(
+            run_dir=run_dir,
+            config=config,
+            phases=phases,
+            comparison_fingerprint=comparison_fingerprint,
+            attempts=attempts,
+            selected=smoke_selection.evaluation,
+            selected_attempt_index=smoke_attempt_index,
+            selected_policy_path=smoke_selection.artifact_dir / POLICY_FILENAME,
+            test_evaluation=None,
+            acceptance=None,
+            status="procedural_smoke_complete",
+        )
+        _write_json(path=run_dir / _REPORT_FILENAME, payload=smoke_report)
+        _report(
+            "procedural smoke COMPLETE: every configured attempt ran in a distinct "
+            "process; final test was not run"
+        )
+        return
+
+    if campaign_selection is None or selected_attempt_index is None:
+        failed_report = _training_report(
+            run_dir=run_dir,
+            config=config,
+            phases=phases,
+            comparison_fingerprint=comparison_fingerprint,
+            attempts=attempts,
+            selected=None,
+            selected_attempt_index=None,
+            selected_policy_path=None,
+            test_evaluation=None,
+            acceptance=None,
+            status="validation_failed",
+        )
+        _write_json(path=run_dir / _REPORT_FILENAME, payload=failed_report)
+        raise RuntimeError("all training attempts failed the validation gates")
+
+    metadata_payload = json.loads((campaign_selection.artifact_dir / METADATA_FILENAME).read_text())
+    if not isinstance(metadata_payload, dict):
+        raise ValueError("selected attempt metadata is not an object")
+    from torch.utils.tensorboard import SummaryWriter
+
+    writer = SummaryWriter(log_dir=str(run_dir / "logs"))
+    try:
+        _finalize_campaign(
+            run_dir=run_dir,
+            policy_root=policy_root,
+            config_path=config_path,
+            config=config,
+            phases=phases,
+            attempts=attempts,
+            selection=campaign_selection,
+            selected_attempt_index=selected_attempt_index,
+            comparison_fingerprint=comparison_fingerprint,
+            metadata=metadata_payload,
+            writer=writer,
+        )
+    finally:
+        writer.close()
 
 
 def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Path) -> None:
@@ -1338,30 +1698,47 @@ def _run(*, args: argparse.Namespace, config: ExperimentConfig, config_path: Pat
     attempt_seeds: tuple[int, ...]
     if args.seed is not None:
         attempt_seeds = (args.seed,)
-    elif args.procedural_smoke:
-        attempt_seeds = (int(training_config.attempt_seeds[0]),)
     else:
         attempt_seeds = tuple(int(seed) for seed in training_config.attempt_seeds)
     repo_root = _repo_root()
     policy_root = (
         repo_root / ".build" / "training" / _validate_policy_name(training_config.policy_name)
     )
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    controller_artifact, controller_digest = _load_training_controller(
-        args=args,
-        config=config,
-        repo_root=repo_root,
-    )
-    _run_new_training(
+    if args.attempt_worker:
+        if args.attempt_index is None:
+            raise ValueError("attempt worker has no attempt index")
+        run_dir_value = os.environ.get(_CAMPAIGN_RUN_DIR_ENV)
+        if run_dir_value is None:
+            raise ValueError(f"{_CAMPAIGN_RUN_DIR_ENV} is required for an attempt worker")
+        run_dir = Path(run_dir_value)
+        if not run_dir.is_absolute():
+            raise ValueError(f"{_CAMPAIGN_RUN_DIR_ENV} must be an absolute path")
+        controller_artifact, controller_digest = _load_training_controller(
+            args=args,
+            config=config,
+            repo_root=repo_root,
+        )
+        _run_new_training(
+            args=args,
+            config=config,
+            config_path=config_path,
+            attempt_seeds=attempt_seeds,
+            policy_root=policy_root,
+            repo_root=repo_root,
+            device="cuda:0" if torch.cuda.is_available() else "cpu",
+            controller_artifact=controller_artifact,
+            controller_digest=controller_digest,
+            run_dir=run_dir,
+            attempt_index_offset=args.attempt_index,
+        )
+        return
+    _run_isolated_campaign(
         args=args,
         config=config,
         config_path=config_path,
         attempt_seeds=attempt_seeds,
         policy_root=policy_root,
         repo_root=repo_root,
-        device=device,
-        controller_artifact=controller_artifact,
-        controller_digest=controller_digest,
     )
 
 
@@ -1393,6 +1770,8 @@ def main() -> None:
         default=None,
         help="override rl.training.controller_artifact for training",
     )
+    parser.add_argument("--attempt-worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--attempt-index", type=int, default=None, help=argparse.SUPPRESS)
     args, _unknown = parser.parse_known_args()
     if args.max_iterations is not None and args.max_iterations < 1:
         raise SystemExit("--max-iterations must be >= 1")
@@ -1400,19 +1779,27 @@ def main() -> None:
         raise SystemExit("--procedural-smoke cannot be combined with --max-iterations")
     if args.num_envs is not None and args.num_envs < 1:
         raise SystemExit("--num-envs must be >= 1")
+    if args.attempt_worker and (args.seed is None or args.attempt_index is None):
+        raise SystemExit("--attempt-worker requires --seed and --attempt-index")
+    if args.attempt_index is not None and args.attempt_index < 0:
+        raise SystemExit("--attempt-index must be >= 0")
 
-    from isaaclab.app import AppLauncher
-
-    app_launcher = AppLauncher(headless=True)
-    simulation_app = app_launcher.app
+    config_path = Path(os.environ[_CONFIG_PATH_ENV])
+    config = load_config(config_path)
+    simulation_app = None
     try:
-        config_path = Path(os.environ[_CONFIG_PATH_ENV])
-        _run(args=args, config=load_config(config_path), config_path=config_path)
+        if args.attempt_worker:
+            from isaaclab.app import AppLauncher
+
+            app_launcher = AppLauncher(headless=True)
+            simulation_app = app_launcher.app
+        _run(args=args, config=config, config_path=config_path)
     except Exception as exc:  # noqa: BLE001 - report any failure as the make sentinel
         _report(f"ERROR: {exc}")
         raise
     finally:
-        simulation_app.close()
+        if simulation_app is not None:
+            simulation_app.close()
 
 
 if __name__ == "__main__":

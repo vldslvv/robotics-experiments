@@ -142,7 +142,7 @@ sudo_keeper_pid=""
 tensorboard_monitor_pid=""
 sudo_validated=false
 tensorboard_host="127.0.0.1"
-tensorboard_port="6006"
+tensorboard_port="${RL_TENSORBOARD_PORT:-6006}"
 tensorboard_url="http://${tensorboard_host}:${tensorboard_port}/"
 tensorboard_container_name="vv-rl-tensorboard.${artifact_run_id}"
 tensorboard_logdir=".build/training/${policy_name}/${artifact_run_id}/logs"
@@ -282,6 +282,10 @@ serve_tensorboard_when_ready() {
                     "${tensorboard_url}" \
                     "${policy_name}" \
                     "${artifact_run_id}" |
+                    tee -a "${console_log}"
+                printf '[%s] TensorBoard Time Series uses one browser-global setting: set Smoothing=0 for all metrics; exact validation values are in %s/training_report.json\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    ".build/training/${policy_name}/${artifact_run_id}" |
                     tee -a "${console_log}"
                 : >"${tensorboard_ready_file}"
                 wait "${server_pid}"

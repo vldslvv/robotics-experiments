@@ -1494,3 +1494,48 @@ test worker, its `test_evaluation` and `acceptance` fields remain null, and logs
 contain no execution of seeds 404, 505, or 606. Existing `latest` and `best`
 links were unchanged. This qualifies phase restoration and campaign reporting;
 it is not policy acceptance and does not spend the reserved final workload.
+
+### 47. Isolate attempts after the first campaign exposes simulator retention
+
+Date: 2026-08-11.
+
+Plain-language view: The first full campaign completed seed 42 but could not
+create seed 43 reliably in the same simulator process. Explicit Python and CUDA
+cleanup did not solve that lifecycle boundary. Each attempt now runs in its own
+Isaac process, so process exit performs the isolation cleanup before the next
+seed starts.
+
+Technical view: Campaign `20260811T195121Z.1232485` completed seed 42 and
+selected checkpoint 191 with held-out task cost 0.690247, 92% success, 1%
+collision, and 7% other flight failure. It correctly failed validation and did
+not run the reserved test workload. The transition to seed 43 then remained in
+environment construction for more than 16 minutes. Diagnostic smoke
+`20260811T-attempt-boundary-smoke2` reproduced the transition after attempt
+teardown itself completed in 0.9 seconds; dropping runner closures, collecting
+garbage, closing the environment, and emptying the CUDA cache therefore did not
+make repeated DirectRLEnv construction reliable inside one Isaac process. Both
+runs were stopped without publication, retry through test evidence, or label
+changes.
+
+The campaign coordinator now owns no simulator. It launches exactly one seed in
+each worker, validates the worker's report identity and unique PID, aggregates
+all completed attempts, and starts another process only when validation fails.
+A validation-passing actor still enters the existing separate fresh-test worker;
+test failure cannot start another attempt. Report schema 2 records
+`attempt_execution: isolated_process` and each attempt's worker PID.
+
+GPU smoke `20260811T-isolated-attempt-smoke` exercised all three configured
+seeds and every phase boundary in 712.3 seconds. Seeds 42, 43, and 44 ran in
+worker PIDs 53, 639, and 1222; their environment setups took 17.0, 16.4, and
+16.2 seconds. All phase restores, optimizer/configuration changes, and explicit
+environment resets completed. The aggregate report contains three attempts,
+three phase records per attempt, null test/acceptance evidence, and no execution
+of seeds 404, 505, or 606. `latest` and `best` remained unchanged.
+
+TensorBoard retains one million scalar samples per tag and reloads every five
+seconds so sparse validation points, including `Validation/action_delta_cost`,
+remain available for hover inspection. TensorBoard 2.21 owns smoothing in one
+browser-global local setting rather than a server flag; setting Time Series
+Smoothing to zero applies to every namespace. The wrapper states that contract,
+supports `RL_TENSORBOARD_PORT` for a run-scoped collision-free address, and
+points to `training_report.json` for exact validation X/Y values.

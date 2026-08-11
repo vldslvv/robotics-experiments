@@ -136,10 +136,12 @@ stages fail during `load_config`.
 `rl.training` owns the ordered phases in each PPO attempt, rollout settings,
 task selection, artifact namespace, ordered `attempt_seeds`, and
 `controller_artifact`. Each phase owns its iteration count, checkpoint cadence,
-learning rate, schedule, entropy, and difficult-reset fraction. Each later phase
-restores the attempt-wide validation-selected actor, critic, optimizer, and
-iteration before applying its configuration and resetting the environments.
-External checkpoint initialization and process resume are unsupported. The
+learning rate, schedule, entropy, and difficult-reset fraction. The campaign
+coordinator starts every attempt in a distinct Isaac process and waits for that
+process to exit before considering the next seed. Each later phase restores the
+attempt-wide validation-selected actor, critic, optimizer, and iteration before
+applying its configuration and resetting the environments. External checkpoint
+initialization and process resume are unsupported. The
 controller artifact defaults to
 `.build/alignment/<alignment-id>/best` and is resolved before Isaac Lab is
 constructed. `CONTROLLER_ARTIFACT` or the training CLI override selects an exact

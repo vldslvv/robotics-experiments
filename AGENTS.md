@@ -224,11 +224,13 @@ the current contents and the intended home for that kind of code.
   unsupported. Controller and policy artifacts are strict v1 contracts; older
   schemas and compatibility migrations are unsupported. A training invocation
   is one campaign of configured independent attempt seeds; every attempt starts
-  a new environment, runner, actor, critic, and optimizer. Later Hydra phases
-  restore that attempt's complete validation-selected learner checkpoint,
-  apply the new schedule/reset mixture, and reset the environments before
-  collecting rollouts. External checkpoint initialization, process resume, and
-  post-run fine-tuning are unsupported. Every checkpoint uses one fixed
+  in a distinct Isaac process with a new environment, runner, actor, critic,
+  and optimizer. The coordinator retains reports and checkpoint references but
+  never owns a training environment. Later Hydra phases restore that attempt's
+  complete validation-selected learner checkpoint, apply the new schedule/reset
+  mixture, and reset the environments before collecting rollouts. External
+  checkpoint initialization, process resume, and post-run fine-tuning are
+  unsupported. Every checkpoint uses one fixed
   validation workload. The evaluator returns raw named metrics, the Hydra-owned
   plateau rule reads exactly one named scalar, and validation gates establish
   selection eligibility only. A completed validation-passing attempt freezes
@@ -252,7 +254,10 @@ the current contents and the intended home for that kind of code.
 - When launching an RL training run for the user, provide a run-scoped
   monitoring path (TensorBoard by default) and report the local URL and log
   directory. Keep monitoring available while the run is active unless the user
-  asks otherwise.
+  asks otherwise. TensorBoard smoothing is one browser-global setting: require
+  zero smoothing for every metric namespace so raw validation, acceptance, and
+  training values remain visible; `training_report.json` is the exact
+  validation-value audit source.
 - PX4 bridge invariants: read
   `isaac/runtime/extensions/px4_sitl_brigde/docs/PX4_BRIDGE_CONTRACTS.md` before
   touching bridge code. Keep the interface contract, frame conversions, motor

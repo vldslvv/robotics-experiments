@@ -26,6 +26,7 @@ def _run_wrapper(
     shutdown: bool = False,
     shutdown_exit: int = 0,
     stale_tensorboard: bool = False,
+    tensorboard_port: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -137,6 +138,8 @@ exit "${EVAL_EXIT}"
             "WRAPPER_CALLS": str(calls),
         }
     )
+    if tensorboard_port is not None:
+        env["RL_TENSORBOARD_PORT"] = str(tensorboard_port)
     command = [
         "bash",
         str(_SCRIPT),
@@ -213,7 +216,18 @@ def test_wrapper_runs_training_and_evaluation_with_one_artifact_id(
         "TensorBoard URL: http://127.0.0.1:6006/ (run: press/" in result.stdout
         and "scalar data loaded" in result.stdout
     )
+    assert "set Smoothing=0 for all metrics" in console
+    assert "training_report.json" in console
     assert "unbound variable" not in result.stderr
+
+
+def test_wrapper_uses_requested_tensorboard_port(tmp_path: Path) -> None:
+    result = _run_wrapper(tmp_path=tmp_path, train_exit=0, tensorboard_port=6008)
+
+    assert result.returncode == 0
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8")
+    assert "RL_TENSORBOARD_PORT=6008" in calls
+    assert "TensorBoard URL: http://127.0.0.1:6008/" in result.stdout
 
 
 def test_wrapper_requests_power_off_after_success(tmp_path: Path) -> None:

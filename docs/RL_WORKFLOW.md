@@ -86,10 +86,13 @@ mutually exclusive terminal classifications.
 
 Every `make train-rl` invocation owns one campaign ID and tries the configured
 `rl.training.attempt_seeds` in order. Each attempt constructs a fresh training
-environment, actor, critic, runner, and optimizer. The default seeds are 42, 43,
-and 44; the campaign stops after the first completed attempt with a
-validation-passing checkpoint. External checkpoint initialization, process
-resume, actor-only copy, and post-run fine-tuning remain unsupported.
+Isaac process, environment, actor, critic, runner, and optimizer. The campaign
+coordinator never owns a training environment: a completed worker exits before
+the next seed starts, making simulator and GPU cleanup an operating-system
+process boundary. The default seeds are 42, 43, and 44; the campaign stops after
+the first completed attempt with a validation-passing checkpoint. External
+checkpoint initialization, process resume, actor-only copy, and post-run
+fine-tuning remain unsupported.
 
 Hydra `rl.training.phases` defines an ordered schedule within each attempt. Each
 phase declares maximum iterations, validation cadence, learning rate, schedule,
@@ -125,13 +128,17 @@ make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml
 ```
 
 The GPU procedural gate keeps every phase/restore boundary, performs one update
-per phase on the first attempt seed, and deliberately stops before reserved test
-seeds are used:
+per phase on every configured attempt seed, and deliberately stops before
+reserved test seeds are used:
 
 ```bash
 make train-rl HYDRA_CONFIG=configs/train_press_approach_quad.yaml \
   TRAIN_ARGS=--procedural-smoke
 ```
+
+The procedural smoke executes one update in every phase of every configured
+attempt, including full attempt teardown/recreation, and stops without using
+the reserved test seeds.
 
 Use the campaign-scoped TensorBoard log directory under
 `.build/training/press-approach/<run-id>/logs`. The standard monitor is:
@@ -140,10 +147,15 @@ Use the campaign-scoped TensorBoard log directory under
 make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id>/logs
 ```
 
-and is served at `http://127.0.0.1:6006` by default. The Make target passes
-`--reload_interval 5`. Use browser smoothing zero for `Validation/*`,
-`Acceptance/*`, and safety rates. PPO and cumulative rollout diagnostics use
-`Training/*`; all rate metrics are fractions in `[0, 1]`.
+and is served at `http://127.0.0.1:6006` by default. Set
+`RL_TENSORBOARD_PORT=<port>` when that address is occupied. The Make target
+passes `--reload_interval 5` and retains up to one million scalar samples per tag.
+TensorBoard 2.21 stores one smoothing value in browser-local global settings;
+set the Time Series smoothing control to zero once for the origin so raw values
+remain visible for every `Validation/*`, `Acceptance/*`, and `Training/*` chart.
+The exact unsmoothed validation X/Y values are also recorded under each
+attempt's `evaluations` list in `training_report.json`. All rate metrics are
+fractions in `[0, 1]`.
 
 The press-approach reward has eleven named signed terms, including the
 current-range barrier, three-axis state-velocity tracking, and physical
