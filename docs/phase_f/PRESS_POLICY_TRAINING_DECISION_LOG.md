@@ -1,6 +1,6 @@
 # Press policy training decision log
 
-Status: FIFTH SCRATCH SELECTION REJECTED; EVALUATION CACHE IMPLEMENTED
+Status: FIFTH SCRATCH SELECTION REJECTED; 50% COARSE SWEEP PENDING
 (2026-08-11).
 
 This is the chronological record for press-policy scratch training, checkpoint
@@ -281,7 +281,7 @@ reset, held-out, and acceptance value identical to run
 phase after 16 iterations. Its first segment retains five-update checkpoints
 through model 135; its second segment immediately continues the same runner and
 optimizer for ten configured iterations, saving models 136-144 individually.
-This lowers training from 152 to 147 configured iterations and evaluates 13
+This lowers training from 152 to 147 configured iterations and evaluates 17
 checkpoints while adding exact resolution only inside the evidenced bracket.
 
 ### 11. Exact resolution exhausts the 40% checkpoint boundary
@@ -296,7 +296,7 @@ exposure rather than save more checkpoints at 40%.
 Technical view: Run `20260811T052107Z-scratch-hard40-fine` started from clean
 source commit `9a049f9`, a new network, and a new optimizer. Training completed
 its 147-iteration schedule in 905.1 seconds at approximately 175k-177k
-frames/s. Selection evaluated 13 checkpoints in 755.1 seconds. Model 142 was
+frames/s. Selection evaluated 17 checkpoints in 755.1 seconds. Model 142 was
 selected with score -0.516978, 96.0% success, 4.0% other flight failure, zero
 collision and timeout, 0.41477 m mean closest range, and 0.39861 m minimum
 closest range.
@@ -343,3 +343,25 @@ cache entries emit a warning and fall back to a fresh evaluation. The cache is
 never consulted by `eval_press.py`, PX4 transfer, or deployment. Host tests
 cover content and controller isolation, cached selection without environment
 execution, report seeding, and iteration-local ranking reconstruction.
+
+### 13. Cache benchmark removes repeated selection cost
+
+Date: 2026-08-11.
+
+Plain-language view: The optimized selector reproduced the exact same winner
+and scores in seconds instead of minutes. It can now spend simulator time only
+on checkpoints that contain genuinely new policy state.
+
+Technical view: Reselect run `20260811T052107Z-scratch-hard40-fine` from clean
+implementation commit `66c32c5`. Startup primed 50 unique entries from the
+five same-fingerprint, same-controller scratch reports. All 17 candidates were
+content-addressed cache hits. Model 142 remained selected with score -0.516978
+and unchanged metrics. The selector test stage fell from 755.1 seconds to 9.55
+seconds, a 98.7% reduction; total container time was 10.0 seconds. The report
+and selected policy metadata mark the cached evaluation source, while the
+independent acceptance command remains fresh by contract.
+
+Proceed to the already evidenced 50% upper reset-mixture coarse sweep. Retain
+the byte-identical phase-1 prefix, accepted controller, reward, optimizer,
+held-out distribution, and gates. Cache hits should eliminate its five repeated
+baseline evaluations; only new post-transition models require simulator work.
