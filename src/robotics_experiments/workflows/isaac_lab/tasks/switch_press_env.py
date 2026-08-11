@@ -246,17 +246,17 @@ class SwitchPressEnv(_FlightDirectRLEnv):
         self._pusher_collision_latch = torch.zeros_like(self._body_collision_latch)
         self._completed_episode_count = torch.zeros((), device=self.device)
         self._successful_episode_count = torch.zeros((), device=self.device)
+        self._collision_episode_count = torch.zeros((), device=self.device)
+        self._body_collision_episode_count = torch.zeros((), device=self.device)
+        self._pusher_collision_episode_count = torch.zeros((), device=self.device)
+        self._flight_failure_episode_count = torch.zeros((), device=self.device)
+        self._timeout_episode_count = torch.zeros((), device=self.device)
 
     def set_training_hard_case_fraction(self, fraction: float, /) -> None:
         """Change the reset mixture at an in-run curriculum boundary."""
         if not 0.0 <= fraction <= 1.0:
             raise ValueError("training hard-case fraction must be between 0 and 1")
         self._training_hard_case_fraction = float(fraction)
-        self._collision_episode_count = torch.zeros((), device=self.device)
-        self._body_collision_episode_count = torch.zeros((), device=self.device)
-        self._pusher_collision_episode_count = torch.zeros((), device=self.device)
-        self._flight_failure_episode_count = torch.zeros((), device=self.device)
-        self._timeout_episode_count = torch.zeros((), device=self.device)
 
     @property
     def press_approach_result(self):

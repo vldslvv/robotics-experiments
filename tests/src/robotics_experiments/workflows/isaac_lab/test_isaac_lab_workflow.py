@@ -1,3 +1,4 @@
+import ast
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -5,6 +6,50 @@ import sys
 import types
 
 import pytest
+
+from tests.support.paths import REPO_ROOT
+
+
+def test_press_episode_counters_exist_before_any_curriculum_update():
+    path = (
+        REPO_ROOT
+        / "src"
+        / "robotics_experiments"
+        / "workflows"
+        / "isaac_lab"
+        / "tasks"
+        / "switch_press_env.py"
+    )
+    tree = ast.parse(path.read_text(), filename=str(path))
+    env_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SwitchPressEnv"
+    )
+    methods = {node.name: node for node in env_class.body if isinstance(node, ast.FunctionDef)}
+
+    def assigned_attributes(method, /):
+        return {
+            node.targets[0].attr
+            for node in ast.walk(method)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Attribute)
+            and isinstance(node.targets[0].value, ast.Name)
+            and node.targets[0].value.id == "self"
+        }
+
+    counters = {
+        "_completed_episode_count",
+        "_successful_episode_count",
+        "_collision_episode_count",
+        "_body_collision_episode_count",
+        "_pusher_collision_episode_count",
+        "_flight_failure_episode_count",
+        "_timeout_episode_count",
+    }
+    assert counters <= assigned_attributes(methods["__init__"])
+    assert not counters & assigned_attributes(methods["set_training_hard_case_fraction"])
 
 
 class _BlockedDependencyFinder(importlib.abc.MetaPathFinder):
