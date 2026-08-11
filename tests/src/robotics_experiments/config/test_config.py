@@ -246,7 +246,7 @@ def test_press_approach_config_preserves_actor_contract_and_stage_settings():
     )
     assert tuple(phase.entropy_coef for phase in training.phases) == (0.0001, 0.0)
     assert tuple(phase.save_interval for phase in training.phases) == (30, 5)
-    assert tuple(phase.hard_case_fraction for phase in training.phases) == (0.0, 0.4)
+    assert tuple(phase.hard_case_fraction for phase in training.phases) == (0.1, 0.4)
     assert policy.actor.initial_noise_std == 0.03
     assert policy.actor.output_initialization == "scratch-neutral-output"
     assert policy.actor.hidden_dims == (256, 256, 128)
