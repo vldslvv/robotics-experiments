@@ -44,6 +44,9 @@ from robotics_experiments.workflows.isaac_lab.tasks._press_reset import (
     _press_entry_state_from_unit_samples,
     _press_training_entry_state_from_unit_samples,
 )
+from robotics_experiments.workflows.isaac_lab.tasks.flight import (
+    _normalized_action_to_controller_command,
+)
 
 __all__ = ["SwitchPressEnv", "SwitchPressEnvCfg", "make_switch_press_env_cfg"]
 
@@ -61,6 +64,7 @@ _TRAINING_REWARD_TERMS = (
     "range_barrier",
     "alignment_error",
     "velocity_tracking",
+    "command_tracking",
     "upright_error",
     "action_delta",
     "success",
@@ -373,6 +377,11 @@ class SwitchPressEnv(_FlightDirectRLEnv):
     def _sample(self, *, time_out: torch.Tensor) -> PressApproachInput[torch.Tensor]:
         self._latch_collision_sample()
         relative_position, relative_quat_xyzw = self._relative_switch_pose()
+        velocity_command_world = _normalized_action_to_controller_command(
+            self.actuation_params,
+            self.actions,
+            self.drone.data.root_quat_w,
+        )[:, :3]
         quat = self.drone.data.root_quat_w
         body_z_world_z = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
         relative_quat_wxyz = relative_quat_xyzw[:, [3, 0, 1, 2]]
@@ -381,6 +390,9 @@ class SwitchPressEnv(_FlightDirectRLEnv):
             linear_velocity_mps=math_utils.quat_apply(
                 relative_quat_wxyz,
                 self.drone.data.root_lin_vel_b,
+            ),
+            velocity_command_mps=math_utils.quat_apply_inverse(
+                self._contact_frame_quat(), velocity_command_world
             ),
             angular_velocity_radps=self.drone.data.root_ang_vel_b,
             body_z_world_z=body_z_world_z,

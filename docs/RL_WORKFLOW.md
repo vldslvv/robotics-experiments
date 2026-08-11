@@ -113,13 +113,15 @@ make tensorboard-rl RL_TENSORBOARD_LOGDIR=.build/training/press-approach/<run-id
 
 and is served at `http://127.0.0.1:6006` by default.
 
-The press-approach reward has ten named signed terms, including the
-current-range barrier and three-axis velocity tracking. The task projects
-positive wall-normal speed through the configured controller braking horizon
-before computing the wall-normal velocity reference. A projected approach
-past the neutral range therefore requests retreat directly, while retreating
-motion is never projected farther inward. The horizon remains task-owned Hydra
-data.
+The press-approach reward has eleven named signed terms, including the
+current-range barrier, three-axis state-velocity tracking, and physical
+velocity-command tracking. Both tracking terms use the same task-owned target;
+the command term receives the action only after the Lab actuation seam maps it
+to a physical contact-frame velocity command. The task projects positive
+wall-normal speed through the configured controller braking horizon before
+computing that target. A projected approach past the neutral range therefore
+requests retreat directly, while retreating motion is never projected farther
+inward. The horizon and reward weights remain task-owned Hydra data.
 
 ## Selection, artifact, and acceptance
 

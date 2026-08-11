@@ -49,6 +49,7 @@ _REWARD = PressApproachRewardConfig(
     range_barrier_weight=10.0,
     alignment_error_weight=50.0,
     velocity_tracking_weight=100.0,
+    command_tracking_weight=100.0,
     upright_error_weight=5.0,
     action_delta_weight=0.004,
     success_weight=150.0,
@@ -81,6 +82,9 @@ def _sample(
     closing_speed_mps: float = 0.08,
     lateral_speed_mps: float = 0.0,
     vertical_speed_mps: float = 0.0,
+    command_forward_mps: float = 0.0,
+    command_lateral_mps: float = 0.0,
+    command_vertical_mps: float = 0.0,
     angular_speed_radps: float = 0.0,
     upright: float = 1.0,
     altitude_m: float = 1.0,
@@ -92,6 +96,9 @@ def _sample(
     return PressApproachInput(
         relative_switch_pos_m=np.array([[range_m, lateral_m, vertical_m]]),
         linear_velocity_mps=np.array([[closing_speed_mps, lateral_speed_mps, vertical_speed_mps]]),
+        velocity_command_mps=np.array(
+            [[command_forward_mps, command_lateral_mps, command_vertical_mps]]
+        ),
         angular_velocity_radps=np.array([[angular_speed_radps, 0.0, 0.0]]),
         body_z_world_z=np.array([upright]),
         altitude_m=np.array([altitude_m]),
@@ -112,12 +119,13 @@ def _step(*, state=None, sample=None):
     )
 
 
-def test_reward_record_has_exactly_ten_signed_terms() -> None:
+def test_reward_record_has_exactly_eleven_signed_terms() -> None:
     assert [field.name for field in fields(PressApproachRewardTerms)] == [
         "range_progress",
         "range_barrier",
         "alignment_error",
         "velocity_tracking",
+        "command_tracking",
         "upright_error",
         "action_delta",
         "success",
@@ -137,6 +145,7 @@ def test_privileged_collision_is_input_only() -> None:
     assert [field.name for field in fields(PressApproachInput)] == [
         "relative_switch_pos_m",
         "linear_velocity_mps",
+        "velocity_command_mps",
         "angular_velocity_radps",
         "body_z_world_z",
         "altitude_m",
@@ -273,6 +282,33 @@ def test_velocity_tracking_penalizes_three_axis_error_in_both_directions() -> No
             ),
         )
         assert mismatched.rewards.velocity_tracking[0] == pytest.approx(expected)
+
+
+def test_command_tracking_penalizes_physical_command_error() -> None:
+    matched = _step(
+        state=_state(range_m=0.41),
+        sample=_sample(
+            range_m=0.41,
+            lateral_m=0.03,
+            vertical_m=0.04,
+            closing_speed_mps=0.0,
+            command_forward_mps=0.0,
+            command_lateral_mps=0.06,
+            command_vertical_mps=0.08,
+        ),
+    )
+    assert matched.rewards.command_tracking[0] == pytest.approx(0.0)
+    mismatched = _step(
+        state=_state(range_m=0.41),
+        sample=_sample(
+            range_m=0.41,
+            closing_speed_mps=0.0,
+            command_forward_mps=0.01,
+            command_lateral_mps=-0.02,
+            command_vertical_mps=0.03,
+        ),
+    )
+    assert mismatched.rewards.command_tracking[0] == pytest.approx(-0.14)
 
 
 def test_action_delta_uses_mean_square() -> None:
@@ -424,6 +460,7 @@ def test_numpy_and_torch_transitions_match() -> None:
     numpy_sample = PressApproachInput(
         relative_switch_pos_m=np.array([[0.41, 0.01, 0.0], [0.55, 0.02, 0.01]]),
         linear_velocity_mps=np.array([[0.0, 0.0, 0.0], [0.18, 0.01, 0.0]]),
+        velocity_command_mps=np.array([[0.0, 0.02, 0.0], [0.04, -0.01, 0.0]]),
         angular_velocity_radps=np.array([[0.1, 0.0, 0.0], [0.2, 0.1, 0.0]]),
         body_z_world_z=np.array([1.0, 0.98]),
         altitude_m=np.array([1.0, 1.0]),
