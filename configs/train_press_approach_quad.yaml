@@ -19,7 +19,7 @@ rl:
     reward:
       range_barrier_margin_m: 0.02
       flight_failure_weight: 300.0
-      velocity_tracking_weight: 300.0
+      velocity_tracking_weight: 900.0
   training:
     task_id: Isaac-Switch-Press-Direct-v1
     vehicle_id: 0
