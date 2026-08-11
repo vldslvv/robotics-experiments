@@ -32,8 +32,14 @@ rl:
         schedule: fixed
         entropy_coef: 0.0001
         hard_case_fraction: 0.0
-      - iterations: 51
+      - iterations: 25
         save_interval: 5
+        learning_rate: 3.0e-5
+        schedule: fixed
+        entropy_coef: 0.0
+        hard_case_fraction: 0.3
+      - iterations: 10
+        save_interval: 1
         learning_rate: 3.0e-5
         schedule: fixed
         entropy_coef: 0.0

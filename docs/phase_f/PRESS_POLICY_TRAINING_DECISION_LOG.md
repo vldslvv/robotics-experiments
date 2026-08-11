@@ -152,3 +152,22 @@ coarse checkpoints through 145, and save every update from 146 through 155.
 Do not change controller, task, reward, PPO values, reset mixture, acceptance
 gates, or initialization. This is the targeted precision stage justified by
 the broad sweep.
+
+### 6. Resolve the coarse peak with an every-update scratch sweep
+
+Date: 2026-08-11.
+
+Plain-language view: Rerun from new weights under the identical learning path,
+but record every policy update around the best coarse checkpoint. This tests
+the narrow promising region without fine-tuning or evaluating dozens of
+unpromising checkpoints.
+
+Technical view: Keep phase 1 at 121 updates and split the unchanged difficult
+curriculum into 25 coarse updates followed immediately by 10 fine updates on
+the same runner, optimizer, environment, rate, entropy, and 30% reset mixture.
+The coarse phase saves every five updates through model 145. The fine phase
+saves models 146 through 155 individually. Total training falls from 172 to
+156 updates, while the selector still evaluates 15 candidates and adds exact
+resolution only in the evidenced interval. Because the split does not reload
+state or change any optimization value, checkpoints through 145 must reproduce
+the coarse run before the new candidates can be trusted.
